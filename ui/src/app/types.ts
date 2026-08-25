@@ -1,0 +1,12 @@
+export type Page = 'chat' | 'tasks' | 'archive' | 'settings';
+export type SettingsTab = 'general' | 'agents' | 'connections' | `api-targets:${string}`;
+export type FileNode = { name: string; path: string; type: 'file' | 'directory'; children?: FileNode[] };
+export type ContextDetails = { estimatedTokens: number | null; capacityTokens: number | null; pressure: string | null; source: string | null; compactionActive: boolean; summarizedTurnCount: number | null; rawRecentTurnCount: number | null; recallUsed?: boolean; recallScope?: string | null; recallSourceCount?: number };
+export type Subagent = { id: string; name: string; avatar: string; activity: string; context: number | null; contextDetails?: ContextDetails; stream: string; subagentId?: string; targetId?: string; resourceId?: string };
+export type Agent = { id: string; name: string; avatar: string; activity: string; context: number | null; contextDetails?: ContextDetails; provider: string; model: string; effort: string; temperature: number; workspace: string; files: FileNode[]; subagents: Subagent[]; targetId?: string; resourceId?: string; targetName?: string };
+export type Tab = { id: string; label: string; kind: 'chat' | 'file' | 'group'; channelId?: string; path?: string; content?: string; workspaceAgentId?: string; targetId?: string };
+export type Task = { title: string; status: string; owner: string };
+export type Account = { id: string; name: string; plan: string; used: number; reset: string; status: string; resetCredit?: string };
+export type PanelId = 'none' | 'agents' | 'workspace' | 'codex' | 'accounts' | 'system';
+export type PanelSlot = 'top' | 'bottom';
+export type SavedProvider = { id: string; provider: string; apiType: string; url: string; apiKey: string; apiKeyConfigured?: boolean; auth?: { type?: string | null; source?: string | null; expiresAt?: string | null }; oauthConfigured?: boolean; authSource?: string | null; expiresAt?: string | null; models: string[]; manualModels?: Record<string, boolean>; modelLabels?: Record<string, string>; modelEfforts?: Record<string, string[]>; defaultEfforts?: Record<string, string>; modelContextWindows?: Record<string, number>; modelDiscoveredInputs?: Record<string, ('text' | 'image')[]>; modelInputOverrides?: Record<string, ('text' | 'image')[]> };

@@ -1,0 +1,61 @@
+{
+  "name": "burrow",
+  "version": "2026.08.25-2",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "burrow": "./bin/burrow.mjs"
+  },
+  "scripts": {
+    "test": "node scripts/test-runtime.mjs",
+    "test:files": "node scripts/test-runtime.mjs --",
+    "test:isolation": "BURROW_VERIFY_DEPLOYED_ISOLATION=1 node scripts/test-runtime.mjs",
+    "openapi:types": "node scripts/generate-openapi-types.mjs",
+    "openapi:types:check": "node scripts/generate-openapi-types.mjs --check",
+    "postman:generate": "node scripts/generate-postman-collection.mjs",
+    "postman:check": "node scripts/generate-postman-collection.mjs --check",
+    "openapi:drift": "node scripts/check-openapi-route-drift.mjs",
+    "openapi:validate": "node scripts/validate-openapi.mjs",
+    "openapi:check": "npm run openapi:validate && npm run openapi:drift && npm run openapi:types:check && npm run postman:check && node --test tests/openapi-tooling.test.mjs tests/openapi-contract.test.mjs tests/openapi-route-coverage.test.mjs tests/openapi-route-drift.test.mjs tests/openapi-types.test.mjs tests/live-api-contract.test.mjs tests/chat-stream-contract.test.mjs",
+    "check": "node --check bin/burrow.mjs && find src tests bin scripts -name '*.mjs' -print0 | xargs -0 -n1 node --check && npm test",
+    "trace-ui": "node scripts/trace-ui.mjs",
+    "ui": "node scripts/burrow-ui.mjs",
+    "serve": "node bin/burrow.mjs serve --root .",
+    "health": "node scripts/health-check.mjs",
+    "health:json": "node scripts/health-check.mjs --json",
+    "service:smoke": "node scripts/service-smoke.mjs",
+    "service:smoke:json": "node scripts/service-smoke.mjs --json",
+    "install:native": "node scripts/install.mjs",
+    "deploy": "node scripts/deploy-release.mjs",
+    "deploy:json": "node scripts/deploy-release.mjs --json",
+    "deploy:package": "node scripts/deploy-release.mjs --export-archive",
+    "deploy:package:json": "node scripts/deploy-release.mjs --json --export-archive",
+    "deploy:apply": "node scripts/deploy-release.mjs --apply",
+    "deploy:apply:json": "node scripts/deploy-release.mjs --apply --json",
+    "release:install": "node scripts/install-release-package.mjs",
+    "release:install:json": "node scripts/install-release-package.mjs --json",
+    "runtime:bootstrap": "node scripts/bootstrap-runtime.mjs",
+    "runtime:bootstrap:json": "node scripts/bootstrap-runtime.mjs --json",
+    "operational:audit": "node scripts/operational-audit.mjs",
+    "operational:audit:json": "node scripts/operational-audit.mjs --json",
+    "runtime:backup": "node scripts/runtime-backup.mjs",
+    "runtime:backup:json": "node scripts/runtime-backup.mjs --json",
+    "runtime:retention": "node bin/burrow.mjs retention --root .",
+    "runtime:retention:json": "node bin/burrow.mjs retention --root . --json",
+    "runtime:restore:rehearsal": "node scripts/runtime-restore-rehearsal.mjs",
+    "runtime:restore:rehearsal:json": "node scripts/runtime-restore-rehearsal.mjs --json"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.232",
+    "jose": "^6.2.8",
+    "node-llama-cpp": "3.19.1"
+  },
+  "devDependencies": {
+    "@redocly/openapi-core": "^2.46.1",
+    "mcporter": "^0.13.7"
+  },
+  "allowScripts": {
+    "@anthropic-ai/claude-code@2.1.232": true,
+    "node-llama-cpp@3.19.1": true
+  }
+}

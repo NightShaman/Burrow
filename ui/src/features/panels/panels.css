@@ -1,0 +1,16 @@
+.codex-content{padding:12px;overflow:auto;min-height:0}.account-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.status,.ok{color:var(--ok)}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-right:5px}.account-card{padding:12px;margin-bottom:9px;border:1px solid var(--line);border-radius:9px;background:var(--surface-raised);cursor:grab}.account-card:active{cursor:grabbing}.account-card.dragging{opacity:.45}.account-card.drop-target{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}.account-top b,.account-top small{display:block}.account-top small,.account-footer small{color:var(--muted);font-size:11px}.account-footer{display:flex;align-items:baseline;justify-content:space-between;gap:10px}.account-footer .reset-credit{color:var(--muted);text-align:right}.account-connection-status{flex:none;padding:3px 8px;border:1px solid currentColor;border-radius:99px;font-size:10px;font-weight:700}.account-connection-status.active{color:var(--ok);background:#073a2c}.account-connection-status.paused{color:var(--warn);background:#3b2d04}.account-connection-status.quota-exceeded{color:var(--danger);background:color-mix(in srgb,var(--danger) 16%,transparent)}.account-connection-status.reauth-required{color:#c6ff00;background:color-mix(in srgb,#c6ff00 14%,transparent)}.usage-row{display:flex;align-items:center;gap:9px;margin:12px 0 7px}.usage{height:7px;flex:1;border-radius:99px;background:var(--line);overflow:hidden}.usage i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--accent),var(--accent-strong))}.usage-percent{flex:none;font-size:12px;font-weight:700}.usage-percent.low{color:var(--danger)}.usage-percent.medium{color:var(--warn)}.usage-percent.high{color:var(--ok)}
+
+.account-status .account-card{cursor:grab}.account-status .account-card:active{cursor:grabbing}
+.account-status .account-connection-status{padding:0;border:0;background:none;font-size:11px}
+.account-status .account-connection-status.active{color:var(--ok);background:none}
+.account-status .account-connection-status.paused{color:var(--danger);background:none}
+.account-status .account-connection-status .dot{width:8px;height:8px;margin-right:4px}
+.account-meter{display:grid;grid-template-columns:minmax(0,1fr) 32px;align-items:center;column-gap:8px;row-gap:3px;margin-top:10px;padding:0;border:0;border-radius:0;background:none;box-shadow:none}
+.account-status .account-meter .usage{grid-column:1;height:6px;min-width:0;padding:0;border:0;border-radius:99px;background:color-mix(in srgb,var(--line) 72%,transparent);box-shadow:none}
+.account-status .account-meter .usage i{border-radius:inherit}
+.account-status .account-meter.secondary{padding:0;border:0;border-radius:0;background:none;box-shadow:none}
+.account-meter .usage-percent{grid-column:2;justify-self:end;width:32px;font-size:12px;text-align:right}
+.account-reset-time{grid-column:1;color:var(--muted);font-size:10px;line-height:1}
+.account-meter.secondary .usage i{background:linear-gradient(90deg,var(--accent-strong),var(--accent))}
+.usage-percent.unknown{color:var(--muted)}
+.account-status .hint{margin-top:8px;font-size:11px}
