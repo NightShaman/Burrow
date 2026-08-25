@@ -1,5 +1,8 @@
 # Burrow
 
+> [!WARNING]
+> Burrow does not provide guardrails for every tool action or external integration. Run it only where you understand the credentials, systems, and data it can reach—and the blast radius of an agent acting with that access. Start with least privilege, isolated test targets, and deliberate integration grants.
+
 <p align="center">
   <img src="burrow-logo.png" alt="Burrow" width="320">
 </p>
@@ -8,15 +11,16 @@
 
 Burrow keeps conversation first. Tools, traces, receipts, tasks, and debug data stay behind the curtain unless they are useful to inspect.
 
+## Project scope
+
+Burrow is a public personal project, built around the maintainer's own needs and direction. Issues and thoughtful feedback are welcome and will be read, but opening an issue does not create an obligation to implement it. Changes that do not fit the project's vision may be declined or left unaddressed.
+
 Burrow is assembled from two human-edited source repositories:
 
 - **[Burrow-Backend](https://github.com/NightShaman/Burrow-Backend)** → `backend/`
 - **[Burrow-UI](https://github.com/NightShaman/Burrow-UI)** → `ui/`
 
 `backend/` and `ui/` are tracked snapshots, not submodules and not primary development locations. Each assembly records its exact source commits in `SOURCE_VERSIONS`.
-
-> [!WARNING]
-> Burrow does not provide guardrails for every tool action or external integration. Run it only where you understand the credentials, systems, and data it can reach—and the blast radius of an agent acting with that access. Start with least privilege, isolated test targets, and deliberate integration grants.
 
 ## Install
 
@@ -119,7 +123,24 @@ For non-interactive use, include `--yes` explicitly:
 ~/.burrow/bin/burrow uninstall --purge --yes
 ```
 
-## Docker image
+## Docker
+
+The published image stores all durable runtime state in `/data`. The supplied Compose file binds the UI to loopback because Burrow has no UI authentication by default.
+
+```sh
+git clone https://github.com/NightShaman/Burrow.git
+cd Burrow
+docker compose up -d
+```
+
+Open <http://127.0.0.1:42817>. To expose Burrow beyond the local host, do not simply change the port binding: put it behind a trusted reverse proxy or configure authentication first, then review the credentials, systems, and data the runtime can reach.
+
+To build the exact checked-out deployment payload instead of pulling the published image:
+
+```sh
+docker build -t burrow:local .
+docker run --init --rm -p 127.0.0.1:42817:42817 -v burrow-data:/data burrow:local
+```
 
 Docker packaging is canonical in Burrow-Backend under `deploy/docker/`. A successful generated assembly materializes the root `Dockerfile`, `docker-entrypoint.sh`, `compose.yml`, and `.dockerignore`, then builds `ghcr.io/nightshaman/burrow` from that exact generated commit.
 
