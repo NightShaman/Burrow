@@ -64,10 +64,22 @@ function diagnosticText(value, protectedValues = []) {
   return redactProtectedText(String(value || '').slice(0, 4_000), protectedValues).trim() || null;
 }
 
-function runtimeFailure(code, { stdout = '', stderr = '', protectedValues = [] } = {}) {
+function runtimeFailure(code, { stdout = '', stderr = '', detail = null, protectedValues = [], toolErrorCode = null } = {}) {
   const error = new Error(code);
-  error.diagnostic = diagnosticText(stderr || stdout, protectedValues);
+  error.diagnostic = diagnosticText(detail ?? (stderr || stdout), protectedValues);
+  // Remote provider codes are useful causal context, but only expose a small,
+  // inert identifier. The provider's free-form text stays in the redacted,
+  // bounded diagnostic rather than becoming a public error classification.
+  if (typeof toolErrorCode === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(toolErrorCode)) error.toolErrorCode = toolErrorCode;
   return error;
+}
+
+export function publicMcpFailureDetail(error, protectedValues = []) {
+  const detail = diagnosticText(error?.diagnostic || error?.message, protectedValues);
+  const toolErrorCode = typeof error?.toolErrorCode === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(error.toolErrorCode)
+    ? error.toolErrorCode
+    : null;
+  return { ...(toolErrorCode ? { toolErrorCode } : {}), ...(detail ? { diagnostic: detail } : {}) };
 }
 
 function run(command, args, { cwd, timeoutMs = 20_000, killAfterMs = 1_000, maxStreamCaptureBytes = DEFAULT_STREAM_CAPTURE_BYTES, protectedValues = [] } = {}) {
@@ -181,7 +193,7 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
     try {
       const parsed = JSON.parse(output);
       if (parsed?.isError === true || parsed?.error || parsed?.ok === false || parsed?.success === false) {
-        const failure = runtimeFailure('mcp_tool_failed', { stdout: boundedJson(parsed), protectedValues: [apiKey, ...Object.values(environmentVariables || {})] });
+        const failure = runtimeFailure('mcp_tool_failed', { stdout: boundedJson(parsed), protectedValues: [apiKey, ...Object.values(environmentVariables || {})], toolErrorCode: parsed?.error?.code, detail: parsed?.error?.message });
         throw failure;
       }
       return parsed;
@@ -201,7 +213,7 @@ export async function diagnoseMcpConnection(connection, { apiKey, environmentVar
     const tools = await discoverMcpTools(connection, { apiKey, environmentVariables, binary, runtimeRoot, runCommand });
     return { ok: true, diagnostic: null, toolCount: tools.length };
   } catch (error) {
-    return { ok: false, error: publicMcpError(error, toolName ? 'mcp_tool_failed' : 'mcp_runtime_failed'), diagnostic: diagnosticText(error?.diagnostic || error?.message, [apiKey, ...Object.values(environmentVariables || {})]) };
+    return { ok: false, error: publicMcpError(error, toolName ? 'mcp_tool_failed' : 'mcp_runtime_failed'), ...publicMcpFailureDetail(error, [apiKey, ...Object.values(environmentVariables || {})]) };
   }
 }
 

@@ -11,7 +11,7 @@ import { searchAgentSessionEvidence } from './session-search.mjs';
 import { executeTaskBoardCreateTool, executeTaskBoardDeleteTool, executeTaskBoardListTool, executeTaskBoardReassignTool, executeTaskBoardUpdateTool } from './task-board-tool-executor.mjs';
 import { compactToolReceipts } from './runtime-result-shapes.mjs';
 import { reviewProposalActions } from './action-safety.mjs';
-import { invokeMcpTool, publicMcpError } from './mcporter-adapter.mjs';
+import { invokeMcpTool, publicMcpError, publicMcpFailureDetail } from './mcporter-adapter.mjs';
 import { grantedMcpTool, mcpCapabilitiesReceipt, mcpProvidersReceipt } from './mcp-menu.mjs';
 import { protectMcpOutput, resolveProtectedBindings } from './protected-values.mjs';
 import path from 'node:path';
@@ -113,7 +113,7 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
         const output = await invokeMcpTool(selected.connection, { apiKey: selected.connection.apiKey, environmentVariables: selected.connection.environmentVariables, toolName: action.mcpToolName, arguments: action.mcpArguments });
         const protectedOutput = protectMcpOutput(output, { provider: selected.connection.name, toolName: action.mcpToolName, mcpArguments: action.mcpArguments, registry: executionContext?.protectedValues });
         result = { tool: 'mcp_call', ok: true, provider: selected.connection.name, mcpToolName: action.mcpToolName, connectionId: selected.connection.id, output: protectedOutput.safeOutput, ...(protectedOutput.protectedValues.length ? { protectedValues: protectedOutput.protectedValues } : {}) };
-      } catch (error) { result = { tool: 'mcp_call', ok: false, provider: action.mcpProvider, mcpToolName: action.mcpToolName, connectionId: selected.connection?.id || null, error: publicMcpError(error, 'mcp_tool_failed') }; }
+      } catch (error) { result = { tool: 'mcp_call', ok: false, provider: action.mcpProvider, mcpToolName: action.mcpToolName, connectionId: selected.connection?.id || null, error: publicMcpError(error, 'mcp_tool_failed'), ...publicMcpFailureDetail(error, [selected.connection?.apiKey, ...Object.values(selected.connection?.environmentVariables || {})]) }; }
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'mcp_call', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, provider: result.provider, mcpToolName: result.mcpToolName, connectionId: result.connectionId, error: result.error || null });
       continue;
