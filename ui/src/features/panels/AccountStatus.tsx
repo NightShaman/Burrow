@@ -121,7 +121,7 @@ function UsageMeter({ bar, tone }: { bar: UsageBar; tone: 'primary' | 'secondary
   return <div className={`account-meter ${tone}`}>
     <div className="usage"><i style={{ width: `${remaining ?? 0}%` }} /></div>
     <small className={`usage-percent ${level}`}>{remaining === null ? '—' : `${remaining}%`}</small>
-    {bar.resetAt && <small className="account-reset-time">{formatResetIn(bar.resetAt)}</small>}
+    <small className="account-reset-time" aria-hidden={!bar.resetAt}>{bar.resetAt ? formatResetIn(bar.resetAt) : '\u00a0'}</small>
   </div>;
 }
 
@@ -185,7 +185,9 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
         {card.state === 'loading' && <small className="hint">Loading usage…</small>}
         {card.state === 'error' && <small className="hint">{card.error ?? 'Usage unavailable'}</small>}
         {card.state === 'ready' && !card.bars.length && <small className="hint">No usage windows reported.</small>}
-        {card.bars.map((bar, index) => <UsageMeter key={bar.key} bar={bar} tone={index === 0 ? 'primary' : 'secondary'} />)}
+        {card.bars.length > 0 && <div className={`account-meters ${card.bars.length === 2 ? 'two-up' : ''}`}>
+          {card.bars.map((bar, index) => <UsageMeter key={bar.key} bar={bar} tone={index === 0 ? 'primary' : 'secondary'} />)}
+        </div>}
       </AccountCard>;
     })}
   </section>;

@@ -101,7 +101,7 @@ It creates `~/.config/systemd/user/burrow.service`, enables it, and starts it. M
 ~/.burrow/bin/burrow service uninstall
 ```
 
-The service uses `~/.burrow/burrow.env` and starts `~/.burrow/bin/burrow serve`. It restarts after failures. When permitted, installation also enables systemd user lingering so the service survives logout. It requires a working `systemctl --user` session; hosts without systemd user services should run `burrow serve` under their own supervisor.
+The service uses `~/.burrow/burrow.env` and starts `~/.burrow/bin/burrow serve`. It restarts after failures and is persistent across logout and reboot: installation requires `loginctl` to enable and verify systemd user lingering for the installing account. If lingering or systemd user services are unavailable, service installation fails rather than creating a session-only service; run `burrow serve` under your own supervisor for that case.
 
 ## Uninstall
 

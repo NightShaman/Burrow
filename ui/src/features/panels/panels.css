@@ -5,7 +5,7 @@
 .account-status .account-connection-status.active{color:var(--ok);background:none}
 .account-status .account-connection-status.paused{color:var(--danger);background:none}
 .account-status .account-connection-status .dot{width:8px;height:8px;margin-right:4px}
-.account-meter{display:grid;grid-template-columns:minmax(0,1fr) 32px;align-items:center;column-gap:8px;row-gap:3px;margin-top:10px;padding:0;border:0;border-radius:0;background:none;box-shadow:none}
+.account-meters{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:10px}.account-meters.two-up{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:12px}.account-meter{display:grid;grid-template-columns:minmax(0,1fr) 32px;align-items:center;column-gap:8px;row-gap:3px;padding:0;border:0;border-radius:0;background:none;box-shadow:none}
 .account-status .account-meter .usage{grid-column:1;height:6px;min-width:0;padding:0;border:0;border-radius:99px;background:color-mix(in srgb,var(--line) 72%,transparent);box-shadow:none}
 .account-status .account-meter .usage i{border-radius:inherit}
 .account-status .account-meter.secondary{padding:0;border:0;border-radius:0;background:none;box-shadow:none}

@@ -79,6 +79,14 @@ function asCodexAccount(account: CodexLbAccount, index: number): Account {
   return { id: account.id ?? `account-${index + 1}`, name: account.name ?? `Account ${index + 1}`, plan: account.type ?? 'Unknown plan', used: 100 - remaining, reset: formatReset(account.resetAt), status: account.status ?? 'Unknown', resetCredit: formatResetCredit(account.availableResetCredits, account.resetCreditNearestExpiresAt) };
 }
 
+export const isOpenAiOAuthConnection = (provider?: Pick<SavedProvider, 'auth' | 'authSource' | 'oauthConfigured'>) =>
+  provider?.auth?.type === 'oauth' ||
+  provider?.auth?.source === 'oauth' ||
+  provider?.auth?.source === 'openai-oauth' ||
+  provider?.authSource === 'oauth' ||
+  provider?.authSource === 'openai-oauth' ||
+  provider?.oauthConfigured === true;
+
 const asSavedProvider = (connection: ModelConnection): SavedProvider => ({
   id: connection.id, provider: connection.provider, apiType: connection.apiType, url: connection.baseUrl, apiKey: '', apiKeyConfigured: connection.apiKeyConfigured,
   auth: connection.auth, oauthConfigured: connection.authConfigured, authSource: connection.auth?.source, expiresAt: connection.auth?.expiresAt,
@@ -148,7 +156,9 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
   const selectedConnection = savedProviders.find((provider) => provider.provider === selectedProvider) ?? savedProviders[0];
   usePolling(async (isCancelled) => {
     const provider = selectedConnection; const isAnthropicMessages = provider?.apiType === 'anthropic-messages';
-    const isOpenAiOAuth = provider?.provider === 'openai' && (provider.auth?.type === 'oauth' || provider.auth?.source === 'oauth' || provider.auth?.source === 'openai-oauth' || provider.authSource === 'oauth' || provider.authSource === 'openai-oauth' || provider.oauthConfigured === true);
+    // OpenAI OAuth connections can have operator-defined display names. Auth
+    // metadata, not the label, identifies the usage endpoint they support.
+    const isOpenAiOAuth = provider?.apiType !== 'anthropic-messages' && isOpenAiOAuthConnection(provider);
     if (!isAnthropicMessages && !isOpenAiOAuth) { setAnthropicUsage(null); setOpenAiUsage(null); return; }
     setAnthropicUsage(null); setOpenAiUsage(null);
     try {
