@@ -45,6 +45,7 @@ export function ChatTranscript({ selected, parent, operator, isNewSession, turns
   }, [isLoading, isNewSession, messages.length, isSending, liveProgress, liveAnswer, activeActivity]);
   return <div className={`chat-messages ${isEmptySession ? 'new-session-view' : ''}`} ref={messagesRef} onScroll={updateScrollIntent} aria-busy={isLoading || isSending}>
     {isEmptySession ? <div className="new-session-empty"><img src="/burrow-logo.png" alt="Burrow" /></div> : <>
+      <div className="chat-watermark" aria-hidden="true"><img src="/burrow-logo.png" alt="" /></div>
       {isSubagent && <div className="stream-banner"><span>Subagent stream</span><strong>{selected.name}</strong><small>Workspace remains attached to {parent.name}</small></div>}
       {isLoading && <p className="chat-state">{messages.length ? 'Refreshing conversation…' : 'Loading conversation…'}</p>}
       {messages.map((turn, index) => {
