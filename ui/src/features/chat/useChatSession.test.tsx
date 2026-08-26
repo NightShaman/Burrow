@@ -169,6 +169,27 @@ describe('useChatSession', () => {
     ]));
   });
 
+  it('does not resurrect cached turns from before a server-side reset', async () => {
+    const resetAt = '2026-08-26T10:00:00.000Z';
+    localStorage.setItem('hc.chatConversations.v1', JSON.stringify({
+      [conversationCacheKey(agentId, sessionId)]: {
+        savedAt: Date.now(),
+        turns: [{ role: 'assistant', content: 'Yesterday afternoon', runId: 'old-run', ts: '2026-08-25T15:00:00.000Z' }],
+      },
+    }));
+    apiMock.mockImplementation(async (path) => {
+      if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+      if (path === conversationPath) return { session: { id: sessionId, metadata: { resetAt, transcriptGeneration: 'new-generation' }, turns: [] } };
+      throw new Error(`Unexpected path: ${path}`);
+    });
+
+    const { result } = renderHook(() => useChatSession(agentId));
+
+    await waitFor(() => expect(result.current.isLoadingConversation).toBe(false));
+    expect(result.current.turns).toEqual([]);
+    expect(JSON.parse(localStorage.getItem('hc.chatConversations.v1') ?? '{}')[conversationCacheKey(agentId, sessionId)].turns).toEqual([]);
+  });
+
   it('merges stored tool activity into refreshed assistant turns', async () => {
     const { result } = renderHook(() => useChatSession(agentId));
     await waitFor(() => expect(result.current.sessionId).toBe(sessionId));

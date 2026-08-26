@@ -31,6 +31,17 @@ function mergeSessionActivities(turns: SessionTurn[], activities: SessionToolAct
   });
 }
 
+function localTurnsForSession(session: ChatSession, localTurns: SessionTurn[]): SessionTurn[] {
+  const resetAt = session.metadata?.resetAt ? Date.parse(session.metadata.resetAt) : Number.NaN;
+  if (Number.isNaN(resetAt)) return localTurns;
+  // A reset keeps the session id but starts a new transcript generation. Cached
+  // turns from the previous generation must not be treated as pending writes.
+  return localTurns.filter((turn) => {
+    const turnTime = turn.ts ? Date.parse(turn.ts) : Number.NaN;
+    return !Number.isNaN(turnTime) && turnTime >= resetAt;
+  });
+}
+
 function reconcileConversationTurns(serverTurns: SessionTurn[], localTurns: SessionTurn[]): SessionTurn[] {
   // A run writes its user and assistant turns independently. A terminal
   // refresh can therefore see only one of them while persistence catches up;
@@ -292,7 +303,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
     const sessionPath = `/api/sessions/${encodeURIComponent(sessionId)}?agentId=${encodeURIComponent(owner.resourceId)}`;
     requestFor<{ session: ChatSession }>(owner.target, sessionPath).then(({ session }) => {
       if (cancelled || conversationCacheRef.current[cacheKey] !== cachedTurns) return;
-      const nextTurns = reconcileConversationTurns(mergeSessionActivities(session.turns ?? [], session.activities ?? []), conversationCacheRef.current[cacheKey] ?? []);
+      const nextTurns = reconcileConversationTurns(mergeSessionActivities(session.turns ?? [], session.activities ?? []), localTurnsForSession(session, conversationCacheRef.current[cacheKey] ?? []));
       conversationCacheRef.current[cacheKey] = nextTurns;
       writeConversationCache(conversationCacheRef.current, cacheKey);
       setTurns(nextTurns);
@@ -321,7 +332,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
     if (conversationCacheRef.current[cacheKey] !== turnsAtRequestStart) return;
     const nextTurns = reconcileConversationTurns(
       mergeSessionActivities(session.turns ?? [], session.activities ?? []),
-      conversationCacheRef.current[cacheKey] ?? [],
+      localTurnsForSession(session, conversationCacheRef.current[cacheKey] ?? []),
     ).map((turn) => {
       const activity = turn.runId ? toolActivityByRunRef.current[turn.runId] : undefined;
       const normalizedTurn = { ...turn, content: textFromChatValue(turn.content) };

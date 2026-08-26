@@ -231,6 +231,11 @@ export type ChatSession = {
   id: string;
   turns?: SessionTurn[];
   activities?: SessionToolActivity[];
+  metadata?: {
+    conversationId?: string;
+    transcriptGeneration?: string;
+    resetAt?: string;
+  };
 };
 
 export function createRequestHeaders(headers: HeadersInit = {}, defaultAccept = 'application/json'): Headers {
