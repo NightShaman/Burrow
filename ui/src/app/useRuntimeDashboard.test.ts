@@ -18,8 +18,8 @@ describe('Codex-LB account mapping', () => {
       primary: { label: '5-hour', percent: 62, resetAt: '2030-01-01T00:00:00Z' },
       secondary: { label: 'Weekly', percent: 94, resetAt: '2030-01-07T00:00:00Z' },
     } }, 0).meters).toEqual([
-      { key: 'primary', label: '5-hour', remainingPercent: 38, resetAt: '2030-01-01T00:00:00Z' },
-      { key: 'secondary', label: 'Weekly', remainingPercent: 6, resetAt: '2030-01-07T00:00:00Z' },
+      { key: 'primary', label: '5-hour', remainingPercent: 62, resetAt: '2030-01-01T00:00:00Z' },
+      { key: 'secondary', label: 'Weekly', remainingPercent: 94, resetAt: '2030-01-07T00:00:00Z' },
     ]);
   });
 

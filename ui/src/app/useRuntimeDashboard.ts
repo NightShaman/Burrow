@@ -69,7 +69,9 @@ function formatResetCredit(count?: number | null, nearestEndAt?: string | null) 
 function quotaMeter(window: CodexLbQuotaWindow | undefined, key: string): AccountMeter | null {
   if (!window) return null;
   const percent = Number(window.percent);
-  return { key, label: window.label ?? key, remainingPercent: Number.isFinite(percent) ? Math.max(0, Math.min(100, Math.round(100 - percent))) : null, resetAt: window.resetAt ?? null };
+  // Codex-LB names this field RemainingPercent; it is already the amount left,
+  // unlike the OAuth usage APIs which report utilization/used percent.
+  return { key, label: window.label ?? key, remainingPercent: Number.isFinite(percent) ? Math.max(0, Math.min(100, Math.round(percent))) : null, resetAt: window.resetAt ?? null };
 }
 
 export function asCodexAccount(account: CodexLbAccount, index: number): Account {
