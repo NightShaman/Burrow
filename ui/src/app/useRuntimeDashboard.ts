@@ -2,12 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiForTarget, type AnthropicUsage, type ModelConnection, type OpenAiUsage } from './api';
 import type { ApiTarget } from './apiTargets';
 import { readAccountOrder, writeAccountOrder } from './accountOrderStorage';
-import type { Account, Agent, SavedProvider } from './types';
+import type { Account, AccountMeter, Agent, SavedProvider } from './types';
 import { usePolling } from './usePolling';
 
 export type OperatorProfile = { name: string; avatar: string };
 export type ProviderConnectionStatus = 'checking' | 'connected' | 'disconnected';
 
+type CodexLbQuotaWindow = { kind?: string; label?: string; percent?: number | null; resetAt?: string | null };
 type CodexLbAccount = {
   id?: string;
   name?: string;
@@ -15,6 +16,7 @@ type CodexLbAccount = {
   status?: string;
   usagePercent?: number | null;
   resetAt?: string | null;
+  quotaWindows?: { primary?: CodexLbQuotaWindow; secondary?: CodexLbQuotaWindow };
   availableResetCredits?: number | null;
   resetCreditNearestExpiresAt?: string | null;
 };
@@ -64,10 +66,17 @@ function formatResetCredit(count?: number | null, nearestEndAt?: string | null) 
   return `${creditLabel} · ${days} day${days === 1 ? '' : 's'} left`;
 }
 
-function asCodexAccount(account: CodexLbAccount, index: number): Account {
+function quotaMeter(window: CodexLbQuotaWindow | undefined, key: string): AccountMeter | null {
+  if (!window) return null;
+  const percent = Number(window.percent);
+  return { key, label: window.label ?? key, remainingPercent: Number.isFinite(percent) ? Math.max(0, Math.min(100, Math.round(100 - percent))) : null, resetAt: window.resetAt ?? null };
+}
+
+export function asCodexAccount(account: CodexLbAccount, index: number): Account {
   const usagePercent = Number(account.usagePercent);
   const remaining = Number.isFinite(usagePercent) ? Math.max(0, Math.min(100, Math.round(usagePercent))) : 0;
-  return { id: account.id ?? `account-${index + 1}`, name: account.name ?? `Account ${index + 1}`, plan: account.type ?? 'Unknown plan', used: 100 - remaining, reset: formatReset(account.resetAt), status: account.status ?? 'Unknown', resetCredit: formatResetCredit(account.availableResetCredits, account.resetCreditNearestExpiresAt) };
+  const meters = [quotaMeter(account.quotaWindows?.primary, 'primary'), quotaMeter(account.quotaWindows?.secondary, 'secondary')].filter((meter): meter is NonNullable<typeof meter> => meter !== null);
+  return { id: account.id ?? `account-${index + 1}`, name: account.name ?? `Account ${index + 1}`, plan: account.type ?? 'Unknown plan', used: 100 - remaining, reset: formatReset(account.resetAt), status: account.status ?? 'Unknown', resetCredit: formatResetCredit(account.availableResetCredits, account.resetCreditNearestExpiresAt), meters };
 }
 
 export const isOpenAiOAuthConnection = (provider?: Pick<SavedProvider, 'auth' | 'authSource' | 'oauthConfigured'>) =>

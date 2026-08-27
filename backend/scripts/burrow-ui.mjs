@@ -926,7 +926,7 @@ function quotaWindow(account = {}, usage = {}, kind = 'secondary') {
   const windowMinutes = finiteQuotaNumber(account[`windowMinutes${suffix}`]);
   return {
     kind,
-    label: kind === 'monthly' || (windowMinutes !== null && windowMinutes >= 40000) ? 'Monthly' : windowMinutes === 10080 ? 'Weekly' : suffix,
+    label: kind === 'monthly' || (windowMinutes !== null && windowMinutes >= 40000) ? 'Monthly' : windowMinutes === 10080 ? 'Weekly' : windowMinutes === 300 ? '5-hour' : suffix,
     percent: finitePercent(usage[`${kind}RemainingPercent`]),
     resetAt: account[`resetAt${suffix}`] || null,
     windowMinutes,
@@ -947,6 +947,10 @@ function selectedAccountWindow(account = {}) {
 
 function sanitizeCodexLbAccount(account = {}, index = 0) {
   const selectedWindow = selectedAccountWindow(account);
+  const quotaWindows = {
+    primary: quotaWindow(account, account.usage || {}, 'primary'),
+    secondary: quotaWindow(account, account.usage || {}, 'secondary'),
+  };
   return {
     id: `account-${index + 1}`,
     name: account.alias || account.displayName || `Account ${index + 1}`,
@@ -955,6 +959,7 @@ function sanitizeCodexLbAccount(account = {}, index = 0) {
     usagePercent: selectedWindow.percent,
     resetAt: selectedWindow.resetAt,
     window: selectedWindow,
+    quotaWindows,
     availableResetCredits: Number.isFinite(Number(account.availableResetCredits)) ? Number(account.availableResetCredits) : null,
     resetCreditNearestExpiresAt: account.resetCreditNearestExpiresAt || null,
   };
