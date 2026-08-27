@@ -1,24 +1,18 @@
 import { useEffect, useState } from 'react';
-import type { PanelId } from './types';
 import { panelIds } from './panelRegistry';
+import { readStorage, removeStorage, writeStorage, readStoredValue, writeStoredValue, type StoredValueValidator } from './browserStorage';
+import type { PanelId } from './types';
+
+const persistedStateVersion = 1;
 const rightPanelDefaultsVersionKey = 'hc.rightPanelDefaultsVersion';
 const rightPanelDefaultsVersion = '3';
 let rightPanelDefaultsMigrated = false;
 
-function readStorage(key: string) {
-  try { return localStorage.getItem(key); } catch { return null; }
-}
-export function writeStorage(key: string, value: string) {
-  try { localStorage.setItem(key, value); } catch { /* Storage may be unavailable or full. */ }
-}
-function removeStorage(key: string) {
-  try { localStorage.removeItem(key); } catch { /* Storage may be unavailable. */ }
-}
 function migrateRightPanelDefaults() {
   if (rightPanelDefaultsMigrated) return;
   rightPanelDefaultsMigrated = true;
   if (readStorage(rightPanelDefaultsVersionKey) === rightPanelDefaultsVersion) return;
-  ['hc.rightTopPanel', 'hc.rightBottomPanel', 'hc.leftTopPanel', 'hc.leftBottomPanel'].forEach(removeStorage);
+  ['hc.rightTopPanel', 'hc.rightBottomPanel', 'hc.leftTopPanel', 'hc.leftBottomPanel'].forEach((key) => removeStorage(key));
   writeStorage(rightPanelDefaultsVersionKey, rightPanelDefaultsVersion);
 }
 
@@ -34,73 +28,42 @@ export const themeDetails = {
   'high-contrast': { label: 'High Contrast', description: 'Maximum contrast with reduced visual decoration.' },
 } as const;
 export type Theme = typeof themes[number];
-const readNumber = (key: string, fallback: number, min: number, max: number) => {
-  const value = Number(readStorage(key));
-  return Number.isFinite(value) && value >= min && value <= max ? value : fallback;
-};
-const readBoolean = (key: string, fallback: boolean) => {
-  const value = readStorage(key);
-  return value === null ? fallback : value === 'true';
-};
-const readTheme = (key: string): Theme => {
-  const value = readStorage(key);
-  return themes.includes(value as unknown as Theme) ? value as unknown as Theme : 'smatchet';
-};
-const readPanel = (key: string, fallback: PanelId) => {
-  const value = readStorage(key) as PanelId | null;
-  return value && panelIds.includes(value) ? value : fallback;
-};
-function useStoredState<T>(key: string, initial: () => T) {
-  const [value, setValue] = useState(initial);
-  useEffect(() => writeStorage(key, String(value)), [key, value]);
+
+const isString: StoredValueValidator<string> = (value): value is string => typeof value === 'string';
+const isBoolean: StoredValueValidator<boolean> = (value): value is boolean => typeof value === 'boolean';
+const isTheme: StoredValueValidator<Theme> = (value): value is Theme => typeof value === 'string' && themes.includes(value as Theme);
+const isPanel: StoredValueValidator<PanelId> = (value): value is PanelId => typeof value === 'string' && panelIds.includes(value as PanelId);
+const boundedNumber = (min: number, max: number): StoredValueValidator<number> => (value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
+
+function useStoredState<T>(key: string, fallback: T, validate: StoredValueValidator<T>, decodeLegacy: (raw: string) => T | undefined) {
+  const [value, setValue] = useState<T>(() => readStoredValue({ key, version: persistedStateVersion, fallback, validate, decodeLegacy: (raw) => decodeLegacy(raw) }));
+  useEffect(() => writeStoredValue(key, persistedStateVersion, value), [key, value]);
   return [value, setValue] as const;
 }
+
 export function usePersistedTheme() {
-  return useStoredState<Theme>('hc.theme', () => readTheme('hc.theme'));
+  return useStoredState<Theme>('hc.theme', 'smatchet', isTheme, (raw) => isTheme(raw) ? raw : undefined);
 }
 export function usePersistedAgentSelection() {
-  return useStoredState<string>('hc.selectedAgentId', () => readStorage('hc.selectedAgentId') ?? '');
+  return useStoredState('hc.selectedAgentId', '', isString, (raw) => raw);
 }
 export function usePersistedTargetSelection() {
-  return useStoredState<string>('hc.selectedTargetId', () => readStorage('hc.selectedTargetId') ?? 'local');
+  return useStoredState('hc.selectedTargetId', 'local', isString, (raw) => raw);
 }
 
-export type PersistedModelSelection = { provider: string; model: string; effort: string };
-
-const readModelSelections = (): Record<string, PersistedModelSelection> => {
-  try {
-    const value: unknown = JSON.parse(readStorage('hc.modelSelections') ?? '{}');
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-    return Object.fromEntries(Object.entries(value).flatMap(([agentId, selection]) => {
-      if (!selection || typeof selection !== 'object') return [];
-      const { provider, model, effort } = selection as Record<string, unknown>;
-      return typeof provider === 'string' && typeof model === 'string' && typeof effort === 'string'
-        ? [[agentId, { provider, model, effort }]]
-        : [];
-    }));
-  } catch {
-    return {};
-  }
-};
-
-export function usePersistedModelSelections() {
-  const [selections, setSelections] = useState<Record<string, PersistedModelSelection>>(() => readModelSelections());
-  useEffect(() => writeStorage('hc.modelSelections', JSON.stringify(selections)), [selections]);
-  return [selections, setSelections] as const;
-}
 export function usePersistedLayout() {
   migrateRightPanelDefaults();
-  const [leftCollapsed, setLeftCollapsed] = useStoredState('hc.leftCollapsed', () => readBoolean('hc.leftCollapsed', false));
-  const [rightCollapsed, setRightCollapsed] = useStoredState('hc.rightCollapsed', () => readBoolean('hc.rightCollapsed', false));
-  const [leftSplit, setLeftSplit] = useStoredState('hc.leftSplit', () => readNumber('hc.leftSplit', 40, 25, 60));
-  const [workspaceCollapsed, setWorkspaceCollapsed] = useStoredState('hc.workspaceCollapsed', () => readBoolean('hc.workspaceCollapsed', false));
-  const [rightSplit, setRightSplit] = useStoredState('hc.rightSplit', () => readNumber('hc.rightSplit', 50, 25, 75));
-  const [leftTopPanel, setLeftTopPanel] = useStoredState<PanelId>('hc.leftTopPanel', () => readPanel('hc.leftTopPanel', 'agents'));
-  const [leftBottomPanel, setLeftBottomPanel] = useStoredState<PanelId>('hc.leftBottomPanel', () => readPanel('hc.leftBottomPanel', 'workspace'));
-  const [rightTopPanel, setRightTopPanel] = useStoredState<PanelId>('hc.rightTopPanel', () => readPanel('hc.rightTopPanel', 'none'));
-  const [rightBottomPanel, setRightBottomPanel] = useStoredState<PanelId>('hc.rightBottomPanel', () => readPanel('hc.rightBottomPanel', 'none'));
-  return { leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed, leftSplit, setLeftSplit, workspaceCollapsed, setWorkspaceCollapsed, rightSplit, setRightSplit, leftTopPanel, setLeftTopPanel, leftBottomPanel, setLeftBottomPanel, rightTopPanel, setRightTopPanel, rightBottomPanel, setRightBottomPanel };
+  const [leftCollapsed, setLeftCollapsed] = useStoredState('hc.leftCollapsed', false, isBoolean, (raw) => raw === 'true' ? true : raw === 'false' ? false : undefined);
+  const [rightCollapsed, setRightCollapsed] = useStoredState('hc.rightCollapsed', false, isBoolean, (raw) => raw === 'true' ? true : raw === 'false' ? false : undefined);
+  const [leftSplit, setLeftSplit] = useStoredState('hc.leftSplit', 40, boundedNumber(25, 60), (raw) => { const value = Number(raw); return Number.isFinite(value) ? value : undefined; });
+  const [rightSplit, setRightSplit] = useStoredState('hc.rightSplit', 50, boundedNumber(25, 75), (raw) => { const value = Number(raw); return Number.isFinite(value) ? value : undefined; });
+  const [leftTopPanel, setLeftTopPanel] = useStoredState<PanelId>('hc.leftTopPanel', 'agents', isPanel, (raw) => isPanel(raw) ? raw : undefined);
+  const [leftBottomPanel, setLeftBottomPanel] = useStoredState<PanelId>('hc.leftBottomPanel', 'workspace', isPanel, (raw) => isPanel(raw) ? raw : undefined);
+  const [rightTopPanel, setRightTopPanel] = useStoredState<PanelId>('hc.rightTopPanel', 'none', isPanel, (raw) => isPanel(raw) ? raw : undefined);
+  const [rightBottomPanel, setRightBottomPanel] = useStoredState<PanelId>('hc.rightBottomPanel', 'none', isPanel, (raw) => isPanel(raw) ? raw : undefined);
+  return { leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed, leftSplit, setLeftSplit, rightSplit, setRightSplit, leftTopPanel, setLeftTopPanel, leftBottomPanel, setLeftBottomPanel, rightTopPanel, setRightTopPanel, rightBottomPanel, setRightBottomPanel };
 }
+
 export function listenResize(move: (event: globalThis.PointerEvent) => void) {
   const stop = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); };
   window.addEventListener('pointermove', move); window.addEventListener('pointerup', stop);

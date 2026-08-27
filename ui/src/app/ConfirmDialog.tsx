@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
 type ConfirmOptions = { title: string; message: string; confirmLabel?: string; tone?: 'danger' | 'default' };
 type ConfirmContextValue = (options: ConfirmOptions) => Promise<boolean>;

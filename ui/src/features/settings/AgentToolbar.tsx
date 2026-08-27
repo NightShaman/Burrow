@@ -1,14 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { Agent, SavedProvider } from '../../app/types';
 import { api, importExport, type RuntimeModel } from '../../app/api';
-import type { ClaudeCodeLogin, OpenAiOAuthConnection } from './modelConnectionsApi';
+import type { OpenAiOAuthConnection } from './modelConnectionsApi';
 import { useClaudeCodeLoginFlow } from './useClaudeCodeLoginFlow';
 import { useOpenAiOAuthConnectionFlow } from './useOpenAiOAuthConnectionFlow';
 
 const profileDocumentKinds = ['SOUL', 'RULES', 'ORIENTATION', 'TOOLS', 'DREAM_MEMORY'] as const;
 
-const finalClaudeLoginStatuses = new Set(['imported', 'cancelled', 'expired', 'failed']);
-const claudeLoginCanSubmitCode = (login?: ClaudeCodeLogin | null) => login?.status === 'waiting_for_code';
 const selectedRuntimeModels = (models: Array<string | RuntimeModel> = []): RuntimeModel[] => models.map((model) => {
   if (typeof model === 'string') return { id: model, selected: true, acceptedInput: ['text'] };
   return { ...model, selected: model.selected ?? true, acceptedInput: model.acceptedInput ?? model.discoveredInput ?? ['text'] };
@@ -117,7 +115,6 @@ export function AgentToolbar({ agents, selectedId, onSelect, onAgentsChanged, on
  const [state, setState] = useState<'idle' | 'creating'>('idle'); const [error, setError] = useState(''); const avatarInput = useRef<HTMLInputElement>(null); const operatorAvatarInput = useRef<HTMLInputElement>(null);
  const [showRegularNewAgent, setShowRegularNewAgent] = useState(false); const [regularId, setRegularId] = useState(''); const [regularName, setRegularName] = useState(''); const [regularError, setRegularError] = useState(''); const [regularState, setRegularState] = useState<'idle' | 'creating'>('idle');
  const [oauthProvider, setOauthProvider] = useState<'openai' | 'anthropic' | null>(null);
- const [claudeConnection, setClaudeConnection] = useState<OpenAiOAuthConnection | null>(null);
  const wizardOAuthConnection = useRef<OpenAiOAuthConnection | null>(null);
  const saveWizardConnection = async (connection: OpenAiOAuthConnection) => {
   if (!connection.id || !connection.provider || !connection.apiType || !connection.baseUrl) throw new Error('OAuth completed, but the connection details were incomplete.');
@@ -139,15 +136,14 @@ export function AgentToolbar({ agents, selectedId, onSelect, onAgentsChanged, on
  };
  const receiveWizardOAuthConnection = (connection: OpenAiOAuthConnection) => {
   wizardOAuthConnection.current = connection;
-  setClaudeConnection(connection);
  };
  const completeWizardOAuth = async () => {
   if (!wizardOAuthConnection.current) throw new Error('OAuth completed, but the connection details were unavailable.');
   await saveWizardConnection(wizardOAuthConnection.current);
   setOauthProvider(null);
  };
- const { login: openAiLogin, code: openAiOAuthCode, setCode: setOpenAiOAuthCode, requestState: openAiOAuthState, error: openAiOAuthError, start: startOpenAiOAuth, submit: submitOpenAiOAuth, cancel: cancelOpenAiOAuth, reset: resetOpenAiOAuth } = useOpenAiOAuthConnectionFlow({ onConnection: receiveWizardOAuthConnection, onAuthorized: completeWizardOAuth });
- const { login: claudeLogin, code: claudeOAuthCode, setCode: setClaudeOAuthCode, requestState: claudeOAuthState, error: claudeOAuthError, start: startClaudeOAuth, submit: submitClaudeOAuth, cancel: cancelClaudeOAuth, reset: resetClaudeOAuth } = useClaudeCodeLoginFlow({ onConnection: receiveWizardOAuthConnection, onImported: completeWizardOAuth, autoImport: true });
+ const { login: openAiLogin, code: openAiOAuthCode, setCode: setOpenAiOAuthCode, requestState: openAiOAuthState, error: openAiOAuthError, start: startOpenAiOAuth, submit: submitOpenAiOAuth, reset: resetOpenAiOAuth } = useOpenAiOAuthConnectionFlow({ onConnection: receiveWizardOAuthConnection, onAuthorized: completeWizardOAuth });
+ const { login: claudeLogin, code: claudeOAuthCode, setCode: setClaudeOAuthCode, requestState: claudeOAuthState, error: claudeOAuthError, start: startClaudeOAuth, submit: submitClaudeOAuth, reset: resetClaudeOAuth } = useClaudeCodeLoginFlow({ onConnection: receiveWizardOAuthConnection, onImported: completeWizardOAuth, autoImport: true });
  const oauthBusy = oauthProvider === 'openai' ? openAiOAuthState : oauthProvider === 'anthropic' ? claudeOAuthState : 'idle';
  const oauthError = oauthProvider === 'openai' ? openAiOAuthError : oauthProvider === 'anthropic' ? claudeOAuthError : '';
  const oauthCode = oauthProvider === 'openai' ? openAiOAuthCode : claudeOAuthCode;
@@ -155,14 +151,12 @@ export function AgentToolbar({ agents, selectedId, onSelect, onAgentsChanged, on
  const startWizardOAuth = async (kind: 'openai' | 'anthropic') => {
   setOauthProvider(kind);
   wizardOAuthConnection.current = null;
-  setClaudeConnection(null);
   resetOpenAiOAuth();
   resetClaudeOAuth();
   if (kind === 'openai') await startOpenAiOAuth(); else await startClaudeOAuth();
  };
  const submitWizardOAuth = async () => { if (oauthProvider === 'openai') await submitOpenAiOAuth(); else if (oauthProvider === 'anthropic') await submitClaudeOAuth(); };
- const cancelWizardOAuth = async () => { if (oauthProvider === 'openai') await cancelOpenAiOAuth(); else if (oauthProvider === 'anthropic') await cancelClaudeOAuth(); };
- const reset = () => { wizardOAuthConnection.current = null; setOauthProvider(null); setClaudeConnection(null); resetOpenAiOAuth(); resetClaudeOAuth(); setCelebrating(false); setShowNewAgent(false); setStep(1); setImportPayload(''); setImportPassword(''); setOperatorName(''); setOperatorAvatar(''); setOperatorAvatarFileName(''); setName(''); setAvatar(''); setSoul(''); setConnectionId(''); setModel(''); setError(''); setImporting(false); setImported(false); if (importInput.current) importInput.current.value = ''; };
+ const reset = () => { wizardOAuthConnection.current = null; setOauthProvider(null); resetOpenAiOAuth(); resetClaudeOAuth(); setCelebrating(false); setShowNewAgent(false); setStep(1); setImportPayload(''); setImportPassword(''); setOperatorName(''); setOperatorAvatar(''); setOperatorAvatarFileName(''); setName(''); setAvatar(''); setSoul(''); setConnectionId(''); setModel(''); setError(''); setImporting(false); setImported(false); if (importInput.current) importInput.current.value = ''; };
  const open = async () => { setShowNewAgent(true); setStep(1); setError(''); try { const result = await api<{ connections: SavedProvider[] }>('/api/settings/model-connections'); setProviders(result.connections ?? []); } catch { setProviders([]); } };
  useEffect(() => {
    if (firstRun && !showNewAgent) void open();

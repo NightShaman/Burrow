@@ -1,25 +1,31 @@
 import { useEffect, useState } from 'react';
+import { readStoredValue, writeStoredValue } from './browserStorage';
 import type { Tab } from './types';
-import { writeStorage } from './usePersistedLayout';
 
-const groupTabsStorageKey = 'hc.groupChatTabs';
+export const groupTabsStorageKey = 'hc.groupChatTabs';
+const groupTabsStorageVersion = 1;
 
-function readPersistedGroupTabs(): Tab[] {
-  try {
-    const stored: unknown = JSON.parse(localStorage.getItem(groupTabsStorageKey) ?? '[]');
-    if (!Array.isArray(stored)) return [];
+function isGroupTab(value: unknown): value is Tab {
+  if (!value || typeof value !== 'object') return false;
+  const tab = value as Partial<Tab>;
+  return tab.kind === 'group'
+    && typeof tab.id === 'string'
+    && typeof tab.channelId === 'string'
+    && typeof tab.label === 'string'
+    && (tab.targetId === undefined || typeof tab.targetId === 'string');
+}
 
-    return stored.filter((tab): tab is Tab => (
-      Boolean(tab)
-      && typeof tab === 'object'
-      && (tab as Tab).kind === 'group'
-      && typeof (tab as Tab).id === 'string'
-      && typeof (tab as Tab).channelId === 'string'
-      && typeof (tab as Tab).label === 'string'
-    ));
-  } catch {
-    return [];
-  }
+const isGroupTabList = (value: unknown): value is Tab[] => Array.isArray(value) && value.every(isGroupTab);
+
+export function readPersistedGroupTabs(storage?: Storage | null): Tab[] {
+  return readStoredValue({
+    key: groupTabsStorageKey,
+    version: groupTabsStorageVersion,
+    fallback: [],
+    validate: isGroupTabList,
+    decodeLegacy: (_raw, parsed) => Array.isArray(parsed) ? parsed.filter(isGroupTab) : undefined,
+    storage,
+  });
 }
 
 export function useAppTabs() {
@@ -30,7 +36,7 @@ export function useAppTabs() {
   const [activeTabId, setActiveTabId] = useState('chat');
 
   useEffect(() => {
-    writeStorage(groupTabsStorageKey, JSON.stringify(tabs.filter((tab) => tab.kind === 'group')));
+    writeStoredValue(groupTabsStorageKey, groupTabsStorageVersion, tabs.filter((tab) => tab.kind === 'group'));
   }, [tabs]);
 
   return { tabs, setTabs, activeTabId, setActiveTabId };

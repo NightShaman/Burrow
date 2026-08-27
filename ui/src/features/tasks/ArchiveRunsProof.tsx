@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
-import { api, type ArchiveRunDetail, type ArchiveRunListResponse, type ArchiveRunResponse } from '../../app/api';
-import type { Agent } from '../../app/types';
+import type { ArchiveRunDetail } from '../../app/api';
+import { archiveRepository } from './archiveRepository';
 
 function date(value?: string | null) {
   if (!value) return 'No date';
@@ -98,7 +98,7 @@ function ProofDetail({ run }: { run: ArchiveRunDetail }) {
   </div>;
 }
 
-export function ArchiveRunsProof({ agents, selectedAgent, search }: { agents: Agent[]; selectedAgent: string; search: string }) {
+export function ArchiveRunsProof({ selectedAgent, search }: { selectedAgent: string; search: string }) {
   const [runs, setRuns] = useState<ArchiveRunDetail[]>([]);
   const [selected, setSelected] = useState<ArchiveRunDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -107,11 +107,10 @@ export function ArchiveRunsProof({ agents, selectedAgent, search }: { agents: Ag
   const [detailError, setDetailError] = useState('');
   useEffect(() => {
     const abort = new AbortController(); setLoading(true); setError(''); setSelected(null);
-    const query = new URLSearchParams({ limit: '100' }); if (selectedAgent) query.set('agentId', selectedAgent);
-    api<ArchiveRunListResponse>(`/api/archive/runs?${query}`, { signal: abort.signal }).then((response) => { if (!abort.signal.aborted) setRuns(response.runs); }).catch((cause) => { if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : 'Could not load archive runs.'); }).finally(() => { if (!abort.signal.aborted) setLoading(false); });
+    archiveRepository.listRuns(selectedAgent, abort.signal).then((runs) => { if (!abort.signal.aborted) setRuns(runs); }).catch((cause) => { if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : 'Could not load archive runs.'); }).finally(() => { if (!abort.signal.aborted) setLoading(false); });
     return () => abort.abort();
   }, [selectedAgent]);
   const visible = useMemo(() => { const query = search.trim().toLowerCase(); return runs.filter((run) => !query || `${run.agentName || run.agentId} ${run.objective || ''} ${run.finalAnswer || ''} ${run.status}`.toLowerCase().includes(query)); }, [runs, search]);
-  const open = (run: ArchiveRunDetail) => { setSelected(run); setDetailError(''); setDetailLoading(true); const query = `?agentId=${encodeURIComponent(run.agentId)}`; api<ArchiveRunResponse>(`/api/archive/runs/${encodeURIComponent(run.runId)}${query}`).then((response) => setSelected(response.run)).catch((cause) => setDetailError(cause instanceof Error ? cause.message : 'Could not open this run.')).finally(() => setDetailLoading(false)); };
+  const open = (run: ArchiveRunDetail) => { setSelected(run); setDetailError(''); setDetailLoading(true); const abort = new AbortController(); archiveRepository.loadRun(run.runId, run.agentId, abort.signal).then(setSelected).catch((cause) => setDetailError(cause instanceof Error ? cause.message : 'Could not open this run.')).finally(() => setDetailLoading(false)); };
   return <div className="archive-split-view archive-proof-view"><section className="archive-results-pane" aria-label="Archive proof runs"><div className="archive-pane-heading"><span className="eyebrow">Runs</span><strong>{visible.length} runs</strong></div><div className="archive-session-list">{loading ? <section className="archive-empty-state"><div className="archive-empty-mark">⌁</div><div><h3>Gathering proof.</h3><p>Loading archived run outcomes.</p></div></section> : null}{error ? <section className="archive-empty-state archive-error"><div className="archive-empty-mark">!</div><div><h3>Could not load archive runs.</h3><p>{error}</p></div></section> : null}{!loading && !error && !visible.length ? <section className="archive-empty-state"><div className="archive-empty-mark">⌁</div><div><h3>No proof runs found.</h3><p>Try another agent or search.</p></div></section> : null}{!loading && !error ? visible.map((run) => <button type="button" className={`archive-session-card proof-run-card${selected?.runId === run.runId ? ' selected' : ''}`} key={run.runId} onClick={() => open(run)}><div className="archive-session-main"><div className="archive-session-meta"><span>{run.agentName || run.agentId}</span><span>{date(run.completedAt || run.startedAt)}</span></div><h3>{run.objective || run.runId}</h3><p>{statusInfo(run.status).label} · {duration(run)} · {run.counts.toolActivities} tool activities · {run.counts.unresolved} unresolved</p></div><div className="archive-session-side"><strong className={`proof-status-text proof-status-${run.status}`}>{statusInfo(run.status).label}</strong><span>{run.counts.observations + run.counts.changes + run.counts.verifications} evidence</span></div></button>) : null}</div></section><section className="archive-reader-pane">{selected ? <div className="archive-content-body archive-reader-body">{detailLoading ? <section className="archive-empty-state"><div className="archive-empty-mark">⌁</div><div><h3>Opening proof.</h3><p>Reading the run evidence.</p></div></section> : detailError ? <section className="archive-empty-state archive-error"><div className="archive-empty-mark">!</div><div><h3>Could not open this run.</h3><p>{detailError}</p></div></section> : <ProofDetail run={selected} />}</div> : <section className="archive-empty-state archive-reader-placeholder"><div className="archive-empty-mark">⌁</div><div><h3>Select a proof run.</h3><p>Choose a run to inspect its outcome, evidence, context, and linked subagents.</p></div></section>}</section></div>;
 }

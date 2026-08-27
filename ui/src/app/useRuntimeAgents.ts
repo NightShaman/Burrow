@@ -1,8 +1,8 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiForTarget, type AgentStatus, type ContextStatus, type RuntimeAgent } from './api';
 import { ownedResourceId, type ApiTarget } from './apiTargets';
 import type { Agent, ContextDetails, SavedProvider, Subagent } from './types';
-import { usePolling } from './usePolling';
+import { usePolling, type IsPollingCancelled } from './usePolling';
 
 type RuntimeAgentHydrationOptions = {
   selectedAgentId: string;
@@ -16,6 +16,8 @@ type RuntimeAgentHydrationOptions = {
 };
 
 type OwnedRuntimeAgent = { agent: RuntimeAgent; target: ApiTarget; identity?: { id: string; name: string; avatar: string } };
+export type RuntimeRegistryState = 'loading' | 'ready' | 'empty' | 'unavailable';
+type TargetAgentResult = { target: ApiTarget; agents: OwnedRuntimeAgent[]; error?: Error };
 
 const avatarFor = (agent: RuntimeAgent) => agent.avatar || agent.name.slice(0, 1).toUpperCase() || 'A';
 const workspacePathFor = (agentId: string) => `/workspace/${agentId}`;
@@ -68,24 +70,34 @@ function contextPercent(status: ContextStatus) {
 
 export function useRuntimeAgents({ selectedAgentId, targets, setSelectedAgentId, parentSessionIdForAgent, runtimeProviders, setSelectedStreamId, onNoAgents, reportError }: RuntimeAgentHydrationOptions) {
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [registryState, setRegistryState] = useState<RuntimeRegistryState>('loading');
+  const [registryError, setRegistryError] = useState('');
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
+  const targetKey = targets.map((target) => target.id).join('|');
+  useEffect(() => {
+    setAgents([]);
+    setRegistryState('loading');
+    setRegistryError('');
+  }, [targetKey]);
 
-  const refreshAgents = useCallback(async () => {
-    const targetResults = await Promise.all(targets.map(async (target) => {
+  const refreshAgents = useCallback(async (isCancelled: IsPollingCancelled = () => false) => {
+    const targetResults: TargetAgentResult[] = await Promise.all(targets.map(async (target) => {
       try {
         const [{ agents: runtimeAgents }, identities] = await Promise.all([
           apiForTarget<{ agents: RuntimeAgent[] }>(target, '/api/agents'),
           apiForTarget<{ agents: Array<{ id: string; name: string; avatar: string }> }>(target, '/api/settings/identities').catch(() => ({ agents: [] })),
         ]);
         const identitiesByAgentId = new Map(identities.agents.map((identity) => [identity.id, identity]));
-        return runtimeAgents.map((agent): OwnedRuntimeAgent => ({ agent, target, identity: identitiesByAgentId.get(agent.id) }));
-      } catch {
-        // One unavailable remote node must not hide the local runtime or other nodes.
-        return [];
+        return { target, agents: runtimeAgents.map((agent): OwnedRuntimeAgent => ({ agent, target, identity: identitiesByAgentId.get(agent.id) })) };
+      } catch (error) {
+        // One unavailable remote node must not hide another healthy runtime.
+        return { target, agents: [], error: error as Error };
       }
     }));
-    const ownedAgents = targetResults.flat();
+    const successfulTargets = targetResults.filter((result) => !result.error);
+    const failedTargets = targetResults.filter((result) => result.error);
+    const ownedAgents = successfulTargets.flatMap((result) => result.agents);
     const registered = ownedAgents.map(asAgent);
     const hydrated = await Promise.all(ownedAgents.map(async ({ agent: runtimeAgent, target }) => {
       const id = ownedResourceId(target.id, runtimeAgent.id);
@@ -117,25 +129,35 @@ export function useRuntimeAgents({ selectedAgentId, targets, setSelectedAgentId,
       })();
       return { ...configured, activity: runtimeAgent.enabled ? formatAgentActivity(status) : 'Disabled', context: contextPercent(contextResult.status), contextDetails: contextDetails(contextResult.status), subagents };
     }));
+    if (isCancelled()) return;
+    if (successfulTargets.length === 0) {
+      const message = failedTargets.map(({ target, error }) => `${target.name}: ${error?.message || 'Unavailable'}`).join('; ');
+      setRegistryState('unavailable');
+      setRegistryError(message || 'The selected runtime is unavailable.');
+      reportError(`Could not load agents: ${message || 'The selected runtime is unavailable.'}`);
+      return;
+    }
     const enabled = hydrated.filter((agent) => agent.activity !== 'Disabled');
     const fallbackAgentId = enabled[0]?.id ?? hydrated[0]?.id ?? '';
     const nextAgentId = hydrated.some((agent) => agent.id === selectedAgentId) ? selectedAgentId : fallbackAgentId;
     setAgents(hydrated);
+    setRegistryState(hydrated.length === 0 ? 'empty' : 'ready');
+    setRegistryError(failedTargets.map(({ target, error }) => `${target.name}: ${error?.message || 'Unavailable'}`).join('; '));
     if (hydrated.length === 0) onNoAgents();
     setSelectedAgentId(nextAgentId);
     setSelectedStreamId((streamId) => hydrated.find((agent) => agent.id === nextAgentId)?.subagents.some((subagent) => subagent.id === streamId) ? streamId : nextAgentId);
-  }, [onNoAgents, parentSessionIdForAgent, runtimeProviders, selectedAgentId, setSelectedAgentId, setSelectedStreamId, targets]);
+  }, [onNoAgents, parentSessionIdForAgent, reportError, runtimeProviders, selectedAgentId, setSelectedAgentId, setSelectedStreamId, targets]);
 
   usePolling(async (isCancelled) => {
     try {
-      await refreshAgents();
+      await refreshAgents(isCancelled);
     } catch (error) {
       if (!isCancelled()) {
         reportError(`Could not load agents: ${(error as Error).message}`);
         if (agentsRef.current.length === 0) onNoAgents();
       }
     }
-  }, 15_000, true, targets.map((target) => target.id).join('|'));
+  }, 15_000, true, targetKey);
 
-  return { agents, setAgents, refreshAgents };
+  return { agents, setAgents, refreshAgents, registryState, registryError };
 }

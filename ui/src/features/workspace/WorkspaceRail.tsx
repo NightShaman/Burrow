@@ -1,6 +1,7 @@
 import { useEffect, useState, type PointerEvent, type ReactNode } from 'react';
 import type { Agent, FileNode, PanelId } from '../../app/types';
-import { api, type RuntimeHealth, type RuntimeMetrics } from '../../app/api';
+import { apiForTarget, type RuntimeHealth, type RuntimeMetrics } from '../../app/api';
+import type { ApiTarget } from '../../app/apiTargets';
 import type { ProviderConnectionStatus } from '../../app/useRuntimeDashboard';
 import { getPanelTitle } from '../../app/panelRegistry';
 import './workspace-rail.css';
@@ -36,25 +37,25 @@ function formatUptime(seconds?: number | null) {
  return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
-export function SystemPanel({ provider, providerConnectionStatus }: { provider: string; providerConnectionStatus: ProviderConnectionStatus }) {
+export function SystemPanel({ target, provider, providerConnectionStatus }: { target: ApiTarget; provider: string; providerConnectionStatus: ProviderConnectionStatus }) {
  const [now, setNow] = useState(() => new Date());
  const [health, setHealth] = useState<RuntimeHealth | null>(null);
  const [metrics, setMetrics] = useState<RuntimeMetrics | null>(null);
  useEffect(() => { const timer = window.setInterval(() => setNow(new Date()), 1000); return () => window.clearInterval(timer); }, []);
- useEffect(() => { let active = true; const load = () => { void Promise.all([api<RuntimeHealth>('/api/health'), api<RuntimeMetrics>('/api/metrics')]).then(([nextHealth, nextMetrics]) => { if (active) { setHealth(nextHealth); setMetrics(nextMetrics); } }).catch(() => { if (active) setMetrics(null); }); }; load(); const timer = window.setInterval(load, 10000); return () => { active = false; window.clearInterval(timer); }; }, []);
+ useEffect(() => { let active = true; setHealth(null); setMetrics(null); const load = () => { void Promise.all([apiForTarget<RuntimeHealth>(target, '/api/health'), apiForTarget<RuntimeMetrics>(target, '/api/metrics')]).then(([nextHealth, nextMetrics]) => { if (active) { setHealth(nextHealth); setMetrics(nextMetrics); } }).catch(() => { if (active) { setHealth(null); setMetrics(null); } }); }; load(); const timer = window.setInterval(load, 10000); return () => { active = false; window.clearInterval(timer); }; }, [target]);
  const traces = health?.traces;
  const process = metrics?.process;
  const heap = process?.heapUsedBytes == null || process?.heapTotalBytes == null ? 'Unavailable' : `${formatBytes(process.heapUsedBytes)} / ${formatBytes(process.heapTotalBytes)}`;
  const stats = [['CPU', process?.cpu.percent == null ? 'Unavailable' : `${process.cpu.percent.toFixed(1)}%`], ['RSS', formatBytes(process?.rssBytes)], ['Heap', heap], ['SQL', metrics?.settingsDatabase.totalBytes == null ? 'Unavailable' : formatBytes(metrics.settingsDatabase.totalBytes)], ['Uptime', formatUptime(process?.uptimeSeconds)], ['Trace storage', traces ? `${formatBytes(traces.logicalBytes)} · ${traces.count ?? '—'} runs` : 'Loading…']];
  const providerLabel = provider.trim() || 'Provider';
  const providerStatusLabel = providerConnectionStatus === 'checking' ? 'Checking provider connection' : providerConnectionStatus === 'connected' ? `${providerLabel} provider` : `${providerLabel} unavailable`;
- return <section className="system-pane"><div className="system-clock">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div><div className="system-date">{now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</div><div className="system-status"><i /> Hatchet runtime</div><div className={`system-provider-status ${providerConnectionStatus}`} title={providerStatusLabel}><i /> <span>{providerLabel}</span></div><div className="system-stats">{stats.map(([label, value]) => <div className="system-stat" key={label}><span>{label}</span><b>{value}</b></div>)}</div></section>;
+ return <section className="system-pane"><div className="system-clock">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div><div className="system-date">{now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</div><div className="system-status"><i /> {target.name} runtime</div><div className={`system-provider-status ${providerConnectionStatus}`} title={providerStatusLabel}><i /> <span>{providerLabel}</span></div><div className="system-stats">{stats.map(([label, value]) => <div className="system-stat" key={label}><span>{label}</span><b>{value}</b></div>)}</div></section>;
 }
 
 
 function AgentCard({ agent, selectedStreamId, expanded, onToggle, onSelect, onSelectSubagent }: { agent: Agent; selectedStreamId: string; expanded: boolean; onToggle: () => void; onSelect: () => void; onSelectSubagent: (id: string) => void }) {
   const selected = selectedStreamId === agent.id;
-  return <div className={`agent-group ${selected ? 'active' : ''}`}><div className="agent-card" onClick={onSelect}><span className="agent-select"><span className="avatar">{agent.avatar.startsWith('data:image/') ? <img src={agent.avatar} alt="" /> : agent.avatar}</span><span className="agent-details"><span className="agent-summary"><span className="agent-identity"><span className="agent-name"><b>{agent.name}</b></span><button className="agent-toggle" onClick={(event) => { event.stopPropagation(); onToggle(); }} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${agent.name}`} aria-expanded={expanded}><Chevron direction="right" /></button></span><span className={`agent-status ${statusClass(agent.activity)}`}><i />{agent.activity}</span></span></span></span><ContextUsage value={agent.context} details={agent.contextDetails} /></div>{expanded && <div className="subagent-list">{agent.subagents.map((subagent) => <button className={`subagent-row ${selectedStreamId === subagent.id ? 'active' : ''}`} onClick={() => onSelectSubagent(subagent.id)} key={subagent.id} aria-pressed={selectedStreamId === subagent.id}><span className="subagent-branch">└</span><span className="subagent-copy"><b>{subagent.name}</b><small>{subagent.activity}</small></span></button>)}</div>}</div>;
+  return <div className={`agent-group ${selected ? 'active' : ''}`}><div className="agent-card"><button type="button" className="agent-select" onClick={onSelect} aria-label={`Select ${agent.name}`} aria-pressed={selected}><span className="avatar">{agent.avatar.startsWith('data:image/') ? <img src={agent.avatar} alt="" /> : agent.avatar}</span><span className="agent-details"><span className="agent-summary"><span className="agent-identity"><span className="agent-name"><b>{agent.name}</b></span></span><span className={`agent-status ${statusClass(agent.activity)}`}><i />{agent.activity}</span></span></span></button><button type="button" className="agent-toggle" onClick={onToggle} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${agent.name}`} aria-expanded={expanded}><Chevron direction="right" /></button><ContextUsage value={agent.context} details={agent.contextDetails} /></div>{expanded && <div className="subagent-list">{agent.subagents.map((subagent) => <button type="button" className={`subagent-row ${selectedStreamId === subagent.id ? 'active' : ''}`} onClick={() => onSelectSubagent(subagent.id)} key={subagent.id} aria-label={`Select ${subagent.name}`} aria-pressed={selectedStreamId === subagent.id}><span className="subagent-branch">└</span><span className="subagent-copy"><b>{subagent.name}</b><small>{subagent.activity}</small></span></button>)}</div>}</div>;
 }
 
 function ContextUsage({ value, details, compact = false }: { value: number | null; details?: Agent['contextDetails']; compact?: boolean }) {

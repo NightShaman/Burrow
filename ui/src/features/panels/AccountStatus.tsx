@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react';
 import { api, type AnthropicUsage, type OpenAiUsage } from '../../app/api';
-import { writeStorage } from '../../app/usePersistedLayout';
+import { readAccountOrder, writeAccountOrder } from '../../app/accountOrderStorage';
 import type { SavedProvider } from '../../app/types';
 import { AccountCard } from './AccountCard';
 
@@ -125,16 +125,7 @@ function UsageMeter({ bar, tone }: { bar: UsageBar; tone: 'primary' | 'secondary
   </div>;
 }
 
-const accountStatusOrderKey = 'hc.accountStatusOrder';
-
-function readAccountStatusOrder(): string[] {
-  try {
-    const stored: unknown = JSON.parse(localStorage.getItem(accountStatusOrderKey) ?? '[]');
-    return Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : [];
-  } catch {
-    return [];
-  }
-}
+export const accountStatusOrderKey = 'hc.accountStatusOrder';
 
 export function orderAccountStatusCards(cards: AccountUsageCard[], order: string[]) {
   const rank = new Map(order.map((id, index) => [id, index]));
@@ -143,7 +134,7 @@ export function orderAccountStatusCards(cards: AccountUsageCard[], order: string
 
 export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
   const cards = useAccountUsage(providers);
-  const [order, setOrder] = useState(readAccountStatusOrder);
+  const [order, setOrder] = useState(() => readAccountOrder(accountStatusOrderKey));
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const orderedCards = useMemo(() => orderAccountStatusCards(cards, order), [cards, order]);
@@ -153,7 +144,7 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
     setOrder((current) => {
       const next = [...current.filter((id) => knownIds.has(id)), ...cards.map((card) => card.id).filter((id) => !current.includes(id))];
       if (next.length === current.length && next.every((id, index) => id === current[index])) return current;
-      writeStorage(accountStatusOrderKey, JSON.stringify(next));
+      writeAccountOrder(accountStatusOrderKey, next);
       return next;
     });
   }, [cards]);
@@ -166,7 +157,7 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
     if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return current;
     next.splice(sourceIndex, 1);
     next.splice(targetIndex, 0, dragged);
-    writeStorage(accountStatusOrderKey, JSON.stringify(next));
+    writeAccountOrder(accountStatusOrderKey, next);
     return next;
   });
   const handleDrop = (event: DragEvent<HTMLElement>, targetId: string) => {

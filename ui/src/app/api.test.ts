@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api, apiForTarget, apiUrl, fetchApi } from './api';
+import { api, apiForTarget, apiUrl, fetchApi, setActiveApiTarget } from './api';
 import { localApiTarget } from './apiTargets';
 import { clearBasicCredentials, setBasicCredentials } from './auth';
 
 describe('API requests', () => {
   afterEach(() => {
+    setActiveApiTarget(undefined);
     clearBasicCredentials();
     vi.unstubAllGlobals();
   });
@@ -45,6 +46,19 @@ describe('API requests', () => {
     expect(fetchMock).toHaveBeenCalledWith('http://node.example:8787/api/agents', expect.any(Object));
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(new Headers(init.headers).has('authorization')).toBe(false);
+  });
+
+  it('keeps an explicit local target local when the active target is remote', async () => {
+    setActiveApiTarget({ id: 'remote', name: 'Remote', baseUrl: 'http://node.example:8787', enabled: true });
+    setBasicCredentials('goblin', 'secret');
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ agents: [] }), { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiForTarget(localApiTarget, '/api/agents');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/agents', expect.any(Object));
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init.headers).get('authorization')).toBe('Basic Z29ibGluOnNlY3JldA==');
   });
 
   it('accepts a successful empty response', async () => {

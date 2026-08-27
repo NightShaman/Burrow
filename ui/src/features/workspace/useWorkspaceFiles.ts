@@ -1,4 +1,4 @@
-import { useCallback, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { apiForTarget } from '../../app/api';
 import { targetForResource, type ApiTarget } from '../../app/apiTargets';
 import type { FileNode, Tab } from '../../app/types';
@@ -16,21 +16,23 @@ type UseWorkspaceFilesOptions = {
 export function useWorkspaceFiles({ selectedAgentId, targets, setTabs, setActiveTabId }: UseWorkspaceFilesOptions) {
   const [workspaceFiles, setWorkspaceFiles] = useState<FileNode[]>([]);
   const ownerFor = useCallback((agentId: string) => targetForResource(targets, agentId), [targets]);
+  useEffect(() => { setWorkspaceFiles([]); }, [selectedAgentId]);
 
-  const refreshWorkspaceFiles = useCallback(async (agentId: string) => {
+  const refreshWorkspaceFiles = useCallback(async (agentId: string, shouldCommit: () => boolean = () => true) => {
     const owner = ownerFor(agentId);
     const { files } = await apiForTarget<{ files: WorkspaceFile[] }>(owner.target, `/api/workspace/files?agentId=${encodeURIComponent(owner.resourceId)}&scope=agent`);
+    if (!shouldCommit()) return;
     const nextFiles = fileTreeFromPaths(files);
     setWorkspaceFiles((current) => JSON.stringify(current) === JSON.stringify(nextFiles) ? current : nextFiles);
   }, [ownerFor]);
 
-  usePolling(async () => {
+  usePolling(async (isCancelled) => {
     if (!selectedAgentId) {
-      setWorkspaceFiles([]);
+      if (!isCancelled()) setWorkspaceFiles([]);
       return;
     }
-    try { await refreshWorkspaceFiles(selectedAgentId); } catch { /* Keep the last known tree. */ }
-  }, 2_000);
+    try { await refreshWorkspaceFiles(selectedAgentId, () => !isCancelled()); } catch { /* Keep the last known tree. */ }
+  }, 2_000, true, selectedAgentId);
 
   const openFile = useCallback(async (file: FileNode) => {
     if (file.type !== 'file' || !selectedAgentId) return;

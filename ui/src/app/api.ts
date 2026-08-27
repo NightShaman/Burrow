@@ -263,7 +263,7 @@ export function fetchApi(path: string, init: RequestInit = {}): Promise<Response
 }
 
 export function fetchApiForTarget(target: Pick<ApiTarget, 'baseUrl'> | undefined, path: string, init: RequestInit = {}): Promise<Response> {
-  if (!target?.baseUrl) return fetchApi(path, init);
+  if (!target?.baseUrl) return fetch(path, { ...init, headers: createRequestHeaders(init.headers) });
   const headers = new Headers(init.headers);
   if (!headers.has('accept')) headers.set('accept', 'application/json');
   // V1 targets have no credential contract. Never leak the local Burrow Basic
@@ -319,18 +319,8 @@ async function parseApiResponse<T>(response: Response): Promise<T> {
 }
 
 export async function apiForTarget<T>(target: Pick<ApiTarget, 'baseUrl'> | undefined, path: string, init: RequestInit = {}): Promise<T> {
-  if (!target?.baseUrl) return api<T>(path, init);
   const response = await fetchApiForTarget(target, path, init);
-  if (response.status === 204) return undefined as T;
-  const text = await response.text();
-  const contentType = response.headers.get('content-type') ?? '';
-  let body: unknown = text;
-  if (text && contentType.includes('application/json')) body = JSON.parse(text);
-  if (!response.ok || (body && typeof body === 'object' && (body as { ok?: unknown }).ok === false)) {
-    const rawError = body && typeof body === 'object' ? (body as { error?: unknown }).error : body;
-    throw new Error(typeof rawError === 'string' ? rawError : `HTTP ${response.status}`);
-  }
-  return body as T;
+  return parseApiResponse<T>(response);
 }
 
 export async function downloadExport(categories: string[], password?: string): Promise<{ blob: Blob; filename: string }> {

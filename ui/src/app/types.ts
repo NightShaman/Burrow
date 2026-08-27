@@ -5,7 +5,6 @@ export type ContextDetails = { estimatedTokens: number | null; capacityTokens: n
 export type Subagent = { id: string; name: string; avatar: string; activity: string; context: number | null; contextDetails?: ContextDetails; stream: string; subagentId?: string; targetId?: string; resourceId?: string };
 export type Agent = { id: string; name: string; avatar: string; activity: string; context: number | null; contextDetails?: ContextDetails; provider: string; model: string; effort: string; temperature: number; workspace: string; files: FileNode[]; subagents: Subagent[]; targetId?: string; resourceId?: string; targetName?: string };
 export type Tab = { id: string; label: string; kind: 'chat' | 'file' | 'group'; channelId?: string; path?: string; content?: string; workspaceAgentId?: string; targetId?: string };
-export type Task = { title: string; status: string; owner: string };
 export type Account = { id: string; name: string; plan: string; used: number; reset: string; status: string; resetCredit?: string };
 export type PanelId = 'none' | 'agents' | 'workspace' | 'codex' | 'accounts' | 'system';
 export type PanelSlot = 'top' | 'bottom';

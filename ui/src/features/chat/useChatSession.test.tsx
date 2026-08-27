@@ -1,14 +1,15 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { api } from '../../app/api';
+import { apiForTarget } from '../../app/api';
+import { localApiTarget } from '../../app/apiTargets';
 import { conversationCacheKey, useChatSession } from './useChatSession';
 
 vi.mock('../../app/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../app/api')>()),
-  api: vi.fn(),
+  apiForTarget: vi.fn(),
 }));
 
-const apiMock = vi.mocked(api);
+const apiMock = vi.mocked(apiForTarget);
 const agentId = 'luna';
 const sessionId = 'session-1';
 const sessionListPath = `/api/sessions?agentId=${agentId}`;
@@ -23,7 +24,7 @@ function deferred<T>() {
 beforeEach(() => {
   localStorage.clear();
   apiMock.mockReset();
-  apiMock.mockImplementation(async (path) => {
+  apiMock.mockImplementation(async (_target, path) => {
     if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
     if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
     throw new Error(`Unexpected path: ${path}`);
@@ -32,7 +33,7 @@ beforeEach(() => {
 
 describe('useChatSession', () => {
   it('loads the first session and its conversation for the selected agent', async () => {
-    apiMock.mockImplementation(async (path) => {
+    apiMock.mockImplementation(async (_target, path) => {
       if (path === sessionListPath) return { sessions: [{ id: sessionId }, { id: 'older' }] };
       if (path === conversationPath) return { session: { id: sessionId, turns: [{ role: 'assistant', content: 'Hello' }] } };
       throw new Error(`Unexpected path: ${path}`);
@@ -48,7 +49,7 @@ describe('useChatSession', () => {
   it('loads a selected child session through its parent agent even when it is absent from that agent’s session list', async () => {
     const childSessionId = 'child-session';
     const childConversationPath = `/api/sessions/${childSessionId}?agentId=${agentId}`;
-    apiMock.mockImplementation(async (path) => {
+    apiMock.mockImplementation(async (_target, path) => {
       if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
       if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
       if (path === childConversationPath) return { session: { id: childSessionId, turns: [{ role: 'assistant', content: 'Child answer' }] } };
@@ -60,7 +61,7 @@ describe('useChatSession', () => {
     act(() => result.current.selectChildSession(agentId, childSessionId));
 
     await waitFor(() => expect(result.current.turns).toEqual([{ role: 'assistant', content: 'Child answer' }]));
-    expect(apiMock).toHaveBeenCalledWith(childConversationPath);
+    expect(apiMock).toHaveBeenCalledWith(localApiTarget, childConversationPath);
   });
 
   it('keeps drafts per agent/session and writes them to local storage', async () => {
@@ -72,7 +73,8 @@ describe('useChatSession', () => {
     await waitFor(() => expect(localStorage.getItem('hc.chatDrafts')).toContain('Finish the tests'));
     expect(result.current.draft).toBe('Finish the tests');
     expect(JSON.parse(localStorage.getItem('hc.chatDrafts') ?? '{}')).toEqual({
-      [conversationCacheKey(agentId, sessionId)]: expect.objectContaining({ value: 'Finish the tests' }),
+      version: 1,
+      value: { [conversationCacheKey(agentId, sessionId)]: expect.objectContaining({ value: 'Finish the tests' }) },
     });
   });
 
@@ -99,7 +101,7 @@ describe('useChatSession', () => {
 
   it('does not let an older conversation request overwrite a refreshed conversation', async () => {
     const initialConversation = deferred<{ session: { id: string; turns: [{ role: string; content: string }] } }>();
-    apiMock.mockImplementation((path) => {
+    apiMock.mockImplementation((_target, path) => {
       if (path === sessionListPath) return Promise.resolve({ sessions: [{ id: sessionId }] });
       if (path === conversationPath) return initialConversation.promise;
       return Promise.reject(new Error(`Unexpected path: ${path}`));
@@ -127,14 +129,14 @@ describe('useChatSession', () => {
     await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
 
     expect(result.current.draft).toBe('Saved draft');
-    expect(JSON.parse(localStorage.getItem('hc.chatDrafts') ?? '{}')).not.toHaveProperty('stale');
+    expect(JSON.parse(localStorage.getItem('hc.chatDrafts') ?? '{}').value).not.toHaveProperty('stale');
   });
 
   it('keeps the first optimistic turn when a reset session starts sending', async () => {
     const resetSessionTurn = { role: 'user' as const, content: 'First message' };
     const { result } = renderHook(() => useChatSession(agentId));
     await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
-    await waitFor(() => expect(apiMock).toHaveBeenCalledWith(conversationPath));
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith(localApiTarget, conversationPath));
 
     apiMock.mockResolvedValueOnce({});
     await act(async () => {
@@ -177,7 +179,7 @@ describe('useChatSession', () => {
         turns: [{ role: 'assistant', content: 'Yesterday afternoon', runId: 'old-run', ts: '2026-08-25T15:00:00.000Z' }],
       },
     }));
-    apiMock.mockImplementation(async (path) => {
+    apiMock.mockImplementation(async (_target, path) => {
       if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
       if (path === conversationPath) return { session: { id: sessionId, metadata: { resetAt, transcriptGeneration: 'new-generation' }, turns: [] } };
       throw new Error(`Unexpected path: ${path}`);
@@ -187,7 +189,7 @@ describe('useChatSession', () => {
 
     await waitFor(() => expect(result.current.isLoadingConversation).toBe(false));
     expect(result.current.turns).toEqual([]);
-    expect(JSON.parse(localStorage.getItem('hc.chatConversations.v1') ?? '{}')[conversationCacheKey(agentId, sessionId)].turns).toEqual([]);
+    expect(JSON.parse(localStorage.getItem('hc.chatConversations.v1') ?? '{}').value[conversationCacheKey(agentId, sessionId)].turns).toEqual([]);
   });
 
   it('merges stored tool activity into refreshed assistant turns', async () => {
@@ -211,7 +213,7 @@ describe('useChatSession', () => {
     const nextSessionListPath = `/api/sessions?agentId=${nextAgentId}`;
     const nextConversationPath = `/api/sessions/${nextSessionId}?agentId=${nextAgentId}`;
     const nextSessions = deferred<{ sessions: { id: string }[] }>();
-    apiMock.mockImplementation((path) => {
+    apiMock.mockImplementation((_target, path) => {
       if (path === sessionListPath) return Promise.resolve({ sessions: [{ id: sessionId }] });
       if (path === conversationPath) return Promise.resolve({ session: { id: sessionId, turns: [{ role: 'assistant', content: 'Previous conversation' }] } });
       if (path === nextSessionListPath) return nextSessions.promise;
@@ -233,7 +235,7 @@ describe('useChatSession', () => {
   });
 
   it('surfaces session loading failures without pretending a conversation loaded', async () => {
-    apiMock.mockImplementation((path) => {
+    apiMock.mockImplementation((_target, path) => {
       if (path === sessionListPath) return Promise.reject(new Error('offline'));
       throw new Error(`Unexpected path: ${path}`);
     });

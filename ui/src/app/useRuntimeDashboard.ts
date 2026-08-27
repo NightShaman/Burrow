@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiForTarget, type AnthropicUsage, type ModelConnection, type OpenAiUsage } from './api';
 import type { ApiTarget } from './apiTargets';
+import { readAccountOrder, writeAccountOrder } from './accountOrderStorage';
 import type { Account, Agent, SavedProvider } from './types';
 import { usePolling } from './usePolling';
-import { writeStorage } from './usePersistedLayout';
 
 export type OperatorProfile = { name: string; avatar: string };
 export type ProviderConnectionStatus = 'checking' | 'connected' | 'disconnected';
@@ -27,16 +27,7 @@ type RuntimeDashboardOptions = {
   target?: ApiTarget;
 };
 
-const codexAccountOrderKey = 'hc.codexLbAccountOrder';
-
-function readCodexAccountOrder(): string[] {
-  try {
-    const stored: unknown = JSON.parse(localStorage.getItem(codexAccountOrderKey) ?? '[]');
-    return Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : [];
-  } catch {
-    return [];
-  }
-}
+export const codexAccountOrderKey = 'hc.codexLbAccountOrder';
 
 function formatReset(resetAt?: string | null) {
   if (!resetAt) return 'reset time unavailable';
@@ -108,7 +99,7 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
   const [openAiUsage, setOpenAiUsage] = useState<OpenAiUsage | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [operatorProfile, setOperatorProfile] = useState<OperatorProfile>({ name: 'Operator', avatar: 'OP' });
-  const codexAccountOrder = useRef(readCodexAccountOrder());
+  const codexAccountOrder = useRef(readAccountOrder(codexAccountOrderKey));
 
   const reorderAccounts = useCallback((draggedId: string, targetId: string) => {
     setAccounts((current) => {
@@ -117,7 +108,7 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
       if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return current;
       const next = [...current]; const [dragged] = next.splice(sourceIndex, 1); next.splice(targetIndex, 0, dragged);
       codexAccountOrder.current = next.map((account) => account.id);
-      writeStorage(codexAccountOrderKey, JSON.stringify(codexAccountOrder.current));
+      writeAccountOrder(codexAccountOrderKey, codexAccountOrder.current);
       return next;
     });
   }, []);
