@@ -74,9 +74,13 @@ export function summarizeToolResults(toolResults = []) {
     ...(toolResult.tool === 'mcp_call' ? {
       mcpToolName: toolResult.mcpToolName ? compactText(toolResult.mcpToolName, 240) : null,
       provider: toolResult.provider ? compactText(toolResult.provider, 120) : null,
-      // Connection IDs and raw MCP output remain in trace-owned results; compact
-      // receipts retain only the safe provider/tool identity and status.
+      // Connection IDs and raw MCP output remain in trace-owned results. Keep
+      // only the bounded, already-sanitized causal detail produced by the MCP
+      // adapter; otherwise an mcp_call receipt turns every provider failure
+      // back into an unhelpful generic mcp_tool_failed.
       connectionId: undefined,
+      toolErrorCode: typeof toolResult.toolErrorCode === 'string' ? compactText(toolResult.toolErrorCode, 80) : undefined,
+      diagnostic: typeof toolResult.diagnostic === 'string' ? compactText(toolResult.diagnostic, RECEIPT_TEXT_LIMITS.error) : undefined,
     } : {}),
     command: toolResult.command ? compactText(toolResult.command, RECEIPT_TEXT_LIMITS.command) : null,
     reason: toolResult.reason ? compactText(toolResult.reason, 500) : null,

@@ -74,6 +74,18 @@ function runtimeFailure(code, { stdout = '', stderr = '', detail = null, protect
   return error;
 }
 
+function providerFailureDetail(result) {
+  const error = result?.error;
+  const contentText = Array.isArray(result?.content)
+    ? result.content.filter((item) => item?.type === 'text' && typeof item.text === 'string').map((item) => item.text).join('\n')
+    : null;
+  const detail = typeof error === 'string' ? error : error?.message || contentText || null;
+  return {
+    detail,
+    toolErrorCode: typeof error?.code === 'string' ? error.code : null,
+  };
+}
+
 export function publicMcpFailureDetail(error, protectedValues = []) {
   const detail = diagnosticText(error?.diagnostic || error?.message, protectedValues);
   const toolErrorCode = typeof error?.toolErrorCode === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(error.toolErrorCode)
@@ -193,7 +205,8 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
     try {
       const parsed = JSON.parse(output);
       if (parsed?.isError === true || parsed?.error || parsed?.ok === false || parsed?.success === false) {
-        const failure = runtimeFailure('mcp_tool_failed', { stdout: boundedJson(parsed), protectedValues: [apiKey, ...Object.values(environmentVariables || {})], toolErrorCode: parsed?.error?.code, detail: parsed?.error?.message });
+        const providerFailure = providerFailureDetail(parsed);
+        const failure = runtimeFailure('mcp_tool_failed', { stdout: boundedJson(parsed), protectedValues: [apiKey, ...Object.values(environmentVariables || {})], toolErrorCode: providerFailure.toolErrorCode, detail: providerFailure.detail });
         throw failure;
       }
       return parsed;
