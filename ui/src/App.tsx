@@ -33,10 +33,11 @@ function AppContent() {
   const { targets: apiTargets, loaded: apiTargetsLoaded } = useApiTargets();
   const { activeTarget, activeTargets, expandedAgents, runtimeVersion, selectedAgentId, selectedStreamId, selectChildStream, selectParentStream, selectTarget, setSelectedAgentId, setSelectedStreamId, showParentStream, toggleAgentExpanded } = useRuntimeSelection({ targets: apiTargets, targetsLoaded: apiTargetsLoaded });
   const { tabs, setTabs, activeTabId, setActiveTabId } = useAppTabs();
-  const { workspaceFiles, openFile, saveFile } = useWorkspaceFiles({ selectedAgentId, targets: activeTargets, setTabs, setActiveTabId });
+  const { leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed, leftSplit, setLeftSplit, rightSplit, setRightSplit, leftTopPanel, setLeftTopPanel, leftBottomPanel, setLeftBottomPanel, rightTopPanel, setRightTopPanel, rightBottomPanel, setRightBottomPanel } = usePersistedLayout();
+  const workspacePanelVisible = page === 'chat' && !leftCollapsed && (leftTopPanel === 'workspace' || leftBottomPanel === 'workspace');
+  const { workspaceFiles, openFile, saveFile } = useWorkspaceFiles({ selectedAgentId, targets: activeTargets, setTabs, setActiveTabId, pollingEnabled: workspacePanelVisible });
   const { attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation, draft, setDraft, refreshSessions, refreshConversation, selectSession: selectChatSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun } = useChatSession(selectedAgentId, activeTargets);
   const [isResettingSession, setIsResettingSession] = useState(false);
-  const { leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed, leftSplit, setLeftSplit, rightSplit, setRightSplit, leftTopPanel, setLeftTopPanel, leftBottomPanel, setLeftBottomPanel, rightTopPanel, setRightTopPanel, rightBottomPanel, setRightBottomPanel } = usePersistedLayout();
   const runtimeProviders = useRef([]);
   const { agents, setAgents, refreshAgents, registryState, registryError } = useRuntimeAgents({
     selectedAgentId,

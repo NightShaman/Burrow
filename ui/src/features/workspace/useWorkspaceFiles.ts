@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { apiForTarget } from '../../app/api';
 import { targetForResource, type ApiTarget } from '../../app/apiTargets';
 import type { FileNode, Tab } from '../../app/types';
@@ -11,19 +11,24 @@ type UseWorkspaceFilesOptions = {
   targets: ApiTarget[];
   setTabs: Dispatch<SetStateAction<Tab[]>>;
   setActiveTabId: Dispatch<SetStateAction<string>>;
+  pollingEnabled?: boolean;
 };
 
-export function useWorkspaceFiles({ selectedAgentId, targets, setTabs, setActiveTabId }: UseWorkspaceFilesOptions) {
+export function useWorkspaceFiles({ selectedAgentId, targets, setTabs, setActiveTabId, pollingEnabled = true }: UseWorkspaceFilesOptions) {
   const [workspaceFiles, setWorkspaceFiles] = useState<FileNode[]>([]);
+  const workspaceListingRef = useRef<WorkspaceFile[]>([]);
   const ownerFor = useCallback((agentId: string) => targetForResource(targets, agentId), [targets]);
-  useEffect(() => { setWorkspaceFiles([]); }, [selectedAgentId]);
+  useEffect(() => {
+    workspaceListingRef.current = [];
+    setWorkspaceFiles([]);
+  }, [selectedAgentId]);
 
   const refreshWorkspaceFiles = useCallback(async (agentId: string, shouldCommit: () => boolean = () => true) => {
     const owner = ownerFor(agentId);
     const { files } = await apiForTarget<{ files: WorkspaceFile[] }>(owner.target, `/api/workspace/files?agentId=${encodeURIComponent(owner.resourceId)}&scope=agent`);
-    if (!shouldCommit()) return;
-    const nextFiles = fileTreeFromPaths(files);
-    setWorkspaceFiles((current) => JSON.stringify(current) === JSON.stringify(nextFiles) ? current : nextFiles);
+    if (!shouldCommit() || sameWorkspaceListing(workspaceListingRef.current, files)) return;
+    workspaceListingRef.current = files;
+    setWorkspaceFiles(fileTreeFromPaths(files));
   }, [ownerFor]);
 
   usePolling(async (isCancelled) => {
@@ -32,7 +37,7 @@ export function useWorkspaceFiles({ selectedAgentId, targets, setTabs, setActive
       return;
     }
     try { await refreshWorkspaceFiles(selectedAgentId, () => !isCancelled()); } catch { /* Keep the last known tree. */ }
-  }, 2_000, true, selectedAgentId);
+  }, 2_000, pollingEnabled, selectedAgentId);
 
   const openFile = useCallback(async (file: FileNode) => {
     if (file.type !== 'file' || !selectedAgentId) return;
@@ -62,6 +67,10 @@ export function useWorkspaceFiles({ selectedAgentId, targets, setTabs, setActive
   }, [ownerFor, setTabs]);
 
   return { workspaceFiles, refreshWorkspaceFiles, openFile, saveFile };
+}
+
+function sameWorkspaceListing(current: WorkspaceFile[], next: WorkspaceFile[]) {
+  return current.length === next.length && current.every((file, index) => file.path === next[index]?.path && file.type === next[index]?.type);
 }
 
 function fileTreeFromPaths(files: WorkspaceFile[]): FileNode[] {

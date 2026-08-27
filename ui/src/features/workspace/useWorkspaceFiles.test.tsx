@@ -27,6 +27,44 @@ describe('useWorkspaceFiles', () => {
     apiForTargetMock.mockReset();
   });
 
+  it('does not poll until the workspace panel becomes visible', async () => {
+    apiForTargetMock.mockResolvedValue({ files: [{ path: 'visible.txt', type: 'file' as const }] });
+
+    const { result, rerender } = renderHook(
+      ({ pollingEnabled }) => useWorkspaceFiles({ selectedAgentId: 'agent-a', targets: [localApiTarget], setTabs, setActiveTabId, pollingEnabled }),
+      { initialProps: { pollingEnabled: false } },
+    );
+
+    await act(async () => { await Promise.resolve(); });
+    expect(apiForTargetMock).not.toHaveBeenCalled();
+    expect(result.current.workspaceFiles).toEqual([]);
+
+    rerender({ pollingEnabled: true });
+
+    await waitFor(() => expect(result.current.workspaceFiles).toEqual([{ name: 'visible.txt', path: 'visible.txt', type: 'file' }]));
+    expect(apiForTargetMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not rebuild the tree when a poll returns the same flat listing', async () => {
+    vi.useFakeTimers();
+    try {
+      apiForTargetMock.mockResolvedValue({ files: [{ path: 'stable.txt', type: 'file' as const }] });
+
+      const { result, unmount } = renderHook(() => useWorkspaceFiles({ selectedAgentId: 'agent-a', targets: [localApiTarget], setTabs, setActiveTabId }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      const initialTree = result.current.workspaceFiles;
+      apiForTargetMock.mockClear();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+
+      expect(apiForTargetMock).toHaveBeenCalledTimes(1);
+      expect(result.current.workspaceFiles).toBe(initialTree);
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not let a previous agent response replace the selected agent workspace', async () => {
     const firstAgent = deferred<{ files: Array<{ path: string; type: 'file' }> }>();
     apiForTargetMock.mockImplementation(async (_target, path) => {
