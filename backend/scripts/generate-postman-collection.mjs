@@ -65,6 +65,7 @@ const collection = {
     ]),
     folder('Agents', [
       req('List agents', 'GET', '/api/agents', { query: [['includeDisabled', 'true']] }),
+      req('Agent overview', 'POST', '/api/agents/overview', { body: { sessions: { '{{agentId}}': '{{sessionId}}' } } }),
       req('Create agent', 'POST', '/api/agents', { body: { id: 'new-agent', name: 'New Agent', modelProfile: 'default' } }),
       req('Update agent', 'PATCH', '/api/agents/{{agentId}}', { body: { name: 'Hatchet', enabled: true, contextConfig: { version: 1 } } }),
       req('Delete agent', 'DELETE', '/api/agents/{{agentId}}'),

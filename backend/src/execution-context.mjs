@@ -91,8 +91,7 @@ export function createExecutionContext({
     agentDataRoot: resolvedAgentDataRoot,
     skillsRoot: resolvedSkillsRoot,
     scopeSource: resolvedAgentWorkspaceRoot ? 'agent-runtime' : 'legacy',
-    // Trusted, non-serialized delivery authority for explicit cross-agent chat.
-    // It supplies no recipient filesystem/profile/memory authority to this turn.
+    // Trusted, non-serialized delivery context for explicit cross-agent chat.
     agentRuntime: agentRuntime || null,
     resolveAgentRuntime: typeof resolveAgentRuntime === 'function' ? resolveAgentRuntime : null,
     runAgentReply: typeof runAgentReply === 'function' ? runAgentReply : null,

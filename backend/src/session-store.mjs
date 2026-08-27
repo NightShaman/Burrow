@@ -299,6 +299,11 @@ async function writeMetadata(rootDir, sessionId, metadata) {
 
 async function updateSessionMetadataAfterAppend({ rootDir, sessionId, entry } = {}) {
   const existing = await readSessionMetadata({ rootDir, sessionId });
+  // Attributed A2A messages are transcript ingress, not runs owned by this
+  // session. Their source run ID must not advance the recipient's continuity
+  // head; doing so makes queued/delivery-only messages look like an
+  // interrupted foreign run. The eventual recipient run claims its own head.
+  const advancesContinuity = entry?.metadata?.kind !== 'agent-message';
   const metadata = {
     ...(existing || initialMetadata(sessionId, entry.ts)),
     version: 4, sessionKey: existing?.sessionKey || sessionId, sessionId,
@@ -308,7 +313,8 @@ async function updateSessionMetadataAfterAppend({ rootDir, sessionId, entry } = 
     turnCount: Number(existing?.turnCount || 0) + 1,
     chatTurnCount: Number(existing?.chatTurnCount || 0) + (isChatMessage(entry) ? 1 : 0),
     lastInteractionAt: isChatMessage(entry) ? entry.ts : (existing?.lastInteractionAt || null),
-    lastRole: entry.role || null, lastRunId: entry.runId || null,
+    lastRole: entry.role || null,
+    lastRunId: advancesContinuity ? (entry.runId || null) : (existing?.lastRunId || null),
   };
   return writeMetadata(rootDir, sessionId, metadata);
 }

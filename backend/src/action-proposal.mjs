@@ -347,7 +347,7 @@ export function nativeToolSchemas({ includeMutations = true, includeWorkingMemor
       type: 'function',
       function: {
         name: 'agent_send_message',
-        description: 'Send an explicit attributed message to another registered agent. request_reply wakes the recipient for one response and leaves peer messaging available for a deliberate follow-up. request_reply_complete wakes the recipient for exactly one reply, mirrors it back, then closes this peer exchange so the sender must conclude to the user. deliver only persists a non-interrupting FYI. No mode transfers filesystem/tool authority.',
+        description: 'Send an explicit attributed message to another registered agent. request_reply wakes the recipient for one response and leaves peer messaging available for a deliberate follow-up. request_reply_complete wakes the recipient for exactly one reply, mirrors it back, then closes this peer exchange so the sender must conclude to the user. deliver only persists a non-interrupting FYI.',
         parameters: {
           type: 'object', additionalProperties: false,
           properties: { recipientAgentId: { type: 'string' }, targetSessionId: { type: 'string', description: 'Optional recipient session id; defaults to "default".' }, messageMode: { type: 'string', enum: ['deliver', 'request_reply', 'request_reply_complete'], description: 'Defaults to request_reply. Use request_reply_complete for one final recipient reply, then conclude to the user without another peer message. deliver only persists a non-interrupting FYI.' }, content: { type: 'string' }, reason: { type: 'string' } },

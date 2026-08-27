@@ -1,4 +1,4 @@
-export function createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession } = {}) {
+export function createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession, agentOverview } = {}) {
   const resultResponse = (res, result, success = 200) => {
     sendJson(res, result.ok ? success : (result.status || 500), result);
     return true;
@@ -9,6 +9,10 @@ export function createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody
       return true;
     }
     if (req.method === 'POST' && url.pathname === '/api/agents') return resultResponse(res, await createAgent(validateBoundaryBody('agent-create', await readJsonBody(req))), 201);
+    if (req.method === 'POST' && url.pathname === '/api/agents/overview') {
+      sendJson(res, 200, await agentOverview(validateBoundaryBody('agent-overview', await readJsonBody(req))));
+      return true;
+    }
     if (req.method === 'PATCH' && url.pathname.startsWith('/api/agents/') && !url.pathname.endsWith('/mcp-tools') && !url.pathname.endsWith('/model-selection')) {
       const id = decodeURIComponent(url.pathname.slice('/api/agents/'.length));
       return resultResponse(res, await updateAgent(id, validateBoundaryBody('agent-patch', await readJsonBody(req))));

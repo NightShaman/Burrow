@@ -47,7 +47,7 @@ async function appendAgentMessage({ rootDir, sessionId: targetSessionId, content
 }
 
 // An agent message is a first-class, attributed transcript turn. It is not a
-// user turn and does not grant the sender's authority to the recipient.
+// user turn; attribution identifies where the message came from.
 export async function sendAgentMessage({ senderRuntime, resolveRecipientRuntime, runRecipientReply = null, recipientAgentId, targetSessionId = 'default', content, messageMode = 'request_reply', runId = null, sourceSessionId = null } = {}) {
   const sender = agentId(senderRuntime?.agentId, 'agent_message_sender');
   const requestedRecipient = agentId(recipientAgentId, 'agent_message_recipient');

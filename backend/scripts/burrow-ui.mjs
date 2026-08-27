@@ -75,6 +75,7 @@ import { createScheduledChannelRoutes } from './ui/scheduled-channel-routes.mjs'
 import { createAuthRoutes } from './ui/auth-routes.mjs';
 import { createChatRoutes } from './ui/chat-routes.mjs';
 import { createModRoute, loadMods } from '../src/mod-runtime.mjs';
+import { MAX_OVERVIEW_CHILD_CONTEXTS, normalizeOverviewBody, overviewSessionIds } from '../src/agent-overview.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sourceRoot = path.resolve(__dirname, '..');
@@ -1711,6 +1712,9 @@ function requireStringField(body, field, { allowEmpty = false } = {}) {
 function validateBoundaryBody(kind, input = {}) {
   const body = requireObjectBody(input);
   if (kind === 'agent-create') { requireStringField(body, 'name'); if (body.id !== undefined && typeof body.id !== 'string') throw Object.assign(new Error('agent_id_invalid'), { statusCode: 400 }); }
+  if (kind === 'agent-overview') {
+    normalizeOverviewBody(body);
+  }
   if (kind === 'agent-patch') { for (const field of ['name', 'enabled', 'availableCapabilities', 'contextConfig']) if (body[field] !== undefined && !['string', 'boolean', 'object'].includes(typeof body[field])) throw Object.assign(new Error(`${field}_invalid`), { statusCode: 400 }); }
   if (kind === 'chat') { const hasMessage = typeof body.message === 'string' && body.message.trim(); const hasImage = Array.isArray(body.attachments) && body.attachments.some((item) => String(item?.type || item?.mimeType || '').toLowerCase().startsWith('image/')); if (!hasMessage && !hasImage) throw Object.assign(new Error('message_required'), { statusCode: 400 }); }
   if (kind === 'workspace-write') { requireStringField(body, 'path'); if (typeof body.content !== 'string') throw Object.assign(new Error('content_required'), { statusCode: 400 }); }
@@ -2390,13 +2394,59 @@ async function listSubagentSummaries(agentRuntime = null) {
 }
 
 const CHILD_LIVE_FINAL_WINDOW_MS = 60 * 60 * 1000;
-
 function visibleChildWorkRecords(records = [], now = Date.now()) {
   return records.filter((item) => {
     if (!item?.final) return true;
     const updatedAt = Date.parse(item.updatedAt || '');
     return Number.isFinite(updatedAt) && now - updatedAt <= CHILD_LIVE_FINAL_WINDOW_MS;
   });
+}
+
+async function agentOverview(body = {}) {
+  normalizeOverviewBody(body);
+  const identities = (await chatIdentities()).agents || [];
+  const identitiesByAgentId = new Map(identities.map((identity) => [identity.id, identity]));
+  const agents = agentsStore().list({ includeDisabled: true });
+  const overview = await Promise.all(agents.map(async (agent) => {
+    const sessionId = typeof body.sessions?.[agent.id] === 'string' && body.sessions[agent.id].trim()
+      ? body.sessions[agent.id].trim()
+      : 'default';
+    const base = { agent, identity: identitiesByAgentId.get(agent.id) || null, sessionId, selection: modelsStore().modelSelection(agent.id) };
+    if (!agent.enabled) return { ...base, status: { agents: [] }, contexts: {} };
+    try {
+      const agentRuntime = await resolveAgentRuntime(agent.id);
+      const [status, runtime] = await Promise.all([
+        agentStatusForSession(sessionId, agentRuntime),
+        runtimeConfig(agent.id),
+      ]);
+      const active = [...activeChatRuns.values()].find((run) => run.agentId === agent.id && run.sessionId === sessionId && !run.controller.signal.aborted) || null;
+      const limits = activeConversationLimits({ modelConfig: runtime.modelConfig, contextConfig: runtime.contextConfig });
+      const childSessionIds = status.agents
+        .filter((item) => item.sessionId !== sessionId)
+        .map((item) => item.sessionId)
+        .filter(Boolean);
+      const { all: sessionIds, hydrated: hydratedSessionIds, truncated } = overviewSessionIds(sessionId, childSessionIds);
+      const contextEntries = await Promise.all(hydratedSessionIds.map(async (currentSessionId) => {
+        const liveRun = currentSessionId === sessionId ? active : null;
+        const context = await inspectSessionContextStatus({ rootDir: projectRoot, dataRoot: agentRuntime.agentWorkspaceRoot, sessionId: currentSessionId, limits, contextConfig: runtime.contextConfig, contextWindow: runtime.modelConfig?.contextWindow, contextTokens: runtime.modelConfig?.contextTokens, liveContext: liveRun?.contextUsage || null });
+        return [currentSessionId, context];
+      }));
+      return {
+        ...base,
+        status,
+        contexts: Object.fromEntries(contextEntries),
+        contextHydration: {
+          limit: MAX_OVERVIEW_CHILD_CONTEXTS,
+          requested: sessionIds.length,
+          hydrated: hydratedSessionIds.length,
+          truncated,
+        },
+      };
+    } catch (error) {
+      return { ...base, status: { agents: [] }, contexts: {}, error: String(error?.message || error) };
+    }
+  }));
+  return { ok: true, agents: overview };
 }
 
 async function agentStatusForSession(sessionId = 'default', agentRuntime = null) {
@@ -2757,7 +2807,7 @@ const taskBoardRoute = createTaskBoardRoutes({ readJsonBody, sendJson, validateB
 const workbenchRoute = createWorkbenchRoutes({ readJsonBody, sendJson, selectedAgentRuntime, dataRootForAgent, listWorkItemSummaries, createWorkbenchItem, readWorkItem, runWorkbenchItemStep, continueWorkbenchItem, archiveWorkbenchItem, workbenchPlan, workbenchRun });
 const dreamRoute = createDreamRoutes({ readJsonBody, sendJson, agentDreamSettings, agentDreamDiary, agentDreamMemoryConsolidate, agentDreamCycle });
 const settingsRoute = createSettingsRoutes({ readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, archiveSummaryModelSelection: async (agentId) => ({ ok: true, selection: archiveSummarySelection((await resolveAgentRuntime(agentId)).agentId) }), saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection: (id) => modelsStore().remove(id), setupStatus: async () => readSetupStatus(modelsStore().db), completeSetup: async () => completeSetup(modelsStore().db) });
-const agentRoute = createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession });
+const agentRoute = createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession, agentOverview });
 const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, exportSessionTranscript, writeSessionMetadata, resetSession, renameSession, archiveSession, forkSession, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession });
 const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, databasePath: settingsDatabasePath() }), tiddleCards: async (query) => listTiddleCards({ ...query, databasePath: settingsDatabasePath() }), tiddleHistory: async (query) => tiddleHistory({ ...query, databasePath: settingsDatabasePath() }), uiAuthSettings, saveUiAuthSettings, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
 const observabilityRoute = createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, codexLbAccounts, anthropicOauthUsage, openaiOauthUsage, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
