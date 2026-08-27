@@ -141,12 +141,14 @@ function AppContent() {
   const composers = useChatComposers({ selectedAgentId, activeRunId, sessions, targets: apiTargets, activeTarget, refreshSessions, selectSession, reportError, clearError, setTabs, setActiveTabId });
   const resizeVertical = (kind: 'left' | 'right', event: PointerEvent) => { const start = event.clientY; const initial = kind === 'left' ? leftSplit : rightSplit; const host = (event.currentTarget as HTMLElement).parentElement?.getBoundingClientRect(); if (!host) return; const move = (e: globalThis.PointerEvent) => { const next = initial + ((e.clientY - start) / host.height) * 100; if (kind === 'left') setLeftSplit(Math.min(75, Math.max(25, next))); else setRightSplit(Math.min(75, Math.max(25, next))); }; listenResize(move); };
   const style = { '--left': leftCollapsed ? '38px' : '320px', '--right': rightCollapsed ? '38px' : '320px', '--left-split': `${leftSplit}%`, '--right-split': `${rightSplit}%` } as React.CSSProperties;
-  if (!loadedSelected && page !== 'settings' && page !== 'archive') {
+  // An empty registry is a valid configured state: keep the cockpit visible so
+  // operators can inspect the chat and open Settings instead of hitting a
+  // full-page dead end. Only block while the registry is still loading or
+  // genuinely unavailable.
+  if (!loadedSelected && registryState !== 'empty' && page !== 'settings' && page !== 'archive') {
     const registryMessage = registryState === 'unavailable'
       ? `${activeTarget.name} is unavailable${registryError ? `: ${registryError}` : '.'}`
-      : registryState === 'empty'
-        ? `No agents are configured on ${activeTarget.name}.`
-        : 'Loading Burrow agents…';
+      : 'Loading Burrow agents…';
     return <main className="cockpit loading-app" data-theme={theme}><p role={registryState === 'unavailable' ? 'alert' : 'status'}>{registryMessage}</p>{registryState !== 'loading' && <button type="button" onClick={() => setPage('settings')}>Open settings</button>}</main>;
   }
   const renderRailPanel = (panel: PanelId) => {
