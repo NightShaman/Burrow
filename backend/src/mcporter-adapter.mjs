@@ -66,6 +66,12 @@ function diagnosticText(value, protectedValues = []) {
 
 function runtimeFailure(code, { stdout = '', stderr = '', detail = null, protectedValues = [], toolErrorCode = null } = {}) {
   const error = new Error(code);
+  // Keep raw streams only on the transient internal Error so callers can
+  // recognize mcporter's documented non-zero exit for an MCP isError result.
+  // Nothing serializes these fields; publicMcpFailureDetail exposes only the
+  // bounded, redacted diagnostic below.
+  error.stdout = stdout;
+  error.stderr = stderr;
   error.diagnostic = diagnosticText(detail ?? (stderr || stdout), protectedValues);
   // Remote provider codes are useful causal context, but only expose a small,
   // inert identifier. The provider's free-form text stays in the redacted,
@@ -201,13 +207,21 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
   if (!['http', 'stdio'].includes(connection.transport)) throw new Error('mcp_transport_invalid');
   if (!text(toolName)) throw new Error('mcp_tool_name_invalid');
   return withConnectionConfig(connection, apiKey, environmentVariables, async (configPath, runtime) => {
-    const output = await runCommand(runtime.binary, ['call', `connection.${toolName}`, '--config', configPath, '--args', JSON.stringify(toolArguments), '--output', 'json'], { cwd: runtime.runtimeRoot, timeoutMs: 30_000, protectedValues: [apiKey, ...Object.values(environmentVariables || {})] });
+    let output;
+    try {
+      output = await runCommand(runtime.binary, ['call', `connection.${toolName}`, '--config', configPath, '--args', JSON.stringify(toolArguments), '--output', 'json'], { cwd: runtime.runtimeRoot, timeoutMs: 30_000, protectedValues: [apiKey, ...Object.values(environmentVariables || {})] });
+    } catch (error) {
+      // mcporter deliberately exits non-zero for a valid MCP `{ isError:
+      // true }` result, while writing that result to stdout. Parse it before
+      // treating the process exit as a launcher/runtime failure.
+      if (String(error?.message || error) !== 'mcp_runtime_failed' || typeof error?.stdout !== 'string') throw error;
+      output = error.stdout;
+    }
     try {
       const parsed = JSON.parse(output);
       if (parsed?.isError === true || parsed?.error || parsed?.ok === false || parsed?.success === false) {
         const providerFailure = providerFailureDetail(parsed);
-        const failure = runtimeFailure('mcp_tool_failed', { stdout: boundedJson(parsed), protectedValues: [apiKey, ...Object.values(environmentVariables || {})], toolErrorCode: providerFailure.toolErrorCode, detail: providerFailure.detail });
-        throw failure;
+        throw runtimeFailure('mcp_tool_failed', { stdout: boundedJson(parsed), protectedValues: [apiKey, ...Object.values(environmentVariables || {})], toolErrorCode: providerFailure.toolErrorCode, detail: providerFailure.detail });
       }
       return parsed;
     } catch (error) {
