@@ -212,6 +212,44 @@ function continuitySnapshot(metadata = {}) {
   };
 }
 
+function processIsAlive(processId) {
+  const pid = Number(processId);
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM proves the process exists but belongs to another account.
+    return error?.code === 'EPERM';
+  }
+}
+
+async function recoverAbandonedContinuityHead({ rootDir, sessionId, prior, metadata, reason, clock }) {
+  // Never retry a possibly partial terminal finalizer. The transcript is the
+  // canonical record of what reached disk; recovery only closes its abandoned
+  // ownership generation so a later turn can safely claim a new one.
+  const recoveredAt = clock();
+  const completedMetadata = {
+    ...metadata,
+    kind: metadata.kind || classifySession(sessionId, metadata),
+    completedAt: metadata.completedAt || recoveredAt,
+    retentionEligibleAt: metadata.retentionEligibleAt || recoveredAt,
+    updatedAt: metadata.updatedAt || recoveredAt,
+  };
+  await writeMetadata(rootDir, sessionId, completedMetadata);
+  const recovered = {
+    ...prior,
+    latestRunId: completedMetadata.lastRunId || prior.runId || prior.latestRunId || null,
+    state: 'completed',
+    completedAt: recoveredAt,
+    snapshot: continuitySnapshot(completedMetadata),
+    recoveredAt,
+    recovery: { reason, abandonedRunId: prior.runId || null },
+  };
+  await atomicWriteJson(continuityHeadFile(rootDir, sessionId), recovered);
+  return { prior: recovered, metadata: completedMetadata };
+}
+
 export async function claimSessionContinuityHead({ rootDir, sessionId, runId, acceptedLatestRunIds = [], clock = nowIso } = {}) {
   if (!rootDir) throw new Error('rootDir is required');
   if (!sessionId) throw new Error('sessionId is required');
@@ -219,10 +257,30 @@ export async function claimSessionContinuityHead({ rootDir, sessionId, runId, ac
   const id = safeId(sessionId);
   return withContinuityLock(rootDir, id, async () => {
     await fs.mkdir(sessionDir(rootDir, id), { recursive: true });
-    const prior = await readSessionContinuityHead({ rootDir, sessionId: id });
-    const metadata = await readSessionMetadata({ rootDir, sessionId: id }) || await writeSessionMetadata({ rootDir, sessionId: id });
+    let prior = await readSessionContinuityHead({ rootDir, sessionId: id });
+    let metadata = await readSessionMetadata({ rootDir, sessionId: id }) || await writeSessionMetadata({ rootDir, sessionId: id });
     if (!metadata.kind) metadata.kind = classifySession(id, metadata);
-    const snapshot = continuitySnapshot(metadata);
+    let snapshot = continuitySnapshot(metadata);
+    // An owner that exited after persisting transcript state cannot finish its
+    // generation. Close it without replaying its work; the next turn receives
+    // a fresh generation over the durable transcript instead of a permanent
+    // user-visible continuity_uncertain failure.
+    const abandonedFinalization = prior?.state === 'finalizing' && !processIsAlive(prior.processId);
+    const abandonedForeignRun = prior?.state === 'running' && Number(prior?.processId) !== process.pid && snapshot.lastRunId === prior.runId && !processIsAlive(prior.processId);
+    const completedHeadBehindTranscript = prior?.state === 'completed' && prior.latestRunId && snapshot.lastRunId && snapshot.lastRunId !== prior.latestRunId;
+    if (abandonedFinalization || abandonedForeignRun || completedHeadBehindTranscript) {
+      const recovery = await recoverAbandonedContinuityHead({
+        rootDir,
+        sessionId: id,
+        prior,
+        metadata,
+        reason: abandonedFinalization ? 'terminal_finalization_abandoned' : (abandonedForeignRun ? 'interrupted_run_abandoned' : 'completed_head_behind_transcript'),
+        clock,
+      });
+      prior = recovery.prior;
+      metadata = recovery.metadata;
+      snapshot = continuitySnapshot(metadata);
+    }
     // Trusted internal ingress (for example, an attributed agent message) may
     // append a transcript turn before its bounded recipient run can claim the
     // head. That known append must not be mistaken for an interrupted foreign
@@ -232,8 +290,8 @@ export async function claimSessionContinuityHead({ rootDir, sessionId, runId, ac
     // A different process cannot safely decide whether an interrupted run
     // finished persisting. Refuse to replace it when transcript metadata
     // shows that run advanced beyond the prior completed head.
-    const interruptedForeignRun = Boolean(prior?.state === 'running' && Number(prior?.processId) !== process.pid && snapshot.lastRunId === prior.runId);
-    const finalizationUncertain = prior?.state === 'finalizing';
+    const interruptedForeignRun = Boolean(prior?.state === 'running' && Number(prior?.processId) !== process.pid && snapshot.lastRunId === prior.runId && processIsAlive(prior.processId));
+    const finalizationUncertain = prior?.state === 'finalizing' && processIsAlive(prior.processId);
     const continuityUncertain = completedStateDisagrees || interruptedForeignRun || finalizationUncertain;
     const head = {
       version: 1,
@@ -268,7 +326,14 @@ export async function commitSessionContinuityHead({ rootDir, sessionId, runId, g
     // append-heavy finalizers and duplicating receipts/transcript entries.
     const finalizing = { ...head, state: 'finalizing', finalizationStartedAt: clock() };
     await atomicWriteJson(continuityHeadFile(rootDir, id), finalizing);
-    const value = typeof commit === 'function' ? await commit(finalizing) : null;
+    let value;
+    try {
+      value = typeof commit === 'function' ? await commit(finalizing) : null;
+    } catch (error) {
+      const metadata = await readSessionMetadata({ rootDir, sessionId: id }) || initialMetadata(id);
+      await recoverAbandonedContinuityHead({ rootDir, sessionId: id, prior: finalizing, metadata, reason: 'terminal_finalization_failed', clock });
+      throw error;
+    }
     const metadata = await readSessionMetadata({ rootDir, sessionId: id }) || initialMetadata(id);
     const completedAt = clock();
     const completedMetadata = {
