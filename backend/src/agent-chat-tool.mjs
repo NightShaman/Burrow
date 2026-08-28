@@ -4,6 +4,19 @@ const ID = /^[a-zA-Z0-9._-]{1,96}$/;
 const MAX_MESSAGE = 20_000;
 const MODES = new Set(['deliver', 'request_reply', 'request_reply_complete']);
 
+// Replies share the recipient session's continuity head. Serialize only the
+// nested reply execution for that session; concurrent A2A deliveries remain
+// attributed transcript ingress, but cannot supersede each other's replies.
+const replyQueues = new Map();
+async function serializeRecipientReply({ rootDir, sessionId, operation }) {
+  const key = `${String(rootDir)}:${String(sessionId)}`;
+  const previous = replyQueues.get(key) || Promise.resolve();
+  const current = previous.catch(() => {}).then(operation);
+  replyQueues.set(key, current);
+  try { return await current; }
+  finally { if (replyQueues.get(key) === current) replyQueues.delete(key); }
+}
+
 function text(value) { return String(value ?? '').trim(); }
 function agentId(value, field) {
   const id = text(value);
@@ -82,7 +95,11 @@ export async function sendAgentMessage({ senderRuntime, resolveRecipientRuntime,
   if (!['request_reply', 'request_reply_complete'].includes(resolvedMode)) return receipt;
   if (typeof runRecipientReply !== 'function') throw new Error('agent_message_reply_unavailable');
 
-  const reply = await runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, inboundEntryId: recipientEntry.id });
+  const reply = await serializeRecipientReply({
+    rootDir: recipientRuntime.agentWorkspaceRoot,
+    sessionId: session,
+    operation: () => runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, inboundEntryId: recipientEntry.id }),
+  });
   const replyText = text(reply?.answerText);
   if (!replyText) return { ...receipt, reply: { ok: false, error: reply?.error || 'agent_message_reply_empty' } };
   const replyEntry = await appendAgentMessage({
