@@ -10,6 +10,7 @@ UNINSTALL=0
 PURGE=0
 ASSUME_YES=0
 INSTALL_NODE=0
+RESTART_SERVICE=0
 usage() { cat <<USAGE
 Usage: install.sh [options]
   --dir PATH                    installation and durable-state root
@@ -150,6 +151,42 @@ ensure_node_24() {
   node_is_supported || { echo "Burrow install: Node.js 24+ installation did not produce a supported node/npm runtime." >&2; exit 1; }
 }
 
+# `burrow update` replaces the running app payload. Restart a managed user
+# service only after activation. An SSH/non-login shell may lack
+# XDG_RUNTIME_DIR even while the user's systemd manager is healthy.
+user_systemctl() {
+  if [ -z "${XDG_RUNTIME_DIR:-}" ] && [ -d "/run/user/$(id -u)" ]; then
+    XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user "$@"
+  else
+    systemctl --user "$@"
+  fi
+}
+
+prepare_service_restart() {
+  [ -d "$INSTALL_DIR/app" ] || return 0
+  SERVICE_UNIT="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/burrow.service"
+  [ -f "$SERVICE_UNIT" ] || return 0
+  command -v systemctl >/dev/null 2>&1 || { echo "Burrow update: a Burrow user service exists but systemctl is unavailable; refusing an update that cannot restart it." >&2; exit 1; }
+  user_systemctl show-environment >/dev/null 2>&1 || { echo "Burrow update: could not reach the Burrow user-service manager; refusing an update that cannot restart it." >&2; exit 1; }
+  RESTART_SERVICE=1
+}
+
+verify_restarted_runtime() {
+  expected_version=$(node -p "require('$INSTALL_DIR/app/backend/package.json').version")
+  host=$(grep '^BURROW_UI_HOST=' "$ENV_FILE" | cut -d= -f2- || true)
+  port=$(grep '^BURROW_UI_PORT=' "$ENV_FILE" | cut -d= -f2- || true)
+  host=${host:-127.0.0.1}
+  port=${port:-42817}
+  [ "$host" = "0.0.0.0" ] && host=127.0.0.1
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    health=$(curl -fsS --max-time 2 "http://$host:$port/api/health" 2>/dev/null || true)
+    case "$health" in *"\"version\":\"$expected_version\""*) return 0 ;; esac
+    sleep 1
+  done
+  echo "Burrow update: service restarted but health did not report version $expected_version." >&2
+  exit 1
+}
+
 if [ -z "$SOURCE_DIR" ]; then
   command -v curl >/dev/null 2>&1 || { echo "Burrow install: curl is required." >&2; exit 1; }
   TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/burrow-install.XXXXXX")
@@ -159,6 +196,7 @@ if [ -z "$SOURCE_DIR" ]; then
 fi
 [ -n "$SOURCE_DIR" ] && [ -f "$SOURCE_DIR/backend/package.json" ] && [ -f "$SOURCE_DIR/ui/package.json" ] || { echo "Burrow install: source is not an assembled Burrow checkout: ${SOURCE_DIR:-unknown}" >&2; exit 1; }
 INSTALL_DIR=$(mkdir -p "$INSTALL_DIR" && cd "$INSTALL_DIR" && pwd)
+prepare_service_restart
 mkdir -p "$INSTALL_DIR/config" "$INSTALL_DIR/workspace" "$INSTALL_DIR/agentdata" "$INSTALL_DIR/cache" "$INSTALL_DIR/reports" "$INSTALL_DIR/integrations" "$INSTALL_DIR/bin"
 STAGING="$INSTALL_DIR/.app-staging-$$"
 PREVIOUS="$INSTALL_DIR/.app-previous"
@@ -301,4 +339,8 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
   rmdir "$INSTALL_DIR/app/integrations" 2>/dev/null || true
 fi
 rm -rf "$PREVIOUS"
+if [ "$RESTART_SERVICE" -eq 1 ]; then
+  user_systemctl restart burrow.service
+  verify_restarted_runtime
+fi
 printf "%s\\n" "Burrow install: ok" "Home: $INSTALL_DIR" "Application: $INSTALL_DIR/app" "State: $INSTALL_DIR/{config,workspace,agentdata,cache}" "Run: $INSTALL_DIR/bin/burrow serve" "Update: $INSTALL_DIR/bin/burrow update"
