@@ -49,12 +49,11 @@ type SavedProvidersProps = {
   onOpenChange: (open: boolean) => void;
   onEdit: (provider: SavedProvider) => void;
   onDelete: (provider: SavedProvider) => void;
+  expanded?: boolean;
 };
 
-export function SavedProviders({ providers, open, onOpenChange, onEdit, onDelete }: SavedProvidersProps) {
-  return <details className="model-saved saved-accordion" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}>
-    <summary><h3>Saved providers</h3><span>{providers.length}</span></summary>
-    {providers.length === 0 ? <p className="settings-empty">No providers saved yet.</p> : <div className="provider-list">{providers.map((item) => <article className="provider-card" key={item.id}>
+export function SavedProviders({ providers, open, onOpenChange, onEdit, onDelete, expanded = false }: SavedProvidersProps) {
+  const contents = providers.length === 0 ? <p className="settings-empty">No providers saved yet.</p> : <div className="provider-list">{providers.map((item) => <article className="provider-card" key={item.id}>
       <div>
         <strong>{item.provider}</strong>
         <small>{modelConnectionApiTypes.find((type) => type.value === item.apiType)?.label ?? item.apiType} · {item.url}</small>
@@ -64,6 +63,10 @@ export function SavedProviders({ providers, open, onOpenChange, onEdit, onDelete
       </div>
       <div className="provider-models">{item.models.map((model) => <span key={model}>{model}</span>)}</div>
       <div className="card-actions"><button className="secondary" onClick={() => onEdit(item)}>Edit</button><button className="danger" onClick={() => onDelete(item)}>Delete</button></div>
-    </article>)}</div>}
+    </article>)}</div>;
+  if (expanded) return <div className="settings-overflow-content model-saved">{contents}</div>;
+  return <details className="model-saved saved-accordion" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}>
+    <summary><h3>Saved providers</h3><span>{providers.length}</span></summary>
+    {contents}
   </details>;
 }

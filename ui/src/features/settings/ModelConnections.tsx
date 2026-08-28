@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { SavedProvider } from '../../app/types';
 import { ModelConnectionOAuthDialog } from './ModelConnectionOAuthDialog';
 import { ModelResults, SavedProviders, modelConnectionApiTypes } from './ModelConnectionViews';
@@ -9,9 +10,10 @@ type Props = {
   savedProviders: SavedProvider[];
   onModelConnectionsChanged: () => Promise<void>;
   mcpConnections: ReactNode;
+  overflowTarget?: HTMLElement | null;
 };
 
-export function ModelConnections({ savedProviders, onModelConnectionsChanged, mcpConnections }: Props) {
+export function ModelConnections({ savedProviders, onModelConnectionsChanged, mcpConnections, overflowTarget }: Props) {
   const editor = useModelConnectionEditor({ onModelConnectionsChanged });
 
   return <div className="connections-stack">
@@ -56,15 +58,16 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
           onToggleModelInput={editor.toggleModelInput}
           onSetModelInputAuto={editor.setModelInputAuto}
         />}
-        <SavedProviders
+        {!overflowTarget && <SavedProviders
           providers={savedProviders}
           open={editor.savedProvidersOpen}
           onOpenChange={editor.setSavedProvidersOpen}
           onEdit={editor.editProvider}
           onDelete={(item) => void editor.deleteProvider(item)}
-        />
+        />}
       </SettingSection>
     </div>
     {mcpConnections}
+    {overflowTarget && createPortal(<SavedProviders providers={savedProviders} open={editor.savedProvidersOpen} onOpenChange={editor.setSavedProvidersOpen} onEdit={editor.editProvider} onDelete={(item) => void editor.deleteProvider(item)} expanded />, overflowTarget)}
   </div>;
 }

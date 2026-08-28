@@ -242,3 +242,382 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .connections-models-column .model-actions{position:sticky;z-index:2;bottom:0;margin:12px -2px 0;padding:10px 2px 2px;background:linear-gradient(to bottom,transparent 0,color-mix(in srgb,var(--surface-raised) 82%,transparent) 34%,var(--surface-raised) 100%)}
 .connections-models-column .model-actions::before{content:'';position:absolute;top:9px;right:0;left:0;border-top:1px solid var(--line-soft);pointer-events:none}
 .connections-models-column .model-actions button{position:relative}
+
+/* Blank-slate Settings prototype: establish only the permanent four-column frame. */
+.settings-baseline-hidden{display:none}
+.settings-blank-slate{
+  box-sizing:border-box;
+  display:grid;
+  grid-template-columns:180px repeat(3,minmax(0,1fr));
+  gap:18px;
+  width:100%;
+  height:calc(100dvh - 111px);
+  min-height:0;
+  grid-template-rows:minmax(0,1fr);
+  padding:22px;
+}
+.settings-blank-slate > .settings-blank-column{min-height:0}
+.settings-blank-column{
+  display:grid;
+  align-content:start;
+  gap:8px;
+  min-width:0;
+  padding:16px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--panel);
+}
+.settings-blank-column strong{color:var(--text-strong);font-size:13px}
+.settings-blank-column span{color:var(--muted);font-size:12px}
+
+/* Blank-slate step 2: functional primary menu only. */
+.settings-prototype-menu{align-content:start}
+.settings-prototype-menu-items{display:grid;gap:7px;margin-top:18px}
+.settings-prototype-menu-items button{min-height:40px;padding:0 12px;border:1px solid var(--line);border-radius:7px;background:var(--surface-raised);color:var(--muted);font:inherit;font-weight:750;text-align:left;cursor:pointer}
+.settings-prototype-menu-items button:hover{border-color:var(--accent-border);background:var(--surface-hover);color:var(--text)}
+.settings-prototype-menu-items button.active{border-color:var(--accent);background:var(--accent-muted);box-shadow:inset 3px 0 0 var(--accent);color:var(--text-strong)}
+.settings-prototype-menu-items button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Blank-slate step 3: the existing Agent selector spans working columns 2–4. */
+.settings-blank-slate.has-agent-selector{
+  height:calc(100dvh - 111px);
+  min-height:0;
+  grid-template-rows:auto minmax(0,1fr);
+}
+.settings-blank-slate.has-agent-selector > .settings-blank-column:not(.settings-prototype-menu){min-height:0}
+.settings-blank-slate.has-agent-selector .settings-prototype-menu{grid-row:1 / span 2}
+.settings-prototype-agent-selector{grid-column:2 / -1;grid-row:1;min-width:0}
+.settings-prototype-agent-selector .agent-toolbar{box-sizing:border-box;width:100%;margin:0}
+.settings-blank-slate.has-agent-selector > .settings-blank-column:not(.settings-prototype-menu){grid-row:2}
+
+/* Blank-slate step 4: Agent section navigation occupies Column 2 only. */
+.settings-prototype-sections{align-content:start}
+.settings-prototype-section-items{display:grid;gap:7px;margin-top:18px}
+.settings-prototype-section-items button{width:100%;min-height:38px;padding:0 11px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--muted);font:inherit;font-weight:750;text-align:left;cursor:pointer}
+.settings-prototype-section-items button:hover{border-color:var(--line);background:var(--surface-hover);color:var(--text)}
+.settings-prototype-section-items button.active{border-color:var(--accent-border);background:var(--accent-muted);color:var(--text-strong)}
+.settings-prototype-section-items button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Blank-slate step 6: real configuration content enters Column 3 without changing the frame. */
+.settings-prototype-configuration{align-content:start}
+.settings-prototype-configuration>.setting-section{margin:0;min-width:0}
+.settings-prototype-configuration>.api-target-settings{grid-column:auto;grid-template-columns:1fr}
+.settings-prototype-configuration>.connections-stack{grid-column:auto;grid-row:auto;grid-template-columns:minmax(0,1fr);width:100%}
+.settings-prototype-configuration>.connections-stack>.connections-models-column{width:100%}
+.settings-prototype-configuration>.connections-stack .setting-section{margin-top:0}
+
+/* Blank-slate step 7: MCP server selection owns Column 3; its tool inventory owns overflow Column 4. */
+.mcp-server-selector{display:grid;gap:7px}
+.mcp-server-selector button{display:grid;gap:3px;width:100%;padding:10px 11px;border:1px solid var(--line);border-radius:7px;background:var(--surface-raised);color:var(--text);text-align:left}
+.mcp-server-selector button:hover{border-color:var(--accent-border);background:var(--surface-hover)}
+.mcp-server-selector button.active{border-color:var(--accent);background:var(--accent-subtle);box-shadow:inset 3px 0 var(--accent)}
+.mcp-server-selector button strong{font-size:12px}
+.mcp-server-selector button small{color:var(--muted);font-size:11px}
+.settings-prototype-overflow:has(.settings-overflow-content){
+  box-sizing:border-box;
+  height:auto;
+  max-height:none;
+  min-height:0;
+  align-self:stretch;
+  align-content:start;
+  padding:0;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+  border-color:transparent;
+  background:transparent;
+}
+.settings-overflow-content{min-width:0}
+.settings-overflow-content>.setting-section{margin:0}
+.mcp-tools-overflow>.setting-section{margin:0}
+.mcp-tools-overflow .card-actions{
+  position:sticky;
+  z-index:2;
+  bottom:0;
+  margin:14px -14px -13px;
+  padding:12px 14px 13px;
+  border-top:1px solid var(--line-soft);
+  background:var(--panel);
+}
+
+/* Column 4 ownership for the remaining nested Settings inventories. */
+.profile-document-selector{display:grid;gap:7px}
+.profile-document-selector button{display:flex;align-items:center;min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.025);color:var(--text);text-align:left;cursor:pointer}
+.profile-document-selector button.active{border-color:var(--accent);background:rgba(var(--accent-rgb),.12);box-shadow:0 0 0 1px var(--accent)}
+.profile-document-overflow,.profile-document-overflow>.setting-section{height:100%;min-height:0}
+.profile-document-overflow>.setting-section{display:grid;grid-template-rows:auto minmax(0,1fr) auto;align-content:stretch}
+.profile-document-overflow .field{min-height:0}
+.profile-document-overflow textarea{box-sizing:border-box;width:100%;height:100%;min-height:18rem;padding:10px 11px;border:1px solid var(--line);border-radius:6px;outline:0;background:var(--surface-input);color:var(--text);font:13px/1.5 var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);resize:none}.profile-document-overflow textarea:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-subtle)}
+.settings-prototype-overflow>.saved-accordion{margin-top:0}
+.settings-prototype-overflow>.setting-section{margin:0}
+/* Dedicated overflow inventories are already disclosed by Columns 2 and 3. */
+.settings-overflow-content.memory-saved,
+.settings-overflow-content.model-saved{display:grid;align-content:start;gap:8px;margin:0;padding:0;border:0}
+.settings-overflow-content .settings-empty{min-height:100px}
+
+/* Four-column Settings workspace: one interface, four owned panes. */
+.settings-blank-slate{
+  grid-template-columns:minmax(0,.434fr) minmax(0,.434fr) minmax(0,1fr) minmax(0,1fr);
+  gap:0;
+  padding:22px;
+  overflow:hidden;
+  border:0;
+  border-radius:0;
+  background:transparent;
+}
+.settings-blank-column{
+  box-sizing:border-box;
+  min-height:0;
+  padding:16px;
+  border:0;
+  border-left:1px solid var(--line);
+  border-radius:0;
+  background:color-mix(in srgb,var(--panel) 88%,var(--surface-sunken));
+}
+.settings-blank-column:first-child{
+  border-left:1px solid var(--line);
+  border-radius:10px 0 0 10px;
+}
+.settings-blank-column:last-child{
+  border-right:1px solid var(--line);
+  border-radius:0 10px 10px 0;
+}
+.settings-prototype-menu,
+.settings-prototype-sections,
+.settings-prototype-configuration,
+.settings-prototype-overflow{
+  border-top:1px solid var(--line);
+  border-bottom:1px solid var(--line);
+}
+.settings-prototype-menu{
+  background:color-mix(in srgb,var(--surface-sunken) 58%,var(--panel));
+}
+.settings-prototype-sections{
+  background:color-mix(in srgb,var(--surface-sunken) 34%,var(--panel));
+}
+.settings-prototype-configuration,
+.settings-prototype-overflow{
+  background:var(--panel);
+}
+.settings-blank-column>strong{
+  display:flex;
+  align-items:center;
+  min-height:30px;
+  margin:0 0 12px;
+  padding:0 2px 10px;
+  border-bottom:1px solid var(--line-soft);
+  color:var(--muted);
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.09em;
+  text-transform:uppercase;
+}
+.settings-prototype-menu-items,
+.settings-prototype-section-items{
+  gap:3px;
+  margin-top:0;
+}
+.settings-prototype-menu-items button,
+.settings-prototype-section-items button{
+  min-height:38px;
+  border:0;
+  border-radius:6px;
+  background:transparent;
+}
+.settings-prototype-menu-items button:hover,
+.settings-prototype-section-items button:hover{
+  border:0;
+  background:var(--surface-hover);
+}
+.settings-prototype-menu-items button.active,
+.settings-prototype-section-items button.active{
+  border:0;
+  background:color-mix(in srgb,var(--accent) 16%,var(--panel));
+  box-shadow:inset 3px 0 0 var(--accent);
+  color:var(--text-strong);
+}
+.settings-prototype-configuration,
+.settings-prototype-overflow{
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+}
+.settings-prototype-configuration>.setting-section,
+.settings-prototype-configuration>.connections-stack>.connections-models-column>.setting-section,
+.settings-prototype-overflow .settings-overflow-content>.setting-section{
+  padding:0;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  box-shadow:none;
+}
+.settings-prototype-configuration>.setting-section>h2,
+.settings-prototype-configuration>.connections-stack>.connections-models-column>.setting-section>h2,
+.settings-prototype-overflow .settings-overflow-content>.setting-section>h2{
+  margin:0 0 14px;
+  padding:0 0 12px;
+  border-bottom:1px solid var(--line-soft);
+  font-size:14px;
+}
+.settings-prototype-overflow:has(.settings-overflow-content){
+  padding:16px;
+  border-top:1px solid var(--line);
+  border-right:1px solid var(--line);
+  border-bottom:1px solid var(--line);
+  border-left:1px solid var(--line);
+  border-radius:0 10px 10px 0;
+  background:var(--panel);
+}
+.settings-prototype-agent-selector{
+  margin:0 0 12px 12px;
+}
+.settings-prototype-agent-selector .agent-toolbar{
+  border-radius:8px;
+}
+.settings-blank-slate.has-agent-selector .settings-prototype-menu{
+  border-top:1px solid var(--line);
+}
+.settings-blank-slate.has-agent-selector>.settings-prototype-sections{
+  border-radius:10px 0 0 0;
+}
+@media(max-width:1000px){
+  .settings-blank-slate{grid-template-columns:150px 180px minmax(300px,1fr) minmax(260px,1fr);overflow-x:auto}
+}
+
+/* Settings prototype visual pass: four related cards directly on the app background. */
+.settings-blank-slate{
+  gap:14px;
+  padding:22px;
+  background:transparent;
+}
+.settings-blank-column,
+.settings-prototype-menu,
+.settings-prototype-sections,
+.settings-prototype-configuration,
+.settings-prototype-overflow,
+.settings-prototype-overflow:has(.settings-overflow-content){
+  box-sizing:border-box;
+  min-height:0;
+  padding:16px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--panel);
+  box-shadow:inset 0 1px 0 color-mix(in srgb,var(--text) 3%,transparent);
+}
+.settings-prototype-menu{
+  background:color-mix(in srgb,var(--surface-sunken) 48%,var(--panel));
+}
+.settings-prototype-sections{
+  background:color-mix(in srgb,var(--surface-sunken) 24%,var(--panel));
+}
+.settings-prototype-configuration,
+.settings-prototype-overflow,
+.settings-prototype-overflow:has(.settings-overflow-content){
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+}
+.settings-prototype-agent-selector{
+  margin:0;
+}
+.settings-prototype-agent-selector .agent-toolbar{
+  border-radius:10px;
+}
+.settings-blank-slate.has-agent-selector .settings-prototype-menu,
+.settings-blank-slate.has-agent-selector>.settings-prototype-sections{
+  border-radius:10px;
+}
+
+/* The Settings workspace is only a placement boundary. Its four columns own the surfaces. */
+.settings-workspace{
+  overflow:hidden;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  box-shadow:none;
+}
+.settings-blank-slate,
+.settings-blank-slate.has-agent-selector{
+  width:100%;
+  height:100%;
+  gap:8px;
+  padding:0;
+}
+.settings-blank-slate > .settings-blank-column{
+  border:1px solid var(--line);
+  border-radius:9px;
+  background:var(--panel);
+}
+
+/* Functional right-side panel experiment. Columns 1 and 2 keep their share;
+   opening the panel takes 20% from each working column. */
+.settings-blank-slate{
+  position:relative;
+  transition:grid-template-columns .24s cubic-bezier(.2,.75,.25,1);
+}
+.settings-blank-slate.has-utility-panel{
+  grid-template-columns:minmax(0,.434fr) minmax(0,.434fr) minmax(0,.8fr) minmax(0,.8fr) minmax(240px,.4fr);
+}
+.settings-utility-panel{
+  position:absolute;
+  top:0;
+  right:0;
+  bottom:0;
+  width:0;
+  min-width:0;
+  overflow:hidden;
+  visibility:hidden;
+  border:0;
+  border-radius:9px;
+  background:var(--panel);
+  opacity:0;
+  transform:translateX(24px);
+  transition:opacity .18s ease,transform .24s cubic-bezier(.2,.75,.25,1),visibility 0s linear .24s;
+}
+.has-utility-panel>.settings-utility-panel{
+  position:relative;
+  grid-column:5;
+  grid-row:1;
+  width:auto;
+  visibility:visible;
+  border:1px solid var(--line);
+  opacity:1;
+  transform:none;
+  transition:opacity .18s ease,transform .24s cubic-bezier(.2,.75,.25,1);
+}
+.has-agent-selector.has-utility-panel>.settings-utility-panel{grid-row:1 / span 2}
+.settings-utility-panel header{display:flex;align-items:center;justify-content:space-between;min-height:38px;padding:0 8px 0 12px;border-bottom:1px solid var(--line-soft);background:var(--panel-2);color:var(--muted);font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+.settings-utility-panel header button{display:grid;place-items:center;width:30px;height:30px;padding:0;border-radius:6px;color:var(--muted)}
+.settings-utility-panel header button:hover{background:var(--surface-hover);color:var(--text)}
+.settings-utility-panel-content{padding:16px;color:var(--muted);font-size:12px}
+.settings-utility-panel-content p{margin:0}
+.settings-utility-panel-toggle{position:absolute;z-index:4;top:8px;right:0;display:grid;place-items:center;width:30px;height:30px;padding:0;border:1px solid var(--line);border-right:0;border-radius:8px 0 0 8px;background:var(--panel-2);color:var(--muted);box-shadow:-4px 0 14px rgb(0 0 0 / 18%)}
+.settings-utility-panel-toggle:hover{color:var(--text);background:var(--surface-hover)}
+.has-utility-panel>.settings-prototype-agent-selector{grid-column:2 / 5}
+@media(prefers-reduced-motion:reduce){.settings-blank-slate,.settings-utility-panel{transition:none}}
+
+/* Settings system rail: dense operational visibility using existing runtime data. */
+.settings-utility-panel{min-height:0}
+.settings-utility-panel>.system-rail-content{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:10px;display:grid;align-content:start;gap:10px}
+.system-rail-summary,.system-rail-group{border:1px solid var(--line);border-radius:7px;background:var(--surface-raised)}
+.system-rail-summary{display:grid;gap:9px;padding:13px 14px}
+.system-rail-summary>div{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.system-rail-summary small{color:var(--muted);font-size:9px}
+.system-rail-summary strong{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:13px;text-transform:capitalize}
+.system-rail-summary strong span{color:var(--muted);font-family:var(--mono,monospace);font-size:10px;font-weight:600}
+.system-rail-status{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em}
+.system-rail-status i{width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.system-rail-status.healthy i{background:var(--success);box-shadow:0 0 8px color-mix(in srgb,var(--success) 55%,transparent)}
+.system-rail-status.error i{background:var(--danger)}
+.system-rail-group{display:grid;padding:13px 14px}
+.system-rail-group h3{margin:0 0 4px;padding:0 1px 8px;border-bottom:1px solid var(--line-soft);color:var(--muted);font-size:9px;font-weight:900;letter-spacing:.12em;text-transform:uppercase}
+.system-rail-stat{display:grid;gap:4px;padding:8px 1px;border-bottom:1px solid var(--line-soft)}
+.system-rail-stat:last-child{padding-bottom:1px;border-bottom:0}
+.system-rail-stat>div{display:flex;align-items:baseline;justify-content:space-between;gap:9px}
+.system-rail-stat span{color:var(--muted);font-size:10px}
+.system-rail-stat b{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--text);font-size:11px;text-align:right;white-space:nowrap}
+.system-rail-stat small{overflow-wrap:anywhere;color:var(--muted);font-size:9px;line-height:1.35;text-align:right}
+.system-rail-meter{display:block;height:3px;overflow:hidden;border-radius:999px;background:var(--surface-input)}
+.system-rail-meter i{display:block;height:100%;border-radius:inherit;background:var(--accent);transition:width .25s ease}
+.system-rail-meter.warning i{background:var(--warning,#f59e0b)}
+@media(prefers-reduced-motion:reduce){.system-rail-meter i{transition:none}}
