@@ -3,6 +3,7 @@ import { redactText } from './redaction.mjs';
 import { AgentRegistryStore } from './agent-registry.mjs';
 import { completeCurator, curatorRoot, readCuratorSelection } from './curator-runtime.mjs';
 import { openSettingsDatabase, settingsDatabasePath } from './settings-database.mjs';
+import { appendPreferenceSignal, normalizePreferenceSignal } from './preference-learning.mjs';
 
 const PASS_INTERVAL_MS = 4 * 60 * 60 * 1_000;
 const LOOKBACK_MS = 24 * 60 * 60 * 1_000;
@@ -61,8 +62,8 @@ export function parseTiddleProposal(value) {
   for (const candidate of candidates) {
     const proposal = parse(candidate);
     const action = text(proposal?.action).toUpperCase();
-    if (action === 'NOOP') return { action, reason: bounded(proposal.reason, 240) || 'no_warm_continuity' };
-    if (action === 'UPSERT' && text(proposal.title) && text(proposal.summary) && (proposal.targetId === null || text(proposal.targetId))) return { action, targetId: text(proposal.targetId) || null, title: bounded(proposal.title, 240), summary: bounded(proposal.summary, 2400), reason: bounded(proposal.reason, 240) || 'persistence across the window' };
+    if (action === 'NOOP') return { action, reason: bounded(proposal.reason, 240) || 'no_warm_continuity', preferenceSignal: normalizePreferenceSignal(proposal.preferenceSignal) };
+    if (action === 'UPSERT' && text(proposal.title) && text(proposal.summary) && (proposal.targetId === null || text(proposal.targetId))) return { action, targetId: text(proposal.targetId) || null, title: bounded(proposal.title, 240), summary: bounded(proposal.summary, 2400), reason: bounded(proposal.reason, 240) || 'persistence across the window', preferenceSignal: normalizePreferenceSignal(proposal.preferenceSignal) };
   }
   return null;
 }
@@ -92,15 +93,16 @@ function prompt({ agentId, scope, residue, cards }) {
     'You are Tiddle. You reconcile rolling conversational continuity on a four-hour cadence. Return JSON only; never address the user.',
     'Warm continuity means a concept persisted, resumed, or recurred across the window. A single vivid turn is not warmth. Default to NOOP.',
     'Do not create tasks, decisions, emotional/therapy notes, transcript summaries, raw tool dumps, verified external state, or instructions for the agent. This is recall metadata only.',
-    'Use UPSERT only when the supplied residue demonstrates a compact future-turn-relevant thread that persisted or recurred. If it is an existing concept, set targetId to that exact existing card id even if you improve its title. Set targetId:null only for a genuinely new concept. Output either {"action":"NOOP","reason":"..."} or {"action":"UPSERT","targetId":"existing-card-id-or-null","title":"...","summary":"...","reason":"..."}.',
+    'Separately, notice only a clear operator behavioral correction (especially an explicit correction). You may emit at most one preferenceSignal when grounded in this residue. It is an observation, never a profile edit. Do not infer a preference from mood, one-off task instructions, or generic conversation. Use {kind:reinforce|contradict|replace,scope,guidance,reason}.',
+    'Return JSON with the normal action fields and optional preferenceSignal. Use UPSERT only when the supplied residue demonstrates a compact future-turn-relevant thread that persisted or recurred. If it is an existing concept, set targetId to that exact existing card id even if you improve its title. Set targetId:null only for a genuinely new concept. Output either {"action":"NOOP","reason":"..."} or {"action":"UPSERT","targetId":"existing-card-id-or-null","title":"...","summary":"...","reason":"..."}.',
     `Agent: ${agentId}; continuity scope: ${scope}`,
     `Existing warm cards: ${JSON.stringify(cards.map((card) => ({ id: card.id, title: card.title, summary: card.summary, recurrence: card.recurrence, lastSeen: card.lastSeen })).slice(0, 24))}`,
     `24-hour context residue (newSinceLastPass marks what arrived after the prior successful pass): ${JSON.stringify(residue.map((item) => ({ ref: item.ref, at: item.at, newSinceLastPass: item.newSinceLastPass === true, sessionId: item.sessionId, message: item.message, answer: item.answer, tools: item.tools })).slice(0, 48))}`,
   ].join('\n\n');
 }
 function schema() { return { oneOf: [
-  { type: 'object', additionalProperties: false, required: ['action', 'reason'], properties: { action: { const: 'NOOP' }, reason: { type: 'string', minLength: 8, maxLength: 240 } } },
-  { type: 'object', additionalProperties: false, required: ['action', 'targetId', 'title', 'summary', 'reason'], properties: { action: { const: 'UPSERT' }, targetId: { anyOf: [{ type: 'null' }, { type: 'string', minLength: 1, maxLength: 120 }] }, title: { type: 'string', minLength: 1, maxLength: 240 }, summary: { type: 'string', minLength: 1, maxLength: 2400 }, reason: { type: 'string', minLength: 8, maxLength: 240 } } },
+  { type: 'object', additionalProperties: false, required: ['action', 'reason'], properties: { action: { const: 'NOOP' }, reason: { type: 'string', minLength: 8, maxLength: 240 }, preferenceSignal: { type: 'object', additionalProperties: false, required: ['kind','scope','guidance','reason'], properties: { kind: { enum: ['reinforce','contradict','replace'] }, scope: { type: 'string', minLength: 1, maxLength: 120 }, guidance: { type: 'string', minLength: 1, maxLength: 600 }, reason: { type: 'string', minLength: 1, maxLength: 240 } } } } },
+  { type: 'object', additionalProperties: false, required: ['action', 'targetId', 'title', 'summary', 'reason'], properties: { action: { const: 'UPSERT' }, targetId: { anyOf: [{ type: 'null' }, { type: 'string', minLength: 1, maxLength: 120 }] }, title: { type: 'string', minLength: 1, maxLength: 240 }, summary: { type: 'string', minLength: 1, maxLength: 2400 }, reason: { type: 'string', minLength: 8, maxLength: 240 }, preferenceSignal: { type: 'object', additionalProperties: false, required: ['kind','scope','guidance','reason'], properties: { kind: { enum: ['reinforce','contradict','replace'] }, scope: { type: 'string', minLength: 1, maxLength: 120 }, guidance: { type: 'string', minLength: 1, maxLength: 600 }, reason: { type: 'string', minLength: 1, maxLength: 240 } } } } },
 ] }; }
 
 function synthesisCandidates(db, agentId, at) {
@@ -226,6 +228,7 @@ export async function runTiddlePass({ agentId, databasePath = null, runtimeRoot 
       const cards = activeCards(db, id, scope, at);
       const completion = await completeCurator({ selection, databasePath, settingsKey, root: curatorRoot({ runtimeRoot: runtimeRoot || undefined }), prompt: prompt({ agentId: id, scope, residue: items.map((item) => ({ ...item, newSinceLastPass: newRefs.has(item.ref) })), cards }), jsonSchema: schema(), traceLogger });
       const proposal = parseTiddleProposal(completion?.choice?.text);
+      const observedPreference = proposal?.preferenceSignal ? appendPreferenceSignal({ databasePath, agentId: id, signal: { ...proposal.preferenceSignal, sourceRefs: [...newRefs] }, at }) : null;
       const cardUpdate = proposal?.action === 'UPSERT' ? { agentId: id, scope, proposal, residue: items, at } : null;
       const update = commitScopePass(db, { agentId: id, scope, at, cardUpdate, entry: (cardUpdateResult) => {
         const card = cardUpdateResult?.card || null;
@@ -235,7 +238,7 @@ export async function runTiddlePass({ agentId, databasePath = null, runtimeRoot 
       } });
       const card = update?.card || null;
       const disposition = card ? (update.prior ? 'updated' : 'created') : 'noop';
-      outcomes.push({ scope, contextResidueCount: items.length, newResidueCount: newRefs.size, disposition, card: card ? { id: card.id, title: card.title, recurrence: card.recurrence } : null });
+      outcomes.push({ scope, contextResidueCount: items.length, newResidueCount: newRefs.size, disposition, preferenceSignal: observedPreference ? { id: observedPreference.id, scope: observedPreference.scope } : null, card: card ? { id: card.id, title: card.title, recurrence: card.recurrence } : null });
     }
     const receipt = { version: 1, ok: true, runId, agentId: id, generatedAt: at, contextWindowStart: contextStart, windowHours: 24, passHours: 4, model: selectionIdentity(selection), scopes: outcomes, residueCount: newResidueCount, nextRunAt: iso(new Date(at).getTime() + PASS_INTERVAL_MS) };
     setMeta(db, passKey(id), { version: 1, agentId: id, lastSuccessAt: at, nextRunAt: receipt.nextRunAt, updatedAt: at }, at);

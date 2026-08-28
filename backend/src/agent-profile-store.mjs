@@ -1,7 +1,7 @@
 import { openSettingsDatabase, settingsDatabasePath } from './settings-database.mjs';
 
-export const AGENT_PROFILE_KINDS = Object.freeze(['SOUL', 'RULES', 'ORIENTATION', 'TOOLS', 'DREAM_MEMORY']);
-const PROFILE_KIND_NAMES = Object.freeze({ DREAMMEMORY: 'DREAM_MEMORY' });
+export const AGENT_PROFILE_KINDS = Object.freeze(['SOUL', 'RULES', 'ORIENTATION', 'PREFERENCES', 'TOOLS', 'DREAM_MEMORY']);
+const PROFILE_KIND_NAMES = Object.freeze({ DREAMMEMORY: 'DREAM_MEMORY', PREFERENCESMD: 'PREFERENCES' });
 const MAX_DOCUMENT_CHARS = 48_000;
 const text = (value) => String(value ?? '').trim();
 const now = () => new Date().toISOString();
@@ -44,7 +44,7 @@ export class AgentProfileStore {
     const id = agentId(agent);
     if (!this.db.prepare('SELECT id FROM agents WHERE id=?').get(id)) throw new Error('agent_not_found');
     return this.db.prepare(`SELECT kind,markdown,created_at,updated_at FROM agent_profile_documents
-      WHERE agent_id=? ORDER BY CASE kind WHEN 'SOUL' THEN 0 WHEN 'RULES' THEN 1 WHEN 'ORIENTATION' THEN 2 WHEN 'TOOLS' THEN 3 WHEN 'DREAM_MEMORY' THEN 4 END`).all(id).map(document);
+      WHERE agent_id=? ORDER BY CASE kind WHEN 'SOUL' THEN 0 WHEN 'RULES' THEN 1 WHEN 'ORIENTATION' THEN 2 WHEN 'PREFERENCES' THEN 3 WHEN 'TOOLS' THEN 4 WHEN 'DREAM_MEMORY' THEN 5 END`).all(id).map(document);
   }
   get(agent, documentKind) {
     return document(this.db.prepare('SELECT kind,markdown,created_at,updated_at FROM agent_profile_documents WHERE agent_id=? AND kind=?').get(agentId(agent), kind(documentKind)));
@@ -70,6 +70,9 @@ export class AgentProfileStore {
     const byKind = new Map((Array.isArray(documents) ? documents : []).map((item) => [String(item?.kind || '').toUpperCase(), String(item?.markdown || '')]));
     return this.replace(id, AGENT_PROFILE_KINDS.map((documentKind) => ({ kind: documentKind, markdown: byKind.get(documentKind) || '' })));
   }
+  replacePreferences(agent, value) {
+    return this.replaceSingle(agent, 'PREFERENCES', value);
+  }
   replaceTools(agent, value) {
     return this.replaceSingle(agent, 'TOOLS', value);
   }
@@ -91,7 +94,7 @@ export class AgentProfileStore {
 export function profileFilesFromDocuments(documents = [], { agentId: owningAgentId = null } = {}) {
   const byKind = new Map((Array.isArray(documents) ? documents : []).map((item) => [item.kind, item]));
   const files = AGENT_PROFILE_KINDS.map((documentKind) => byKind.get(documentKind)).filter(Boolean).map((item) => {
-    const displayName = item.kind === 'DREAM_MEMORY' ? 'DreamMemory' : item.kind;
+    const displayName = item.kind === 'DREAM_MEMORY' ? 'DreamMemory' : item.kind === 'PREFERENCES' ? 'PREFERENCES' : item.kind;
     return { id: displayName.toLowerCase(), name: `${displayName}.md`, path: `sqlite:agent_profile_documents/${owningAgentId || 'agent'}/${item.kind}`, content: item.markdown, chars: item.markdown.length };
   });
   return { profileDir: 'sqlite:agent_profile_documents', files, chars: files.reduce((total, file) => total + file.chars, 0) };

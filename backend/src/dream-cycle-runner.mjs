@@ -9,6 +9,7 @@ import { createModelAdapter } from './model-adapter.mjs';
 import { nextCronOccurrence } from './scheduled-job-store.mjs';
 import { openSettingsDatabase, settingsDatabasePath, withSettingsTransaction } from './settings-database.mjs';
 import { WorkingMemoryStore } from './working-memory-store.mjs';
+import { applyPreferenceUpdate, parsePreferenceAdjudication, preferenceAdjudicationPrompt, preferenceLearningState, preferenceSignals, validatePreferenceAdjudication } from './preference-learning.mjs';
 
 const PHASES = Object.freeze(['light', 'rem', 'deep']);
 const DEFAULT_LIMIT = 12;
@@ -110,6 +111,27 @@ function phaseWindowStart({ phase, generatedAt }) {
   return new Date(new Date(generatedAt).getTime() - days * 24 * 60 * 60 * 1000).toISOString();
 }
 
+async function adjudicatePreferences({ agentId, profileStore, databasePath, generatedAt, modelAdapter = null, modelConfig = null, traceLogger = null } = {}) {
+  const state = preferenceLearningState({ agentId, databasePath });
+  const signals = preferenceSignals({ agentId, databasePath, since: state.lastSignalAt, limit: 100 });
+  if (!signals.length) return { disposition: 'no_new_signals', signalCount: 0 };
+  let adapter = modelAdapter; let config = modelConfig;
+  try {
+    if (!adapter) {
+      config = config || await resolveModelConfig({ agentId, settingsDb: databasePath });
+      if (!config?.model) return { disposition: 'model_unavailable', signalCount: signals.length };
+      adapter = createModelAdapter({ config: { ...config, temperature: 0, reasoningEffort: 'off' } });
+    }
+    const current = profileStore.get(agentId, 'PREFERENCES')?.markdown || '# Operator Preferences';
+    const result = await adapter.complete({ messages: [{ role: 'user', content: preferenceAdjudicationPrompt({ preferences: current, signals }) }], traceLogger });
+    const proposal = parsePreferenceAdjudication(modelText(result));
+    const validation = validatePreferenceAdjudication({ proposal, signals });
+    if (!validation.ok || validation.disposition === 'noop') return { disposition: validation.ok ? 'noop' : 'rejected', signalCount: signals.length, reason: validation.reason || proposal?.reason || null };
+    const update = applyPreferenceUpdate({ agentId, markdown: proposal.markdown, sourceSignals: validation.signals, profileStore, databasePath, at: generatedAt });
+    return { disposition: update.applied ? 'updated' : update.reason, signalCount: signals.length, signalIds: validation.signals.map((signal) => signal.id) };
+  } catch (error) { return { disposition: 'failed', signalCount: signals.length, reason: String(error?.message || error) }; }
+}
+
 function phaseInput({ phase, items, limit = DEFAULT_LIMIT }) {
   if (phase === 'light') return items.slice(0, Math.max(1, Math.min(24, Number(limit) || DEFAULT_LIMIT)));
   if (phase === 'rem') return items.slice(0, Math.max(1, Math.min(18, Number(limit) || DEFAULT_LIMIT)));
@@ -207,10 +229,11 @@ export async function runDreamCycle({ agentId, databasePath = null, rootDir = nu
       phaseResults.push({ phase, inspected: sourceItems.length, recorded, summary, diaryId: diary.id });
     }
     const consolidation = consolidateDreamMemory({ agentId: id, databasePath, limit, generatedAt, items: dreamMemoryCandidates });
+    const preferences = await adjudicatePreferences({ agentId: id, profileStore, databasePath, generatedAt, modelAdapter, modelConfig, traceLogger });
     const nextRunAt = nextCronOccurrence(settings.cron, settings.timezone, new Date(generatedAt));
     const state = { version: 1, agentId: id, enabled: true, cron: settings.cron, timezone: settings.timezone, nextRunAt, lastRunAt: generatedAt, updatedAt: generatedAt };
     db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`).run(phaseState(id), json(state), generatedAt);
-    const receipt = { version: 1, ok: true, runId, agentId: id, phases: phaseResults, dreamMemoryItemCount: consolidation.itemCount, nextRunAt, generatedAt };
+    const receipt = { version: 1, ok: true, runId, agentId: id, phases: phaseResults, dreamMemoryItemCount: consolidation.itemCount, preferences, nextRunAt, generatedAt };
     db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?)`).run(receiptState(id, runId), json(receipt), generatedAt);
     return receipt;
   } catch (error) {

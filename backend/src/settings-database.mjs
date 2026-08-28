@@ -45,7 +45,7 @@ export const SETTINGS_OWNERSHIP = Object.freeze([
   Object.freeze({ id: 'model-connections', authority: 'sqlite', storage: 'model_connections', surface: 'model-settings-api', migration: 'complete', notes: 'Connection metadata, enabled models, and encrypted API keys; normal chat resolves by SQLite ID.' }),
   Object.freeze({ id: 'chat-identities', authority: 'sqlite', storage: 'chat_identities', surface: 'chat-identity-api', migration: 'complete', notes: 'Operator and agent display identities.' }),
   Object.freeze({ id: 'agent-registry', authority: 'sqlite', storage: 'agents', surface: 'agent-registry-api', migration: 'complete', notes: 'Agent records and bounded context configuration.' }),
-  Object.freeze({ id: 'agent-profile-documents', authority: 'sqlite', storage: 'agent_profile_documents', surface: 'agent-profile-documents-api', migration: 'complete', notes: 'Per-agent virtual Markdown prompt documents: SOUL, RULES, ORIENTATION, TOOLS, and DreamMemory.' }),
+  Object.freeze({ id: 'agent-profile-documents', authority: 'sqlite', storage: 'agent_profile_documents', surface: 'agent-profile-documents-api', migration: 'complete', notes: 'Per-agent virtual Markdown prompt documents: SOUL, RULES, ORIENTATION, PREFERENCES, TOOLS, and DreamMemory.' }),
   Object.freeze({ id: 'dream-diary', authority: 'sqlite', storage: 'dream_diary_entries', surface: 'dream-diary-store', migration: 'complete', notes: 'Per-agent operator-facing DreamDiary narrative entries; not loaded into agent prompt context.' }),
   Object.freeze({ id: 'dream-settings', authority: 'sqlite', storage: 'dream_settings', surface: 'dream-settings-api', migration: 'complete', notes: 'Operator-owned Dream enablement, schedule, timezone, and editable prompt.' }),
   Object.freeze({ id: 'runtime-ui-context-settings', authority: 'service-environment', storage: 'service environment', surface: 'deployment', migration: 'complete', notes: 'Deployment paths and listener settings are service-environment owned.' }),
@@ -453,6 +453,27 @@ DreamDiary is for the operator: readable narrative reflection, never prompt auth
     body: 'CREATE UNIQUE INDEX IF NOT EXISTS scheduled_job_runs_occurrence_uq ON scheduled_job_runs(job_id,scheduled_for);',
     apply(db) {
       const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='scheduled_job_runs'").get();
+      if (table) db.exec(this.body);
+    },
+  },
+  {
+    version: 31,
+    name: 'agent-profile-preferences-document',
+    body: `CREATE TABLE agent_profile_documents_v31 (
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK(kind IN ('SOUL','RULES','ORIENTATION','PREFERENCES','TOOLS','DREAM_MEMORY')),
+      markdown TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      PRIMARY KEY(agent_id,kind)
+    );
+    INSERT INTO agent_profile_documents_v31 (agent_id,kind,markdown,created_at,updated_at)
+      SELECT agent_id,kind,markdown,created_at,updated_at FROM agent_profile_documents;
+    INSERT INTO agent_profile_documents_v31 (agent_id,kind,markdown,created_at,updated_at)
+      SELECT id,'PREFERENCES','# PREFERENCES\n\nCurrent operator-specific working preferences. Operator edits are authoritative. This document contains current guidance only; no audit history.\n',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP FROM agents
+      WHERE NOT EXISTS (SELECT 1 FROM agent_profile_documents_v31 WHERE agent_id=agents.id AND kind='PREFERENCES');
+    DROP TABLE agent_profile_documents;
+    ALTER TABLE agent_profile_documents_v31 RENAME TO agent_profile_documents;`,
+    apply(db) {
+      const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_profile_documents'").get();
       if (table) db.exec(this.body);
     },
   },
