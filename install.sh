@@ -12,6 +12,7 @@ ASSUME_YES=0
 INSTALL_NODE=0
 RESTART_SERVICE=0
 VERBOSE=0
+MANAGED_RUNTIME_STOPPED=0
 usage() { cat <<USAGE
 Usage: install.sh [options]
   --dir PATH                    installation and durable-state root
@@ -90,7 +91,22 @@ verbose_log() {
   [ "$VERBOSE" -eq 1 ] || return 0
   printf '%s %s\n' "Burrow update [$(date -u +%Y-%m-%dT%H:%M:%SZ)]" "$*"
 }
-cleanup() { [ -z "$TMP_ROOT" ] || rm -rf "$TMP_ROOT"; }
+cleanup() {
+  status=$?
+  # Once an update has stopped a managed runtime, never leave it down merely
+  # because the updater was interrupted or a later activation check failed.
+  # The app switch is atomic, so starting here always runs either the intact
+  # prior payload or the fully activated replacement.
+  if [ "$RESTART_SERVICE" -eq 1 ] && [ "$MANAGED_RUNTIME_STOPPED" -eq 1 ]; then
+    unit_state=$(user_systemctl is-active burrow.service 2>/dev/null || true)
+    if [ "$unit_state" != active ]; then
+      update_log "restoring managed service after interrupted update..."
+      user_systemctl start burrow.service >/dev/null 2>&1 || true
+    fi
+  fi
+  [ -z "$TMP_ROOT" ] || rm -rf "$TMP_ROOT"
+  exit "$status"
+}
 trap cleanup EXIT HUP INT TERM
 
 node_is_supported() {
@@ -358,6 +374,7 @@ if [ "$RESTART_SERVICE" -eq 1 ]; then
   update_log "stopping managed service..."
   previous_invocation=$(user_systemctl show burrow.service -p InvocationID --value 2>/dev/null || true)
   stop_managed_runtime
+  MANAGED_RUNTIME_STOPPED=1
 fi
 
 # Replace the service launcher atomically. The running service and an update
@@ -454,12 +471,19 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
   done
   rmdir "$INSTALL_DIR/app/integrations" 2>/dev/null || true
 fi
-rm -rf "$PREVIOUS"
 if [ "$RESTART_SERVICE" -eq 1 ]; then
   update_log "starting managed service..."
-  verbose_log "starting burrow.service"
+  verbose_log "starting burrow.service immediately after atomic payload activation"
   user_systemctl start burrow.service
   verify_restarted_runtime "$previous_invocation"
+  MANAGED_RUNTIME_STOPPED=0
+fi
+# Deleting the prior app can take tens of seconds when it contains installed
+# dependencies. It is cleanup, not activation; never hold runtime downtime
+# hostage to recursive deletion.
+if [ -d "$PREVIOUS" ]; then
+  verbose_log "cleaning previous application payload after service recovery"
+  rm -rf "$PREVIOUS"
 fi
 verbose_log "activation complete"
 printf "%s\\n" "Burrow install: ok" "Home: $INSTALL_DIR" "Application: $INSTALL_DIR/app" "State: $INSTALL_DIR/{config,workspace,agentdata,cache}" "Run: $INSTALL_DIR/bin/burrow serve" "Update: $INSTALL_DIR/bin/burrow update"
