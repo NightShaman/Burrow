@@ -439,14 +439,13 @@ export async function runSpawnSubagentChild({
   const toolResults = [];
   let current = first;
   let terminalResult = terminalResultFromToolCalls(firstToolCalls, { toolResults, target });
-  const maxToolRounds = 6;
   const forcedContinuations = new Map();
-  for (let round = 0; round < maxToolRounds && !terminalResult; round += 1) {
+  for (let round = 0; !terminalResult; round += 1) {
     let toolCalls = choiceToolCalls(current.choice);
     terminalResult = terminalResultFromToolCalls(toolCalls, { toolResults, target });
     if (terminalResult) break;
     if (!toolCalls.length) {
-      const forced = round < maxToolRounds - 1 ? continuationToolCallsForTruncatedEvidence(toolResults, forcedContinuations) : [];
+      const forced = continuationToolCallsForTruncatedEvidence(toolResults, forcedContinuations);
       if (!forced.length) break;
       toolCalls = forced;
     }
@@ -458,10 +457,10 @@ export async function runSpawnSubagentChild({
       rootDir: dataRoot, sessionId: childSessionId, runId: id, traceDir, iteration: round + 1,
       toolCalls, toolResults: batch.results, activitySequence,
     });
-    const allowMoreTools = round < maxToolRounds - 1;
+    const allowMoreTools = true;
     const nativeContinuation = Boolean(current.choice?.toolCalls?.length && typeof adapter.continueWithToolResults === 'function');
     await progress?.({ type: 'subagent-progress', phase: 'model-request', id });
-    const continuationTools = allowMoreTools ? subagentToolSchemas() : null;
+    const continuationTools = subagentToolSchemas();
     let next;
     try {
       const preparedContinuation = nativeContinuation
@@ -522,13 +521,6 @@ export async function runSpawnSubagentChild({
     await updateSubagentStatus({ dataRoot, id, status, phase: 'idle', result: terminalResult, provenance: { source: 'spawn-subagent-child', reason: terminalResult.ok ? 'terminal_completed' : 'terminal_not_completed' } });
     await writeSessionMetadata({ rootDir: dataRoot, sessionId: childSessionId, extra: { sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: status, subagentOk: terminalResult.ok, workerProfile: 'spawn_subagent' } });
     return terminalResult;
-  }
-
-  if (choiceToolCalls(current.choice).length) {
-    const result = subagentEmptyFinalResult({ toolResults, target, reason: 'subagent_tool_round_limit_reached' });
-    await updateSubagentStatus({ dataRoot, id, status: 'failed', phase: 'idle', result, provenance: { source: 'spawn-subagent-child', reason: 'tool_round_limit_reached' } });
-    await writeSessionMetadata({ rootDir: dataRoot, sessionId: childSessionId, extra: { sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: 'failed', subagentOk: false, workerProfile: 'spawn_subagent' } });
-    return result;
   }
 
   await progress?.({ type: 'subagent-progress', phase: 'terminal-request', id });
