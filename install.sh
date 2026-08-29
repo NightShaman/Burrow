@@ -288,8 +288,11 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
   # These are runtime-owned integrations, not application dependencies. Stage
   # them before activation so a failed install cannot leave a partial runtime.
   mkdir -p "$STAGING/integrations/mcporter" "$STAGING/integrations/claude-code"
+  echo "Burrow update: staging backend runtime dependencies..."
   (cd "$STAGING/backend" && npm ci --omit=dev --no-audit --no-fund --loglevel=error && node -e "import('node-llama-cpp')")
+  echo "Burrow update: staging MCP integration..."
   npm install --prefix "$STAGING/integrations/mcporter" --omit=dev --no-package-lock --no-save --no-audit --no-fund --loglevel=error mcporter@0.13.7
+  echo "Burrow update: staging Claude Code integration..."
   cat > "$STAGING/integrations/claude-code/package.json" <<'PACKAGE'
 {
   "private": true,
@@ -298,7 +301,18 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
 }
 PACKAGE
   npm install --prefix "$STAGING/integrations/claude-code" --omit=dev --no-package-lock --ignore-scripts=false --no-audit --no-fund --loglevel=error
-  "$STAGING/integrations/claude-code/node_modules/.bin/claude" --version >/dev/null
+  echo "Burrow update: validating Claude Code integration..."
+  command -v timeout >/dev/null 2>&1 || { echo "Burrow update: timeout is required to validate Claude Code safely." >&2; exit 1; }
+  timeout 15s "$STAGING/integrations/claude-code/node_modules/.bin/claude" --version >/dev/null
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    if [ "$status" -eq 124 ]; then
+      echo "Burrow update: Claude Code validation timed out after 15 seconds; staged payload was not activated." >&2
+    else
+      echo "Burrow update: Claude Code validation failed (exit $status); staged payload was not activated." >&2
+    fi
+    exit 1
+  fi
 fi
 ENV_FILE="$INSTALL_DIR/burrow.env"
 if [ ! -f "$ENV_FILE" ]; then
