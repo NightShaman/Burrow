@@ -465,8 +465,11 @@ mv -f "$WRAPPER_TMP" "$INSTALL_DIR/bin/burrow"
 [ ! -d "$INSTALL_DIR/app" ] || mv "$INSTALL_DIR/app" "$PREVIOUS"
 if ! mv "$STAGING" "$INSTALL_DIR/app"; then [ ! -d "$PREVIOUS" ] || mv "$PREVIOUS" "$INSTALL_DIR/app"; echo "Burrow install: could not activate new app payload." >&2; exit 1; fi
 if [ "$INSTALL_DEPS" -eq 1 ]; then
+  # Installed integrations are dependency trees too. Renaming the prior trees
+  # is atomic; recursively deleting them here would prolong service downtime.
+  mkdir -p "$PREVIOUS/integrations"
   for integration in mcporter claude-code; do
-    rm -rf "$INSTALL_DIR/integrations/$integration"
+    [ ! -d "$INSTALL_DIR/integrations/$integration" ] || mv "$INSTALL_DIR/integrations/$integration" "$PREVIOUS/integrations/$integration"
     mv "$INSTALL_DIR/app/integrations/$integration" "$INSTALL_DIR/integrations/$integration"
   done
   rmdir "$INSTALL_DIR/app/integrations" 2>/dev/null || true
