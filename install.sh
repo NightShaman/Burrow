@@ -11,6 +11,7 @@ PURGE=0
 ASSUME_YES=0
 INSTALL_NODE=0
 RESTART_SERVICE=0
+VERBOSE=0
 usage() { cat <<USAGE
 Usage: install.sh [options]
   --dir PATH                    installation and durable-state root
@@ -21,6 +22,7 @@ Usage: install.sh [options]
   --uninstall                   remove installed application files
   --purge                       with --uninstall, also remove all durable state
   --yes                         do not prompt for uninstall confirmation
+  --verbose, -v                 show timestamped update diagnostics
   --help                        show this help
 Install:   curl -fsSL https://raw.githubusercontent.com/${REPOSITORY}/main/install.sh | sh
 Update:    ~/.burrow/bin/burrow update
@@ -40,6 +42,7 @@ while [ "$#" -gt 0 ]; do
     --uninstall) UNINSTALL=1; shift ;;
     --purge) PURGE=1; shift ;;
     --yes|-y) ASSUME_YES=1; shift ;;
+    --verbose|-v) VERBOSE=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Burrow install: unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -82,6 +85,11 @@ if [ "$UNINSTALL" -eq 1 ]; then
 fi
 
 TMP_ROOT=""
+update_log() { printf '%s\n' "Burrow update: $*"; }
+verbose_log() {
+  [ "$VERBOSE" -eq 1 ] || return 0
+  printf '%s %s\n' "Burrow update [$(date -u +%Y-%m-%dT%H:%M:%SZ)]" "$*"
+}
 cleanup() { [ -z "$TMP_ROOT" ] || rm -rf "$TMP_ROOT"; }
 trap cleanup EXIT HUP INT TERM
 
@@ -169,6 +177,7 @@ prepare_service_restart() {
   command -v systemctl >/dev/null 2>&1 || { echo "Burrow update: a Burrow user service exists but systemctl is unavailable; refusing an update that cannot restart it." >&2; exit 1; }
   user_systemctl show-environment >/dev/null 2>&1 || { echo "Burrow update: could not reach the Burrow user-service manager; refusing an update that cannot restart it." >&2; exit 1; }
   RESTART_SERVICE=1
+  verbose_log "managed service detected: $SERVICE_UNIT"
 }
 
 runtime_endpoint() {
@@ -186,11 +195,13 @@ listening_port_owner() {
 
 stop_managed_runtime() {
   runtime_endpoint
+  verbose_log "stopping burrow.service (listener: ${host}:${port})"
   user_systemctl stop burrow.service
   for attempt in $(seq 1 10); do
     unit_state=$(user_systemctl is-active burrow.service 2>/dev/null || true)
     port_owner=$(listening_port_owner || true)
-    [ "$unit_state" != active ] && [ -z "$port_owner" ] && return 0
+    verbose_log "stop check $attempt/10: unit=${unit_state:-unknown}; listener=${port_owner:-none}"
+    [ "$unit_state" != active ] && [ -z "$port_owner" ] && { verbose_log "managed runtime stopped and listener cleared"; return 0; }
     sleep 1
   done
   echo "Burrow update: service did not stop cleanly within 10 seconds (state: ${unit_state:-unknown}; listener: ${port_owner:-none}). Refusing to activate a payload over a live runtime." >&2
@@ -204,6 +215,7 @@ verify_restarted_runtime() {
   [ -n "$expected_version" ] || expected_version=$(node -p "require('$INSTALL_DIR/app/backend/package.json').version")
   runtime_endpoint
   previous_invocation=${1:-}
+  verbose_log "waiting for new service invocation after ${previous_invocation:-none}; expected build $expected_version"
   last_unit_state=unknown
   last_health=unreachable
   for attempt in $(seq 1 15); do
@@ -212,7 +224,8 @@ verify_restarted_runtime() {
     if [ "$last_unit_state" = active ] && { [ -z "$previous_invocation" ] || [ "$current_invocation" != "$previous_invocation" ]; }; then
       last_health=$(curl -fsS --max-time 2 "http://$host:$port/api/health" 2>/dev/null || true)
       health_version=$(printf '%s' "$last_health" | node -e 'let body=""; process.stdin.on("data", chunk => { body += chunk; }).on("end", () => { try { process.stdout.write(String(JSON.parse(body).version || "")); } catch {} });')
-      [ "$health_version" = "$expected_version" ] && return 0
+      verbose_log "start check $attempt/15: invocation=${current_invocation:-unknown}; health_version=${health_version:-none}"
+      [ "$health_version" = "$expected_version" ] && { verbose_log "service healthy on build $health_version"; return 0; }
     fi
     sleep 1
   done
@@ -232,12 +245,15 @@ verify_restarted_runtime() {
 if [ -z "$SOURCE_DIR" ]; then
   command -v curl >/dev/null 2>&1 || { echo "Burrow install: curl is required." >&2; exit 1; }
   TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/burrow-install.XXXXXX")
+  verbose_log "created temporary staging root"
   # Resolve main through GitHub's commit API, then download that immutable
   # codeload archive. `archive/refs/heads/main` is CDN-cached and can lag a
   # completed assembly by minutes, leaving an update to reinstall stale code.
   assembly_sha=$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${REPOSITORY}/commits/main" | node -e 'let body=""; process.stdin.on("data", chunk => { body += chunk; }).on("end", () => { try { const sha=JSON.parse(body).sha; if (/^[0-9a-f]{40}$/i.test(sha || "")) process.stdout.write(sha); } catch {} });')
   [ -n "$assembly_sha" ] || { echo "Burrow install: could not resolve the current GitHub assembly commit." >&2; exit 1; }
-  echo "Burrow update: downloading assembly $assembly_sha"
+  update_log "downloading assembly $assembly_sha"
+  verbose_log "resolved immutable GitHub assembly commit $assembly_sha"
+  verbose_log "downloading immutable assembly archive from codeload.github.com"
   curl -fsSL "https://codeload.github.com/${REPOSITORY}/tar.gz/$assembly_sha" -o "$TMP_ROOT/burrow.tar.gz"
   tar -xzf "$TMP_ROOT/burrow.tar.gz" -C "$TMP_ROOT"
   SOURCE_DIR=$(find "$TMP_ROOT" -mindepth 1 -maxdepth 1 -type d -name "Burrow-*" | head -n 1)
@@ -255,6 +271,7 @@ if [ -n "${BURROW_INSTALL_TEST_ROOT:-}" ]; then
   case "${XDG_RUNTIME_DIR:-}" in "$TEST_ROOT"|"$TEST_ROOT"/*) ;; *) echo "Burrow install: test isolation requires XDG_RUNTIME_DIR beneath BURROW_INSTALL_TEST_ROOT." >&2; exit 1 ;; esac
 fi
 prepare_service_restart
+verbose_log "install root prepared; source mode=${SOURCE_DIR:+assembled}"
 # An update is entered through the absolute launcher, but package lifecycle
 # scripts may invoke `burrow`. Keep the active installation launcher visible
 # throughout staging rather than depending on a login-shell PATH.
@@ -264,6 +281,7 @@ case ":$PATH:" in
 esac
 mkdir -p "$INSTALL_DIR/config" "$INSTALL_DIR/workspace" "$INSTALL_DIR/agentdata" "$INSTALL_DIR/cache" "$INSTALL_DIR/reports" "$INSTALL_DIR/integrations" "$INSTALL_DIR/bin"
 STAGING="$INSTALL_DIR/.app-staging-$$"
+verbose_log "staging application payload"
 PREVIOUS="$INSTALL_DIR/.app-previous"
 rm -rf "$STAGING" "$PREVIOUS"; mkdir -p "$STAGING"
 cp -R "$SOURCE_DIR/backend" "$STAGING/backend"
@@ -277,9 +295,11 @@ if [ "$MODE" = "ui" ]; then
   # those immutable assets, not reinstall 129 packages and rebuild Vite on the
   # live host. Source-directory installs retain the build fallback.
   if [ -d "$SOURCE_DIR/ui/dist" ]; then
+    verbose_log "using prebuilt UI assets from assembly"
     mkdir -p "$STAGING/backend/public/ui"
     cp -R "$SOURCE_DIR/ui/dist/." "$STAGING/backend/public/ui/"
   elif [ "$INSTALL_DEPS" -eq 1 ]; then
+    verbose_log "building UI because source has no prebuilt assets"
     (cd "$STAGING/ui" && npm ci --no-audit --no-fund --loglevel=error && npm run build --silent)
     mkdir -p "$STAGING/backend/public/ui"; cp -R "$STAGING/ui/dist/." "$STAGING/backend/public/ui/"
   fi
@@ -288,11 +308,14 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
   # These are runtime-owned integrations, not application dependencies. Stage
   # them before activation so a failed install cannot leave a partial runtime.
   mkdir -p "$STAGING/integrations/mcporter" "$STAGING/integrations/claude-code"
-  echo "Burrow update: staging backend runtime dependencies..."
+  update_log "staging backend runtime dependencies..."
+  verbose_log "running backend npm ci (production dependencies only)"
   (cd "$STAGING/backend" && npm ci --omit=dev --no-audit --no-fund --loglevel=error && node -e "import('node-llama-cpp')")
-  echo "Burrow update: staging MCP integration..."
+  update_log "staging MCP integration..."
+  verbose_log "installing pinned mcporter integration"
   npm install --prefix "$STAGING/integrations/mcporter" --omit=dev --no-package-lock --no-save --no-audit --no-fund --loglevel=error mcporter@0.13.7
-  echo "Burrow update: staging Claude Code integration..."
+  update_log "staging Claude Code integration..."
+  verbose_log "installing pinned Claude Code integration; no executable probe will run"
   cat > "$STAGING/integrations/claude-code/package.json" <<'PACKAGE'
 {
   "private": true,
@@ -332,6 +355,7 @@ fi
 # A restart alone can overlap old and new servers on the listener; prove the
 # unit and port are clear before activation instead.
 if [ "$RESTART_SERVICE" -eq 1 ]; then
+  update_log "stopping managed service..."
   previous_invocation=$(user_systemctl show burrow.service -p InvocationID --value 2>/dev/null || true)
   stop_managed_runtime
 fi
@@ -432,7 +456,10 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
 fi
 rm -rf "$PREVIOUS"
 if [ "$RESTART_SERVICE" -eq 1 ]; then
+  update_log "starting managed service..."
+  verbose_log "starting burrow.service"
   user_systemctl start burrow.service
   verify_restarted_runtime "$previous_invocation"
 fi
+verbose_log "activation complete"
 printf "%s\\n" "Burrow install: ok" "Home: $INSTALL_DIR" "Application: $INSTALL_DIR/app" "State: $INSTALL_DIR/{config,workspace,agentdata,cache}" "Run: $INSTALL_DIR/bin/burrow serve" "Update: $INSTALL_DIR/bin/burrow update"
