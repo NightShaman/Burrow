@@ -110,7 +110,16 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
         }
       }
       toolResults.push(result);
-      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, skillId: action.skillId || null, version: result.skill?.version || null, error: result.error || null });
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({
+        tool: action.tool,
+        ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}),
+        ok: result.ok,
+        skillId: action.skillId || null,
+        version: result.skill?.version || null,
+        // Preserve discovery cards, but never loaded skill body in trace events.
+        skills: action.tool === 'list_skills' ? result.skills.map(({ id, name, description, lifecycle, available, owner, ownership }) => ({ id, name, description, lifecycle, available, owner, ownership: ownership ? { scope: ownership.scope, agentId: ownership.agentId } : null })) : undefined,
+        error: result.error || null,
+      });
       continue;
     }
 

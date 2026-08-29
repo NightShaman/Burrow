@@ -40,6 +40,27 @@ function coverageFromToolResult(toolResult = {}) {
   };
 }
 
+function compactSkillCard(skill) {
+  if (!skill || typeof skill !== 'object') return null;
+  return {
+    id: typeof skill.id === 'string' ? compactText(skill.id, 160) : null,
+    name: typeof skill.name === 'string' ? compactText(skill.name, 240) : null,
+    description: typeof skill.description === 'string' ? compactText(skill.description, 1_000) : null,
+    version: typeof skill.version === 'string' ? compactText(skill.version, 120) : null,
+    lifecycle: typeof skill.lifecycle === 'string' ? compactText(skill.lifecycle, 80) : null,
+    available: skill.available === true,
+    ownership: skill.ownership && typeof skill.ownership === 'object'
+      ? { scope: skill.ownership.scope || null, agentId: skill.ownership.agentId || null }
+      : undefined,
+  };
+}
+
+function compactSkillCards(skills) {
+  return Array.isArray(skills)
+    ? skills.slice(0, RECEIPT_TEXT_LIMITS.list).map(compactSkillCard).filter(Boolean)
+    : undefined;
+}
+
 function compactToolRecord(record) {
   if (!record || typeof record !== 'object') return undefined;
   return {
@@ -154,6 +175,10 @@ export function summarizeToolResults(toolResults = []) {
     mcpCapabilities: Array.isArray(toolResult.tools)
       ? toolResult.tools.slice(0, 20).map((tool) => ({ name: typeof tool?.name === 'string' ? compactText(tool.name, 240) : null, description: typeof tool?.description === 'string' ? compactText(tool.description, 2_000) : null, inputSchema: tool?.inputSchema && typeof tool.inputSchema === 'object' && !Array.isArray(tool.inputSchema) ? tool.inputSchema : { type: 'object', properties: {} }, granted: tool?.granted === true }))
       : undefined,
+    // Skill discovery must preserve the bounded capability cards that informed
+    // the agent. Full loaded instructions remain native-result-only.
+    skills: compactSkillCards(toolResult.skills),
+    skill: toolResult.skill ? compactSkillCard(toolResult.skill) : undefined,
     entries: Array.isArray(toolResult.entries) ? toolResult.entries.slice(0, RECEIPT_TEXT_LIMITS.list).map((item) => ({ path: item?.path || null, type: item?.type || null })) : undefined,
     paths: compactList(toolResult.paths),
     matches: Array.isArray(toolResult.matches) ? toolResult.matches.slice(0, RECEIPT_TEXT_LIMITS.list).map((item) => ({ filePath: item?.filePath || null, line: item?.line ?? null, text: compactText(item?.text, 500) })) : undefined,
