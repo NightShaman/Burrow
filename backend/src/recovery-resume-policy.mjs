@@ -14,7 +14,7 @@ export async function readRecoveryTranscriptTail({ rootDir, sessionId, readChatM
   for (const message of [...messages].reverse()) {
     const content = boundedText(message?.content, remaining);
     if (!content) continue;
-    tail.unshift({ role: message.role, content, ts: message.ts || null, runId: message.runId || null });
+    tail.unshift({ role: message.role, content, ts: message.ts || null, runId: message.runId || null, metadata: message?.metadata?.kind === 'agent-message' ? { kind: 'agent-message' } : null });
     remaining -= content.length;
     if (remaining <= 0) break;
   }
@@ -26,9 +26,16 @@ export async function readRecoveryTranscriptTail({ rootDir, sessionId, readChatM
 // same-session runtime turn with the manifest and bounded transcript available.
 export function decideInterruptedRunRecovery({ manifest = null, transcript = [] } = {}) {
   const objective = boundedText(manifest?.objective, 2_000);
-  const latestUser = [...(Array.isArray(transcript) ? transcript : [])].reverse().find((entry) => entry?.role === 'user' && boundedText(entry.content, 2_000));
-  if (!objective || !latestUser) {
-    return { action: 'needs_user_input', autoResume: false, reason: 'missing_reliable_user_objective', transcriptMessages: transcript.length };
+  // A2A ingress is a durable attributed transcript turn, not a user turn, but
+  // it is still a reliable same-session objective. Requiring a user turn here
+  // stranded interrupted recipient replies and made them ask the sender for a
+  // resend after every restart.
+  const latestObjectiveTurn = [...(Array.isArray(transcript) ? transcript : [])].reverse().find((entry) => {
+    if (!boundedText(entry?.content, 2_000)) return false;
+    return entry?.role === 'user' || (entry?.role === 'agent' && entry?.metadata?.kind === 'agent-message');
+  });
+  if (!objective || !latestObjectiveTurn) {
+    return { action: 'needs_user_input', autoResume: false, reason: 'missing_reliable_session_objective', transcriptMessages: transcript.length };
   }
   const requiresReconciliation = (Array.isArray(manifest?.pendingVerification) && manifest.pendingVerification.length > 0)
     || (Array.isArray(manifest?.changedFiles) && manifest.changedFiles.length > 0)
