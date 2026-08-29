@@ -43,6 +43,7 @@ function sourceForSection(name) {
     attachment: 'attachment-provider',
     'attachment-manifest': 'attachment-manifest-provider',
     skills: 'skill-provider',
+    'available-capabilities': 'skill-catalog-provider',
     'current-message': 'current-turn-provider',
     task: 'current-turn-provider',
   };
@@ -157,6 +158,16 @@ function renderAttachmentSections(attachments = [], { totalBudget = 32_000, perF
     sections.push(section('attachment', [`Attachment: ${name}`, `Type: ${type}`, `Encoding: ${encoding}`, `Original chars: ${originalText.length}`, `Included chars: ${included.length}`, originalText.length > included.length ? `Truncation: ${originalText.length - included.length} chars omitted from this attachment.` : '', '', included].filter(Boolean).join('\n'), { attachment: provenance.at(-1) }));
   }
   return { sections, provenance, usedChars: used };
+}
+
+
+function renderAvailableCapabilities(skills = []) {
+  const available = Array.isArray(skills) ? skills.filter((skill) => skill?.available !== false) : [];
+  if (!available.length) return '';
+  return [
+    'Available capabilities. The runtime advertises these; you decide whether to load a skill. Use list_skills for the catalog or load_skill(id) for full instructions. Loading is read-only and records the exact version in the trace.',
+    ...available.slice(0, 40).map((skill) => `- ${skill.id}${skill.description ? ` — ${skill.description}` : ''}${skill.version ? ` [${skill.version}]` : ''}`),
+  ].join('\n');
 }
 
 function renderSkill(skill) {
@@ -422,14 +433,14 @@ export async function assemblePrompt({
   runId,
   outputMode = 'plain',
   supportContext = null,
+  availableSkills = [],
 } = {}) {
   if (!rootDir) throw new Error('rootDir is required');
   if (!task || typeof task !== 'string') throw new Error('task is required');
 
   const logger = traceLogger || createTraceLogger({ rootDir: await resolveRuntimeTraceRoot(rootDir), runId });
-  // Skills are stable, cached operating instructions. The normal path carries
-  // every eligible global + agent-owned skill; prompt pressure is handled by
-  // conversation compression, not by silently withholding skills.
+  // Skill instructions are loaded only by an explicit agent choice. The compact
+  // capability catalog is always visible; no router silently judges relevance.
   const skillLimit = limits.skillChars ?? 64_000;
   const profileLimit = limits.profileChars ?? modelProfile?.maxChars ?? 4_000;
   // An agent's profile directory is its deliberately editable prompt space.
@@ -520,6 +531,7 @@ export async function assemblePrompt({
     section('support-extra-eyes', clampText(renderExtraEyesReview(supportContext?.extraEyesReview || null), limits.extraEyesChars ?? 6_000)),
     section('attachment-manifest', renderedAttachmentManifest, { items: (Array.isArray(attachmentManifest) ? attachmentManifest : []).slice(-24).map((item) => ({ name: item?.name || 'attachment', type: item?.type || item?.mimeType || 'application/octet-stream', artifactPath: item?.artifactPath || null })) }),
     ...renderedAttachments.sections,
+    section('available-capabilities', renderAvailableCapabilities(availableSkills)),
     section('skills', skillTexts.join('\n\n---\n\n'), {
       items: loadedSkillIds,
       omittedItems: omittedSkillIds,

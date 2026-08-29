@@ -71,7 +71,7 @@ function reviewAction(action = {}, { workspaceRoot = null, executionContext = nu
     };
   }
 
-  if (action.tool === 'mcp_providers' || action.tool === 'mcp_capabilities') {
+  if (action.tool === 'mcp_providers' || action.tool === 'mcp_capabilities' || action.tool === 'list_skills' || action.tool === 'load_skill') {
     risk.push('read-only');
     return { index: action.index, tool: action.tool, status: blockers.length ? 'blocked' : 'allowed', risk, blockers: [...new Set(blockers)], warnings };
   }

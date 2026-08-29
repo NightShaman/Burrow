@@ -47,6 +47,17 @@ async function findSkillBodies(skillsRoot) {
   return found.sort();
 }
 
+function frontmatterMetadata(text = '') {
+  const match = String(text).match(/^---\r?\n([\s\S]{0,8192}?)\r?\n---/);
+  if (!match) return {};
+  const fields = {};
+  for (const line of match[1].split(/\r?\n/)) {
+    const entry = /^([A-Za-z][\w-]*):\s*["']?(.+?)["']?\s*$/.exec(line);
+    if (entry) fields[entry[1]] = entry[2];
+  }
+  return fields;
+}
+
 async function loadOwnedSkillRoot({ skillsRoot, owner, overrides = {} } = {}) {
   const root = path.resolve(skillsRoot);
   const bodies = await findSkillBodies(root);
@@ -56,11 +67,15 @@ async function loadOwnedSkillRoot({ skillsRoot, owner, overrides = {} } = {}) {
     const id = normalizeId(path.basename(path.dirname(absolutePath)));
     if (!id) continue;
     const stat = await fs.stat(absolutePath);
+    // Catalog metadata is deliberately bounded: enough to advertise a capability,
+    // never a substitute for loading its instructions.
+    const header = await fs.readFile(absolutePath, 'utf8').then((body) => body.slice(0, 8192));
+    const metadata = frontmatterMetadata(header);
     const lifecycle = adminLifecycle({ id }, overrides);
     skills.push({
       id,
-      name: id,
-      description: '',
+      name: metadata.name || id,
+      description: metadata.description || '',
       priority: 0,
       path: path.relative(root, absolutePath),
       sourcePath: path.relative(root, absolutePath),
@@ -167,20 +182,15 @@ export function selectCatalogSkills({ catalog = [], ids = [], source = 'model-se
   return { selected, rejected };
 }
 
-// Prompt inclusion follows ownership/availability, not a planner's relevance label.
-// `selected` remains observability: it records a model/planner's optional choice
-// without withholding an eligible skill's instructions from the model.
+// Only explicitly loaded/requested skill bodies belong in the prompt. The catalog is advertised separately; it never guesses relevance.
 export function promptEligibleSkills({ catalog = [], selected = [] } = {}) {
   const selectedById = new Map(asArray(selected).map((skill) => [String(skill.id), skill]));
   return asArray(catalog)
     .filter((skill) => skill.available !== false)
+    .filter((skill) => selectedById.has(String(skill.id)))
     .map((skill) => {
       const selectedSkill = selectedById.get(String(skill.id));
-      return {
-        ...compactSkill(skill),
-        ...(selectedSkill?.selection ? { selection: selectedSkill.selection } : {}),
-        promptInclusion: selectedSkill ? 'planner-selected' : 'ownership-eligible',
-      };
+      return { ...compactSkill(skill), ...(selectedSkill?.selection ? { selection: selectedSkill.selection } : {}), promptInclusion: 'agent-loaded' };
     });
 }
 

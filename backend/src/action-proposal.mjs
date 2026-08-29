@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-export const ALLOWED_TOOLS = new Set(['shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'files_write', 'files_patch', 'spawn_subagent', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call']);
+export const ALLOWED_TOOLS = new Set(['shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'files_write', 'files_patch', 'spawn_subagent', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call', 'list_skills', 'load_skill']);
 
 const TARGET_KIND_ALIASES = new Map([
   ['filesystem', 'filesystem'],
@@ -106,6 +106,7 @@ function normalizeAction(action, index) {
     targetSessionId: action?.targetSessionId ? String(action.targetSessionId).trim() : null,
     messageMode: action?.messageMode ? String(action.messageMode).trim() : 'request_reply',
     taskId: action?.taskId ? String(action.taskId) : null,
+    skillId: action?.skillId || action?.id ? String(action.skillId || action.id).trim() : null,
     mcpProvider: action?.provider ? String(action.provider).trim() : null,
     mcpToolName: action?.mcpToolName ? String(action.mcpToolName).trim() : null,
     mcpArguments: action?.mcpArguments && typeof action.mcpArguments === 'object' && !Array.isArray(action.mcpArguments) ? action.mcpArguments : {},
@@ -148,6 +149,7 @@ function normalizeAction(action, index) {
     if (!normalized.task) errors.push('task_required');
     normalized.target = normalizeSpawnTarget(action?.target, errors);
   }
+  if (tool === 'load_skill' && !normalized.skillId) errors.push('skill_id_required');
   if (tool === 'mcp_capabilities' && !normalized.mcpProvider) errors.push('mcp_provider_required');
   if (tool === 'mcp_call' && !normalized.mcpProvider) errors.push('mcp_provider_required');
   if (tool === 'mcp_call' && !normalized.mcpToolName) errors.push('mcp_tool_name_required');
@@ -299,6 +301,8 @@ export function nativeToolSchemas({ includeMutations = true, includeWorkingMemor
         },
       },
     },
+    { type: 'function', function: { name: 'list_skills', description: 'List available operating skills as compact capability cards. The runtime advertises; you decide whether to load a skill. Read-only.', parameters: { type: 'object', additionalProperties: false, properties: { reason: { type: 'string' } } } } },
+    { type: 'function', function: { name: 'load_skill', description: 'Load one available skill’s full instructions. Read-only. The result records the exact skill version/hash; use the instructions for the current task.', parameters: { type: 'object', additionalProperties: false, properties: { skillId: { type: 'string' }, reason: { type: 'string' } }, required: ['skillId'] } } },
     { type: 'function', function: { name: 'mcp_providers', description: 'List enabled MCP providers and how many tools the Goblin King has granted this agent from each provider. Use this before browsing a provider catalog.', parameters: { type: 'object', additionalProperties: false, properties: { reason: { type: 'string' } } } } },
     { type: 'function', function: { name: 'mcp_capabilities', description: 'Browse or search an MCP provider catalog without adding its schemas to the permanent tool surface. Results include each tool schema and whether the Goblin King has granted it to this agent. Use query to find capabilities such as issue or pull request; use cursor to page.', parameters: { type: 'object', additionalProperties: false, properties: { provider: { type: 'string' }, query: { type: 'string' }, cursor: { type: 'string' }, limit: { type: 'number', minimum: 1, maximum: 20 }, reason: { type: 'string' } }, required: ['provider'] } } },
     { type: 'function', function: { name: 'mcp_call', description: 'Call one MCP tool discovered with mcp_capabilities. The tool must be granted to this agent by the Goblin King. Provide its exact provider name, exact tool name, and arguments that match the returned schema.', parameters: { type: 'object', additionalProperties: false, properties: { provider: { type: 'string' }, mcpToolName: { type: 'string' }, mcpArguments: { type: 'object', additionalProperties: true }, reason: { type: 'string' } }, required: ['provider', 'mcpToolName', 'mcpArguments'] } } },
@@ -389,7 +393,7 @@ export function nativeToolSchemas({ includeMutations = true, includeWorkingMemor
     && (includeTaskBoard || !['tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete'].includes(tool.function?.name))
     && (includeAgentProfile || tool.function?.name !== 'agent_update_tools_profile')
     && (includeAgentChat || tool.function?.name !== 'agent_send_message')
-    && (includeMcpMenu || !['mcp_providers', 'mcp_capabilities', 'mcp_call'].includes(tool.function?.name)));
+    && (includeMcpMenu || !['mcp_providers', 'mcp_capabilities', 'mcp_call', 'list_skills', 'load_skill'].includes(tool.function?.name)));
 }
 
 export function actionFromNativeToolCall(call = {}, index = 0) {

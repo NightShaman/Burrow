@@ -11,6 +11,7 @@ export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolv
     kernel: plainChatKernel({ agentName: agentRuntime?.agent?.name || agentRuntime?.agentId || runtimeState.agentId }),
     selectedSkills: route.promptPlan.selectedSkills,
     promptSkills: route.promptPlan.promptSkills,
+    availableSkills: route.skills.catalog,
     supportContext: { subagents: structuredSubagents, extraEyesReview, workingContext: ambientWorkingContext, uiTarget: agentRuntime?.contextConfig?.uiTarget || agentRuntime?.agent?.contextConfig?.uiTarget || null, dreamPreload, childEvidence, sessionRecall, runEvidence, ...groupSupport },
     modelProfile: null,
     task: modelTask,

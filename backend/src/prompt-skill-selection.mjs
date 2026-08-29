@@ -12,15 +12,16 @@ export async function resolvePromptSkillPlan({ rootDir, workspaceContext = {}, s
       overrides: resolvedSkillConfig,
     })).skills;
 
-  // Ownership/availability determines what reaches the model's stable prompt.
-  // A planner selection is only relevance observability; it must never gate
-  // otherwise eligible global or agent-owned instructions.
-  const selected = turnPlan?.support?.skills?.selected || [];
+  // A planner does not select skills. It may observe a catalog, but only an
+  // explicit agent load can put a skill body into a prompt.
+  const selected = [];
   const promptSkills = promptEligibleSkills({ catalog, selected });
   const skills = {
     selected,
     catalog: catalog.map((skill) => ({
       id: skill.id,
+      name: skill.name || skill.id,
+      description: skill.description || '',
       owner: skill.owner,
       lifecycle: skill.lifecycle,
       available: skill.available !== false,

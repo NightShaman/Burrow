@@ -14,6 +14,7 @@ import { reviewProposalActions } from './action-safety.mjs';
 import { invokeMcpTool, publicMcpError, publicMcpFailureDetail } from './mcporter-adapter.mjs';
 import { grantedMcpTool, mcpCapabilitiesReceipt, mcpProvidersReceipt } from './mcp-menu.mjs';
 import { protectMcpOutput, resolveProtectedBindings } from './protected-values.mjs';
+import { loadEffectiveSkillCatalog, loadSelectedSkillText, skillManifest, selectCatalogSkills } from './skill-catalog.mjs';
 import path from 'node:path';
 
 function workspacePath(filePath, workspaceRoot, rootDir) {
@@ -91,6 +92,27 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
     if (action.tool === 'git_status') { toolResults.push(await gitStatusEnvelope({ dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-git_status`, reason: action.reason })); continue; }
     if (action.tool === 'git_diff') { toolResults.push(await gitDiffEnvelope({ dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-git_diff`, reason: action.reason })); continue; }
     if (action.tool === 'files_edit') { toolResults.push(await editFileEnvelope({ filePath: workspacePath(action.filePath, executionRoot, rootDir), oldText: action.oldText, newText: action.newText, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-edit`, reason: action.reason })); continue; }
+
+    if (action.tool === 'list_skills' || action.tool === 'load_skill') {
+      const skillsWorkspace = executionContext?.agentWorkspaceRoot ? path.dirname(executionContext.agentWorkspaceRoot) : executionRoot;
+      const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: skillsWorkspace, agentId: agentId || executionContext?.agentId || 'hatchet', agentRuntime: executionContext?.agentRuntime || null });
+      const started = await traceLogger?.toolStart?.({ tool: action.tool, skillId: action.skillId || null, catalogCount: catalog.availableSkills.length });
+      let result;
+      if (action.tool === 'list_skills') {
+        result = { tool: 'list_skills', ok: true, skills: catalog.availableSkills.map(skillManifest) };
+      } else {
+        const choice = selectCatalogSkills({ catalog: catalog.skills, ids: [action.skillId], source: 'agent-requested' });
+        if (!choice.selected.length) result = { tool: 'load_skill', ok: false, skillId: action.skillId, error: choice.rejected[0]?.reason || 'skill_not_found' };
+        else {
+          const loaded = await loadSelectedSkillText(skillsWorkspace, choice.selected, { maxTotalChars: 64_000, maxPerSkillChars: 64_000 });
+          const skill = loaded[0];
+          result = skill.missing ? { tool: 'load_skill', ok: false, skillId: action.skillId, error: skill.error || 'skill_source_missing' } : { tool: 'load_skill', ok: true, skill: { ...skillManifest(skill), version: skill.version, content: skill.content, contentTruncated: skill.contentTruncated } };
+        }
+      }
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, skillId: action.skillId || null, version: result.skill?.version || null, error: result.error || null });
+      continue;
+    }
 
     if (action.tool === 'mcp_providers') {
       const result = mcpProvidersReceipt({ connections: executionContext?.mcpConnections, grants: executionContext?.mcpTools, agentId });
