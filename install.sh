@@ -178,12 +178,19 @@ verify_restarted_runtime() {
   host=${host:-127.0.0.1}
   port=${port:-42817}
   [ "$host" = "0.0.0.0" ] && host=127.0.0.1
-  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-    health=$(curl -fsS --max-time 2 "http://$host:$port/api/health" 2>/dev/null || true)
-    case "$health" in *"\"version\":\"$expected_version\""*) return 0 ;; esac
+  # A cold Node runtime can take longer than the former 15-second probe window,
+  # especially after native modules and UI assets were replaced. Wait for the
+  # unit to become active and give health a bounded minute to report the new
+  # version; a successful update must not be reported as failed merely because
+  # the listener was still initializing.
+  for attempt in $(seq 1 60); do
+    if user_systemctl is-active --quiet burrow.service 2>/dev/null; then
+      health=$(curl -fsS --max-time 2 "http://$host:$port/api/health" 2>/dev/null || true)
+      case "$health" in *"\"version\":\"$expected_version\""*) return 0 ;; esac
+    fi
     sleep 1
   done
-  echo "Burrow update: service restarted but health did not report version $expected_version." >&2
+  echo "Burrow update: service restarted but health did not report version $expected_version within 60 seconds." >&2
   exit 1
 }
 
@@ -197,6 +204,13 @@ fi
 [ -n "$SOURCE_DIR" ] && [ -f "$SOURCE_DIR/backend/package.json" ] && [ -f "$SOURCE_DIR/ui/package.json" ] || { echo "Burrow install: source is not an assembled Burrow checkout: ${SOURCE_DIR:-unknown}" >&2; exit 1; }
 INSTALL_DIR=$(mkdir -p "$INSTALL_DIR" && cd "$INSTALL_DIR" && pwd)
 prepare_service_restart
+# An update is entered through the absolute launcher, but package lifecycle
+# scripts may invoke `burrow`. Keep the active installation launcher visible
+# throughout staging rather than depending on a login-shell PATH.
+case ":$PATH:" in
+  *":$INSTALL_DIR/bin:"*) ;;
+  *) PATH="$INSTALL_DIR/bin:$PATH"; export PATH ;;
+esac
 mkdir -p "$INSTALL_DIR/config" "$INSTALL_DIR/workspace" "$INSTALL_DIR/agentdata" "$INSTALL_DIR/cache" "$INSTALL_DIR/reports" "$INSTALL_DIR/integrations" "$INSTALL_DIR/bin"
 STAGING="$INSTALL_DIR/.app-staging-$$"
 PREVIOUS="$INSTALL_DIR/.app-previous"
