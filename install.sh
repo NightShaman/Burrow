@@ -382,6 +382,9 @@ fi
 # truncation can fail with ETXTBSY and leaves a half-written command behind.
 WRAPPER_TMP="$INSTALL_DIR/bin/.burrow-launcher-$$"
 rm -f "$WRAPPER_TMP"
+# The launcher is self-locating and must be emitted literally. An unquoted
+# heredoc executes command substitutions while writing it; that can launch a
+# child `burrow serve` during update and wedge the stopped-service window.
 cat > "$WRAPPER_TMP" <<WRAPPER
 #!/bin/sh
 set -eu
