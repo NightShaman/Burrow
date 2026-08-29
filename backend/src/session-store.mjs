@@ -19,6 +19,7 @@ function sessionFile(rootDir, sessionId) { return path.join(sessionDir(rootDir, 
 function sessionMetaFile(rootDir, sessionId) { return path.join(sessionDir(rootDir, sessionId), 'session.meta.json'); }
 function resetArchiveMetaFile(rootDir, sessionId, fileName) { return path.join(sessionDir(rootDir, sessionId), `${String(fileName || '').replace(/\.jsonl$/, '')}.archive.json`); }
 function continuityHeadFile(rootDir, sessionId) { return path.join(sessionDir(rootDir, sessionId), 'continuity-head.json'); }
+function interruptedRunFile(rootDir, sessionId) { return path.join(sessionDir(rootDir, sessionId), 'interrupted-run.json'); }
 function jsonLine(value) { return `${JSON.stringify(value)}\n`; }
 
 const continuityLocks = new Map();
@@ -204,6 +205,51 @@ export async function readSessionContinuityHead({ rootDir, sessionId } = {}) {
   }
 }
 
+function boundedRecoveryText(value, limit = 1_200) { return String(value || '').trim().slice(0, limit) || null; }
+function normalizeInterruptedRunManifest(value = {}) {
+  const source = value && typeof value === 'object' ? value : {};
+  const workingContext = source.workingContext && typeof source.workingContext === 'object' ? source.workingContext : null;
+  return {
+    version: 1,
+    sessionId: boundedRecoveryText(source.sessionId, 120),
+    runId: boundedRecoveryText(source.runId, 200),
+    generation: Number.isSafeInteger(source.generation) ? source.generation : null,
+    status: 'interrupted',
+    reason: boundedRecoveryText(source.reason, 160) || 'unknown',
+    interruptedAt: boundedRecoveryText(source.interruptedAt, 64) || nowIso(),
+    objective: boundedRecoveryText(source.objective, 2_000),
+    lastCompletedStep: boundedRecoveryText(source.lastCompletedStep, 1_200),
+    pendingVerification: Array.isArray(source.pendingVerification) ? source.pendingVerification.map((item) => boundedRecoveryText(item, 400)).filter(Boolean).slice(0, 8) : [],
+    changedFiles: Array.isArray(source.changedFiles) ? source.changedFiles.map((item) => boundedRecoveryText(item, 500)).filter(Boolean).slice(0, 12) : [],
+    traceRef: boundedRecoveryText(source.traceRef, 1_000),
+    ...(workingContext ? { workingContext } : {}),
+  };
+}
+export async function readInterruptedRunManifest({ rootDir, sessionId } = {}) {
+  try {
+    const text = await fs.readFile(interruptedRunFile(rootDir, safeId(sessionId)), 'utf8');
+    const value = text.trim() ? JSON.parse(text) : null;
+    return value?.status === 'interrupted' ? value : null;
+  } catch (error) { if (error?.code === 'ENOENT') return null; throw error; }
+}
+export async function recordInterruptedRun({ rootDir, sessionId, runId, generation, reason, objective = null, lastCompletedStep = null, pendingVerification = [], changedFiles = [], traceRef = null, workingContext = null, clock = nowIso } = {}) {
+  const id = safeId(sessionId);
+  return withContinuityLock(rootDir, id, async () => {
+    await fs.mkdir(sessionDir(rootDir, id), { recursive: true });
+    const manifest = normalizeInterruptedRunManifest({ sessionId: id, runId, generation, reason, objective, lastCompletedStep, pendingVerification, changedFiles, traceRef, workingContext, interruptedAt: clock() });
+    await atomicWriteJson(interruptedRunFile(rootDir, id), manifest);
+    const head = await readSessionContinuityHead({ rootDir, sessionId: id });
+    // Shutdown observers know the active run identity but may not have its
+    // private continuity generation. A matching run id is sufficient to close
+    // that live owner; when a generation is supplied it remains a strict guard.
+    const generationMatches = generation === null || generation === undefined || Number(head?.generation) === Number(generation);
+    if (head?.runId === String(runId) && generationMatches && (head.state === 'running' || head.state === 'finalizing')) {
+      await atomicWriteJson(continuityHeadFile(rootDir, id), { ...head, state: 'interrupted', interruptedAt: manifest.interruptedAt, interruption: { reason: manifest.reason, runId: manifest.runId } });
+    }
+    return manifest;
+  });
+}
+
 function continuitySnapshot(metadata = {}) {
   return {
     transcriptGeneration: metadata?.transcriptGeneration || null,
@@ -240,14 +286,16 @@ async function recoverAbandonedContinuityHead({ rootDir, sessionId, prior, metad
   const recovered = {
     ...prior,
     latestRunId: completedMetadata.lastRunId || prior.runId || prior.latestRunId || null,
-    state: 'completed',
-    completedAt: recoveredAt,
+    state: 'interrupted',
+    interruptedAt: recoveredAt,
     snapshot: continuitySnapshot(completedMetadata),
     recoveredAt,
     recovery: { reason, abandonedRunId: prior.runId || null },
   };
+  const manifest = normalizeInterruptedRunManifest({ sessionId, runId: prior.runId, generation: prior.generation, reason, interruptedAt: recoveredAt, lastCompletedStep: 'Run ownership was abandoned; reconcile durable session and workspace state before continuing.' });
+  await atomicWriteJson(interruptedRunFile(rootDir, sessionId), manifest);
   await atomicWriteJson(continuityHeadFile(rootDir, sessionId), recovered);
-  return { prior: recovered, metadata: completedMetadata };
+  return { prior: recovered, metadata: completedMetadata, manifest };
 }
 
 export async function claimSessionContinuityHead({ rootDir, sessionId, runId, acceptedLatestRunIds = [], clock = nowIso } = {}) {
@@ -261,6 +309,7 @@ export async function claimSessionContinuityHead({ rootDir, sessionId, runId, ac
     let metadata = await readSessionMetadata({ rootDir, sessionId: id }) || await writeSessionMetadata({ rootDir, sessionId: id });
     if (!metadata.kind) metadata.kind = classifySession(id, metadata);
     let snapshot = continuitySnapshot(metadata);
+    let recoveryManifest = prior?.state === 'interrupted' ? await readInterruptedRunManifest({ rootDir, sessionId: id }) : null;
     // An owner that exited after persisting transcript state cannot finish its
     // generation. Close it without replaying its work; the next turn receives
     // a fresh generation over the durable transcript instead of a permanent
@@ -280,6 +329,7 @@ export async function claimSessionContinuityHead({ rootDir, sessionId, runId, ac
       prior = recovery.prior;
       metadata = recovery.metadata;
       snapshot = continuitySnapshot(metadata);
+      recoveryManifest = recovery.manifest || recoveryManifest;
     }
     // Trusted internal ingress (for example, an attributed agent message) may
     // append a transcript turn before its bounded recipient run can claim the
@@ -307,7 +357,7 @@ export async function claimSessionContinuityHead({ rootDir, sessionId, runId, ac
       ...(continuityUncertain ? { reason: finalizationUncertain ? 'terminal_finalization_incomplete' : (interruptedForeignRun ? 'interrupted_run_from_another_process' : 'session_metadata_ahead_of_last_completed_head') } : {}),
     };
     await atomicWriteJson(continuityHeadFile(rootDir, id), head);
-    return { ...head, current: !continuityUncertain };
+    return { ...head, current: !continuityUncertain, recoveryManifest };
   });
 }
 

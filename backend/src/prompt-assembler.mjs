@@ -229,11 +229,12 @@ function renderWorkingContext(context = null, maxChars = 0) {
   const referents = Array.isArray(context.referents) ? context.referents.filter(Boolean) : [];
   const workspace = context.workspace && typeof context.workspace === 'object' ? context.workspace : null;
   const continuity = context.continuity && typeof context.continuity === 'object' ? context.continuity : null;
+  const interruptedRun = context.interruptedRun && typeof context.interruptedRun === 'object' ? context.interruptedRun : null;
   const records = Array.isArray(continuity?.records) ? continuity.records.filter((record) => record?.title && record?.content) : [];
   const cards = Array.isArray(continuity?.cards) ? continuity.cards.filter((card) => card?.title) : [];
   const warmCount = records.length + cards.length + Number(continuity?.handoffCount || 0) + Number(continuity?.candidateCount || 0);
   const readEvidence = Array.isArray(context.readEvidence) ? context.readEvidence.filter((item) => item?.path && item?.excerpt) : [];
-  if (!workspace && !targets.length && !referents.length && !warmCount && !readEvidence.length) return '';
+  if (!workspace && !targets.length && !referents.length && !warmCount && !readEvidence.length && !interruptedRun) return '';
   const lines = [
     'Working Context. Preserves conversational continuity only. This reference ledger never selects the execution root, cwd, safety policy, continuity-scope authority, identity, role, persona, or task.',
     'Profile files and the latest user turn outrank Working Context. Absence of handoff, rolling continuity, or memory search results is never evidence that profile identity, role, persona, or current-task context is absent.',
@@ -241,6 +242,13 @@ function renderWorkingContext(context = null, maxChars = 0) {
   if (workspace?.root) lines.push(`Latest explicit target: ${workspace.root}`);
   if (targets.length) lines.push('Recent file references:', ...targets.slice(0, 6).map((item) => `- ${item}`));
   if (referents.length) lines.push('Referents:', ...referents.slice(0, 8).map((item) => `- ${item}`));
+  if (interruptedRun) {
+    lines.push('', 'Interrupted Run Recovery. This is runtime-owned durable recovery state. Reconcile it against current repository/runtime evidence before continuing; do not repeat completed work blindly.', `- Run: ${interruptedRun.runId || 'unknown'} (generation ${interruptedRun.generation ?? 'unknown'})`, `- Reason: ${interruptedRun.reason || 'unknown'}`);
+    if (interruptedRun.objective) lines.push(`- Authorized objective: ${interruptedRun.objective}`);
+    if (interruptedRun.lastCompletedStep) lines.push(`- Last durable state: ${interruptedRun.lastCompletedStep}`);
+    if (interruptedRun.changedFiles?.length) lines.push('- Changed files:', ...interruptedRun.changedFiles.slice(0, 12).map((item) => `  - ${item}`));
+    if (interruptedRun.pendingVerification?.length) lines.push('- Pending reconciliation:', ...interruptedRun.pendingVerification.slice(0, 8).map((item) => `  - ${item}`));
+  }
   if (readEvidence.length) {
     const preamble = 'Retained ReadEvidence. Exact excerpts returned by earlier files_read calls. They are version-checked before use; this request includes only the evidence that fits its context budget. Reopen the file when you need content outside an included excerpt.';
     // No independent working-context default: this receives its allocation from

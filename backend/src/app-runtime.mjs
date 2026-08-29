@@ -4,7 +4,7 @@ import { routeRequest } from './request-router.mjs';
 import { prepareContextForTurn } from './context-builder.mjs';
 import { createTraceLogger } from './trace-logger.mjs';
 import { resolveRuntimeTracePath } from './config.mjs';
-import { claimSessionContinuityHead, isSessionContinuityCurrent, readSessionContinuityHead } from './session-store.mjs';
+import { claimSessionContinuityHead, isSessionContinuityCurrent, readSessionContinuityHead, recordInterruptedRun } from './session-store.mjs';
 import { prepareRuntimeSupportContext } from './runtime-support-context.mjs';
 import { workbenchWorkflow } from './workbench-workflow.mjs';
 import { buildContinuationPlan, explicitContinueRequested } from './work-item-service.mjs';
@@ -221,6 +221,7 @@ async function runAskChatUnserialized({
     resolvedTarget,
     message,
     explicitWorkspaceFiles,
+    interruptedRun: continuity.recoveryManifest || null,
   });
   const { priorSession, conversationId, resolvedWorkingRoot, compatibilityScope, continuityScope, generatedContinuityScope, verifiedSubjectScope, deicticFiles, workspaceFiles, initialWorkingContext, ambientWorkingContext } = sessionContext;
   const effectiveAction = action ?? normalizedArgs.action ?? null;
@@ -236,7 +237,7 @@ async function runAskChatUnserialized({
     sessionId: resolvedSessionId,
   });
   const logger = createTraceLogger({ rootDir: traceRoot, runId: resolvedRunId, sessionId: resolvedSessionId, onRecord: onTraceRecord });
-  const commitTerminalResult = createTerminalCommitter({ rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, testHooks });
+  const commitTerminalResult = createTerminalCommitter({ rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, testHooks });
   const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, inboundEntryId }) => {
     const nestedRunId = `${resolvedRunId}-reply-${recipientRuntime.agentId}`;
     const lifecycle = typeof registerNestedAgentRun === 'function'
@@ -422,7 +423,15 @@ async function runAskChatUnserialized({
   }
 
   const modelExecution = await runRuntimeModelExecution({ runtimeTurn, prompt, message, shouldCallModel, modelConfig, logger, resolvedWorkingRoot, rootDir, dataRoot, resolvedSessionId, conversationId, runtimeConfig, executionPolicy, executionContext, normalizedArgs, attachments: turnAttachments, sessionRoot, resolvedRunId, continuity, initialWorkingContext, onTextDelta: onModelTextDelta, onThoughtDelta: onModelThoughtDelta, onContextUsage: onModelContextUsage, command, json });
-  if (modelExecution.superseded) return modelExecution.result;
+  if (modelExecution.superseded) {
+    await recordInterruptedRun({
+      rootDir: sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation,
+      reason: 'superseded_by_newer_session_run', objective: message, traceRef: logger.traceDir,
+      lastCompletedStep: 'Model execution completed after session ownership changed; terminal result was not persisted.',
+      pendingVerification: ['Reconcile durable workspace and tool state before continuing.'], workingContext: initialWorkingContext,
+    });
+    return modelExecution.result;
+  }
   const { modelTurn, finalWorkingContext } = modelExecution;
   const result = await persistPlainChatResult({ sessionRoot, dataRoot, logger, command, message, sessionId: resolvedSessionId, priorSession, route, selectedSkills: route.skills.selected.map((skill) => skill.id), prompt, contextEngine: turnContext, contextCompression, intent, session, workspaceRoot: resolvedWorkingRoot, subjectScope: verifiedSubjectScope, backgroundWork: trackedBackgroundWork, modelTurn, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, subagents, structuredSubagents, extraEyesReview, fileDeicticResolution: deicticFiles, finalWorkingContext, commitTerminalResult });
   if (result?.ok && result.decision === 'answered' && result.answerText) {

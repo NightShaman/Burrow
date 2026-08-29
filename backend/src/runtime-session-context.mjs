@@ -6,7 +6,7 @@ import { loadWorkingContinuity, normalizeContinuityScope, projectHandoffsIntoWor
 import { validateReadEvidence } from './read-evidence.mjs';
 import { readSessionReadEvidence } from './read-evidence-store.mjs';
 
-export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessionId, runtimeState, normalizedArgs, workspaceRoot, resolvedTarget, message, explicitWorkspaceFiles = [] } = {}) {
+export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessionId, runtimeState, normalizedArgs, workspaceRoot, resolvedTarget, message, explicitWorkspaceFiles = [], interruptedRun = null } = {}) {
   // Planning consumes no transcript prose. It receives only durable session
   // identity/metadata, while pending actions are resolved from their explicit
   // work-item and turn contracts rather than an arbitrary transcript tail.
@@ -47,6 +47,6 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
     agentId: runtimeState.agentId || null,
     continuityScope,
   });
-  const ambientWorkingContext = { ...initialWorkingContext, continuity: workingContinuity, continuityScopeSource: generatedContinuityScope ? 'runtime_generated' : 'session_persisted' };
+  const ambientWorkingContext = { ...initialWorkingContext, ...(interruptedRun ? { interruptedRun } : {}), continuity: workingContinuity, continuityScopeSource: generatedContinuityScope ? 'runtime_generated' : 'session_persisted' };
   return { priorSession, conversationId, resolvedWorkingRoot, continuityHandoffs, compatibilityScope, continuityScope, generatedContinuityScope, verifiedSubjectScope, deicticFiles, workspaceFiles, initialWorkingContext, ambientWorkingContext };
 }

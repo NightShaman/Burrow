@@ -16,6 +16,7 @@ import { collectTraceObservability } from '../src/trace-observability.mjs';
 import { listSubagentRecords, subagentVisibilitySummary } from '../src/subagent-store.mjs';
 import { ContinuityHandoffStore, buildContinuityHandoff, listContinuityHandoffs } from '../src/continuity-handoff-store.mjs';
 import { appendSessionEntry, archiveSession, forkSession, listResetSessionArchives, listSessionRecords, readActivityEvents, readChatMessages, readResetSessionArchive, readSessionMetadata, readSessionTurns, exportSessionTranscript, renameSession, resetSession, summarizeSessionTurns, writeResetSessionArchiveMetadata, writeSessionMetadata } from '../src/session-store.mjs';
+import { recordActiveRunInterruptions } from '../src/interrupted-run-recovery.mjs';
 import { generateArchiveSummary } from '../src/archive-summary.mjs';
 import { listArchiveRuns, readArchiveRun } from '../src/archive-proof.mjs';
 import { loadWorkingContinuity, normalizeContinuityScope, projectHandoffsIntoWorkingContinuity } from '../src/working-memory-continuity.mjs';
@@ -2910,6 +2911,22 @@ const server = createServer(async (req, res) => {
     return sendJson(res, status, { ok: false, error: String(error?.message || error), ...(error?.details ? { details: error.details } : {}), stack: process.env.NODE_ENV === 'development' ? error?.stack : undefined });
   }
 });
+
+let shuttingDown = false;
+async function shutdownRuntime(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  try {
+    await recordActiveRunInterruptions({ activeRuns: activeChatRuns, resolveAgentRuntime, reason: signal === 'SIGINT' ? 'service_interrupt' : 'service_shutdown' });
+    await new Promise((resolve) => server.close(() => resolve()));
+  } catch (error) {
+    console.error(`Burrow shutdown recovery failed: ${String(error?.message || error)}`);
+  } finally {
+    process.exit(signal === 'SIGINT' ? 130 : 0);
+  }
+}
+process.once('SIGTERM', () => { void shutdownRuntime('SIGTERM'); });
+process.once('SIGINT', () => { void shutdownRuntime('SIGINT'); });
 
 server.listen(port, host, async () => {
   if (backgroundSchedulersEnabled()) {
