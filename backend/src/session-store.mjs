@@ -809,6 +809,8 @@ function normalizeRecoveryContinuation(value = {}, manifest = {}) {
     queuedAt: String(value?.queuedAt || manifest.interruptedAt || nowIso()).slice(0, 64),
     claimedAt: value?.claimedAt ? String(value.claimedAt).slice(0, 64) : null,
     claimedByRunId: value?.claimedByRunId ? String(value.claimedByRunId).slice(0, 200) : null,
+    claimedProcessId: Number.isInteger(value?.claimedProcessId) && value.claimedProcessId > 0 ? value.claimedProcessId : null,
+    attempts: Number.isSafeInteger(value?.attempts) && value.attempts >= 0 ? value.attempts : 0,
     completedAt: value?.completedAt ? String(value.completedAt).slice(0, 64) : null,
     result: value?.result ? String(value.result).slice(0, 120) : null,
   };
@@ -838,8 +840,18 @@ export async function claimInterruptedRunContinuation({ rootDir, sessionId, reco
   return withContinuityLock(rootDir, id, async () => {
     const manifest = await readInterruptedRunManifest({ rootDir, sessionId: id });
     const existing = await readRecoveryContinuation({ rootDir, sessionId: id });
-    if (!manifest || !existing || existing.status !== 'pending' || !existing.autoResume) return { ok: false, manifest, continuation: existing };
-    const continuation = normalizeRecoveryContinuation({ ...existing, status: 'running', claimedAt: clock(), claimedByRunId: recoveryRunId }, manifest);
+    const abandonedClaim = existing?.status === 'running'
+      && Number.isInteger(existing.claimedProcessId)
+      && !processIsAlive(existing.claimedProcessId);
+    if (!manifest || !existing || !existing.autoResume || (existing.status !== 'pending' && !abandonedClaim)) return { ok: false, manifest, continuation: existing };
+    const continuation = normalizeRecoveryContinuation({
+      ...existing,
+      status: 'running',
+      claimedAt: clock(),
+      claimedByRunId: recoveryRunId,
+      claimedProcessId: process.pid,
+      attempts: Number(existing.attempts || 0) + 1,
+    }, manifest);
     await atomicWriteJson(recoveryContinuationFile(rootDir, id), continuation);
     return { ok: true, manifest, continuation };
   });
@@ -863,7 +875,10 @@ export async function listPendingRecoveryContinuations({ rootDir, limit = 100 } 
   for (const entry of entries.filter((item) => item.isDirectory())) {
     const sessionId = safeId(entry.name);
     const [manifest, continuation] = await Promise.all([readInterruptedRunManifest({ rootDir, sessionId }), readRecoveryContinuation({ rootDir, sessionId })]);
-    if (manifest && continuation?.status === 'pending' && continuation.autoResume) pending.push({ sessionId, manifest, continuation });
+    const reclaimable = continuation?.status === 'running'
+      && Number.isInteger(continuation.claimedProcessId)
+      && !processIsAlive(continuation.claimedProcessId);
+    if (manifest && continuation?.autoResume && (continuation.status === 'pending' || reclaimable)) pending.push({ sessionId, manifest, continuation });
   }
   return pending.sort((a, b) => String(a.continuation.queuedAt).localeCompare(String(b.continuation.queuedAt))).slice(0, limit);
 }
