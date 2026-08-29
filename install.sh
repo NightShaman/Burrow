@@ -232,7 +232,13 @@ verify_restarted_runtime() {
 if [ -z "$SOURCE_DIR" ]; then
   command -v curl >/dev/null 2>&1 || { echo "Burrow install: curl is required." >&2; exit 1; }
   TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/burrow-install.XXXXXX")
-  curl -fsSL "https://github.com/${REPOSITORY}/archive/refs/heads/main.tar.gz" -o "$TMP_ROOT/burrow.tar.gz"
+  # Resolve main through GitHub's commit API, then download that immutable
+  # codeload archive. `archive/refs/heads/main` is CDN-cached and can lag a
+  # completed assembly by minutes, leaving an update to reinstall stale code.
+  assembly_sha=$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${REPOSITORY}/commits/main" | node -e 'let body=""; process.stdin.on("data", chunk => { body += chunk; }).on("end", () => { try { const sha=JSON.parse(body).sha; if (/^[0-9a-f]{40}$/i.test(sha || "")) process.stdout.write(sha); } catch {} });')
+  [ -n "$assembly_sha" ] || { echo "Burrow install: could not resolve the current GitHub assembly commit." >&2; exit 1; }
+  echo "Burrow update: downloading assembly $assembly_sha"
+  curl -fsSL "https://codeload.github.com/${REPOSITORY}/tar.gz/$assembly_sha" -o "$TMP_ROOT/burrow.tar.gz"
   tar -xzf "$TMP_ROOT/burrow.tar.gz" -C "$TMP_ROOT"
   SOURCE_DIR=$(find "$TMP_ROOT" -mindepth 1 -maxdepth 1 -type d -name "Burrow-*" | head -n 1)
 fi
