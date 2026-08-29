@@ -199,11 +199,28 @@ export async function runDreamCycle({ agentId, databasePath = null, rootDir = nu
   try {
     const settings = settingsStore.get(id);
     if (!settings.enabled) throw new Error('dream_cycle_disabled');
-    // Dream material is deliberately curated working memory only. Session transcripts,
-    // receipts, tool activity, and execution continuity never enter operator-facing
-    // DreamDiary or DreamMemory automatically.
-    const fallbackItems = memoryStore.list({ agentId: id, includeInactive: false, limit: 100 })
+    // Dreams consume curated continuity only: explicit working-memory records and
+    // Tiddle's compact rolling cards. Raw transcripts, tool receipts, and trace
+    // payloads never enter DreamDiary, DreamMemory, or prompt preload.
+    const explicitItems = memoryStore.list({ agentId: id, includeInactive: false, limit: 100 })
       .filter((item) => ['decision', 'finding', 'blocker', 'handoff'].includes(item.kind));
+    const warmItems = memoryStore.listAllRollingContinuityCards({ agentId: id, limit: 100 }).map((card) => ({
+      id: `warm-dream:${card.id}`,
+      agentId: id,
+      sessionId: 'tiddle',
+      conversationId: 'tiddle',
+      project: card.project,
+      kind: 'finding',
+      state: 'active',
+      title: card.title,
+      content: card.summary,
+      sourceRefs: Array.isArray(card.recentRefs) ? card.recentRefs : [],
+      expiresAt: card.expiresAt,
+      updatedAt: card.lastSeen,
+    }));
+    const fallbackItems = [...explicitItems, ...warmItems]
+      .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')))
+      .slice(0, 100);
     const soul = profileStore.get(id, 'SOUL')?.markdown || '';
     const phaseResults = [];
     let dreamMemoryCandidates = [];
@@ -215,6 +232,7 @@ export async function runDreamCycle({ agentId, databasePath = null, rootDir = nu
         content: item.content,
         sourceRefs: item.sourceRefs?.length ? item.sourceRefs : [`working-memory:${item.id}`],
         kind: item.kind,
+        project: item.project,
         expiresAt: item.expiresAt,
       }));
       const selected = phase !== 'deep' ? dreamItems.slice(0, Math.max(1, Math.min(12, Number(limit) || DEFAULT_LIMIT))) : [];
@@ -229,11 +247,26 @@ export async function runDreamCycle({ agentId, databasePath = null, rootDir = nu
       phaseResults.push({ phase, inspected: sourceItems.length, recorded, summary, diaryId: diary.id });
     }
     const consolidation = consolidateDreamMemory({ agentId: id, databasePath, limit, generatedAt, items: dreamMemoryCandidates });
+    // Dream preload is compact, derived, and explicitly non-authoritative. A
+    // scoped preload wins; `global` is a conservative fallback for ordinary
+    // sessions that do not yet have a continuity scope.
+    const preloadItems = dreamMemoryCandidates.slice(0, 5).map((item) => ({ id: item.id, title: item.title, content: item.content, sourceRefs: item.sourceRefs }));
+    const preloadExpiry = new Date(new Date(generatedAt).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const preloadProjects = [...new Set(dreamMemoryCandidates.map((item) => text(item.project)).filter(Boolean))];
+    const dreamPreloads = [];
+    if (preloadItems.length) {
+      dreamPreloads.push(memoryStore.replaceDreamPreload({ agentId: id, project: 'global', items: preloadItems, expiresAt: preloadExpiry }));
+      for (const project of preloadProjects.slice(0, 8)) {
+        const items = dreamMemoryCandidates.filter((item) => item.project === project).slice(0, 5)
+          .map((item) => ({ id: item.id, title: item.title, content: item.content, sourceRefs: item.sourceRefs }));
+        if (items.length) dreamPreloads.push(memoryStore.replaceDreamPreload({ agentId: id, project, items, expiresAt: preloadExpiry }));
+      }
+    }
     const preferences = await adjudicatePreferences({ agentId: id, profileStore, databasePath, generatedAt, modelAdapter, modelConfig, traceLogger });
     const nextRunAt = nextCronOccurrence(settings.cron, settings.timezone, new Date(generatedAt));
     const state = { version: 1, agentId: id, enabled: true, cron: settings.cron, timezone: settings.timezone, nextRunAt, lastRunAt: generatedAt, updatedAt: generatedAt };
     db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`).run(phaseState(id), json(state), generatedAt);
-    const receipt = { version: 1, ok: true, runId, agentId: id, phases: phaseResults, dreamMemoryItemCount: consolidation.itemCount, preferences, nextRunAt, generatedAt };
+    const receipt = { version: 1, ok: true, runId, agentId: id, phases: phaseResults, dreamMemoryItemCount: consolidation.itemCount, dreamPreloadCount: dreamPreloads.length, preferences, nextRunAt, generatedAt };
     db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?)`).run(receiptState(id, runId), json(receipt), generatedAt);
     return receipt;
   } catch (error) {

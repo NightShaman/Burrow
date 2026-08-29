@@ -252,14 +252,31 @@ export class WorkingMemoryStore {
       .run(key, JSON.stringify(next), timestamp);
     return card;
   }
-  listRollingContinuityCards({ agentId, project, limit = 20 } = {}) {
-    if (!text(agentId) || !text(project)) return [];
+  listRollingContinuityCards({ agentId, project = null, limit = 20 } = {}) {
+    if (!text(agentId)) return [];
+    if (!text(project)) return this.listAllRollingContinuityCards({ agentId, limit });
     const row = this.db.prepare('SELECT value_json FROM settings_meta WHERE key=?').get(`rolling-continuity:${text(agentId)}:${text(project)}`);
     let value = null;
     try { value = row ? JSON.parse(row.value_json) : null; } catch { value = null; }
     const timestamp = now();
     return (Array.isArray(value?.cards) ? value.cards : [])
       .filter((card) => !card.expiresAt || card.expiresAt >= timestamp)
+      .sort((left, right) => String(right.lastSeen || '').localeCompare(String(left.lastSeen || '')) || Number(right.recurrence || 0) - Number(left.recurrence || 0))
+      .slice(0, Math.max(1, Math.min(100, Number(limit) || 20)));
+  }
+  listAllRollingContinuityCards({ agentId, limit = 20 } = {}) {
+    if (!text(agentId)) return [];
+    const rows = this.db.prepare('SELECT value_json FROM settings_meta WHERE key LIKE ?').all(`rolling-continuity:${text(agentId)}:%`);
+    const timestamp = now();
+    const cards = [];
+    for (const row of rows) {
+      try {
+        for (const card of JSON.parse(row.value_json)?.cards || []) {
+          if (card?.agentId === text(agentId) && (!card.expiresAt || card.expiresAt >= timestamp)) cards.push(card);
+        }
+      } catch {}
+    }
+    return cards
       .sort((left, right) => String(right.lastSeen || '').localeCompare(String(left.lastSeen || '')) || Number(right.recurrence || 0) - Number(left.recurrence || 0))
       .slice(0, Math.max(1, Math.min(100, Number(limit) || 20)));
   }

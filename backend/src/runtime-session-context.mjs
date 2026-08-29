@@ -5,6 +5,7 @@ import { applyWorkingContextEvents, verifiedEventsFromTurnInput, workingContextF
 import { loadWorkingContinuity, normalizeContinuityScope, projectHandoffsIntoWorkingContinuity } from './working-memory-continuity.mjs';
 import { validateReadEvidence } from './read-evidence.mjs';
 import { readSessionReadEvidence } from './read-evidence-store.mjs';
+import { WorkingMemoryStore } from './working-memory-store.mjs';
 
 export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessionId, runtimeState, normalizedArgs, workspaceRoot, resolvedTarget, message, explicitWorkspaceFiles = [], interruptedRun = null } = {}) {
   // Planning consumes no transcript prose. It receives only durable session
@@ -53,5 +54,11 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
     continuityScope,
   });
   const ambientWorkingContext = { ...initialWorkingContext, ...(interruptedRun ? { interruptedRun } : {}), continuity: workingContinuity, continuityScopeSource: generatedContinuityScope ? 'runtime_generated' : 'session_persisted' };
-  return { priorSession, conversationId, resolvedWorkingRoot, continuityHandoffs, compatibilityScope, continuityScope, generatedContinuityScope, verifiedSubjectScope, deicticFiles, workspaceFiles, initialWorkingContext, ambientWorkingContext };
+  let dreamPreload = null;
+  try {
+    const store = new WorkingMemoryStore(runtimeState.settingsDatabasePath ? { databasePath: runtimeState.settingsDatabasePath } : {});
+    try { dreamPreload = store.getDreamPreload({ agentId: runtimeState.agentId, project: continuityScope }) || store.getDreamPreload({ agentId: runtimeState.agentId, project: 'global' }); }
+    finally { store.close(); }
+  } catch { dreamPreload = null; }
+  return { priorSession, conversationId, resolvedWorkingRoot, continuityHandoffs, compatibilityScope, continuityScope, generatedContinuityScope, verifiedSubjectScope, deicticFiles, workspaceFiles, initialWorkingContext, ambientWorkingContext, dreamPreload };
 }

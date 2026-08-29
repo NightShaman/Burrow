@@ -223,9 +223,8 @@ async function runAskChatUnserialized({
     explicitWorkspaceFiles,
     interruptedRun: continuity.recoveryManifest || null,
   });
-  const { priorSession, conversationId, resolvedWorkingRoot, compatibilityScope, continuityScope, generatedContinuityScope, verifiedSubjectScope, deicticFiles, workspaceFiles, initialWorkingContext, ambientWorkingContext } = sessionContext;
+  const { priorSession, conversationId, resolvedWorkingRoot, compatibilityScope, continuityScope, generatedContinuityScope, verifiedSubjectScope, deicticFiles, workspaceFiles, initialWorkingContext, ambientWorkingContext, dreamPreload } = sessionContext;
   const effectiveAction = action ?? normalizedArgs.action ?? null;
-  const dreamPreload = null;
   const turnMemoryContext = {};
   // An explicit data root owns its trace cache too. This keeps isolated callers
   // (tests, one-shot tools, and alternate runtimes) from falling back to the
