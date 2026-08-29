@@ -203,6 +203,16 @@ if [ -z "$SOURCE_DIR" ]; then
 fi
 [ -n "$SOURCE_DIR" ] && [ -f "$SOURCE_DIR/backend/package.json" ] && [ -f "$SOURCE_DIR/ui/package.json" ] || { echo "Burrow install: source is not an assembled Burrow checkout: ${SOURCE_DIR:-unknown}" >&2; exit 1; }
 INSTALL_DIR=$(mkdir -p "$INSTALL_DIR" && cd "$INSTALL_DIR" && pwd)
+if [ -n "${BURROW_INSTALL_TEST_ROOT:-}" ]; then
+  TEST_ROOT=$(cd "$BURROW_INSTALL_TEST_ROOT" && pwd) || { echo "Burrow install: test root is unavailable." >&2; exit 1; }
+  TEST_HOME=$(cd "$HOME" && pwd) || { echo "Burrow install: test HOME is unavailable." >&2; exit 1; }
+  TEST_CONFIG=$(mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}" && cd "${XDG_CONFIG_HOME:-$HOME/.config}" && pwd)
+  TEST_TMP=$(mkdir -p "${TMPDIR:-/tmp}" && cd "${TMPDIR:-/tmp}" && pwd)
+  for TEST_PATH in "$INSTALL_DIR" "$TEST_HOME" "$TEST_CONFIG" "$TEST_TMP"; do
+    case "$TEST_PATH" in "$TEST_ROOT"|"$TEST_ROOT"/*) ;; *) echo "Burrow install: test isolation requires install, home, config, and temp paths beneath BURROW_INSTALL_TEST_ROOT." >&2; exit 1 ;; esac
+  done
+  case "${XDG_RUNTIME_DIR:-}" in "$TEST_ROOT"|"$TEST_ROOT"/*) ;; *) echo "Burrow install: test isolation requires XDG_RUNTIME_DIR beneath BURROW_INSTALL_TEST_ROOT." >&2; exit 1 ;; esac
+fi
 prepare_service_restart
 # An update is entered through the absolute launcher, but package lifecycle
 # scripts may invoke `burrow`. Keep the active installation launcher visible
