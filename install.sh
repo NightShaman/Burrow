@@ -171,40 +171,61 @@ prepare_service_restart() {
   RESTART_SERVICE=1
 }
 
-verify_restarted_runtime() {
-  # The assembled GitHub payload writes this immutable build version during
-  # assembly. Development/source-dir installs may not have assembly metadata,
-  # so retain the package-version fallback for that supported path.
-  expected_version=$(awk '$1 == "Burrow-Build-Version" { print $2; exit }' "$INSTALL_DIR/app/SOURCE_VERSIONS" 2>/dev/null || true)
-  [ -n "$expected_version" ] || expected_version=$(node -p "require('$INSTALL_DIR/app/backend/package.json').version")
+runtime_endpoint() {
   host=$(grep '^BURROW_UI_HOST=' "$ENV_FILE" | cut -d= -f2- || true)
   port=$(grep '^BURROW_UI_PORT=' "$ENV_FILE" | cut -d= -f2- || true)
   host=${host:-127.0.0.1}
   port=${port:-42817}
   [ "$host" = "0.0.0.0" ] && host=127.0.0.1
-  # A cold Node runtime can take longer than the former 15-second probe window,
-  # especially after native modules and UI assets were replaced. The expected
-  # version comes from the assembled payload's GitHub-generated build metadata,
-  # not a manually maintained release number. Wait for the unit to become
-  # active and retain final facts if readiness fails.
+}
+
+listening_port_owner() {
+  command -v ss >/dev/null 2>&1 || return 1
+  ss -ltnp "sport = :$port" 2>/dev/null | sed -n '2p'
+}
+
+stop_managed_runtime() {
+  runtime_endpoint
+  user_systemctl stop burrow.service
+  for attempt in $(seq 1 10); do
+    unit_state=$(user_systemctl is-active burrow.service 2>/dev/null || true)
+    port_owner=$(listening_port_owner || true)
+    [ "$unit_state" != active ] && [ -z "$port_owner" ] && return 0
+    sleep 1
+  done
+  echo "Burrow update: service did not stop cleanly within 10 seconds (state: ${unit_state:-unknown}; listener: ${port_owner:-none}). Refusing to activate a payload over a live runtime." >&2
+  exit 1
+}
+
+verify_restarted_runtime() {
+  # GitHub assemblies write their immutable build identity into SOURCE_VERSIONS.
+  # Development/source-dir installs retain package-version fallback support.
+  expected_version=$(awk '$1 == "Burrow-Build-Version" { print $2; exit }' "$INSTALL_DIR/app/SOURCE_VERSIONS" 2>/dev/null || true)
+  [ -n "$expected_version" ] || expected_version=$(node -p "require('$INSTALL_DIR/app/backend/package.json').version")
+  runtime_endpoint
+  previous_invocation=${1:-}
   last_unit_state=unknown
   last_health=unreachable
-  for attempt in $(seq 1 45); do
+  for attempt in $(seq 1 15); do
     last_unit_state=$(user_systemctl is-active burrow.service 2>/dev/null || true)
-    if [ "$last_unit_state" = active ]; then
+    current_invocation=$(user_systemctl show burrow.service -p InvocationID --value 2>/dev/null || true)
+    if [ "$last_unit_state" = active ] && { [ -z "$previous_invocation" ] || [ "$current_invocation" != "$previous_invocation" ]; }; then
       last_health=$(curl -fsS --max-time 2 "http://$host:$port/api/health" 2>/dev/null || true)
-      case "$last_health" in *"\"version\":\"$expected_version\""*) return 0 ;; esac
+      health_version=$(printf '%s' "$last_health" | node -e 'let body=""; process.stdin.on("data", chunk => { body += chunk; }).on("end", () => { try { process.stdout.write(String(JSON.parse(body).version || "")); } catch {} });')
+      [ "$health_version" = "$expected_version" ] && return 0
     fi
     sleep 1
   done
-  observed_version=$(printf '%s' "$last_health" | sed -n 's/.*"version":"\\([^"}]*\\)".*/\1/p' | head -n 1)
-  if [ -n "$observed_version" ]; then
-    echo "Burrow update: service is $last_unit_state but health reported version $observed_version, expected $expected_version after 45 seconds." >&2
-  elif [ "$last_unit_state" != active ]; then
-    echo "Burrow update: burrow.service is $last_unit_state after restart; health never became reachable within 45 seconds." >&2
+  if [ "$last_unit_state" != active ]; then
+    echo "Burrow update: burrow.service is $last_unit_state after start; expected a new service invocation within 15 seconds." >&2
+  elif [ -n "$previous_invocation" ] && [ "$current_invocation" = "$previous_invocation" ]; then
+    echo "Burrow update: burrow.service remained on invocation $current_invocation after start; expected a new runtime." >&2
+  elif [ -n "$health_version" ]; then
+    echo "Burrow update: new service invocation $current_invocation is active but health reported version $health_version, expected $expected_version within 15 seconds." >&2
   else
-    echo "Burrow update: burrow.service is active but health at http://$host:$port/api/health never reported version $expected_version within 45 seconds." >&2
+    echo "Burrow update: new service invocation $current_invocation is active but health at http://$host:$port/api/health was unreachable within 15 seconds." >&2
   fi
+  user_systemctl status burrow.service --no-pager -n 20 >&2 || true
   exit 1
 }
 
@@ -294,6 +315,14 @@ if ! grep -q '^BURROW_SETTINGS_KEY=' "$ENV_FILE"; then
   umask 077
   printf '%s=%s\n' 'BURROW_SETTINGS_KEY' "$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))')" >> "$ENV_FILE"
 fi
+# Stop the managed runtime before replacing the active launcher or app payload.
+# A restart alone can overlap old and new servers on the listener; prove the
+# unit and port are clear before activation instead.
+if [ "$RESTART_SERVICE" -eq 1 ]; then
+  previous_invocation=$(user_systemctl show burrow.service -p InvocationID --value 2>/dev/null || true)
+  stop_managed_runtime
+fi
+
 # Replace the service launcher atomically. The running service and an update
 # invoked through this launcher may still have the previous inode open; direct
 # truncation can fail with ETXTBSY and leaves a half-written command behind.
@@ -390,7 +419,7 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
 fi
 rm -rf "$PREVIOUS"
 if [ "$RESTART_SERVICE" -eq 1 ]; then
-  user_systemctl restart burrow.service
-  verify_restarted_runtime
+  user_systemctl start burrow.service
+  verify_restarted_runtime "$previous_invocation"
 fi
 printf "%s\\n" "Burrow install: ok" "Home: $INSTALL_DIR" "Application: $INSTALL_DIR/app" "State: $INSTALL_DIR/{config,workspace,agentdata,cache}" "Run: $INSTALL_DIR/bin/burrow serve" "Update: $INSTALL_DIR/bin/burrow update"
