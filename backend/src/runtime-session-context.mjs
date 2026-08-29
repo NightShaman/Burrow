@@ -30,7 +30,12 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
   });
   const resolvedWorkingRoot = resolvedTarget?.root || workspaceRoot || normalizedArgs.workspace_root || runtimeState.agentWorkspaceRoot || runtimeState.workspaceRoot || null;
   const priorWorkingContext = workingContextFromSession(priorSession);
-  const validReadEvidence = await validateReadEvidence(await readSessionReadEvidence({ rootDir: sessionRoot, sessionId: resolvedSessionId }));
+  // ReadEvidence is an active-session aid, not ambient new-session memory. A
+  // fresh session without an interrupted run must begin from its actual
+  // conversation/handoff state, never arbitrary prior file excerpts.
+  const validReadEvidence = (!isFreshConversation || interruptedRun)
+    ? await validateReadEvidence(await readSessionReadEvidence({ rootDir: sessionRoot, sessionId: resolvedSessionId }))
+    : [];
   const compatibilityScope = normalizeContinuityScope(normalizedArgs.continuity_scope ?? normalizedArgs.continuityScope ?? normalizedArgs.working_project ?? normalizedArgs.workingProject);
   const continuityScope = normalizeContinuityScope(priorWorkingContext.continuityScope) || compatibilityScope || `conversation:${conversationId || resolvedSessionId}`;
   const generatedContinuityScope = !normalizeContinuityScope(priorWorkingContext.continuityScope) && !compatibilityScope;
