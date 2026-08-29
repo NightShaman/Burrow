@@ -2929,6 +2929,17 @@ async function shutdownRuntime(signal) {
 process.once('SIGTERM', () => { void shutdownRuntime('SIGTERM'); });
 process.once('SIGINT', () => { void shutdownRuntime('SIGINT'); });
 
+// A duplicate launcher/service must not become an unhandled EventEmitter
+// exception that buries the actual bind conflict in a Node stack trace.
+server.once('error', (error) => {
+  const code = String(error?.code || 'server_error');
+  const detail = code === 'EADDRINUSE'
+    ? `Burrow UI could not bind ${host}:${port}: address already in use.`
+    : `Burrow UI failed to listen on ${host}:${port}: ${String(error?.message || error)}`;
+  console.error(detail);
+  process.exit(1);
+});
+
 server.listen(port, host, async () => {
   if (backgroundSchedulersEnabled()) {
     const store = new ScheduledJobStore({ databasePath: settingsDatabasePath() });

@@ -189,7 +189,7 @@ verify_restarted_runtime() {
   # active and retain final facts if readiness fails.
   last_unit_state=unknown
   last_health=unreachable
-  for attempt in $(seq 1 180); do
+  for attempt in $(seq 1 45); do
     last_unit_state=$(user_systemctl is-active burrow.service 2>/dev/null || true)
     if [ "$last_unit_state" = active ]; then
       last_health=$(curl -fsS --max-time 2 "http://$host:$port/api/health" 2>/dev/null || true)
@@ -199,11 +199,11 @@ verify_restarted_runtime() {
   done
   observed_version=$(printf '%s' "$last_health" | sed -n 's/.*"version":"\\([^"}]*\\)".*/\1/p' | head -n 1)
   if [ -n "$observed_version" ]; then
-    echo "Burrow update: service is $last_unit_state but health reported version $observed_version, expected $expected_version after 180 seconds." >&2
+    echo "Burrow update: service is $last_unit_state but health reported version $observed_version, expected $expected_version after 45 seconds." >&2
   elif [ "$last_unit_state" != active ]; then
-    echo "Burrow update: burrow.service is $last_unit_state after restart; health never became reachable within 180 seconds." >&2
+    echo "Burrow update: burrow.service is $last_unit_state after restart; health never became reachable within 45 seconds." >&2
   else
-    echo "Burrow update: burrow.service is active but health at http://$host:$port/api/health never reported version $expected_version within 180 seconds." >&2
+    echo "Burrow update: burrow.service is active but health at http://$host:$port/api/health never reported version $expected_version within 45 seconds." >&2
   fi
   exit 1
 }
@@ -246,8 +246,14 @@ chmod 0755 "$STAGING/install.sh"
 [ "$INSTALL_DEPS" -ne 1 ] || ensure_node_24
 if [ "$MODE" = "ui" ]; then
   cp -R "$SOURCE_DIR/ui" "$STAGING/ui"
-  if [ "$INSTALL_DEPS" -eq 1 ]; then
-    (cd "$STAGING/ui" && npm ci && npm run build)
+  # GitHub assemblies contain a prebuilt UI. Updating from one must activate
+  # those immutable assets, not reinstall 129 packages and rebuild Vite on the
+  # live host. Source-directory installs retain the build fallback.
+  if [ -d "$SOURCE_DIR/ui/dist" ]; then
+    mkdir -p "$STAGING/backend/public/ui"
+    cp -R "$SOURCE_DIR/ui/dist/." "$STAGING/backend/public/ui/"
+  elif [ "$INSTALL_DEPS" -eq 1 ]; then
+    (cd "$STAGING/ui" && npm ci --no-audit --no-fund --loglevel=error && npm run build --silent)
     mkdir -p "$STAGING/backend/public/ui"; cp -R "$STAGING/ui/dist/." "$STAGING/backend/public/ui/"
   fi
 fi
@@ -255,8 +261,8 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
   # These are runtime-owned integrations, not application dependencies. Stage
   # them before activation so a failed install cannot leave a partial runtime.
   mkdir -p "$STAGING/integrations/mcporter" "$STAGING/integrations/claude-code"
-  (cd "$STAGING/backend" && npm ci --omit=dev && node -e "import('node-llama-cpp')")
-  npm install --prefix "$STAGING/integrations/mcporter" --omit=dev --no-package-lock --no-save mcporter@0.13.7
+  (cd "$STAGING/backend" && npm ci --omit=dev --no-audit --no-fund --loglevel=error && node -e "import('node-llama-cpp')")
+  npm install --prefix "$STAGING/integrations/mcporter" --omit=dev --no-package-lock --no-save --no-audit --no-fund --loglevel=error mcporter@0.13.7
   cat > "$STAGING/integrations/claude-code/package.json" <<'PACKAGE'
 {
   "private": true,
@@ -264,7 +270,7 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
   "allowScripts": { "@anthropic-ai/claude-code@2.1.232": true }
 }
 PACKAGE
-  npm install --prefix "$STAGING/integrations/claude-code" --omit=dev --no-package-lock --ignore-scripts=false
+  npm install --prefix "$STAGING/integrations/claude-code" --omit=dev --no-package-lock --ignore-scripts=false --no-audit --no-fund --loglevel=error
   "$STAGING/integrations/claude-code/node_modules/.bin/claude" --version >/dev/null
 fi
 ENV_FILE="$INSTALL_DIR/burrow.env"
