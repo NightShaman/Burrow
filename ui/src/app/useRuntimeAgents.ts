@@ -106,6 +106,8 @@ export function useRuntimeAgents({ selectedAgentId, targets, setSelectedAgentId,
   const [registryError, setRegistryError] = useState('');
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
+  const selectedAgentIdRef = useRef(selectedAgentId);
+  selectedAgentIdRef.current = selectedAgentId;
   const targetKey = targets.map((target) => target.id).join('|');
   useEffect(() => {
     setAgents([]);
@@ -171,7 +173,8 @@ export function useRuntimeAgents({ selectedAgentId, targets, setSelectedAgentId,
     }
     const enabled = hydrated.filter((agent) => agent.activity !== 'Disabled');
     const fallbackAgentId = enabled[0]?.id ?? hydrated[0]?.id ?? '';
-    const nextAgentId = hydrated.some((agent) => agent.id === selectedAgentId) ? selectedAgentId : fallbackAgentId;
+    const latestSelectedAgentId = selectedAgentIdRef.current;
+    const nextAgentId = hydrated.some((agent) => agent.id === latestSelectedAgentId) ? latestSelectedAgentId : fallbackAgentId;
     setAgents(hydrated);
     setRegistryState(hydrated.length === 0 ? 'empty' : 'ready');
     setRegistryError(failedTargets.map(({ target, error }) => `${target.name}: ${error?.message || 'Unavailable'}`).join('; '));
