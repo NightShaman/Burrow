@@ -69,7 +69,6 @@ function normalizeAction(action, index) {
     maxMatches: Number.isFinite(Number(action?.maxMatches)) ? Math.max(1, Math.floor(Number(action.maxMatches))) : null,
     offsetBytes: Number.isFinite(Number(action?.offsetBytes)) ? Math.max(0, Math.floor(Number(action.offsetBytes))) : null,
     maxBytes: Number.isFinite(Number(action?.maxBytes)) ? Math.max(1, Math.floor(Number(action.maxBytes))) : null,
-    timeoutMs: Number.isFinite(Number(action?.timeoutMs)) ? Math.floor(Number(action.timeoutMs)) : null,
     query: action?.query ? String(action.query) : null,
     cursor: action?.cursor === undefined || action?.cursor === null ? null : String(action.cursor),
     sessionScope: action?.scope ? String(action.scope) : 'agent_sessions',
@@ -367,7 +366,6 @@ export function nativeToolSchemas({ includeMutations = true, includeWorkingMemor
             task: { type: 'string' },
             label: { type: 'string', description: 'Optional short display label for the child in the agent tree (maximum 80 characters). Keep the full instruction in task.' },
             model: { type: 'string', description: 'Optional exact enabled SQLite model id for this child only. Omit to inherit the parent model.' },
-            timeoutMs: { type: 'number', minimum: 30000, description: 'Optional requested child runtime budget in milliseconds. Runtime clamps it to configured safe limits.' },
             target: {
               type: 'object',
               description: 'Structural filesystem target. Use kind exactly "filesystem"; repository, repo, directory, folder, and project are not tool kinds.',
@@ -422,7 +420,7 @@ export function actionFromNativeToolCall(call = {}, index = 0) {
   if (tool === 'mcp_providers') return normalizeAction({ tool, reason: args.reason }, index);
   if (tool === 'mcp_capabilities') return normalizeAction({ tool, reason: args.reason, provider: args.provider, query: args.query, cursor: args.cursor, limit: args.limit }, index);
   if (tool === 'mcp_call') return normalizeAction({ tool, reason: args.reason, provider: args.provider, mcpToolName: args.mcpToolName, mcpArguments: args.mcpArguments }, index);
-  if (tool === 'spawn_subagent') return normalizeAction({ tool, reason: args.reason, task: args.task, label: args.label, model: args.model || args.modelId, modelProfile: args.modelProfile, timeoutMs: args.timeoutMs, target: args.target }, index);
+  if (tool === 'spawn_subagent') return normalizeAction({ tool, reason: args.reason, task: args.task, label: args.label, model: args.model || args.modelId, modelProfile: args.modelProfile, target: args.target }, index);
   return normalizeAction({ tool }, index);
 }
 

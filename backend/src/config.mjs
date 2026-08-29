@@ -229,23 +229,6 @@ export function resolveRetentionConfig() {
     traceMaxBytes: positive(env('BURROW_TRACE_MAX_BYTES')),
   };
 }
-const DEFAULT_SUBAGENT_TIMEOUT_MS = 15 * 60 * 1000;
-const DEFAULT_SUBAGENT_MAX_TIMEOUT_MS = 30 * 60 * 1000;
-const MIN_SUBAGENT_TIMEOUT_MS = 30 * 1000;
-
-function boundedTimeout(value, fallback, { min = MIN_SUBAGENT_TIMEOUT_MS, max = Number.MAX_SAFE_INTEGER } = {}) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(max, Math.max(min, Math.floor(parsed)));
-}
-
-/** Runtime-owned limits for isolated child processes; no unlimited mode exists. */
-export function resolveSubagentTimeoutConfig(args = {}) {
-  const maxTimeoutMs = boundedTimeout(args.subagent_max_timeout_ms ?? args.subagentMaxTimeoutMs ?? env('BURROW_SUBAGENT_MAX_TIMEOUT_MS'), DEFAULT_SUBAGENT_MAX_TIMEOUT_MS);
-  const defaultTimeoutMs = boundedTimeout(args.subagent_timeout_ms ?? args.subagentTimeoutMs ?? env('BURROW_SUBAGENT_TIMEOUT_MS'), DEFAULT_SUBAGENT_TIMEOUT_MS, { max: maxTimeoutMs });
-  return Object.freeze({ defaultTimeoutMs, maxTimeoutMs, minTimeoutMs: MIN_SUBAGENT_TIMEOUT_MS });
-}
-
 export function resolveChatToolLoopConfig() { return { stopOnNoProgress: false, loopWarningThreshold: 2, loopBlockThreshold: 3 }; }
 export function resolveContextConfig(args = {}) {
   return normalizeContextCompressionConfig({

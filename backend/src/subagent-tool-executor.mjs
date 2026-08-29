@@ -5,7 +5,6 @@ import { finishSubagentChildSession, startSubagentChildSession, subagentChildSes
 import { resolveExecutionTarget } from './execution-context.mjs';
 import { executionPolicyAllowsCommit, executionPolicyAllowsMutation, normalizeExecutionPolicyInput } from './execution-policy.mjs';
 import { runSubagentProcess } from './subagent-process-runner.mjs';
-import { resolveSubagentTimeoutConfig } from './config.mjs';
 
 function compactString(value) {
   return String(value || '').trim();
@@ -74,21 +73,7 @@ function normalizeTaskForSpawnRequest(value) {
   return compactString(value).replace(/\s+/g, ' ');
 }
 
-function requestedTimeout(value) {
-  if (value === undefined || value === null || value === '') return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.floor(parsed) : null;
-}
-
-function resolveSubagentTimeout({ requested = null, policy = resolveSubagentTimeoutConfig() } = {}) {
-  const source = requested === null ? 'runtime_default' : 'tool_request';
-  const candidate = requested === null ? policy.defaultTimeoutMs : requested;
-  const effectiveTimeoutMs = Math.min(policy.maxTimeoutMs, Math.max(policy.minTimeoutMs, candidate));
-  return { requestedTimeoutMs: requested, effectiveTimeoutMs, timeoutSource: source, timeoutClamped: candidate !== effectiveTimeoutMs };
-}
-
-
-function spawnRequestIdentity({ parentSessionId, parentConversationId, parentRunId, targetRoot, capability, modelProfile, task, timeoutMs } = {}) {
+function spawnRequestIdentity({ parentSessionId, parentConversationId, parentRunId, targetRoot, capability, modelProfile, task } = {}) {
   // Transparent deterministic identity from explicit request fields. This is
   // deliberately mechanical: it must not infer semantic task equivalence.
   return JSON.stringify({
@@ -99,7 +84,6 @@ function spawnRequestIdentity({ parentSessionId, parentConversationId, parentRun
     capability: compactString(capability) || 'spawn_subagent',
     modelProfile: compactString(modelProfile) || null,
     task: normalizeTaskForSpawnRequest(task),
-    timeoutMs: requestedTimeout(timeoutMs),
   });
 }
 
@@ -181,10 +165,8 @@ export async function executeSpawnSubagentTool({
   traceLogger = null,
   modelConfig = null,
   executionPolicy: executionPolicyInput = null,
-  subagentTimeoutConfig = null,
 } = {}) {
   const activityId = compactString(args.activityId) || null;
-  const timeout = resolveSubagentTimeout({ requested: requestedTimeout(args.timeoutMs), policy: subagentTimeoutConfig || resolveSubagentTimeoutConfig() });
   const task = compactString(args.task || args.purpose || args.reason);
   const blockers = [];
   if (!task) blockers.push('subagent_task_required');
@@ -255,7 +237,6 @@ export async function executeSpawnSubagentTool({
     model: requestedModel,
     modelProfile: modelSelection.requestedProfile,
     task: normalizeTaskForSpawnRequest(task),
-    timeoutMs: timeout.requestedTimeoutMs,
   };
   spawnRequest.key = spawnRequestIdentity(spawnRequest);
   const existing = await findSubagentBySpawnRequestKey({ dataRoot, key: spawnRequest.key });
@@ -302,21 +283,13 @@ export async function executeSpawnSubagentTool({
 
   const childRun = await runSubagentProcess({
     args: { id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy },
-    timeoutMs: timeout.effectiveTimeoutMs,
   });
   const childResult = childRun.result || { ok: false, summary: 'Subagent returned no result.', blockers: ['subagent_result_missing'], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
-  if (childRun.timedOut && !(childResult.evidence || []).length) {
-    const salvagedEvidence = await salvageEvidenceFromTrace(traceDir);
-    if (salvagedEvidence.length) {
-      childResult.evidence = salvagedEvidence;
-      childResult.warnings = [...(childResult.warnings || []), 'subagent_timeout_evidence_salvaged'];
-    }
-  }
   const status = childRun.ok && childResult.ok ? 'succeeded' : 'failed';
   const receiptRef = traceDir ? path.join(traceDir, 'receipt.json') : null;
   if (receiptRef) {
     await fs.mkdir(path.dirname(receiptRef), { recursive: true });
-    await fs.writeFile(receiptRef, `${JSON.stringify({ id, parentSessionId, parentConversationId, parentRunId, childSessionId, status, target, model: modelSelection, timeout, spawned: Boolean(childRun.spawned), exitCode: childRun.exitCode ?? null, evidenceCount: childResult.evidence?.length || 0 }, null, 2)}\n`, 'utf8');
+    await fs.writeFile(receiptRef, `${JSON.stringify({ id, parentSessionId, parentConversationId, parentRunId, childSessionId, status, target, model: modelSelection, spawned: Boolean(childRun.spawned), exitCode: childRun.exitCode ?? null, evidenceCount: childResult.evidence?.length || 0 }, null, 2)}\n`, 'utf8');
   }
   const child = childFrom({ parentSessionId, parentConversationId, parentRunId, childSessionId, receiptRefs: receiptRef ? [receiptRef] : [], dataRoot });
   const result = {
@@ -365,9 +338,9 @@ export async function executeSpawnSubagentTool({
     record: subagentVisibilitySummary(finished.record),
     queued,
     running: running.record,
-    childRun: { exitCode: childRun.exitCode ?? null, timedOut: Boolean(childRun.timedOut), timedOutBy: childRun.timedOutBy || null, durationMs: childRun.durationMs || null, ...timeout },
+    childRun: { exitCode: childRun.exitCode ?? null, durationMs: childRun.durationMs || null },
     spawnRequestKey: spawnRequest.key,
   };
 }
 
-export const __subagentToolExecutor__ = Object.freeze({ childProcess: true, refineRepositoryTarget, normalizeTaskForSpawnRequest, requestedTimeout, resolveSubagentTimeout, spawnRequestIdentity, compactSalvagedEvidence, salvageEvidenceFromTrace });
+export const __subagentToolExecutor__ = Object.freeze({ childProcess: true, refineRepositoryTarget, normalizeTaskForSpawnRequest, spawnRequestIdentity, compactSalvagedEvidence, salvageEvidenceFromTrace });

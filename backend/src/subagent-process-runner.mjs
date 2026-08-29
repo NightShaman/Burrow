@@ -4,10 +4,8 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DEFAULT_HARD_TIMEOUT_MS = 300_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 const DEFAULT_STREAM_CAPTURE_BYTES = 256 * 1024;
-const DEFAULT_KILL_AFTER_MS = 1_000;
 
 function compactString(value) {
   return String(value || '').trim();
@@ -75,12 +73,10 @@ function parseChildJson(stdout) {
 
 export async function runSubagentProcess({
   args = {},
-  timeoutMs = DEFAULT_HARD_TIMEOUT_MS,
   tempDir = os.tmpdir(),
   nodePath = process.execPath,
   childScriptPath: overrideChildScriptPath = null,
   maxStreamCaptureBytes = DEFAULT_STREAM_CAPTURE_BYTES,
-  killAfterMs = DEFAULT_KILL_AFTER_MS,
 } = {}) {
   const { dir, payloadPath } = await writePayload({ args }, tempDir);
   const startedAt = Date.now();
@@ -97,43 +93,20 @@ export async function runSubagentProcess({
       stderrOriginalBytes: stderrState.originalBytes,
     });
     let settled = false;
-    const hardTimeoutMs = Math.max(1, Number(timeoutMs) || DEFAULT_HARD_TIMEOUT_MS);
-    let timedOutBy = null;
     const child = spawn(nodePath, [overrideChildScriptPath || childScriptPath(), payloadPath], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: childEnv(),
     });
     const finish = async (payload) => {
-      clearTimeout(hardTimer);
       await cleanupPayloadDir(dir);
       resolve({ durationMs: Date.now() - startedAt, payloadCleaned: true, ...payload });
     };
-    const timeout = async (kind) => {
-      if (settled) return;
-      settled = true;
-      timedOutBy = kind;
-      const killDelay = Math.max(1, Number(killAfterMs) || DEFAULT_KILL_AFTER_MS);
-      child.kill('SIGTERM');
-      setTimeout(() => { if (!child.killed || child.exitCode === null) child.kill('SIGKILL'); }, killDelay).unref?.();
-      await finish({
-        ok: false,
-        spawned: true,
-        timedOut: true,
-        timedOutBy: kind,
-        exitCode: null,
-        signal: 'SIGTERM',
-        ...streams(),
-        result: { ok: false, summary: 'Subagent timed out.', blockers: ['subagent_timed_out'], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false },
-      });
-    };
-    const hardTimer = setTimeout(() => timeout('hard'), hardTimeoutMs);
 
     child.stdout.on('data', (chunk) => { appendTail(stdoutState, chunk, captureLimit); });
     child.stderr.on('data', (chunk) => { appendTail(stderrState, chunk, captureLimit); });
     child.on('error', async (error) => {
       if (settled) return;
       settled = true;
-      clearTimeout(hardTimer);
       await finish({
         ok: false,
         spawned: false,
@@ -145,7 +118,6 @@ export async function runSubagentProcess({
     child.on('close', async (code, signal) => {
       if (settled) return;
       settled = true;
-      clearTimeout(hardTimer);
       let parsed;
       try {
         parsed = parseChildJson(renderedStream(stdoutState));
@@ -168,4 +140,4 @@ export async function runSubagentProcess({
   });
 }
 
-export const __subagentProcessRunner__ = Object.freeze({ defaultHardTimeoutMs: DEFAULT_HARD_TIMEOUT_MS, defaultHeartbeatIntervalMs: DEFAULT_HEARTBEAT_INTERVAL_MS, defaultStreamCaptureBytes: DEFAULT_STREAM_CAPTURE_BYTES, defaultKillAfterMs: DEFAULT_KILL_AFTER_MS, childScript: childScriptPath, compactString, appendTail, renderedStream, parseChildJson });
+export const __subagentProcessRunner__ = Object.freeze({ defaultHeartbeatIntervalMs: DEFAULT_HEARTBEAT_INTERVAL_MS, defaultStreamCaptureBytes: DEFAULT_STREAM_CAPTURE_BYTES, childScript: childScriptPath, compactString, appendTail, renderedStream, parseChildJson });
