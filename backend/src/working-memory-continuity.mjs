@@ -37,6 +37,7 @@ export function selectWorkingContinuity({ records = [], cards = [], agentId = nu
       id: card.id,
       project: card.project,
       title: bounded(card.title, 240),
+      summary: bounded(card.summary, 900),
       lastSeen: card.lastSeen || null,
       recurrence: Number(card.recurrence || 0),
       evidence: bounded(card.evidence, 120) || null,

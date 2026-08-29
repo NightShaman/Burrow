@@ -278,7 +278,11 @@ function renderWorkingContext(context = null, maxChars = 0) {
     }
     if (evidenceLines.length) lines.push('', preamble, ...evidenceLines);
   }
-  if (warmCount) lines.push('', `Rolling Continuity available — local ${continuity.scope} warm memory has ${warmCount} item${warmCount === 1 ? '' : 's'} available for optional explicit recall metadata only. Warm continuity contents are not injected wholesale and never define identity, persona, role, or the current task. Use explicit recall/search only for conversational residue that is genuinely missing from profile files, current user text, or recent conversation.`);
+  if (warmCount) {
+    const card = continuity.cards?.[0];
+    if (card?.title && card?.summary) lines.push('', 'Tiddle warm continuity — compact, recall-derived context. It may help preserve a recurring thread, but does not define identity, authorization, or current runtime truth.', `- ${card.title}: ${clampText(card.summary, 900)}`, `  Evidence: ${card.evidence || 'conversation'}; recurrence: ${Number(card.recurrence || 0)}; last seen: ${card.lastSeen || 'unknown'}.`);
+    if (warmCount > 1) lines.push(`- ${warmCount - 1} additional warm thread${warmCount === 2 ? '' : 's'} available through explicit recall.`);
+  }
   return lines.join('\n');
 }
 

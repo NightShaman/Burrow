@@ -23,6 +23,17 @@ function parseJson(value) { try { return JSON.parse(value); } catch { return [];
 function expiry(days = DEFAULT_TTL_DAYS) { return new Date(Date.now() + Math.max(1, Number(days) || DEFAULT_TTL_DAYS) * 86400_000).toISOString(); }
 function ftsQuery(query) { return text(query).match(/[\p{L}\p{N}_-]{2,}/gu)?.map((word) => `"${word.replaceAll('"', '""')}"`).join(' AND ') || ''; }
 function warmKey(value = '') { return createHash('sha256').update(text(value).toLowerCase().replace(/\s+/g, ' ')).digest('hex').slice(0, 24); }
+function warmTokens(value = '') { return [...new Set(text(value).toLowerCase().split(/[^a-z0-9_-]+/u).filter((token) => token.length >= 4))]; }
+function warmSimilarity(left = '', right = '') {
+  const a = new Set(warmTokens(left)); const b = new Set(warmTokens(right));
+  if (!a.size || !b.size) return 0;
+  let shared = 0; for (const token of a) if (b.has(token)) shared += 1;
+  return shared / Math.min(a.size, b.size);
+}
+function sharedWarmRefs(left = [], right = []) {
+  const known = new Set((Array.isArray(left) ? left : []).map(text).filter(Boolean));
+  return (Array.isArray(right) ? right : []).some((ref) => known.has(text(ref)));
+}
 
 function initialize(db) {
   db.exec(`
@@ -227,10 +238,16 @@ export class WorkingMemoryStore {
     let value = null;
     try { value = row ? JSON.parse(row.value_json) : null; } catch { value = null; }
     const timestamp = now();
-    const cardId = `warm:${warmKey(`${agentId}\u0000${project}\u0000${title}`)}`;
     const cards = Array.isArray(value?.cards) ? value.cards : [];
-    const existing = cards.find((card) => card.id === cardId) || null;
-    const refs = [...new Set([...(Array.isArray(existing?.recentRefs) ? existing.recentRefs : []), ...(Array.isArray(sourceRefs) ? sourceRefs.map(text).filter(Boolean) : [])])].slice(-20);
+    const incomingRefs = Array.isArray(sourceRefs) ? sourceRefs.map(text).filter(Boolean) : [];
+    // A curator may phrase the same thread differently on adjacent turns. Keep
+    // one stable card when source lineage overlaps, then use conservative title
+    // similarity for later recurrence without shared receipts.
+    const existing = cards.find((card) => sharedWarmRefs(card.recentRefs, incomingRefs))
+      || cards.find((card) => warmSimilarity(`${card.title || ''} ${card.summary || ''}`, `${title} ${content}`) >= 0.8)
+      || null;
+    const cardId = existing?.id || `warm:${warmKey(`${agentId}\u0000${project}\u0000${title}`)}`;
+    const refs = [...new Set([...(Array.isArray(existing?.recentRefs) ? existing.recentRefs : []), ...incomingRefs])].slice(-20);
     const card = {
       id: cardId,
       agentId: text(agentId),

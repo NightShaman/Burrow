@@ -5,9 +5,18 @@
 .proof-run-card {
   min-height:104px
 }
-.proof-status-text {
-  font-size:10px;
-  letter-spacing:.04em
+.archive-results-pane .proof-run-card {
+  grid-template-columns:minmax(0,1fr) 120px
+}
+.archive-results-pane .proof-run-card .archive-session-side {
+  inline-size:120px;
+  overflow:visible
+}
+.archive-results-pane .proof-run-card .proof-status-text {
+  font-size:17px;
+  line-height:1;
+  letter-spacing:normal;
+  white-space:nowrap
 }
 .proof-status-completed,.proof-status-ok,.proof-status-validated {
   color:var(--success,#58d68d)
