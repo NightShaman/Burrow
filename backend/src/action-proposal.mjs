@@ -424,8 +424,12 @@ export function actionFromNativeToolCall(call = {}, index = 0) {
   if (tool === 'mcp_providers') return normalizeAction({ tool, reason: args.reason }, index);
   if (tool === 'mcp_capabilities') return normalizeAction({ tool, reason: args.reason, provider: args.provider, query: args.query, cursor: args.cursor, limit: args.limit }, index);
   if (tool === 'mcp_call') return normalizeAction({ tool, reason: args.reason, provider: args.provider, mcpToolName: args.mcpToolName, mcpArguments: args.mcpArguments }, index);
+  if (tool === 'list_skills') return normalizeAction({ tool, reason: args.reason }, index);
+  if (tool === 'load_skill') return normalizeAction({ tool, reason: args.reason, skillId: args.skillId }, index);
   if (tool === 'spawn_subagent') return normalizeAction({ tool, reason: args.reason, task: args.task, label: args.label, model: args.model || args.modelId, modelProfile: args.modelProfile, target: args.target }, index);
-  return normalizeAction({ tool }, index);
+  const normalized = normalizeAction({ tool, reason: args.reason }, index);
+  if (Object.keys(args).some((key) => key !== 'reason')) normalized.errors.push('tool_arguments_unmapped');
+  return normalized;
 }
 
 export const __test__ = { extractJsonCandidate, normalizeAction, normalizeSpawnTarget, stripCodeFence, ALLOWED_TOOLS };

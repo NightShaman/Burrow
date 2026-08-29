@@ -366,6 +366,26 @@ function nativeToolReceipt(result = {}) {
     inputSchema: tool?.inputSchema && typeof tool.inputSchema === 'object' && !Array.isArray(tool.inputSchema) ? tool.inputSchema : { type: 'object', properties: {} },
     granted: tool?.granted === true,
   }));
+  // Skill discovery is decision-critical capability evidence. Keep bounded
+  // cards on the actual provider wire; full bodies appear only after an
+  // explicit load_skill call.
+  if (Array.isArray(result?.skills) && result?.tool === 'list_skills') receipt.skills = result.skills.slice(0, 20).map((skill) => ({
+    id: truncatedNativeText(skill?.id, 160), name: truncatedNativeText(skill?.name, 240),
+    description: truncatedNativeText(skill?.description, 1_000), version: truncatedNativeText(skill?.version, 120),
+    lifecycle: truncatedNativeText(skill?.lifecycle, 80), available: skill?.available === true,
+    ownership: skill?.ownership && typeof skill.ownership === 'object'
+      ? { scope: skill.ownership.scope || null, agentId: skill.ownership.agentId || null }
+      : null,
+  }));
+  if (result?.skill && typeof result.skill === 'object' && result?.tool === 'load_skill') receipt.skill = {
+    id: truncatedNativeText(result.skill.id, 160), name: truncatedNativeText(result.skill.name, 240),
+    description: truncatedNativeText(result.skill.description, 1_000), version: truncatedNativeText(result.skill.version, 120),
+    lifecycle: truncatedNativeText(result.skill.lifecycle, 80), available: result.skill.available === true,
+    ownership: result.skill.ownership && typeof result.skill.ownership === 'object'
+      ? { scope: result.skill.ownership.scope || null, agentId: result.skill.ownership.agentId || null }
+      : null,
+    content: typeof result.skill.content === 'string' ? result.skill.content : null,
+  };
   for (const key of ['provider', 'nextCursor']) if (typeof result?.[key] === 'string') receipt[key] = truncatedNativeText(result[key], 500);
   for (const key of ['totalCount']) if (typeof result?.[key] === 'number') receipt[key] = result[key];
   if (result?.task && typeof result.task === 'object') receipt.task = {
