@@ -29,6 +29,11 @@ function projection(result = {}) {
   if (result.tool === 'files_find') return { ...base, path: result.dirPath || null, pattern: result.pattern || null, ...collectionReceipt('paths', result.paths), resultFingerprint: result.resultFingerprint || null, toolTruncated: Boolean(result.truncated) };
   if (mutation(result)) return { ...base, filePath: result.filePath || null, touchedFiles: result.touchedFiles || result.changedFiles || [] };
   if (result.tool === 'spawn_subagent') return { ...base, id: result.id || null, status: result.status || null, childSessionId: result.childSessionId || null, blockers: result.blockers || [], warnings: result.warnings || [] };
+  // Skill discovery is decision-critical evidence: include bounded cards in the
+  // model-facing continuation receipt. The catalog is already bounded by the
+  // executor/result shape; never include loaded SKILL.md bodies here.
+  if (result.tool === 'list_skills') return { ...base, skills: Array.isArray(result.skills) ? result.skills.slice(0, 20).map((skill) => ({ id: skill?.id || null, name: skill?.name || null, description: skill?.description || null, version: skill?.version || null, lifecycle: skill?.lifecycle || null, available: skill?.available === true, ownership: skill?.ownership ? { scope: skill.ownership.scope || null, agentId: skill.ownership.agentId || null } : null })) : [] };
+  if (result.tool === 'load_skill') return { ...base, skill: result.skill ? { id: result.skill.id || null, name: result.skill.name || null, version: result.skill.version || null, lifecycle: result.skill.lifecycle || null, available: result.skill.available === true } : null };
   return { ...base, path: result.filePath || result.path || result.dirPath || null, resultFingerprint: result.resultFingerprint || null };
 }
 
