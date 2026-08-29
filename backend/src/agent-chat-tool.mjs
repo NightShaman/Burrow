@@ -76,29 +76,43 @@ export async function sendAgentMessage({ senderRuntime, resolveRecipientRuntime,
   const session = sessionId(targetSessionId);
   const source = sessionId(sourceSessionId || 'default');
 
-  const recipientEntry = await appendAgentMessage({
-    rootDir: recipientRuntime.agentWorkspaceRoot, sessionId: session, content: body,
-    sender, senderRuntime, recipient, sourceSessionId: source, sourceRunId: runId,
-    messageMode: resolvedMode, direction: 'inbound',
-  });
-  const sourceEntry = await appendAgentMessage({
-    rootDir: senderRuntime.agentWorkspaceRoot, sessionId: source, content: body,
-    sender, senderRuntime, recipient, sourceSessionId: source, sourceRunId: runId,
-    messageMode: resolvedMode, direction: 'outbound', replyToEntryId: recipientEntry.id,
-  });
-  const receipt = {
-    tool: 'agent_send_message', ok: true, messageMode: resolvedMode,
-    senderAgentId: sender, recipientAgentId: recipient, sourceSessionId: source, targetSessionId: session,
-    sourceEntryId: sourceEntry.id, recipientEntryId: recipientEntry.id, deliveredAt: recipientEntry.ts,
-    autoExecuted: false,
+  const deliver = async () => {
+    const recipientEntry = await appendAgentMessage({
+      rootDir: recipientRuntime.agentWorkspaceRoot, sessionId: session, content: body,
+      sender, senderRuntime, recipient, sourceSessionId: source, sourceRunId: runId,
+      messageMode: resolvedMode, direction: 'inbound',
+    });
+    const sourceEntry = await appendAgentMessage({
+      rootDir: senderRuntime.agentWorkspaceRoot, sessionId: source, content: body,
+      sender, senderRuntime, recipient, sourceSessionId: source, sourceRunId: runId,
+      messageMode: resolvedMode, direction: 'outbound', replyToEntryId: recipientEntry.id,
+    });
+    return {
+      recipientEntry,
+      sourceEntry,
+      receipt: {
+        tool: 'agent_send_message', ok: true, messageMode: resolvedMode,
+        senderAgentId: sender, recipientAgentId: recipient, sourceSessionId: source, targetSessionId: session,
+        sourceEntryId: sourceEntry.id, recipientEntryId: recipientEntry.id, deliveredAt: recipientEntry.ts,
+        autoExecuted: false,
+      },
+    };
   };
-  if (!['request_reply', 'request_reply_complete'].includes(resolvedMode)) return receipt;
+  if (!['request_reply', 'request_reply_complete'].includes(resolvedMode)) return (await deliver()).receipt;
   if (typeof runRecipientReply !== 'function') throw new Error('agent_message_reply_unavailable');
 
-  const reply = await serializeRecipientReply({
+  // Ingress is part of the recipient reply transaction. Appending a second
+  // A2A message while the first recipient run owns this session advances the
+  // transcript underneath it and makes the first terminal commit stale. Queue
+  // both delivery and execution per recipient session instead.
+  const { recipientEntry, sourceEntry, receipt, reply } = await serializeRecipientReply({
     rootDir: recipientRuntime.agentWorkspaceRoot,
     sessionId: session,
-    operation: () => runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, inboundEntryId: recipientEntry.id }),
+    operation: async () => {
+      const delivery = await deliver();
+      const response = await runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, inboundEntryId: delivery.recipientEntry.id });
+      return { ...delivery, reply: response };
+    },
   });
   const replyText = text(reply?.answerText);
   if (!replyText) return { ...receipt, reply: { ok: false, error: reply?.error || 'agent_message_reply_empty' } };

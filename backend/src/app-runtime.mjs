@@ -37,6 +37,35 @@ import { attachmentSummary, createFallbackRunId, extraEyesRequested, normalizeRu
 
 export { loadRuntimeConfig };
 
+// A continuity head makes stale completion safe, but it does not make two live
+// turns in one process cooperative: a later claimant can still invalidate an
+// earlier turn. Queue the complete runtime turn per session so operator turns
+// and nested A2A replies cannot race each other. Cross-process protection
+// remains the continuity head and file lock in session-store.
+const sessionExecutionQueues = new Map();
+function sessionExecutionKey({ rootDir, sessionId, args = {}, agentRuntime = null } = {}) {
+  const sessionRoot = agentRuntime?.agentWorkspaceRoot
+    || args?.agent_workspace_root || args?.agentWorkspaceRoot
+    || args?.data_root || args?.dataRoot
+    || rootDir;
+  return `${path.resolve(String(sessionRoot))}:${String(sessionId || args?.session_id || args?.sessionId || args?.run_id || args?.runId || 'default')}`;
+}
+async function serializeSessionExecution(options, operation) {
+  const key = sessionExecutionKey(options);
+  const previous = sessionExecutionQueues.get(key) || Promise.resolve();
+  const current = previous.catch(() => {}).then(operation);
+  sessionExecutionQueues.set(key, current);
+  try { return await current; }
+  finally { if (sessionExecutionQueues.get(key) === current) sessionExecutionQueues.delete(key); }
+}
+
+export async function runAskChat(options = {}) {
+  // Internal regression seam: stale-commit tests exercise the cross-process
+  // continuity guard directly. Production callers always serialize here.
+  if (options.testHooks?.bypassSessionExecutionQueue) return runAskChatUnserialized(options);
+  return serializeSessionExecution(options, () => runAskChatUnserialized(options));
+}
+
 async function subagentDebugSnapshot({ dataRoot, legacyDataRoot = null, sessionId, compatibilityObserver = null, limit = 20 } = {}) {
   if (!dataRoot) return { snapshot: { items: [], activeCount: 0, finalCount: 0 }, records: [] };
   const records = await listSubagentRecords({ dataRoot, legacyDataRoot, compatibilityObserver, sessionId, limit });
@@ -83,7 +112,7 @@ function completedChildEvidence(records = [], { sessionId = null, conversationId
     }));
 }
 
-export async function runAskChat({
+async function runAskChatUnserialized({
   rootDir,
   command = 'chat',
   message,

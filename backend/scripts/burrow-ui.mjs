@@ -86,6 +86,20 @@ const port = Number(process.env.BURROW_UI_PORT || process.argv.find((arg) => arg
 const host = process.env.BURROW_UI_HOST || '0.0.0.0';
 const activeChatRuns = new Map();
 const sessionContinuityHeads = new Map();
+// The continuity head rejects stale writes, but browser requests sharing a
+// session must not make each other stale in the first place. Serialize the
+// complete HTTP turn per agent/session; nested A2A runs are serialized by the
+// runtime queue in app-runtime.
+const sessionChatQueues = new Map();
+function sessionChatQueueKey(agentId, sessionId) { return `${String(agentId)}:${String(sessionId || 'default')}`; }
+async function serializeSessionChat({ agentId, sessionId, operation }) {
+  const key = sessionChatQueueKey(agentId, sessionId);
+  const previous = sessionChatQueues.get(key) || Promise.resolve();
+  const current = previous.catch(() => {}).then(operation);
+  sessionChatQueues.set(key, current);
+  try { return await current; }
+  finally { if (sessionChatQueues.get(key) === current) sessionChatQueues.delete(key); }
+}
 const claudeCodeLoginConnectionIds = new Map();
 const groupChannelRuns = new Map();
 let modelSettingsStore = null;
@@ -2643,7 +2657,6 @@ async function handleChatCommand({ parsed, sessionId, agentRuntime } = {}) {
 
 async function handleChat(req, res) {
   const body = validateBoundaryBody('chat', await readJsonBody(req));
-  const streaming = acceptsNdjson(req);
   let agentRuntime;
   try {
     agentRuntime = await resolveAgentRuntime(body.agentId);
@@ -2651,6 +2664,11 @@ async function handleChat(req, res) {
     return sendJson(res, error?.statusCode || 500, { ok: false, error: String(error?.message || error) });
   }
   const sessionId = String(body.sessionId || 'default');
+  return serializeSessionChat({ agentId: agentRuntime.agentId, sessionId, operation: () => handleSerializedChat({ req, res, body, agentRuntime, sessionId }) });
+}
+
+async function handleSerializedChat({ req, res, body, agentRuntime, sessionId }) {
+  const streaming = acceptsNdjson(req);
   const command = parseChatCommand(body.message);
   if (command) {
     const result = await handleChatCommand({ parsed: command, sessionId, agentRuntime });
