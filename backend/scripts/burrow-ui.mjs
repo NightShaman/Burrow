@@ -16,6 +16,7 @@ import { collectTraceObservability } from '../src/trace-observability.mjs';
 import { listSubagentRecords, subagentVisibilitySummary } from '../src/subagent-store.mjs';
 import { ContinuityHandoffStore, buildContinuityHandoff, listContinuityHandoffs } from '../src/continuity-handoff-store.mjs';
 import { appendSessionEntry, archiveSession, forkSession, listResetSessionArchives, listSessionRecords, readActivityEvents, readChatMessages, readResetSessionArchive, readSessionMetadata, readSessionTurns, exportSessionTranscript, renameSession, resetSession, summarizeSessionTurns, writeResetSessionArchiveMetadata, writeSessionMetadata } from '../src/session-store.mjs';
+import { runPendingRecoveryContinuations } from '../src/recovery-continuation-runner.mjs';
 import { recordActiveRunInterruptions } from '../src/interrupted-run-recovery.mjs';
 import { generateArchiveSummary } from '../src/archive-summary.mjs';
 import { listArchiveRuns, readArchiveRun } from '../src/archive-proof.mjs';
@@ -2940,4 +2941,23 @@ server.listen(port, host, async () => {
     startCodexClientVersionRefresh();
   }
   console.log(`Burrow UI listening on http://${host}:${port}`);
+  // Recovery uses the same durable per-session queue and runtime turn path as
+  // ordinary chat. It starts only after the listener is live, and a queue claim
+  // prevents duplicate recovery when startup is retried.
+  void runPendingRecoveryContinuations({
+    agentRuntimes: await Promise.all(agentsStore().list({ includeDisabled: false }).map((agent) => resolveAgentRuntime(agent.id))),
+    createRunId: createChatTurnRunId,
+    runContinuation: async ({ runtime, sessionId, runId, manifest }) => {
+      const lifecycle = registerActiveAgentRun(activeChatRuns, { agentId: runtime.agentId, sessionId, runId, message: `Recover interrupted run: ${manifest.objective || 'reconcile durable state'}`, source: 'recovery' });
+      try {
+        return await runChatTurnFromBody({
+          body: { message: 'Continue the interrupted work using the runtime recovery record. Reconcile durable state before acting; do not repeat completed work blindly.', sessionId, runId, abortSignal: lifecycle.signal },
+          rootDir: projectRoot, agentRuntime: runtime, resolveAgentRuntime,
+          onTraceRecord: lifecycle.onTraceRecord, onModelTextDelta: lifecycle.onModelTextDelta,
+          onModelThoughtDelta: lifecycle.onModelThoughtDelta, onModelContextUsage: lifecycle.onModelContextUsage,
+          registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source }) => registerActiveAgentRun(activeChatRuns, { agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source }),
+        });
+      } finally { lifecycle.finish(); }
+    },
+  }).catch((error) => console.error(`Burrow recovery startup failed: ${String(error?.message || error)}`));
 });

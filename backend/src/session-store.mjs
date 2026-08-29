@@ -238,6 +238,7 @@ export async function recordInterruptedRun({ rootDir, sessionId, runId, generati
     await fs.mkdir(sessionDir(rootDir, id), { recursive: true });
     const manifest = normalizeInterruptedRunManifest({ sessionId: id, runId, generation, reason, objective, lastCompletedStep, pendingVerification, changedFiles, traceRef, workingContext, interruptedAt: clock() });
     await atomicWriteJson(interruptedRunFile(rootDir, id), manifest);
+    await atomicWriteJson(recoveryContinuationFile(rootDir, id), normalizeRecoveryContinuation({}, manifest));
     const head = await readSessionContinuityHead({ rootDir, sessionId: id });
     // Shutdown observers know the active run identity but may not have its
     // private continuity generation. A matching run id is sufficient to close
@@ -294,6 +295,7 @@ async function recoverAbandonedContinuityHead({ rootDir, sessionId, prior, metad
   };
   const manifest = normalizeInterruptedRunManifest({ sessionId, runId: prior.runId, generation: prior.generation, reason, interruptedAt: recoveredAt, lastCompletedStep: 'Run ownership was abandoned; reconcile durable session and workspace state before continuing.' });
   await atomicWriteJson(interruptedRunFile(rootDir, sessionId), manifest);
+  await atomicWriteJson(recoveryContinuationFile(rootDir, sessionId), normalizeRecoveryContinuation({}, manifest));
   await atomicWriteJson(continuityHeadFile(rootDir, sessionId), recovered);
   return { prior: recovered, metadata: completedMetadata, manifest };
 }
@@ -787,3 +789,76 @@ export async function archiveSession({ rootDir, sessionId, archived = true, cloc
 }
 
 export const __test__ = { safeId, sessionDir, sessionFile, sessionMetaFile, deriveArchiveTitle, summarizeSessionTurns, normalizeTranscriptEntry, isChatMessage, readJsonLines, readTailJsonLines, retainedChatMetadata, classifySession, SESSION_TAIL_READ_MAX_BYTES };
+
+// Durable, per-session recovery continuation. The interruption manifest remains
+// the factual record; this separate queue record owns dispatch lifecycle.
+function recoveryContinuationFile(rootDir, sessionId) { return path.join(sessionDir(rootDir, sessionId), 'recovery-queue.json'); }
+function recoveryContinuationKey(manifest = {}) { return `${String(manifest.runId || 'unknown').slice(0, 200)}:${Number.isSafeInteger(manifest.generation) ? manifest.generation : 'unknown'}`; }
+function recoveryAutoResume(reason) { return new Set(['service_shutdown', 'service_interrupt', 'process_lost', 'interrupted_run_abandoned', 'terminal_finalization_abandoned', 'terminal_finalization_failed']).has(String(reason || '')); }
+function normalizeRecoveryContinuation(value = {}, manifest = {}) {
+  const status = ['pending', 'running', 'completed', 'failed'].includes(value?.status) ? value.status : 'pending';
+  return {
+    version: 1,
+    key: String(value?.key || recoveryContinuationKey(manifest)).slice(0, 260),
+    status,
+    autoResume: value?.autoResume === undefined ? recoveryAutoResume(manifest.reason) : Boolean(value.autoResume),
+    queuedAt: String(value?.queuedAt || manifest.interruptedAt || nowIso()).slice(0, 64),
+    claimedAt: value?.claimedAt ? String(value.claimedAt).slice(0, 64) : null,
+    claimedByRunId: value?.claimedByRunId ? String(value.claimedByRunId).slice(0, 200) : null,
+    completedAt: value?.completedAt ? String(value.completedAt).slice(0, 64) : null,
+    result: value?.result ? String(value.result).slice(0, 120) : null,
+  };
+}
+export async function readRecoveryContinuation({ rootDir, sessionId } = {}) {
+  try {
+    const text = await fs.readFile(recoveryContinuationFile(rootDir, safeId(sessionId)), 'utf8');
+    const value = text.trim() ? JSON.parse(text) : null;
+    return value && typeof value === 'object' ? value : null;
+  } catch (error) { if (error?.code === 'ENOENT') return null; throw error; }
+}
+export async function enqueueInterruptedRunContinuation({ rootDir, sessionId, manifest = null, clock = nowIso } = {}) {
+  const id = safeId(sessionId);
+  return withContinuityLock(rootDir, id, async () => {
+    const source = manifest || await readInterruptedRunManifest({ rootDir, sessionId: id });
+    if (!source) return null;
+    const existing = await readRecoveryContinuation({ rootDir, sessionId: id });
+    const continuation = normalizeRecoveryContinuation(existing || { queuedAt: clock() }, source);
+    await atomicWriteJson(recoveryContinuationFile(rootDir, id), continuation);
+    return continuation;
+  });
+}
+export async function claimInterruptedRunContinuation({ rootDir, sessionId, recoveryRunId, clock = nowIso } = {}) {
+  const id = safeId(sessionId);
+  if (!recoveryRunId) throw new Error('recovery_run_id_required');
+  return withContinuityLock(rootDir, id, async () => {
+    const manifest = await readInterruptedRunManifest({ rootDir, sessionId: id });
+    const existing = await readRecoveryContinuation({ rootDir, sessionId: id });
+    if (!manifest || !existing || existing.status !== 'pending' || !existing.autoResume) return { ok: false, manifest, continuation: existing };
+    const continuation = normalizeRecoveryContinuation({ ...existing, status: 'running', claimedAt: clock(), claimedByRunId: recoveryRunId }, manifest);
+    await atomicWriteJson(recoveryContinuationFile(rootDir, id), continuation);
+    return { ok: true, manifest, continuation };
+  });
+}
+export async function completeInterruptedRunContinuation({ rootDir, sessionId, recoveryRunId, ok, result = null, clock = nowIso } = {}) {
+  const id = safeId(sessionId);
+  return withContinuityLock(rootDir, id, async () => {
+    const manifest = await readInterruptedRunManifest({ rootDir, sessionId: id });
+    const existing = await readRecoveryContinuation({ rootDir, sessionId: id });
+    if (!existing || existing.status !== 'running' || existing.claimedByRunId !== String(recoveryRunId)) return { ok: false, stale: true, continuation: existing || null };
+    const continuation = normalizeRecoveryContinuation({ ...existing, status: ok ? 'completed' : 'failed', completedAt: clock(), result: result || (ok ? 'completed' : 'failed') }, manifest || {});
+    await atomicWriteJson(recoveryContinuationFile(rootDir, id), continuation);
+    if (ok && manifest) await atomicWriteJson(interruptedRunFile(rootDir, id), { ...manifest, status: 'recovered', recoveredAt: continuation.completedAt, recoveredByRunId: String(recoveryRunId) });
+    return { ok: true, stale: false, continuation };
+  });
+}
+export async function listPendingRecoveryContinuations({ rootDir, limit = 100 } = {}) {
+  let entries = [];
+  try { entries = await fs.readdir(path.join(rootDir, 'sessions'), { withFileTypes: true }); } catch (error) { if (error?.code === 'ENOENT') return []; throw error; }
+  const pending = [];
+  for (const entry of entries.filter((item) => item.isDirectory())) {
+    const sessionId = safeId(entry.name);
+    const [manifest, continuation] = await Promise.all([readInterruptedRunManifest({ rootDir, sessionId }), readRecoveryContinuation({ rootDir, sessionId })]);
+    if (manifest && continuation?.status === 'pending' && continuation.autoResume) pending.push({ sessionId, manifest, continuation });
+  }
+  return pending.sort((a, b) => String(a.continuation.queuedAt).localeCompare(String(b.continuation.queuedAt))).slice(0, limit);
+}
