@@ -172,17 +172,21 @@ prepare_service_restart() {
 }
 
 verify_restarted_runtime() {
-  expected_version=$(node -p "require('$INSTALL_DIR/app/backend/package.json').version")
+  # The assembled GitHub payload writes this immutable build version during
+  # assembly. Development/source-dir installs may not have assembly metadata,
+  # so retain the package-version fallback for that supported path.
+  expected_version=$(awk '$1 == "Burrow-Build-Version" { print $2; exit }' "$INSTALL_DIR/app/SOURCE_VERSIONS" 2>/dev/null || true)
+  [ -n "$expected_version" ] || expected_version=$(node -p "require('$INSTALL_DIR/app/backend/package.json').version")
   host=$(grep '^BURROW_UI_HOST=' "$ENV_FILE" | cut -d= -f2- || true)
   port=$(grep '^BURROW_UI_PORT=' "$ENV_FILE" | cut -d= -f2- || true)
   host=${host:-127.0.0.1}
   port=${port:-42817}
   [ "$host" = "0.0.0.0" ] && host=127.0.0.1
   # A cold Node runtime can take longer than the former 15-second probe window,
-  # especially after native modules and UI assets were replaced. Wait for the
-  # unit to become active and give health a bounded three minutes to report the
-  # activated version. Keep the final unit/health facts so an update failure is
-  # diagnosable rather than a vague false-negative.
+  # especially after native modules and UI assets were replaced. The expected
+  # version comes from the assembled payload's GitHub-generated build metadata,
+  # not a manually maintained release number. Wait for the unit to become
+  # active and retain final facts if readiness fails.
   last_unit_state=unknown
   last_health=unreachable
   for attempt in $(seq 1 180); do
