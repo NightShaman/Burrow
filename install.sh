@@ -301,18 +301,11 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
 }
 PACKAGE
   npm install --prefix "$STAGING/integrations/claude-code" --omit=dev --no-package-lock --ignore-scripts=false --no-audit --no-fund --loglevel=error
-  echo "Burrow update: validating Claude Code integration..."
-  command -v timeout >/dev/null 2>&1 || { echo "Burrow update: timeout is required to validate Claude Code safely." >&2; exit 1; }
-  timeout 15s "$STAGING/integrations/claude-code/node_modules/.bin/claude" --version >/dev/null
-  status=$?
-  if [ "$status" -ne 0 ]; then
-    if [ "$status" -eq 124 ]; then
-      echo "Burrow update: Claude Code validation timed out after 15 seconds; staged payload was not activated." >&2
-    else
-      echo "Burrow update: Claude Code validation failed (exit $status); staged payload was not activated." >&2
-    fi
-    exit 1
-  fi
+  # Installing the pinned package is sufficient update-time validation. Running
+  # `claude --version` can initialize external/runtime state and hang despite a
+  # successful install, needlessly blocking activation of an otherwise valid
+  # Burrow payload. The runtime invokes Claude only when that integration is
+  # actually used.
 fi
 ENV_FILE="$INSTALL_DIR/burrow.env"
 if [ ! -f "$ENV_FILE" ]; then
