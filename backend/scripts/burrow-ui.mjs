@@ -2947,11 +2947,14 @@ server.listen(port, host, async () => {
   void runPendingRecoveryContinuations({
     agentRuntimes: await Promise.all(agentsStore().list({ includeDisabled: false }).map((agent) => resolveAgentRuntime(agent.id))),
     createRunId: createChatTurnRunId,
-    runContinuation: async ({ runtime, sessionId, runId, manifest }) => {
+    runContinuation: async ({ runtime, sessionId, runId, manifest, continuation }) => {
+      const recoveryInstruction = continuation?.decision === 'resume'
+        ? 'Continue the interrupted work using the runtime recovery record and bounded same-session transcript.'
+        : 'Recover the interrupted work using the runtime recovery record. Reconcile durable state before acting; do not repeat completed work blindly.';
       const lifecycle = registerActiveAgentRun(activeChatRuns, { agentId: runtime.agentId, sessionId, runId, message: `Recover interrupted run: ${manifest.objective || 'reconcile durable state'}`, source: 'recovery' });
       try {
         return await runChatTurnFromBody({
-          body: { message: 'Continue the interrupted work using the runtime recovery record. Reconcile durable state before acting; do not repeat completed work blindly.', sessionId, runId, abortSignal: lifecycle.signal },
+          body: { message: recoveryInstruction, sessionId, runId, abortSignal: lifecycle.signal },
           rootDir: projectRoot, agentRuntime: runtime, resolveAgentRuntime,
           onTraceRecord: lifecycle.onTraceRecord, onModelTextDelta: lifecycle.onModelTextDelta,
           onModelThoughtDelta: lifecycle.onModelThoughtDelta, onModelContextUsage: lifecycle.onModelContextUsage,

@@ -16,7 +16,7 @@ export async function runPendingRecoveryContinuations({ agentRuntimes = [], runC
       const claim = await claimInterruptedRunContinuation({ rootDir: runtime.agentWorkspaceRoot, sessionId: item.sessionId, recoveryRunId: runId });
       if (!claim.ok) continue;
       try {
-        const result = await runContinuation({ runtime, sessionId: item.sessionId, runId, manifest: claim.manifest });
+        const result = await runContinuation({ runtime, sessionId: item.sessionId, runId, manifest: claim.manifest, continuation: claim.continuation });
         const completed = await completeInterruptedRunContinuation({
           rootDir: runtime.agentWorkspaceRoot, sessionId: item.sessionId, recoveryRunId: runId,
           ok: Boolean(result?.ok), result: result?.decision || (result?.ok ? 'completed' : 'failed'),

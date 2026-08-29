@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { boundedRedactedValue, redactAndTruncateText } from './redaction.mjs';
 import { normalizeSessionContextState } from './session-context-state.mjs';
+import { assessInterruptedRunRecovery } from './recovery-resume-policy.mjs';
 
 const SESSION_TAIL_READ_MAX_BYTES = 4 * 1024 * 1024;
 
@@ -238,7 +239,8 @@ export async function recordInterruptedRun({ rootDir, sessionId, runId, generati
     await fs.mkdir(sessionDir(rootDir, id), { recursive: true });
     const manifest = normalizeInterruptedRunManifest({ sessionId: id, runId, generation, reason, objective, lastCompletedStep, pendingVerification, changedFiles, traceRef, workingContext, interruptedAt: clock() });
     await atomicWriteJson(interruptedRunFile(rootDir, id), manifest);
-    await atomicWriteJson(recoveryContinuationFile(rootDir, id), normalizeRecoveryContinuation({}, manifest));
+    const assessment = await assessInterruptedRunRecovery({ rootDir, sessionId: id, manifest, readChatMessages });
+    await atomicWriteJson(recoveryContinuationFile(rootDir, id), normalizeRecoveryContinuation({ decision: assessment.action, decisionReason: assessment.reason, transcriptMessages: assessment.transcriptMessages, autoResume: assessment.autoResume }, manifest));
     const head = await readSessionContinuityHead({ rootDir, sessionId: id });
     // Shutdown observers know the active run identity but may not have its
     // private continuity generation. A matching run id is sufficient to close
@@ -794,14 +796,16 @@ export const __test__ = { safeId, sessionDir, sessionFile, sessionMetaFile, deri
 // the factual record; this separate queue record owns dispatch lifecycle.
 function recoveryContinuationFile(rootDir, sessionId) { return path.join(sessionDir(rootDir, sessionId), 'recovery-queue.json'); }
 function recoveryContinuationKey(manifest = {}) { return `${String(manifest.runId || 'unknown').slice(0, 200)}:${Number.isSafeInteger(manifest.generation) ? manifest.generation : 'unknown'}`; }
-function recoveryAutoResume(reason) { return new Set(['service_shutdown', 'service_interrupt', 'process_lost', 'interrupted_run_abandoned', 'terminal_finalization_abandoned', 'terminal_finalization_failed']).has(String(reason || '')); }
 function normalizeRecoveryContinuation(value = {}, manifest = {}) {
   const status = ['pending', 'running', 'completed', 'failed'].includes(value?.status) ? value.status : 'pending';
   return {
     version: 1,
     key: String(value?.key || recoveryContinuationKey(manifest)).slice(0, 260),
     status,
-    autoResume: value?.autoResume === undefined ? recoveryAutoResume(manifest.reason) : Boolean(value.autoResume),
+    decision: ['resume', 'reconcile_first', 'needs_user_input'].includes(value?.decision) ? value.decision : 'reconcile_first',
+    decisionReason: value?.decisionReason ? String(value.decisionReason).slice(0, 160) : null,
+    transcriptMessages: Number.isSafeInteger(value?.transcriptMessages) ? value.transcriptMessages : 0,
+    autoResume: Boolean(value?.autoResume),
     queuedAt: String(value?.queuedAt || manifest.interruptedAt || nowIso()).slice(0, 64),
     claimedAt: value?.claimedAt ? String(value.claimedAt).slice(0, 64) : null,
     claimedByRunId: value?.claimedByRunId ? String(value.claimedByRunId).slice(0, 200) : null,
@@ -822,7 +826,8 @@ export async function enqueueInterruptedRunContinuation({ rootDir, sessionId, ma
     const source = manifest || await readInterruptedRunManifest({ rootDir, sessionId: id });
     if (!source) return null;
     const existing = await readRecoveryContinuation({ rootDir, sessionId: id });
-    const continuation = normalizeRecoveryContinuation(existing || { queuedAt: clock() }, source);
+    const assessment = await assessInterruptedRunRecovery({ rootDir, sessionId: id, manifest: source, readChatMessages });
+    const continuation = normalizeRecoveryContinuation({ ...(existing || { queuedAt: clock() }), decision: assessment.action, decisionReason: assessment.reason, transcriptMessages: assessment.transcriptMessages, autoResume: assessment.autoResume }, source);
     await atomicWriteJson(recoveryContinuationFile(rootDir, id), continuation);
     return continuation;
   });
