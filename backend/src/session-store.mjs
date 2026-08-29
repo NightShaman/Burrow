@@ -209,7 +209,6 @@ export async function readSessionContinuityHead({ rootDir, sessionId } = {}) {
 function boundedRecoveryText(value, limit = 1_200) { return String(value || '').trim().slice(0, limit) || null; }
 function normalizeInterruptedRunManifest(value = {}) {
   const source = value && typeof value === 'object' ? value : {};
-  const workingContext = source.workingContext && typeof source.workingContext === 'object' ? source.workingContext : null;
   return {
     version: 1,
     sessionId: boundedRecoveryText(source.sessionId, 120),
@@ -223,7 +222,6 @@ function normalizeInterruptedRunManifest(value = {}) {
     pendingVerification: Array.isArray(source.pendingVerification) ? source.pendingVerification.map((item) => boundedRecoveryText(item, 400)).filter(Boolean).slice(0, 8) : [],
     changedFiles: Array.isArray(source.changedFiles) ? source.changedFiles.map((item) => boundedRecoveryText(item, 500)).filter(Boolean).slice(0, 12) : [],
     traceRef: boundedRecoveryText(source.traceRef, 1_000),
-    ...(workingContext ? { workingContext } : {}),
   };
 }
 export async function readInterruptedRunManifest({ rootDir, sessionId } = {}) {
