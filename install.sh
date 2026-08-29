@@ -12,7 +12,6 @@ ASSUME_YES=0
 INSTALL_NODE=0
 RESTART_SERVICE=0
 VERBOSE=0
-MANAGED_RUNTIME_STOPPED=0
 usage() { cat <<USAGE
 Usage: install.sh [options]
   --dir PATH                    installation and durable-state root
@@ -93,17 +92,6 @@ verbose_log() {
 }
 cleanup() {
   status=$?
-  # Once an update has stopped a managed runtime, never leave it down merely
-  # because the updater was interrupted or a later activation check failed.
-  # The app switch is atomic, so starting here always runs either the intact
-  # prior payload or the fully activated replacement.
-  if [ "$RESTART_SERVICE" -eq 1 ] && [ "$MANAGED_RUNTIME_STOPPED" -eq 1 ]; then
-    unit_state=$(user_systemctl is-active burrow.service 2>/dev/null || true)
-    if [ "$unit_state" != active ]; then
-      update_log "restoring managed service after interrupted update..."
-      user_systemctl start burrow.service >/dev/null 2>&1 || true
-    fi
-  fi
   [ -z "$TMP_ROOT" ] || rm -rf "$TMP_ROOT"
   exit "$status"
 }
@@ -202,26 +190,6 @@ runtime_endpoint() {
   host=${host:-127.0.0.1}
   port=${port:-42817}
   [ "$host" = "0.0.0.0" ] && host=127.0.0.1
-}
-
-listening_port_owner() {
-  command -v ss >/dev/null 2>&1 || return 1
-  ss -ltnp "sport = :$port" 2>/dev/null | sed -n '2p'
-}
-
-stop_managed_runtime() {
-  runtime_endpoint
-  verbose_log "stopping burrow.service (listener: ${host}:${port})"
-  user_systemctl stop burrow.service
-  for attempt in $(seq 1 10); do
-    unit_state=$(user_systemctl is-active burrow.service 2>/dev/null || true)
-    port_owner=$(listening_port_owner || true)
-    verbose_log "stop check $attempt/10: unit=${unit_state:-unknown}; listener=${port_owner:-none}"
-    [ "$unit_state" != active ] && [ -z "$port_owner" ] && { verbose_log "managed runtime stopped and listener cleared"; return 0; }
-    sleep 1
-  done
-  echo "Burrow update: service did not stop cleanly within 10 seconds (state: ${unit_state:-unknown}; listener: ${port_owner:-none}). Refusing to activate a payload over a live runtime." >&2
-  exit 1
 }
 
 verify_restarted_runtime() {
@@ -367,24 +335,16 @@ if ! grep -q '^BURROW_SETTINGS_KEY=' "$ENV_FILE"; then
   umask 077
   printf '%s=%s\n' 'BURROW_SETTINGS_KEY' "$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))')" >> "$ENV_FILE"
 fi
-# Stop the managed runtime before replacing the active launcher or app payload.
-# A restart alone can overlap old and new servers on the listener; prove the
-# unit and port are clear before activation instead.
-if [ "$RESTART_SERVICE" -eq 1 ]; then
-  update_log "stopping managed service..."
-  previous_invocation=$(user_systemctl show burrow.service -p InvocationID --value 2>/dev/null || true)
-  stop_managed_runtime
-  MANAGED_RUNTIME_STOPPED=1
-fi
-
-# Replace the service launcher atomically. The running service and an update
-# invoked through this launcher may still have the previous inode open; direct
-# truncation can fail with ETXTBSY and leaves a half-written command behind.
+# Prepare and atomically activate the replacement while the current service remains
+# available. Renames are metadata operations on this filesystem; the only
+# intended downtime is systemd's own restart after activation. Do not manually
+# stop/start around these swaps: that created an opaque failure window and left
+# a healthy runtime down when activation stalled.
 WRAPPER_TMP="$INSTALL_DIR/bin/.burrow-launcher-$$"
 rm -f "$WRAPPER_TMP"
 # The launcher is self-locating and must be emitted literally. An unquoted
 # heredoc executes command substitutions while writing it; that can launch a
-# child `burrow serve` during update and wedge the stopped-service window.
+# child `burrow serve` during update and wedge the restart.
 cat > "$WRAPPER_TMP" <<WRAPPER
 #!/bin/sh
 set -eu
@@ -464,12 +424,18 @@ UNIT
 esac
 WRAPPER
 chmod 0755 "$WRAPPER_TMP"
+# Capture the live service invocation before activation. `restart` must create
+# a different invocation; otherwise the update did not actually replace the
+# running runtime.
+previous_invocation=""
+if [ "$RESTART_SERVICE" -eq 1 ]; then
+  previous_invocation=$(user_systemctl show burrow.service -p InvocationID --value 2>/dev/null || true)
+  verbose_log "captured managed service invocation ${previous_invocation:-unknown} before atomic activation"
+fi
 mv -f "$WRAPPER_TMP" "$INSTALL_DIR/bin/burrow"
 [ ! -d "$INSTALL_DIR/app" ] || mv "$INSTALL_DIR/app" "$PREVIOUS"
 if ! mv "$STAGING" "$INSTALL_DIR/app"; then [ ! -d "$PREVIOUS" ] || mv "$PREVIOUS" "$INSTALL_DIR/app"; echo "Burrow install: could not activate new app payload." >&2; exit 1; fi
 if [ "$INSTALL_DEPS" -eq 1 ]; then
-  # Installed integrations are dependency trees too. Renaming the prior trees
-  # is atomic; recursively deleting them here would prolong service downtime.
   mkdir -p "$PREVIOUS/integrations"
   for integration in mcporter claude-code; do
     [ ! -d "$INSTALL_DIR/integrations/$integration" ] || mv "$INSTALL_DIR/integrations/$integration" "$PREVIOUS/integrations/$integration"
@@ -478,11 +444,10 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
   rmdir "$INSTALL_DIR/app/integrations" 2>/dev/null || true
 fi
 if [ "$RESTART_SERVICE" -eq 1 ]; then
-  update_log "starting managed service..."
-  verbose_log "starting burrow.service immediately after atomic payload activation"
-  user_systemctl start burrow.service
+  update_log "restarting managed service..."
+  verbose_log "restarting burrow.service after atomic payload activation"
+  user_systemctl restart burrow.service
   verify_restarted_runtime "$previous_invocation"
-  MANAGED_RUNTIME_STOPPED=0
 fi
 # Deleting the prior app can take tens of seconds when it contains installed
 # dependencies. It is cleanup, not activation; never hold runtime downtime
