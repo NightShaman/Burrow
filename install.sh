@@ -180,17 +180,27 @@ verify_restarted_runtime() {
   [ "$host" = "0.0.0.0" ] && host=127.0.0.1
   # A cold Node runtime can take longer than the former 15-second probe window,
   # especially after native modules and UI assets were replaced. Wait for the
-  # unit to become active and give health a bounded minute to report the new
-  # version; a successful update must not be reported as failed merely because
-  # the listener was still initializing.
-  for attempt in $(seq 1 60); do
-    if user_systemctl is-active --quiet burrow.service 2>/dev/null; then
-      health=$(curl -fsS --max-time 2 "http://$host:$port/api/health" 2>/dev/null || true)
-      case "$health" in *"\"version\":\"$expected_version\""*) return 0 ;; esac
+  # unit to become active and give health a bounded three minutes to report the
+  # activated version. Keep the final unit/health facts so an update failure is
+  # diagnosable rather than a vague false-negative.
+  last_unit_state=unknown
+  last_health=unreachable
+  for attempt in $(seq 1 180); do
+    last_unit_state=$(user_systemctl is-active burrow.service 2>/dev/null || true)
+    if [ "$last_unit_state" = active ]; then
+      last_health=$(curl -fsS --max-time 2 "http://$host:$port/api/health" 2>/dev/null || true)
+      case "$last_health" in *"\"version\":\"$expected_version\""*) return 0 ;; esac
     fi
     sleep 1
   done
-  echo "Burrow update: service restarted but health did not report version $expected_version within 60 seconds." >&2
+  observed_version=$(printf '%s' "$last_health" | sed -n 's/.*"version":"\\([^"}]*\\)".*/\1/p' | head -n 1)
+  if [ -n "$observed_version" ]; then
+    echo "Burrow update: service is $last_unit_state but health reported version $observed_version, expected $expected_version after 180 seconds." >&2
+  elif [ "$last_unit_state" != active ]; then
+    echo "Burrow update: burrow.service is $last_unit_state after restart; health never became reachable within 180 seconds." >&2
+  else
+    echo "Burrow update: burrow.service is active but health at http://$host:$port/api/health never reported version $expected_version within 180 seconds." >&2
+  fi
   exit 1
 }
 
@@ -274,7 +284,12 @@ if ! grep -q '^BURROW_SETTINGS_KEY=' "$ENV_FILE"; then
   umask 077
   printf '%s=%s\n' 'BURROW_SETTINGS_KEY' "$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))')" >> "$ENV_FILE"
 fi
-cat > "$INSTALL_DIR/bin/burrow" <<WRAPPER
+# Replace the service launcher atomically. The running service and an update
+# invoked through this launcher may still have the previous inode open; direct
+# truncation can fail with ETXTBSY and leaves a half-written command behind.
+WRAPPER_TMP="$INSTALL_DIR/bin/.burrow-launcher-$$"
+rm -f "$WRAPPER_TMP"
+cat > "$WRAPPER_TMP" <<WRAPPER
 #!/bin/sh
 set -eu
 BURROW_HOME="\$(CDPATH= cd -- "\$(dirname -- "\$0")/.." && pwd)"
@@ -352,7 +367,8 @@ UNIT
   *) exec node "\$BURROW_HOME/app/backend/bin/burrow.mjs" "\$@" --root "\$BURROW_HOME/app/backend" ;;
 esac
 WRAPPER
-chmod 0755 "$INSTALL_DIR/bin/burrow"
+chmod 0755 "$WRAPPER_TMP"
+mv -f "$WRAPPER_TMP" "$INSTALL_DIR/bin/burrow"
 [ ! -d "$INSTALL_DIR/app" ] || mv "$INSTALL_DIR/app" "$PREVIOUS"
 if ! mv "$STAGING" "$INSTALL_DIR/app"; then [ ! -d "$PREVIOUS" ] || mv "$PREVIOUS" "$INSTALL_DIR/app"; echo "Burrow install: could not activate new app payload." >&2; exit 1; fi
 if [ "$INSTALL_DEPS" -eq 1 ]; then
