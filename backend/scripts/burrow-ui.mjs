@@ -55,7 +55,7 @@ import { ScheduledJobStore } from '../src/scheduled-job-store.mjs';
 import { createScheduledJobScheduler } from '../src/scheduled-job-scheduler.mjs';
 import { backgroundSchedulersEnabled } from '../src/background-scheduler-policy.mjs';
 import { McpSettingsStore } from '../src/mcp-settings-store.mjs';
-import { diagnoseMcpConnection as diagnoseMcpConnectionRuntime, discoverMcpTools, reconcilePersistentMcpConnection } from '../src/mcporter-adapter.mjs';
+import { diagnoseMcpConnection as diagnoseMcpConnectionRuntime, discoverMcpTools, hydrateMcpProviderStates, reconcilePersistentMcpConnection } from '../src/mcporter-adapter.mjs';
 import { createRuntimeMetricsCollector } from '../src/runtime-metrics.mjs';
 import { createRuntimeServerLogger } from '../src/runtime-server-log.mjs';
 import { latestProviderRequest } from '../src/provider-request-inspection.mjs';
@@ -123,6 +123,7 @@ const anthropicUsageCache = new Map();
 const openaiOauthUsageCache = new Map();
 const runtimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
 const serverLogger = createRuntimeServerLogger({ runtimeRoot });
+await hydrateMcpProviderStates({ runtimeRoot: process.env.BURROW_MCPORTER_ROOT || path.join(runtimeRoot, 'integrations', 'mcporter') }).catch((error) => serverLogger.event('mcp_provider_state_hydration_failed', { error: String(error?.message || error) }));
 const runtimeMetrics = createRuntimeMetricsCollector({
   runtimeRoot: process.env.BURROW_DATA_ROOT || '/mnt/local/burrow',
   settingsDatabasePath: settingsDatabasePath(),
@@ -2929,23 +2930,24 @@ const server = createServer(async (req, res) => {
 });
 
 let shuttingDown = false;
-async function shutdownRuntime(signal) {
+const SHUTDOWN_DRAIN_MS = Math.max(1_000, Number(process.env.BURROW_SHUTDOWN_DRAIN_MS || 10_000));
+async function shutdownRuntime(signal, { exitCode = signal === 'SIGINT' ? 130 : signal === 'unhandledRejection' ? 1 : 0 } = {}) {
   if (shuttingDown) return;
-  shuttingDown = true;
+  shuttingDown = true; let forced = false;
   try {
     await serverLogger.event('shutdown_started', { signal, activeRuns: activeChatRuns.size });
+    const closePromise = new Promise((resolve) => server.close(() => resolve()));
     await recordActiveRunInterruptions({ activeRuns: activeChatRuns, resolveAgentRuntime, reason: signal === 'SIGINT' ? 'service_interrupt' : 'service_shutdown' });
-    await new Promise((resolve) => server.close(() => resolve()));
-    await serverLogger.event('shutdown_complete', { signal });
+    server.closeIdleConnections?.();
+    await Promise.race([closePromise, new Promise((resolve) => setTimeout(() => { forced = true; server.closeAllConnections?.(); resolve(); }, SHUTDOWN_DRAIN_MS))]);
+    await serverLogger.event('shutdown_complete', { signal, forced, drainMs: SHUTDOWN_DRAIN_MS });
   } catch (error) {
-    void serverLogger.event('shutdown_error', { signal, error: String(error?.message || error) });
-    console.error(`Burrow shutdown recovery failed: ${String(error?.message || error)}`);
-  } finally {
-    process.exit(signal === 'SIGINT' ? 130 : 0);
-  }
+    await serverLogger.event('shutdown_error', { signal, error: String(error?.message || error) });
+    console.error(`Burrow shutdown recovery failed: ${String(error?.message || error)}`); exitCode = exitCode || 1;
+  } finally { await serverLogger.flush().catch(() => {}); process.exit(exitCode); }
 }
-process.once('uncaughtException', (error) => { void serverLogger.event('uncaught_exception', { error: String(error?.stack || error) }).finally(() => process.exit(1)); });
-process.once('unhandledRejection', (error) => { void serverLogger.event('unhandled_rejection', { error: String(error?.stack || error) }); });
+process.once('uncaughtException', (error) => { void serverLogger.event('uncaught_exception', { error: String(error?.stack || error) }).finally(() => shutdownRuntime('uncaughtException', { exitCode: 1 })); });
+process.once('unhandledRejection', (error) => { void serverLogger.event('unhandled_rejection', { error: String(error?.stack || error) }).finally(() => shutdownRuntime('unhandledRejection', { exitCode: 1 })); });
 process.once('SIGTERM', () => { void shutdownRuntime('SIGTERM'); });
 process.once('SIGINT', () => { void shutdownRuntime('SIGINT'); });
 

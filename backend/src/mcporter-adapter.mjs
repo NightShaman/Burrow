@@ -48,10 +48,16 @@ function providerEvent(connection, status, { runtimeRoot = null, error = null } 
     .catch(() => {});
 }
 
+export async function hydrateMcpProviderStates({ runtimeRoot = null } = {}) {
+  const root = runtimeRoot || resolveMcporterRuntime({ runtimeRoot }).root;
+  let lines; try { lines = (await readFile(path.join(root, 'runtime', 'mcp-provider-events.jsonl'), 'utf8')).split('\n').filter(Boolean).slice(-PROVIDER_EVENT_LIMIT); } catch (error) { if (error?.code === 'ENOENT') return 0; throw error; }
+  let loaded = 0; for (const line of lines) { try { const event = JSON.parse(line); if (!event?.providerId || !event?.status || !event?.ts) continue; providerStates.set(String(event.providerId), { ...event, lastKnown: true }); loaded += 1; } catch {} } return loaded;
+}
+
 export function mcpProviderState(connection) {
   if (connection?.lifecycle !== 'keep_alive') return { status: 'available', updatedAt: null };
   const state = providerStates.get(providerId(connection));
-  return state ? { status: state.status, updatedAt: state.ts, ...(state.error ? { error: state.error } : {}) } : { status: 'unknown', updatedAt: null };
+  return state ? { status: state.status, updatedAt: state.ts, ...(state.lastKnown ? { lastKnown: true } : {}), ...(state.error ? { error: state.error } : {}) } : { status: 'unknown', updatedAt: null };
 }
 const boundedJson = (value, maxChars = 1_000) => { try { const rendered = typeof value === 'string' ? value : JSON.stringify(value); return rendered.length <= maxChars ? rendered : `${rendered.slice(0, maxChars)}…`; } catch { return String(value).slice(0, maxChars); } };
 // MCP diagnostics are external, untrusted text. Public errors must be stable

@@ -1,4 +1,5 @@
-import { appendSessionTurn } from './session-store.mjs';
+import { createHash } from 'node:crypto';
+import { appendSessionTurnIfAbsent } from './session-store.mjs';
 
 const ID = /^[a-zA-Z0-9._-]{1,96}$/;
 const MAX_MESSAGE = 20_000;
@@ -48,8 +49,8 @@ function provenance({ sender, senderRuntime, recipient, sourceSessionId, targetS
   };
 }
 
-async function appendAgentMessage({ rootDir, sessionId: targetSessionId, content, sender, senderRuntime, recipient, sourceSessionId, sourceRunId, messageMode, direction, replyToEntryId = null }) {
-  return appendSessionTurn({
+async function appendAgentMessage({ rootDir, sessionId: targetSessionId, content, sender, senderRuntime, recipient, sourceSessionId, sourceRunId, messageMode, direction, deliveryId, replyToEntryId = null }) {
+  return appendSessionTurnIfAbsent({ idempotencyKey: `${deliveryId}:${direction}`,
     rootDir,
     sessionId: targetSessionId,
     role: 'agent',
@@ -75,24 +76,25 @@ export async function sendAgentMessage({ senderRuntime, resolveRecipientRuntime,
   if (sender === recipient) throw new Error('agent_message_self_send_forbidden');
   const session = sessionId(targetSessionId);
   const source = sessionId(sourceSessionId || 'default');
+  const deliveryId = createHash('sha256').update(JSON.stringify([sender, recipient, source, session, runId || null, resolvedMode, body])).digest('hex');
 
   const deliver = async () => {
     const recipientEntry = await appendAgentMessage({
       rootDir: recipientRuntime.agentWorkspaceRoot, sessionId: session, content: body,
       sender, senderRuntime, recipient, sourceSessionId: source, sourceRunId: runId,
-      messageMode: resolvedMode, direction: 'inbound',
+      messageMode: resolvedMode, direction: 'inbound', deliveryId,
     });
     const sourceEntry = await appendAgentMessage({
       rootDir: senderRuntime.agentWorkspaceRoot, sessionId: source, content: body,
       sender, senderRuntime, recipient, sourceSessionId: source, sourceRunId: runId,
-      messageMode: resolvedMode, direction: 'outbound', replyToEntryId: recipientEntry.id,
+      messageMode: resolvedMode, direction: 'outbound', deliveryId, replyToEntryId: recipientEntry.id,
     });
     return {
       recipientEntry,
       sourceEntry,
       receipt: {
         tool: 'agent_send_message', ok: true, messageMode: resolvedMode,
-        senderAgentId: sender, recipientAgentId: recipient, sourceSessionId: source, targetSessionId: session,
+        deliveryId, senderAgentId: sender, recipientAgentId: recipient, sourceSessionId: source, targetSessionId: session,
         sourceEntryId: sourceEntry.id, recipientEntryId: recipientEntry.id, deliveredAt: recipientEntry.ts,
         autoExecuted: false,
       },
@@ -120,7 +122,7 @@ export async function sendAgentMessage({ senderRuntime, resolveRecipientRuntime,
     rootDir: senderRuntime.agentWorkspaceRoot, sessionId: source, content: replyText,
     sender: recipient, senderRuntime: recipientRuntime, recipient: sender,
     sourceSessionId: session, sourceRunId: reply?.runId || null,
-    messageMode: 'reply', direction: 'inbound', replyToEntryId: sourceEntry.id,
+    messageMode: 'reply', direction: 'inbound', deliveryId: `${deliveryId}:reply`, replyToEntryId: sourceEntry.id,
   });
   return {
     ...receipt,
