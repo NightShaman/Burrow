@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { api } from '../../app/api';
+import { api, type ProgressEntry } from '../../app/api';
 import type { Agent } from '../../app/types';
 import { useConfirm } from '../../app/ConfirmDialog';
 
@@ -13,12 +13,43 @@ type BoardTask = {
   priority: string;
   assignedAgentId: string | null;
   metadata: Record<string, unknown>;
+  execution?: { runId?: string; status?: string; ok?: boolean; error?: string | null; executedAt?: string | null; result?: { answerText?: string | null; blockers?: string[] } } | null;
   createdAt: string;
   updatedAt: string;
 };
 
 type TaskEditorState = { mode: 'create' } | { mode: 'edit'; task: BoardTask };
 type ProjectDraft = { id?: string; name: string; description: string };
+type ActiveRun = { runId: string; agentId: string; sessionId: string; status: string; phase?: string; progress?: Array<{ type?: string; data?: Record<string, unknown>; ts?: string }> };
+type TaskExecutionState = { taskId: string; runId: string; agentId: string; sessionId: string; progress: ProgressEntry[]; phase: string };
+
+function publicProgressLabel(entry: { type?: string; data?: Record<string, unknown> }) {
+  const data = entry.data ?? {};
+  if (entry.type === 'model.started') return 'Model started';
+  if (entry.type === 'model.completed') return data.ok === false ? 'Model failed' : 'Model completed';
+  if (entry.type === 'tool.started') return `Started ${typeof data.label === 'string' ? data.label : typeof data.tool === 'string' ? data.tool.replaceAll('_', ' ') : 'tool'}`;
+  if (entry.type === 'tool.completed') return `Completed ${typeof data.label === 'string' ? data.label : typeof data.tool === 'string' ? data.tool.replaceAll('_', ' ') : 'tool'}`;
+  if (entry.type === 'verification.completed') return data.ok === false ? 'Verification failed' : 'Verification completed';
+  if (entry.type === 'route.decided') return 'Route selected';
+  if (entry.type === 'runtime.notice') return 'Runtime notice';
+  return 'Working';
+}
+
+function activeRunProgress(run: ActiveRun): ProgressEntry[] {
+  return (run.progress ?? []).map((entry, index) => ({
+    id: `${run.runId}:${index}`,
+    text: publicProgressLabel(entry),
+    ts: typeof entry.ts === 'string' ? entry.ts : new Date().toISOString(),
+    status: 'complete',
+  }));
+}
+
+function TaskExecutionProgress({ execution }: { execution: TaskExecutionState }) {
+  return <section className="task-execution-progress" aria-live="polite" aria-label="Task execution progress">
+    <header><div><span className="eyebrow">LIVE EXECUTION</span><h3>{execution.phase === 'streaming' ? 'Agent is working' : 'Starting agent'}</h3></div><span className="task-execution-pulse" aria-hidden="true" /></header>
+    {execution.progress.length ? <ol>{execution.progress.map((entry) => <li key={entry.id}><span aria-hidden="true">✓</span><span>{entry.text}</span></li>)}</ol> : <p role="status">Waiting for the first progress update…</p>}
+  </section>;
+}
 
 const columns = [
   { id: 'backlog', title: 'Backlog' },
@@ -44,6 +75,7 @@ export function Tasks({ agents }: { agents: Agent[] }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [taskExecution, setTaskExecution] = useState<TaskExecutionState | null>(null);
 
   async function loadBoard() {
     setLoading(true);
@@ -63,6 +95,33 @@ export function Tasks({ agents }: { agents: Agent[] }) {
   }
 
   useEffect(() => { void loadBoard(); }, []);
+
+  useEffect(() => {
+    if (!taskExecution) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const response = await api<{ ok: boolean; runs: ActiveRun[] }>(`/api/chat/runs/active?agentId=${encodeURIComponent(taskExecution.agentId)}&sessionId=${encodeURIComponent(taskExecution.sessionId)}`);
+        if (cancelled) return;
+        const run = response.runs.find((candidate) => candidate.runId === taskExecution.runId);
+        if (run) {
+          setTaskExecution((current) => current && current.runId === run.runId ? { ...current, phase: run.phase || current.phase, progress: activeRunProgress(run) } : current);
+          return;
+        }
+        setTaskExecution(null);
+        const latest = await api<{ task: BoardTask }>(`/api/task-board/tasks/${encodeURIComponent(taskExecution.taskId)}`);
+        if (!cancelled) {
+          setTasks((current) => current.map((task) => task.id === latest.task.id ? latest.task : task));
+          setEditor((current) => current?.mode === 'edit' && current.task.id === latest.task.id ? { mode: 'edit', task: latest.task } : current);
+        }
+      } catch {
+        // Keep the execution panel visible while a transient status poll fails.
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, 1000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [taskExecution?.agentId, taskExecution?.runId, taskExecution?.sessionId]);
 
   const visibleTasks = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -123,9 +182,12 @@ export function Tasks({ agents }: { agents: Agent[] }) {
     setSaving(true);
     setError('');
     try {
-      const result = await api<{ task: BoardTask }>(`/api/task-board/tasks/${encodeURIComponent(editingTask.id)}/execute`, { method: 'POST' });
+      const result = await api<{ task: BoardTask; execution?: { runId?: string; agentId?: string; sessionId?: string } }>(`/api/task-board/tasks/${encodeURIComponent(editingTask.id)}/execute`, { method: 'POST' });
       setTasks((current) => current.map((task) => task.id === result.task.id ? result.task : task));
       setEditor({ mode: 'edit', task: result.task });
+      if (result.execution?.runId && result.execution.agentId && result.execution.sessionId) {
+        setTaskExecution({ taskId: editingTask.id, runId: result.execution.runId, agentId: result.execution.agentId, sessionId: result.execution.sessionId, progress: [], phase: 'thinking' });
+      }
     } catch (executeError) { setError(`Could not execute the task: ${(executeError as Error).message}`); } finally { setSaving(false); }
   }
 
@@ -176,6 +238,6 @@ export function Tasks({ agents }: { agents: Agent[] }) {
       return <section className="kanban-column" key={column.id}><header><span>{column.title}</span><strong>{columnTasks.length}</strong></header><div className="kanban-cards">{columnTasks.map((task) => <button className="task-card" type="button" key={task.id} onClick={() => setEditor({ mode: 'edit', task })}><span className={`task-priority ${task.priority}`}>{priorityLabel(task.priority)}</span><strong>{task.title}</strong><small>{projectFor(task.projectId)?.name ?? 'Unknown project'}</small><small>Owner · {agentFor(task.assignedAgentId)?.name ?? 'Unassigned'}</small></button>)}{columnTasks.length === 0 && <p className="kanban-empty">No tasks</p>}</div></section>;
     })}</div>}
     {showProjects && <div className="task-detail-backdrop" role="presentation" onMouseDown={() => { setShowProjects(false); setProjectDraft(null); }}><section className="project-manager-panel" role="dialog" aria-modal="true" aria-labelledby="project-manager-title" onMouseDown={(event) => event.stopPropagation()}><header className="task-detail-header"><div><span className="eyebrow">CONFIGURATION</span><h2 id="project-manager-title">Projects</h2></div><button className="task-modal-close" type="button" aria-label="Close project manager" onClick={() => { setShowProjects(false); setProjectDraft(null); }}>×</button></header><div className="project-manager-content">{projectDraft ? <form className="project-form" onSubmit={saveProject}><label className="task-form-field"><span>Project name <b aria-hidden="true">*</b></span><input autoFocus required value={projectDraft.name} onChange={(event) => setProjectDraft({ ...projectDraft, name: event.target.value })} /></label><label className="task-form-field"><span>Description</span><textarea rows={4} value={projectDraft.description} onChange={(event) => setProjectDraft({ ...projectDraft, description: event.target.value })} /></label><footer><button type="button" onClick={() => setProjectDraft(null)}>Cancel</button><button className="primary" disabled={saving} type="submit">{saving ? 'Saving…' : projectDraft.id ? 'Save project' : 'Add project'}</button></footer></form> : <><button className="primary project-add" type="button" onClick={() => setProjectDraft({ name: '', description: '' })}>＋ Add project</button><div className="project-list">{projects.map((project) => <article className="project-row" key={project.id}><div><strong>{project.name}</strong>{project.description && <p>{project.description}</p>}</div><div><button type="button" onClick={() => setProjectDraft(project)}>Edit</button><button className="task-delete" type="button" disabled={saving} onClick={() => void deleteProject(project)}>Delete</button></div></article>)}{!projects.length && <p className="kanban-empty">No configured projects.</p>}</div></>}</div></section></div>}
-    {editor && <div className="task-detail-backdrop" role="presentation" onMouseDown={() => setEditor(null)}><section className="task-detail-panel" role="dialog" aria-modal="true" aria-labelledby="task-editor-title" onMouseDown={(event) => event.stopPropagation()}><header className="task-detail-header"><div><span className="eyebrow">{editingTask ? 'TASK DETAILS' : 'NEW TASK'}</span><h2 id="task-editor-title">{editingTask ? 'Edit task' : 'New task'}</h2></div><button className="task-modal-close" type="button" aria-label="Close task editor" onClick={() => setEditor(null)}>×</button></header><form className="task-detail-form" onSubmit={saveTask}><label className="task-form-field"><span>Title <b aria-hidden="true">*</b></span><input required name="title" defaultValue={editingTask?.title} /></label><label className="task-form-field"><span>Description</span><textarea name="description" rows={5} defaultValue={editingTask?.description} /></label><div className="task-form-grid"><label className="task-form-field"><span>Status</span><select name="status" defaultValue={editingTask?.status ?? 'todo'}>{columns.map((column) => <option key={column.id} value={column.id}>{column.title}</option>)}</select></label><label className="task-form-field"><span>Priority</span><select name="priority" defaultValue={editingTask?.priority ?? 'normal'}>{['critical', 'high', 'normal', 'low'].map((priority) => <option key={priority} value={priority}>{priorityLabel(priority)}</option>)}</select></label><label className="task-form-field"><span>Assignee</span><select name="assignedAgentId" defaultValue={editingTask?.assignedAgentId ?? ''}><option value="">Unassigned</option>{agents.map((agent) => <option value={agent.resourceId ?? agent.id} key={agent.id}>{agent.name}</option>)}</select></label><label className="task-form-field"><span>Project <b aria-hidden="true">*</b></span><select required name="projectId" defaultValue={editingTask?.projectId ?? selectedProjectId}>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label></div>{editingTask && <dl className="task-metadata" aria-label="Task metadata"><div><dt>Created</dt><dd>{formatTaskDate(editingTask.createdAt)}</dd></div><div><dt>Updated</dt><dd>{formatTaskDate(editingTask.updatedAt)}</dd></div></dl>}<footer className="task-detail-actions">{editingTask && <button className="task-execute" disabled={saving || !editingTask.assignedAgentId || ['done', 'cancelled'].includes(editingTask.status)} type="button" onClick={() => void executeTask()}>▷ Execute</button>}<div className="task-editor-primary-actions">{editingTask && <button className="task-delete" disabled={saving} type="button" onClick={() => void deleteTask()}>⌫ Delete</button>}<button className="primary" disabled={saving} type="submit">{saving ? 'Saving…' : editingTask ? 'Save changes' : 'Create task'}</button></div></footer></form></section></div>}
+    {editor && <div className="task-detail-backdrop" role="presentation" onMouseDown={() => setEditor(null)}><section className="task-detail-panel" role="dialog" aria-modal="true" aria-labelledby="task-editor-title" onMouseDown={(event) => event.stopPropagation()}>{taskExecution && editingTask?.id === taskExecution.taskId && <TaskExecutionProgress execution={taskExecution} />}<header className="task-detail-header"><div><span className="eyebrow">{editingTask ? 'TASK DETAILS' : 'NEW TASK'}</span><h2 id="task-editor-title">{editingTask ? 'Edit task' : 'New task'}</h2></div><button className="task-modal-close" type="button" aria-label="Close task editor" onClick={() => setEditor(null)}>×</button></header><form className="task-detail-form" onSubmit={saveTask}><label className="task-form-field"><span>Title <b aria-hidden="true">*</b></span><input required name="title" defaultValue={editingTask?.title} /></label><label className="task-form-field"><span>Description</span><textarea name="description" rows={5} defaultValue={editingTask?.description} /></label><div className="task-form-grid"><label className="task-form-field"><span>Status</span><select name="status" defaultValue={editingTask?.status ?? 'todo'}>{columns.map((column) => <option key={column.id} value={column.id}>{column.title}</option>)}</select></label><label className="task-form-field"><span>Priority</span><select name="priority" defaultValue={editingTask?.priority ?? 'normal'}>{['critical', 'high', 'normal', 'low'].map((priority) => <option key={priority} value={priority}>{priorityLabel(priority)}</option>)}</select></label><label className="task-form-field"><span>Assignee</span><select name="assignedAgentId" defaultValue={editingTask?.assignedAgentId ?? ''}><option value="">Unassigned</option>{agents.map((agent) => <option value={agent.resourceId ?? agent.id} key={agent.id}>{agent.name}</option>)}</select></label><label className="task-form-field"><span>Project <b aria-hidden="true">*</b></span><select required name="projectId" defaultValue={editingTask?.projectId ?? selectedProjectId}>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label></div>{editingTask && <dl className="task-metadata" aria-label="Task metadata"><div><dt>Created</dt><dd>{formatTaskDate(editingTask.createdAt)}</dd></div><div><dt>Updated</dt><dd>{formatTaskDate(editingTask.updatedAt)}</dd></div></dl>}<footer className="task-detail-actions">{editingTask && <button className="task-execute" disabled={saving || !editingTask.assignedAgentId || ['done', 'cancelled'].includes(editingTask.status)} type="button" onClick={() => void executeTask()}>▷ Execute</button>}<div className="task-editor-primary-actions">{editingTask && <button className="task-delete" disabled={saving} type="button" onClick={() => void deleteTask()}>⌫ Delete</button>}<button className="primary" disabled={saving} type="submit">{saving ? 'Saving…' : editingTask ? 'Save changes' : 'Create task'}</button></div></footer></form></section></div>}
   </div></div>;
 }
