@@ -39,8 +39,9 @@ function UsageMeter({ label, usedPercent, resetAt }: UsageMeterProps) {
   </span>;
 }
 
-export function AppStatusBar({ anthropicUsage, openAiUsage, runtimeVersion }: { anthropicUsage: AnthropicUsage | null; openAiUsage: OpenAiUsage | null; runtimeVersion: string | null }) {
+export function AppStatusBar({ anthropicUsage, openAiUsage, runtimeVersion, registryStale }: { anthropicUsage: AnthropicUsage | null; openAiUsage: OpenAiUsage | null; runtimeVersion: string | null; registryStale?: boolean }) {
   return <footer className="status-bar">
+    {registryStale && <span className="registry-stale" role="status" title="Agent registry refresh failed; showing the last known agents.">Agents stale</span>}
     {anthropicUsage?.windows
       .filter((window) => window.key === 'five_hour' || window.key === 'seven_day')
       .map((window) => <UsageMeter key={window.key} label={window.key === 'five_hour' ? '5hr' : '7day'} usedPercent={window.usedPercent} resetAt={window.resetAt} />)}

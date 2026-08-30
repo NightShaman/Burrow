@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import type { MutableRefObject } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiForTarget } from './api';
@@ -68,6 +68,32 @@ describe('useRuntimeAgents registry state', () => {
     expect(result.current.registryError).toContain('Connection refused');
     expect(onNoAgents).not.toHaveBeenCalled();
     expect(reportError).toHaveBeenCalledWith(expect.stringContaining('Connection refused'));
+  });
+
+  it('keeps the last good registry and marks a failed refresh stale', async () => {
+    let overviewCalls = 0;
+    apiForTargetMock.mockImplementation(async (_target, path) => {
+      if (path === '/api/agents') return { agents: [{ id: 'smatchet', name: 'Smatchet', enabled: true }] };
+      if (path !== '/api/agents/overview') throw new Error(`Unexpected path: ${path}`);
+      overviewCalls += 1;
+      if (overviewCalls > 1) throw new Error('Bad Gateway');
+      return { agents: [{
+        agent: { id: 'smatchet', name: 'Smatchet', enabled: true },
+        sessionId: 'default', selection: null,
+        status: { agents: [{ sessionId: 'default', status: 'IDLE' }] }, contexts: {},
+      }] };
+    });
+
+    const { result } = renderRuntimeAgents();
+    await waitFor(() => expect(result.current.registryState).toBe('ready'));
+    const loadedAgents = result.current.agents;
+
+    await act(async () => { await result.current.refreshAgents(); });
+
+    expect(result.current.agents).toEqual(loadedAgents);
+    expect(result.current.registryState).toBe('ready');
+    expect(result.current.registryStale).toBe(true);
+    expect(reportError).not.toHaveBeenCalled();
   });
 
   it('hydrates parent and child state with one request per target', async () => {

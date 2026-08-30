@@ -104,6 +104,7 @@ export function useRuntimeAgents({ selectedAgentId, targets, setSelectedAgentId,
   const [agents, setAgents] = useState<Agent[]>([]);
   const [registryState, setRegistryState] = useState<RuntimeRegistryState>('loading');
   const [registryError, setRegistryError] = useState('');
+  const [registryStale, setRegistryStale] = useState(false);
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
   const selectedAgentIdRef = useRef(selectedAgentId);
@@ -113,6 +114,7 @@ export function useRuntimeAgents({ selectedAgentId, targets, setSelectedAgentId,
     setAgents([]);
     setRegistryState('loading');
     setRegistryError('');
+    setRegistryStale(false);
   }, [targetKey]);
 
   const refreshAgents = useCallback(async (isCancelled: IsPollingCancelled = () => false) => {
@@ -166,6 +168,11 @@ export function useRuntimeAgents({ selectedAgentId, targets, setSelectedAgentId,
     if (isCancelled()) return;
     if (successfulTargets.length === 0) {
       const message = failedTargets.map(({ target, error }) => `${target.name}: ${error?.message || 'Unavailable'}`).join('; ');
+      if (agentsRef.current.length > 0) {
+        setRegistryStale(true);
+        setRegistryError(message || 'The registry refresh failed.');
+        return;
+      }
       setRegistryState('unavailable');
       setRegistryError(message || 'The selected runtime is unavailable.');
       reportError(`Could not load agents: ${message || 'The selected runtime is unavailable.'}`);
@@ -177,6 +184,7 @@ export function useRuntimeAgents({ selectedAgentId, targets, setSelectedAgentId,
     const nextAgentId = hydrated.some((agent) => agent.id === latestSelectedAgentId) ? latestSelectedAgentId : fallbackAgentId;
     setAgents(hydrated);
     setRegistryState(hydrated.length === 0 ? 'empty' : 'ready');
+    setRegistryStale(failedTargets.length > 0);
     setRegistryError(failedTargets.map(({ target, error }) => `${target.name}: ${error?.message || 'Unavailable'}`).join('; '));
     if (hydrated.length === 0) onNoAgents();
     setSelectedAgentId(nextAgentId);
@@ -188,11 +196,16 @@ export function useRuntimeAgents({ selectedAgentId, targets, setSelectedAgentId,
       await refreshAgents(isCancelled);
     } catch (error) {
       if (!isCancelled()) {
-        reportError(`Could not load agents: ${(error as Error).message}`);
-        if (agentsRef.current.length === 0) onNoAgents();
+        if (agentsRef.current.length > 0) {
+          setRegistryStale(true);
+          setRegistryError((error as Error).message);
+        } else {
+          reportError(`Could not load agents: ${(error as Error).message}`);
+          onNoAgents();
+        }
       }
     }
   }, 15_000, true, targetKey);
 
-  return { agents, setAgents, refreshAgents, registryState, registryError };
+  return { agents, setAgents, refreshAgents, registryState, registryError, registryStale };
 }
