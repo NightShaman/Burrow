@@ -46,7 +46,7 @@ export function redactValue(value, { maxDepth = 12, maxItems = 64, maxKeys = 64 
     count += 1;
     // Redact secret-bearing fields, not ordinary telemetry such as
     // `estimatedTokens` or `contextTokens`.
-    if (/^(?:token|api[_-]?key|secret|password|passwd|auth)$/i.test(key)) result[key] = '[redacted]';
+    if (/^(?:token|api[_-]?key|secret|password|passwd|auth|authorization)$/i.test(key)) result[key] = '[redacted]';
     else result[key] = redactValue(value[key], { maxDepth, maxItems, maxKeys }, depth + 1, seen);
   }
   return result;
@@ -97,7 +97,7 @@ export function boundedRedactedValue(value, {
       if (count >= maxKeys || state.remaining <= 0) { omitted = true; break; }
       count += 1;
       const safeKey = String(key).slice(0, 256);
-      if (/^(?:token|api[_-]?key|secret|password|passwd|auth)$/i.test(safeKey)) result[safeKey] = '[redacted]';
+      if (/^(?:token|api[_-]?key|secret|password|passwd|auth|authorization)$/i.test(safeKey)) result[safeKey] = '[redacted]';
       else {
         try { result[safeKey] = visit(item[key], depth + 1); }
         catch { result[safeKey] = '[metadata field unreadable]'; }

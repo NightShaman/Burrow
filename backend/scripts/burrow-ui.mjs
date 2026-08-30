@@ -57,6 +57,7 @@ import { backgroundSchedulersEnabled } from '../src/background-scheduler-policy.
 import { McpSettingsStore } from '../src/mcp-settings-store.mjs';
 import { diagnoseMcpConnection as diagnoseMcpConnectionRuntime, discoverMcpTools, reconcilePersistentMcpConnection } from '../src/mcporter-adapter.mjs';
 import { createRuntimeMetricsCollector } from '../src/runtime-metrics.mjs';
+import { createRuntimeServerLogger } from '../src/runtime-server-log.mjs';
 import { latestProviderRequest } from '../src/provider-request-inspection.mjs';
 import { chatCommandHelpText, chatCommandResponse, parseChatCommand } from '../src/chat-commands.mjs';
 import { activeChatRunKey, activeChatRunSummaries, activeChatRunSummary, cancelActiveChatRun, registerActiveAgentRun } from '../src/active-chat-runs.mjs';
@@ -120,6 +121,8 @@ const BASIC_SESSION_COOKIE = 'hc_basic_session';
 const OPENAI_OAUTH_USAGE_URL = process.env.BURROW_OPENAI_OAUTH_USAGE_URL || 'https://chatgpt.com/backend-api/wham/usage';
 const anthropicUsageCache = new Map();
 const openaiOauthUsageCache = new Map();
+const runtimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
+const serverLogger = createRuntimeServerLogger({ runtimeRoot });
 const runtimeMetrics = createRuntimeMetricsCollector({
   runtimeRoot: process.env.BURROW_DATA_ROOT || '/mnt/local/burrow',
   settingsDatabasePath: settingsDatabasePath(),
@@ -2846,6 +2849,10 @@ const mods = await loadMods({
 const modRoute = createModRoute({ mods, readJsonBody, sendJson });
 
 const server = createServer(async (req, res) => {
+  const startedAt = Date.now();
+  let responseStatus = null;
+  res.once('finish', () => { void serverLogger.event('http_request', { method: req.method || null, path: new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`).pathname, status: responseStatus || res.statusCode, durationMs: Date.now() - startedAt }); });
+  req.once('aborted', () => { void serverLogger.event('client_disconnect', { method: req.method || null, path: req.url || null, phase: 'request_aborted', durationMs: Date.now() - startedAt }); });
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`);
     const origin = `${url.protocol}//${url.host}`;
@@ -2909,6 +2916,7 @@ const server = createServer(async (req, res) => {
     return sendJson(res, 404, { ok: false, error: 'not_found' });
   } catch (error) {
     const status = Number(error?.statusCode) >= 400 && Number(error.statusCode) < 500 ? Number(error.statusCode) : 500;
+    void serverLogger.event('request_error', { method: req.method || null, path: req.url || null, status, error: String(error?.message || error), durationMs: Date.now() - startedAt });
     return sendJson(res, status, { ok: false, error: String(error?.message || error), ...(error?.details ? { details: error.details } : {}), stack: process.env.NODE_ENV === 'development' ? error?.stack : undefined });
   }
 });
@@ -2918,14 +2926,19 @@ async function shutdownRuntime(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   try {
+    await serverLogger.event('shutdown_started', { signal, activeRuns: activeChatRuns.size });
     await recordActiveRunInterruptions({ activeRuns: activeChatRuns, resolveAgentRuntime, reason: signal === 'SIGINT' ? 'service_interrupt' : 'service_shutdown' });
     await new Promise((resolve) => server.close(() => resolve()));
+    await serverLogger.event('shutdown_complete', { signal });
   } catch (error) {
+    void serverLogger.event('shutdown_error', { signal, error: String(error?.message || error) });
     console.error(`Burrow shutdown recovery failed: ${String(error?.message || error)}`);
   } finally {
     process.exit(signal === 'SIGINT' ? 130 : 0);
   }
 }
+process.once('uncaughtException', (error) => { void serverLogger.event('uncaught_exception', { error: String(error?.stack || error) }).finally(() => process.exit(1)); });
+process.once('unhandledRejection', (error) => { void serverLogger.event('unhandled_rejection', { error: String(error?.stack || error) }); });
 process.once('SIGTERM', () => { void shutdownRuntime('SIGTERM'); });
 process.once('SIGINT', () => { void shutdownRuntime('SIGINT'); });
 
@@ -2936,11 +2949,13 @@ server.once('error', (error) => {
   const detail = code === 'EADDRINUSE'
     ? `Burrow UI could not bind ${host}:${port}: address already in use.`
     : `Burrow UI failed to listen on ${host}:${port}: ${String(error?.message || error)}`;
-  console.error(detail);
-  process.exit(1);
+  void serverLogger.event('listener_error', { code, host, port, error: String(error?.message || error) }).finally(() => { console.error(detail); process.exit(1); });
 });
 
+server.on('clientError', (error, socket) => { void serverLogger.event('client_error', { code: error?.code || null, error: String(error?.message || error), remoteAddress: socket?.remoteAddress || null }); socket?.destroy(); });
+server.on('connection', (socket) => { socket.once('error', (error) => { void serverLogger.event('socket_error', { code: error?.code || null, error: String(error?.message || error), remoteAddress: socket.remoteAddress || null }); }); });
 server.listen(port, host, async () => {
+  await serverLogger.event('listener_started', { host, port, pid: process.pid, version: releaseVersion });
   if (backgroundSchedulersEnabled()) {
     const store = new ScheduledJobStore({ databasePath: settingsDatabasePath() });
     try { store.markMissedRuns(); store.markMissedSchedules(); } finally { store.close(); }
