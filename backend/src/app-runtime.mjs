@@ -240,7 +240,7 @@ async function runAskChatUnserialized({
   const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, inboundEntryId }) => {
     const nestedRunId = `${resolvedRunId}-reply-${recipientRuntime.agentId}`;
     const lifecycle = typeof registerNestedAgentRun === 'function'
-      ? registerNestedAgentRun({ agentRuntime: recipientRuntime, sessionId: recipientSessionId, runId: nestedRunId, message: content, source: 'a2a' })
+      ? registerNestedAgentRun({ agentRuntime: recipientRuntime, sessionId: recipientSessionId, runId: nestedRunId, message: content, source: 'a2a', parentAgentId: runtimeState.agentId, parentRunId: resolvedRunId, parentSessionId: resolvedSessionId, messageMode: 'request_reply', senderAgentId, sourceSessionId, sourceRunId, inboundEntryId })
       : null;
     try {
       const reply = await runAskChat({

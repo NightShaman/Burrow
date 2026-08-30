@@ -2712,7 +2712,7 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId })
       rootDir: projectRoot,
       agentRuntime,
       resolveAgentRuntime,
-      registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source }) => registerActiveAgentRun(activeChatRuns, { agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source }),
+      registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerActiveAgentRun(activeChatRuns, { agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
       onTraceRecord: streaming ? (traceRecord) => {
         const progress = publicChatProgress(traceRecord);
         if (progress) {
@@ -2991,7 +2991,7 @@ server.listen(port, host, async () => {
           rootDir: projectRoot, agentRuntime: runtime, resolveAgentRuntime,
           onTraceRecord: lifecycle.onTraceRecord, onModelTextDelta: lifecycle.onModelTextDelta,
           onModelThoughtDelta: lifecycle.onModelThoughtDelta, onModelContextUsage: lifecycle.onModelContextUsage,
-          registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source }) => registerActiveAgentRun(activeChatRuns, { agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source }),
+          registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerActiveAgentRun(activeChatRuns, { agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
         });
       } finally { lifecycle.finish(); }
     },
