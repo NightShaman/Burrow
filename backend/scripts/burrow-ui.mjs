@@ -227,6 +227,13 @@ async function executeBoardTask(taskId) {
     rootDir: projectRoot,
     agentRuntime,
     resolveAgentRuntime,
+    onTraceRecord: (traceRecord) => {
+      const progress = publicChatProgress(traceRecord);
+      if (!progress) return;
+      record.progress = [...record.progress, { ...progress, runId, sessionId, ts: traceRecord.ts || new Date().toISOString() }].slice(-50);
+      if (progress.type === 'model.started') record.phase = 'thinking';
+      if (progress.type === 'model.completed') record.phase = 'streaming';
+    },
     onModelContextUsage: async (usage) => {
       if (!usage || typeof usage !== 'object') return;
       record.contextUsage = updateContextUsageHighWater(record.contextUsage, usage);
