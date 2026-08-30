@@ -26,14 +26,67 @@ function manifestUi(id, root, value = {}) {
   }
   return ui;
 }
+const CONTRIBUTION_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const SETTINGS_CAPABILITIES = new Set(['apiTargets']);
+
+function boundedManifestText(value, { required = false, max = 240, errorCode } = {}) {
+  const text = String(value ?? '').trim();
+  if ((required && !text) || text.length > max) throw new Error(errorCode);
+  return text || undefined;
+}
+function modEndpoint(id, value, errorCode) {
+  const endpoint = String(value || '').trim();
+  if (!endpoint.startsWith(`/api/mods/${id}/`) || endpoint.includes('?') || endpoint.includes('#') || endpoint.split('/').includes('..')) throw new Error(`${errorCode}:${id}`);
+  return endpoint;
+}
+function manifestSettingsContribution(id, value, index, availableCapabilities) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`mod_settings_contribution_invalid:${id}`);
+  const contributionId = String(value.id || '').trim();
+  if (!CONTRIBUTION_ID.test(contributionId)) throw new Error(`mod_settings_contribution_id_invalid:${id}`);
+  const navigation = value.navigation;
+  const primary = value.primary;
+  if (!navigation || typeof navigation !== 'object' || Array.isArray(navigation) || !primary || typeof primary !== 'object' || Array.isArray(primary)) throw new Error(`mod_settings_contribution_columns_invalid:${id}`);
+  const navigationTitle = boundedManifestText(navigation.title, { required: true, errorCode: `mod_settings_navigation_title_required:${id}` });
+  const navigationDescription = boundedManifestText(navigation.description, { max: 600, errorCode: `mod_settings_navigation_description_invalid:${id}` });
+  const primaryTitle = boundedManifestText(primary.title, { required: true, errorCode: `mod_settings_primary_title_required:${id}` });
+  const primaryDescription = boundedManifestText(primary.description, { max: 1_200, errorCode: `mod_settings_primary_description_invalid:${id}` });
+  const primaryCapability = String(primary.capability || '').trim();
+  if (!SETTINGS_CAPABILITIES.has(primaryCapability) || !availableCapabilities.has(primaryCapability)) throw new Error(`mod_settings_primary_capability_invalid:${id}`);
+  const output = {
+    id: contributionId,
+    navigation: { title: navigationTitle, ...(navigationDescription ? { description: navigationDescription } : {}) },
+    primary: { title: primaryTitle, ...(primaryDescription ? { description: primaryDescription } : {}), capability: primaryCapability },
+  };
+  if (value.inventory !== undefined) {
+    const inventory = value.inventory;
+    if (!inventory || typeof inventory !== 'object' || Array.isArray(inventory)) throw new Error(`mod_settings_inventory_invalid:${id}`);
+    const title = boundedManifestText(inventory.title, { required: true, errorCode: `mod_settings_inventory_title_required:${id}` });
+    const description = boundedManifestText(inventory.description, { max: 1_200, errorCode: `mod_settings_inventory_description_invalid:${id}` });
+    const capability = inventory.capability === undefined ? primaryCapability : String(inventory.capability || '').trim();
+    if (!SETTINGS_CAPABILITIES.has(capability) || !availableCapabilities.has(capability)) throw new Error(`mod_settings_inventory_capability_invalid:${id}`);
+    const emptyState = inventory.emptyState;
+    if (emptyState !== undefined && (!emptyState || typeof emptyState !== 'object' || Array.isArray(emptyState))) throw new Error(`mod_settings_inventory_empty_state_invalid:${id}`);
+    const emptyTitle = emptyState === undefined ? undefined : boundedManifestText(emptyState.title, { required: true, errorCode: `mod_settings_inventory_empty_title_required:${id}` });
+    const emptyDescription = emptyState === undefined ? undefined : boundedManifestText(emptyState.description, { max: 1_200, errorCode: `mod_settings_inventory_empty_description_invalid:${id}` });
+    output.inventory = { title, ...(description ? { description } : {}), capability, ...(emptyState ? { emptyState: { title: emptyTitle, ...(emptyDescription ? { description: emptyDescription } : {}) } } : {}) };
+  }
+  return output;
+}
 function manifestContributions(id, value = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`mod_contributions_invalid:${id}`);
   const contributions = {};
-  if (value?.apiTargets !== undefined) {
-    const endpoint = String(value.apiTargets || '').trim();
-    if (!endpoint.startsWith(`/api/mods/${id}/`) || endpoint.includes('?') || endpoint.includes('#') || endpoint.split('/').includes('..')) {
-      throw new Error(`mod_api_targets_invalid:${id}`);
-    }
+  const capabilities = {};
+  if (value.apiTargets !== undefined) {
+    const endpoint = modEndpoint(id, value.apiTargets, 'mod_api_targets_invalid');
     contributions.apiTargets = endpoint;
+    capabilities.apiTargets = { endpoint };
+  }
+  if (value.settings !== undefined) {
+    if (!Array.isArray(value.settings) || !value.settings.length || value.settings.length > 12) throw new Error(`mod_settings_contributions_invalid:${id}`);
+    const availableCapabilities = new Set(Object.keys(capabilities));
+    const settings = value.settings.map((entry, index) => manifestSettingsContribution(id, entry, index, availableCapabilities));
+    if (new Set(settings.map((entry) => entry.id)).size !== settings.length) throw new Error(`mod_settings_contribution_id_duplicate:${id}`);
+    contributions.settings = settings;
   }
   return contributions;
 }
