@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { textFromChatValue, type ChatAttachment, type SessionSummary, type SessionTurn, type ToolActivity } from '../../app/api';
-import { localApiTarget, type ApiTarget } from '../../app/apiTargets';
+import { apiForTarget, textFromChatValue, type ActiveA2AActivity, type ActiveChatRun, type ChatAttachment, type SessionSummary, type SessionTurn, type ToolActivity } from '../../app/api';
+import { localApiTarget, targetForResource, type ApiTarget } from '../../app/apiTargets';
 import { conversationCacheKey, readConversationCache, writeConversationCache, type ConversationCache } from './chatConversationCache';
 import { readDraftCache, writeDraftCache, type DraftCache } from './chatDraftCache';
 import { reconcileSessionTurns } from './chatTurnReconciliation';
@@ -21,6 +21,8 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   const [turns, setTurns] = useState<SessionTurn[]>([]);
   const [chatError, setChatError] = useState('');
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
+  const [a2aActivities, setA2aActivities] = useState<ActiveA2AActivity[]>([]);
+  const hadA2aRunsRef = useRef(false);
   const [, setToolActivityVersion] = useState(0);
   const conversationCacheRef = useRef<ConversationCache>(readConversationCache());
   // The displayed chat session may be a child session. Agent-status is scoped
@@ -195,6 +197,47 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
     const current = selectedChatRef.current;
     if (current.agentId === agentId && current.sessionId === targetSessionId) setTurns(nextTurns);
   }, [selectedAgentId, sessionId, sessionRepository]);
+  useEffect(() => {
+    if (!selectedAgentId || !sessionId || isNewSession) {
+      setA2aActivities([]);
+      hadA2aRunsRef.current = false;
+      return;
+    }
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const owner = targetForResource(targets, selectedAgentId);
+        const response = await apiForTarget<{ runs?: ActiveChatRun[] }>(owner.target, `/api/chat/runs/active?agentId=${encodeURIComponent(owner.resourceId)}&sessionId=${encodeURIComponent(sessionId)}`);
+        if (cancelled) return;
+        const activities = (response.runs ?? []).flatMap((run) => {
+          if (run.a2aActivities?.length) return run.a2aActivities;
+          if (run.source !== 'a2a' || !run.a2a) return [];
+          const status: ActiveA2AActivity['status'] = run.status === 'cancelled' ? 'cancelled' : run.phase === 'streaming' ? 'streaming' : 'running';
+          return [{ id: `a2a:${run.runId}`, status, parentAgentId: run.a2a.parentAgentId, recipient: { agentId: run.agentId, sessionId: run.sessionId, runId: run.runId }, messageMode: run.a2a.messageMode, progress: run.progress ?? [] }];
+        });
+        const hadRuns = hadA2aRunsRef.current;
+        hadA2aRunsRef.current = Boolean(response.runs?.length);
+        setA2aActivities(activities.slice(-12));
+        if (response.runs?.length || hadRuns) {
+          const cacheKey = conversationCacheKey(selectedAgentId, sessionId);
+          const cachedTurns = conversationCacheRef.current[cacheKey] ?? [];
+          const session = await sessionRepository.loadSession(selectedAgentId, sessionId);
+          const nextTurns = reconcileSessionTurns(session, cachedTurns);
+          conversationCacheRef.current[cacheKey] = nextTurns;
+          writeConversationCache(conversationCacheRef.current, cacheKey);
+          if (!cancelled && selectedChatRef.current.agentId === selectedAgentId && selectedChatRef.current.sessionId === sessionId) setTurns(nextTurns);
+        }
+      } catch {
+        // Live activity is supplemental; durable session loading remains authoritative.
+      } finally {
+        if (!cancelled) timer = window.setTimeout(poll, 1000);
+      }
+    };
+    void poll();
+    return () => { cancelled = true; if (timer !== undefined) window.clearTimeout(timer); };
+  }, [isNewSession, selectedAgentId, sessionId, targets]);
+
   const selectSession = useCallback((targetSessionId: string) => {
     if (!selectedAgentId || !targetSessionId || targetSessionId === sessionId) return;
     // Remember explicit choices before React state changes so concurrent list
@@ -260,5 +303,5 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   const reportError = useCallback((message: string) => setChatError(message), []);
   const clearError = useCallback(() => setChatError(''), []);
 
-  return { attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation: isLoadingConversation || isSwitchingAgent, draft, setDraft, refreshSessions, refreshConversation, selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun };
+  return { attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation: isLoadingConversation || isSwitchingAgent, draft, setDraft, refreshSessions, refreshConversation, selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun, a2aActivities };
 }

@@ -170,6 +170,29 @@ export type ToolActivity = { runId?: string | null; status?: 'running' | 'ok' | 
 export type SessionToolActivity = { runId?: string | null; summary: string; items: Array<{ label: string; detail?: string; status: 'pending' | 'ok' | 'error'; count?: number }> };
 export type ProgressEntry = { id: string; text: string; ts: string; modelCall?: number; status?: 'streaming' | 'complete' };
 export type RunProgress = { items: ProgressEntry[]; status?: 'running' | 'complete' | 'failed' | 'cancelled' | 'superseded' };
+export type ActiveA2AActivity = {
+  id: string;
+  status: 'running' | 'streaming' | 'replied' | 'cancelled';
+  startedAt?: string;
+  updatedAt?: string;
+  completedAt?: string;
+  recipient?: { agentId?: string; sessionId?: string; runId?: string };
+  parentAgentId?: string;
+  messageMode?: string;
+  progress?: Array<{ type?: string; data?: Record<string, unknown>; ts?: string }>;
+};
+export type ActiveChatRun = {
+  runId: string;
+  agentId: string;
+  sessionId: string;
+  status: string;
+  phase?: string;
+  progress?: Array<{ type?: string; data?: Record<string, unknown>; ts?: string }>;
+  source?: string | null;
+  a2a?: { parentAgentId?: string; parentRunId?: string; messageMode?: string } | null;
+  a2aActivities?: ActiveA2AActivity[];
+};
+export type ActiveChatRunsResponse = { ok: boolean; runs: ActiveChatRun[] };
 
 export type SessionAttachment = {
   index?: number;
@@ -193,6 +216,7 @@ export type SessionTurn = {
     kind?: string;
     fromAgentId?: string;
     fromAgentName?: string;
+    toAgentId?: string;
     messageMode?: 'deliver' | 'request_reply' | 'reply' | string;
     direction?: 'inbound' | 'outbound' | string;
   };

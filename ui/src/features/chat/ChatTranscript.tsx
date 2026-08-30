@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
-import { textFromChatValue, type ProgressEntry, type RunProgress, type SessionAttachment, type SessionTurn, type ToolActivity } from '../../app/api';
+import { textFromChatValue, type ProgressEntry, type RunProgress, type SessionAttachment, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
 import type { Agent, Subagent } from '../../app/types';
 
 export type OperatorProfile = { name: string; avatar: string };
@@ -20,9 +20,10 @@ type ChatTranscriptProps = {
   activeToolActivity?: ToolActivity;
   liveProgress: ProgressEntry[];
   liveAnswer: string;
+  a2aActivities?: import('../../app/api').ActiveA2AActivity[];
 };
 
-export function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer }: ChatTranscriptProps) {
+export function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, a2aActivities = [] }: ChatTranscriptProps) {
   const isSubagent = 'stream' in selected;
   const messages = turns.filter((turn) => turn.type === 'message' && turn.content && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent'));
   const activityByRun = new Map<string, ToolActivity>();
@@ -52,10 +53,13 @@ export function ChatTranscript({ selected, parent, operator, isNewSession, turns
         const isAgentMessage = turn.role === 'agent';
         const fromCurrentAgent = turn.metadata?.fromAgentId === selected.id;
         const senderName = turn.metadata?.fromAgentName ?? turn.metadata?.fromAgentId ?? 'Agent';
+        const recipientName = turn.metadata?.toAgentId ?? selected.name;
+        const messageName = isAgentMessage ? `${senderName} → ${recipientName}` : selected.name;
         const persistedActivity = turn.metadata?.toolActivity;
         const isPersistedTerminalTurn = turn.role === 'assistant' && turn.runId === activeRunId && Boolean(turn.metadata?.progress || persistedActivity || turn.content);
-        return <ChatMessage key={`${turn.runId ?? 'turn'}-${index}`} side={turn.role === 'user' || (isAgentMessage && !fromCurrentAgent) ? 'operator' : 'agent'} name={turn.role === 'user' ? operator.name : isAgentMessage ? (fromCurrentAgent ? selected.name : senderName) : selected.name} avatar={turn.role === 'user' ? operator.avatar || operator.name.slice(0, 1).toUpperCase() : isAgentMessage && !fromCurrentAgent ? senderName.slice(0, 1).toUpperCase() : selected.avatar} time={formatTime(turn.ts)} text={textFromChatValue(turn.content)} activity={turn.role === 'assistant' ? (persistedActivity ?? (turn.runId === activeRunId ? activeActivity : activityByRun.get(turn.runId ?? ''))) : undefined} progress={turn.role === 'assistant' ? turn.metadata?.progress : undefined} streamedAnswer={turn.role === 'assistant' ? turn.metadata?.streamedAnswer : undefined} activityLive={turn.role === 'assistant' && turn.runId === activeRunId && !isPersistedTerminalTurn} attachments={turn.metadata?.attachments} />;
+        return <ChatMessage key={`${turn.runId ?? 'turn'}-${index}`} side={turn.role === 'user' || (isAgentMessage && !fromCurrentAgent) ? 'operator' : 'agent'} name={turn.role === 'user' ? operator.name : isAgentMessage ? messageName : selected.name} avatar={turn.role === 'user' ? operator.avatar || operator.name.slice(0, 1).toUpperCase() : isAgentMessage && !fromCurrentAgent ? senderName.slice(0, 1).toUpperCase() : selected.avatar} time={formatTime(turn.ts)} text={textFromChatValue(turn.content)} activity={turn.role === 'assistant' ? (persistedActivity ?? (turn.runId === activeRunId ? activeActivity : activityByRun.get(turn.runId ?? ''))) : undefined} progress={turn.role === 'assistant' ? turn.metadata?.progress : undefined} streamedAnswer={turn.role === 'assistant' ? turn.metadata?.streamedAnswer : undefined} activityLive={turn.role === 'assistant' && turn.runId === activeRunId && !isPersistedTerminalTurn} attachments={turn.metadata?.attachments} />;
       })}
+      {a2aActivities.length > 0 && <section className="a2a-activity-list" aria-label="Agent-to-agent activity">{a2aActivities.map((activity) => <A2AActivityCard key={activity.id} activity={activity} selectedName={selected.name} />)}</section>}
       {isSending && !messages.some((turn) => turn.role === 'assistant' && turn.runId === activeRunId && Boolean(turn.metadata?.progress || turn.metadata?.toolActivity || turn.content)) && <LiveAssistantTurn name={selected.name} avatar={selected.avatar} progress={liveProgress} activity={activeActivity} answer={liveAnswer} />}
       {error && <p className="chat-error" role="alert">{error}</p>}
     </>}
@@ -148,6 +152,23 @@ export function ChatMessage({ side, name, avatar, time, text, activity, progress
   };
   const copyLabel = copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : '';
   return <article className={`message ${side}${modelError ? ' model-error-message' : ''}`}><div className="message-avatar" aria-label={`${name} avatar`}>{image ? <img src={image} alt="" /> : avatar}</div><div className="message-content"><small>{name.toUpperCase()} · {time.toUpperCase()}</small>{attachments.length ? <div className="message-attachments" aria-label={`${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`}>{attachments.map((attachment, index) => <span className="message-attachment" key={`${attachment.index ?? index}-${attachment.name}`} title={attachment.type}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m4 18 5.5-5.5 3.5 3.5 2.5-2.5 4.5 4.5" /></svg><span>{attachment.name}</span></span>)}</div> : null}{streamedAnswer ? <StreamedAnswerCard text={streamedAnswer} /> : null}{progress?.items?.length ? <ProgressCard items={progress.items} status={progress.status} /> : null}{modelError ? <div className="message-bubble model-error-card" role="alert"><div className="model-error-sigil" aria-hidden="true">⚠</div><div><strong>{modelError.overloaded ? 'The model servers are throwing goblets' : modelErrorTitle}</strong><p>{modelError.message}</p><span>The chat is fine. The upstream model is being stupid.</span></div></div> : text && <div className="message-bubble final-answer"><ReactMarkdown remarkPlugins={[remarkBreaks]}>{text}</ReactMarkdown></div>}{activity && <ToolActivityCard activity={activity} live={activityLive} />}{text && <button className="copy-message" onClick={copy} aria-label={`Copy ${name} message as Markdown`} title={copyState === 'copied' ? 'Copied Markdown' : copyState === 'failed' ? 'Copy failed' : 'Copy Markdown'}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg><span aria-live="polite">{copyLabel}</span></button>}</div></article>;
+}
+
+function agentDisplayName(value: string) {
+  return value.split(/[:/_-]+/).filter(Boolean).map((part) => part.slice(0, 1).toUpperCase() + part.slice(1)).join(' ');
+}
+
+function A2AActivityCard({ activity, selectedName }: { activity: import('../../app/api').ActiveA2AActivity; selectedName: string }) {
+  const recipient = agentDisplayName(activity.recipient?.agentId ?? selectedName);
+  const sender = agentDisplayName(activity.parentAgentId ?? selectedName);
+  const label = `Agent message · ${sender} → ${recipient}`;
+  const items: ToolActivityItem[] = (activity.progress ?? []).flatMap((event, index) => {
+    const type = event.type ?? 'activity';
+    const data = event.data ?? {};
+    const tool = typeof data.tool === 'string' ? data.tool : type.replace(/^tool\./, '').replace('.', ' ');
+    return [{ id: `${activity.id}:${index}`, label: tool, status: type.endsWith('completed') ? (data.ok === false ? 'error' : 'ok') : 'pending' }];
+  });
+  return <details className={`tool-activity a2a-activity ${activity.status === 'running' || activity.status === 'streaming' ? 'live' : ''}`} open={activity.status === 'running' || activity.status === 'streaming'}><summary><span className={activity.status === 'running' || activity.status === 'streaming' ? 'tool-activity-spinner' : 'tool-activity-check'} aria-hidden="true">{activity.status === 'running' || activity.status === 'streaming' ? '' : '✓'}</span><strong>{label}</strong><span className="tool-activity-chevron" aria-hidden="true">⌄</span></summary><div className="tool-activity-list">{items.length ? items.map((item) => <div className="tool-activity-item" key={item.id}><span className={`tool-dot ${item.status}`} aria-hidden="true">{item.status === 'error' ? '!' : item.status === 'pending' ? '·' : '✓'}</span><strong>{item.label}</strong></div>) : <div className="tool-activity-empty">{activity.status === 'replied' ? 'Agent replied' : 'Waiting for agent activity…'}</div>}</div></details>;
 }
 
 function ToolActivityCard({ activity, live }: { activity: ToolActivity; live?: boolean }) {
