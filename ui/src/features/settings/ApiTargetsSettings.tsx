@@ -1,6 +1,7 @@
+import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useState } from 'react';
 import { apiLocal } from '../../app/api';
-import { apiTargetsChangedEvent, normalizeApiTarget, type ApiTarget, type ApiTargetContribution } from '../../app/apiTargets';
+import { apiTargetsChangedEvent, normalizeApiTarget, type ApiTarget, type ApiTargetContribution, type ModSettingsContribution } from '../../app/apiTargets';
 import { useConfirm } from '../../app/ConfirmDialog';
 import { Field, SettingSection } from './SettingsPrimitives';
 
@@ -12,7 +13,7 @@ function errorMessage(cause: unknown, action: string) {
   return cause instanceof Error ? `${action}: ${cause.message}` : `${action}.`;
 }
 
-export function ApiTargetsSettings({ contribution }: { contribution: ApiTargetContribution }) {
+export function ApiTargetsSettings({ contribution, settings, overflowTarget }: { contribution: ApiTargetContribution; settings?: ModSettingsContribution; overflowTarget?: HTMLElement | null }) {
   const confirm = useConfirm();
   const [targets, setTargets] = useState<ApiTarget[]>([]);
   const [draft, setDraft] = useState<DraftTarget>(emptyDraft);
@@ -65,17 +66,24 @@ export function ApiTargetsSettings({ contribution }: { contribution: ApiTargetCo
     finally { setStatus('idle'); }
   };
 
-  return <div className="api-target-settings">
-    <SettingSection title={editingId ? 'Edit API target' : 'Add API target'}>
-      <p className="settings-description">Connect another Burrow runtime so its agents and owned resources appear in this UI.</p>
+  const inventory = settings?.inventory ? <SettingSection title={settings.inventory.title}>
+    {targets.length === 0 ? <div className="settings-empty-state"><strong>{settings.inventory.emptyState?.title || 'No remote API targets configured.'}</strong>{settings.inventory.emptyState?.description && <span>{settings.inventory.emptyState.description}</span>}</div> : <div className="api-target-list">{targets.map((target) => <article className="api-target-card" key={target.id}><div><strong>{target.name}</strong><small>{target.baseUrl}</small><span>{target.id} · {target.enabled ? 'Enabled' : 'Disabled'}</span></div></article>)}</div>}
+  </SettingSection> : null;
+  const primaryTitle = settings?.primary.title || (editingId ? 'Edit API target' : 'Add API target');
+  return <>
+  <div className="api-target-settings">
+    <SettingSection title={primaryTitle}>
+      {settings?.primary.description ? <p className="settings-description">{settings.primary.description}</p> : <p className="settings-description">Connect another Burrow runtime so its agents and owned resources appear in this UI.</p>}
       <div className="field-pair compact-fields"><Field label="Target ID"><input value={draft.id} onChange={(event) => setDraft((current) => ({ ...current, id: event.target.value }))} disabled={Boolean(editingId) || status !== 'idle'} placeholder="node-one" /></Field><Field label="Name"><input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} disabled={status !== 'idle'} placeholder="Node One" /></Field></div>
       <Field label="Base URL"><input type="url" value={draft.baseUrl} onChange={(event) => setDraft((current) => ({ ...current, baseUrl: event.target.value }))} disabled={status !== 'idle'} placeholder="http://node-one:8787" /></Field>
       <label className="api-target-enabled"><input type="checkbox" checked={draft.enabled} onChange={(event) => setDraft((current) => ({ ...current, enabled: event.target.checked }))} disabled={status !== 'idle'} /> Enabled</label>
       <div className="setting-actions">{editingId && <button className="secondary" type="button" onClick={reset} disabled={status !== 'idle'}>Cancel</button>}<button className="primary" type="button" onClick={() => void save()} disabled={status !== 'idle'}>{status === 'saving' ? 'Saving…' : editingId ? 'Save target' : 'Add target'}</button></div>
       {error && <p className="settings-request-error" role="alert">{error}</p>}
     </SettingSection>
-    <SettingSection title="Configured targets">
+    {!settings?.inventory && <SettingSection title="Configured targets">
       {status === 'loading' ? <p className="settings-empty">Loading API targets…</p> : targets.length === 0 ? <p className="settings-empty">No remote API targets configured.</p> : <div className="api-target-list">{targets.map((target) => <article className="api-target-card" key={target.id}><div><strong>{target.name}</strong><small>{target.baseUrl}</small><span>{target.id} · {target.enabled ? 'Enabled' : 'Disabled'}</span></div><div className="api-target-actions"><button className="secondary" type="button" onClick={() => edit(target)} disabled={status !== 'idle'}>Edit</button><button className="danger" type="button" onClick={() => void remove(target)} disabled={status !== 'idle'}>Delete</button></div></article>)}</div>}
-    </SettingSection>
-  </div>;
+    </SettingSection>}
+  </div>
+  {overflowTarget && inventory && createPortal(<div className="settings-overflow-content">{inventory}</div>, overflowTarget)}
+  </>;
 }

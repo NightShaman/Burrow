@@ -15,7 +15,7 @@ import { McpConnections } from './McpConnections';
 import { AuthenticationSettings } from './AuthenticationSettings';
 import { CuratorSettings } from './CuratorSettings';
 import { RetentionSettings } from './RetentionSettings';
-import { loadApiTargetContributions, type ApiTargetContribution } from '../../app/apiTargets';
+import { loadApiTargetContributions, type ApiTargetContribution, type ModSettingsContribution } from '../../app/apiTargets';
 import type { ApiTarget } from '../../app/apiTargets';
 import { ApiTargetsSettings } from './ApiTargetsSettings';
 import { ExecutionBoundaries } from './ExecutionBoundaries';
@@ -57,15 +57,19 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
     const status = await api<SetupStatus>('/api/setup/complete', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     setSetupStatus(status);
   };
-  const selectedContribution = tab.startsWith('api-targets:') ? targetContributions.find((item) => item.modId === tab.slice('api-targets:'.length)) : undefined;
-  const heading = selectedContribution?.name ?? tab[0].toUpperCase() + tab.slice(1);
+  const nativeSettingMatch = tab.match(/^mod-settings:([^:]+):(.+)$/);
+  const selectedContribution = (tab.startsWith('api-targets:') || nativeSettingMatch)
+    ? targetContributions.find((item) => item.modId === (nativeSettingMatch?.[1] ?? tab.slice('api-targets:'.length)))
+    : undefined;
+  const selectedModSettings: ModSettingsContribution | undefined = selectedContribution?.settings?.find((item) => item.id === nativeSettingMatch?.[2]) ?? selectedContribution?.settings?.[0];
+  const heading = selectedModSettings?.navigation.title ?? selectedContribution?.name ?? tab[0].toUpperCase() + tab.slice(1);
   const builtInTabs = ['general', 'agents', 'connections'] as SettingsTab[];
   return <>
     <main className={`settings-blank-slate${tab === 'agents' ? ' has-agent-selector' : ''}${utilityPanelOpen ? ' has-utility-panel' : ''}`} aria-label="Settings layout prototype">
       <nav className="settings-blank-column settings-prototype-menu" aria-label="Settings sections">
         <div className="settings-prototype-menu-items">
           {builtInTabs.map((item) => <button type="button" className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => setTab(item)} key={item}>{item === 'connections' ? 'Connections' : item[0].toUpperCase() + item.slice(1)}</button>)}
-          {targetContributions.map((item) => { const itemTab = `api-targets:${item.modId}` as SettingsTab; return <button type="button" className={tab === itemTab ? 'active' : ''} aria-current={tab === itemTab ? 'page' : undefined} onClick={() => setTab(itemTab)} key={item.modId}>{item.name}</button>; })}
+          {targetContributions.map((item) => item.settings?.length ? item.settings.map((setting) => { const itemTab = `mod-settings:${item.modId}:${setting.id}` as SettingsTab; return <button type="button" className={tab === itemTab ? 'active' : ''} aria-current={tab === itemTab ? 'page' : undefined} onClick={() => setTab(itemTab)} key={`${item.modId}:${setting.id}`}>{setting.navigation.title}</button>; }) : <button type="button" className={tab === `api-targets:${item.modId}` ? 'active' : ''} aria-current={tab === `api-targets:${item.modId}` ? 'page' : undefined} onClick={() => setTab(`api-targets:${item.modId}` as SettingsTab)} key={item.modId}>{item.name}</button>)}
         </div>
       </nav>
       {tab === 'agents' && <div className="settings-prototype-agent-selector"><AgentToolbar agents={agents} selectedId={settingsSelected.id} onSelect={setSettingsAgentId} onAgentsChanged={onAgentsChanged} onModelConnectionsChanged={onModelConnectionsChanged} onOperatorProfileChanged={onOperatorProfileChanged} onFirstRunComplete={onFirstRunComplete} onSetupComplete={completeFirstRun} firstRun={previewFirstRun || setupStatus?.wizardStep === 'fresh' || setupStatus?.wizardStep === 'incomplete'} /></div>}
@@ -97,7 +101,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
             ['mcp-servers', 'MCP servers'],
           ] as const).map(([id, label]) => <button type="button" className={connectionSection === id ? 'active' : ''} aria-current={connectionSection === id ? 'page' : undefined} onClick={() => setConnectionSection(id)} key={id}>{label}</button>)}
         </nav>}
-        {selectedContribution && <span>Extension settings</span>}
+        {selectedModSettings ? <nav className="settings-prototype-section-items" aria-label={`${selectedModSettings.navigation.title} settings sections`}><button type="button" className="active" aria-current="page">{selectedModSettings.navigation.title}</button></nav> : selectedContribution && <span>Extension settings</span>}
       </section>
       <section className="settings-blank-column settings-prototype-configuration">
         {tab === 'general' && generalSection === 'operator-profile' && <OperatorProfile onSaved={onOperatorProfileChanged} />}
@@ -111,7 +115,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
         {tab === 'connections' && connectionSection === 'authentication' && <AuthenticationSettings />}
         {tab === 'connections' && connectionSection === 'model-providers' && <ModelConnections savedProviders={savedProviders} onModelConnectionsChanged={onModelConnectionsChanged} mcpConnections={null} overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'mcp-servers' && <McpConnections overflowTarget={overflowColumn} />}
-        {selectedContribution && <ApiTargetsSettings contribution={selectedContribution} />}
+        {selectedContribution && <ApiTargetsSettings contribution={selectedContribution} settings={selectedModSettings} overflowTarget={overflowColumn} />}
       </section>
       <section className="settings-blank-column settings-prototype-overflow" ref={setOverflowColumn} aria-label="Additional settings" />
       <aside className="settings-utility-panel" aria-label="System statistics" aria-hidden={!utilityPanelOpen}>
