@@ -373,7 +373,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
   border:0;
   border-left:1px solid var(--line);
   border-radius:0;
-  background:color-mix(in srgb,var(--panel) 88%,var(--surface-sunken));
+  background:color-mix(in srgb,var(--panel) 55%,var(--surface-sunken));
 }
 .settings-blank-column:first-child{
   border-left:1px solid var(--line);
@@ -391,14 +391,14 @@ button:disabled{cursor:not-allowed;opacity:.45}
   border-bottom:1px solid var(--line);
 }
 .settings-prototype-menu{
-  background:color-mix(in srgb,var(--surface-sunken) 58%,var(--panel));
+  background:color-mix(in srgb,var(--surface-sunken) 42%,var(--panel));
 }
 .settings-prototype-sections{
-  background:color-mix(in srgb,var(--surface-sunken) 34%,var(--panel));
+  background:color-mix(in srgb,var(--surface-sunken) 22%,var(--panel));
 }
 .settings-prototype-configuration,
 .settings-prototype-overflow{
-  background:var(--panel);
+  background:color-mix(in srgb,var(--panel) 68%,transparent);
 }
 .settings-blank-column>strong{
   display:flex;
@@ -547,7 +547,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .settings-blank-slate > .settings-blank-column{
   border:1px solid var(--line);
   border-radius:9px;
-  background:var(--panel);
+  background:color-mix(in srgb,var(--panel) 55%,transparent);
 }
 
 /* Functional right-side panel experiment. Columns 1 and 2 keep their share;
