@@ -67,7 +67,7 @@ export function ApiTargetsSettings({ contribution, settings, overflowTarget }: {
   };
 
   const inventory = settings?.inventory ? <SettingSection title={settings.inventory.title}>
-    {targets.length === 0 ? <div className="settings-empty-state"><strong>{settings.inventory.emptyState?.title || 'No remote API targets configured.'}</strong>{settings.inventory.emptyState?.description && <span>{settings.inventory.emptyState.description}</span>}</div> : <div className="api-target-list">{targets.map((target) => <article className="api-target-card" key={target.id}><div><strong>{target.name}</strong><small>{target.baseUrl}</small><span>{target.id} · {target.enabled ? 'Enabled' : 'Disabled'}</span></div></article>)}</div>}
+    {targets.length === 0 ? <div className="settings-empty-state"><strong>{settings.inventory.emptyState?.title || 'No remote API targets configured.'}</strong>{settings.inventory.emptyState?.description && <span>{settings.inventory.emptyState.description}</span>}</div> : <div className="api-target-list">{targets.map((target) => <article className="api-target-card" key={target.id}><div><strong>{target.name}</strong><small>{target.baseUrl}</small><span>{target.id} · {target.enabled ? 'Enabled' : 'Disabled'}</span></div><div className="api-target-actions"><button className="secondary" type="button" onClick={() => edit(target)} disabled={status !== 'idle'}>Edit</button><button className="danger" type="button" onClick={() => void remove(target)} disabled={status !== 'idle'}>Delete</button></div></article>)}</div>}
   </SettingSection> : null;
   const primaryTitle = settings?.primary.title || (editingId ? 'Edit API target' : 'Add API target');
   return <>
