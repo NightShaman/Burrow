@@ -1,3 +1,4 @@
+import { ensureMcpProvider, mcpProviderState, publicMcpError } from './mcporter-adapter.mjs';
 const text = (value) => String(value ?? '').trim();
 const bounded = (value, limit) => text(value).slice(0, limit);
 const keyFor = (connectionId, toolName) => `${connectionId}:${toolName}`;
@@ -24,12 +25,17 @@ export function isGrantedMcpTool(grants, connectionId, toolName) {
   return grants instanceof Map && grants.has(keyFor(connectionId, toolName));
 }
 
-export function mcpProvidersReceipt({ connections, grants, agentId } = {}) {
+export async function mcpProvidersReceipt({ connections, grants, agentId } = {}) {
   if (!(connections instanceof Map)) return { tool: 'mcp_providers', ok: true, providers: [], resultCount: 0 };
-  const providers = [...connections.values()]
+  const providers = await Promise.all([...connections.values()]
     .filter((connection) => connection?.enabled)
     .slice(0, 50)
-    .map((connection) => {
+    .map(async (connection) => {
+      let lifecycle = mcpProviderState(connection);
+      if (connection.lifecycle === 'keep_alive') {
+        try { lifecycle = await ensureMcpProvider(connection, { apiKey: connection.apiKey, environmentVariables: connection.environmentVariables }); }
+        catch (error) { lifecycle = { ...mcpProviderState(connection), status: 'unavailable', error: publicMcpError(error) }; }
+      }
       const catalog = Array.isArray(connection.tools) ? connection.tools : [];
       const grantedToolCount = catalog.filter((tool) => isGrantedMcpTool(grants, connection.id, tool.name)).length;
       return {
@@ -38,15 +44,20 @@ export function mcpProvidersReceipt({ connections, grants, agentId } = {}) {
         transport: connection.transport,
         catalogToolCount: catalog.length,
         grantedToolCount,
-        available: grantedToolCount > 0,
+        available: grantedToolCount > 0 && lifecycle.status !== 'unavailable',
+        lifecycle,
       };
-    });
+    }));
   return { tool: 'mcp_providers', ok: true, agentId: agentId || null, providers, resultCount: providers.length };
 }
 
-export function mcpCapabilitiesReceipt({ connections, grants, provider, query = null, cursor = null, limit = null } = {}) {
+export async function mcpCapabilitiesReceipt({ connections, grants, provider, query = null, cursor = null, limit = null } = {}) {
   const connection = resolveMcpProvider(connections, provider);
   if (!connection || !connection.enabled) return { tool: 'mcp_capabilities', ok: false, provider: text(provider) || null, error: 'mcp_provider_not_available' };
+  if (connection.lifecycle === 'keep_alive') {
+    try { await ensureMcpProvider(connection, { apiKey: connection.apiKey, environmentVariables: connection.environmentVariables }); }
+    catch { return { tool: 'mcp_capabilities', ok: false, provider: { id: connection.id, name: connection.name }, error: 'mcp_provider_not_available' }; }
+  }
   const normalizedQuery = text(query).toLowerCase();
   const start = Math.max(0, Number.parseInt(cursor, 10) || 0);
   const pageSize = Math.max(1, Math.min(20, Number(limit) || 12));

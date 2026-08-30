@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { redactProtectedText } from './redaction.mjs';
@@ -25,6 +25,34 @@ export const MCPORTER_ROOT = process.env.BURROW_MCPORTER_ROOT || (process.env.BU
 export const MCPORTER_BIN = process.env.BURROW_MCPORTER_BIN || (MCPORTER_ROOT ? path.join(MCPORTER_ROOT, 'node_modules', '.bin', 'mcporter') : null);
 const text = (value) => String(value ?? '').trim();
 const DEFAULT_STREAM_CAPTURE_BYTES = 256 * 1024;
+const PROVIDER_EVENT_LIMIT = 200;
+const providerStates = new Map();
+
+function providerId(connection) { return text(connection?.id) || 'connection'; }
+function providerEvent(connection, status, { runtimeRoot = null, error = null } = {}) {
+  if (connection?.lifecycle !== 'keep_alive') return Promise.resolve();
+  const event = { ts: new Date().toISOString(), providerId: providerId(connection), status };
+  if (error) event.error = publicMcpError(error);
+  providerStates.set(event.providerId, event);
+  const root = runtimeRoot || resolveMcporterRuntime({ runtimeRoot }).root;
+  const directory = path.join(root, 'runtime');
+  const eventPath = path.join(directory, 'mcp-provider-events.jsonl');
+  // This is deliberately a bounded public lifecycle receipt, not child stderr
+  // or provider output. A failed observability write must never break MCP use.
+  return mkdir(directory, { recursive: true, mode: 0o700 })
+    .then(async () => {
+      await appendFile(eventPath, `${JSON.stringify(event)}\n`, { mode: 0o600 });
+      const lines = (await readFile(eventPath, 'utf8')).trimEnd().split('\n');
+      if (lines.length > PROVIDER_EVENT_LIMIT) await writeFile(eventPath, `${lines.slice(-PROVIDER_EVENT_LIMIT).join('\n')}\n`, { mode: 0o600 });
+    })
+    .catch(() => {});
+}
+
+export function mcpProviderState(connection) {
+  if (connection?.lifecycle !== 'keep_alive') return { status: 'available', updatedAt: null };
+  const state = providerStates.get(providerId(connection));
+  return state ? { status: state.status, updatedAt: state.ts, ...(state.error ? { error: state.error } : {}) } : { status: 'unknown', updatedAt: null };
+}
 const boundedJson = (value, maxChars = 1_000) => { try { const rendered = typeof value === 'string' ? value : JSON.stringify(value); return rendered.length <= maxChars ? rendered : `${rendered.slice(0, maxChars)}…`; } catch { return String(value).slice(0, maxChars); } };
 // MCP diagnostics are external, untrusted text. Public errors must be stable
 // classifications, never launcher stderr or remote server payloads.
@@ -158,8 +186,19 @@ async function withConnectionConfig(connection, apiKey, environmentVariables, op
     // whether an existing daemon must be replaced.
     const existing = await readFile(configPath, 'utf8').catch(() => null);
     if (existing !== config) await writeFile(configPath, config, { mode: 0o600 });
-    await runCommand(binary, ['daemon', 'start', '--config', configPath], { cwd: runtimeRoot, protectedValues: [apiKey, ...Object.values(environmentVariables || {})] });
-    return operation(configPath, { binary, runtimeRoot });
+    await providerEvent(connection, 'starting', { runtimeRoot });
+    try {
+      // daemon start is idempotent in mcporter: it both verifies an existing
+      // daemon and recreates one that vanished. Never advertise a keep-alive
+      // provider merely because its old catalog is cached.
+      await runCommand(binary, ['daemon', 'start', '--config', configPath], { cwd: runtimeRoot, protectedValues: [apiKey, ...Object.values(environmentVariables || {})] });
+      await providerEvent(connection, 'ready', { runtimeRoot });
+    } catch (error) {
+      await providerEvent(connection, 'unavailable', { runtimeRoot, error });
+      throw error;
+    }
+    try { return await operation(configPath, { binary, runtimeRoot }); }
+    catch (error) { await providerEvent(connection, 'unavailable', { runtimeRoot, error }); throw error; }
   }
   const temporary = await mkdtemp(path.join(configRoot, 'mcp-'));
   const configPath = path.join(temporary, 'mcporter.json');
@@ -177,7 +216,13 @@ export async function stopPersistentMcpConnection(connection, { apiKey, binary =
     throw error;
   });
   if (!configExists) return true;
-  await runCommand(binary, ['daemon', 'stop', '--config', configPath], { cwd: runtimeRoot });
+  try {
+    await runCommand(binary, ['daemon', 'stop', '--config', configPath], { cwd: runtimeRoot });
+    await providerEvent(connection, 'stopped', { runtimeRoot });
+  } catch (error) {
+    await providerEvent(connection, 'unavailable', { runtimeRoot, error });
+    throw error;
+  }
   await rm(configPath, { force: true });
   return true;
 }
@@ -187,6 +232,14 @@ export async function reconcilePersistentMcpConnection(previous, next, { previou
   const changed = !next || !next.enabled || next.lifecycle !== 'keep_alive' || JSON.stringify(configFor(previous, previousApiKey, previousEnvironmentVariables)) !== JSON.stringify(configFor(next, nextApiKey, nextEnvironmentVariables));
   if (!changed) return false;
   return stopPersistentMcpConnection(previous, { apiKey: previousApiKey, binary, runtimeRoot, runCommand });
+}
+
+export async function ensureMcpProvider(connection, { apiKey, environmentVariables = {}, binary = null, runtimeRoot = null, runCommand = run } = {}) {
+  if (!connection?.enabled) throw new Error('mcp_connection_disabled');
+  if (!['http', 'stdio'].includes(connection.transport)) throw new Error('mcp_transport_invalid');
+  if (connection.lifecycle !== 'keep_alive') return mcpProviderState(connection);
+  await withConnectionConfig(connection, apiKey, environmentVariables, async () => null, { runtimeRoot, binary, runCommand });
+  return mcpProviderState(connection);
 }
 
 export async function discoverMcpTools(connection, { apiKey, environmentVariables = {}, binary = null, runtimeRoot = null, runCommand = run } = {}) {
@@ -244,4 +297,4 @@ export async function diagnoseMcpConnection(connection, { apiKey, environmentVar
   }
 }
 
-export const __test__ = { appendTail, renderedStream, run, configFor, resolveMcporterRuntime, diagnosticText, defaultStreamCaptureBytes: DEFAULT_STREAM_CAPTURE_BYTES };
+export const __test__ = { appendTail, renderedStream, run, configFor, resolveMcporterRuntime, diagnosticText, providerStates, defaultStreamCaptureBytes: DEFAULT_STREAM_CAPTURE_BYTES };

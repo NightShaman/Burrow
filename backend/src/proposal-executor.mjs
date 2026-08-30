@@ -124,13 +124,13 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
     }
 
     if (action.tool === 'mcp_providers') {
-      const result = mcpProvidersReceipt({ connections: executionContext?.mcpConnections, grants: executionContext?.mcpTools, agentId });
+      const result = await mcpProvidersReceipt({ connections: executionContext?.mcpConnections, grants: executionContext?.mcpTools, agentId });
       toolResults.push(result);
       continue;
     }
 
     if (action.tool === 'mcp_capabilities') {
-      const result = mcpCapabilitiesReceipt({ connections: executionContext?.mcpConnections, grants: executionContext?.mcpTools, provider: action.mcpProvider, query: action.query, cursor: action.cursor, limit: action.limit });
+      const result = await mcpCapabilitiesReceipt({ connections: executionContext?.mcpConnections, grants: executionContext?.mcpTools, provider: action.mcpProvider, query: action.query, cursor: action.cursor, limit: action.limit });
       toolResults.push(result);
       continue;
     }
