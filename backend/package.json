@@ -25,7 +25,7 @@
     "health:json": "node scripts/health-check.mjs --json",
     "service:smoke": "node scripts/service-smoke.mjs",
     "service:smoke:json": "node scripts/service-smoke.mjs --json",
-    "install:native": "node scripts/install.mjs",
+    "install:native": "sh install.sh",
     "release:install": "node scripts/install-release-package.mjs",
     "release:install:json": "node scripts/install-release-package.mjs --json",
     "runtime:bootstrap": "node scripts/bootstrap-runtime.mjs",
