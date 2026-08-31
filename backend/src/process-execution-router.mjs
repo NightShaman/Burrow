@@ -33,8 +33,8 @@ export function resolveProcessExecutionTarget(runContext = {}) {
 
 /**
  * Routes a structured process request without changing the agent's tool set.
- * Controllers receive correlation identifiers, but never protected values: remote
- * protected bindings are intentionally unsupported until that transport exists.
+ * Controllers receive stable correlation identifiers. Resolved protected values
+ * remain isolated in their dedicated transient field for authenticated delivery.
  */
 export function createProcessExecutionRouter({ localExecute, remoteController = null } = {}) {
   if (typeof localExecute !== 'function') throw new Error('local_execute_required');
@@ -43,9 +43,6 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
     if (target.kind === 'local') return localExecute(request.process || request, context);
     if (target.kind !== 'remote') throw new Error('execution_target_invalid');
     if (!remoteController || typeof remoteController.executeProcess !== 'function') throw new Error('remote_process_controller_unavailable');
-    if (request.protectedValues?.length || request.protectedBindings && Object.keys(request.protectedBindings).length) {
-      throw new Error('remote_protected_bindings_unsupported');
-    }
     const gatewayId = requiredId(target.gatewayId, 'gateway_id');
     const parentRunId = requiredId(context.parentRunId, 'parent_run_id');
     const toolCallId = requiredId(context.toolCallId, 'tool_call_id');
@@ -59,9 +56,13 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
       process: {
         command: requiredId(process.command, 'command'),
         ...(process.cwd ? { cwd: String(process.cwd) } : {}),
-        ...(process.env ? { env: { ...process.env } } : {}),
+        // Ordinary env remains compatible; protected values use a distinct,
+        // operation-scoped field so controllers cannot accidentally journal it.
+        ...(process.env && !request.protectedValues ? { env: { ...process.env } } : {}),
         ...(process.timeoutMs != null ? { timeoutMs: Number(process.timeoutMs) } : {}),
       },
+      ...(request.protectedValues ? { protectedValues: { ...request.protectedValues } } : {}),
+      ...(request.protectedBindingMetadata ? { protectedBindingMetadata: request.protectedBindingMetadata.map((entry) => ({ ...entry })) } : {}),
     }, { abortSignal: context.abortSignal || null });
   };
 }

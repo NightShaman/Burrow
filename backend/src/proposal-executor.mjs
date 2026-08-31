@@ -71,12 +71,9 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
     }
     if (action.tool === 'shell_exec') {
       const target = resolveProcessExecutionTarget(executionContext || {});
-      // Protected references remain local-only. Reject them before resolution so
-      // neither references nor values can cross the remote controller boundary.
-      if (target.kind === 'remote' && Object.keys(action.protectedBindings || {}).length) {
-        toolResults.push({ tool: 'shell_exec', ok: false, command: action.command, cwd: action.cwd ? path.resolve(action.cwd) : executionRoot, error: 'remote_protected_bindings_unsupported' });
-        continue;
-      }
+      // The authoritative backend resolves protected references. Remote values
+      // are passed only to the authenticated process controller, never embedded
+      // in command text or ordinary process environment fields.
       const protectedInput = resolveProtectedBindings(action.protectedBindings, executionContext?.protectedValues);
       if (protectedInput.errors.length) {
         toolResults.push({ tool: 'shell_exec', ok: false, command: action.command, cwd: action.cwd ? path.resolve(action.cwd) : executionRoot, error: protectedInput.errors.join(','), protectedBindings: protectedInput.bindings });
@@ -96,7 +93,8 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
         localExecute: runExec,
         remoteController: executionContext?.processExecutionController || null,
       });
-      const result = await routeProcess({ target, process, protectedBindings: action.protectedBindings }, {
+      const result = await routeProcess({ target, process, protectedBindings: action.protectedBindings,
+        ...(target.kind === 'remote' && protectedInput.bindings.length ? { protectedValues: protectedInput.env, protectedBindingMetadata: protectedInput.bindings } : {}) }, {
         parentRunId: executionContext?.parentRunId || traceLogger?.runId,
         toolCallId: action.toolCallId,
         abortSignal,
