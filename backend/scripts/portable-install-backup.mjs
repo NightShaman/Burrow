@@ -10,6 +10,8 @@ const execFileAsync = promisify(execFile);
 const ARCHIVE_ROOT = 'burrow-install';
 const MANIFEST = 'portable-install-manifest.json';
 const TAR_LIST_MAX_BUFFER = 64 * 1024 * 1024;
+const MCPORTER_VERSION = '0.13.7';
+const CLAUDE_CODE_VERSION = '2.1.232';
 
 function nonEmpty(value, name) { if (!value) throw new Error(`${name} is required`); return value; }
 
@@ -89,6 +91,43 @@ async function applyOwnership(root, owner) {
   await walk(root);
 }
 
+const RESTORED_INSTALL_PATHS = Object.freeze({
+  BURROW_RUNTIME_ROOT: (root) => root,
+  BURROW_WORKSPACE_ROOT: (root) => path.join(root, 'workspace'),
+  BURROW_AGENT_DATA_ROOT: (root) => path.join(root, 'agentdata'),
+  BURROW_CACHE_ROOT: (root) => path.join(root, 'cache'),
+  BURROW_SETTINGS_DB: (root) => path.join(root, 'config', 'settings.sqlite'),
+  BURROW_CLAUDE_BIN: (root) => path.join(root, 'integrations', 'claude-code', 'node_modules', '.bin', 'claude'),
+});
+
+async function rebaseRestoredEnvironment(installRoot) {
+  const envPath = path.join(installRoot, 'burrow.env');
+  const original = await fs.readFile(envPath, 'utf8');
+  const lines = original.split('\n');
+  const rebased = lines.map((line) => {
+    const separator = line.indexOf('=');
+    if (separator < 1) return line;
+    const key = line.slice(0, separator);
+    const resolvePath = RESTORED_INSTALL_PATHS[key];
+    return resolvePath ? `${key}=${resolvePath(installRoot)}` : line;
+  });
+  await fs.writeFile(envPath, rebased.join('\n'), { mode: 0o600 });
+  await fs.chmod(envPath, 0o600);
+}
+
+async function installRestoredIntegrations(installRoot, runCommand = execFileAsync) {
+  const integrationsRoot = path.join(installRoot, 'integrations');
+  const mcporterRoot = path.join(integrationsRoot, 'mcporter');
+  const claudeRoot = path.join(integrationsRoot, 'claude-code');
+  await fs.rm(mcporterRoot, { recursive: true, force: true });
+  await fs.rm(claudeRoot, { recursive: true, force: true });
+  await fs.mkdir(mcporterRoot, { recursive: true });
+  await runCommand('npm', ['install', '--prefix', mcporterRoot, '--omit=dev', '--no-package-lock', '--no-save', '--no-audit', '--no-fund', '--loglevel=error', `mcporter@${MCPORTER_VERSION}`]);
+  await fs.mkdir(claudeRoot, { recursive: true });
+  await fs.writeFile(path.join(claudeRoot, 'package.json'), `${JSON.stringify({ private: true, dependencies: { '@anthropic-ai/claude-code': CLAUDE_CODE_VERSION }, allowScripts: { [`@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}`]: true } }, null, 2)}\n`);
+  await runCommand('npm', ['install', '--prefix', claudeRoot, '--omit=dev', '--no-package-lock', '--ignore-scripts=false', '--no-audit', '--no-fund', '--loglevel=error']);
+}
+
 export async function planPortableInstallRestore({ archive, home = process.env.HOME || os.homedir(), replace = false, runTar = execFileAsync } = {}) {
   const sourceArchive = path.resolve(nonEmpty(archive, '--archive'));
   if (!await exists(sourceArchive)) throw new Error(`archive does not exist: ${sourceArchive}`);
@@ -103,7 +142,7 @@ export async function planPortableInstallRestore({ archive, home = process.env.H
   return { ok: true, dryRun: true, archive: sourceArchive, targetHome, target, replace: Boolean(replace), targetExists, archiveEntries: entries.length, owner: { uid: homeStat.uid, gid: homeStat.gid } };
 }
 
-export async function restorePortableInstall({ archive, home = process.env.HOME || os.homedir(), replace = false, runTar = execFileAsync } = {}) {
+export async function restorePortableInstall({ archive, home = process.env.HOME || os.homedir(), replace = false, runTar = execFileAsync, runCommand = execFileAsync } = {}) {
   const plan = await planPortableInstallRestore({ archive, home, replace, runTar });
   const staging = await fs.mkdtemp(path.join(plan.targetHome, '.burrow-restore-'));
   try {
@@ -116,6 +155,8 @@ export async function restorePortableInstall({ archive, home = process.env.HOME 
     if (plan.targetExists) await fs.rm(plan.target, { recursive: true, force: true });
     await fs.rename(stagedRoot, plan.target);
     await fs.rm(path.join(plan.target, MANIFEST), { force: true });
+    await rebaseRestoredEnvironment(plan.target);
+    await installRestoredIntegrations(plan.target, runCommand);
     if (process.getuid?.() !== plan.owner.uid || process.getgid?.() !== plan.owner.gid) await applyOwnership(plan.target, plan.owner);
     return { ...plan, dryRun: false, restored: true, serviceCommand: `${path.join(plan.target, 'bin', 'burrow')} service install` };
   } finally { await fs.rm(staging, { recursive: true, force: true }); }
