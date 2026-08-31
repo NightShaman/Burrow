@@ -54,9 +54,15 @@ export async function createPortableInstallBackup({ root, output, now = new Date
   const staging = await fs.mkdtemp(path.join(path.dirname(plan.archive), '.burrow-portable-backup-'));
   try {
     const stagedRoot = path.join(staging, ARCHIVE_ROOT);
-    await fs.cp(plan.installRoot, stagedRoot, { recursive: true, dereference: false, preserveTimestamps: true });
+    await fs.cp(plan.installRoot, stagedRoot, {
+      recursive: true,
+      dereference: false,
+      preserveTimestamps: true,
+      filter: (source) => source === plan.installRoot || !path.basename(source).startsWith('.app-staging-'),
+    });
     await fs.writeFile(path.join(stagedRoot, MANIFEST), `${JSON.stringify({ format: 1, createdAt: plan.createdAt, archiveRoot: ARCHIVE_ROOT, required: plan.required }, null, 2)}\n`, { mode: 0o600 });
-    await runTar('tar', ['-czf', plan.archive, '-C', staging, ARCHIVE_ROOT], { timeout: 300_000 });
+    try { await runTar('tar', ['-czf', plan.archive, '-C', staging, ARCHIVE_ROOT], { timeout: 300_000 }); }
+    catch (error) { await fs.rm(plan.archive, { force: true }); throw error; }
   } finally { await fs.rm(staging, { recursive: true, force: true }); }
   return { ...plan, dryRun: false, created: true };
 }

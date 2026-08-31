@@ -27,6 +27,7 @@ import { resolveGroupMentionTargets } from '../src/group-channel-routing.mjs';
 import { planRetentionCleanup, runRetentionCleanup } from '../src/retention.mjs';
 import { normalizeRetentionPolicy, readRetentionPolicy, readRetentionPolicyState, retentionPolicyFailureState, retentionPolicySuccessState, saveRetentionPolicy, writeRetentionPolicyState } from '../src/retention-settings.mjs';
 import { createRetentionScheduler } from '../src/retention-scheduler.mjs';
+import { createInstallStagingCleanupScheduler } from '../src/install-staging-cleanup.mjs';
 import { authorityExplanationFromTraceSummary, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, summarizeTrace } from '../src/trace-summary.mjs';
 import { routeRequest } from '../src/request-router.mjs';
 import { planTurn } from '../src/turn-planner.mjs';
@@ -113,6 +114,7 @@ let dreamCycleScheduler = null;
 let tiddleScheduler = null;
 let attachmentCleanupScheduler = null;
 let retentionScheduler = null;
+let installStagingCleanupScheduler = null;
 const traceStatusCache = new Map();
 const TRACE_STATUS_CACHE_MS = 30_000;
 const ANTHROPIC_USAGE_CACHE_MS = 60_000;
@@ -186,6 +188,11 @@ function retentionPolicyScheduler() {
     runCleanup: async (policy) => retentionCleanup({ policy, confirm: true, includeAttachments: true }),
   });
   return retentionScheduler;
+}
+
+function installerStagingScheduler() {
+  if (!installStagingCleanupScheduler) installStagingCleanupScheduler = createInstallStagingCleanupScheduler({ runtimeRoot });
+  return installStagingCleanupScheduler;
 }
 
 function taskExecutionMessage(task, project) {
@@ -2973,6 +2980,7 @@ server.listen(port, host, async () => {
     await rollingContinuityScheduler().start();
     await attachmentScheduler().start();
     await retentionPolicyScheduler().start();
+    await installerStagingScheduler().start();
     startCodexClientVersionRefresh();
   }
   console.log(`Burrow UI listening on http://${host}:${port}`);
