@@ -78,7 +78,7 @@ import { createObservabilityRoutes } from './ui/observability-routes.mjs';
 import { createScheduledChannelRoutes } from './ui/scheduled-channel-routes.mjs';
 import { createAuthRoutes } from './ui/auth-routes.mjs';
 import { createChatRoutes } from './ui/chat-routes.mjs';
-import { createModRoute, loadMods } from '../src/mod-runtime.mjs';
+import { cleanupMods, createModRoute, loadMods } from '../src/mod-runtime.mjs';
 import { MAX_OVERVIEW_CHILD_CONTEXTS, normalizeOverviewBody, overviewSessionIds } from '../src/agent-overview.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -2947,6 +2947,7 @@ async function shutdownRuntime(signal, { exitCode = signal === 'SIGINT' ? 130 : 
     await recordActiveRunInterruptions({ activeRuns: activeChatRuns, resolveAgentRuntime, reason: signal === 'SIGINT' ? 'service_interrupt' : 'service_shutdown' });
     server.closeIdleConnections?.();
     await Promise.race([closePromise, new Promise((resolve) => setTimeout(() => { forced = true; server.closeAllConnections?.(); resolve(); }, SHUTDOWN_DRAIN_MS))]);
+    await cleanupMods(mods);
     await serverLogger.event('shutdown_complete', { signal, forced, drainMs: SHUTDOWN_DRAIN_MS });
   } catch (error) {
     await serverLogger.event('shutdown_error', { signal, error: String(error?.message || error) });

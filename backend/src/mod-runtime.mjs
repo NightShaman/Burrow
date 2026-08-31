@@ -162,6 +162,32 @@ function apiRegistrar(mod) {
   return { routes, api: Object.freeze({ get: (p, h) => add('GET', p, h), post: (p, h) => add('POST', p, h), put: (p, h) => add('PUT', p, h), patch: (p, h) => add('PATCH', p, h), delete: (p, h) => add('DELETE', p, h) }) };
 }
 
+function modCleanupHandle(value) {
+  if (typeof value === 'function') return value;
+  if (value && typeof value === 'object' && typeof value.close === 'function') return () => value.close();
+  return null;
+}
+
+function closeModStore(mod, logger) {
+  const store = mod.store;
+  mod.store = null;
+  if (!store) return;
+  try { store.close(); }
+  catch (error) { logger.error?.(`Burrow mod ${mod.id} store cleanup failed: ${String(error?.message || error)}`); }
+}
+
+export async function cleanupMods(mods = [], { logger = console } = {}) {
+  for (const mod of mods) {
+    const cleanup = mod.lifecycleCleanup;
+    mod.lifecycleCleanup = null;
+    if (cleanup) {
+      try { await cleanup(); }
+      catch (error) { logger.error?.(`Burrow mod ${mod.id} cleanup failed: ${String(error?.message || error)}`); }
+    }
+    closeModStore(mod, logger);
+  }
+}
+
 export async function loadMods({ runtimeRoot, databasePath, logger = console } = {}) {
   const discovered = await discoverMods({ runtimeRoot });
   const loaded = [];
@@ -169,15 +195,22 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console } =
     if (mod.status === 'failed') { loaded.push(mod); continue; }
     const registrar = apiRegistrar(mod);
     const store = new ModSettingsStore({ modId: mod.id, databasePath });
+    let lifecycleCleanup = null;
     try {
       if (mod.server) {
         const module = await import(`${pathToFileURL(mod.server).href}?loaded=${Date.now()}`);
         if (typeof module.activate !== 'function') throw new Error(`mod_activate_missing:${mod.id}`);
-        await module.activate(Object.freeze({ id: mod.id, api: registrar.api, settings: modSettingsApi(store), secrets: modSecretsApi(store), logger }));
+        const activation = await module.activate(Object.freeze({ id: mod.id, api: registrar.api, settings: modSettingsApi(store), secrets: modSecretsApi(store), logger }));
+        lifecycleCleanup = modCleanupHandle(activation);
       }
-      loaded.push({ ...mod, routes: registrar.routes, store, status: 'loaded' });
+      loaded.push({ ...mod, routes: registrar.routes, store, lifecycleCleanup, status: 'loaded' });
     } catch (error) {
-      store.close();
+      if (lifecycleCleanup) {
+        try { await lifecycleCleanup(); }
+        catch (cleanupError) { logger.error?.(`Burrow mod ${mod.id} cleanup failed: ${String(cleanupError?.message || cleanupError)}`); }
+      }
+      try { store.close(); }
+      catch (closeError) { logger.error?.(`Burrow mod ${mod.id} store cleanup failed: ${String(closeError?.message || closeError)}`); }
       logger.error?.(`Burrow mod ${mod.id} failed: ${String(error?.message || error)}`);
       loaded.push({ ...mod, routes: [], store: null, status: 'failed', error: String(error?.message || error) });
     }
