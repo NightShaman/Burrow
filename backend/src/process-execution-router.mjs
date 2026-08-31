@@ -1,0 +1,71 @@
+import { createHash } from 'node:crypto';
+
+function requiredId(value, name) {
+  const text = String(value || '').trim();
+  if (!text) throw new Error(`${name}_required`);
+  return text;
+}
+
+export function processOperationId({ parentRunId, toolCallId } = {}) {
+  const run = requiredId(parentRunId, 'parent_run_id');
+  const call = requiredId(toolCallId, 'tool_call_id');
+  const digest = createHash('sha256').update(`${run}\0${call}`).digest('hex').slice(0, 24);
+  return `shell-${digest}`;
+}
+
+export function localExecutionTarget() {
+  return Object.freeze({ kind: 'local' });
+}
+
+export function remoteExecutionTarget(gatewayId) {
+  return Object.freeze({ kind: 'remote', gatewayId: requiredId(gatewayId, 'gateway_id') });
+}
+
+/**
+ * Routes a structured process request without changing the agent's tool set.
+ * Controllers receive correlation identifiers, but never protected values: remote
+ * protected bindings are intentionally unsupported until that transport exists.
+ */
+export function createProcessExecutionRouter({ localExecute, remoteController = null } = {}) {
+  if (typeof localExecute !== 'function') throw new Error('local_execute_required');
+  return async function executeProcess(request = {}, context = {}) {
+    const target = request.target || localExecutionTarget();
+    if (target.kind === 'local') return localExecute(request.process || request, context);
+    if (target.kind !== 'remote') throw new Error('execution_target_invalid');
+    if (!remoteController || typeof remoteController.executeProcess !== 'function') throw new Error('remote_process_controller_unavailable');
+    if (request.protectedValues?.length || request.protectedBindings && Object.keys(request.protectedBindings).length) {
+      throw new Error('remote_protected_bindings_unsupported');
+    }
+    const gatewayId = requiredId(target.gatewayId, 'gateway_id');
+    const parentRunId = requiredId(context.parentRunId, 'parent_run_id');
+    const toolCallId = requiredId(context.toolCallId, 'tool_call_id');
+    const operationId = context.operationId || processOperationId({ parentRunId, toolCallId });
+    const process = request.process || {};
+    return remoteController.executeProcess({
+      operationId,
+      gatewayId,
+      parentRunId,
+      toolCallId,
+      process: {
+        command: requiredId(process.command, 'command'),
+        ...(process.cwd ? { cwd: String(process.cwd) } : {}),
+        ...(process.env ? { env: { ...process.env } } : {}),
+        ...(process.timeoutMs != null ? { timeoutMs: Number(process.timeoutMs) } : {}),
+      },
+    }, { abortSignal: context.abortSignal || null });
+  };
+}
+
+export function createProcessControllerRegistry() {
+  const controllers = new Map();
+  return Object.freeze({
+    register(modId, controller) {
+      const id = requiredId(modId, 'mod_id');
+      if (!controller || typeof controller.executeProcess !== 'function') throw new Error('process_controller_invalid');
+      if (controllers.has(id)) throw new Error(`process_controller_duplicate:${id}`);
+      controllers.set(id, controller);
+      return () => controllers.delete(id);
+    },
+    get(modId) { return controllers.get(String(modId || '')) || null; },
+  });
+}

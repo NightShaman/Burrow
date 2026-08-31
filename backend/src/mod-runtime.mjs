@@ -188,7 +188,7 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
   }
 }
 
-export async function loadMods({ runtimeRoot, databasePath, logger = console } = {}) {
+export async function loadMods({ runtimeRoot, databasePath, logger = console, processControllers = null } = {}) {
   const discovered = await discoverMods({ runtimeRoot });
   const loaded = [];
   for (const mod of discovered) {
@@ -200,7 +200,10 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console } =
       if (mod.server) {
         const module = await import(`${pathToFileURL(mod.server).href}?loaded=${Date.now()}`);
         if (typeof module.activate !== 'function') throw new Error(`mod_activate_missing:${mod.id}`);
-        const activation = await module.activate(Object.freeze({ id: mod.id, api: registrar.api, settings: modSettingsApi(store), secrets: modSecretsApi(store), logger }));
+        const processExecution = processControllers ? Object.freeze({
+          registerController(controller) { return processControllers.register(mod.id, controller); },
+        }) : null;
+        const activation = await module.activate(Object.freeze({ id: mod.id, api: registrar.api, settings: modSettingsApi(store), secrets: modSecretsApi(store), logger, ...(processExecution ? { processExecution } : {}) }));
         lifecycleCleanup = modCleanupHandle(activation);
       }
       loaded.push({ ...mod, routes: registrar.routes, store, lifecycleCleanup, status: 'loaded' });
