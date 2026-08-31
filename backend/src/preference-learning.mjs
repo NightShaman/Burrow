@@ -76,7 +76,7 @@ export function preferenceAdjudicationPrompt({ preferences, signals }) {
   return [
     'You are a bounded curator for an operator-authored PREFERENCES.md profile. Return JSON only; never address the operator.',
     'Preferences are current operator-specific behavioral corrections learned through friction. They may be directive. RULES, SOUL, ORIENTATION, and TOOLS are outside your authority.',
-    'Use only supplied grounded Tiddle signals. Do not infer preferences from task instructions, moods, generic conversation, or old evidence. Preserve operator wording unless the new signals clearly require a change.',
+    'Use only supplied grounded session-derived signals. Do not infer preferences from task instructions, moods, generic conversation, or old evidence. Preserve operator wording unless the new signals clearly require a change.',
     'The Markdown must contain only current guidance: no audit history, evidence, timestamps, confidence, or explanations. Do not remove a preference merely because it was not mentioned recently.',
     'Return NOOP unless the supplied new signals clearly support a current-profile change. A directly stated correction can be sufficient; ambiguous or conflicting signals require NOOP. Return either {"action":"NOOP","reason":"..."} or {"action":"REPLACE","markdown":"...","signalIds":["..."],"reason":"..."}.',
     `Current PREFERENCES.md:\n${preferences || '(empty)'}`,
@@ -101,6 +101,6 @@ export function validatePreferenceAdjudication({ proposal, signals = [] } = {}) 
   const byId = new Map(signals.map((signal) => [signal.id, signal]));
   const selected = proposal.signalIds.map((id) => byId.get(id)).filter(Boolean);
   if (!selected.length || selected.length !== proposal.signalIds.length || proposal.markdown.length > 48_000) return { ok: false, reason: 'proposal_ungrounded' };
-  if (!/^\s*#\s+operator preferences\b/imu.test(proposal.markdown)) return { ok: false, reason: 'preferences_markdown_heading_required' };
+  if (!/^\s*#\s+(?:PREFERENCES|Operator Preferences)\s*$/imu.test(proposal.markdown)) return { ok: false, reason: 'preferences_markdown_heading_required' };
   return { ok: true, disposition: 'replace', signals: selected };
 }
