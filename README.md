@@ -59,6 +59,8 @@ Node.js, npm, `curl`, and `tar` must be available. The installer does not requir
 ```text
 --dir PATH                    install root; defaults to ~/.burrow
 --headless                    install runtime without bundled UI assets
+--host HOST                   listener host; defaults to 127.0.0.1
+--port PORT                   listener port; defaults to 42817
 --no-install-dependencies     skip npm install/build; development use only
 --source-dir PATH             install from an assembled local Burrow checkout
 --help                        show all options
@@ -72,7 +74,7 @@ Start Burrow:
 ~/.burrow/bin/burrow serve
 ```
 
-The default listener is `127.0.0.1:42817`. Edit `~/.burrow/burrow.env` to change the runtime environment.
+The default listener is `127.0.0.1:42817`. Configure it explicitly during unattended installation, for example `sh install.sh --host 0.0.0.0 --port 42817`. Re-running the installer without listener flags preserves the existing values; supplying either flag updates that value and a managed service is restarted after activation.
 
 Update in place:
 

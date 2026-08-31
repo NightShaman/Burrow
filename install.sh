@@ -10,6 +10,8 @@ UNINSTALL=0
 PURGE=0
 ASSUME_YES=0
 INSTALL_NODE=0
+LISTEN_HOST=""
+LISTEN_PORT=""
 RESTART_SERVICE=0
 VERBOSE=0
 usage() { cat <<USAGE
@@ -19,6 +21,8 @@ Usage: install.sh [options]
   --headless                    install runtime without web UI assets
   --no-install-dependencies     skip npm ci/build (development only)
   --install-node                install Node.js 24 LTS on supported Linux when required
+  --host HOST                   listener host; default 127.0.0.1 on first install
+  --port PORT                   listener port; default 42817 on first install
   --uninstall                   remove installed application files
   --purge                       with --uninstall, also remove all durable state
   --yes                         do not prompt for uninstall confirmation
@@ -39,6 +43,8 @@ while [ "$#" -gt 0 ]; do
     --headless) MODE=headless; shift ;;
     --no-install-dependencies) INSTALL_DEPS=0; shift ;;
     --install-node) INSTALL_NODE=1; shift ;;
+    --host) LISTEN_HOST=${2:?--host requires a value}; shift 2 ;;
+    --port) LISTEN_PORT=${2:?--port requires a value}; shift 2 ;;
     --uninstall) UNINSTALL=1; shift ;;
     --purge) PURGE=1; shift ;;
     --yes|-y) ASSUME_YES=1; shift ;;
@@ -47,6 +53,14 @@ while [ "$#" -gt 0 ]; do
     *) echo "Burrow install: unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+[ -z "$LISTEN_HOST" ] || case "$LISTEN_HOST" in
+  *[!A-Za-z0-9._:-]*|'') echo "Burrow install: --host contains unsupported characters." >&2; exit 2 ;;
+esac
+if [ -n "$LISTEN_PORT" ]; then
+  case "$LISTEN_PORT" in ''|*[!0-9]*) echo "Burrow install: --port must be an integer from 1 to 65535." >&2; exit 2 ;; esac
+  [ "$LISTEN_PORT" -ge 1 ] && [ "$LISTEN_PORT" -le 65535 ] || { echo "Burrow install: --port must be an integer from 1 to 65535." >&2; exit 2; }
+fi
 
 if [ "$UNINSTALL" -eq 1 ]; then
   [ -z "$SOURCE_DIR" ] || { echo "Burrow uninstall: --source-dir is not valid with --uninstall." >&2; exit 2; }
@@ -335,6 +349,23 @@ if ! grep -q '^BURROW_SETTINGS_KEY=' "$ENV_FILE"; then
   umask 077
   printf '%s=%s\n' 'BURROW_SETTINGS_KEY' "$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))')" >> "$ENV_FILE"
 fi
+# Listener values are durable by default. Explicit installer flags are the
+# supported deployment-management interface for changing them on install or update.
+set_env_value() {
+  env_key=$1
+  env_value=$2
+  env_tmp="$ENV_FILE.tmp.$$"
+  awk -v key="$env_key" -v value="$env_value" '
+    BEGIN { replaced=0 }
+    index($0, key "=") == 1 { if (!replaced) print key "=" value; replaced=1; next }
+    { print }
+    END { if (!replaced) print key "=" value }
+  ' "$ENV_FILE" > "$env_tmp"
+  chmod 0600 "$env_tmp"
+  mv "$env_tmp" "$ENV_FILE"
+}
+[ -z "$LISTEN_HOST" ] || set_env_value BURROW_UI_HOST "$LISTEN_HOST"
+[ -z "$LISTEN_PORT" ] || set_env_value BURROW_UI_PORT "$LISTEN_PORT"
 # Prepare and atomically activate the replacement while the current service remains
 # available. Renames are metadata operations on this filesystem; the only
 # intended downtime is systemd's own restart after activation. Do not manually
