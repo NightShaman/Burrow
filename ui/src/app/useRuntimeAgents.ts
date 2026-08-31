@@ -48,6 +48,7 @@ const asAgent = (entry: AgentOverviewEntry, target: ApiTarget): Agent => ({
   workspace: workspacePathFor(entry.agent.id),
   files: [],
   subagents: [],
+  executionEnvironment: entry.agent.executionEnvironment ?? null,
 });
 
 export function formatAgentActivity(status?: string) {

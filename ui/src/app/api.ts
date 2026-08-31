@@ -67,6 +67,7 @@ export type RuntimeAgent = {
   name: string;
   enabled: boolean;
   avatar?: string | null;
+  executionEnvironment?: { kind: 'local' | 'gateway'; hostId?: string; workspaceRoot: string } | null;
 };
 
 export type AgentStatus = {

@@ -22,6 +22,7 @@ import { ExecutionBoundaries } from './ExecutionBoundaries';
 import { Chevron } from '../workspace/WorkspaceRail';
 import { readStoredValue, writeStoredValue } from '../../app/browserStorage';
 import { SystemStatsRail } from './SystemStatsRail';
+import { RemoteNodesSettings } from './RemoteNodesSettings';
 
 const settingsUtilityPanelStorageKey = 'hc.settingsUtilityPanelOpen';
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
@@ -116,7 +117,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
         {tab === 'connections' && connectionSection === 'authentication' && <AuthenticationSettings />}
         {tab === 'connections' && connectionSection === 'model-providers' && <ModelConnections savedProviders={savedProviders} onModelConnectionsChanged={onModelConnectionsChanged} mcpConnections={null} overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'mcp-servers' && <McpConnections overflowTarget={overflowColumn} />}
-        {selectedContribution && <ApiTargetsSettings contribution={selectedContribution} settings={selectedModSettings} overflowTarget={overflowColumn} />}
+        {selectedContribution?.modId === 'remote-nodes' ? <RemoteNodesSettings agents={agents} targets={targets} onAgentsChanged={onAgentsChanged} /> : selectedContribution && <ApiTargetsSettings contribution={selectedContribution} settings={selectedModSettings} overflowTarget={overflowColumn} />}
       </section>
       <section className="settings-blank-column settings-prototype-overflow" ref={setOverflowColumn} aria-label="Additional settings" />
       <aside className="settings-utility-panel" aria-label="System statistics" aria-hidden={!utilityPanelOpen}>
