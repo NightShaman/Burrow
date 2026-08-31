@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 const ARCHIVE_ROOT = 'burrow-install';
 const MANIFEST = 'portable-install-manifest.json';
+const TAR_LIST_MAX_BUFFER = 64 * 1024 * 1024;
 
 function nonEmpty(value, name) { if (!value) throw new Error(`${name} is required`); return value; }
 
@@ -73,7 +74,7 @@ function safeArchiveEntry(entry) {
 }
 
 async function archiveEntries(archive, runTar) {
-  const { stdout } = await runTar('tar', ['-tzf', archive], { timeout: 120_000 });
+  const { stdout } = await runTar('tar', ['-tzf', archive], { timeout: 120_000, maxBuffer: TAR_LIST_MAX_BUFFER });
   const entries = stdout.split('\n').filter(Boolean);
   if (!entries.length || entries.some((entry) => !safeArchiveEntry(entry))) throw new Error('archive contains paths outside the portable install root');
   return entries;
