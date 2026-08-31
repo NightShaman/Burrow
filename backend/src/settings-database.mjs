@@ -477,6 +477,15 @@ DreamDiary is for the operator: readable narrative reflection, never prompt auth
       if (table) db.exec(this.body);
     },
   },
+  {
+    version: 32,
+    name: 'agent-execution-environment-assignment',
+    body: 'ALTER TABLE agents ADD COLUMN execution_environment_json TEXT;',
+    apply(db) {
+      const columns = db.prepare('PRAGMA table_info(agents)').all().map((column) => column.name);
+      if (!columns.includes('execution_environment_json')) db.exec(this.body);
+    },
+  },
 ].map((migration) => Object.freeze({ ...migration, checksum: checksum(`${migration.version}:${migration.name}:${migration.body}`) })));
 
 function ensureDreamSettingsModelColumns(db) {

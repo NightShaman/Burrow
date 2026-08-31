@@ -1,4 +1,5 @@
 import { runExec } from './harness/exec.mjs';
+import { createProcessExecutionRouter, resolveProcessExecutionTarget } from './process-execution-router.mjs';
 import { readFileEnvelope } from './harness/read-file.mjs';
 import { writeFileEnvelope } from './harness/write-file.mjs';
 import { applyPatchEnvelope } from './harness/apply-patch.mjs';
@@ -51,20 +52,36 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
       continue;
     }
     if (action.tool === 'shell_exec') {
+      const target = resolveProcessExecutionTarget(executionContext || {});
+      // Protected references remain local-only. Reject them before resolution so
+      // neither references nor values can cross the remote controller boundary.
+      if (target.kind === 'remote' && Object.keys(action.protectedBindings || {}).length) {
+        toolResults.push({ tool: 'shell_exec', ok: false, command: action.command, cwd: action.cwd ? path.resolve(action.cwd) : executionRoot, error: 'remote_protected_bindings_unsupported' });
+        continue;
+      }
       const protectedInput = resolveProtectedBindings(action.protectedBindings, executionContext?.protectedValues);
       if (protectedInput.errors.length) {
         toolResults.push({ tool: 'shell_exec', ok: false, command: action.command, cwd: action.cwd ? path.resolve(action.cwd) : executionRoot, error: protectedInput.errors.join(','), protectedBindings: protectedInput.bindings });
         continue;
       }
-      const result = await runExec({
+      const process = {
         command: action.command,
-        cwd: action.cwd ? path.resolve(action.cwd) : executionRoot,
+        cwd: action.cwd ? path.resolve(action.cwd) : (executionContext?.executionEnvironment?.workspaceRoot || executionRoot),
         env: protectedInput.env,
         traceLogger,
         artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-shell_exec`,
         reason: action.reason,
         abortSignal,
         protectedValues: Object.values(protectedInput.env),
+      };
+      const routeProcess = executionContext?.processExecutionRouter || createProcessExecutionRouter({
+        localExecute: runExec,
+        remoteController: executionContext?.processExecutionController || null,
+      });
+      const result = await routeProcess({ target, process, protectedBindings: action.protectedBindings }, {
+        parentRunId: executionContext?.parentRunId || traceLogger?.runId,
+        toolCallId: action.toolCallId,
+        abortSignal,
       });
       if (protectedInput.bindings.length) result.protectedBindings = protectedInput.bindings;
       toolResults.push(result);

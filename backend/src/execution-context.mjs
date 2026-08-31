@@ -70,6 +70,11 @@ export function createExecutionContext({
   mcpTools = null,
   mcpConnections = null,
   protectedValues = null,
+  executionEnvironment = null,
+  processExecutionTarget = null,
+  processExecutionController = null,
+  processExecutionRouter = null,
+  parentRunId = null,
 } = {}) {
   const resolvedAgentWorkspaceRoot = optionalAbsolute(agentWorkspaceRoot, 'agent_workspace_root');
   const resolvedAgentDataRoot = optionalAbsolute(agentDataRoot, 'agent_data_root');
@@ -101,6 +106,11 @@ export function createExecutionContext({
     mcpTools: mcpTools instanceof Map ? mcpTools : new Map(),
     mcpConnections: mcpConnections instanceof Map ? mcpConnections : new Map(),
     protectedValues: protectedValues instanceof Map ? protectedValues : new Map(),
+    executionEnvironment: executionEnvironment && typeof executionEnvironment === 'object' ? { ...executionEnvironment } : null,
+    processExecutionTarget: processExecutionTarget && typeof processExecutionTarget === 'object' ? { ...processExecutionTarget } : null,
+    processExecutionController: processExecutionController && typeof processExecutionController.executeProcess === 'function' ? processExecutionController : null,
+    processExecutionRouter: typeof processExecutionRouter === 'function' ? processExecutionRouter : null,
+    parentRunId: parentRunId == null ? null : String(parentRunId),
   };
   return freeze(context);
 }

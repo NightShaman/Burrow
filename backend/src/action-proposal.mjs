@@ -51,6 +51,8 @@ function normalizeAction(action, index) {
   const normalized = {
     index,
     tool: tool || null,
+    // Provider call identity is trusted runtime metadata, not a tool argument.
+    toolCallId: action?.toolCallId ? String(action.toolCallId) : null,
     reason: action?.reason ? String(action.reason) : null,
     requiresApproval: Boolean(action?.requiresApproval),
     command: action?.command ? String(action.command) : null,
@@ -399,7 +401,7 @@ export function nativeToolSchemas({ includeMutations = true, includeWorkingMemor
 export function actionFromNativeToolCall(call = {}, index = 0) {
   const args = call.arguments && typeof call.arguments === 'object' ? call.arguments : {};
   const tool = call.name;
-  if (tool === 'shell_exec') return normalizeAction({ tool, reason: args.reason, command: args.command, cwd: args.cwd, protectedBindings: args.protectedBindings }, index);
+  if (tool === 'shell_exec') return normalizeAction({ tool, toolCallId: call.id, reason: args.reason, command: args.command, cwd: args.cwd, protectedBindings: args.protectedBindings }, index);
   if (tool === 'files_read') return normalizeAction({ tool, reason: args.reason, filePath: args.filePath, offsetBytes: args.offsetBytes, maxBytes: args.maxBytes }, index);
   if (tool === 'session_search') return normalizeAction({ tool, reason: args.reason, query: args.query, scope: args.scope, limit: args.limit }, index);
   if (tool === 'files_list') return normalizeAction({ tool, reason: args.reason, dirPath: args.dirPath, maxDepth: args.maxDepth, maxEntries: args.maxEntries }, index);

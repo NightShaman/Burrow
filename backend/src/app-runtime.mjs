@@ -267,7 +267,7 @@ async function runAskChatUnserialized({
     }
   };
   const { mcpTools, mcpConnections } = loadRuntimeMcpCapabilities({ databasePath: runtimeState.settingsDatabasePath, agentId: runtimeState.agentId });
-  const executionContext = createRuntimeExecutionContext({ runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections });
+  const executionContext = createRuntimeExecutionContext({ runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId });
   const effectiveSkillCatalog = await loadEffectiveSkillCatalog({
     workspaceRoot: runtimeState.workspaceRoot,
     agentId: runtimeState.agentId,

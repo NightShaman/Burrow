@@ -34,6 +34,7 @@ import { planTurn } from '../src/turn-planner.mjs';
 import { workbenchWorkflow } from '../src/workbench-workflow.mjs';
 import { runWorkbenchStep } from '../src/workbench-runner.mjs';
 import { resolveExecutionTarget } from '../src/execution-context.mjs';
+import { createProcessControllerRegistry } from '../src/process-execution-router.mjs';
 import { buildChatSupportStatus, buildWorkbenchStatus } from '../src/workbench-status.mjs';
 import { allowedNextSteps, appendWorkItemStep, archiveWorkItem, createWorkItem, listWorkItems, readWorkItem, workItemEligibility } from '../src/work-item-store.mjs';
 import { searchBurrowSessionEvidence, searchSessionEvidence } from '../src/session-search.mjs';
@@ -89,6 +90,7 @@ const apiDocsRoot = path.join(sourceRoot, 'public', 'api-docs');
 const port = Number(process.env.BURROW_UI_PORT || process.argv.find((arg) => arg.startsWith('--port='))?.split('=')[1] || 42817);
 const host = process.env.BURROW_UI_HOST || '0.0.0.0';
 const activeChatRuns = new Map();
+const processControllers = createProcessControllerRegistry();
 const sessionContinuityHeads = new Map();
 // The continuity head rejects stale writes, but browser requests sharing a
 // session must not make each other stale in the first place. Serialize the
@@ -801,7 +803,15 @@ async function resolveAgentRuntime(agentId = null) {
     error.statusCode = 409;
     throw error;
   }
-  return agentRuntimeContext({ runtimeState: runtime.runtimeState, agent });
+  const resolved = agentRuntimeContext({ runtimeState: runtime.runtimeState, agent });
+  const executionEnvironment = Object.freeze(agent.executionEnvironment
+    ? { ...agent.executionEnvironment }
+    : { kind: 'local', workspaceRoot: resolved.agentWorkspaceRoot });
+  return Object.freeze({
+    ...resolved,
+    executionEnvironment,
+    processExecutionController: executionEnvironment.kind === 'gateway' ? processControllers.get('remote-nodes') : null,
+  });
 }
 
 async function createAgent(body = {}) {
@@ -2860,6 +2870,7 @@ const chatRoute = createChatRoutes({ handleChat, readJsonBody, sendJson, selecte
 const mods = await loadMods({
   runtimeRoot: process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow',
   databasePath: settingsDatabasePath(),
+  processControllers,
 });
 const modRoute = createModRoute({ mods, readJsonBody, sendJson });
 

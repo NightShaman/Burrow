@@ -21,6 +21,16 @@ export function remoteExecutionTarget(gatewayId) {
   return Object.freeze({ kind: 'remote', gatewayId: requiredId(gatewayId, 'gateway_id') });
 }
 
+/** Resolve the controller-owned target frozen into this run's context. */
+export function resolveProcessExecutionTarget(runContext = {}) {
+  const configured = runContext.processExecutionTarget || runContext.executionEnvironment || null;
+  if (!configured) return localExecutionTarget();
+  if (configured.kind === 'local') return localExecutionTarget();
+  if (configured.kind === 'remote') return remoteExecutionTarget(configured.gatewayId);
+  if (configured.kind === 'gateway') return remoteExecutionTarget(configured.gatewayId || configured.hostId);
+  throw new Error('execution_target_invalid');
+}
+
 /**
  * Routes a structured process request without changing the agent's tool set.
  * Controllers receive correlation identifiers, but never protected values: remote
