@@ -1,5 +1,6 @@
 import { runExec } from './harness/exec.mjs';
 import { createProcessExecutionRouter, resolveProcessExecutionTarget } from './process-execution-router.mjs';
+import { createNativeFilesystemExecutionRouter, resolveNativeFilesystemExecutionTarget } from './native-filesystem-execution-router.mjs';
 import { readFileEnvelope } from './harness/read-file.mjs';
 import { writeFileEnvelope } from './harness/write-file.mjs';
 import { applyPatchEnvelope } from './harness/apply-patch.mjs';
@@ -35,6 +36,23 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
     : executionContext?.workspaceRoot || workspaceRoot || rootDir || process.cwd();
   const toolResults = [];
   const skipped = [];
+  const routeFilesystem = createNativeFilesystemExecutionRouter({
+    localExecute: async ({ tool, arguments: args }) => {
+      if (tool === 'files_read') return readFileEnvelope(args);
+      if (tool === 'files_list') return listFilesEnvelope(args);
+      if (tool === 'files_find') return globEnvelope(args);
+      if (tool === 'files_inspect') return statPathEnvelope(args);
+      if (tool === 'files_search') return searchFilesEnvelope(args);
+      if (tool === 'files_write') return writeFileEnvelope(args);
+      if (tool === 'files_edit') return editFileEnvelope(args);
+      throw new Error('native_filesystem_tool_unsupported');
+    },
+    remoteController: executionContext?.processExecutionController || null,
+  });
+  const executeFilesystem = (action, args) => routeFilesystem({
+    target: resolveNativeFilesystemExecutionTarget(executionContext || {}),
+    operation: { tool: action.tool, arguments: args },
+  }, { parentRunId: executionContext?.parentRunId || traceLogger?.runId, toolCallId: action.toolCallId, abortSignal });
 
   for (const action of actions) {
     const suppliedReview = reviews.find((item) => item.index === action.index) || null;
@@ -88,27 +106,14 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
       continue;
     }
 
-    if (action.tool === 'files_read') {
-      toolResults.push(await readFileEnvelope({
-        filePath: workspacePath(action.filePath, executionRoot, rootDir),
-        workspaceRoot: executionRoot,
-        rootDir,
-        traceLogger,
-        artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-read`,
-        reason: action.reason,
-        offsetBytes: action.offsetBytes ?? 0,
-        ...(action.maxBytes ? { maxBytes: action.maxBytes } : {}),
-      }));
-      continue;
-    }
-
-    if (action.tool === 'files_list') { toolResults.push(await listFilesEnvelope({ dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxEntries: action.maxEntries, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-list`, reason: action.reason })); continue; }
-    if (action.tool === 'files_find') { toolResults.push(await globEnvelope({ pattern: action.pattern, dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxEntries: action.maxEntries, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-files_find`, reason: action.reason })); continue; }
-    if (action.tool === 'files_inspect') { toolResults.push(await statPathEnvelope({ path: workspacePath(action.path, executionRoot, rootDir), workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-stat`, reason: action.reason })); continue; }
-    if (action.tool === 'files_search') { toolResults.push(await searchFilesEnvelope({ query: action.query, dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxMatches: action.maxMatches, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-search`, reason: action.reason })); continue; }
+    if (action.tool === 'files_read') { toolResults.push(await executeFilesystem(action, { filePath: workspacePath(action.filePath, executionRoot, rootDir), workspaceRoot: executionRoot, rootDir, traceLogger, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-read`, reason: action.reason, offsetBytes: action.offsetBytes ?? 0, ...(action.maxBytes ? { maxBytes: action.maxBytes } : {}) })); continue; }
+    if (action.tool === 'files_list') { toolResults.push(await executeFilesystem(action, { dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxEntries: action.maxEntries, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-list`, reason: action.reason })); continue; }
+    if (action.tool === 'files_find') { toolResults.push(await executeFilesystem(action, { pattern: action.pattern, dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxEntries: action.maxEntries, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-files_find`, reason: action.reason })); continue; }
+    if (action.tool === 'files_inspect') { toolResults.push(await executeFilesystem(action, { path: workspacePath(action.path, executionRoot, rootDir), workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-stat`, reason: action.reason })); continue; }
+    if (action.tool === 'files_search') { toolResults.push(await executeFilesystem(action, { query: action.query, dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxMatches: action.maxMatches, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-search`, reason: action.reason })); continue; }
     if (action.tool === 'git_status') { toolResults.push(await gitStatusEnvelope({ dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-git_status`, reason: action.reason })); continue; }
     if (action.tool === 'git_diff') { toolResults.push(await gitDiffEnvelope({ dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-git_diff`, reason: action.reason })); continue; }
-    if (action.tool === 'files_edit') { toolResults.push(await editFileEnvelope({ filePath: workspacePath(action.filePath, executionRoot, rootDir), oldText: action.oldText, newText: action.newText, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-edit`, reason: action.reason })); continue; }
+    if (action.tool === 'files_edit') { toolResults.push(await executeFilesystem(action, { filePath: workspacePath(action.filePath, executionRoot, rootDir), oldText: action.oldText, newText: action.newText, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-edit`, reason: action.reason })); continue; }
 
     if (action.tool === 'list_skills' || action.tool === 'load_skill') {
       const skillsWorkspace = executionContext?.agentWorkspaceRoot ? path.dirname(executionContext.agentWorkspaceRoot) : executionRoot;
@@ -276,7 +281,7 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
     }
 
     if (action.tool === 'files_write') {
-      toolResults.push(await writeFileEnvelope({
+      toolResults.push(await executeFilesystem(action, {
         filePath: workspacePath(action.filePath, executionRoot, rootDir),
         content: action.content,
         workspaceRoot: executionRoot,
