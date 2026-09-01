@@ -7,9 +7,9 @@ services:
     environment:
       HOME: /home/burrow
     ports:
-      # Burrow has no UI authentication by default. Bind to loopback unless you
-      # have explicitly configured authentication or a trusted reverse proxy.
-      - "127.0.0.1:42817:42817"
+      # Publish Burrow on the host so remote clients and network reverse proxies
+      # can reach it. Control exposure with the host firewall or proxy policy.
+      - "42817:42817"
       # Authenticated outbound Host Gateways connect to this controller port.
       # Restrict it with host/network firewalling to intended execution nodes.
       - "7443:7443"
