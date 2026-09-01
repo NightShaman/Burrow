@@ -127,7 +127,9 @@ For non-interactive use, include `--yes` explicitly:
 
 ## Docker
 
-The published image stores all durable runtime state in `/data`. The supplied Compose file binds the UI to loopback because Burrow has no UI authentication by default.
+The published image stores all durable runtime state in `/data`. It runs as the dedicated `burrow` identity with UID/GID `4226:4226`; the image build accepts `BURROW_UID` and `BURROW_GID` build arguments when another deliberate numeric identity is required. The supplied Compose file pins `4226:4226`, binds the unauthenticated UI to loopback, and publishes TCP `7443` for authenticated outbound Host Gateway connections. Restrict the gateway port with host/network firewalling to intended execution nodes.
+
+Existing persistent volumes must be writable by the configured numeric identity. For a disposable empty runtime, recreate the volume. For a runtime containing durable state, migrate only Burrow-owned data deliberately rather than recursively changing unrelated container or service data.
 
 ```sh
 git clone https://github.com/NightShaman/Burrow.git
