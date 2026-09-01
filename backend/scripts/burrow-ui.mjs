@@ -45,7 +45,7 @@ import { cancelOpenAiOAuthLogin, getOpenAiOAuthLogin, startOpenAiOAuthLogin, sub
 import { WorkingMemoryStore } from '../src/working-memory-store.mjs';
 import { curatorRoot, curatorRuntimeStatus, readCuratorSelection, saveCuratorSelection } from '../src/curator-runtime.mjs';
 import { AgentRegistryStore, agentRuntimeContext, ensureAgentRoots } from '../src/agent-registry.mjs';
-import { AgentProfileStore } from '../src/agent-profile-store.mjs';
+import { AGENT_PROFILE_KINDS, AgentProfileStore } from '../src/agent-profile-store.mjs';
 import { DreamDiaryStore } from '../src/dream-diary-store.mjs';
 import { DreamSettingsStore } from '../src/dream-settings-store.mjs';
 import { consolidateDreamMemory } from '../src/dream-memory-consolidator.mjs';
@@ -1515,7 +1515,7 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
       const profileDocuments = Array.isArray(profiles[agent.id]) ? profiles[agent.id] : [];
       if (profileDocuments.length) {
         const profileStore = profilesStore();
-        try { profileStore.replace(agent.id, profileDocuments.filter((item) => ['SOUL', 'RULES', 'ORIENTATION', 'TOOLS', 'DREAM_MEMORY'].includes(String(item?.kind || '').toUpperCase())).map((item) => ({ ...item, kind: String(item.kind).toUpperCase() }))); } finally { profileStore.close(); }
+        try { profileStore.replace(agent.id, profileDocuments.filter((item) => AGENT_PROFILE_KINDS.includes(String(item?.kind || '').toUpperCase())).map((item) => ({ ...item, kind: String(item.kind).toUpperCase() }))); } finally { profileStore.close(); }
       }
       if (agent.dreamSettings && typeof agent.dreamSettings === 'object') {
         const dreamStore = dreamSettingsStore();
