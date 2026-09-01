@@ -53,13 +53,26 @@ export function ExportSettings() {
     finally { setState('idle'); }
   };
 
+  const previewImport = async (payload: string, passwordValue = '') => {
+    setError(''); setImportState('previewing');
+    try {
+      const preview = await importExport({ payload, ...(passwordValue ? { password: passwordValue } : {}), conflictPolicy }, true) as ImportPreview;
+      setImportPreview(preview);
+    } catch (reason) {
+      if (reason instanceof Error && reason.message === 'import_password_required') {
+        setImportPreview({ encrypted: true, requiresPassword: true });
+        setError('This export is encrypted. Enter its password, then preview it again.');
+      } else setError(importErrorMessage(reason));
+    } finally { setImportState('idle'); }
+  };
+
   const readImportFile = async (file?: File) => {
     if (!file) return;
     setError(''); setImportState('previewing'); setImportPreview(null); setImportPassword('');
     try {
       const payload = await fileToBase64(file);
-      const preview = await importExport({ payload, conflictPolicy }, true) as ImportPreview;
-      setImportPayload(payload); setImportName(file.name); setImportPreview(preview);
+      setImportPayload(payload); setImportName(file.name);
+      await previewImport(payload);
     } catch (reason) { setError(importErrorMessage(reason)); setImportPayload(''); setImportName(''); }
     finally { setImportState('idle'); }
   };
@@ -93,7 +106,7 @@ export function ExportSettings() {
       <input ref={importInput} className="export-file-input" type="file" accept=".json.gz,.gz,.hc-export,.tar,.bin,application/octet-stream,application/gzip" onChange={(event) => { void readImportFile(event.target.files?.[0]); }} />
       <button className="secondary" type="button" onClick={() => importInput.current?.click()} disabled={importState !== 'idle'}>{importState === 'previewing' ? 'Reading export…' : 'Choose export file'}</button>
       {importName && <p className="import-file-name" role="status">Selected: <strong>{importName}</strong></p>}
-      {importPreview && <div className="import-preview" aria-live="polite"><strong>Export preview</strong><span>Supported: {importSummary(importPreview.supported ?? importPreview.categories)}</span>{importPreview.unsupported !== undefined && <span>Unsupported: {importSummary(importPreview.unsupported)}</span>}<Field label="Conflict handling"><select value={conflictPolicy} onChange={(event) => setConflictPolicy(event.target.value as typeof conflictPolicy)}><option value="error">Stop if conflicts exist</option><option value="skip">Skip conflicting items</option><option value="replace">Replace conflicting items</option></select></Field>{(importPreview.requiresPassword || importPreview.encrypted) && <Field label="Export password"><input type="password" value={importPassword} onChange={(event) => setImportPassword(event.target.value)} autoComplete="off" /></Field>}<p className="import-warning">Importing changes Burrow data. This cannot be undone from the UI.</p><button className="primary" type="button" onClick={() => void applyImport()} disabled={importState !== 'idle' || Boolean(importPreview.requiresPassword || importPreview.encrypted) && !importPassword.trim()}>{importState === 'importing' ? 'Importing…' : 'Import export'}</button></div>}
+      {importPreview && <div className="import-preview" aria-live="polite"><strong>Export preview</strong><span>Supported: {importSummary(importPreview.supported ?? importPreview.categories)}</span>{importPreview.unsupported !== undefined && <span>Unsupported: {importSummary(importPreview.unsupported)}</span>}<Field label="Conflict handling"><select value={conflictPolicy} onChange={(event) => setConflictPolicy(event.target.value as typeof conflictPolicy)}><option value="error">Stop if conflicts exist</option><option value="skip">Skip conflicting items</option><option value="replace">Replace conflicting items</option></select></Field>{(importPreview.requiresPassword || importPreview.encrypted) && <><Field label="Export password"><input type="password" value={importPassword} onChange={(event) => setImportPassword(event.target.value)} autoComplete="off" /></Field><button className="secondary" type="button" onClick={() => void previewImport(importPayload, importPassword)} disabled={importState !== 'idle' || !importPassword.trim()}>{importState === 'previewing' ? 'Checking password…' : 'Preview with password'}</button></>}<p className="import-warning">Importing changes Burrow data. This cannot be undone from the UI.</p><button className="primary" type="button" onClick={() => void applyImport()} disabled={importState !== 'idle' || Boolean(importPreview.requiresPassword || importPreview.encrypted) && !importPassword.trim()}>{importState === 'importing' ? 'Importing…' : 'Import export'}</button></div>}
       {error && <p className="settings-error" role="alert">{error}</p>}
     </SettingSection>
   </>;
