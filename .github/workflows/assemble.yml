@@ -58,6 +58,11 @@ jobs:
           ref: ${{ steps.revisions.outputs.ui }}
           token: ${{ secrets.BURROW_SOURCE_TOKEN }}
           path: ui-source
+      - uses: actions/checkout@v4
+        with:
+          repository: NightShaman/burrow-mod-remote-nodes
+          token: ${{ secrets.BURROW_SOURCE_TOKEN }}
+          path: remote-nodes-source
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -120,6 +125,20 @@ jobs:
             git push origin HEAD:main
           fi
           printf 'commit=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Publish public Node Goblin release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          version=$(cat remote-nodes-source/gateway/VERSION)
+          tag="v$version"
+          SOURCE_DATE_EPOCH=$(git -C remote-nodes-source show -s --format=%ct HEAD) \
+            remote-nodes-source/gateway/deploy/build-release.sh remote-nodes-source/gateway/dist
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "Node Goblin $version" --notes "Calendar-versioned Node Goblin release $version."
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" \
+            "remote-nodes-source/gateway/dist/node-goblin-$version.tar.gz" \
+            "remote-nodes-source/gateway/dist/node-goblin-$version.tar.gz.sha256" --clobber
       - name: Authenticate to GitHub Container Registry
         uses: docker/login-action@v3
         with:
