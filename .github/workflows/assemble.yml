@@ -86,13 +86,15 @@ jobs:
         run: |
           set -eu
           cd assembled
-          rm -rf backend ui Dockerfile docker-entrypoint.sh compose.yml .dockerignore install.sh README.md burrow-logo.png SOURCE_VERSIONS
+          rm -rf backend ui Dockerfile docker-entrypoint.sh compose.yml .dockerignore install.sh install-node-goblin.sh README.md burrow-logo.png SOURCE_VERSIONS
           mkdir backend ui
           for path in bin global-skills public scripts src; do cp -a "../backend-source/$path" "backend/$path"; done
           cp -a ../backend-source/package.json ../backend-source/package-lock.json backend/
           for path in src public dist; do cp -a "../ui-source/$path" "ui/$path"; done
           cp -a ../ui-source/package.json ../ui-source/package-lock.json ../ui-source/index.html ../ui-source/tsconfig.json ../ui-source/vite.config.ts ui/
           cp ../backend-source/deploy/installer/install.sh install.sh
+          cp ../backend-source/deploy/installer/install-node-goblin.sh install-node-goblin.sh
+          chmod 0755 install.sh install-node-goblin.sh
           cp ../backend-source/deploy/README.md README.md
           cp ../ui-source/public/burrow-logo.png burrow-logo.png
           cp ../backend-source/deploy/docker/Dockerfile Dockerfile
