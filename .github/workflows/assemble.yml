@@ -33,6 +33,7 @@ jobs:
           EVENT_SHA: ${{ github.event.client_payload.source_sha }}
           INPUT_BACKEND_SHA: ${{ inputs.backend_sha }}
           INPUT_UI_SHA: ${{ inputs.ui_sha }}
+          EVENT_NODE_GOBLIN_VERSION: ${{ github.event.client_payload.node_goblin_version }}
           GH_TOKEN: ${{ secrets.BURROW_SOURCE_TOKEN }}
         run: |
           set -eu
@@ -42,7 +43,7 @@ jobs:
           if [ "$EVENT_SOURCE" = "NightShaman/Burrow-UI" ] && [ -n "$EVENT_SHA" ]; then ui_ref="$EVENT_SHA"; fi
           if [ -z "$backend_ref" ]; then backend_ref=$(gh api repos/NightShaman/Burrow-Backend/commits/main --jq .sha); fi
           if [ -z "$ui_ref" ]; then ui_ref=$(gh api repos/NightShaman/Burrow-UI/commits/main --jq .sha); fi
-          printf 'backend=%s\nui=%s\n' "$backend_ref" "$ui_ref" >> "$GITHUB_OUTPUT"
+          printf 'backend=%s\nui=%s\nnode_goblin_version=%s\n' "$backend_ref" "$ui_ref" "$EVENT_NODE_GOBLIN_VERSION" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
           path: assembled
@@ -130,15 +131,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
-          version=$(cat remote-nodes-source/gateway/VERSION)
+          version="${{ steps.revisions.outputs.node_goblin_version }}"
+          if [ -z "$version" ]; then
+            # Non-Node-Goblin assemblies do not mint another daemon release.
+            exit 0
+          fi
+          printf '%s\n' "$version" > remote-nodes-source/gateway/VERSION
           tag="v$version"
           SOURCE_DATE_EPOCH=$(git -C remote-nodes-source show -s --format=%ct HEAD) \
             remote-nodes-source/gateway/deploy/build-release.sh remote-nodes-source/gateway/dist
-          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "Node Goblin $version" --notes "Calendar-versioned Node Goblin release $version."
-          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" \
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
+            --title "Node Goblin $version" \
+            --notes "Calendar-versioned Node Goblin release $version from source $(git -C remote-nodes-source rev-parse HEAD)." \
             "remote-nodes-source/gateway/dist/node-goblin-$version.tar.gz" \
-            "remote-nodes-source/gateway/dist/node-goblin-$version.tar.gz.sha256" --clobber
+            "remote-nodes-source/gateway/dist/node-goblin-$version.tar.gz.sha256"
       - name: Authenticate to GitHub Container Registry
         uses: docker/login-action@v3
         with:
