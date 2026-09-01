@@ -182,5 +182,6 @@ jobs:
           git -C assembled tag "$tag" "$COMMIT"
           git -C assembled push origin "$tag"
           gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
             --title "Burrow $VERSION" \
             --notes "Calendar-versioned Burrow release $VERSION assembled at $COMMIT. Image: ghcr.io/nightshaman/burrow:$VERSION"
