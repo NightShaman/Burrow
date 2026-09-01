@@ -22,8 +22,6 @@ WORKDIR /opt/burrow
 
 COPY backend/package*.json ./
 RUN npm ci --omit=dev
-# Burrow's Anthropic OAuth flow requires a known-compatible Claude Code CLI.
-RUN npm install --global @anthropic-ai/claude-code@2.1.232
 COPY --chown=burrow:burrow backend/ ./
 COPY --chown=burrow:burrow --from=ui-build /build/ui/dist ./public/ui
 COPY --chown=burrow:burrow docker-entrypoint.sh /usr/local/bin/burrow-docker-entrypoint

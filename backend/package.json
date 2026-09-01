@@ -40,16 +40,10 @@
     "runtime:restore:rehearsal:json": "node scripts/runtime-restore-rehearsal.mjs --json"
   },
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.232",
-    "jose": "^6.2.8",
-    "node-llama-cpp": "3.19.1"
+    "jose": "^6.2.8"
   },
   "devDependencies": {
     "@redocly/openapi-core": "^2.46.1",
     "mcporter": "^0.13.7"
-  },
-  "allowScripts": {
-    "@anthropic-ai/claude-code@2.1.232": true,
-    "node-llama-cpp@3.19.1": true
   }
 }

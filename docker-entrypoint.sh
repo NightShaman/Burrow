@@ -28,4 +28,13 @@ else
 fi
 
 export BURROW_SETTINGS_KEY
+
+# CLI integrations are derived runtime state. Keep them under the persistent
+# runtime root so regular and container installs share one layout, and only
+# contact npm when a pinned integration is missing or stale.
+node /opt/burrow/scripts/ensure-runtime-integrations.mjs
+export BURROW_MCPORTER_ROOT="${BURROW_MCPORTER_ROOT:-${BURROW_RUNTIME_ROOT}/integrations/mcporter}"
+export BURROW_MCPORTER_BIN="${BURROW_MCPORTER_BIN:-${BURROW_MCPORTER_ROOT}/node_modules/.bin/mcporter}"
+export BURROW_CLAUDE_BIN="${BURROW_CLAUDE_BIN:-${BURROW_RUNTIME_ROOT}/integrations/claude-code/node_modules/.bin/claude}"
+
 exec "$@"

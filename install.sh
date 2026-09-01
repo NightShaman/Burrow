@@ -308,7 +308,7 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
   mkdir -p "$STAGING/integrations/mcporter" "$STAGING/integrations/claude-code"
   update_log "staging backend runtime dependencies..."
   verbose_log "running backend npm ci (production dependencies only)"
-  (cd "$STAGING/backend" && npm ci --omit=dev --no-audit --no-fund --loglevel=error && node -e "import('node-llama-cpp')")
+  (cd "$STAGING/backend" && npm ci --omit=dev --no-audit --no-fund --loglevel=error)
   update_log "staging MCP integration..."
   verbose_log "installing pinned mcporter integration"
   npm install --prefix "$STAGING/integrations/mcporter" --omit=dev --no-package-lock --no-save --no-audit --no-fund --loglevel=error mcporter@0.13.7
