@@ -15,7 +15,7 @@ const DEFAULT_INSTALL_PORT = 42817;
 const DEFAULT_SMOKE_PORT = 8788;
 const APP_DIRECTORIES = Object.freeze(['bin', 'deploy', 'docs', 'global-skills', 'scripts', 'src', 'public', 'node_modules']);
 const APP_FILES = Object.freeze(['package.json', 'package-lock.json', 'README.md', 'RELEASE_ID', 'BUILD_SOURCE', 'MANIFEST.sha256']);
-const RUNTIME_DIRECTORIES = Object.freeze(['config', 'workspace', path.join('workspace', 'global'), path.join('workspace', 'global', 'skills'), path.join('workspace', 'global', 'tools'), 'agentdata', 'cache', 'reports', 'integrations', 'deployments', 'packages']);
+const RUNTIME_DIRECTORIES = Object.freeze(['config', 'workspace', path.join('workspace', 'global'), path.join('workspace', 'global', 'skills'), path.join('workspace', 'global', 'tools'), 'cache', 'reports', 'integrations', 'deployments', 'packages']);
 
 export function parseArgs(argv = []) {
   const args = { json: false, apply: false, forceEnv: false, generateSettingsKey: null, smoke: false, smokePort: null, host: null, port: null, healthTimeoutMs: 15_000 };

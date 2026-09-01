@@ -188,7 +188,7 @@ export async function resolveUiConfig(args = {}) {
 export function defaultRuntimeRoot() { return env('BURROW_RUNTIME_ROOT', DEFAULT_RUNTIME_ROOT); }
 export function defaultRuntimeWorkspaceRoot() { return path.join(defaultRuntimeRoot(), DEFAULT_WORKSPACE_ID); }
 export function defaultRuntimeAgentWorkspaceRoot() { return path.join(defaultRuntimeWorkspaceRoot(), DEFAULT_AGENT_ID); }
-export function defaultRuntimeAgentDataRoot() { return path.join(defaultRuntimeRoot(), 'agentdata', DEFAULT_AGENT_ID); }
+export function defaultRuntimeAgentDataRoot() { return defaultRuntimeAgentWorkspaceRoot(); }
 export function defaultRuntimeDataRoot() { return defaultRuntimeAgentDataRoot(); }
 export function defaultRuntimeCacheRoot() { return path.join(defaultRuntimeRoot(), 'cache'); }
 export function defaultRuntimeArchiveRoot() { return path.join(defaultRuntimeRoot(), 'archive'); }
@@ -197,15 +197,23 @@ export function defaultRuntimeSourceRoot() { return env('BURROW_SOURCE_ROOT', pr
 /** Deployment paths are service-environment owned; CLI flags are explicit one-shot overrides. */
 export function resolveRuntimeStateConfig({ rootDir, args = {} } = {}) {
   const agentId = text(args.agent_id ?? env('BURROW_AGENT_ID', DEFAULT_AGENT_ID)) || DEFAULT_AGENT_ID;
+  const runtimeRoot = absolute(args.runtime_root ?? env('BURROW_RUNTIME_ROOT'), DEFAULT_RUNTIME_ROOT);
   const sourceRoot = absolute(args.source_root ?? env('BURROW_SOURCE_ROOT'), rootDir || process.cwd());
-  const workspaceRoot = absolute(args.workspace_root ?? env('BURROW_WORKSPACE_ROOT'), defaultRuntimeWorkspaceRoot());
-  const agentWorkspaceRoot = absolute(args.agent_workspace_root ?? env('BURROW_AGENT_WORKSPACE_ROOT'), path.join(workspaceRoot, agentId));
-  const agentDataRoot = absolute(args.agent_data_root ?? env('BURROW_AGENT_DATA_ROOT'), path.join(defaultRuntimeRoot(), 'agentdata', agentId));
-  const dataRoot = absolute(args.data_root ?? env('BURROW_DATA_ROOT'), agentDataRoot);
-  const cacheRoot = absolute(args.cache_root ?? env('BURROW_CACHE_ROOT'), path.join(defaultRuntimeRoot(), 'cache'));
-  const archiveRoot = absolute(args.archive_root ?? env('BURROW_ARCHIVE_ROOT'), path.join(defaultRuntimeRoot(), 'archive'));
-  const settingsDatabasePath = absolute(args.settings_database_path ?? env('BURROW_SETTINGS_DB'), path.join(defaultRuntimeRoot(), 'config', 'settings.sqlite'));
-  return { sourceRoot, workspaceRoot, workspaceRootSource: 'environment', agentId, agentWorkspaceRoot, agentWorkspaceRootSource: 'environment', agentDataRoot, agentDataRootSource: 'environment', filesystemBoundaries: [], sourceCopyRoot: sourceRoot, skillsRoot: absolute(args.skills_root ?? env('BURROW_SKILLS_ROOT'), path.join(agentWorkspaceRoot, 'skills')), skillsRootSource: 'environment', dataRoot, dataRootSource: 'environment', cacheRoot, cacheRootSource: 'environment', archiveRoot, archiveRootSource: 'environment', settingsDatabasePath };
+  const workspaceRoot = absolute(args.workspace_root ?? env('BURROW_WORKSPACE_ROOT'), path.join(runtimeRoot, DEFAULT_WORKSPACE_ID));
+  // An explicit workspace root defines the complete per-agent tree for this
+  // invocation. Do not let an ambient service-level agent path redirect it.
+  const configuredAgentWorkspaceRoot = args.agent_workspace_root ?? (args.workspace_root === undefined ? env('BURROW_AGENT_WORKSPACE_ROOT') : undefined);
+  const agentWorkspaceRoot = absolute(configuredAgentWorkspaceRoot, path.join(workspaceRoot, agentId));
+  // Legacy data-root inputs remain accepted as migration sources, but active
+  // per-agent state is always consolidated in the agent workspace.
+  const legacyAgentDataRootValue = args.agent_data_root ?? env('BURROW_AGENT_DATA_ROOT') ?? args.data_root ?? env('BURROW_DATA_ROOT');
+  const legacyAgentDataRoot = legacyAgentDataRootValue ? absolute(legacyAgentDataRootValue, agentWorkspaceRoot) : null;
+  const agentDataRoot = agentWorkspaceRoot;
+  const dataRoot = agentWorkspaceRoot;
+  const cacheRoot = absolute(args.cache_root ?? env('BURROW_CACHE_ROOT'), path.join(runtimeRoot, 'cache'));
+  const archiveRoot = absolute(args.archive_root ?? env('BURROW_ARCHIVE_ROOT'), path.join(runtimeRoot, 'archive'));
+  const settingsDatabasePath = absolute(args.settings_database_path ?? env('BURROW_SETTINGS_DB'), path.join(runtimeRoot, 'config', 'settings.sqlite'));
+  return { runtimeRoot, sourceRoot, workspaceRoot, workspaceRootSource: 'environment', agentId, agentWorkspaceRoot, agentWorkspaceRootSource: 'environment', agentDataRoot, agentDataRootSource: 'workspace', legacyAgentDataRoot, filesystemBoundaries: [], sourceCopyRoot: sourceRoot, skillsRoot: absolute(args.skills_root ?? env('BURROW_SKILLS_ROOT'), path.join(agentWorkspaceRoot, 'skills')), skillsRootSource: 'environment', dataRoot, dataRootSource: 'workspace', cacheRoot, cacheRootSource: 'environment', archiveRoot, archiveRootSource: 'environment', settingsDatabasePath };
 }
 function safe(value, fallback) { return text(value || fallback).replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 120) || fallback; }
 export function resolveRuntimeTracePath({ cacheRoot, workspaceRoot, agentId = DEFAULT_AGENT_ID, sessionId = 'default', runId = null, testIsolation = null } = {}) { const resolvedCacheRoot = path.resolve(cacheRoot); const tracedWorkspace = safe(path.basename(path.resolve(workspaceRoot || DEFAULT_WORKSPACE_ID)), DEFAULT_WORKSPACE_ID); const parts = [resolvedCacheRoot, testIsolation ? 'test-traces' : 'traces', tracedWorkspace, safe(agentId, DEFAULT_AGENT_ID), safe(sessionId, 'default')]; if (runId) parts.push(safe(runId, 'run')); return path.join(...parts); }

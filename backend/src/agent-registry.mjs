@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { openSettingsDatabase, settingsDatabasePath } from './settings-database.mjs';
 import { mergeAgentContextConfig, normalizeAgentContextConfig } from './agent-context-config.mjs';
+import { migrateLegacyAgentState } from './runtime-state-migration.mjs';
 
 const ID = /^[a-zA-Z0-9._-]{1,96}$/;
 const DEFAULT_CAPABILITIES = Object.freeze(['chat', 'files', 'skills']);
@@ -109,21 +110,25 @@ export class AgentRegistryStore {
 }
 
 export async function ensureAgentRoots({ runtimeState, agent } = {}) {
-  if (!runtimeState?.workspaceRoot || !runtimeState?.agentDataRoot || !agent?.id) throw new Error('agent_runtime_context_required');
+  if (!runtimeState?.workspaceRoot || !agent?.id) throw new Error('agent_runtime_context_required');
   const workspaceRoot = path.resolve(runtimeState.workspaceRoot, agent.id);
   const globalRoot = path.resolve(runtimeState.workspaceRoot, 'global');
-  const dataContainer = path.dirname(path.resolve(runtimeState.agentDataRoot));
-  const dataRoot = path.resolve(dataContainer, agent.id);
-  for (const dir of [workspaceRoot, dataRoot]) await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+  await migrateLegacyAgentState({
+    runtimeRoot: runtimeState.runtimeRoot || path.resolve(runtimeState.workspaceRoot, '..'),
+    workspaceRoot: runtimeState.workspaceRoot,
+    agentId: agent.id,
+    legacyAgentDataRoot: agent.id === runtimeState.agentId ? runtimeState.legacyAgentDataRoot : null,
+  });
+  await fs.mkdir(workspaceRoot, { recursive: true, mode: 0o700 });
   await fs.mkdir(globalRoot, { recursive: true, mode: 0o755 });
   for (const dir of ['skills', 'sessions', 'artifacts', 'tools']) await fs.mkdir(path.join(workspaceRoot, dir), { recursive: true, mode: 0o700 });
   return agentRuntimeContext({ runtimeState, agent });
 }
 
 export function agentRuntimeContext({ runtimeState, agent } = {}) {
-  if (!runtimeState?.workspaceRoot || !runtimeState?.agentDataRoot || !agent?.id) throw new Error('agent_runtime_context_required');
+  if (!runtimeState?.workspaceRoot || !agent?.id) throw new Error('agent_runtime_context_required');
   const workspaceRoot = path.resolve(runtimeState.workspaceRoot, agent.id);
-  const dataRoot = path.resolve(path.dirname(runtimeState.agentDataRoot), agent.id);
+  const dataRoot = workspaceRoot;
   const globalRoot = path.resolve(runtimeState.workspaceRoot, 'global');
   return {
     agentId: agent.id,

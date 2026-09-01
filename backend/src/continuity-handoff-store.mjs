@@ -120,7 +120,8 @@ export class ContinuityHandoffStore {
       WHERE agent_id=? AND expires_at>=?
       ORDER BY CASE WHEN source='explicit' THEN 0 ELSE 1 END,
         CASE WHEN session_id=? THEN 0 ELSE 1 END,
-        updated_at DESC LIMIT 1`)
+        updated_at DESC,
+        rowid DESC LIMIT 1`)
       .get(text(agentId), now(), text(sessionId)));
   }
 }

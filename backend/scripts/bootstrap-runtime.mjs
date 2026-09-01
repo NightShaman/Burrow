@@ -6,7 +6,7 @@ import { installReleasePackage } from './install-release-package.mjs';
 import { ensureDefaultGlobalWorkspace } from '../src/runtime-workspace-defaults.mjs';
 import { fileURLToPath } from 'node:url';
 
-const RUNTIME_DIRECTORIES = Object.freeze(['config', 'workspace', path.join('workspace', 'global'), path.join('workspace', 'global', 'skills'), path.join('workspace', 'global', 'tools'), 'agentdata', 'cache', 'reports', 'integrations', 'deployments', 'packages']);
+const RUNTIME_DIRECTORIES = Object.freeze(['config', 'workspace', path.join('workspace', 'global'), path.join('workspace', 'global', 'skills'), path.join('workspace', 'global', 'tools'), 'cache', 'reports', 'integrations', 'deployments', 'packages']);
 
 export function parseArgs(argv = []) {
   const args = { apply: false, json: false, generateSettingsKey: null, forceEnv: false, host: null, port: null };

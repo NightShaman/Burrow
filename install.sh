@@ -68,7 +68,7 @@ if [ "$UNINSTALL" -eq 1 ]; then
   INSTALL_DIR=$(cd "$INSTALL_DIR" && pwd)
   [ "$INSTALL_DIR" != "/" ] || { echo "Burrow uninstall: refusing to remove /." >&2; exit 1; }
   if [ "$PURGE" -eq 1 ]; then
-    ACTION="remove $INSTALL_DIR, including config, workspace, agentdata, cache, and reports"
+    ACTION="remove $INSTALL_DIR, including config, workspace, cache, and reports"
   else
     ACTION="remove the application payload and launcher; durable state under $INSTALL_DIR will be preserved"
   fi
@@ -93,7 +93,7 @@ if [ "$UNINSTALL" -eq 1 ]; then
   else
     rm -rf "$INSTALL_DIR/app" "$INSTALL_DIR/.app-staging-"* "$INSTALL_DIR/.app-previous" "$INSTALL_DIR/bin/burrow"
     rmdir "$INSTALL_DIR/bin" 2>/dev/null || true
-    printf "%s\n" "Burrow uninstall: application removed" "Preserved: $INSTALL_DIR/{config,workspace,agentdata,cache,reports,integrations,burrow.env}"
+    printf "%s\n" "Burrow uninstall: application removed" "Preserved: $INSTALL_DIR/{config,workspace,cache,reports,integrations,burrow.env}"
   fi
   exit 0
 fi
@@ -277,7 +277,7 @@ case ":$PATH:" in
   *":$INSTALL_DIR/bin:"*) ;;
   *) PATH="$INSTALL_DIR/bin:$PATH"; export PATH ;;
 esac
-mkdir -p "$INSTALL_DIR/config" "$INSTALL_DIR/workspace" "$INSTALL_DIR/agentdata" "$INSTALL_DIR/cache" "$INSTALL_DIR/reports" "$INSTALL_DIR/integrations" "$INSTALL_DIR/bin"
+mkdir -p "$INSTALL_DIR/config" "$INSTALL_DIR/workspace" "$INSTALL_DIR/cache" "$INSTALL_DIR/reports" "$INSTALL_DIR/integrations" "$INSTALL_DIR/bin"
 STAGING="$INSTALL_DIR/.app-staging-$$"
 verbose_log "staging application payload"
 PREVIOUS="$INSTALL_DIR/.app-previous"
@@ -335,7 +335,6 @@ if [ ! -f "$ENV_FILE" ]; then
 # Durable Burrow runtime state. Updates preserve this file.
 BURROW_RUNTIME_ROOT=$INSTALL_DIR
 BURROW_WORKSPACE_ROOT=$INSTALL_DIR/workspace
-BURROW_AGENT_DATA_ROOT=$INSTALL_DIR/agentdata
 BURROW_CACHE_ROOT=$INSTALL_DIR/cache
 BURROW_SETTINGS_DB=$INSTALL_DIR/config/settings.sqlite
 BURROW_CLAUDE_BIN=$INSTALL_DIR/integrations/claude-code/node_modules/.bin/claude
@@ -488,4 +487,4 @@ if [ -d "$PREVIOUS" ]; then
   rm -rf "$PREVIOUS"
 fi
 verbose_log "activation complete"
-printf "%s\\n" "Burrow install: ok" "Home: $INSTALL_DIR" "Application: $INSTALL_DIR/app" "State: $INSTALL_DIR/{config,workspace,agentdata,cache}" "Run: $INSTALL_DIR/bin/burrow serve" "Update: $INSTALL_DIR/bin/burrow update"
+printf "%s\\n" "Burrow install: ok" "Home: $INSTALL_DIR" "Application: $INSTALL_DIR/app" "State: $INSTALL_DIR/{config,workspace,cache}" "Run: $INSTALL_DIR/bin/burrow serve" "Update: $INSTALL_DIR/bin/burrow update"

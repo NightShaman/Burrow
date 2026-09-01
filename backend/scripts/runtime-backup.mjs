@@ -70,7 +70,7 @@ export async function resolveBackupRoots({ root = process.cwd(), config = null, 
   const resolvedRoot = path.resolve(root);
   const loaded = await loadBurrowConfig({ rootDir: resolvedRoot, configPath: config });
   const resolvedAgentId = agentId || null;
-  const runtimeState = resolveRuntimeStateConfig({ rootDir: resolvedRoot, args: { ...(dataRoot ? { data_root: dataRoot } : {}), ...(workspaceRoot ? { workspace_root: workspaceRoot } : {}), ...(resolvedAgentId ? { agent_id: resolvedAgentId } : {}), ...(workspaceRoot && resolvedAgentId ? { agent_workspace_root: path.join(workspaceRoot, resolvedAgentId) } : {}), ...(settingsDatabasePath ? { settings_database_path: settingsDatabasePath } : {}) }, loadedConfig: loaded.config });
+  const runtimeState = resolveRuntimeStateConfig({ rootDir: resolvedRoot, args: { runtime_root: resolvedRoot, ...(dataRoot ? { data_root: dataRoot } : {}), ...(workspaceRoot ? { workspace_root: workspaceRoot } : {}), ...(resolvedAgentId ? { agent_id: resolvedAgentId } : {}), ...(workspaceRoot && resolvedAgentId ? { agent_workspace_root: path.join(workspaceRoot, resolvedAgentId) } : {}), settings_database_path: settingsDatabasePath || path.join(resolvedRoot, 'config', 'settings.sqlite') }, loadedConfig: loaded.config });
   return { sourceRoot: resolvedRoot, dataRoot: runtimeState.dataRoot, runtimeState, configPath: loaded.path, configExists: loaded.exists };
 }
 
@@ -92,7 +92,7 @@ async function workspaceBackupRoots(runtimeState, settingsExists) {
 
 export async function planRuntimeBackup({ root = process.cwd(), config = null, dataRoot = null, workspaceRoot = null, agentId = null, settingsDatabasePath = null, output = null, now = new Date(), paths = DEFAULT_BACKUP_PATHS } = {}) {
   const roots = await resolveBackupRoots({ root, config, dataRoot, workspaceRoot, agentId, settingsDatabasePath });
-  const entries = await Promise.all(paths.map((relativePath) => pathInfo(roots.dataRoot, relativePath)));
+  const entries = [];
   const settings = await pathInfo(path.dirname(roots.runtimeState.settingsDatabasePath), path.basename(roots.runtimeState.settingsDatabasePath));
   settings.path = SETTINGS_BACKUP_PATH;
   const included = entries.filter((entry) => entry.exists);

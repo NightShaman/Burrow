@@ -45,7 +45,7 @@ export async function planPortableInstallBackup({ root, output, now = new Date()
   const stat = await fs.stat(installRoot);
   if (!stat.isDirectory()) throw new Error(`install root is not a directory: ${installRoot}`);
   if (archive === installRoot || archive.startsWith(`${installRoot}${path.sep}`)) throw new Error('backup archive must be outside the install root');
-  const required = ['app', 'bin', 'burrow.env', 'config', 'workspace', 'agentdata', 'integrations'];
+  const required = ['app', 'bin', 'burrow.env', 'config', 'workspace', 'integrations'];
   const present = await Promise.all(required.map(async (entry) => ({ entry, exists: await exists(path.join(installRoot, entry)) })));
   return { ok: present.every((entry) => entry.exists), dryRun: true, installRoot, archive, required, missing: present.filter((entry) => !entry.exists).map((entry) => entry.entry), createdAt: now.toISOString() };
 }
@@ -94,7 +94,7 @@ async function applyOwnership(root, owner) {
 const RESTORED_INSTALL_PATHS = Object.freeze({
   BURROW_RUNTIME_ROOT: (root) => root,
   BURROW_WORKSPACE_ROOT: (root) => path.join(root, 'workspace'),
-  BURROW_AGENT_DATA_ROOT: (root) => path.join(root, 'agentdata'),
+  BURROW_AGENT_DATA_ROOT: () => null,
   BURROW_CACHE_ROOT: (root) => path.join(root, 'cache'),
   BURROW_SETTINGS_DB: (root) => path.join(root, 'config', 'settings.sqlite'),
   BURROW_CLAUDE_BIN: (root) => path.join(root, 'integrations', 'claude-code', 'node_modules', '.bin', 'claude'),
@@ -109,8 +109,10 @@ async function rebaseRestoredEnvironment(installRoot) {
     if (separator < 1) return line;
     const key = line.slice(0, separator);
     const resolvePath = RESTORED_INSTALL_PATHS[key];
-    return resolvePath ? `${key}=${resolvePath(installRoot)}` : line;
-  });
+    if (!resolvePath) return line;
+    const resolved = resolvePath(installRoot);
+    return resolved === null ? null : `${key}=${resolved}`;
+  }).filter((line) => line !== null);
   await fs.writeFile(envPath, rebased.join('\n'), { mode: 0o600 });
   await fs.chmod(envPath, 0o600);
 }

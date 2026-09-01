@@ -46,7 +46,6 @@ The installer downloads the assembled `main` revision, installs dependencies, bu
 ├── burrow.env    # durable runtime environment
 ├── config/        # settings database and configuration
 ├── workspace/     # workspace and project material
-├── agentdata/     # sessions and agent-local runtime state
 ├── cache/
 ├── reports/
 └── integrations/
@@ -103,7 +102,7 @@ Update in place:
 ~/.burrow/bin/burrow update
 ```
 
-An update downloads the current assembled Burrow revision and atomically replaces only `~/.burrow/app`. It preserves `burrow.env`, `config/`, `workspace/`, `agentdata/`, `cache/`, `reports/`, and `integrations/`.
+An update downloads the current assembled Burrow revision and atomically replaces only `~/.burrow/app`. It preserves `burrow.env`, `config/`, `workspace/`, `cache/`, `reports/`, and `integrations/`.
 
 ### Run as a user service
 

@@ -8,15 +8,18 @@ function inside(child, parent) {
 }
 
 export function contextBoundaryViolation({ rootDir = null, dataRoot = null, agentWorkspaceRoot = null, agentDataRoot = null, cacheRoot = null } = {}) {
-  if (agentWorkspaceRoot && agentDataRoot && inside(agentWorkspaceRoot, agentDataRoot)) {
-    return { field: 'agentWorkspaceRoot', value: path.resolve(agentWorkspaceRoot), forbiddenRoot: path.resolve(agentDataRoot), reason: 'agent_workspace_inside_agent_data' };
+  const workspace = agentWorkspaceRoot ? path.resolve(agentWorkspaceRoot) : null;
+  const data = agentDataRoot ? path.resolve(agentDataRoot) : null;
+  const separateAgentDataRoot = data && data !== workspace ? data : null;
+  if (workspace && separateAgentDataRoot && inside(workspace, separateAgentDataRoot)) {
+    return { field: 'agentWorkspaceRoot', value: workspace, forbiddenRoot: separateAgentDataRoot, reason: 'agent_workspace_inside_agent_data' };
   }
   const forbidden = [
     ['rootDir', rootDir],
     ['dataRoot', dataRoot],
   ];
   for (const [field, value] of forbidden) {
-    if (inside(value, agentDataRoot)) return { field, value: path.resolve(value), forbiddenRoot: path.resolve(agentDataRoot), reason: 'agent_data_root_not_context' };
+    if (inside(value, separateAgentDataRoot)) return { field, value: path.resolve(value), forbiddenRoot: separateAgentDataRoot, reason: 'agent_data_root_not_context' };
     if (inside(value, cacheRoot)) return { field, value: path.resolve(value), forbiddenRoot: path.resolve(cacheRoot), reason: 'cache_root_not_context' };
   }
   return null;
