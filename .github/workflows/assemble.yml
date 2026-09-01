@@ -16,6 +16,8 @@ permissions:
   contents: write
   packages: write
 
+# Assembly publishes generated files back to main. Serialize publishers so two
+# source-update dispatches cannot both build from stale main and race the push.
 concurrency:
   group: burrow-assembly-main
   cancel-in-progress: false
@@ -80,6 +82,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
+          # Generated assemblies own their release identifier. Assign the next
+          # available UTC calendar revision automatically. The checked-in
+          # version also counts so adopting release records after an existing
+          # same-day build starts at .1 rather than reusing the bare date.
           base=$(date -u +%Y.%m.%d)
           version=$base
           suffix=0
@@ -123,6 +129,9 @@ jobs:
           git add -A
           if ! git diff --cached --quiet; then
             git commit -m "build: assemble Burrow"
+            # Main may advance while source verification/building runs. Rebase
+            # the generated commit onto the current remote before publishing;
+            # never turn a harmless race into a failed assembly or force-push.
             git fetch origin main
             git rebase origin/main
             git push origin HEAD:main
@@ -134,11 +143,19 @@ jobs:
         run: |
           set -eu
           version="${{ steps.revisions.outputs.node_goblin_version }}"
-          if [ -z "$version" ]; then exit 0; fi
+          if [ -z "$version" ]; then
+            # Non-Node-Goblin assemblies do not mint another daemon release.
+            exit 0
+          fi
           printf '%s\n' "$version" > remote-nodes-source/gateway/VERSION
           tag="v$version"
-          SOURCE_DATE_EPOCH=$(git -C remote-nodes-source show -s --format=%ct HEAD) remote-nodes-source/gateway/deploy/build-release.sh remote-nodes-source/gateway/dist
-          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "Node Goblin $version" --notes "Calendar-versioned Node Goblin release $version from source $(git -C remote-nodes-source rev-parse HEAD)." "remote-nodes-source/gateway/dist/node-goblin-$version.tar.gz" "remote-nodes-source/gateway/dist/node-goblin-$version.tar.gz.sha256"
+          SOURCE_DATE_EPOCH=$(git -C remote-nodes-source show -s --format=%ct HEAD) \
+            remote-nodes-source/gateway/deploy/build-release.sh remote-nodes-source/gateway/dist
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
+            --title "Node Goblin $version" \
+            --notes "Calendar-versioned Node Goblin release $version from source $(git -C remote-nodes-source rev-parse HEAD)." \
+            "remote-nodes-source/gateway/dist/node-goblin-$version.tar.gz" \
+            "remote-nodes-source/gateway/dist/node-goblin-$version.tar.gz.sha256"
       - name: Authenticate to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -164,4 +181,6 @@ jobs:
           tag="v$VERSION"
           git -C assembled tag "$tag" "$COMMIT"
           git -C assembled push origin "$tag"
-          gh release create "$tag" --title "Burrow $VERSION" --notes "Calendar-versioned Burrow release $VERSION assembled at $COMMIT. Image: ghcr.io/nightshaman/burrow:$VERSION"
+          gh release create "$tag" \
+            --title "Burrow $VERSION" \
+            --notes "Calendar-versioned Burrow release $VERSION assembled at $COMMIT. Image: ghcr.io/nightshaman/burrow:$VERSION"
