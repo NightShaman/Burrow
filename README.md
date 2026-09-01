@@ -54,6 +54,27 @@ The installer downloads the assembled `main` revision, installs dependencies, bu
 
 Node.js, npm, `curl`, and `tar` must be available. The installer does not require `/opt`, root access, or Docker.
 
+## Install a Node Goblin
+
+A Node Goblin is the lightweight execution service for a remote Burrow controller. Install the latest calendar-versioned release from the main Burrow repository:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/NightShaman/Burrow/main/install-node-goblin.sh | sudo sh
+sudo node-goblin configure
+sudo node-goblin connect
+```
+
+The installer downloads the release tarball and checksum from `NightShaman/burrow-mod-remote-nodes`, verifies it, and installs the systemd service. Configuration asks only for the controller address and stable node ID. On first connection, compare the pairing code printed by the Node Goblin with Burrow's pending pairing and approve it in Settings.
+
+Pin a calendar release or configure non-interactively with non-secret values:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/NightShaman/Burrow/main/install-node-goblin.sh \
+  | sudo sh -s -- --version 2026.09.01 --controller gkl42.example:7443 --node-id hatchet
+```
+
+The installer adopts a conventional existing `burrow` account or creates a narrow service account with UID/GID `4226:4226`. It does not grant sudo, alter supplementary groups, or manufacture host permissions.
+
 ### Options
 
 ```text
@@ -127,7 +148,7 @@ For non-interactive use, include `--yes` explicitly:
 
 ## Docker
 
-The published image stores all durable runtime state in `/data`. It runs as the dedicated `burrow` identity with UID/GID `4226:4226`; the image build accepts `BURROW_UID` and `BURROW_GID` build arguments when another deliberate numeric identity is required. The supplied Compose file pins `4226:4226`, binds the unauthenticated UI to loopback, and publishes TCP `7443` for authenticated outbound Host Gateway connections. Restrict the gateway port with host/network firewalling to intended execution nodes.
+The published image stores all durable runtime state in `/data`. It runs as the dedicated `burrow` identity with UID/GID `4226:4226`; the image build accepts `BURROW_UID` and `BURROW_GID` build arguments when another deliberate numeric identity is required. The supplied Compose file pins `4226:4226` and publishes TCP `42817` for Burrow plus TCP `7443` for authenticated outbound Node Goblin connections. Control exposure with the host firewall, reverse proxy, and network policy appropriate to the deployment.
 
 Existing persistent volumes must be writable by the configured numeric identity. For a disposable empty runtime, recreate the volume. For a runtime containing durable state, migrate only Burrow-owned data deliberately rather than recursively changing unrelated container or service data.
 
@@ -137,7 +158,7 @@ cd Burrow
 docker compose up -d
 ```
 
-Open <http://127.0.0.1:42817>. To expose Burrow beyond the local host, do not simply change the port binding: put it behind a trusted reverse proxy or configure authentication first, then review the credentials, systems, and data the runtime can reach.
+Open `http://<docker-host>:42817`. The supplied mapping is remotely reachable; restrict it with the host firewall or a trusted reverse proxy according to the network and authentication model you intend.
 
 To build the exact checked-out deployment payload instead of pulling the published image:
 
