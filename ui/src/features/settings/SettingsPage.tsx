@@ -22,7 +22,7 @@ import { ExecutionBoundaries } from './ExecutionBoundaries';
 import { Chevron } from '../workspace/WorkspaceRail';
 import { readStoredValue, writeStoredValue } from '../../app/browserStorage';
 import { SystemStatsRail } from './SystemStatsRail';
-import { RemoteNodesSettings } from './RemoteNodesSettings';
+import { RemoteNodesSettings, type RemoteNodesSection } from './RemoteNodesSettings';
 
 const settingsUtilityPanelStorageKey = 'hc.settingsUtilityPanelOpen';
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
@@ -32,6 +32,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
   const [agentSection, setAgentSection] = useState<'details' | 'profile-documents' | 'mcp-tools' | 'cron-jobs' | 'dreams'>('details');
   const [generalSection, setGeneralSection] = useState<'operator-profile' | 'execution-boundaries' | 'trace-retention' | 'export' | 'rail-panels' | 'tiddle-signal' | 'appearance'>('operator-profile');
   const [connectionSection, setConnectionSection] = useState<'authentication' | 'model-providers' | 'mcp-servers'>('authentication');
+  const [remoteNodesSection, setRemoteNodesSection] = useState<RemoteNodesSection>('controller');
   const [targetContributions, setTargetContributions] = useState<ApiTargetContribution[]>([]);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [overflowColumn, setOverflowColumn] = useState<HTMLElement | null>(null);
@@ -103,7 +104,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
             ['mcp-servers', 'MCP servers'],
           ] as const).map(([id, label]) => <button type="button" className={connectionSection === id ? 'active' : ''} aria-current={connectionSection === id ? 'page' : undefined} onClick={() => setConnectionSection(id)} key={id}>{label}</button>)}
         </nav>}
-        {selectedModSettings ? <nav className="settings-prototype-section-items" aria-label={`${selectedModSettings.navigation.title} settings sections`}><button type="button" className="active" aria-current="page">{selectedModSettings.navigation.title}</button></nav> : selectedContribution && <span>Extension settings</span>}
+        {selectedContribution?.modId === 'remote-nodes' ? <nav className="settings-prototype-section-items" aria-label="Remote Nodes settings sections">{([['controller', 'Controller & TLS'], ['pairings', 'Pending pairings'], ['gateways', 'Gateways'], ['assignments', 'Agent assignments'], ['operations', 'Operation activity']] as const).map(([id, label]) => <button type="button" className={remoteNodesSection === id ? 'active' : ''} aria-current={remoteNodesSection === id ? 'page' : undefined} onClick={() => setRemoteNodesSection(id)} key={id}>{label}</button>)}</nav> : selectedModSettings ? <nav className="settings-prototype-section-items" aria-label={`${selectedModSettings.navigation.title} settings sections`}><button type="button" className="active" aria-current="page">{selectedModSettings.navigation.title}</button></nav> : selectedContribution && <span>Extension settings</span>}
       </section>
       <section className="settings-blank-column settings-prototype-configuration">
         {tab === 'general' && generalSection === 'operator-profile' && <OperatorProfile onSaved={onOperatorProfileChanged} />}
@@ -117,7 +118,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
         {tab === 'connections' && connectionSection === 'authentication' && <AuthenticationSettings />}
         {tab === 'connections' && connectionSection === 'model-providers' && <ModelConnections savedProviders={savedProviders} onModelConnectionsChanged={onModelConnectionsChanged} mcpConnections={null} overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'mcp-servers' && <McpConnections overflowTarget={overflowColumn} />}
-        {selectedContribution?.modId === 'remote-nodes' ? <RemoteNodesSettings agents={agents} targets={targets} onAgentsChanged={onAgentsChanged} /> : selectedContribution && <ApiTargetsSettings contribution={selectedContribution} settings={selectedModSettings} overflowTarget={overflowColumn} />}
+        {selectedContribution?.modId === 'remote-nodes' ? <RemoteNodesSettings agents={agents} targets={targets} onAgentsChanged={onAgentsChanged} section={remoteNodesSection} /> : selectedContribution && <ApiTargetsSettings contribution={selectedContribution} settings={selectedModSettings} overflowTarget={overflowColumn} />}
       </section>
       <section className="settings-blank-column settings-prototype-overflow" ref={setOverflowColumn} aria-label="Additional settings" />
       <aside className="settings-utility-panel" aria-label="System statistics" aria-hidden={!utilityPanelOpen}>
