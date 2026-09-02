@@ -94,7 +94,6 @@ async function applyOwnership(root, owner) {
 const RESTORED_INSTALL_PATHS = Object.freeze({
   BURROW_RUNTIME_ROOT: (root) => root,
   BURROW_WORKSPACE_ROOT: (root) => path.join(root, 'workspace'),
-  BURROW_AGENT_DATA_ROOT: () => null,
   BURROW_CACHE_ROOT: (root) => path.join(root, 'cache'),
   BURROW_SETTINGS_DB: (root) => path.join(root, 'config', 'settings.sqlite'),
   BURROW_CLAUDE_BIN: (root) => path.join(root, 'integrations', 'claude-code', 'node_modules', '.bin', 'claude'),

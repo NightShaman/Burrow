@@ -68,7 +68,7 @@ export async function deployedRuntimeManifests({ rootDir = process.cwd() } = {})
   const runtimeRoot = process.env.BURROW_RUNTIME_ROOT || '/mnt/local/burrow';
   const workspace = process.env.BURROW_WORKSPACE_ROOT || path.join(runtimeRoot, 'workspace');
   const agentWorkspace = process.env.BURROW_AGENT_WORKSPACE_ROOT || path.join(workspace, 'hatchet');
-  const agentData = process.env.BURROW_AGENT_DATA_ROOT || path.join(runtimeRoot, 'agentdata', 'hatchet');
+  const agentData = agentWorkspace;
   const cache = process.env.BURROW_CACHE_ROOT || path.join(runtimeRoot, 'cache');
   const roots = {
     sessions: path.join(agentWorkspace, 'sessions'),
@@ -91,7 +91,7 @@ export async function createTestRuntime({ prefix = TEST_ROOT_PREFIX } = {}) {
     tmp: path.join(root, 'tmp'),
     workspace: path.join(root, 'workspace'),
     agentWorkspace: path.join(root, 'workspace', 'hatchet'),
-    agentData: path.join(root, 'agentdata', 'hatchet'),
+    agentData: path.join(root, 'workspace', 'hatchet'),
     cache: path.join(root, 'cache'),
     settingsDb: path.join(root, 'config', 'settings.sqlite'),
   };
@@ -112,7 +112,7 @@ export function testRuntimeEnv(runtime, baseEnv = process.env) {
   for (const key of ['BURROW_CONFIG', 'BURROW_RUNTIME_ROOT', 'BURROW_DATA_ROOT', 'BURROW_WORKSPACE_ROOT', 'BURROW_AGENT_WORKSPACE_ROOT', 'BURROW_AGENT_DATA_ROOT', 'BURROW_CACHE_ROOT', 'BURROW_ARCHIVE_ROOT', 'BURROW_SETTINGS_DB', 'BURROW_SETTINGS_KEY', 'TMPDIR', 'TMP', 'TEMP']) delete env[key];
   // Isolated settings stores still encrypt connection secrets. This fixed test-only
   // key never reaches a deployed runtime and avoids inheriting host credentials.
-  return { ...env, TMPDIR: runtime.tmp, TMP: runtime.tmp, TEMP: runtime.tmp, BURROW_RUNTIME_ROOT: runtime.root, BURROW_WORKSPACE_ROOT: runtime.workspace, BURROW_AGENT_WORKSPACE_ROOT: runtime.agentWorkspace, BURROW_AGENT_DATA_ROOT: runtime.agentData, BURROW_CACHE_ROOT: runtime.cache, BURROW_TRACE_ISOLATION: '1', BURROW_SETTINGS_DB: runtime.settingsDb, BURROW_SETTINGS_KEY: Buffer.alloc(32, 7).toString('base64') };
+  return { ...env, TMPDIR: runtime.tmp, TMP: runtime.tmp, TEMP: runtime.tmp, BURROW_RUNTIME_ROOT: runtime.root, BURROW_WORKSPACE_ROOT: runtime.workspace, BURROW_AGENT_WORKSPACE_ROOT: runtime.agentWorkspace, BURROW_CACHE_ROOT: runtime.cache, BURROW_TRACE_ISOLATION: '1', BURROW_SETTINGS_DB: runtime.settingsDb, BURROW_SETTINGS_KEY: Buffer.alloc(32, 7).toString('base64') };
 }
 
 export async function removeTestRuntime(runtime) {
