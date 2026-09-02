@@ -38,25 +38,11 @@ for command in curl tar sha256sum; do command -v "$command" >/dev/null 2>&1 || {
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 if [ "$VERSION" = latest ]; then
-  releases_url="https://api.github.com/repos/$REPOSITORY/releases?per_page=100"
-  tags=$(curl -fsSL -H 'Accept: application/vnd.github+json' "$releases_url" \
-    | tr ',' '\n' \
-    | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
-  VERSION=
-  for tag in $tags; do
-    candidate=${tag#v}
-    case "$candidate" in
-      [0-9][0-9][0-9][0-9].[0-1][0-9].[0-3][0-9]|[0-9][0-9][0-9][0-9].[0-1][0-9].[0-3][0-9].[0-9]*) ;;
-      *) continue ;;
-    esac
-    name="node-goblin-$candidate"
-    base="https://github.com/$REPOSITORY/releases/download/$tag"
-    if curl -fsIL "$base/$name.tar.gz" >/dev/null 2>&1 && curl -fsIL "$base/$name.tar.gz.sha256" >/dev/null 2>&1; then
-      VERSION=$candidate
-      break
-    fi
-  done
-  [ -n "$VERSION" ] || { echo "could not resolve a Node Goblin release with install assets" >&2; exit 1; }
+  release_url="https://api.github.com/repos/$REPOSITORY/releases/latest"
+  VERSION=$(curl -fsSL -H 'Accept: application/vnd.github+json' "$release_url" \
+    | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\([^"]*\)".*/\1/p' | head -n 1)
+  [ -n "$VERSION" ] || { echo "could not resolve the latest Node Goblin release" >&2; exit 1; }
+  case "$VERSION" in [0-9][0-9][0-9][0-9].[0-1][0-9].[0-3][0-9]|[0-9][0-9][0-9][0-9].[0-1][0-9].[0-3][0-9].[0-9]*) ;; *) echo "latest release has an invalid calendar version" >&2; exit 1;; esac
 fi
 
 NAME="node-goblin-$VERSION"
