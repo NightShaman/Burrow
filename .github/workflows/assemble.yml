@@ -146,10 +146,10 @@ jobs:
           # The public Burrow repository owns the release tag namespace. Build
           # daemon assets here, but attach them only when the single canonical
           # Burrow release is created after the image has published.
-          if [ -z "${{ steps.revisions.outputs.node_goblin_version }}" ]; then
-            printf 'present=false\n' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          # Every canonical Burrow release carries a matching Node Goblin
+          # installer. This also makes manual assemblies and Backend/UI-driven
+          # releases installable; source-update payloads are not the authority
+          # for public asset availability.
           version="${{ steps.build.outputs.version }}"
           printf '%s\n' "$version" > remote-nodes-source/gateway/VERSION
           SOURCE_DATE_EPOCH=$(git -C remote-nodes-source show -s --format=%ct HEAD) \
