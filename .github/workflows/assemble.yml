@@ -139,29 +139,25 @@ jobs:
             git push origin HEAD:main
           fi
           printf 'commit=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Publish public Node Goblin release assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build public Node Goblin release assets
+        id: node_goblin_assets
         run: |
           set -eu
-          # The public Burrow repository owns this tag namespace. Package a
-          # Node Goblin source update under the assembly's assigned calendar
-          # revision—not the source repository's independently assigned one—so
-          # it cannot collide with an existing Burrow release tag.
+          # The public Burrow repository owns the release tag namespace. Build
+          # daemon assets here, but attach them only when the single canonical
+          # Burrow release is created after the image has published.
           if [ -z "${{ steps.revisions.outputs.node_goblin_version }}" ]; then
-            # Non-Node-Goblin assemblies do not mint another daemon release.
+            printf 'present=false\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           version="${{ steps.build.outputs.version }}"
           printf '%s\n' "$version" > remote-nodes-source/gateway/VERSION
-          tag="v$version"
           SOURCE_DATE_EPOCH=$(git -C remote-nodes-source show -s --format=%ct HEAD) \
             remote-nodes-source/gateway/deploy/build-release.sh remote-nodes-source/gateway/dist
-          gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
-            --title "Node Goblin $version" \
-            --notes "Calendar-versioned Node Goblin release $version from source $(git -C remote-nodes-source rev-parse HEAD)." \
-            "remote-nodes-source/gateway/dist/node-goblin-$version.tar.gz" \
-            "remote-nodes-source/gateway/dist/node-goblin-$version.tar.gz.sha256"
+          printf 'present=true\n' >> "$GITHUB_OUTPUT"
+          printf 'tarball=%s\nchecksum=%s\n' \
+            "$GITHUB_WORKSPACE/remote-nodes-source/gateway/dist/node-goblin-$version.tar.gz" \
+            "$GITHUB_WORKSPACE/remote-nodes-source/gateway/dist/node-goblin-$version.tar.gz.sha256" >> "$GITHUB_OUTPUT"
       - name: Authenticate to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -187,7 +183,12 @@ jobs:
           tag="v$VERSION"
           git -C assembled tag "$tag" "$COMMIT"
           git -C assembled push origin "$tag"
+          assets=''
+          if [ "${{ steps.node_goblin_assets.outputs.present }}" = true ]; then
+            assets="${{ steps.node_goblin_assets.outputs.tarball }} ${{ steps.node_goblin_assets.outputs.checksum }}"
+          fi
           gh release create "$tag" \
             --repo "$GITHUB_REPOSITORY" \
             --title "Burrow $VERSION" \
-            --notes "Calendar-versioned Burrow release $VERSION assembled at $COMMIT. Image: ghcr.io/nightshaman/burrow:$VERSION"
+            --notes "Calendar-versioned Burrow release $VERSION assembled at $COMMIT. Image: ghcr.io/nightshaman/burrow:$VERSION" \
+            $assets
