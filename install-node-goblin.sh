@@ -38,11 +38,24 @@ for command in curl tar sha256sum; do command -v "$command" >/dev/null 2>&1 || {
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 if [ "$VERSION" = latest ]; then
-  release_url="https://api.github.com/repos/$REPOSITORY/releases/latest"
-  VERSION=$(curl -fsSL -H 'Accept: application/vnd.github+json' "$release_url" \
-    | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\([^"]*\)".*/\1/p' | head -n 1)
-  [ -n "$VERSION" ] || { echo "could not resolve the latest Node Goblin release" >&2; exit 1; }
-  case "$VERSION" in [0-9][0-9][0-9][0-9].[0-1][0-9].[0-3][0-9]|[0-9][0-9][0-9][0-9].[0-1][0-9].[0-3][0-9].[0-9]*) ;; *) echo "latest release has an invalid calendar version" >&2; exit 1;; esac
+  # A Burrow release can exist without Node Goblin assets. GitHub's
+  # /releases/latest therefore cannot be used here: it may select a newer
+  # Burrow-only release and produce a 404 below. Walk version tags newest
+  # first and select the first one that actually publishes this bootstrap's
+  # tarball.
+  VERSION=
+  tags=$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$REPOSITORY/git/matching-refs/tags/v" \
+    | sed -n 's/.*"ref":"refs\/tags\/v\([0-9][0-9][0-9][0-9]\.[0-9][0-9]\.[0-9][0-9]\(\.[0-9][0-9]*\)\?\)".*/\1/p' \
+    | sort -rV)
+  for candidate in $tags; do
+    candidate_name="node-goblin-$candidate"
+    candidate_base="https://github.com/$REPOSITORY/releases/download/v$candidate"
+    if curl -fsI "$candidate_base/$candidate_name.tar.gz" >/dev/null 2>&1; then
+      VERSION=$candidate
+      break
+    fi
+  done
+  [ -n "$VERSION" ] || { echo "could not resolve a release containing Node Goblin assets" >&2; exit 1; }
 fi
 
 NAME="node-goblin-$VERSION"
