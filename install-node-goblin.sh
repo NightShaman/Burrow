@@ -45,7 +45,7 @@ if [ "$VERSION" = latest ]; then
   # tarball.
   VERSION=
   tags=$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$REPOSITORY/git/matching-refs/tags/v" \
-    | sed -n 's/.*"ref":"refs\/tags\/v\([0-9][0-9][0-9][0-9]\.[0-9][0-9]\.[0-9][0-9]\(\.[0-9][0-9]*\)\?\)".*/\1/p' \
+    | sed -n 's/.*"ref"[[:space:]]*:[[:space:]]*"refs\/tags\/v\([0-9][0-9][0-9][0-9]\.[0-9][0-9]\.[0-9][0-9]\(\.[0-9][0-9]*\)\?\)".*/\1/p' \
     | sort -rV)
   for candidate in $tags; do
     candidate_name="node-goblin-$candidate"
