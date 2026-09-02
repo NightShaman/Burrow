@@ -144,11 +144,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
-          version="${{ steps.revisions.outputs.node_goblin_version }}"
-          if [ -z "$version" ]; then
+          # The public Burrow repository owns this tag namespace. Package a
+          # Node Goblin source update under the assembly's assigned calendar
+          # revision—not the source repository's independently assigned one—so
+          # it cannot collide with an existing Burrow release tag.
+          if [ -z "${{ steps.revisions.outputs.node_goblin_version }}" ]; then
             # Non-Node-Goblin assemblies do not mint another daemon release.
             exit 0
           fi
+          version="${{ steps.build.outputs.version }}"
           printf '%s\n' "$version" > remote-nodes-source/gateway/VERSION
           tag="v$version"
           SOURCE_DATE_EPOCH=$(git -C remote-nodes-source show -s --format=%ct HEAD) \
