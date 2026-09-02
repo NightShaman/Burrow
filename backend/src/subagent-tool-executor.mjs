@@ -5,6 +5,9 @@ import { finishSubagentChildSession, startSubagentChildSession, subagentChildSes
 import { resolveExecutionTarget } from './execution-context.mjs';
 import { executionPolicyAllowsCommit, executionPolicyAllowsMutation, normalizeExecutionPolicyInput } from './execution-policy.mjs';
 import { runSubagentProcess } from './subagent-process-runner.mjs';
+import { runSpawnSubagentChild } from './subagent-worker-runner.mjs';
+import { createNativeFilesystemExecutionRouter, resolveNativeFilesystemExecutionTarget } from './native-filesystem-execution-router.mjs';
+import { statPathEnvelope } from './harness/developer-tools.mjs';
 
 function compactString(value) {
   return String(value || '').trim();
@@ -154,6 +157,23 @@ function childFrom({ parentSessionId, parentConversationId, parentRunId, childSe
   };
 }
 
+async function resolveRemoteTarget(targetRequest, executionContext, runId) {
+  if (!targetRequest || typeof targetRequest !== 'object') throw new Error('target_required');
+  if (targetRequest.kind !== 'filesystem') throw new Error(`unsupported_target_kind:${targetRequest.kind || 'missing'}`);
+  const root = compactString(targetRequest.root);
+  if (!path.isAbsolute(root)) throw new Error('target_root_must_be_absolute');
+  const route = createNativeFilesystemExecutionRouter({
+    localExecute: async ({ arguments: args }) => statPathEnvelope(args),
+    remoteController: executionContext?.processExecutionController || null,
+  });
+  const result = await route({ target: resolveNativeFilesystemExecutionTarget(executionContext || {}), operation: { tool: 'files_inspect', arguments: { path: root } } }, {
+    parentRunId: runId || executionContext?.parentRunId || 'subagent-target-validation',
+    toolCallId: `spawn-target-${Date.now()}`,
+  });
+  if (!result?.ok || result.type !== 'directory') throw new Error(result?.error || 'target_root_not_found');
+  return Object.freeze({ kind: 'filesystem', root: result.path || root, boundaries: [] });
+}
+
 export async function executeSpawnSubagentTool({
   arguments: args = {},
   executionContext = null,
@@ -192,10 +212,15 @@ export async function executeSpawnSubagentTool({
     blockers.push('invalid_target:target_required');
   } else {
     try {
-      target = await resolveExecutionTarget(args.target, { filesystemBoundaries: executionContext?.filesystemBoundaries || [] });
-      const refined = await refineRepositoryTarget(target);
-      target = refined.target;
-      targetWarnings = refined.warnings;
+      const remote = resolveNativeFilesystemExecutionTarget(executionContext || {}).kind === 'remote';
+      target = remote
+        ? await resolveRemoteTarget(args.target, executionContext, runId)
+        : await resolveExecutionTarget(args.target, { filesystemBoundaries: executionContext?.filesystemBoundaries || [] });
+      if (!remote) {
+        const refined = await refineRepositoryTarget(target);
+        target = refined.target;
+        targetWarnings = refined.warnings;
+      }
     } catch (error) {
       blockers.push(`invalid_target:${error?.message || String(error)}`);
     }
@@ -281,9 +306,22 @@ export async function executeSpawnSubagentTool({
   await startSubagentChildSession({ dataRoot, id, workerProfile: 'spawn_subagent', purpose: task, owner, trace: { runId: id, childSessionId, traceDir }, model: modelSelection });
   const running = await updateSubagentStatus({ dataRoot, id, status: 'running', phase: 'spawned', trace: { runId: id, childSessionId, traceDir }, provenance: { source: 'spawn-subagent-tool', reason: 'spawned' } });
 
-  const childRun = await runSubagentProcess({
-    args: { id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy },
-  });
+  const remoteExecution = resolveNativeFilesystemExecutionTarget(executionContext || {}).kind === 'remote';
+  let childRun;
+  try {
+    childRun = remoteExecution
+      ? { ok: true, spawned: true, exitCode: 0, durationMs: null, result: await runSpawnSubagentChild({ id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy, parentExecutionContext: executionContext }) }
+      : await runSubagentProcess({ args: { id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy } });
+  } catch (error) {
+    const code = compactString(error?.code || error?.message || 'subagent_child_dispatch_failed').split(':')[0];
+    childRun = {
+      ok: false,
+      spawned: remoteExecution,
+      exitCode: null,
+      durationMs: null,
+      result: { ok: false, summary: 'Subagent child failed to start or dispatch.', blockers: [`subagent_child_dispatch_failed:${code}`], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false },
+    };
+  }
   const childResult = childRun.result || { ok: false, summary: 'Subagent returned no result.', blockers: ['subagent_result_missing'], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
   const status = childRun.ok && childResult.ok ? 'succeeded' : 'failed';
   const receiptRef = traceDir ? path.join(traceDir, 'receipt.json') : null;

@@ -116,11 +116,18 @@ async function appendChildToolRound({ rootDir, sessionId, runId, traceDir, itera
   return sequence;
 }
 
-async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSessionId, conversationId = null, traceLogger = null, executionPolicy: executionPolicyInput = null, modelConfig = null, observedToolResults = [] } = {}) {
+async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSessionId, conversationId = null, traceLogger = null, executionPolicy: executionPolicyInput = null, modelConfig = null, observedToolResults = [], parentExecutionContext = null } = {}) {
   const executionPolicy = normalizeExecutionPolicyInput(executionPolicyInput);
   const proposal = proposalFromNativeToolCalls(toolCalls);
   const reviews = reviewProposalActions({ actions: proposal.actions, workspaceRoot: target.root });
-  const executionContext = createExecutionContext({ sessionId: childSessionId, conversationId, workspaceRoot: target.root, dataRoot, cacheRoot: traceLogger?.traceDir || null });
+  const executionContext = createExecutionContext({
+    sessionId: childSessionId, conversationId, workspaceRoot: target.root, dataRoot, cacheRoot: traceLogger?.traceDir || null,
+    executionEnvironment: parentExecutionContext?.executionEnvironment || null,
+    processExecutionTarget: parentExecutionContext?.processExecutionTarget || null,
+    processExecutionController: parentExecutionContext?.processExecutionController || null,
+    processExecutionRouter: parentExecutionContext?.processExecutionRouter || null,
+    parentRunId: parentExecutionContext?.parentRunId || traceLogger?.runId || null,
+  });
   const execution = await executeReviewedProposalActions({
     actions: proposal.actions, reviews: reviews.reviews, workspaceRoot: target.root, rootDir: target.root,
     dataRoot, sessionId: childSessionId, traceLogger, executionPolicy, modelConfig,
@@ -386,6 +393,7 @@ export async function runSpawnSubagentChild({
   traceDir = null,
   executionPolicy: executionPolicyInput = null,
   progress = null,
+  parentExecutionContext = null,
 } = {}) {
   const blockers = [];
   if (!id) blockers.push('subagent_id_required');
@@ -450,7 +458,7 @@ export async function runSpawnSubagentChild({
       toolCalls = forced;
     }
     await progress?.({ type: 'subagent-progress', phase: 'tool-request', id, toolCallCount: toolCalls.length });
-    const batch = await runSubagentToolCalls({ toolCalls, target, dataRoot, childSessionId, conversationId: owner.conversationId || null, traceLogger: modelTrace, executionPolicy: executionPolicyInput, modelConfig, observedToolResults: toolResults });
+    const batch = await runSubagentToolCalls({ toolCalls, target, dataRoot, childSessionId, conversationId: owner.conversationId || null, traceLogger: modelTrace, executionPolicy: executionPolicyInput, modelConfig, observedToolResults: toolResults, parentExecutionContext });
     await progress?.({ type: 'subagent-progress', phase: 'tool-result', id, resultCount: batch.results.length });
     toolResults.push(...batch.results);
     activitySequence = await appendChildToolRound({
