@@ -44,6 +44,8 @@ function executionEnv(env = {}, inheritEnv = false) {
 
 export async function runExec({
   command,
+  executable = null,
+  args = [],
   cwd,
   env = {},
   timeoutMs = 30_000,
@@ -57,7 +59,19 @@ export async function runExec({
   maxOutputChars = 100_000,
   protectedValues = [],
 } = {}) {
-  if (!command || typeof command !== 'string') throw new Error('command is required');
+  if (command != null && (typeof command !== 'string' || !command.trim())) throw new Error('command_invalid');
+  if (executable != null && (typeof executable !== 'string' || !executable.trim())) throw new Error('executable_invalid');
+  if (!Array.isArray(args) || args.some((value) => typeof value !== 'string')) throw new Error('args_invalid');
+  const hasCommand = typeof command === 'string';
+  const file = executable?.trim() || '';
+  const hasExecutable = Boolean(file);
+  if (hasCommand && hasExecutable) throw new Error('command_and_executable_mutually_exclusive');
+  if (!hasCommand && !hasExecutable) throw new Error('command_or_executable_required');
+  if (hasCommand && args.length) throw new Error('args_with_command_invalid');
+  const argv = hasExecutable ? [...args] : [];
+  // This is an evidence/display field only. argv execution below never passes
+  // through a shell or reconstructs this string.
+  const displayCommand = hasExecutable ? [file, ...argv].join(' ') : command;
 
   const logger = traceLogger || createTraceLogger({ rootDir: await resolveRuntimeTraceRoot(rootDir || process.cwd()), runId });
   const startedAt = nowMs();
@@ -68,23 +82,23 @@ export async function runExec({
   const captureLimitBytes = Math.max(1, Math.floor(Number(maxOutputChars) || 100_000) * 2);
   const stdoutState = { originalBytes: 0, capturedBytes: 0 };
   const stderrState = { originalBytes: 0, capturedBytes: 0 };
-  const prefix = safeName(artifactPrefix || `shell_exec-${commandHash(command)}`);
+  const prefix = safeName(artifactPrefix || `shell_exec-${commandHash(displayCommand)}`);
   const redact = (value) => redactProtectedText(value, protectedValues);
   const redactAndTruncate = (value, options) => {
     const envelope = redactAndTruncateText(value, options);
     envelope.text = redact(envelope.text);
     return envelope;
   };
-  const started = await logger.toolStart?.({ tool: 'shell_exec', command: redact(command), cwd: cwd || process.cwd(), reason: typeof reason === 'string' ? reason.slice(0, 500) : null });
+  const started = await logger.toolStart?.({ tool: 'shell_exec', command: redact(displayCommand), cwd: cwd || process.cwd(), reason: typeof reason === 'string' ? reason.slice(0, 500) : null });
   const activityId = started?.payload?.activityId || null;
 
   let timedOut = false;
   let killed = false;
   let cancelled = false;
-  const child = spawn(command, {
+  const child = spawn(hasExecutable ? file : command, hasExecutable ? argv : [], {
     cwd: cwd || process.cwd(),
     env: executionEnv(env, inheritEnv),
-    shell: true,
+    shell: !hasExecutable,
     // A shell may leave grandchildren holding stdout/stderr open. Run it in
     // its own process group so timeout/cancel can terminate the whole command.
     detached: process.platform !== 'win32',
@@ -162,7 +176,7 @@ export async function runExec({
   const result = {
     tool: 'shell_exec',
     ok,
-    command: redact(command),
+    command: redact(displayCommand),
     reason: typeof reason === 'string' ? reason.slice(0, 500) : null,
     cwd: cwd || process.cwd(),
     exitCode: exit.exitCode,

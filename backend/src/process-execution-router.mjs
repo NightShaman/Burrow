@@ -48,13 +48,21 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
     const toolCallId = requiredId(context.toolCallId, 'tool_call_id');
     const operationId = context.operationId || processOperationId({ parentRunId, toolCallId });
     const process = request.process || {};
+    if (process.command != null && (typeof process.command !== 'string' || !process.command.trim())) throw new Error('command_invalid');
+    if (process.executable != null && (typeof process.executable !== 'string' || !process.executable.trim())) throw new Error('executable_invalid');
+    if (process.args != null && (!Array.isArray(process.args) || process.args.some((value) => typeof value !== 'string'))) throw new Error('args_invalid');
+    const command = process.command?.trim() || '';
+    const executable = process.executable?.trim() || '';
+    if (command && executable) throw new Error('command_and_executable_mutually_exclusive');
+    if (!command && !executable) throw new Error('command_or_executable_required');
+    if (command && process.args?.length) throw new Error('args_with_command_invalid');
     return remoteController.executeProcess({
       operationId,
       gatewayId,
       parentRunId,
       toolCallId,
       process: {
-        command: requiredId(process.command, 'command'),
+        ...(command ? { command } : { executable, args: process.args ? [...process.args] : [] }),
         ...(process.cwd ? { cwd: String(process.cwd) } : {}),
         // Ordinary env remains compatible; protected values use a distinct,
         // operation-scoped field so controllers cannot accidentally journal it.

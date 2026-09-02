@@ -109,8 +109,21 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
     if (action.tool === 'files_find') { toolResults.push(await executeFilesystem(action, { pattern: action.pattern, dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxEntries: action.maxEntries, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-files_find`, reason: action.reason })); continue; }
     if (action.tool === 'files_inspect') { toolResults.push(await executeFilesystem(action, { path: workspacePath(action.path, executionRoot, rootDir), workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-stat`, reason: action.reason })); continue; }
     if (action.tool === 'files_search') { toolResults.push(await executeFilesystem(action, { query: action.query, dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxMatches: action.maxMatches, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-search`, reason: action.reason })); continue; }
-    if (action.tool === 'git_status') { toolResults.push(await gitStatusEnvelope({ dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-git_status`, reason: action.reason })); continue; }
-    if (action.tool === 'git_diff') { toolResults.push(await gitDiffEnvelope({ dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-git_diff`, reason: action.reason })); continue; }
+    if (action.tool === 'git_status' || action.tool === 'git_diff') {
+      const target = resolveProcessExecutionTarget(executionContext || {});
+      const routeProcess = executionContext?.processExecutionRouter || createProcessExecutionRouter({
+        localExecute: runExec,
+        remoteController: executionContext?.processExecutionController || null,
+      });
+      const execute = (process) => routeProcess({ target, process }, {
+        parentRunId: executionContext?.parentRunId || traceLogger?.runId,
+        toolCallId: action.toolCallId,
+        abortSignal,
+      });
+      const envelope = action.tool === 'git_status' ? gitStatusEnvelope : gitDiffEnvelope;
+      toolResults.push(await envelope({ dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-${action.tool}`, reason: action.reason, execute }));
+      continue;
+    }
     if (action.tool === 'files_edit') { toolResults.push(await executeFilesystem(action, { filePath: workspacePath(action.filePath, executionRoot, rootDir), oldText: action.oldText, newText: action.newText, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-edit`, reason: action.reason })); continue; }
 
     if (action.tool === 'list_skills' || action.tool === 'load_skill') {

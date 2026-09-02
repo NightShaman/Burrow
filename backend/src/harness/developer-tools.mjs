@@ -183,12 +183,12 @@ export async function editFileEnvelope({ filePath, oldText, newText, workspaceRo
   }
 }
 
-async function gitEnvelope({ tool, command, dirPath, workspaceRoot, traceLogger, rootDir, runId, artifactPrefix, reason }) {
+async function gitEnvelope({ tool, args, dirPath, workspaceRoot, traceLogger, rootDir, runId, artifactPrefix, reason, execute = runExec }) {
   const cwd = resolved(dirPath, workspaceRoot);
   const context = await toolContext({ tool, rootDir, runId, traceLogger, artifactPrefix, payload: { cwd, reason } });
-  const result = await runExec({ command, cwd, traceLogger: context.logger, artifactPrefix: `${context.prefix}-shell_exec`, reason });
+  const result = await execute({ executable: 'git', args, cwd, traceLogger: context.logger, artifactPrefix: `${context.prefix}-shell_exec`, reason });
   return finish({ logger: context.logger, tool, activityId: context.activityId, result: { ...result, tool, dirPath: cwd, reason, resultFingerprint: resultFingerprint({ exitCode: result.exitCode, stdout: result.stdout || '', stderr: result.stderr || '' }), trace: { cwd, exitCode: result.exitCode } } });
 }
 
-export function gitStatusEnvelope(args = {}) { return gitEnvelope({ ...args, tool: 'git_status', command: 'git status --short --branch' }); }
-export function gitDiffEnvelope(args = {}) { return gitEnvelope({ ...args, tool: 'git_diff', command: 'git diff --no-ext-diff --' }); }
+export function gitStatusEnvelope(options = {}) { return gitEnvelope({ ...options, tool: 'git_status', args: ['status', '--short', '--branch'] }); }
+export function gitDiffEnvelope(options = {}) { return gitEnvelope({ ...options, tool: 'git_diff', args: ['diff', '--no-ext-diff', '--'] }); }
