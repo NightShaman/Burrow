@@ -345,26 +345,33 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
 
     if (action.tool === 'spawn_subagent') {
       const started = await traceLogger?.toolStart?.({ tool: 'spawn_subagent', label: action.label || null, task: action.task || action.purpose || action.reason || null, model: action.model || null, modelProfile: action.modelProfile || null, target: action.target || null });
-      const result = await executeSpawnSubagentTool({
-        arguments: {
-          task: action.task || action.purpose || action.reason,
-          label: action.label,
-          model: action.model,
-          modelProfile: action.modelProfile,
-          timeoutMs: action.timeoutMs,
-          target: action.target,
-          activityId: started?.payload?.activityId || null,
-        },
-        executionContext,
-        rootDir,
-        dataRoot,
-        sessionId,
-        conversationId: resolvedConversationId,
-        runId: traceLogger?.runId || null,
-        traceLogger,
-        modelConfig,
-        executionPolicy,
+      let result;
+      try {
+        result = await executeSpawnSubagentTool({
+          arguments: {
+            task: action.task || action.purpose || action.reason,
+            label: action.label,
+            model: action.model,
+            modelProfile: action.modelProfile,
+            timeoutMs: action.timeoutMs,
+            target: action.target,
+            activityId: started?.payload?.activityId || null,
+          },
+          executionContext,
+          rootDir,
+          dataRoot,
+          sessionId,
+          conversationId: resolvedConversationId,
+          runId: traceLogger?.runId || null,
+          traceLogger,
+          modelConfig,
+          executionPolicy,
         });
+      } catch (error) {
+        const code = String(error?.code || error?.message || 'subagent_dispatch_failed').split(':')[0];
+        result = { tool: 'spawn_subagent', ok: false, spawned: false, status: 'failed', task: action.task || action.purpose || action.reason || null, target: action.target || null, blockers: [`subagent_dispatch_failed:${code}`], warnings: [], evidence: [], summary: `Subagent dispatch failed (${code}).`, record: null };
+        await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'spawn_subagent', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: false, status: 'failed', blockers: result.blockers });
+      }
       toolResults.push(result);
       // The subagent executor emits the matching result with this activity ID;
       // it owns the child-process lifecycle and must close the live row.
