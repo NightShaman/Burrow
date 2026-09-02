@@ -118,7 +118,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
         {tab === 'connections' && connectionSection === 'authentication' && <AuthenticationSettings />}
         {tab === 'connections' && connectionSection === 'model-providers' && <ModelConnections savedProviders={savedProviders} onModelConnectionsChanged={onModelConnectionsChanged} mcpConnections={null} overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'mcp-servers' && <McpConnections overflowTarget={overflowColumn} />}
-        {selectedContribution?.modId === 'remote-nodes' ? <RemoteNodesSettings agents={agents} targets={targets} onAgentsChanged={onAgentsChanged} section={remoteNodesSection} /> : selectedContribution && <ApiTargetsSettings contribution={selectedContribution} settings={selectedModSettings} overflowTarget={overflowColumn} />}
+        {selectedContribution?.modId === 'remote-nodes' ? <RemoteNodesSettings agents={agents} targets={targets} onAgentsChanged={onAgentsChanged} section={remoteNodesSection} overflowTarget={overflowColumn} /> : selectedContribution && <ApiTargetsSettings contribution={selectedContribution} settings={selectedModSettings} overflowTarget={overflowColumn} />}
       </section>
       <section className="settings-blank-column settings-prototype-overflow" ref={setOverflowColumn} aria-label="Additional settings" />
       <aside className="settings-utility-panel" aria-label="System statistics" aria-hidden={!utilityPanelOpen}>
