@@ -38,23 +38,13 @@ for command in curl tar sha256sum; do command -v "$command" >/dev/null 2>&1 || {
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 if [ "$VERSION" = latest ]; then
-  # A Burrow release can exist without Node Goblin assets. GitHub's
-  # /releases/latest therefore cannot be used here: it may select a newer
-  # Burrow-only release and produce a 404 below. Walk version tags newest
-  # first and select the first one that actually publishes this bootstrap's
-  # tarball.
-  VERSION=
-  tags=$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$REPOSITORY/git/matching-refs/tags/v" \
-    | sed -n 's/.*"ref"[[:space:]]*:[[:space:]]*"refs\/tags\/v\([0-9][0-9][0-9][0-9]\.[0-9][0-9]\.[0-9][0-9]\(\.[0-9][0-9]*\)\?\)".*/\1/p' \
-    | sort -rV)
-  for candidate in $tags; do
-    candidate_name="node-goblin-$candidate"
-    candidate_base="https://github.com/$REPOSITORY/releases/download/v$candidate"
-    if curl -fsI "$candidate_base/$candidate_name.tar.gz" >/dev/null 2>&1; then
-      VERSION=$candidate
-      break
-    fi
-  done
+  # A Burrow release can exist without Node Goblin assets, so neither
+  # /releases/latest nor tag probing is reliable. Resolve directly from the
+  # release assets that this bootstrap can actually install.
+  VERSION=$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$REPOSITORY/releases?per_page=100" \
+    | sed -n 's#.*"browser_download_url"[[:space:]]*:[[:space:]]*"[^\"]*/node-goblin-\([0-9][0-9][0-9][0-9]\.[0-9][0-9]\.[0-9][0-9]\(\.[0-9][0-9]*\)\?\)\.tar\.gz".*#\1#p' \
+    | sort -rV \
+    | head -n 1)
   [ -n "$VERSION" ] || { echo "could not resolve a release containing Node Goblin assets" >&2; exit 1; }
 fi
 
