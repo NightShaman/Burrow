@@ -86,9 +86,13 @@ export function createTraceLogger({ rootDir, runId, sessionId, clock = nowIso, o
     const filePath = path.join(traceDir, fileName);
     await fs.appendFile(filePath, jsonLine(record), 'utf8');
     await fs.appendFile(path.join(traceDir, 'events.jsonl'), jsonLine({ ...record, stream: fileName }), 'utf8');
-    // Observers are transport-only. Trace persistence remains authoritative,
-    // and a disconnected/failed observer must never fail a runtime turn.
-    try { await onRecord?.({ ...record, stream: fileName }); } catch {}
+    // Observers are transport-only. Trace persistence remains authoritative.
+    // Never await an observer here: a stalled UI/A2A progress projection must
+    // not strand the run between a persisted plan and its tool dispatch.
+    try {
+      const notification = onRecord?.({ ...record, stream: fileName });
+      if (notification && typeof notification.then === 'function') void notification.catch(() => {});
+    } catch {}
     return record;
   }
 

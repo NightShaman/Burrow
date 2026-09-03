@@ -71,12 +71,28 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
     }
     if (action.tool === 'shell_exec') {
       const target = resolveProcessExecutionTarget(executionContext || {});
+      const started = await traceLogger?.toolStart?.({
+        tool: 'shell_exec',
+        toolCallId: action.toolCallId || null,
+        gatewayId: target.kind === 'remote' ? target.gatewayId : null,
+        executionTarget: target.kind,
+      });
       // The authoritative backend resolves protected references. Remote values
       // are passed only to the authenticated process controller, never embedded
       // in command text or ordinary process environment fields.
       const protectedInput = resolveProtectedBindings(action.protectedBindings, executionContext?.protectedValues);
       if (protectedInput.errors.length) {
-        toolResults.push({ tool: 'shell_exec', ok: false, command: action.command, cwd: action.cwd ? path.resolve(action.cwd) : executionRoot, error: protectedInput.errors.join(','), protectedBindings: protectedInput.bindings });
+        const result = { tool: 'shell_exec', ok: false, command: action.command, cwd: action.cwd ? path.resolve(action.cwd) : executionRoot, error: protectedInput.errors.join(','), protectedBindings: protectedInput.bindings };
+        toolResults.push(result);
+        await (traceLogger?.toolEnd || traceLogger?.tool)?.({
+          tool: 'shell_exec',
+          ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}),
+          toolCallId: action.toolCallId || null,
+          gatewayId: target.kind === 'remote' ? target.gatewayId : null,
+          executionTarget: target.kind,
+          ok: false,
+          error: result.error,
+        });
         continue;
       }
       const process = {
@@ -93,14 +109,29 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
         localExecute: runExec,
         remoteController: executionContext?.processExecutionController || null,
       });
-      const result = await routeProcess({ target, process, protectedBindings: action.protectedBindings,
-        ...(target.kind === 'remote' && protectedInput.bindings.length ? { protectedValues: protectedInput.env, protectedBindingMetadata: protectedInput.bindings } : {}) }, {
-        parentRunId: executionContext?.parentRunId || traceLogger?.runId,
-        toolCallId: action.toolCallId,
-        abortSignal,
-      });
+      let result;
+      try {
+        result = await routeProcess({ target, process, protectedBindings: action.protectedBindings,
+          ...(target.kind === 'remote' && protectedInput.bindings.length ? { protectedValues: protectedInput.env, protectedBindingMetadata: protectedInput.bindings } : {}) }, {
+          parentRunId: executionContext?.parentRunId || traceLogger?.runId,
+          toolCallId: action.toolCallId,
+          abortSignal,
+        });
+      } catch (error) {
+        const code = typeof error?.code === 'string' ? error.code : 'process_dispatch_failed';
+        result = { tool: 'shell_exec', ok: false, command: action.command, cwd: process.cwd, error: code, failureClass: 'tool_dispatch_failed' };
+      }
       if (protectedInput.bindings.length) result.protectedBindings = protectedInput.bindings;
       toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({
+        tool: 'shell_exec',
+        ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}),
+        toolCallId: action.toolCallId || null,
+        gatewayId: target.kind === 'remote' ? target.gatewayId : null,
+        executionTarget: target.kind,
+        ok: result.ok,
+        error: result.error || null,
+      });
       continue;
     }
 

@@ -77,8 +77,17 @@ export function cancelActiveChatRun(activeChatRuns, runId, { body = {}, agentId 
   }
   if (!record) return { ok: false, error: 'chat_run_not_found', runId, agentId: requestedAgentId };
   const reason = String(body.reason || 'stopped from UI');
-  record.cancelled = true;
-  record.reason = reason;
-  record.controller.abort(new Error(reason));
-  return { ok: true, runId, agentId: record.agentId, sessionId: record.sessionId, status: 'cancelled', reason };
+  const cancelledRuns = [];
+  const cancelTree = (candidate) => {
+    if (!candidate || candidate.controller?.signal?.aborted) return;
+    candidate.cancelled = true;
+    candidate.reason = reason;
+    candidate.controller.abort(new Error(reason));
+    cancelledRuns.push({ runId: candidate.runId, agentId: candidate.agentId, sessionId: candidate.sessionId });
+    for (const child of activeChatRuns.values()) {
+      if (child.a2a?.parentAgentId === candidate.agentId && child.a2a?.parentRunId === candidate.runId) cancelTree(child);
+    }
+  };
+  cancelTree(record);
+  return { ok: true, runId, agentId: record.agentId, sessionId: record.sessionId, status: 'cancelled', reason, cancelledRuns };
 }
