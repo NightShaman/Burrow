@@ -622,3 +622,70 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .system-rail-meter i{display:block;height:100%;border-radius:inherit;background:var(--accent);transition:width .25s ease}
 .system-rail-meter.warning i{background:var(--warning,#f59e0b)}
 @media(prefers-reduced-motion:reduce){.system-rail-meter i{transition:none}}
+
+/* Mod contributions use the same column surface as native Settings: no nested card. */
+.settings-prototype-configuration > .mod-settings-mount > .setting-section,
+.settings-prototype-overflow > .mod-settings-mount > .setting-section,
+.settings-prototype-overflow > .settings-overflow-content > .setting-section {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.settings-prototype-configuration > .mod-settings-mount > .setting-section > h2,
+.settings-prototype-overflow > .mod-settings-mount > .setting-section > h2,
+.settings-prototype-overflow > .settings-overflow-content > .setting-section > h2 {
+  margin: 0 0 14px;
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 14px;
+}
+.mod-settings-mount input[type='checkbox'] {
+  appearance: none;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  margin: 0;
+  flex: 0 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-input);
+  color: var(--accent);
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+}
+.mod-settings-mount input[type='checkbox']::before {
+  width: 8px;
+  height: 5px;
+  border: solid currentColor;
+  border-width: 0 0 2px 2px;
+  content: '';
+  transform: rotate(-45deg) scale(0);
+  transition: transform .12s ease-in-out;
+}
+.mod-settings-mount input[type='checkbox']:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+.mod-settings-mount input[type='checkbox']:checked::before {
+  transform: rotate(-45deg) scale(1);
+}
+.mod-settings-mount input[type='checkbox']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.mod-settings-mount input[type='checkbox']:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mod-settings-mount input[type='checkbox']::before {
+    transition: none;
+  }
+}

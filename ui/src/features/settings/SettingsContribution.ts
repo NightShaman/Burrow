@@ -1,0 +1,101 @@
+import type { ReactNode } from 'react';
+
+export type SettingsLayout = 'form' | 'list-detail' | 'activity';
+
+export type SettingsField = {
+  id: string;
+  label: string;
+  value?: string;
+  description?: string;
+  control?: 'text' | 'password' | 'number' | 'boolean' | 'select';
+  options?: Array<{ value: string; label: string }>;
+};
+
+export type SettingsAction = {
+  id: string;
+  label: string;
+  tone?: 'default' | 'primary' | 'danger';
+  confirm?: string;
+};
+
+export type SettingsValues = Record<string, string | boolean>;
+
+export type SettingsContributionRuntime = {
+  values: SettingsValues;
+  onChange: (fieldId: string, value: string | boolean) => void;
+  onAction: (actionId: string, values: SettingsValues) => void | Promise<void>;
+};
+
+export type SettingsItem = {
+  id: string;
+  label: string;
+  description?: string;
+  meta?: string;
+  detail?: string;
+  fields?: SettingsField[];
+  actions?: SettingsAction[];
+};
+
+export type SettingsSection = {
+  id: string;
+  label: string;
+  description?: string;
+  layout: SettingsLayout;
+  fields?: SettingsField[];
+  items?: SettingsItem[];
+  actions?: SettingsAction[];
+};
+
+export type SettingsContribution = {
+  sections: SettingsSection[];
+  render?: (section: SettingsSection) => ReactNode;
+};
+
+export type SettingsContributionContext = {
+  api: <T = unknown>(path: string, init?: RequestInit) => Promise<T>;
+  agents: readonly unknown[];
+};
+
+export type SettingsContributionFactory = (context: SettingsContributionContext) => SettingsContribution | Promise<SettingsContribution>;
+
+const idPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function validateSettingsContribution(value: unknown): SettingsContribution | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as { sections?: unknown; render?: unknown };
+  if (!Array.isArray(candidate.sections)) return null;
+  const seen = new Set<string>();
+  const sections = candidate.sections.flatMap((section): SettingsSection[] => {
+    if (!section || typeof section !== 'object') return [];
+    const item = section as Partial<SettingsSection>;
+    if (typeof item.id !== 'string' || !idPattern.test(item.id) || seen.has(item.id) || typeof item.label !== 'string' || !item.label.trim()) return [];
+    if (item.layout !== 'form' && item.layout !== 'list-detail' && item.layout !== 'activity') return [];
+    seen.add(item.id);
+    const fields = Array.isArray(item.fields) ? item.fields.flatMap((field): SettingsField[] => {
+      if (!field || typeof field !== 'object') return [];
+      const candidate = field as Partial<SettingsField>;
+      if (typeof candidate.id !== 'string' || !idPattern.test(candidate.id) || typeof candidate.label !== 'string' || !candidate.label.trim()) return [];
+      const control = candidate.control ?? 'text';
+      if (!['text', 'password', 'number', 'boolean', 'select'].includes(control)) return [];
+      const options = Array.isArray(candidate.options) ? candidate.options.flatMap((option) => option && typeof option === 'object' && typeof option.value === 'string' && typeof option.label === 'string' ? [{ value: option.value, label: option.label }] : []) : undefined;
+      return [{ id: candidate.id, label: candidate.label.trim(), value: typeof candidate.value === 'string' ? candidate.value : undefined, description: typeof candidate.description === 'string' ? candidate.description : undefined, control, ...(options?.length ? { options } : {}) }];
+    }) : undefined;
+    const itemFields = Array.isArray(item.fields) ? item.fields.flatMap((field): SettingsField[] => {
+      if (!field || typeof field !== 'object') return [];
+      const candidate = field as Partial<SettingsField>;
+      if (typeof candidate.id !== 'string' || !idPattern.test(candidate.id) || typeof candidate.label !== 'string' || !candidate.label.trim()) return [];
+      const control = candidate.control ?? 'text';
+      if (!['text', 'password', 'number', 'boolean', 'select'].includes(control)) return [];
+      const options = Array.isArray(candidate.options) ? candidate.options.flatMap((option) => option && typeof option === 'object' && typeof option.value === 'string' && typeof option.label === 'string' ? [{ value: option.value, label: option.label }] : []) : undefined;
+      return [{ id: candidate.id, label: candidate.label.trim(), value: typeof candidate.value === 'string' ? candidate.value : undefined, description: typeof candidate.description === 'string' ? candidate.description : undefined, control, ...(options?.length ? { options } : {}) }];
+    }) : undefined;
+    const actions = Array.isArray(item.actions) ? item.actions.flatMap((action): SettingsAction[] => {
+      if (!action || typeof action !== 'object') return [];
+      const candidate = action as Partial<SettingsAction>;
+      return typeof candidate.id === 'string' && idPattern.test(candidate.id) && typeof candidate.label === 'string' && candidate.label.trim() ? [{ id: candidate.id, label: candidate.label.trim(), tone: candidate.tone === 'primary' || candidate.tone === 'danger' ? candidate.tone : 'default', ...(typeof candidate.confirm === 'string' ? { confirm: candidate.confirm } : {}) }] : [];
+    }) : undefined;
+    return [{ id: item.id, label: item.label.trim(), description: typeof item.description === 'string' ? item.description : undefined, layout: item.layout, ...(fields ? { fields } : {}), ...(itemFields ? { fields: itemFields } : {}), ...(actions ? { actions } : {}) }];
+  });
+  if (sections.length !== candidate.sections.length) return null;
+  return { sections, render: typeof candidate.render === 'function' ? candidate.render as SettingsContribution['render'] : undefined };
+}
