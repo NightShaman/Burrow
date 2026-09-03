@@ -24,12 +24,12 @@ export function ApiTargetsSettings({ contribution, settings, overflowTarget }: {
   const load = useCallback(async () => {
     setStatus('loading'); setError('');
     try {
-      const response = await apiLocal<TargetResponse>(contribution.endpoint);
+      const response = await apiLocal<TargetResponse>(contribution.endpoint!);
       const values = Array.isArray(response.targets) ? response.targets : [];
       setTargets(values.map(normalizeApiTarget).filter((target): target is ApiTarget => Boolean(target)));
     } catch (cause) { setError(errorMessage(cause, 'Could not load API targets')); }
     finally { setStatus('idle'); }
-  }, [contribution.endpoint]);
+  }, [contribution.endpoint!]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -45,7 +45,7 @@ export function ApiTargetsSettings({ contribution, settings, overflowTarget }: {
     setStatus('saving'); setError('');
     try {
       const body = { id, name, baseUrl: normalizedUrl, enabled: draft.enabled };
-      const endpoint = editingId ? `${contribution.endpoint}/${encodeURIComponent(editingId)}` : contribution.endpoint;
+      const endpoint = editingId ? `${contribution.endpoint!}/${encodeURIComponent(editingId)}` : contribution.endpoint!;
       const response = await apiLocal<TargetResponse>(endpoint, { method: editingId ? 'PUT' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
       const saved = normalizeApiTarget(response.target);
       if (!saved) await load();
@@ -58,7 +58,7 @@ export function ApiTargetsSettings({ contribution, settings, overflowTarget }: {
     if (!await confirm({ title: 'Delete API target?', message: `Delete ${target.name}? Agents and sessions owned by that runtime will no longer appear.`, confirmLabel: 'Delete target', tone: 'danger' })) return;
     setStatus('deleting'); setError('');
     try {
-      await apiLocal(`${contribution.endpoint}/${encodeURIComponent(target.id)}`, { method: 'DELETE' });
+      await apiLocal(`${contribution.endpoint!}/${encodeURIComponent(target.id)}`, { method: 'DELETE' });
       setTargets((current) => current.filter((item) => item.id !== target.id));
       if (editingId === target.id) reset();
       window.dispatchEvent(new Event(apiTargetsChangedEvent));

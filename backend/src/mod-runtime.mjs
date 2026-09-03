@@ -27,7 +27,7 @@ function manifestUi(id, root, value = {}) {
   return ui;
 }
 const CONTRIBUTION_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const SETTINGS_CAPABILITIES = new Set(['apiTargets']);
+const SETTINGS_CAPABILITIES = new Set(['apiTargets', 'settingsUi']);
 
 function boundedManifestText(value, { required = false, max = 240, errorCode } = {}) {
   const text = String(value ?? '').trim();
@@ -72,10 +72,11 @@ function manifestSettingsContribution(id, value, index, availableCapabilities) {
   }
   return output;
 }
-function manifestContributions(id, value = {}) {
+function manifestContributions(id, value = {}, ui = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`mod_contributions_invalid:${id}`);
   const contributions = {};
   const capabilities = {};
+  if (ui.settings) capabilities.settingsUi = { endpoint: ui.settings.url };
   if (value.apiTargets !== undefined) {
     const endpoint = modEndpoint(id, value.apiTargets, 'mod_api_targets_invalid');
     contributions.apiTargets = endpoint;
@@ -123,7 +124,7 @@ export async function discoverMods({ runtimeRoot = process.env.BURROW_RUNTIME_RO
       }
       const server = manifest.server ? safeRelative(manifest.server, `mod_server_invalid:${id}`) : null;
       const ui = manifestUi(id, root, manifest.ui);
-      const contributions = manifestContributions(id, manifest.contributions);
+      const contributions = manifestContributions(id, manifest.contributions, ui);
       const mod = { id, name, root, manifest, server: server ? inside(root, server) : null, ui, contributions };
       seen.set(id, mod); mods.push(mod);
     } catch (error) {

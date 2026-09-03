@@ -37,6 +37,23 @@ describe('API target contributions', () => {
     ]);
   });
 
+  it('discovers scoped mod settings assets without requiring an API targets contribution', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, mods: [
+      { id: 'remote-nodes', name: 'Remote Nodes', contributions: { settings: [{ id: 'operations', navigation: { title: 'Remote Nodes' }, primary: { title: 'Operations', capability: 'settingsUi' } }] }, ui: { settingsUrl: '/api/mods/remote-nodes/ui/settings.js' } },
+      { id: 'unsafe', name: 'Unsafe', ui: { settingsUrl: '/api/mods/other/ui/settings.js' } },
+    ] }), { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(loadApiTargetContributions()).resolves.toEqual([
+      {
+        modId: 'remote-nodes',
+        name: 'Remote Nodes',
+        settingsUrl: '/api/mods/remote-nodes/ui/settings.js',
+        settings: [{ id: 'operations', navigation: { title: 'Remote Nodes' }, primary: { title: 'Operations', capability: 'settingsUi' } }],
+      },
+    ]);
+  });
+
   it('namespaces remote resources and resolves their owner without changing local IDs', () => {
     const targets = [
       { id: 'local', name: 'Local', baseUrl: '', enabled: true },

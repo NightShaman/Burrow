@@ -21,12 +21,13 @@ type ModsResponse = {
     id?: unknown;
     name?: unknown;
     contributions?: { apiTargets?: unknown; settings?: unknown };
+    ui?: { settingsUrl?: unknown };
   }>;
 };
 
 export type ModSettingsEmptyState = { title: string; description?: string };
 export type ModSettingsNavigation = { title: string; description?: string };
-export type ModSettingsPane = { title: string; description?: string; capability: 'apiTargets' };
+export type ModSettingsPane = { title: string; description?: string; capability: 'apiTargets' | 'settingsUi' };
 export type ModSettingsInventory = ModSettingsPane & { emptyState?: ModSettingsEmptyState };
 export type ModSettingsContribution = {
   id: string;
@@ -43,11 +44,11 @@ function normalizeSettingsContribution(value: unknown): ModSettingsContribution 
   if (typeof item.id !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item.id) || !navigation || typeof navigation !== 'object' || !primary || typeof primary !== 'object') return null;
   const nav = navigation as Record<string, unknown>;
   const pane = primary as Record<string, unknown>;
-  if (typeof nav.title !== 'string' || !nav.title.trim() || typeof pane.title !== 'string' || !pane.title.trim() || pane.capability !== 'apiTargets') return null;
+  if (typeof nav.title !== 'string' || !nav.title.trim() || typeof pane.title !== 'string' || !pane.title.trim() || (pane.capability !== 'apiTargets' && pane.capability !== 'settingsUi')) return null;
   const output: ModSettingsContribution = {
     id: item.id,
     navigation: { title: nav.title.trim(), ...(typeof nav.description === 'string' && nav.description.trim() ? { description: nav.description.trim() } : {}) },
-    primary: { title: pane.title.trim(), capability: 'apiTargets', ...(typeof pane.description === 'string' && pane.description.trim() ? { description: pane.description.trim() } : {}) },
+    primary: { title: pane.title.trim(), capability: pane.capability, ...(typeof pane.description === 'string' && pane.description.trim() ? { description: pane.description.trim() } : {}) },
   };
   if (item.inventory !== undefined) {
     if (!item.inventory || typeof item.inventory !== 'object' || Array.isArray(item.inventory)) return null;
@@ -67,7 +68,8 @@ type TargetsResponse = { ok: true; targets?: unknown };
 export type ApiTargetContribution = {
   modId: string;
   name: string;
-  endpoint: string;
+  endpoint?: string;
+  settingsUrl?: string;
   settings?: ModSettingsContribution[];
 };
 
@@ -101,11 +103,15 @@ export async function loadApiTargetContributions(): Promise<ApiTargetContributio
   const catalog = await loadModsCatalog();
   return (catalog.mods ?? []).flatMap((mod) => {
     const endpoint = mod.contributions?.apiTargets;
-    if (typeof mod.id !== 'string' || typeof endpoint !== 'string' || !endpoint.startsWith(`/api/mods/${mod.id}/`)) return [];
+    const settingsUrl = mod.ui?.settingsUrl;
+    if (typeof mod.id !== 'string') return [];
+    const validEndpoint = typeof endpoint === 'string' && endpoint.startsWith(`/api/mods/${mod.id}/`) ? endpoint : undefined;
+    const validSettingsUrl = typeof settingsUrl === 'string' && settingsUrl.startsWith(`/api/mods/${mod.id}/`) ? settingsUrl : undefined;
+    if (!validEndpoint && !validSettingsUrl) return [];
     const settings = Array.isArray(mod.contributions?.settings)
       ? mod.contributions.settings.map(normalizeSettingsContribution).filter((item): item is ModSettingsContribution => Boolean(item))
       : [];
-    return [{ modId: mod.id, name: typeof mod.name === 'string' && mod.name.trim() ? mod.name.trim() : mod.id, endpoint, ...(settings.length ? { settings } : {}) }];
+    return [{ modId: mod.id, name: typeof mod.name === 'string' && mod.name.trim() ? mod.name.trim() : mod.id, ...(validEndpoint ? { endpoint: validEndpoint } : {}), ...(validSettingsUrl ? { settingsUrl: validSettingsUrl } : {}), ...(settings.length ? { settings } : {}) }];
   });
 }
 
