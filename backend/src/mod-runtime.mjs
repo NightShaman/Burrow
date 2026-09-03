@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ModSettingsStore, modSecretsApi, modSettingsApi } from './mod-settings-store.mjs';
+import { startModHost } from './mod-host.mjs';
 
 const MOD_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MIME = Object.freeze({ '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' });
@@ -136,6 +137,12 @@ export async function discoverMods({ runtimeRoot = process.env.BURROW_RUNTIME_RO
 }
 
 function escapeRegex(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function normalizedModRoutePath(value) {
+  if (typeof value !== 'string' || value !== value.trim() || !value.startsWith('/') || value === '/' || value.includes('?') || value.includes('#') || value.includes('\\') || value.endsWith('/') || value.includes('//')) throw new Error('mod_route_description_invalid');
+  const parts = value.slice(1).split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..' || decodeURIComponent(part) !== part)) throw new Error('mod_route_description_invalid');
+  return value;
+}
 function compileRoute(routePath) {
   const names = [];
   const pattern = routePath.split('/').map((part) => {
@@ -189,34 +196,71 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
   }
 }
 
-export async function loadMods({ runtimeRoot, databasePath, logger = console, processControllers = null } = {}) {
+export async function loadMods({ runtimeRoot, databasePath, logger = console, processControllers = null, systemModCapabilities = {}, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs } = {}) {
   const discovered = await discoverMods({ runtimeRoot });
   const loaded = [];
   for (const mod of discovered) {
     if (mod.status === 'failed') { loaded.push(mod); continue; }
-    const registrar = apiRegistrar(mod);
-    const store = new ModSettingsStore({ modId: mod.id, databasePath });
-    let lifecycleCleanup = null;
+    let host = null;
+    let store = null;
     try {
+      let routes = [];
       if (mod.server) {
-        const module = await import(`${pathToFileURL(mod.server).href}?loaded=${Date.now()}`);
-        if (typeof module.activate !== 'function') throw new Error(`mod_activate_missing:${mod.id}`);
-        const processExecution = processControllers ? Object.freeze({
-          registerController(controller) { return processControllers.register(mod.id, controller); },
-        }) : null;
-        const activation = await module.activate(Object.freeze({ id: mod.id, api: registrar.api, settings: modSettingsApi(store), secrets: modSecretsApi(store), logger, ...(processExecution ? { processExecution } : {}) }));
-        lifecycleCleanup = modCleanupHandle(activation);
+        const requestedSystem = mod.manifest?.system === true;
+        const configuredCapability = systemModCapabilities?.[mod.id];
+        const systemCapability = mod.id === 'remote-nodes' && requestedSystem && configuredCapability === 'remote-process-controller-v1'
+          ? configuredCapability : null;
+        if (requestedSystem && !systemCapability) throw new Error(`system_mod_not_enabled:${mod.id}`);
+        let unregisterController = null;
+        store = new ModSettingsStore({ modId: mod.id, databasePath });
+        host = startModHost({
+          mod, store, logger, systemCapability, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs,
+          onSystemControllerReady(controllerProxy) {
+            if (!systemCapability || !processControllers) return;
+            unregisterController = processControllers.register(mod.id, controllerProxy);
+          },
+          onSystemControllerUnavailable() {
+            unregisterController?.();
+            unregisterController = null;
+          },
+          onUnavailable(code) {
+            unregisterController?.();
+            unregisterController = null;
+            mod.status = 'failed';
+            mod.error = code;
+          },
+        });
+        const descriptions = await host.activated;
+        if (!Array.isArray(descriptions)) throw new Error(`mod_route_description_invalid:${mod.id}`);
+        const routeIds = new Set();
+        const routeKeys = new Set();
+        routes = descriptions.map((route) => {
+          const method = route?.method;
+          const routeId = route?.routeId;
+          if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method) || typeof routeId !== 'string' || !/^route-[1-9][0-9]*$/.test(routeId) || routeIds.has(routeId)) throw new Error(`mod_route_description_invalid:${mod.id}`);
+          let routePath;
+          try { routePath = normalizedModRoutePath(route?.path); }
+          catch { throw new Error(`mod_route_description_invalid:${mod.id}`); }
+          const routeKey = `${method} ${routePath}`;
+          if (routeKeys.has(routeKey)) throw new Error(`mod_route_description_invalid:${mod.id}`);
+          routeIds.add(routeId);
+          routeKeys.add(routeKey);
+          return { method, path: routePath, ...compileRoute(routePath), handler: (request) => host.invoke(routeId, request) };
+        });
       }
-      loaded.push({ ...mod, routes: registrar.routes, store, lifecycleCleanup, status: 'loaded' });
+      Object.assign(mod, { routes, store, lifecycleCleanup: host ? () => host.close() : null, host, status: 'loaded' });
+      loaded.push(mod);
     } catch (error) {
-      if (lifecycleCleanup) {
-        try { await lifecycleCleanup(); }
+      if (host) {
+        try { await host.close(); }
         catch (cleanupError) { logger.error?.(`Burrow mod ${mod.id} cleanup failed: ${String(cleanupError?.message || cleanupError)}`); }
       }
-      try { store.close(); }
-      catch (closeError) { logger.error?.(`Burrow mod ${mod.id} store cleanup failed: ${String(closeError?.message || closeError)}`); }
+      if (store) {
+        try { store.close(); }
+        catch (cleanupError) { logger.error?.(`Burrow mod ${mod.id} store cleanup failed: ${String(cleanupError?.message || cleanupError)}`); }
+      }
       logger.error?.(`Burrow mod ${mod.id} failed: ${String(error?.message || error)}`);
-      loaded.push({ ...mod, routes: [], store: null, status: 'failed', error: String(error?.message || error) });
+      loaded.push({ ...mod, routes: [], store: null, host: null, status: 'failed', error: String(error?.message || error) });
     }
   }
   return loaded;
@@ -237,6 +281,23 @@ async function sendAsset(res, filePath) {
   const content = await fs.readFile(filePath);
   res.writeHead(200, { 'content-type': MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream', 'content-length': content.length, 'cache-control': 'no-cache' });
   res.end(content);
+}
+function serializableHeaders(headers = {}) {
+  const output = {};
+  for (const [name, value] of Object.entries(headers)) {
+    if (value === undefined) continue;
+    output[String(name).toLowerCase()] = Array.isArray(value) ? value.map(String) : String(value);
+  }
+  return output;
+}
+function sendModResult(res, sendJson, result) {
+  const status = Number(result?.status) || 200;
+  const body = result?.body ?? result ?? { ok: true };
+  const headers = result && typeof result === 'object' && !Array.isArray(result) && result.headers && typeof result.headers === 'object' && !Array.isArray(result.headers) ? serializableHeaders(result.headers) : null;
+  if (!headers || !Object.keys(headers).length) { sendJson(res, status, body); return; }
+  const payload = Buffer.from(JSON.stringify(body));
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': payload.length, ...headers });
+  res.end(payload);
 }
 
 export function createModRoute({ mods = [], readJsonBody, sendJson } = {}) {
@@ -268,10 +329,13 @@ export function createModRoute({ mods = [], readJsonBody, sendJson } = {}) {
     if (!route) { sendJson(res, 404, { ok: false, error: 'mod_route_not_found' }); return true; }
     try {
       const body = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) ? await readJsonBody(req) : null;
-      const result = await route.handler({ body, query: Object.fromEntries(url.searchParams), params, method: req.method, path: routePath });
-      sendJson(res, Number(result?.status) || 200, result?.body ?? result ?? { ok: true });
+      const result = await route.handler({ body, query: Object.fromEntries(url.searchParams), params, method: req.method, path: routePath, headers: serializableHeaders(req.headers) });
+      sendModResult(res, sendJson, result);
     } catch (error) {
-      sendJson(res, Number(error?.statusCode) || 500, { ok: false, error: String(error?.message || error) });
+      const code = String(error?.code || '');
+      if (code === 'mod_route_timeout') sendJson(res, 504, { ok: false, error: 'mod_route_timeout' });
+      else if (['mod_host_exited', 'mod_host_disconnected', 'mod_host_error', 'mod_host_send_failed', 'mod_host_unavailable', 'mod_host_closed'].includes(code)) sendJson(res, 503, { ok: false, error: 'mod_unavailable' });
+      else sendJson(res, Number(error?.statusCode) || 500, { ok: false, error: 'mod_route_failed' });
     }
     return true;
   };
