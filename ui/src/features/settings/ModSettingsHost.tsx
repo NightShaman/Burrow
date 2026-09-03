@@ -30,7 +30,7 @@ type ModSettingsModule = {
   handleSettingsAction?: (actionId: string, values: Record<string, string | boolean>) => void | Promise<void>;
 };
 
-function DeclarativeSection({ contribution, section, module, overflowTarget }: { contribution: SettingsContribution; section: ModSettingsSection; module: ModSettingsModule; overflowTarget: HTMLElement | null }) {
+export function DeclarativeSection({ contribution, section, module, overflowTarget }: { contribution: SettingsContribution; section: ModSettingsSection; module: ModSettingsModule; overflowTarget: HTMLElement | null }) {
   const definition = contribution.sections.find((item) => item.id === section.id);
   const [values, setValues] = useState<Record<string, string | boolean>>(() => Object.fromEntries([...(definition?.fields ?? []), ...(definition?.items?.flatMap((item) => item.fields ?? []) ?? [])].map((field) => [field.id, field.control === 'boolean' ? field.value === 'true' : field.value ?? ''])));
   const [actionState, setActionState] = useState<{ id: string; status: 'saving' | 'success' | 'error'; message: string } | null>(null);
