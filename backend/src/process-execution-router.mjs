@@ -67,7 +67,7 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
         // Ordinary env remains compatible; protected values use a distinct,
         // operation-scoped field so controllers cannot accidentally journal it.
         ...(process.env && !request.protectedValues ? { env: { ...process.env } } : {}),
-        ...(process.timeoutMs != null ? { timeoutMs: Number(process.timeoutMs) } : {}),
+        timeoutMs: process.timeoutMs != null ? Number(process.timeoutMs) : 30_000,
       },
       ...(request.protectedValues ? { protectedValues: { ...request.protectedValues } } : {}),
       ...(request.protectedBindingMetadata ? { protectedBindingMetadata: request.protectedBindingMetadata.map((entry) => ({ ...entry })) } : {}),
