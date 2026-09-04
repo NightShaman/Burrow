@@ -45,7 +45,7 @@ The installer downloads the assembled `main` revision, installs dependencies, bu
 ├── bin/burrow    # launcher and management command
 ├── burrow.env    # durable runtime environment
 ├── config/       # settings database and configuration
-├── workspace/     # workspace and project material
+├── workspace/    # workspace and project material
 ├── cache/
 ├── reports/
 └── integrations/
