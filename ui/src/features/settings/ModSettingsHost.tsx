@@ -30,17 +30,30 @@ type ModSettingsModule = {
   handleSettingsAction?: (actionId: string, values: Record<string, string | boolean>) => void | Promise<void>;
 };
 
+function defaultFieldValues(definition: SettingsContribution['sections'][number]): Record<string, string | boolean> {
+  return Object.fromEntries([
+    ...(definition.fields ?? []),
+    ...(definition.items?.flatMap((item) => item.fields ?? []) ?? []),
+  ].map((field) => [field.id, field.control === 'boolean' ? field.value === 'true' : field.value ?? '']));
+}
+
 export function DeclarativeSection({ contribution, section, module, overflowTarget }: { contribution: SettingsContribution; section: ModSettingsSection; module: ModSettingsModule; overflowTarget: HTMLElement | null }) {
   const definition = contribution.sections.find((item) => item.id === section.id);
-  const [values, setValues] = useState<Record<string, string | boolean>>(() => Object.fromEntries([...(definition?.fields ?? []), ...(definition?.items?.flatMap((item) => item.fields ?? []) ?? [])].map((field) => [field.id, field.control === 'boolean' ? field.value === 'true' : field.value ?? ''])));
+  const [values, setValues] = useState<Record<string, string | boolean>>(() => definition ? defaultFieldValues(definition) : {});
   const [actionState, setActionState] = useState<{ id: string; status: 'saving' | 'success' | 'error'; message: string } | null>(null);
   const [selectedId, setSelectedId] = useState(definition?.items?.[0]?.id ?? '');
+  useEffect(() => {
+    if (!definition) return;
+    setValues((current) => ({ ...defaultFieldValues(definition), ...current }));
+    setSelectedId((current) => definition.items?.some((item) => item.id === current) ? current : definition.items?.[0]?.id ?? '');
+  }, [definition]);
   if (!definition) return null;
   const update = (id: string, value: string | boolean) => setValues((current) => ({ ...current, [id]: value }));
   const runAction = async (actionId: string, confirm?: string) => {
     if (confirm && !window.confirm(confirm)) return;
     setActionState({ id: actionId, status: 'saving', message: 'Saving…' });
-    try { await module.handleSettingsAction?.(actionId, values); setActionState({ id: actionId, status: 'success', message: 'Saved.' }); }
+    const actionValues = { ...defaultFieldValues(definition), ...values };
+    try { await module.handleSettingsAction?.(actionId, actionValues); setActionState({ id: actionId, status: 'success', message: 'Saved.' }); }
     catch (cause) { setActionState({ id: actionId, status: 'error', message: cause instanceof Error ? cause.message : 'The action could not be completed.' }); }
   };
   const actions = (items: SettingsAction[] | undefined) => items?.length ? <div className="card-actions">{items.map((action) => { const saving = actionState?.id === action.id && actionState?.status === 'saving'; return <button type="button" className={action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : ''} disabled={saving} key={action.id} onClick={() => void runAction(action.id, action.confirm)}>{saving ? 'Saving…' : action.label}</button>; })}</div> : null;

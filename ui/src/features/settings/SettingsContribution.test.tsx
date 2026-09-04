@@ -1,5 +1,5 @@
-import { render, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, waitFor, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import { DeclarativeSection } from './ModSettingsHost';
 import { validateSettingsContribution } from './SettingsContribution';
 
@@ -37,6 +37,24 @@ describe('settings contribution list-detail items', () => {
     expect(within(overflow).getByRole('heading', { name: 'Smatchet' })).toBeTruthy();
     expect(within(overflow).getByText('Assignments apply to future turns only.')).toBeTruthy();
     expect(within(overflow).getByRole('button', { name: 'Save assignment' })).toBeTruthy();
+  });
+
+  it('passes displayed item defaults when saving after selecting an item', async () => {
+    const contribution = validateSettingsContribution({
+      sections: [{
+        id: 'assignments', label: 'Agent assignments', layout: 'list-detail', items: [
+          { id: 'local', label: 'Local', fields: [{ id: 'gateway:local', label: 'Gateway', value: 'local' }], actions: [{ id: 'save:local', label: 'Save' }] },
+          { id: 'Hatchet', label: 'Hatchet', fields: [{ id: 'gateway:Hatchet', label: 'Gateway', value: 'Hatchet' }], actions: [{ id: 'save:Hatchet', label: 'Save' }] },
+        ],
+      }],
+    });
+    const handleSettingsAction = vi.fn().mockResolvedValue(undefined);
+    const overflow = document.createElement('div');
+    render(<DeclarativeSection contribution={contribution!} section={contribution!.sections[0]} module={{ handleSettingsAction }} overflowTarget={overflow} />);
+
+    fireEvent.click(within(document.body).getByRole('button', { name: /Hatchet/ }));
+    fireEvent.click(within(overflow).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(handleSettingsAction).toHaveBeenCalledWith('save:Hatchet', { 'gateway:local': 'local', 'gateway:Hatchet': 'Hatchet' }));
   });
 });
 
