@@ -12,7 +12,7 @@ describe('API target contributions', () => {
 
   it('loads enabled targets from a mod contribution endpoint', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, mods: [{ id: 'remote-nodes', contributions: { apiTargets: '/api/mods/remote-nodes/targets' } }] }), { headers: { 'content-type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, mods: [{ id: 'node-goblin', contributions: { apiTargets: '/api/mods/node-goblin/targets' } }] }), { headers: { 'content-type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, targets: [
         { id: 'node-1', name: 'Node One', baseUrl: 'http://node-one:8787', enabled: true },
         { id: 'node-2', name: 'Node Two', baseUrl: 'http://node-two:8787', enabled: false },
@@ -27,29 +27,29 @@ describe('API target contributions', () => {
 
   it('discovers host-managed target settings from scoped contribution endpoints', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, mods: [
-      { id: 'remote-nodes', name: 'Remote Nodes', contributions: { apiTargets: '/api/mods/remote-nodes/targets' } },
+      { id: 'node-goblin', name: 'Node Goblin', contributions: { apiTargets: '/api/mods/node-goblin/targets' } },
       { id: 'unsafe', name: 'Unsafe', contributions: { apiTargets: '/api/mods/other/targets' } },
     ] }), { headers: { 'content-type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(loadApiTargetContributions()).resolves.toEqual([
-      { modId: 'remote-nodes', name: 'Remote Nodes', endpoint: '/api/mods/remote-nodes/targets' },
+      { modId: 'node-goblin', name: 'Node Goblin', endpoint: '/api/mods/node-goblin/targets' },
     ]);
   });
 
   it('discovers scoped mod settings assets without requiring an API targets contribution', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, mods: [
-      { id: 'remote-nodes', name: 'Remote Nodes', contributions: { settings: [{ id: 'operations', navigation: { title: 'Remote Nodes' }, primary: { title: 'Operations', capability: 'settingsUi' } }] }, ui: { settingsUrl: '/api/mods/remote-nodes/ui/settings.js' } },
+      { id: 'node-goblin', name: 'Node Goblin', contributions: { settings: [{ id: 'operations', navigation: { title: 'Node Goblin' }, primary: { title: 'Operations', capability: 'settingsUi' } }] }, ui: { settingsUrl: '/api/mods/node-goblin/ui/settings.js' } },
       { id: 'unsafe', name: 'Unsafe', ui: { settingsUrl: '/api/mods/other/ui/settings.js' } },
     ] }), { headers: { 'content-type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(loadApiTargetContributions()).resolves.toEqual([
       {
-        modId: 'remote-nodes',
-        name: 'Remote Nodes',
-        settingsUrl: '/api/mods/remote-nodes/ui/settings.js',
-        settings: [{ id: 'operations', navigation: { title: 'Remote Nodes' }, primary: { title: 'Operations', capability: 'settingsUi' } }],
+        modId: 'node-goblin',
+        name: 'Node Goblin',
+        settingsUrl: '/api/mods/node-goblin/ui/settings.js',
+        settings: [{ id: 'operations', navigation: { title: 'Node Goblin' }, primary: { title: 'Operations', capability: 'settingsUi' } }],
       },
     ]);
   });

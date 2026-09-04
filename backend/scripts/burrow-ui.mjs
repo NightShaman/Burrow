@@ -810,7 +810,7 @@ async function resolveAgentRuntime(agentId = null) {
   return Object.freeze({
     ...resolved,
     executionEnvironment,
-    processExecutionController: executionEnvironment.kind === 'gateway' ? processControllers.get('remote-nodes') : null,
+    processExecutionController: executionEnvironment.kind === 'gateway' ? processControllers.get('node-goblin') : null,
   });
 }
 
@@ -2871,8 +2871,8 @@ const mods = await loadMods({
   runtimeRoot: process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow',
   databasePath: settingsDatabasePath(),
   processControllers,
-  systemModCapabilities: process.env.BURROW_SYSTEM_REMOTE_NODES === '1'
-    ? { 'remote-nodes': 'remote-process-controller-v1' }
+  systemModCapabilities: process.env.BURROW_SYSTEM_NODE_GOBLIN === '1'
+    ? { 'node-goblin': 'remote-process-controller-v1' }
     : {},
 });
 const modRoute = createModRoute({ mods, readJsonBody, sendJson });

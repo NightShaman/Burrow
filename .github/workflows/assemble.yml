@@ -63,7 +63,7 @@ jobs:
         with:
           repository: NightShaman/Node-Goblin
           token: ${{ secrets.BURROW_SOURCE_TOKEN }}
-          path: remote-nodes-source
+          path: node-goblin-source
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -151,13 +151,13 @@ jobs:
           # releases installable; source-update payloads are not the authority
           # for public asset availability.
           version="${{ steps.build.outputs.version }}"
-          printf '%s\n' "$version" > remote-nodes-source/gateway/VERSION
-          SOURCE_DATE_EPOCH=$(git -C remote-nodes-source show -s --format=%ct HEAD) \
-            remote-nodes-source/gateway/deploy/build-release.sh remote-nodes-source/gateway/dist
+          printf '%s\n' "$version" > node-goblin-source/gateway/VERSION
+          SOURCE_DATE_EPOCH=$(git -C node-goblin-source show -s --format=%ct HEAD) \
+            node-goblin-source/gateway/deploy/build-release.sh node-goblin-source/gateway/dist
           printf 'present=true\n' >> "$GITHUB_OUTPUT"
           printf 'tarball=%s\nchecksum=%s\n' \
-            "$GITHUB_WORKSPACE/remote-nodes-source/gateway/dist/node-goblin-$version.tar.gz" \
-            "$GITHUB_WORKSPACE/remote-nodes-source/gateway/dist/node-goblin-$version.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+            "$GITHUB_WORKSPACE/node-goblin-source/gateway/dist/node-goblin-$version.tar.gz" \
+            "$GITHUB_WORKSPACE/node-goblin-source/gateway/dist/node-goblin-$version.tar.gz.sha256" >> "$GITHUB_OUTPUT"
       - name: Authenticate to GitHub Container Registry
         uses: docker/login-action@v3
         with:

@@ -208,7 +208,7 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, pr
       if (mod.server) {
         const requestedSystem = mod.manifest?.system === true;
         const configuredCapability = systemModCapabilities?.[mod.id];
-        const systemCapability = mod.id === 'remote-nodes' && requestedSystem && configuredCapability === 'remote-process-controller-v1'
+        const systemCapability = mod.id === 'node-goblin' && requestedSystem && configuredCapability === 'remote-process-controller-v1'
           ? configuredCapability : null;
         if (requestedSystem && !systemCapability) throw new Error(`system_mod_not_enabled:${mod.id}`);
         let unregisterController = null;

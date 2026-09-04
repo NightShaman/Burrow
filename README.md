@@ -190,5 +190,5 @@ For example, the Node Goblin mod is maintained at <https://github.com/NightShama
 ```sh
 mkdir -p "$HOME/.burrow/mods"
 git clone https://github.com/NightShaman/Node-Goblin.git \
-  "$HOME/.burrow/mods/remote-nodes"
+  "$HOME/.burrow/mods/node-goblin"
 ```
