@@ -4,7 +4,7 @@
 > Burrow does not provide guardrails for every tool action or external integration. Run it only where you understand the credentials, systems, and data it can reach—and the blast radius of an agent acting with that access. Start with least privilege, isolated test targets, and deliberate integration grants.
 
 <p align="center">
-  <img src="burrow-logo.png" alt="Burrow" width="320">
+  <img src="burrow-logo.png" alt="Burrow" width="480">
 </p>
 
 > A chat-first local runtime for people who want capable agents without turning their workbench into a dashboard cult.
@@ -44,7 +44,7 @@ The installer downloads the assembled `main` revision, installs dependencies, bu
 ├── app/          # replaceable installed application
 ├── bin/burrow    # launcher and management command
 ├── burrow.env    # durable runtime environment
-├── config/        # settings database and configuration
+├── config/       # settings database and configuration
 ├── workspace/     # workspace and project material
 ├── cache/
 ├── reports/
