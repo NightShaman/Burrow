@@ -45,9 +45,13 @@ describe('settings contribution item IDs', () => {
     sections: [{ id: 'pairing', label: 'Pairing', layout: 'list-detail', items }],
   });
 
-  it('preserves case-sensitive opaque item IDs', () => {
-    const result = validateSettingsContribution(contribution([{ id: 'Hatchet', label: 'Hatchet' }]));
+  it('preserves case-sensitive opaque item IDs and their actions', () => {
+    const result = validateSettingsContribution(contribution([{ id: 'Hatchet', label: 'Hatchet', actions: [
+      { id: 'approve-pairing:Hatchet', label: 'Approve', tone: 'primary' },
+      { id: 'reject-pairing:Hatchet', label: 'Reject', tone: 'danger' },
+    ] }]));
     expect(result?.sections[0].items?.[0].id).toBe('Hatchet');
+    expect(result?.sections[0].items?.[0].actions?.map((action) => action.id)).toEqual(['approve-pairing:Hatchet', 'reject-pairing:Hatchet']);
   });
 
   it.each([

@@ -59,8 +59,9 @@ export type SettingsContributionContext = {
 export type SettingsContributionFactory = (context: SettingsContributionContext) => SettingsContribution | Promise<SettingsContribution>;
 
 const idPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-// Field/action IDs are also used as namespaced keys by mod contributions.
-const nestedIdPattern = /^[a-z0-9]+(?:[a-z0-9:_-]*[a-z0-9])?$/;
+// Field/action IDs are also used as namespaced keys by mod contributions. The
+// suffix may contain opaque, case-preserving owner IDs such as `Hatchet`.
+const nestedIdPattern = /^[A-Za-z0-9]+(?:[A-Za-z0-9:_-]*[A-Za-z0-9])?$/;
 // Item IDs identify opaque mod-owned records, so preserve their spelling while
 // rejecting values that cannot safely be used as an identifier in the UI.
 const maxOpaqueIdLength = 128;
