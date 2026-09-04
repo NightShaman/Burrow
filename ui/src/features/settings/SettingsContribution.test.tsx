@@ -39,3 +39,23 @@ describe('settings contribution list-detail items', () => {
     expect(within(overflow).getByRole('button', { name: 'Save assignment' })).toBeTruthy();
   });
 });
+
+describe('settings contribution item IDs', () => {
+  const contribution = (items: unknown[]) => ({
+    sections: [{ id: 'pairing', label: 'Pairing', layout: 'list-detail', items }],
+  });
+
+  it('preserves case-sensitive opaque item IDs', () => {
+    const result = validateSettingsContribution(contribution([{ id: 'Hatchet', label: 'Hatchet' }]));
+    expect(result?.sections[0].items?.[0].id).toBe('Hatchet');
+  });
+
+  it.each([
+    ['empty', ''],
+    ['whitespace-only', '   '],
+    ['control character', 'Hatchet\u0000gateway'],
+    ['too long', 'H'.repeat(129)],
+  ])('rejects unsafe %s item IDs rather than silently dropping the item', (_label, id) => {
+    expect(validateSettingsContribution(contribution([{ id, label: 'Unsafe' }]))).toBeNull();
+  });
+});

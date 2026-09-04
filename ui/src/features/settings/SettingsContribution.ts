@@ -61,6 +61,14 @@ export type SettingsContributionFactory = (context: SettingsContributionContext)
 const idPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // Field/action IDs are also used as namespaced keys by mod contributions.
 const nestedIdPattern = /^[a-z0-9]+(?:[a-z0-9:_-]*[a-z0-9])?$/;
+// Item IDs identify opaque mod-owned records, so preserve their spelling while
+// rejecting values that cannot safely be used as an identifier in the UI.
+const maxOpaqueIdLength = 128;
+const controlCharacterPattern = /[\u0000-\u001f\u007f-\u009f]/u;
+
+function isValidOpaqueId(value: string): boolean {
+  return value.length > 0 && value.length <= maxOpaqueIdLength && value.trim().length > 0 && !controlCharacterPattern.test(value);
+}
 
 function validateFields(value: unknown): SettingsField[] | undefined {
   if (!Array.isArray(value)) return undefined;
@@ -97,10 +105,11 @@ export function validateSettingsContribution(value: unknown): SettingsContributi
     seen.add(item.id);
     const fields = validateFields(item.fields);
     const actions = validateActions(item.actions);
+    let invalidItem = false;
     const items = Array.isArray(item.items) ? item.items.flatMap((entry): SettingsItem[] => {
-      if (!entry || typeof entry !== 'object') return [];
+      if (!entry || typeof entry !== 'object') { invalidItem = true; return []; }
       const item = entry as Partial<SettingsItem>;
-      if (typeof item.id !== 'string' || !idPattern.test(item.id) || typeof item.label !== 'string' || !item.label.trim()) return [];
+      if (typeof item.id !== 'string' || !isValidOpaqueId(item.id) || typeof item.label !== 'string' || !item.label.trim()) { invalidItem = true; return []; }
       const itemFields = validateFields(item.fields);
       const itemActions = validateActions(item.actions);
       return [{
@@ -113,6 +122,7 @@ export function validateSettingsContribution(value: unknown): SettingsContributi
         ...(itemActions ? { actions: itemActions } : {}),
       }];
     }) : undefined;
+    if (invalidItem) return [];
     return [{ id: item.id, label: item.label.trim(), description: typeof item.description === 'string' ? item.description : undefined, layout: item.layout, ...(fields ? { fields } : {}), ...(items ? { items } : {}), ...(actions ? { actions } : {}) }];
   });
   if (sections.length !== candidate.sections.length) return null;
