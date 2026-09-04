@@ -61,7 +61,7 @@ jobs:
           path: ui-source
       - uses: actions/checkout@v4
         with:
-          repository: NightShaman/burrow-mod-remote-nodes
+          repository: NightShaman/Node-Goblin
           token: ${{ secrets.BURROW_SOURCE_TOKEN }}
           path: remote-nodes-source
       - uses: actions/setup-node@v4

@@ -2,7 +2,7 @@
 # Public bootstrap for the calendar-versioned Node Goblin release.
 set -eu
 
-REPOSITORY=${NODE_GOBLIN_REPOSITORY:-NightShaman/Burrow}
+REPOSITORY=${NODE_GOBLIN_REPOSITORY:-NightShaman/Node-Goblin}
 VERSION=${NODE_GOBLIN_VERSION:-latest}
 CONTROLLER=
 NODE_ID=

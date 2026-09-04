@@ -63,7 +63,7 @@ sudo node-goblin configure
 sudo node-goblin connect
 ```
 
-The installer downloads the release tarball and checksum from `NightShaman/burrow-mod-remote-nodes`, verifies it, and installs the systemd service. Configuration asks only for the controller address and stable node ID. On first connection, compare the pairing code printed by the Node Goblin with Burrow's pending pairing and approve it in Settings.
+The installer downloads the release tarball and checksum from `NightShaman/Node-Goblin`, verifies it, and installs the systemd service. Configuration asks only for the controller address and stable node ID. On first connection, compare the pairing code printed by the Node Goblin with Burrow's pending pairing and approve it in Settings.
 
 Pin a calendar release or configure non-interactively with non-secret values:
 
@@ -185,10 +185,10 @@ The assembly requires a `BURROW_SOURCE_TOKEN` repository secret to fetch the sou
 
 Mods are separate from the Burrow product repository. Install them beneath the active runtime root, normally `~/.burrow/mods/<mod-id>`, and restart Burrow after installation. Burrow discovers a mod from its `burrow.mod.json` manifest.
 
-For example, Remote Nodes is maintained at <https://github.com/NightShaman/burrow-mod-remote-nodes>:
+For example, the Node Goblin mod is maintained at <https://github.com/NightShaman/Node-Goblin>:
 
 ```sh
 mkdir -p "$HOME/.burrow/mods"
-git clone https://github.com/NightShaman/burrow-mod-remote-nodes.git \
+git clone https://github.com/NightShaman/Node-Goblin.git \
   "$HOME/.burrow/mods/remote-nodes"
 ```
