@@ -15,17 +15,20 @@ export type ModRecord = {
 };
 
 export type ModSource = { id: string; url: string; status?: string; error?: string; lastCheckedAt?: string };
-export type ModManagementState = { ok?: boolean; mods?: ModRecord[]; sources?: ModSource[] };
+export type ModManagementState = { ok?: boolean; restartRequired?: boolean; mods?: ModRecord[]; sources?: ModSource[] };
+export type NormalizedModManagement = { ok?: boolean; restartRequired: boolean; mods: ModRecord[]; sources: ModSource[] };
 
-export function normalizeModManagement(value: unknown): { mods: ModRecord[]; sources: ModSource[] } {
+export function normalizeModManagement(value: unknown): NormalizedModManagement {
   const body = value && typeof value === 'object' ? value as ModManagementState : {};
   return {
-    mods: Array.isArray(body.mods) ? body.mods.filter((mod): mod is ModRecord => Boolean(mod && typeof mod === 'object' && typeof mod.id === 'string')) : [],
+    ok: body.ok,
+    restartRequired: body.restartRequired === true,
+    mods: Array.isArray(body.mods) ? body.mods.filter((mod): mod is ModRecord => Boolean(mod && typeof mod === 'object' && typeof mod.id === 'string' && typeof mod.name === 'string')) : [],
     sources: Array.isArray(body.sources) ? body.sources.filter((source): source is ModSource => Boolean(source && typeof source === 'object' && typeof source.id === 'string' && typeof source.url === 'string')) : [],
   };
 }
 
-export async function loadModManagement(): Promise<{ mods: ModRecord[]; sources: ModSource[] }> {
+export async function loadModManagement(): Promise<NormalizedModManagement> {
   return normalizeModManagement(await api<ModManagementState>('/api/mod-management'));
 }
 
