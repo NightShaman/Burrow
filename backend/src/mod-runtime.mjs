@@ -196,7 +196,7 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
   }
 }
 
-export async function loadMods({ runtimeRoot, databasePath, logger = console, executionProviders = null, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs } = {}) {
+export async function loadMods({ runtimeRoot, databasePath, logger = console, executionProviders = null, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs } = {}) {
   const discovered = await discoverMods({ runtimeRoot });
   const loaded = [];
   for (const mod of discovered) {
@@ -218,7 +218,7 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
         let unregisterController = null;
         store = new ModSettingsStore({ modId: mod.id, databasePath });
         host = startModHost({
-          mod, store, logger, systemCapability, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs,
+          mod, store, logger, systemCapability, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs,
           onSystemControllerReady(controllerProxy) {
             if (!systemCapability || !executionProviders) return;
             unregisterController = executionProviders.register(mod.id, controllerProxy);

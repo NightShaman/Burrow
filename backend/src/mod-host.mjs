@@ -5,6 +5,9 @@ import { randomUUID } from 'node:crypto';
 const CHILD_PATH = fileURLToPath(new URL('./mod-host-child.mjs', import.meta.url));
 // A hung extension handler must not hold Burrow core's HTTP request open forever.
 export const DEFAULT_MOD_ROUTE_TIMEOUT_MS = 30_000;
+// Leave enough room for the gateway's TERM -> KILL -> forced-settlement path,
+// while still bounding a lost terminal response at the core/mod boundary.
+export const SYSTEM_PROCESS_WATCHDOG_GRACE_MS = 1_500;
 
 function finiteTimeout(value, fallback) {
   const number = Number(value);
@@ -82,7 +85,7 @@ const STORE_METHODS = Object.freeze({
   secrets: Object.freeze({ get: 'getSecret', set: 'setSecret', clear: 'clearSecret', has: 'hasSecret' }),
 });
 
-export function startModHost({ mod, store, logger = console, systemCapability = null, activationTimeoutMs = 10_000, routeTimeoutMs = DEFAULT_MOD_ROUTE_TIMEOUT_MS, cleanupTimeoutMs = 5_000, onUnavailable = null, onSystemControllerReady = null, onSystemControllerUnavailable = null } = {}) {
+export function startModHost({ mod, store, logger = console, systemCapability = null, activationTimeoutMs = 10_000, routeTimeoutMs = DEFAULT_MOD_ROUTE_TIMEOUT_MS, cleanupTimeoutMs = 5_000, systemProcessWatchdogGraceMs = SYSTEM_PROCESS_WATCHDOG_GRACE_MS, onUnavailable = null, onSystemControllerReady = null, onSystemControllerUnavailable = null } = {}) {
   if (!store) throw hostError('mod_store_required', mod?.id);
   const child = fork(CHILD_PATH, [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], serialization: 'advanced' });
   const pending = new Map();
@@ -100,6 +103,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   const rejectSystemProcesses = (code = 'remote_process_controller_unavailable') => {
     const error = hostError(code);
     for (const entry of pendingSystemProcess.values()) {
+      clearTimeout(entry.watchdogTimer);
       entry.abortSignal?.removeEventListener?.('abort', entry.cancel);
       entry.reject(error);
     }
@@ -212,6 +216,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       const entry = pendingSystemProcess.get(requestId);
       if (!entry || message.operationId !== entry.operationId || message.targetId !== entry.targetId) return;
       pendingSystemProcess.delete(requestId);
+      clearTimeout(entry.watchdogTimer);
       entry.abortSignal?.removeEventListener?.('abort', entry.cancel);
       if (message.ok !== true) entry.reject(hostError(typeof message.error === 'string' && /^[a-z0-9_]+$/.test(message.error) ? message.error : 'remote_process_failed'));
       else {
@@ -315,14 +320,29 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
         const requestId = randomUUID();
         return new Promise((resolve, reject) => {
           const cancel = () => {
-            if (!pendingSystemProcess.has(requestId) || !child.connected) return;
-            child.send({ type: 'system-controller-process-cancel', protocol: systemCapability, controllerInstanceId, requestId, operationId, targetId }, () => {});
+            const entry = pendingSystemProcess.get(requestId);
+            if (!entry || entry.watchdogTimer) return;
+            entry.watchdogTimer = setTimeout(() => {
+              if (pendingSystemProcess.get(requestId) !== entry) return;
+              pendingSystemProcess.delete(requestId);
+              abortSignal?.removeEventListener?.('abort', cancel);
+              reject(hostError('remote_process_cancel_timeout'));
+            }, finiteTimeout(systemProcessWatchdogGraceMs, SYSTEM_PROCESS_WATCHDOG_GRACE_MS));
+            entry.watchdogTimer.unref?.();
+            if (child.connected) child.send({ type: 'system-controller-process-cancel', protocol: systemCapability, controllerInstanceId, requestId, operationId, targetId }, () => {});
           };
-          pendingSystemProcess.set(requestId, { operationId, targetId, resolve, reject, abortSignal, cancel });
-          if (abortSignal?.aborted) cancel(); else abortSignal?.addEventListener?.('abort', cancel, { once: true });
-          child.send({ type: 'system-controller-process-execute', protocol: systemCapability, controllerInstanceId, requestId, operation }, (error) => {
-            if (!error || !pendingSystemProcess.has(requestId)) return;
+          pendingSystemProcess.set(requestId, { operationId, targetId, resolve, reject, abortSignal, cancel, watchdogTimer: null });
+          if (abortSignal?.aborted) {
             pendingSystemProcess.delete(requestId);
+            reject(hostError('remote_process_aborted'));
+            return;
+          }
+          abortSignal?.addEventListener?.('abort', cancel, { once: true });
+          child.send({ type: 'system-controller-process-execute', protocol: systemCapability, controllerInstanceId, requestId, operation }, (error) => {
+            const entry = pendingSystemProcess.get(requestId);
+            if (!error || !entry) return;
+            pendingSystemProcess.delete(requestId);
+            clearTimeout(entry.watchdogTimer);
             abortSignal?.removeEventListener?.('abort', cancel);
             reject(hostError('remote_process_send_failed'));
             markUnavailable('system_controller_send_failed');
