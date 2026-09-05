@@ -20,6 +20,7 @@ function normalizeLimits(limits = {}) {
     priorSummaryChars: limits.priorSummaryChars ?? DEFAULT_CONTEXT_LIMITS.priorSummaryChars,
     minRawRecentTurns: limits.minRawRecentTurns,
     maxRawRecentTurns: limits.maxRawRecentTurns,
+    maxPromptExecutionDigests: limits.maxPromptExecutionDigests,
   };
 }
 
@@ -268,6 +269,7 @@ export function inspectContextEngineResult({ sessionId = 'default', context, tra
     // provider receipt and must not be mistaken for one.
     support: resolvedContext.support || {},
     recentMessages: resolvedContext.recentMessages || [],
+    promptEnteringEntries: conversation.promptEnteringEntries || [],
     rawRecentTurnCount: resolvedContext.stats?.rawRecentTurnCount ?? resolvedContext.recentMessages?.length ?? 0,
     totalChatTurnCount: resolvedContext.stats?.totalChatTurnCount ?? conversation.stats?.totalChatTurnCount ?? 0,
     priorSummary: {

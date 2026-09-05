@@ -15,6 +15,19 @@ function contentChars(entry) {
   return String(entry?.content || '').length;
 }
 
+function promptEnteringProjection(entry) {
+  return {
+    id: entry?.id || null,
+    ts: entry?.ts || null,
+    type: entry?.type || 'message',
+    role: entry?.role || null,
+    visibility: entry?.visibility || 'chat',
+    chars: contentChars(entry),
+    entersPrompt: true,
+    content: String(entry?.content || ''),
+  };
+}
+
 function summarySource(summary = {}) {
   return summary.createdAt || summary.lastSummarizedEntryId || summary.firstSummarizedEntryId || 'unknown';
 }
@@ -116,15 +129,20 @@ export function buildConversationContext({ transcript = [], limits = {} } = {}) 
   const rawRecentCharBudget = limits.rawRecentChars ?? limits.recentDialogueChars ?? 6_000;
   const priorSummaryCharBudget = limits.priorSummaryChars ?? 4_000;
   const minRawRecentTurns = Math.max(1, limits.minRawRecentTurns ?? 6);
+  const maxPromptExecutionDigests = Math.max(0, Number.isFinite(Number(limits.maxPromptExecutionDigests)) ? Math.floor(Number(limits.maxPromptExecutionDigests)) : 3);
   const maxRawRecentTurns = Number.isFinite(limits.maxRawRecentTurns) && limits.maxRawRecentTurns > 0 ? limits.maxRawRecentTurns : Infinity;
   const entries = Array.isArray(transcript) ? transcript : [];
   const excludedCounts = { events: 0, receipts: 0, debug: 0 };
   const excludedChars = { events: 0, receipts: 0, debug: 0 };
   const chatMessages = [];
+  const promptEnteringEntries = entries.filter((entry) => entry?.entersPrompt === true).map(promptEnteringProjection);
+  const executionDigestEntries = entries.filter(isExecutionDigest);
+  const retainedDigestEntries = new Set(executionDigestEntries.slice(-maxPromptExecutionDigests));
 
   for (const entry of entries) {
     if (isPromptChatMessage(entry)) {
       const executionDigest = isExecutionDigest(entry);
+      if (executionDigest && !retainedDigestEntries.has(entry)) continue;
       chatMessages.push({
         id: entry.id || null,
         ts: entry.ts || null,
@@ -191,6 +209,7 @@ export function buildConversationContext({ transcript = [], limits = {} } = {}) 
     attachmentManifest,
     priorSummary,
     priorMessages,
+    promptEnteringEntries,
     summaryProvenance,
     excludedCounts,
     excludedChars,
@@ -211,6 +230,10 @@ export function buildConversationContext({ transcript = [], limits = {} } = {}) 
       totalChatTurnCount: chatMessages.length,
       priorSummaryTurnCount: priorMessages.length,
       persistedSummaryCount: persistedSummaries.length,
+      promptEnteringEntryCount: promptEnteringEntries.length,
+      promptExecutionDigestCount: executionDigestEntries.length,
+      retainedPromptExecutionDigestCount: Math.min(maxPromptExecutionDigests, executionDigestEntries.length),
+      maxPromptExecutionDigests,
     },
   };
 }

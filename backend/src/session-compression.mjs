@@ -94,7 +94,21 @@ export function structuredCompressionSummary(messages = [], { maxChars = 6000, r
   const retainedState = preservedStates.length
     ? `${preservedStates.length} explicit lifecycle-managed record${preservedStates.length === 1 ? '' : 's'} remain active; current prompt context renders them separately.`
     : 'None recorded.';
-  const executionEvidence = source.filter(isExecutionDigest).map(render).join('\n') || 'None recorded.';
+  const executionEvidenceLines = source.filter(isExecutionDigest).slice().reverse().map(render);
+  const executionEvidenceBudget = Math.max(0, Math.floor(Math.max(0, Number(maxChars) || 6000) * 0.32));
+  const executionEvidence = [];
+  let executionEvidenceChars = 0;
+  for (const line of executionEvidenceLines) {
+    const separator = executionEvidence.length ? 1 : 0;
+    if (executionEvidence.length && executionEvidenceChars + separator + line.length > executionEvidenceBudget) break;
+    if (!executionEvidence.length && line.length > executionEvidenceBudget) {
+      executionEvidence.push(line.slice(0, executionEvidenceBudget));
+      break;
+    }
+    executionEvidence.push(line);
+    executionEvidenceChars += separator + line.length;
+  }
+  const boundedExecutionEvidence = executionEvidence.join('\n') || 'None recorded.';
   const text = [
     '# Compacted Conversation Handoff',
     '',
@@ -113,7 +127,7 @@ export function structuredCompressionSummary(messages = [], { maxChars = 6000, r
     retainedState,
     '',
     '## Canonical execution evidence',
-    executionEvidence,
+    boundedExecutionEvidence,
   ].join('\n');
   if (text.length <= maxChars) return text;
   const marker = '\n\n[older compacted context truncated]';

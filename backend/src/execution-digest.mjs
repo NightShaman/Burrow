@@ -77,10 +77,12 @@ function selectDigestResults(results, limit) {
     if (selected.size < limit) selected.add(index);
   };
 
-  // Preserve all material outcomes first, in run order within each class.
-  for (let index = 0; index < results.length; index += 1) if (results[index].ok === false) add(index);
-  for (let index = 0; index < results.length; index += 1) if (isMutation(results[index])) add(index);
+  // Preserve consequences before intermediate failures. Failures remain useful
+  // only after terminal outcomes and mutations have had first claim on the
+  // bounded digest budget.
   for (let index = 0; index < results.length; index += 1) if (isOutcome(results[index])) add(index);
+  for (let index = 0; index < results.length; index += 1) if (isMutation(results[index])) add(index);
+  for (let index = 0; index < results.length; index += 1) if (results[index].ok === false) add(index);
 
   // For routine work, retain the most recent result for each tool/target pair.
   // Iterate backwards so repeated reads/searches do not evict their latest fact.
