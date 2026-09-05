@@ -41,6 +41,7 @@ export function DeclarativeSection({ contribution, section, module, overflowTarg
   const definition = contribution.sections.find((item) => item.id === section.id);
   const [values, setValues] = useState<Record<string, string | boolean>>(() => definition ? defaultFieldValues(definition) : {});
   const [actionState, setActionState] = useState<{ id: string; status: 'saving' | 'success' | 'error'; message: string } | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<{ actionId: string; message: string } | null>(null);
   const [selectedId, setSelectedId] = useState(definition?.items?.[0]?.id ?? '');
   useEffect(() => {
     if (!definition) return;
@@ -49,14 +50,16 @@ export function DeclarativeSection({ contribution, section, module, overflowTarg
   }, [definition]);
   if (!definition) return null;
   const update = (id: string, value: string | boolean) => setValues((current) => ({ ...current, [id]: value }));
-  const runAction = async (actionId: string, confirm?: string) => {
-    if (confirm && !window.confirm(confirm)) return;
+  const runAction = async (actionId: string) => {
     setActionState({ id: actionId, status: 'saving', message: 'Saving…' });
     const actionValues = { ...defaultFieldValues(definition), ...values };
     try { await module.handleSettingsAction?.(actionId, actionValues); setActionState({ id: actionId, status: 'success', message: 'Saved.' }); }
     catch (cause) { setActionState({ id: actionId, status: 'error', message: cause instanceof Error ? cause.message : 'The action could not be completed.' }); }
   };
-  const actions = (items: SettingsAction[] | undefined) => items?.length ? <div className="card-actions">{items.map((action) => { const saving = actionState?.id === action.id && actionState?.status === 'saving'; return <button type="button" className={action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : ''} disabled={saving} key={action.id} onClick={() => void runAction(action.id, action.confirm)}>{saving ? 'Saving…' : action.label}</button>; })}</div> : null;
+  const actions = (items: SettingsAction[] | undefined) => items?.length ? <>
+    <div className="card-actions">{items.map((action) => { const saving = actionState?.id === action.id && actionState?.status === 'saving'; return <button type="button" className={action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : ''} disabled={saving} key={action.id} onClick={() => action.confirm ? setPendingConfirmation({ actionId: action.id, message: action.confirm }) : void runAction(action.id)}>{saving ? 'Saving…' : action.label}</button>; })}</div>
+    {pendingConfirmation && <div className="settings-confirm-backdrop" role="presentation" onMouseDown={() => setPendingConfirmation(null)}><section className="settings-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-confirm-title" onMouseDown={(event) => event.stopPropagation()}><header><div><span className="eyebrow">CONFIRM ACTION</span><h2 id="settings-confirm-title">Are you sure?</h2></div><button className="settings-confirm-close" type="button" aria-label="Close confirmation" onClick={() => setPendingConfirmation(null)}>×</button></header><p>{pendingConfirmation.message}</p><div className="card-actions"><button type="button" onClick={() => setPendingConfirmation(null)}>Cancel</button><button type="button" className="danger" onClick={() => { const { actionId } = pendingConfirmation; setPendingConfirmation(null); void runAction(actionId); }}>Continue</button></div></section></div>}
+  </> : null;
   const feedback = actionState && <p className={actionState.status === 'error' ? 'settings-request-error' : 'settings-help'} role={actionState.status === 'error' ? 'alert' : 'status'}>{actionState.message}</p>;
   if (definition.layout === 'form') return <SettingSection title={definition.label}>
     {definition.description && <p className="settings-help">{definition.description}</p>}
