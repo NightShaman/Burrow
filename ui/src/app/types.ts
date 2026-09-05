@@ -1,5 +1,5 @@
 export type Page = 'chat' | 'tasks' | 'archive' | 'settings';
-export type SettingsTab = 'general' | 'agents' | 'connections' | `api-targets:${string}` | `mod-settings:${string}:${string}`;
+export type SettingsTab = 'general' | 'agents' | 'connections' | 'mods' | `api-targets:${string}` | `mod-settings:${string}:${string}`;
 export type FileNode = { name: string; path: string; type: 'file' | 'directory'; children?: FileNode[] };
 export type ContextDetails = { estimatedTokens: number | null; capacityTokens: number | null; pressure: string | null; source: string | null; compactionActive: boolean; summarizedTurnCount: number | null; rawRecentTurnCount: number | null; recallUsed?: boolean; recallScope?: string | null; recallSourceCount?: number };
 export type Subagent = { id: string; name: string; avatar: string; activity: string; context: number | null; contextDetails?: ContextDetails; stream: string; subagentId?: string; targetId?: string; resourceId?: string };

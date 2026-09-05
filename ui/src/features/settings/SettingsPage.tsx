@@ -23,6 +23,7 @@ import { Chevron } from '../workspace/WorkspaceRail';
 import { readStoredValue, writeStoredValue } from '../../app/browserStorage';
 import { SystemStatsRail } from './SystemStatsRail';
 import { ModSettingsHost } from './ModSettingsHost';
+import { ModsSettings } from './ModsSettings';
 
 const settingsUtilityPanelStorageKey = 'hc.settingsUtilityPanelOpen';
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
@@ -65,7 +66,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
     : undefined;
   const selectedModSettings: ModSettingsContribution | undefined = selectedContribution?.settings?.find((item) => item.id === nativeSettingMatch?.[2]) ?? selectedContribution?.settings?.[0];
   const heading = selectedModSettings?.navigation.title ?? selectedContribution?.name ?? tab[0].toUpperCase() + tab.slice(1);
-  const builtInTabs = ['general', 'agents', 'connections'] as SettingsTab[];
+  const builtInTabs = ['general', 'agents', 'connections', 'mods'] as SettingsTab[];
   return <>
     <main className={`settings-blank-slate${tab === 'agents' ? ' has-agent-selector' : ''}${utilityPanelOpen ? ' has-utility-panel' : ''}`} aria-label="Settings layout prototype">
       <nav className="settings-blank-column settings-prototype-menu" aria-label="Settings sections">
@@ -118,6 +119,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
         {tab === 'connections' && connectionSection === 'authentication' && <AuthenticationSettings />}
         {tab === 'connections' && connectionSection === 'model-providers' && <ModelConnections savedProviders={savedProviders} onModelConnectionsChanged={onModelConnectionsChanged} mcpConnections={null} overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'mcp-servers' && <McpConnections overflowTarget={overflowColumn} />}
+        {tab === 'mods' && <ModsSettings />}
         {selectedContribution?.settingsUrl ? <ModSettingsHost modId={selectedContribution.modId} settingsUrl={selectedContribution.settingsUrl} agents={agents} onAgentsChanged={onAgentsChanged} navigationTarget={modNavigationColumn} overflowTarget={overflowColumn} /> : selectedContribution && <ApiTargetsSettings contribution={selectedContribution} settings={selectedModSettings} overflowTarget={overflowColumn} />}
       </section>
       <section className="settings-blank-column settings-prototype-overflow" ref={setOverflowColumn} aria-label="Additional settings" />
