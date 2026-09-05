@@ -196,7 +196,7 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
   }
 }
 
-export async function loadMods({ runtimeRoot, databasePath, logger = console, executionProviders = null, systemModCapabilities = {}, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs } = {}) {
+export async function loadMods({ runtimeRoot, databasePath, logger = console, executionProviders = null, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs } = {}) {
   const discovered = await discoverMods({ runtimeRoot });
   const loaded = [];
   for (const mod of discovered) {
@@ -208,13 +208,13 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
       if (mod.server) {
         const requestedSystem = mod.manifest?.system === true;
         const declaredCapabilities = Array.isArray(mod.manifest?.systemCapabilities)
-          ? mod.manifest.systemCapabilities.map((value) => String(value || '').trim()).filter(Boolean)
+          ? [...new Set(mod.manifest.systemCapabilities.map((value) => String(value || '').trim()).filter(Boolean))]
           : [];
-        const configuredCapability = typeof systemModCapabilities?.[mod.id] === 'string'
-          ? systemModCapabilities[mod.id].trim() : '';
-        const systemCapability = requestedSystem && configuredCapability && declaredCapabilities.includes(configuredCapability)
-          ? configuredCapability : null;
-        if (requestedSystem && !systemCapability) throw new Error(`system_mod_not_enabled:${mod.id}`);
+        if (declaredCapabilities.length > 0 && !requestedSystem) throw new Error(`system_mod_declaration_invalid:${mod.id}`);
+        if (declaredCapabilities.some((capability) => capability !== 'execution-provider-v1')) throw new Error(`system_mod_capability_unsupported:${mod.id}`);
+        if (declaredCapabilities.length > 1) throw new Error(`system_mod_capability_ambiguous:${mod.id}`);
+        const systemCapability = requestedSystem ? declaredCapabilities[0] || null : null;
+        if (requestedSystem && !systemCapability) throw new Error(`system_mod_capability_required:${mod.id}`);
         let unregisterController = null;
         store = new ModSettingsStore({ modId: mod.id, databasePath });
         host = startModHost({

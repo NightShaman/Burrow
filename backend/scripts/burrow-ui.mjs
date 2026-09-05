@@ -2871,10 +2871,6 @@ const mods = await loadMods({
   runtimeRoot: process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow',
   databasePath: settingsDatabasePath(),
   executionProviders,
-  systemModCapabilities: (() => {
-    try { return JSON.parse(process.env.BURROW_SYSTEM_MOD_CAPABILITIES || '{}'); }
-    catch { throw new Error('system_mod_capabilities_invalid'); }
-  })(),
 });
 const modRoute = createModRoute({ mods, readJsonBody, sendJson });
 
