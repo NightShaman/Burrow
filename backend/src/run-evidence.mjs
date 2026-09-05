@@ -105,6 +105,21 @@ function changeText(result = {}) {
   if (commit) return `Git commit created: ${commit[1]}`;
   return bounded(`${text(result.tool || 'change')}: ${resultText(result) || (result.ok === true ? 'completed successfully' : 'completed')}`);
 }
+function operationKey(result = {}) {
+  const tool = text(result.tool || result.label || 'tool').toLowerCase();
+  const command = text(result.command).toLowerCase();
+  const target = text(result.filePath || result.path || result.repository || result.repo);
+  if (/\bgit\s+push\b/u.test(command)) return 'git:push';
+  if (/\bgit\s+commit\b/u.test(command)) return 'git:commit';
+  if (isValidation(result)) return `validation:${command}`;
+  if (target) return `${tool}:${target}`;
+  return `${tool}:${command || text(result.mcpToolName || result.toolName)}`;
+}
+function terminalFailures(results = []) {
+  const terminalByOperation = new Map();
+  for (const result of results) terminalByOperation.set(operationKey(result), result);
+  return [...terminalByOperation.values()].filter((result) => result?.ok === false);
+}
 
 function compactItems(items = []) {
   return list(items).slice(0, MAX_ITEMS).map((item) => {
@@ -129,13 +144,13 @@ export function compactRunEvidence(record = {}) {
   };
 }
 
-export function deriveRunEvidence({ agentId, sessionId, runId, traceDir, objective = '', answerText = '', toolResults = [], unresolved = [], continuityScope = null, targets = [] } = {}) {
+export function deriveRunEvidence({ agentId, sessionId, runId, traceDir, objective = '', answerText = '', toolResults = [], unresolved = [], completionEvidence = null, outcome = null, continuityScope = null, targets = [] } = {}) {
   const results = list(toolResults);
   const observations = [];
   const changes = [];
   const validations = [];
   const source = sourceRefs({ runId, traceDir });
-  for (const result of results.slice(0, MAX_ITEMS)) {
+  for (const result of results) {
     const tool = text(result.tool || result.label || 'tool');
     const detail = resultText(result);
     const ref = resultRef(result);
@@ -152,11 +167,14 @@ export function deriveRunEvidence({ agentId, sessionId, runId, traceDir, objecti
     else if (validation) validations.push(item);
     else observations.push(item);
   }
-  const failed = results.filter((result) => result?.ok === false).map((result) => bounded(`${text(result.tool || 'tool')}: ${resultText(result) || 'failed'}`));
+  const failed = terminalFailures(results).map((result) => bounded(`${text(result.tool || 'tool')}: ${resultText(result) || 'failed'}`));
+  const completionChanges = list(completionEvidence?.changedFiles).map((filePath) => ({ text: bounded(`Changed file: ${filePath}`), status: 'observed', sourceRefs: source }));
+  const completionValidations = list(completionEvidence?.checks).filter((check) => check?.ok === true).map((check) => ({ text: bounded(`Verification passed: ${text(check.command) || 'check'}`), status: 'validated', sourceRefs: source }));
+  const explicitOutcome = text(outcome?.summary || outcome?.result || outcome?.status);
   return compactRunEvidence({
     version: 1, kind: 'run-evidence', agentId: text(agentId) || null, sessionId: text(sessionId) || null,
-    runId: text(runId) || null, objective: bounded(objective, 900), outcome: bounded(answerText, 900),
-    observations: observations.slice(0, MAX_ITEMS), changes: changes.slice(0, MAX_ITEMS), validations: validations.slice(0, MAX_ITEMS),
+    runId: text(runId) || null, objective: bounded(objective, 900), outcome: bounded(answerText || explicitOutcome, 900),
+    observations, changes: [...changes, ...completionChanges], validations: [...validations, ...completionValidations],
     unresolved: unique([...list(unresolved), ...failed], MAX_ITEMS).map((item) => ({ text: bounded(item), status: 'unresolved', sourceRefs: source })),
     continuityScope: text(continuityScope) || null,
     targets: unique([...targets, ...targetSignals({ toolResults })], MAX_ITEMS),

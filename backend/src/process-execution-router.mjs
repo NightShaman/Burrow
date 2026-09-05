@@ -55,7 +55,7 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
     if (command && executable) throw new Error('command_and_executable_mutually_exclusive');
     if (!command && !executable) throw new Error('command_or_executable_required');
     if (command && process.args?.length) throw new Error('args_with_command_invalid');
-    return remoteController.executeProcess({
+    const result = await remoteController.executeProcess({
       operationId,
       targetId,
       parentRunId,
@@ -71,6 +71,7 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
       ...(request.protectedValues ? { protectedValues: { ...request.protectedValues } } : {}),
       ...(request.protectedBindingMetadata ? { protectedBindingMetadata: request.protectedBindingMetadata.map((entry) => ({ ...entry })) } : {}),
     }, { abortSignal: context.abortSignal || null });
+    return result && typeof result === 'object' ? { ...result, operationId: result.operationId || operationId } : result;
   };
 }
 

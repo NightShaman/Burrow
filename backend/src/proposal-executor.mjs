@@ -25,6 +25,17 @@ function workspacePath(filePath, workspaceRoot, rootDir) {
   return path.resolve(workspaceRoot || rootDir || process.cwd(), filePath);
 }
 
+function withExecutionProvenance(result, target, executionContext, toolCallId) {
+  if (!result || typeof result !== 'object') return result;
+  const parentRunId = executionContext?.parentRunId || null;
+  return {
+    ...result,
+    execution: target?.kind === 'remote'
+      ? { kind: 'remote', providerId: target.providerId, targetId: target.targetId, parentRunId, toolCallId: toolCallId || null, operationId: result.operationId || null }
+      : { kind: 'local', parentRunId, toolCallId: toolCallId || null },
+  };
+}
+
 export async function executeReviewedProposalActions({ actions = [], reviews = [], workspaceRoot = null, rootDir = null, dataRoot = null, sessionId = null, conversationId = null, agentId = null, agentRuntime = null, resolveAgentRuntime = null, runAgentReply = null, workingMemoryStore = null, executionPolicy = null, modelConfig = null, traceLogger = null, artifactPrefix = null, observedToolResults = [], executionContext = null, abortSignal = null } = {}) {
   agentId = agentId || executionContext?.agentId || null;
   const resolvedConversationId = conversationId || executionContext?.conversationId || null;
@@ -49,10 +60,15 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
     },
     remoteController: executionContext?.processExecutionController || null,
   });
-  const executeFilesystem = (action, args) => routeFilesystem({
-    target: resolveNativeFilesystemExecutionTarget(executionContext || {}),
-    operation: { tool: action.tool, arguments: args },
-  }, { parentRunId: executionContext?.parentRunId || traceLogger?.runId, toolCallId: action.toolCallId, abortSignal });
+  const executeFilesystem = async (action, args) => {
+    const target = resolveNativeFilesystemExecutionTarget(executionContext || {});
+    const result = await routeFilesystem({ target, operation: { tool: action.tool, arguments: args } }, {
+      parentRunId: executionContext?.parentRunId || traceLogger?.runId,
+      toolCallId: action.toolCallId,
+      abortSignal,
+    });
+    return withExecutionProvenance(result, target, executionContext, action.toolCallId);
+  };
 
   for (const action of actions) {
     const suppliedReview = reviews.find((item) => item.index === action.index) || null;
@@ -122,6 +138,7 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
         result = { tool: 'shell_exec', ok: false, command: action.command, cwd: process.cwd, error: code, failureClass: 'tool_dispatch_failed' };
       }
       if (protectedInput.bindings.length) result.protectedBindings = protectedInput.bindings;
+      result = withExecutionProvenance(result, target, executionContext, action.toolCallId);
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({
         tool: 'shell_exec',

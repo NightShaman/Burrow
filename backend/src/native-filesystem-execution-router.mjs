@@ -44,14 +44,16 @@ export function createNativeFilesystemExecutionRouter({ localExecute, remoteCont
     const parentRunId = required(context.parentRunId, 'parent_run_id');
     const toolCallId = required(context.toolCallId, 'tool_call_id');
     const operationId = context.operationId || nativeFilesystemOperationId({ parentRunId, toolCallId });
-    try { return await remoteController.executeNativeFilesystem({
+    try {
+      const result = await remoteController.executeNativeFilesystem({
       operationId,
       targetId: required(target.targetId, 'target_id'),
       parentRunId,
       toolCallId,
       operation: { tool, arguments: Object.fromEntries(Object.entries(operation.arguments || {}).filter(([key, value]) => !['traceLogger', 'rootDir', 'artifactPrefix', 'runId'].includes(key) && (value == null || ['string', 'number', 'boolean'].includes(typeof value)))) },
-    }, { abortSignal: context.abortSignal || null });
-    } catch (error) { return failure(tool, operation.arguments || {}, error); }
+      }, { abortSignal: context.abortSignal || null });
+      return result && typeof result === 'object' ? { ...result, operationId: result.operationId || operationId } : result;
+    } catch (error) { return { ...failure(tool, operation.arguments || {}, error), operationId }; }
   };
 }
 
