@@ -242,8 +242,7 @@ function renderWorkingContext(context = null, maxChars = 0) {
   const continuity = context.continuity && typeof context.continuity === 'object' ? context.continuity : null;
   const interruptedRun = context.interruptedRun && typeof context.interruptedRun === 'object' ? context.interruptedRun : null;
   const records = Array.isArray(continuity?.records) ? continuity.records.filter((record) => record?.title && record?.content) : [];
-  const cards = Array.isArray(continuity?.cards) ? continuity.cards.filter((card) => card?.title) : [];
-  const warmCount = records.length + cards.length + Number(continuity?.handoffCount || 0) + Number(continuity?.candidateCount || 0);
+  const warmCount = records.length + Number(continuity?.handoffCount || 0) + Number(continuity?.candidateCount || 0);
   const readEvidence = Array.isArray(context.readEvidence) ? context.readEvidence.filter((item) => item?.path && item?.excerpt) : [];
   if (!workspace && !targets.length && !referents.length && !warmCount && !readEvidence.length && !interruptedRun) return '';
   const lines = [
@@ -278,11 +277,8 @@ function renderWorkingContext(context = null, maxChars = 0) {
     }
     if (evidenceLines.length) lines.push('', preamble, ...evidenceLines);
   }
-  if (warmCount) {
-    const card = continuity.cards?.[0];
-    if (card?.title && card?.summary) lines.push('', 'Tiddle warm continuity — compact, recall-derived context. It may help preserve a recurring thread, but does not define identity, authorization, or current runtime truth.', `- ${card.title}: ${clampText(card.summary, 900)}`, `  Evidence: ${card.evidence || 'conversation'}; recurrence: ${Number(card.recurrence || 0)}; last seen: ${card.lastSeen || 'unknown'}.`);
-    if (warmCount > 1) lines.push(`- ${warmCount - 1} additional warm thread${warmCount === 2 ? '' : 's'} available through explicit recall.`);
-  }
+  // Tiddle rolling cards are explicit-recall metadata only. Do not render
+  // them into ordinary prompts, even when a caller supplies a stale card.
   return lines.join('\n');
 }
 
