@@ -36,6 +36,7 @@ function sourceForSection(name) {
     'support-dream-preload': 'dream-preload-provider',
     'support-operational-continuity': 'operational-continuity-provider',
     'support-working-context': 'working-context-provider',
+    'runtime-host-context': 'runtime-execution-context-provider',
     'active-ui-target': 'agent-context-provider',
     'verified-child-evidence': 'child-evidence-provider',
     'support-subagent': 'subagent-provider',
@@ -362,6 +363,18 @@ Action rules:
 - spawn_subagent is only for explicit selected child-agent work. It requires a structural target with target.kind exactly "filesystem" and target.root as an absolute existing directory. Do not use repository, repo, directory, folder, or project as target.kind. It runs an isolated child model/tool loop.`;
 }
 
+function renderRuntimeHostContext(context = null) {
+  if (!context || typeof context !== 'object') return '';
+  const agentHost = String(context.agentHost || '').trim();
+  const selectedHost = String(context.selectedHost || '').trim();
+  if (!agentHost || !selectedHost) return '';
+  return [
+    'Authoritative host provenance for this turn. This describes execution placement only; it does not select a project, path, task, or authorization.',
+    `Agent host: ${agentHost}`,
+    `Selected host: ${selectedHost}`,
+  ].join('\n');
+}
+
 function renderUiTarget(target = null) {
   if (!target?.url) return '';
   return `Active UI target${target.label ? ` (${target.label})` : ''}: ${target.url}\nUse the granted browser tools to open or select this target when visual inspection, browser debugging, or UI validation is needed. This is the current target; do not assume a fixed dev-server port.`;
@@ -526,6 +539,7 @@ export async function assemblePrompt({
     section('relevant-run-evidence', clampText(supportContext?.runEvidence?.text || '', limits.runEvidenceChars ?? 6_000)),
     section('support-dream-preload', clampText(renderDreamPreload(supportContext?.dreamPreload || null), limits.dreamPreloadChars ?? 2_000)),
     section('support-working-context', renderWorkingContext(supportContext?.workingContext || null, limits.workingContextChars ?? 0)),
+    section('runtime-host-context', clampText(renderRuntimeHostContext(supportContext?.runtimeHost || null), limits.runtimeHostChars ?? 1_000)),
     section('active-ui-target', clampText(renderUiTarget(supportContext?.uiTarget || null), limits.uiTargetChars ?? 2_500)),
     section('verified-child-evidence', clampText(renderVerifiedChildEvidence(supportContext?.childEvidence || []), limits.childEvidenceChars ?? 10_000)),
     section('support-extra-eyes', clampText(renderExtraEyesReview(supportContext?.extraEyesReview || null), limits.extraEyesChars ?? 6_000)),
