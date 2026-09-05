@@ -551,6 +551,16 @@ DreamDiary is for the operator: readable narrative reflection, never prompt auth
       );`);
     },
   },
+  {
+    version: 36,
+    name: 'mod-lifecycle-enablement',
+    body: `CREATE TABLE IF NOT EXISTS mod_lifecycle (
+      mod_id TEXT PRIMARY KEY,
+      enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );`,
+  },
 ].map((migration) => Object.freeze({ ...migration, checksum: checksum(`${migration.version}:${migration.name}:${migration.body}`) })));
 
 function ensureDreamSettingsModelColumns(db) {

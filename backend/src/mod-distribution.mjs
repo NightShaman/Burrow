@@ -135,6 +135,7 @@ async function swapMod(target, prepared) {
 
 function sourceRows(db) { return db.prepare('SELECT id,url,provider,mod_id,mod_name,latest_version,archive_url,status,error,last_checked_at FROM mod_sources ORDER BY created_at').all(); }
 function installationRows(db) { return new Map(db.prepare('SELECT mod_id,source_id,version,archive_sha256,installed_at,updated_at FROM mod_installations').all().map((row) => [row.mod_id, row])); }
+function lifecycleRows(db) { return new Map(db.prepare('SELECT mod_id,enabled,created_at,updated_at FROM mod_lifecycle').all().map((row) => [row.mod_id, row])); }
 
 export function createModDistribution({ runtimeRoot, databasePath, restart = null, logger = console } = {}) {
   if (!runtimeRoot || !databasePath) throw new Error('mod_distribution_configuration_required');
@@ -156,13 +157,15 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
     try {
       const discovered = await discoverMods({ runtimeRoot, logger });
       const installed = installationRows(db);
+      const lifecycle = lifecycleRows(db);
       const sources = sourceRows(db);
       const sourceByMod = new Map(sources.filter((row) => row.mod_id).map((row) => [row.mod_id, row]));
       const mods = discovered.map((mod) => {
         const record = installed.get(mod.id); const source = sourceByMod.get(mod.id) || (record?.source_id ? sources.find((item) => item.id === record.source_id) : null);
         const version = record?.version || normalizeVersion(mod.manifest?.version || '') || undefined;
         const latestVersion = source?.latest_version || undefined;
-        return { id: mod.id, name: mod.name, version, status: mod.status === 'failed' ? 'failed' : 'installed', system: mod.manifest?.system === true, source: source?.url, latestVersion, updateAvailable: Boolean(version && latestVersion && compareVersions(latestVersion, version) > 0), canInstall: source?.status === 'ready', ...(source?.error ? { reason: source.error } : {}) };
+        const enabled = lifecycle.get(mod.id)?.enabled !== 0;
+        return { id: mod.id, name: mod.name, version, status: mod.status === 'failed' ? 'failed' : 'installed', enabled, system: mod.manifest?.system === true, source: source?.url, latestVersion, updateAvailable: Boolean(version && latestVersion && compareVersions(latestVersion, version) > 0), canInstall: source?.status === 'ready', ...(source?.error ? { reason: source.error } : {}) };
       });
       for (const source of sources) if (source.mod_id && !mods.some((mod) => mod.id === source.mod_id)) mods.push({ id: source.mod_id, name: source.mod_name || source.mod_id, status: 'available', source: source.url, latestVersion: source.latest_version || undefined, canInstall: source.status === 'ready', ...(source.error ? { reason: source.error } : {}) });
       return { ok: true, restartRequired: false, mods, sources: sources.map((row) => ({ id: row.id, url: row.url, status: row.status, ...(row.error ? { error: row.error } : {}), ...(row.last_checked_at ? { lastCheckedAt: row.last_checked_at } : {}) })) };
@@ -201,9 +204,25 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       const timestamp = now();
       db.prepare('UPDATE mod_sources SET mod_id=?,mod_name=?,latest_version=?,status=\'ready\',error=NULL,updated_at=? WHERE id=?').run(prepared.id, prepared.name, version, timestamp, source.id);
       db.prepare(`INSERT INTO mod_installations (mod_id,source_id,version,archive_sha256,installed_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(mod_id) DO UPDATE SET source_id=excluded.source_id,version=excluded.version,archive_sha256=excluded.archive_sha256,installed_at=excluded.installed_at,updated_at=excluded.updated_at`).run(prepared.id, source.id, version, digest, timestamp, timestamp);
+      db.prepare(`INSERT INTO mod_lifecycle (mod_id,enabled,created_at,updated_at) VALUES (?,1,?,?)
+        ON CONFLICT(mod_id) DO UPDATE SET enabled=1,updated_at=excluded.updated_at`).run(prepared.id, timestamp, timestamp);
       restart?.();
       return { ok: true, modId: prepared.id, version, archiveSha256: digest, restartRequired: true };
     } finally { db.close(); if (scratch) await fs.rm(scratch, { recursive: true, force: true }); locks.delete(id); }
+  }
+  async function setEnabled(modId, enabled) {
+    const id = String(modId || '').trim(); if (!MOD_ID.test(id)) throw new Error('mod_id_invalid');
+    if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
+    locks.add(id); const db = openSettingsDatabase({ databasePath });
+    try {
+      const discovered = await discoverMods({ runtimeRoot, logger });
+      if (!discovered.some((entry) => entry.id === id)) throw Object.assign(new Error('mod_not_found'), { statusCode: 404 });
+      const timestamp = now();
+      db.prepare(`INSERT INTO mod_lifecycle (mod_id,enabled,created_at,updated_at) VALUES (?,?,?,?)
+        ON CONFLICT(mod_id) DO UPDATE SET enabled=excluded.enabled,updated_at=excluded.updated_at`).run(id, enabled ? 1 : 0, timestamp, timestamp);
+      restart?.();
+      return { ok: true, modId: id, enabled: Boolean(enabled), restartRequired: true };
+    } finally { db.close(); locks.delete(id); }
   }
   async function uninstall(modId) {
     const id = String(modId || '').trim(); if (!MOD_ID.test(id)) throw new Error('mod_id_invalid');
@@ -213,14 +232,14 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       const discovered = await discoverMods({ runtimeRoot, logger });
       const mod = discovered.find((entry) => entry.id === id);
       if (!mod) throw Object.assign(new Error('mod_not_found'), { statusCode: 404 });
-      if (mod.manifest?.system === true) throw Object.assign(new Error('system_mod_uninstall_forbidden'), { statusCode: 409 });
       await fs.rm(path.join(modsRoot, id), { recursive: true, force: true });
       db.prepare('DELETE FROM mod_installations WHERE mod_id=?').run(id);
+      db.prepare('DELETE FROM mod_lifecycle WHERE mod_id=?').run(id);
       restart?.();
       return { ok: true, modId: id, uninstalled: true, settingsPreserved: true, restartRequired: true };
     } finally { db.close(); locks.delete(id); }
   }
-  return { list, addSource, refresh, removeSource, install, uninstall };
+  return { list, addSource, refresh, removeSource, install, enable: (id) => setEnabled(id, true), disable: (id) => setEnabled(id, false), uninstall };
 }
 
 export function createModManagementRoute({ distribution, readJsonBody, sendJson } = {}) {
@@ -230,10 +249,16 @@ export function createModManagementRoute({ distribution, readJsonBody, sendJson 
     if (url.pathname === '/api/mod-management/refresh' && req.method === 'POST') { sendJson(res, 200, await distribution.refresh()); return true; }
     let match = url.pathname.match(/^\/api\/mod-management\/sources\/([^/]+)$/);
     if (match && req.method === 'DELETE') { const result = await distribution.removeSource(decodeURIComponent(match[1])); sendJson(res, result.ok ? 200 : 404, result); return true; }
-    match = url.pathname.match(/^\/api\/mod-management\/([^/]+)\/(install|uninstall)$/);
+    match = url.pathname.match(/^\/api\/mod-management\/([^/]+)\/(install|enable|disable|uninstall)$/);
     if (match && req.method === 'POST') {
-      const id = decodeURIComponent(match[1]); const body = await readJsonBody(req);
-      const result = match[2] === 'install' ? await distribution.install(id, body.version || body.targetVersion) : await distribution.uninstall(id);
+      const id = decodeURIComponent(match[1]);
+      let result;
+      if (match[2] === 'install') {
+        const body = await readJsonBody(req);
+        result = await distribution.install(id, body.version || body.targetVersion);
+      } else {
+        result = await distribution[match[2]](id);
+      }
       sendJson(res, 200, result); return true;
     }
     return false;

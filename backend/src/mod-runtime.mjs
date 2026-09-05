@@ -3,6 +3,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ModSettingsStore, modSecretsApi, modSettingsApi } from './mod-settings-store.mjs';
 import { startModHost } from './mod-host.mjs';
+import { openSettingsDatabase } from './settings-database.mjs';
 
 const MOD_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MIME = Object.freeze({ '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' });
@@ -198,9 +199,17 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
 
 export async function loadMods({ runtimeRoot, databasePath, logger = console, executionProviders = null, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs } = {}) {
   const discovered = await discoverMods({ runtimeRoot });
+  const lifecycleDb = openSettingsDatabase({ databasePath });
+  let disabled;
+  try {
+    disabled = new Set(lifecycleDb.prepare('SELECT mod_id FROM mod_lifecycle WHERE enabled=0').all().map((row) => row.mod_id));
+  } finally {
+    lifecycleDb.close();
+  }
   const loaded = [];
   for (const mod of discovered) {
     if (mod.status === 'failed') { loaded.push(mod); continue; }
+    if (disabled.has(mod.id)) { loaded.push({ ...mod, status: 'disabled' }); continue; }
     let host = null;
     let store = null;
     try {
@@ -271,15 +280,18 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
 }
 
 export function modCatalog(mods = []) {
-  return mods.map((mod) => ({
-    id: mod.id,
-    name: mod.name,
-    status: mod.status || 'discovered',
-    ...(mod.status === 'failed' ? { error: mod.error || 'mod_failed' } : {}),
-    ...(mod.status !== 'failed' && mod.manifest?.version ? { version: String(mod.manifest.version) } : {}),
-    ...(mod.status !== 'failed' && Object.keys(mod.contributions || {}).length ? { contributions: { ...mod.contributions } } : {}),
-    ...(mod.status !== 'failed' && Object.keys(mod.ui || {}).length ? { ui: { ...(mod.ui.control ? { controlUrl: mod.ui.control.url } : {}), ...(mod.ui.settings ? { settingsUrl: mod.ui.settings.url } : {}) } } : {}),
-  }));
+  return mods.map((mod) => {
+    const active = mod.status !== 'failed' && mod.status !== 'disabled';
+    return {
+      id: mod.id,
+      name: mod.name,
+      status: mod.status || 'discovered',
+      ...(mod.status === 'failed' ? { error: mod.error || 'mod_failed' } : {}),
+      ...(mod.status !== 'failed' && mod.manifest?.version ? { version: String(mod.manifest.version) } : {}),
+      ...(active && Object.keys(mod.contributions || {}).length ? { contributions: { ...mod.contributions } } : {}),
+      ...(active && Object.keys(mod.ui || {}).length ? { ui: { ...(mod.ui.control ? { controlUrl: mod.ui.control.url } : {}), ...(mod.ui.settings ? { settingsUrl: mod.ui.settings.url } : {}) } } : {}),
+    };
+  });
 }
 
 async function sendAsset(res, filePath) {
