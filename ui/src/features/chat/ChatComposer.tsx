@@ -47,7 +47,8 @@ export function ChatComposer({
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const query = commandQuery(draft.trim());
   const commandMatches = query === null ? [] : CHAT_COMMANDS.filter((command) => command.name.startsWith(query));
-  const projectQuery = /^\/project(?:\s+(.*))?$/iu.exec(draft.trim())?.[1] ?? null;
+  const projectMatch = /^\/project(?:\s+(.*))?\s*$/iu.exec(draft);
+  const projectQuery = projectMatch ? (projectMatch[1] ?? '') : null;
   const [projects, setProjects] = useState<Array<{ id: string; name: string; description?: string }>>([]);
   useEffect(() => {
     if (projectQuery === null) return;
