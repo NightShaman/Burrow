@@ -2655,27 +2655,8 @@ function renderContextInspection({ inspection = {}, status = {}, agentRuntime, m
 async function handleChatCommand({ parsed, sessionId, agentRuntime } = {}) {
   if (parsed?.error) return { status: 400, response: chatCommandResponse({ command: null, sessionId, text: `Invalid command.\n\n${chatCommandHelpText()}`, receipt: { error: parsed.error }, ok: false }) };
   if (!parsed?.definition) return { status: 400, response: chatCommandResponse({ command: parsed?.command || null, sessionId, text: `Unknown command: /${parsed?.command || ''}\n\n${chatCommandHelpText()}`, receipt: { error: 'command_unknown' }, ok: false }) };
-  if (parsed.args && !(parsed.command === 'context' && parsed.args === 'full') && parsed.command !== 'project') return { status: 400, response: chatCommandResponse({ command: parsed.command, sessionId, text: `${parsed.definition.usage} does not accept arguments.`, receipt: { error: 'command_arguments_not_supported' }, ok: false }) };
-  if (parsed.command === 'help') return { status: 200, response: chatCommandResponse({ command: 'help', sessionId, text: chatCommandHelpText(), receipt: { available: ['help', 'context', 'status', 'new', 'stop', 'project'] } }) };
-  if (parsed.command === 'project') {
-    const projects = await withTaskBoard((store) => store.listProjects());
-    if (!parsed.args) {
-      const active = await withTaskBoard((store) => store.getConversationProject({ agentId: agentRuntime.agentId, sessionId }));
-      const text = projects.length ? ['Projects:', ...projects.map((project) => `- ${project.name}${active?.id === project.id ? ' (active)' : ''}`), '', 'Use /project <name> to select one or /project clear to clear it.'].join('\n') : 'No TaskBoard projects are configured.';
-      return { status: 200, response: chatCommandResponse({ command: 'project', sessionId, text, receipt: { mode: 'list', activeProjectId: active?.id || null, projects: projects.map(({ id, name, description }) => ({ id, name, description })) } }) };
-    }
-    if (parsed.args.toLowerCase() === 'clear') {
-      const cleared = await withTaskBoard((store) => store.clearConversationProject({ agentId: agentRuntime.agentId, sessionId }));
-      return { status: 200, response: chatCommandResponse({ command: 'project', sessionId, text: 'Cleared the conversation active project.', receipt: { mode: 'clear', cleared } }) };
-    }
-    const exact = projects.filter((project) => project.name.localeCompare(parsed.args, undefined, { sensitivity: 'accent' }) === 0);
-    if (exact.length !== 1) {
-      const matches = projects.filter((project) => project.name.toLowerCase().includes(parsed.args.toLowerCase()));
-      return { status: 404, response: chatCommandResponse({ command: 'project', sessionId, text: matches.length ? `No exact project named “${parsed.args}”. Matches:\n${matches.map((project) => `- ${project.name}`).join('\n')}` : `No project named “${parsed.args}”.`, receipt: { error: exact.length > 1 ? 'project_ambiguous' : 'project_not_found', matches: matches.map(({ id, name }) => ({ id, name })) }, ok: false }) };
-    }
-    const project = await withTaskBoard((store) => store.setConversationProject({ agentId: agentRuntime.agentId, sessionId, projectId: exact[0].id }));
-    return { status: 200, response: chatCommandResponse({ command: 'project', sessionId, text: `Active project: ${project.name}`, receipt: { mode: 'select', project } }) };
-  }
+  if (parsed.args && !(parsed.command === 'context' && parsed.args === 'full')) return { status: 400, response: chatCommandResponse({ command: parsed.command, sessionId, text: `${parsed.definition.usage} does not accept arguments.`, receipt: { error: 'command_arguments_not_supported' }, ok: false }) };
+  if (parsed.command === 'help') return { status: 200, response: chatCommandResponse({ command: 'help', sessionId, text: chatCommandHelpText(), receipt: { available: ['help', 'context', 'status', 'new', 'stop'] } }) };
   if (parsed.command === 'new') {
     const active = [...activeChatRuns.values()].find((run) => run.agentId === agentRuntime.agentId && run.sessionId === sessionId && !run.controller.signal.aborted) || null;
     if (active) await cancelChatRun(active.runId, { reason: 'superseded by /new' }, agentRuntime);

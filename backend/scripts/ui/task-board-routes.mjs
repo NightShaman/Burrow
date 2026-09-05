@@ -8,6 +8,32 @@ export function createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundary
       sendJson(res, 200, { ok: true, priorities: taskPriorities });
       return true;
     }
+    if (url.pathname === '/api/task-board/conversation-project') {
+      if (req.method === 'GET') {
+        const agentId = url.searchParams.get('agentId');
+        const sessionId = url.searchParams.get('sessionId') || 'default';
+        if (!agentId) sendJson(res, 400, { ok: false, error: 'agent_id_required' });
+        else sendJson(res, 200, await withTaskBoard((store) => ({ ok: true, project: store.getConversationProject({ agentId, sessionId }) })));
+        return true;
+      }
+      if (req.method === 'PUT') {
+        const body = await readJsonBody(req);
+        if (!body.agentId) sendJson(res, 400, { ok: false, error: 'agent_id_required' });
+        else if (!body.projectId) sendJson(res, 400, { ok: false, error: 'project_id_required' });
+        else sendJson(res, 200, await withTaskBoard((store) => ({ ok: true, project: store.setConversationProject({ agentId: body.agentId, sessionId: body.sessionId || 'default', projectId: body.projectId }) })));
+        return true;
+      }
+      if (req.method === 'DELETE') {
+        const agentId = url.searchParams.get('agentId');
+        const sessionId = url.searchParams.get('sessionId') || 'default';
+        if (!agentId) sendJson(res, 400, { ok: false, error: 'agent_id_required' });
+        else {
+          await withTaskBoard((store) => store.clearConversationProject({ agentId, sessionId }));
+          sendJson(res, 200, { ok: true, project: null });
+        }
+        return true;
+      }
+    }
     if (req.method === 'GET' && url.pathname === '/api/task-board/projects') {
       sendJson(res, 200, await withTaskBoard((store) => ({ ok: true, projects: store.listProjects() })));
       return true;

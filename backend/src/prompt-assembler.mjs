@@ -252,7 +252,7 @@ function renderWorkingContext(context = null, maxChars = 0) {
     'Profile files and the latest user turn outrank Working Context. Absence of handoff, rolling continuity, or memory search results is never evidence that profile identity, role, persona, or current-task context is absent.',
   ];
   if (activeProject) {
-    lines.push('', 'Conversation active project. Explicitly selected by the operator through /project; refreshed from TaskBoard for this turn. These references orient work but do not authorize changes or prove that a path still exists.', `Project: ${activeProject.name || 'unknown'} (${activeProject.id || 'unknown'})`);
+    lines.push('', 'Conversation active project. Explicitly selected by the operator through the project context control; refreshed from TaskBoard for this turn. These references orient work but do not authorize changes or prove that a path still exists.', `Project: ${activeProject.name || 'unknown'} (${activeProject.id || 'unknown'})`);
     if (activeProject.description) lines.push(`Description: ${activeProject.description}`);
     if (activeProject.notes) lines.push('Project notes:', activeProject.notes);
     if (Array.isArray(activeProject.pathEntries) && activeProject.pathEntries.length) {

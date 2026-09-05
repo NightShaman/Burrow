@@ -4,7 +4,6 @@ export const CHAT_COMMANDS = Object.freeze([
   Object.freeze({ name: 'status', usage: '/status', description: 'Show compact runtime and active-run status.' }),
   Object.freeze({ name: 'new', usage: '/new', description: 'Start a fresh conversation generation in this session; prior history is archived.' }),
   Object.freeze({ name: 'stop', usage: '/stop', description: 'Cancel the active run in this session.' }),
-  Object.freeze({ name: 'project', usage: '/project [name|clear]', description: 'Show projects or set the conversation active project.' }),
 ]);
 
 const BY_NAME = new Map(CHAT_COMMANDS.map((command) => [command.name, command]));
