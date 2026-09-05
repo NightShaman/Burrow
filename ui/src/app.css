@@ -10,4 +10,5 @@
 @import './styles/responsive.css';
 @import './features/workspace/workspace-rail.css';
 @import './features/settings/settings.css';
+@import './features/settings/mods.css';
 @import './features/groups/group-channels.css';
