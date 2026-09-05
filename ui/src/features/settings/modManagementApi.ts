@@ -6,6 +6,7 @@ export type ModRecord = {
   version?: string;
   status?: string;
   system?: boolean;
+  enabled?: boolean;
   source?: string;
   latestVersion?: string;
   updateAvailable?: boolean;
@@ -30,4 +31,8 @@ export async function loadModManagement(): Promise<{ mods: ModRecord[]; sources:
 
 export async function modManagementAction(path: string, init: RequestInit = {}) {
   return api<ModManagementState>(path, { ...init, headers: { 'content-type': 'application/json', ...(init.headers ?? {}) } });
+}
+
+export function modLifecyclePath(modId: string, action: 'install' | 'uninstall' | 'enable' | 'disable') {
+  return `/api/mod-management/${encodeURIComponent(modId)}/${action}`;
 }
