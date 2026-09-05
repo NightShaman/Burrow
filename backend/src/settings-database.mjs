@@ -561,6 +561,23 @@ DreamDiary is for the operator: readable narrative reflection, never prompt auth
       updated_at TEXT NOT NULL
     );`,
   },
+  {
+    version: 37,
+    name: 'scoped-api-tokens',
+    body: `CREATE TABLE IF NOT EXISTS api_tokens (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      token_prefix TEXT NOT NULL,
+      scopes_json TEXT NOT NULL,
+      expires_at TEXT,
+      last_used_at TEXT,
+      revoked_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS api_tokens_active_idx ON api_tokens(revoked_at,expires_at);`,
+  },
 ].map((migration) => Object.freeze({ ...migration, checksum: checksum(`${migration.version}:${migration.name}:${migration.body}`) })));
 
 function ensureDreamSettingsModelColumns(db) {
