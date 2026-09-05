@@ -80,6 +80,7 @@ import { createScheduledChannelRoutes } from './ui/scheduled-channel-routes.mjs'
 import { createAuthRoutes } from './ui/auth-routes.mjs';
 import { createChatRoutes } from './ui/chat-routes.mjs';
 import { cleanupMods, createModRoute, loadMods } from '../src/mod-runtime.mjs';
+import { createModDistribution, createModManagementRoute } from '../src/mod-distribution.mjs';
 import { MAX_OVERVIEW_CHILD_CONTEXTS, normalizeOverviewBody, overviewSessionIds } from '../src/agent-overview.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -2867,12 +2868,19 @@ const observabilityRoute = createObservabilityRoutes({ readJsonBody, sendJson, v
 const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJson, validateBoundaryBody, withScheduledJobs, scheduler, listGroupChannels, createGroupChannel, readGroupChannelTurns, groupChannelRuns, startGroupChannelMessage, cancelGroupChannelRun, runtimeDataRoot });
 const authRoute = createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
 const chatRoute = createChatRoutes({ handleChat, readJsonBody, sendJson, selectedAgentRuntime, cancelChatRun });
-const mods = await loadMods({
-  runtimeRoot: process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow',
-  databasePath: settingsDatabasePath(),
-  executionProviders,
-});
+const modsRuntimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
+const mods = await loadMods({ runtimeRoot: modsRuntimeRoot, databasePath: settingsDatabasePath(), executionProviders });
 const modRoute = createModRoute({ mods, readJsonBody, sendJson });
+const modDistribution = createModDistribution({
+  runtimeRoot: modsRuntimeRoot,
+  databasePath: settingsDatabasePath(),
+  restart() {
+    // Installed code is never hot-swapped into a live process. The service
+    // manager restarts Burrow after the response has reached the operator.
+    setTimeout(() => { process.kill(process.pid, 'SIGTERM'); }, 250).unref?.();
+  },
+});
+const modManagementRoute = createModManagementRoute({ distribution: modDistribution, readJsonBody, sendJson });
 
 const server = createServer(async (req, res) => {
   const startedAt = Date.now();
@@ -2890,6 +2898,7 @@ const server = createServer(async (req, res) => {
       if (await serveV18Asset(url, res)) return;
       return sendJson(res, 404, { ok: false, error: 'ui_artifact_not_found' });
     }
+    if (await modManagementRoute({ req, res, url })) return;
     if (await modRoute({ req, res, url })) return;
     if (await exportRoute({ req, res, url })) return;
     if (req.method === 'GET' && url.pathname === '/api/openapi.json') {

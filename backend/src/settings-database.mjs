@@ -502,6 +502,20 @@ DreamDiary is for the operator: readable narrative reflection, never prompt auth
       db.exec('DROP INDEX IF EXISTS runtime_run_bindings_session_binding_idx; DROP TABLE IF EXISTS runtime_active_turns; DROP TABLE IF EXISTS runtime_run_bindings; DROP TABLE IF EXISTS runtime_session_bindings;');
     },
   },
+  {
+    version: 34,
+    name: 'core-owned-mod-distribution',
+    body: `CREATE TABLE IF NOT EXISTS mod_sources (
+      id TEXT PRIMARY KEY, url TEXT NOT NULL UNIQUE, provider TEXT NOT NULL,
+      mod_id TEXT, mod_name TEXT, latest_version TEXT, archive_url TEXT,
+      status TEXT NOT NULL DEFAULT 'pending', error TEXT,
+      last_checked_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS mod_installations (
+      mod_id TEXT PRIMARY KEY, source_id TEXT REFERENCES mod_sources(id) ON DELETE SET NULL,
+      version TEXT, archive_sha256 TEXT, installed_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );`,
+  },
 ].map((migration) => Object.freeze({ ...migration, checksum: checksum(`${migration.version}:${migration.name}:${migration.body}`) })));
 
 function ensureDreamSettingsModelColumns(db) {

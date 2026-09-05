@@ -276,6 +276,7 @@ export function modCatalog(mods = []) {
     name: mod.name,
     status: mod.status || 'discovered',
     ...(mod.status === 'failed' ? { error: mod.error || 'mod_failed' } : {}),
+    ...(mod.status !== 'failed' && mod.manifest?.version ? { version: String(mod.manifest.version) } : {}),
     ...(mod.status !== 'failed' && Object.keys(mod.contributions || {}).length ? { contributions: { ...mod.contributions } } : {}),
     ...(mod.status !== 'failed' && Object.keys(mod.ui || {}).length ? { ui: { ...(mod.ui.control ? { controlUrl: mod.ui.control.url } : {}), ...(mod.ui.settings ? { settingsUrl: mod.ui.settings.url } : {}) } } : {}),
   }));
