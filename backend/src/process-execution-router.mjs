@@ -17,8 +17,8 @@ export function localExecutionTarget() {
   return Object.freeze({ kind: 'local' });
 }
 
-export function remoteExecutionTarget(gatewayId) {
-  return Object.freeze({ kind: 'remote', gatewayId: requiredId(gatewayId, 'gateway_id') });
+export function remoteExecutionTarget(providerId, targetId) {
+  return Object.freeze({ kind: 'remote', providerId: requiredId(providerId, 'provider_id'), targetId: requiredId(targetId, 'target_id') });
 }
 
 /** Resolve the controller-owned target frozen into this run's context. */
@@ -26,8 +26,7 @@ export function resolveProcessExecutionTarget(runContext = {}) {
   const configured = runContext.processExecutionTarget || runContext.executionEnvironment || null;
   if (!configured) return localExecutionTarget();
   if (configured.kind === 'local') return localExecutionTarget();
-  if (configured.kind === 'remote') return remoteExecutionTarget(configured.gatewayId);
-  if (configured.kind === 'gateway') return remoteExecutionTarget(configured.gatewayId || configured.hostId);
+  if (configured.kind === 'remote') return remoteExecutionTarget(configured.providerId, configured.targetId);
   throw new Error('execution_target_invalid');
 }
 
@@ -43,7 +42,7 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
     if (target.kind === 'local') return localExecute(request.process || request, context);
     if (target.kind !== 'remote') throw new Error('execution_target_invalid');
     if (!remoteController || typeof remoteController.executeProcess !== 'function') throw new Error('remote_process_controller_unavailable');
-    const gatewayId = requiredId(target.gatewayId, 'gateway_id');
+    const targetId = requiredId(target.targetId, 'target_id');
     const parentRunId = requiredId(context.parentRunId, 'parent_run_id');
     const toolCallId = requiredId(context.toolCallId, 'tool_call_id');
     const operationId = context.operationId || processOperationId({ parentRunId, toolCallId });
@@ -58,7 +57,7 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
     if (command && process.args?.length) throw new Error('args_with_command_invalid');
     return remoteController.executeProcess({
       operationId,
-      gatewayId,
+      targetId,
       parentRunId,
       toolCallId,
       process: {
@@ -75,16 +74,16 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
   };
 }
 
-export function createProcessControllerRegistry() {
+export function createExecutionProviderRegistry() {
   const controllers = new Map();
   return Object.freeze({
-    register(modId, controller) {
-      const id = requiredId(modId, 'mod_id');
-      if (!controller || typeof controller.executeProcess !== 'function') throw new Error('process_controller_invalid');
-      if (controllers.has(id)) throw new Error(`process_controller_duplicate:${id}`);
+    register(providerId, controller) {
+      const id = requiredId(providerId, 'provider_id');
+      if (!controller || typeof controller.executeProcess !== 'function') throw new Error('execution_provider_invalid');
+      if (controllers.has(id)) throw new Error(`execution_provider_duplicate:${id}`);
       controllers.set(id, controller);
       return () => controllers.delete(id);
     },
-    get(modId) { return controllers.get(String(modId || '')) || null; },
+    get(providerId) { return controllers.get(String(providerId || '')) || null; },
   });
 }

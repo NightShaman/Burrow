@@ -10,7 +10,7 @@ const activeSystemProcesses = new Map();
 const activeSystemFilesystems = new Map();
 const NATIVE_FILESYSTEM_TOOLS = new Set(['files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_write', 'files_edit']);
 let controllerInstanceId = null;
-const SYSTEM_PROTOCOL = 'remote-process-controller-v1';
+const SYSTEM_PROTOCOL = 'execution-provider-v1';
 
 function send(message, callback) {
   if (!process.connected) {
@@ -33,7 +33,7 @@ function validSystemMessage(message, type) {
   return message?.type === type && message.protocol === SYSTEM_PROTOCOL && message.controllerInstanceId === controllerInstanceId
     && typeof message.requestId === 'string' && message.requestId.length > 0
     && typeof message.operationId === 'string' && message.operationId.length > 0
-    && typeof message.gatewayId === 'string' && message.gatewayId.length > 0;
+    && typeof message.targetId === 'string' && message.targetId.length > 0;
 }
 
 function rejectStoreRequests(error) {
@@ -169,21 +169,21 @@ process.on('message', async (message) => {
       argumentsValue = operation?.arguments && typeof operation.arguments === 'object' && !Array.isArray(operation.arguments)
         ? JSON.parse(JSON.stringify(operation.arguments)) : null;
     } catch {}
-    if (!validSystemMessage({ ...message, operationId: operation?.operationId, gatewayId: operation?.gatewayId }, 'system-controller-filesystem-execute')
+    if (!validSystemMessage({ ...message, operationId: operation?.operationId, targetId: operation?.targetId }, 'system-controller-filesystem-execute')
       || typeof operation.parentRunId !== 'string' || !operation.parentRunId || typeof operation.toolCallId !== 'string' || !operation.toolCallId
       || !NATIVE_FILESYSTEM_TOOLS.has(operation.tool) || !argumentsValue || !systemController?.executeNativeFilesystem) return;
     const abort = new AbortController();
-    activeSystemFilesystems.set(message.requestId, { abort, operationId: operation.operationId, gatewayId: operation.gatewayId });
+    activeSystemFilesystems.set(message.requestId, { abort, operationId: operation.operationId, targetId: operation.targetId });
     try {
-      const result = await systemController.executeNativeFilesystem({ operationId: operation.operationId, gatewayId: operation.gatewayId,
+      const result = await systemController.executeNativeFilesystem({ operationId: operation.operationId, targetId: operation.targetId,
         parentRunId: operation.parentRunId, toolCallId: operation.toolCallId, operation: { tool: operation.tool, arguments: argumentsValue } }, { abortSignal: abort.signal });
       if (!activeSystemFilesystems.has(message.requestId)) return;
       send({ type: 'system-controller-filesystem-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId, requestId: message.requestId,
-        operationId: operation.operationId, gatewayId: operation.gatewayId, ok: true, result }, () => {});
+        operationId: operation.operationId, targetId: operation.targetId, ok: true, result }, () => {});
     } catch (error) {
       if (!activeSystemFilesystems.has(message.requestId)) return;
       send({ type: 'system-controller-filesystem-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId, requestId: message.requestId,
-        operationId: operation.operationId, gatewayId: operation.gatewayId, ok: false, error: opaqueCode(error, 'remote_filesystem_failed') }, () => {});
+        operationId: operation.operationId, targetId: operation.targetId, ok: false, error: opaqueCode(error, 'remote_filesystem_failed') }, () => {});
     } finally { activeSystemFilesystems.delete(message.requestId); }
     return;
   }
@@ -194,20 +194,20 @@ process.on('message', async (message) => {
   }
   if (message?.type === 'system-controller-process-execute') {
     const operation = message.operation;
-    if (!validSystemMessage({ ...message, operationId: operation?.operationId, gatewayId: operation?.gatewayId }, 'system-controller-process-execute')
+    if (!validSystemMessage({ ...message, operationId: operation?.operationId, targetId: operation?.targetId }, 'system-controller-process-execute')
       || typeof operation.parentRunId !== 'string' || !operation.parentRunId || typeof operation.toolCallId !== 'string' || !operation.toolCallId
       || !operation.process || typeof operation.process !== 'object' || Array.isArray(operation.process) || !systemController?.executeProcess) return;
     const abort = new AbortController();
-    activeSystemProcesses.set(message.requestId, { abort, operationId: operation.operationId, gatewayId: operation.gatewayId });
+    activeSystemProcesses.set(message.requestId, { abort, operationId: operation.operationId, targetId: operation.targetId });
     try {
       const result = await systemController.executeProcess(operation, { abortSignal: abort.signal });
       if (!activeSystemProcesses.has(message.requestId)) return;
       send({ type: 'system-controller-process-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId, requestId: message.requestId,
-        operationId: operation.operationId, gatewayId: operation.gatewayId, ok: true, result }, () => {});
+        operationId: operation.operationId, targetId: operation.targetId, ok: true, result }, () => {});
     } catch (error) {
       if (!activeSystemProcesses.has(message.requestId)) return;
       send({ type: 'system-controller-process-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId, requestId: message.requestId,
-        operationId: operation.operationId, gatewayId: operation.gatewayId, ok: false, error: opaqueCode(error) }, () => {});
+        operationId: operation.operationId, targetId: operation.targetId, ok: false, error: opaqueCode(error) }, () => {});
     } finally { activeSystemProcesses.delete(message.requestId); }
     return;
   }

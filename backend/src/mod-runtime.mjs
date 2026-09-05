@@ -196,7 +196,7 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
   }
 }
 
-export async function loadMods({ runtimeRoot, databasePath, logger = console, processControllers = null, systemModCapabilities = {}, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs } = {}) {
+export async function loadMods({ runtimeRoot, databasePath, logger = console, executionProviders = null, systemModCapabilities = {}, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs } = {}) {
   const discovered = await discoverMods({ runtimeRoot });
   const loaded = [];
   for (const mod of discovered) {
@@ -207,8 +207,12 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, pr
       let routes = [];
       if (mod.server) {
         const requestedSystem = mod.manifest?.system === true;
-        const configuredCapability = systemModCapabilities?.[mod.id];
-        const systemCapability = mod.id === 'node-goblin' && requestedSystem && configuredCapability === 'remote-process-controller-v1'
+        const declaredCapabilities = Array.isArray(mod.manifest?.systemCapabilities)
+          ? mod.manifest.systemCapabilities.map((value) => String(value || '').trim()).filter(Boolean)
+          : [];
+        const configuredCapability = typeof systemModCapabilities?.[mod.id] === 'string'
+          ? systemModCapabilities[mod.id].trim() : '';
+        const systemCapability = requestedSystem && configuredCapability && declaredCapabilities.includes(configuredCapability)
           ? configuredCapability : null;
         if (requestedSystem && !systemCapability) throw new Error(`system_mod_not_enabled:${mod.id}`);
         let unregisterController = null;
@@ -216,8 +220,8 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, pr
         host = startModHost({
           mod, store, logger, systemCapability, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs,
           onSystemControllerReady(controllerProxy) {
-            if (!systemCapability || !processControllers) return;
-            unregisterController = processControllers.register(mod.id, controllerProxy);
+            if (!systemCapability || !executionProviders) return;
+            unregisterController = executionProviders.register(mod.id, controllerProxy);
           },
           onSystemControllerUnavailable() {
             unregisterController?.();

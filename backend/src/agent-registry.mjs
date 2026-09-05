@@ -15,11 +15,27 @@ function executionEnvironment(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('agent_execution_environment_invalid');
   const kind = text(value.kind);
   const workspaceRoot = text(value.workspaceRoot);
-  if (!['local', 'gateway'].includes(kind) || !workspaceRoot || !path.isAbsolute(workspaceRoot)) throw new Error('agent_execution_environment_invalid');
+  if (!workspaceRoot || !path.isAbsolute(workspaceRoot)) throw new Error('agent_execution_environment_invalid');
   if (kind === 'local') return { kind, workspaceRoot: path.resolve(workspaceRoot) };
-  const hostId = text(value.hostId);
-  if (!hostId) throw new Error('agent_execution_environment_host_required');
-  return { kind, hostId, workspaceRoot: path.resolve(workspaceRoot) };
+  // Preserve legacy provider-less assignments as unresolved data. Core cannot
+  // truthfully decide which independently installed mod owns them.
+  if (kind === 'gateway') {
+    const targetId = text(value.hostId || value.targetId);
+    if (!targetId) throw new Error('agent_execution_environment_target_required');
+    return { kind: 'unresolved', legacyKind: 'gateway', targetId, workspaceRoot: path.resolve(workspaceRoot) };
+  }
+  if (kind === 'unresolved') {
+    const legacyKind = text(value.legacyKind);
+    const targetId = text(value.targetId);
+    if (!legacyKind || !targetId) throw new Error('agent_execution_environment_invalid');
+    return { kind, legacyKind, targetId, workspaceRoot: path.resolve(workspaceRoot) };
+  }
+  if (kind !== 'remote') throw new Error('agent_execution_environment_invalid');
+  const providerId = text(value.providerId);
+  const targetId = text(value.targetId);
+  if (!providerId) throw new Error('agent_execution_environment_provider_required');
+  if (!targetId) throw new Error('agent_execution_environment_target_required');
+  return { kind, providerId, targetId, workspaceRoot: path.resolve(workspaceRoot) };
 }
 function bootstrapSampleIdentitiesEnabled(value = process.env.BURROW_BOOTSTRAP_SAMPLE_IDENTITIES) { return ['1', 'true', 'yes', 'on'].includes(String(value ?? '0').trim().toLowerCase()); }
 

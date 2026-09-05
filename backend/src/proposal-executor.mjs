@@ -74,7 +74,7 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
       const started = await traceLogger?.toolStart?.({
         tool: 'shell_exec',
         toolCallId: action.toolCallId || null,
-        gatewayId: target.kind === 'remote' ? target.gatewayId : null,
+        targetId: target.kind === 'remote' ? target.targetId : null,
         executionTarget: target.kind,
       });
       // The authoritative backend resolves protected references. Remote values
@@ -88,7 +88,7 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
           tool: 'shell_exec',
           ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}),
           toolCallId: action.toolCallId || null,
-          gatewayId: target.kind === 'remote' ? target.gatewayId : null,
+          targetId: target.kind === 'remote' ? target.targetId : null,
           executionTarget: target.kind,
           ok: false,
           error: result.error,
@@ -127,7 +127,7 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
         tool: 'shell_exec',
         ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}),
         toolCallId: action.toolCallId || null,
-        gatewayId: target.kind === 'remote' ? target.gatewayId : null,
+        targetId: target.kind === 'remote' ? target.targetId : null,
         executionTarget: target.kind,
         ok: result.ok,
         error: result.error || null,

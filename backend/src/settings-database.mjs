@@ -50,7 +50,6 @@ export const SETTINGS_OWNERSHIP = Object.freeze([
   Object.freeze({ id: 'dream-settings', authority: 'sqlite', storage: 'dream_settings', surface: 'dream-settings-api', migration: 'complete', notes: 'Operator-owned Dream enablement, schedule, timezone, and editable prompt.' }),
   Object.freeze({ id: 'runtime-ui-context-settings', authority: 'service-environment', storage: 'service environment', surface: 'deployment', migration: 'complete', notes: 'Deployment paths and listener settings are service-environment owned.' }),
   Object.freeze({ id: 'workspace-registry', authority: 'runtime-files', storage: 'runtime/workspace state', surface: 'not-yet-defined', migration: 'deferred', notes: 'Do not migrate before workspace ownership and routing UX are defined.' }),
-  Object.freeze({ id: 'runtime-bindings', authority: 'sqlite', storage: 'runtime_session_bindings, runtime_run_bindings, runtime_active_turns', surface: 'runtime-binding-store', migration: 'complete', notes: 'Durable adapter session/thread and run/turn correlation records; detaching retains native thread references.' }),
   Object.freeze({ id: 'task-board', authority: 'sqlite', storage: 'task_board_projects, task_board_tasks', surface: 'task-board-api', migration: 'complete', notes: 'Projects, task status, agent assignment, execution receipts, and board metadata.' }),
   Object.freeze({ id: 'scheduled-jobs', authority: 'sqlite', storage: 'scheduled_jobs, scheduled_job_runs', surface: 'scheduled-jobs-api', migration: 'complete', notes: 'Operator-owned agent schedules and durable dispatch/result receipts.' }),
   Object.freeze({ id: 'mcp-connections', authority: 'sqlite', storage: 'mcp_connections, mcp_connection_secrets, agent_mcp_tools', surface: 'agent-mcp-settings-api', migration: 'complete', notes: 'HTTP MCP connection records, encrypted API keys, discovered tool metadata, and per-agent tool grants.' }),
@@ -486,6 +485,23 @@ DreamDiary is for the operator: readable narrative reflection, never prompt auth
       if (!columns.includes('execution_environment_json')) db.exec(this.body);
     },
   },
+  {
+    version: 33,
+    name: 'retire-runtime-adapter-scaffolding',
+    body: 'Archive residual runtime adapter bindings in settings metadata, then drop the retired binding tables and index.',
+    apply(db) {
+      const tables = ['runtime_session_bindings', 'runtime_run_bindings', 'runtime_active_turns'];
+      const present = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('runtime_session_bindings','runtime_run_bindings','runtime_active_turns')").all().map((row) => row.name));
+      const archived = Object.fromEntries(tables.map((table) => [table, present.has(table) ? db.prepare(`SELECT * FROM ${table}`).all() : []]));
+      const hasRows = Object.values(archived).some((rows) => rows.length > 0);
+      if (hasRows) {
+        db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?)
+          ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at`)
+          .run('retired_runtime_adapter_state', JSON.stringify({ schema: 'burrow.retired-runtime-adapter-state/v1', archivedAt: now(), tables: archived }), now());
+      }
+      db.exec('DROP INDEX IF EXISTS runtime_run_bindings_session_binding_idx; DROP TABLE IF EXISTS runtime_active_turns; DROP TABLE IF EXISTS runtime_run_bindings; DROP TABLE IF EXISTS runtime_session_bindings;');
+    },
+  },
 ].map((migration) => Object.freeze({ ...migration, checksum: checksum(`${migration.version}:${migration.name}:${migration.body}`) })));
 
 function ensureDreamSettingsModelColumns(db) {
@@ -594,9 +610,6 @@ export function settingsOwnershipInventory(db) {
       modelConnectionSecretsConfigured: count('model_connection_secrets'),
       chatIdentities: count('chat_identities'),
       agents: count('agents'),
-      runtimeSessionBindings: count('runtime_session_bindings'),
-      runtimeRunBindings: count('runtime_run_bindings'),
-      runtimeActiveTurns: count('runtime_active_turns'),
       scheduledJobs: count('scheduled_jobs'),
       scheduledJobRuns: count('scheduled_job_runs'),
       dreamDiaryEntries: count('dream_diary_entries'),

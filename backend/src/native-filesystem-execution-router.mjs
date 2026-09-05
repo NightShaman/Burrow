@@ -46,7 +46,7 @@ export function createNativeFilesystemExecutionRouter({ localExecute, remoteCont
     const operationId = context.operationId || nativeFilesystemOperationId({ parentRunId, toolCallId });
     try { return await remoteController.executeNativeFilesystem({
       operationId,
-      gatewayId: required(target.gatewayId, 'gateway_id'),
+      targetId: required(target.targetId, 'target_id'),
       parentRunId,
       toolCallId,
       operation: { tool, arguments: Object.fromEntries(Object.entries(operation.arguments || {}).filter(([key, value]) => !['traceLogger', 'rootDir', 'artifactPrefix', 'runId'].includes(key) && (value == null || ['string', 'number', 'boolean'].includes(typeof value)))) },

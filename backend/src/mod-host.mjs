@@ -39,9 +39,9 @@ function validateResponseHeaders(value) {
 }
 // Mod HTTP responses remain JSON-only. Streaming, buffers and arbitrary structured
 // clone values are deliberately outside the generic mod-host contract.
-function validateSystemProcessResult(value, operationId, gatewayId) {
+function validateSystemProcessResult(value, operationId, targetId) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.tool !== 'shell_exec'
-    || value.operationId !== operationId || value.gatewayId !== gatewayId || typeof value.ok !== 'boolean') throw hostError('remote_process_result_invalid');
+    || value.operationId !== operationId || value.targetId !== targetId || typeof value.ok !== 'boolean') throw hostError('remote_process_result_invalid');
   let encoded;
   try { encoded = JSON.stringify(value); } catch { throw hostError('remote_process_result_invalid'); }
   if (encoded === undefined) throw hostError('remote_process_result_invalid');
@@ -59,9 +59,9 @@ function jsonObject(value, code) {
   return parsed;
 }
 
-function validateSystemFilesystemResult(value, operationId, gatewayId, tool) {
+function validateSystemFilesystemResult(value, operationId, targetId, tool) {
   const result = jsonObject(value, 'remote_filesystem_result_invalid');
-  if (result.tool !== tool || typeof result.ok !== 'boolean' || result.operationId !== operationId || result.gatewayId !== gatewayId) {
+  if (result.tool !== tool || typeof result.ok !== 'boolean' || result.operationId !== operationId || result.targetId !== targetId) {
     throw hostError('remote_filesystem_result_invalid');
   }
   return result;
@@ -179,7 +179,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     }
     if (message?.type === 'log') logger[message.level]?.(`[mod:${mod.id}] ${message.message}`);
     if (message?.type === 'system-controller-ready') {
-      if (systemCapability !== 'remote-process-controller-v1' || message.protocol !== systemCapability || systemControllerReady) {
+      if (systemCapability !== 'execution-provider-v1' || message.protocol !== systemCapability || systemControllerReady) {
         markUnavailable('system_controller_registration_invalid');
         if (!stopped) child.kill('SIGKILL');
         return;
@@ -196,12 +196,12 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       if (message.protocol !== systemCapability || message.controllerInstanceId !== controllerInstanceId) return;
       const requestId = typeof message.requestId === 'string' ? message.requestId : '';
       const entry = pendingSystemFilesystem.get(requestId);
-      if (!entry || message.operationId !== entry.operationId || message.gatewayId !== entry.gatewayId) return;
+      if (!entry || message.operationId !== entry.operationId || message.targetId !== entry.targetId) return;
       pendingSystemFilesystem.delete(requestId);
       entry.abortSignal?.removeEventListener?.('abort', entry.cancel);
       if (message.ok !== true) entry.reject(hostError(typeof message.error === 'string' && /^[a-z0-9_]+$/.test(message.error) ? message.error : 'remote_filesystem_failed'));
       else {
-        try { entry.resolve(validateSystemFilesystemResult(message.result, entry.operationId, entry.gatewayId, entry.tool)); }
+        try { entry.resolve(validateSystemFilesystemResult(message.result, entry.operationId, entry.targetId, entry.tool)); }
         catch { entry.reject(hostError('remote_filesystem_result_invalid')); }
       }
       return;
@@ -210,12 +210,12 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       if (message.protocol !== systemCapability || message.controllerInstanceId !== controllerInstanceId) return;
       const requestId = typeof message.requestId === 'string' ? message.requestId : '';
       const entry = pendingSystemProcess.get(requestId);
-      if (!entry || message.operationId !== entry.operationId || message.gatewayId !== entry.gatewayId) return;
+      if (!entry || message.operationId !== entry.operationId || message.targetId !== entry.targetId) return;
       pendingSystemProcess.delete(requestId);
       entry.abortSignal?.removeEventListener?.('abort', entry.cancel);
       if (message.ok !== true) entry.reject(hostError(typeof message.error === 'string' && /^[a-z0-9_]+$/.test(message.error) ? message.error : 'remote_process_failed'));
       else {
-        try { entry.resolve(validateSystemProcessResult(message.result, entry.operationId, entry.gatewayId)); }
+        try { entry.resolve(validateSystemProcessResult(message.result, entry.operationId, entry.targetId)); }
         catch { entry.reject(hostError('remote_process_result_invalid')); }
       }
       return;
@@ -302,13 +302,13 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       executeProcess(request = {}, { abortSignal = null } = {}) {
         if (!systemControllerReady || closing || stopped || !child.connected) return Promise.reject(hostError('remote_process_controller_unavailable'));
         const operationId = String(request.operationId || '');
-        const gatewayId = String(request.gatewayId || '');
+        const targetId = String(request.targetId || '');
         const parentRunId = String(request.parentRunId || '');
         const toolCallId = String(request.toolCallId || '');
-        if (!operationId || !gatewayId || !parentRunId || !toolCallId || !request.process || typeof request.process !== 'object' || Array.isArray(request.process)) return Promise.reject(hostError('remote_process_request_invalid'));
+        if (!operationId || !targetId || !parentRunId || !toolCallId || !request.process || typeof request.process !== 'object' || Array.isArray(request.process)) return Promise.reject(hostError('remote_process_request_invalid'));
         let operation;
         try {
-          operation = JSON.parse(JSON.stringify({ operationId, gatewayId, parentRunId, toolCallId, process: request.process,
+          operation = JSON.parse(JSON.stringify({ operationId, targetId, parentRunId, toolCallId, process: request.process,
             ...(request.protectedBindingMetadata ? { protectedBindingMetadata: request.protectedBindingMetadata } : {}),
             ...(request.protectedValues ? { protectedValues: request.protectedValues } : {}) }));
         } catch { return Promise.reject(hostError('remote_process_request_invalid')); }
@@ -316,9 +316,9 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
         return new Promise((resolve, reject) => {
           const cancel = () => {
             if (!pendingSystemProcess.has(requestId) || !child.connected) return;
-            child.send({ type: 'system-controller-process-cancel', protocol: systemCapability, controllerInstanceId, requestId, operationId, gatewayId }, () => {});
+            child.send({ type: 'system-controller-process-cancel', protocol: systemCapability, controllerInstanceId, requestId, operationId, targetId }, () => {});
           };
-          pendingSystemProcess.set(requestId, { operationId, gatewayId, resolve, reject, abortSignal, cancel });
+          pendingSystemProcess.set(requestId, { operationId, targetId, resolve, reject, abortSignal, cancel });
           if (abortSignal?.aborted) cancel(); else abortSignal?.addEventListener?.('abort', cancel, { once: true });
           child.send({ type: 'system-controller-process-execute', protocol: systemCapability, controllerInstanceId, requestId, operation }, (error) => {
             if (!error || !pendingSystemProcess.has(requestId)) return;
@@ -333,15 +333,15 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       executeNativeFilesystem(request = {}, { abortSignal = null } = {}) {
         if (!systemControllerReady || closing || stopped || !child.connected) return Promise.reject(hostError('remote_native_filesystem_controller_unavailable'));
         const operationId = String(request.operationId || '');
-        const gatewayId = String(request.gatewayId || '');
+        const targetId = String(request.targetId || '');
         const parentRunId = String(request.parentRunId || '');
         const toolCallId = String(request.toolCallId || '');
         const tool = String(request.operation?.tool || '');
-        if (!operationId || !gatewayId || !parentRunId || !toolCallId || !NATIVE_FILESYSTEM_TOOLS.has(tool)) return Promise.reject(hostError('remote_filesystem_request_invalid'));
+        if (!operationId || !targetId || !parentRunId || !toolCallId || !NATIVE_FILESYSTEM_TOOLS.has(tool)) return Promise.reject(hostError('remote_filesystem_request_invalid'));
         let operation;
         try {
           const args = jsonObject(request.operation?.arguments || {}, 'remote_filesystem_request_invalid');
-          operation = { operationId, gatewayId, parentRunId, toolCallId, tool, arguments: args };
+          operation = { operationId, targetId, parentRunId, toolCallId, tool, arguments: args };
         } catch { return Promise.reject(hostError('remote_filesystem_request_invalid')); }
         const requestId = randomUUID();
         return new Promise((resolve, reject) => {
@@ -350,10 +350,10 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
             if (!entry) return;
             pendingSystemFilesystem.delete(requestId);
             abortSignal?.removeEventListener?.('abort', cancel);
-            if (child.connected) child.send({ type: 'system-controller-filesystem-cancel', protocol: systemCapability, controllerInstanceId, requestId, operationId, gatewayId }, () => {});
+            if (child.connected) child.send({ type: 'system-controller-filesystem-cancel', protocol: systemCapability, controllerInstanceId, requestId, operationId, targetId }, () => {});
             reject(hostError('remote_filesystem_aborted'));
           };
-          pendingSystemFilesystem.set(requestId, { operationId, gatewayId, tool, resolve, reject, abortSignal, cancel });
+          pendingSystemFilesystem.set(requestId, { operationId, targetId, tool, resolve, reject, abortSignal, cancel });
           if (abortSignal?.aborted) { cancel(); return; }
           abortSignal?.addEventListener?.('abort', cancel, { once: true });
           child.send({ type: 'system-controller-filesystem-execute', protocol: systemCapability, controllerInstanceId, requestId, operation }, (error) => {

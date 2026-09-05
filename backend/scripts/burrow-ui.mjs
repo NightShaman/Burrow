@@ -34,7 +34,7 @@ import { planTurn } from '../src/turn-planner.mjs';
 import { workbenchWorkflow } from '../src/workbench-workflow.mjs';
 import { runWorkbenchStep } from '../src/workbench-runner.mjs';
 import { resolveExecutionTarget } from '../src/execution-context.mjs';
-import { createProcessControllerRegistry } from '../src/process-execution-router.mjs';
+import { createExecutionProviderRegistry } from '../src/process-execution-router.mjs';
 import { buildChatSupportStatus, buildWorkbenchStatus } from '../src/workbench-status.mjs';
 import { allowedNextSteps, appendWorkItemStep, archiveWorkItem, createWorkItem, listWorkItems, readWorkItem, workItemEligibility } from '../src/work-item-store.mjs';
 import { searchBurrowSessionEvidence, searchSessionEvidence } from '../src/session-search.mjs';
@@ -90,7 +90,7 @@ const apiDocsRoot = path.join(sourceRoot, 'public', 'api-docs');
 const port = Number(process.env.BURROW_UI_PORT || process.argv.find((arg) => arg.startsWith('--port='))?.split('=')[1] || 42817);
 const host = process.env.BURROW_UI_HOST || '0.0.0.0';
 const activeChatRuns = new Map();
-const processControllers = createProcessControllerRegistry();
+const executionProviders = createExecutionProviderRegistry();
 const sessionContinuityHeads = new Map();
 // The continuity head rejects stale writes, but browser requests sharing a
 // session must not make each other stale in the first place. Serialize the
@@ -810,7 +810,7 @@ async function resolveAgentRuntime(agentId = null) {
   return Object.freeze({
     ...resolved,
     executionEnvironment,
-    processExecutionController: executionEnvironment.kind === 'gateway' ? processControllers.get('node-goblin') : null,
+    processExecutionController: executionEnvironment.kind === 'remote' ? executionProviders.get(executionEnvironment.providerId) : null,
   });
 }
 
@@ -2870,10 +2870,11 @@ const chatRoute = createChatRoutes({ handleChat, readJsonBody, sendJson, selecte
 const mods = await loadMods({
   runtimeRoot: process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow',
   databasePath: settingsDatabasePath(),
-  processControllers,
-  systemModCapabilities: process.env.BURROW_SYSTEM_NODE_GOBLIN === '1'
-    ? { 'node-goblin': 'remote-process-controller-v1' }
-    : {},
+  executionProviders,
+  systemModCapabilities: (() => {
+    try { return JSON.parse(process.env.BURROW_SYSTEM_MOD_CAPABILITIES || '{}'); }
+    catch { throw new Error('system_mod_capabilities_invalid'); }
+  })(),
 });
 const modRoute = createModRoute({ mods, readJsonBody, sendJson });
 
