@@ -272,10 +272,15 @@ export async function runDreamCycle({ agentId, databasePath = null, rootDir = nu
       const messages = phaseWindows[phase];
       let extraction = { memories: [], preferences: [] };
       try { extraction = await extractPhaseCandidates({ phase, messages, generatedAt, modelAdapter: dreamAdapter, traceLogger }); } catch {}
-      for (const candidate of extraction.memories) {
-        const key = `${candidate.kind}|${candidate.title.toLowerCase()}|${candidate.content.toLowerCase()}`;
-        const existing = selectedByKey.get(key);
-        selectedByKey.set(key, existing ? { ...existing, sourceRefs: [...new Set([...existing.sourceRefs, ...candidate.sourceRefs])].slice(0, 8) } : { ...candidate, id: entryId(id, phase, candidate.title, candidate.content), phase });
+      // Light and REM are reflective phases: their extracted memories may
+      // inform diary output and preference reinforcement, but only Deep may
+      // contribute notes to the durable DreamMemory document.
+      if (phase === 'deep') {
+        for (const candidate of extraction.memories) {
+          const key = `${candidate.kind}|${candidate.title.toLowerCase()}|${candidate.content.toLowerCase()}`;
+          const existing = selectedByKey.get(key);
+          selectedByKey.set(key, existing ? { ...existing, sourceRefs: [...new Set([...existing.sourceRefs, ...candidate.sourceRefs])].slice(0, 8) } : { ...candidate, id: entryId(id, phase, candidate.title, candidate.content), phase });
+        }
       }
       const userRefs = new Set(messages.filter((message) => message.role === 'user').map((message) => message.sourceRef));
       for (const candidate of extraction.preferences) {
