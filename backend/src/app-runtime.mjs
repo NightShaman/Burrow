@@ -72,44 +72,16 @@ async function subagentDebugSnapshot({ dataRoot, legacyDataRoot = null, sessionI
   const summaries = records.map(subagentVisibilitySummary);
   const owned = sessionId ? summaries.filter((item) => item.owner?.sessionId === sessionId) : summaries;
   const active = owned.filter((item) => item.final !== true);
-  const final = owned.filter((item) => item.final === true);
-  // Raw records are needed only to select prompt evidence below. They must not
-  // travel in the canonical envelope, receipt, or router trace.
-  return { snapshot: { items: owned, activeCount: active.length, finalCount: final.length }, records };
+  // Completed child records remain durable for receipts, archive proof, and
+  // explicit inspection. They are historical runs, not ambient context for a
+  // later operator turn. Only live children belong in the current snapshot.
+  return { snapshot: { items: active, activeCount: active.length, finalCount: 0 }, records };
 }
 
 async function logRuntimeHeapStage(logger, stage, objects) {
   // Bounded graph telemetry for the narrow OOM window. It records object
   // counts/sizes without serializing the inspected payloads themselves.
   await logger?.event?.('runtime-heap-stage', runtimeHeapStage(stage, objects));
-}
-
-function compactChildEvidence(evidence = []) {
-  return (Array.isArray(evidence) ? evidence : []).slice(0, 4).map((item) => ({
-    tool: item?.tool || null,
-    ok: item?.ok ?? null,
-    filePath: item?.filePath || null,
-    command: item?.command ? String(item.command).slice(0, 400) : null,
-    error: item?.error ? String(item.error).slice(0, 800) : null,
-    content: item?.content ? String(item.content).slice(0, 1_200) : null,
-    summary: item?.summary ? String(item.summary).slice(0, 1_200) : null,
-  }));
-}
-
-function completedChildEvidence(records = [], { sessionId = null, conversationId = null, limit = 3 } = {}) {
-  return (records || [])
-    .filter((record) => record?.owner?.sessionId === sessionId && record?.owner?.conversationId === conversationId && record.status === 'succeeded' && record.result?.ok && record.trace?.childSessionId)
-    .slice(0, limit)
-    .map((record) => ({
-      id: record.id,
-      status: record.status,
-      ok: Boolean(record.result?.ok),
-      target: record.scope?.target || (record.scope?.workspaceRoot ? { kind: 'filesystem', root: record.scope.workspaceRoot } : null),
-      childSessionId: record.trace?.childSessionId || null,
-      receiptRef: (record.result?.artifacts || []).find((artifact) => artifact?.type === 'subagent-receipt')?.path || null,
-      summary: record.result?.summary || '',
-      evidence: compactChildEvidence(record.result?.evidence),
-    }));
 }
 
 async function runAskChatUnserialized({
@@ -354,8 +326,9 @@ async function runAskChatUnserialized({
   const structuredSubagents = null;
   const extraEyesReview = null;
   const subagentState = await subagentDebugSnapshot({ dataRoot, legacyDataRoot, sessionId: resolvedSessionId, compatibilityObserver });
-  const childEvidence = completedChildEvidence(subagentState.records, { sessionId: resolvedSessionId, conversationId });
-  // Registry history belongs to the UI/debug surface, never model support context.
+  // Completed child records remain available through receipts, traces, and
+  // explicit inspection. They do not become ambient evidence on later turns.
+  const childEvidence = [];
   const subagents = subagentState.snapshot;
   await logRuntimeHeapStage(logger, 'after-delegated-evidence-selection', { childEvidence, rawSubagentRecordCount: subagentState.records.length });
   const { canonicalTurnEnvelope, runtimeTurn } = await buildRuntimeTurnEnvelope({ logger, resolvedSessionId, conversationId, message, command, resolvedWorkingRoot, resolvedTarget, attachments: attachmentSummary(turnAttachments), session, intent, routeDecision, turnPlan, turnContext: preparedContext.turnContext, ambientWorkingContext, agentContextConfig, route, executionPolicy, subagents, structuredSubagents, extraEyesReview, resolvedRunId, childEvidence, plannerObservability, priorSession, deicticFiles, trackedBackgroundWork, runtimeHeapStage: logRuntimeHeapStage });
