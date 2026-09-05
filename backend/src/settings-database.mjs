@@ -602,12 +602,19 @@ export function applySettingsMigrations(db, { clock = now } = {}) {
       continue;
     }
     withSettingsTransaction(db, () => {
+      // The initial ledger snapshot can become stale while this connection
+      // waits for another fresh process to finish the same migration. Recheck
+      // after BEGIN IMMEDIATE owns the setup lock; otherwise a second process
+      // can replay an old migration after a newer one has removed its tables.
+      const concurrent = db.prepare('SELECT version,name,checksum FROM schema_migrations WHERE version=?').get(migration.version);
+      if (concurrent) {
+        if (migration.version === 7 && concurrent.name === 'memory-connections') return;
+        if (concurrent.name === migration.name && (concurrent.checksum === migration.checksum || LEGACY_MIGRATION_CHECKSUMS[migration.version]?.has(concurrent.checksum))) return;
+        throw new Error(`settings_migration_checksum_mismatch:${migration.version}`);
+      }
       if (migration.apply) migration.apply(db);
       else db.exec(migration.body);
-      // Multiple isolated test/CLI processes may initialize one empty settings
-      // database concurrently. Migration bodies are idempotent; let the first
-      // committer own the ledger row instead of failing the other initializer.
-      db.prepare('INSERT OR IGNORE INTO schema_migrations (version,name,applied_at,checksum) VALUES (?,?,?,?)')
+      db.prepare('INSERT INTO schema_migrations (version,name,applied_at,checksum) VALUES (?,?,?,?)')
         .run(migration.version, migration.name, clock(), migration.checksum);
     });
   }

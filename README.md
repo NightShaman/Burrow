@@ -53,6 +53,27 @@ The installer downloads the assembled `main` revision, installs dependencies, bu
 
 Node.js, npm, `curl`, and `tar` must be available. The installer does not require `/opt`, root access, or Docker.
 
+## Install a Node Goblin
+
+A Node Goblin is the lightweight execution service for a remote Burrow controller. Install the latest calendar-versioned release from the main Burrow repository:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/NightShaman/Burrow/main/install-node-goblin.sh | sudo sh
+sudo node-goblin configure
+sudo node-goblin connect
+```
+
+The installer downloads the release tarball and checksum from `NightShaman/Node-Goblin`, verifies it, and installs the systemd service. Configuration asks only for the controller address and stable node ID. On first connection, compare the pairing code printed by the Node Goblin with Burrow's pending pairing and approve it in Settings.
+
+Pin a calendar release or configure non-interactively with non-secret values:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/NightShaman/Burrow/main/install-node-goblin.sh \
+  | sudo sh -s -- --version 2026.09.01 --controller gkl42.example:7443 --node-id hatchet
+```
+
+The installer adopts a conventional existing `burrow` account or creates a narrow service account with UID/GID `4226:4226`. It does not grant sudo, alter supplementary groups, or manufacture host permissions.
+
 ### Options
 
 ```text
