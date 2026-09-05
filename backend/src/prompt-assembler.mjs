@@ -242,14 +242,24 @@ function renderWorkingContext(context = null, maxChars = 0) {
   const workspace = context.workspace && typeof context.workspace === 'object' ? context.workspace : null;
   const continuity = context.continuity && typeof context.continuity === 'object' ? context.continuity : null;
   const interruptedRun = context.interruptedRun && typeof context.interruptedRun === 'object' ? context.interruptedRun : null;
+  const activeProject = context.activeProject && typeof context.activeProject === 'object' ? context.activeProject : null;
   const records = Array.isArray(continuity?.records) ? continuity.records.filter((record) => record?.title && record?.content) : [];
   const warmCount = records.length + Number(continuity?.handoffCount || 0) + Number(continuity?.candidateCount || 0);
   const readEvidence = Array.isArray(context.readEvidence) ? context.readEvidence.filter((item) => item?.path && item?.excerpt) : [];
-  if (!workspace && !targets.length && !referents.length && !warmCount && !readEvidence.length && !interruptedRun) return '';
+  if (!workspace && !targets.length && !referents.length && !warmCount && !readEvidence.length && !interruptedRun && !activeProject) return '';
   const lines = [
     'Working Context. Preserves conversational continuity only. This reference ledger never selects the execution root, cwd, safety policy, continuity-scope authority, identity, role, persona, or task.',
     'Profile files and the latest user turn outrank Working Context. Absence of handoff, rolling continuity, or memory search results is never evidence that profile identity, role, persona, or current-task context is absent.',
   ];
+  if (activeProject) {
+    lines.push('', 'Conversation active project. Explicitly selected by the operator through /project; refreshed from TaskBoard for this turn. These references orient work but do not authorize changes or prove that a path still exists.', `Project: ${activeProject.name || 'unknown'} (${activeProject.id || 'unknown'})`);
+    if (activeProject.description) lines.push(`Description: ${activeProject.description}`);
+    if (activeProject.notes) lines.push('Project notes:', activeProject.notes);
+    if (Array.isArray(activeProject.pathEntries) && activeProject.pathEntries.length) {
+      lines.push('Project paths:');
+      for (const entry of activeProject.pathEntries.slice(0, 100)) lines.push(`- ${entry.label}: ${entry.path}${entry.note ? ` — ${entry.note}` : ''}`);
+    }
+  }
   if (workspace?.root) lines.push(`Latest explicit target: ${workspace.root}`);
   if (targets.length) lines.push('Recent file references:', ...targets.slice(0, 6).map((item) => `- ${item}`));
   if (referents.length) lines.push('Referents:', ...referents.slice(0, 8).map((item) => `- ${item}`));

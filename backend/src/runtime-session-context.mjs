@@ -6,6 +6,7 @@ import { loadWorkingContinuity, normalizeContinuityScope, projectHandoffsIntoWor
 import { validateReadEvidence } from './read-evidence.mjs';
 import { readSessionReadEvidence } from './read-evidence-store.mjs';
 import { WorkingMemoryStore } from './working-memory-store.mjs';
+import { TaskBoardStore } from './task-board-store.mjs';
 
 export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessionId, runtimeState, normalizedArgs, workspaceRoot, resolvedTarget, message, explicitWorkspaceFiles = [], interruptedRun = null } = {}) {
   // Planning consumes no transcript prose. It receives only durable session
@@ -53,7 +54,13 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
     agentId: runtimeState.agentId || null,
     continuityScope,
   });
-  const ambientWorkingContext = { ...initialWorkingContext, ...(interruptedRun ? { interruptedRun } : {}), continuity: workingContinuity, continuityScopeSource: generatedContinuityScope ? 'runtime_generated' : 'session_persisted' };
+  let activeProject = null;
+  try {
+    const store = new TaskBoardStore({ databasePath: runtimeState.settingsDatabasePath });
+    try { activeProject = store.getConversationProject({ agentId: runtimeState.agentId, sessionId: resolvedSessionId }); }
+    finally { store.close(); }
+  } catch { activeProject = null; }
+  const ambientWorkingContext = { ...initialWorkingContext, ...(interruptedRun ? { interruptedRun } : {}), ...(activeProject ? { activeProject } : {}), continuity: workingContinuity, continuityScopeSource: generatedContinuityScope ? 'runtime_generated' : 'session_persisted' };
   let dreamPreload = null;
   try {
     const store = new WorkingMemoryStore(runtimeState.settingsDatabasePath ? { databasePath: runtimeState.settingsDatabasePath } : {});

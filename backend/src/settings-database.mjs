@@ -516,6 +516,41 @@ DreamDiary is for the operator: readable narrative reflection, never prompt auth
       version TEXT, archive_sha256 TEXT, installed_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );`,
   },
+  {
+    version: 35,
+    name: 'task-board-project-context',
+    body: `ALTER TABLE task_board_projects ADD COLUMN notes TEXT NOT NULL DEFAULT '';
+    CREATE TABLE IF NOT EXISTS task_board_project_paths (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES task_board_projects(id) ON DELETE CASCADE,
+      label TEXT NOT NULL, path TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS task_board_project_paths_project_idx ON task_board_project_paths(project_id,sort_order,id);
+    CREATE TABLE IF NOT EXISTS conversation_project_bindings (
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL, project_id TEXT NOT NULL REFERENCES task_board_projects(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      PRIMARY KEY(agent_id,session_id)
+    );`,
+    apply(db) {
+      const projectTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_board_projects'").get();
+      if (!projectTable) return;
+      const columns = db.prepare('PRAGMA table_info(task_board_projects)').all().map((column) => column.name);
+      if (!columns.includes('notes')) db.exec("ALTER TABLE task_board_projects ADD COLUMN notes TEXT NOT NULL DEFAULT '';");
+      db.exec(`CREATE TABLE IF NOT EXISTS task_board_project_paths (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES task_board_projects(id) ON DELETE CASCADE,
+        label TEXT NOT NULL, path TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS task_board_project_paths_project_idx ON task_board_project_paths(project_id,sort_order,id);
+      CREATE TABLE IF NOT EXISTS conversation_project_bindings (
+        agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL, project_id TEXT NOT NULL REFERENCES task_board_projects(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        PRIMARY KEY(agent_id,session_id)
+      );`);
+    },
+  },
 ].map((migration) => Object.freeze({ ...migration, checksum: checksum(`${migration.version}:${migration.name}:${migration.body}`) })));
 
 function ensureDreamSettingsModelColumns(db) {

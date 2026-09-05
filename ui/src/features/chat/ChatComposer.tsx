@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent } from 'react';
-import { textFromChatValue, type ChatAttachment, type SessionTurn } from '../../app/api';
+import { api, textFromChatValue, type ChatAttachment, type SessionTurn } from '../../app/api';
 
 const CHAT_COMMANDS = [
   { name: 'help', usage: '/help', description: 'List available chat commands.' },
@@ -8,6 +8,7 @@ const CHAT_COMMANDS = [
   { name: 'status', usage: '/status', description: 'Show runtime and active-run status.' },
   { name: 'new', usage: '/new', description: 'Start a fresh conversation generation.' },
   { name: 'stop', usage: '/stop', description: 'Cancel the active run in this session.' },
+  { name: 'project', usage: '/project [name]', description: 'Set or clear the active project.' },
 ] as const;
 
 function commandQuery(value: string) {
@@ -46,6 +47,13 @@ export function ChatComposer({
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const query = commandQuery(draft.trim());
   const commandMatches = query === null ? [] : CHAT_COMMANDS.filter((command) => command.name.startsWith(query));
+  const projectQuery = /^\/project(?:\s+(.*))?$/iu.exec(draft.trim())?.[1] ?? null;
+  const [projects, setProjects] = useState<Array<{ id: string; name: string; description?: string }>>([]);
+  useEffect(() => {
+    if (projectQuery === null) return;
+    void api<{ projects: Array<{ id: string; name: string; description?: string }> }>('/api/task-board/projects').then((result) => setProjects(result.projects)).catch(() => setProjects([]));
+  }, [projectQuery === null]);
+  const visibleProjects = projectQuery === null ? [] : projects.filter((project) => !projectQuery || project.name.toLowerCase().includes(projectQuery.toLowerCase()));
   const chooseCommand = (name: string) => setDraft(`/${name}${name === 'context' ? ' ' : ''}`);
   const pasteImages = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith('image/'));
@@ -88,6 +96,12 @@ export function ChatComposer({
       {commandMatches.length > 0 && (
         <div className="chat-command-menu" role="listbox" aria-label="Chat commands">
           {commandMatches.map((command) => <button key={command.name} type="button" role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => chooseCommand(command.name)}><strong>{command.usage}</strong><span>{command.description}</span></button>)}
+        </div>
+      )}
+      {projectQuery !== null && (
+        <div className="chat-command-menu" role="listbox" aria-label="Projects">
+          <button type="button" role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => setDraft('/project clear')}><strong>Clear active project</strong><span>Remove project context from this conversation.</span></button>
+          {visibleProjects.map((project) => <button key={project.id} type="button" role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => setDraft(`/project ${project.name}`)}><strong>{project.name}</strong><span>{project.description || 'TaskBoard project'}</span></button>)}
         </div>
       )}
       <div className="composer">
