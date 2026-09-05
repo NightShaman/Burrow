@@ -2,6 +2,19 @@ import { useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent } from 'react';
 import { textFromChatValue, type ChatAttachment, type SessionTurn } from '../../app/api';
 
+const CHAT_COMMANDS = [
+  { name: 'help', usage: '/help', description: 'List available chat commands.' },
+  { name: 'context', usage: '/context [full]', description: 'Show context capacity, or the full provider context.' },
+  { name: 'status', usage: '/status', description: 'Show runtime and active-run status.' },
+  { name: 'new', usage: '/new', description: 'Start a fresh conversation generation.' },
+  { name: 'stop', usage: '/stop', description: 'Cancel the active run in this session.' },
+] as const;
+
+function commandQuery(value: string) {
+  const match = value.match(/^\/([A-Za-z0-9_-]*)$/u);
+  return match ? match[1].toLowerCase() : null;
+}
+
 type ChatComposerProps = {
   draft: string;
   setDraft: (value: string) => void;
@@ -31,6 +44,9 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const canSend = Boolean(draft.trim() || attached.length) && !disabled;
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const query = commandQuery(draft.trim());
+  const commandMatches = query === null ? [] : CHAT_COMMANDS.filter((command) => command.name.startsWith(query));
+  const chooseCommand = (name: string) => setDraft(`/${name}${name === 'context' ? ' ' : ''}`);
   const pasteImages = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith('image/'));
     if (files.length) {
@@ -67,6 +83,11 @@ export function ChatComposer({
               <span className="attachment-meta">{file.type.startsWith('image/') ? null : <span className="attachment-name">{file.name}</span>}<span aria-hidden="true">×</span></span>
             </button>
           ))}
+        </div>
+      )}
+      {commandMatches.length > 0 && (
+        <div className="chat-command-menu" role="listbox" aria-label="Chat commands">
+          {commandMatches.map((command) => <button key={command.name} type="button" role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => chooseCommand(command.name)}><strong>{command.usage}</strong><span>{command.description}</span></button>)}
         </div>
       )}
       <div className="composer">

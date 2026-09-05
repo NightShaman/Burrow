@@ -7,6 +7,10 @@ import type { Agent, Subagent } from '../../app/types';
 
 export type OperatorProfile = { name: string; avatar: string };
 
+function isChatCommand(value: string) {
+  return /^\/[A-Za-z][A-Za-z0-9_-]*(?:\s+.*)?$/u.test(value.trim());
+}
+
 type ChatTranscriptProps = {
   selected: Agent | Subagent;
   parent: Agent;
@@ -25,7 +29,7 @@ type ChatTranscriptProps = {
 
 export function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, a2aActivities = [] }: ChatTranscriptProps) {
   const isSubagent = 'stream' in selected;
-  const messages = turns.filter((turn) => turn.type === 'message' && turn.content && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent'));
+  const messages = turns.filter((turn) => turn.type === 'message' && turn.content && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && isChatCommand(textFromChatValue(turn.content))));
   const activityByRun = new Map<string, ToolActivity>();
   for (const turn of turns) {
     const activity = turn.metadata?.toolActivity;
