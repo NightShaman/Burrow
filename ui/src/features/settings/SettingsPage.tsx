@@ -12,6 +12,7 @@ import { AgentMcpTools } from './AgentMcpTools';
 import { ExportSettings } from './ExportSettings';
 import { Field, SettingSection } from './SettingsPrimitives';
 import { McpConnections } from './McpConnections';
+import { ApiTokensSettings } from './ApiTokensSettings';
 import { AuthenticationSettings } from './AuthenticationSettings';
 import { CuratorSettings } from './CuratorSettings';
 import { RetentionSettings } from './RetentionSettings';
@@ -32,7 +33,8 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
   const [settingsAgentId, setSettingsAgentId] = useState(selected.id);
   const [agentSection, setAgentSection] = useState<'details' | 'profile-documents' | 'mcp-tools' | 'cron-jobs' | 'dreams'>('details');
   const [generalSection, setGeneralSection] = useState<'operator-profile' | 'execution-boundaries' | 'trace-retention' | 'export' | 'rail-panels' | 'tiddle-signal' | 'appearance'>('operator-profile');
-  const [connectionSection, setConnectionSection] = useState<'authentication' | 'model-providers' | 'mcp-servers'>('authentication');
+  const [connectionSection, setConnectionSection] = useState<'authentication' | 'model-providers' | 'mcp-servers' | 'api-tokens'>('authentication');
+  const [modsSection, setModsSection] = useState<'installed' | 'sources'>('installed');
   const [modNavigationColumn, setModNavigationColumn] = useState<HTMLElement | null>(null);
   const [targetContributions, setTargetContributions] = useState<ApiTargetContribution[]>([]);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
@@ -103,7 +105,14 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
             ['authentication', 'Authentication'],
             ['model-providers', 'Model providers'],
             ['mcp-servers', 'MCP servers'],
+            ['api-tokens', 'API tokens'],
           ] as const).map(([id, label]) => <button type="button" className={connectionSection === id ? 'active' : ''} aria-current={connectionSection === id ? 'page' : undefined} onClick={() => setConnectionSection(id)} key={id}>{label}</button>)}
+        </nav>}
+        {tab === 'mods' && <nav className="settings-prototype-section-items" aria-label="Mod management sections">
+          {([
+            ['installed', 'Installed mods'],
+            ['sources', 'Mod sources'],
+          ] as const).map(([id, label]) => <button type="button" className={modsSection === id ? 'active' : ''} aria-current={modsSection === id ? 'page' : undefined} onClick={() => setModsSection(id)} key={id}>{label}</button>)}
         </nav>}
         {selectedContribution?.settingsUrl ? <div ref={setModNavigationColumn} /> : selectedModSettings ? <nav className="settings-prototype-section-items" aria-label={`${selectedModSettings.navigation.title} settings sections`}><button type="button" className="active" aria-current="page">{selectedModSettings.navigation.title}</button></nav> : selectedContribution && <span>Extension settings</span>}
       </section>
@@ -119,7 +128,8 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
         {tab === 'connections' && connectionSection === 'authentication' && <AuthenticationSettings />}
         {tab === 'connections' && connectionSection === 'model-providers' && <ModelConnections savedProviders={savedProviders} onModelConnectionsChanged={onModelConnectionsChanged} mcpConnections={null} overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'mcp-servers' && <McpConnections overflowTarget={overflowColumn} />}
-        {tab === 'mods' && <ModsSettings />}
+        {tab === 'connections' && connectionSection === 'api-tokens' && <ApiTokensSettings overflowTarget={overflowColumn} />}
+        {tab === 'mods' && <ModsSettings section={modsSection} overflowTarget={overflowColumn} />}
         {selectedContribution?.settingsUrl ? <ModSettingsHost modId={selectedContribution.modId} settingsUrl={selectedContribution.settingsUrl} agents={agents} onAgentsChanged={onAgentsChanged} navigationTarget={modNavigationColumn} overflowTarget={overflowColumn} /> : selectedContribution && <ApiTargetsSettings contribution={selectedContribution} settings={selectedModSettings} overflowTarget={overflowColumn} />}
       </section>
       <section className="settings-blank-column settings-prototype-overflow" ref={setOverflowColumn} aria-label="Additional settings" />
