@@ -53,3 +53,46 @@ describe('ModsSettings layout contract', () => {
     overflow.remove();
   });
 });
+
+
+describe('ModsSettings version and lifecycle truth', () => {
+  it.each([
+    { version: undefined, latestVersion: '2.0.0', updateAvailable: false, label: 'Reinstall' },
+    { version: undefined, latestVersion: '2.0.0', updateAvailable: true, label: 'Reinstall' },
+    { version: '1.0.0', latestVersion: undefined, updateAvailable: false, label: 'Reinstall' },
+    { version: '1.0.0', latestVersion: '1.0.0', updateAvailable: false, label: 'Reinstall' },
+    { version: '1.0.0', latestVersion: '2.0.0', updateAvailable: true, label: 'Update' },
+  ])('presents known and unknown versions honestly: $version / $latestVersion / $label', async ({ label, ...versions }) => {
+    loadMock.mockResolvedValue({ restartRequired: false, sources: [], mods: [
+      { id: 'node-goblin', name: 'Node Goblin', status: 'installed', enabled: true, canInstall: true, ...versions },
+    ] });
+    vi.mocked(management.modManagementAction).mockResolvedValue({ ok: true });
+    render(<ModsSettings />);
+    await screen.findByRole('button', { name: label });
+    const current = screen.getByLabelText('Current version') as HTMLInputElement;
+    const latest = screen.getByLabelText('Latest version') as HTMLInputElement;
+    expect(current.value).toBe(versions.version || 'Unknown');
+    expect(latest.value).toBe(versions.latestVersion || 'Unknown');
+    expect(current.readOnly).toBe(true);
+    expect(latest.readOnly).toBe(true);
+    expect(screen.queryByText('Up to date')).toBeNull();
+    expect(screen.queryByLabelText('Install version')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: label }));
+    await waitFor(() => expect(management.modManagementAction).toHaveBeenCalledWith(
+      '/api/mod-management/node-goblin/install', { method: 'POST', body: '{}' },
+    ));
+    await screen.findByRole('button', { name: label });
+  });
+
+  it.each(['installed', 'available'])('honors canInstall=false for $status mods', async (status) => {
+    loadMock.mockResolvedValue({ restartRequired: false, sources: [], mods: [
+      { id: 'blocked', name: 'Blocked', status, canInstall: false, latestVersion: '2.0.0' },
+    ] });
+    render(<ModsSettings />);
+    const button = await screen.findByRole('button', { name: status === 'installed' ? 'Reinstall' : 'Install' });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText('Current version') as HTMLInputElement).value).toBe(status === 'installed' ? 'Unknown' : 'Not installed');
+    fireEvent.click(button);
+    expect(management.modManagementAction).not.toHaveBeenCalled();
+  });
+});

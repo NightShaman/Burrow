@@ -13,14 +13,13 @@ function formatCheckedTime(value: string) {
 
 function actionLabel(mod: ModRecord) {
   if (mod.status !== 'installed') return 'Install';
-  return mod.updateAvailable ? 'Update' : 'Up to date';
+  return mod.version && mod.latestVersion && mod.updateAvailable === true ? 'Update' : 'Reinstall';
 }
 
 export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   const [state, setState] = useState<NormalizedModManagement>({ mods: [], sources: [], restartRequired: false });
   const [selectedModId, setSelectedModId] = useState<string | null>(null);
   const [sourceUrl, setSourceUrl] = useState('');
-  const [version, setVersion] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,9 +53,7 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   };
 
   const install = (mod: ModRecord) => {
-    const selectedVersion = version.trim();
-    setVersion('');
-    void run(mod.id, modLifecyclePath(mod.id, 'install'), { method: 'POST', body: JSON.stringify(selectedVersion ? { version: selectedVersion } : {}) });
+    void run(mod.id, modLifecyclePath(mod.id, 'install'), { method: 'POST', body: JSON.stringify({}) });
   };
   const lifecycle = (mod: ModRecord, action: 'uninstall' | 'enable' | 'disable') => {
     void run(mod.id, modLifecyclePath(mod.id, action), { method: 'POST' });
@@ -71,7 +68,7 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
     ? <p className="settings-empty">No mods found. Add a source in Mod sources.</p>
     : <div className="memory-connection-list">{state.mods.map((mod) => <article className="memory-connection" key={mod.id}>
       <div><strong>{mod.name}{mod.system && <span className="mod-system-dot" role="img" aria-label="System mod" title="System mod" />}</strong><small>{mod.status === 'installed' ? (mod.enabled ? 'Installed · Enabled' : 'Installed · Disabled') : 'Available'}{mod.version ? ` · ${mod.version}` : ''}</small></div>
-      <div className="memory-connection-actions"><button type="button" className="secondary memory-edit" aria-pressed={mod.id === selectedModId} disabled={busy !== null} onClick={() => { setSelectedModId(mod.id); setVersion(''); }}>Manage</button></div>
+      <div className="memory-connection-actions"><button type="button" className="secondary memory-edit" aria-pressed={mod.id === selectedModId} disabled={busy !== null} onClick={() => setSelectedModId(mod.id)}>Manage</button></div>
     </article>)}</div>;
   const modInventory = overflowTarget
     ? <div className="settings-overflow-content memory-saved" aria-label="Mod catalog">{modInventoryContents}</div>
@@ -82,12 +79,13 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
     {selectedMod ? <>
       <p className="settings-description">Manage installation, version, and availability for this mod.</p>
       <Field label="Mod ID"><input value={selectedMod.id} readOnly /></Field>
-      <div className="field-pair"><Field label="Current version"><input value={selectedMod.version || 'Not installed'} readOnly /></Field><Field label="Install version"><input value={version} onChange={(event) => setVersion(event.target.value)} placeholder={selectedMod.latestVersion || 'Latest available'} /></Field></div>
-      <p className="settings-description">{selectedMod.status === 'installed' ? `Installed · ${selectedMod.enabled ? 'Enabled' : 'Disabled'}` : 'Available from a configured source'}{selectedMod.latestVersion ? ` · Latest ${selectedMod.latestVersion}` : ''}{selectedMod.reason ? ` · ${selectedMod.reason}` : ''}</p>
+      <div className="field-pair"><Field label="Current version"><input value={selectedMod.status === 'installed' ? selectedMod.version || 'Unknown' : 'Not installed'} readOnly /></Field><Field label="Latest version"><input value={selectedMod.latestVersion || 'Unknown'} readOnly /></Field></div>
+      <p className="settings-description">{selectedMod.status === 'installed' ? `Installed · ${selectedMod.enabled ? 'Enabled' : 'Disabled'}` : 'Available from a configured source'}{selectedMod.reason ? ` · ${selectedMod.reason}` : ''}</p>
+      <p className="settings-help">Install, update, and reinstall use the latest release from the configured source.</p>
       <div className="model-actions">
         {selectedMod.status === 'installed' && <button className="danger" type="button" disabled={busy !== null} onClick={() => lifecycle(selectedMod, 'uninstall')}>{busy === selectedMod.id ? 'Working…' : 'Uninstall'}</button>}
         {selectedMod.status === 'installed' && <button className="secondary" type="button" disabled={busy !== null} onClick={() => lifecycle(selectedMod, selectedMod.enabled ? 'disable' : 'enable')}>{busy === selectedMod.id ? 'Working…' : selectedMod.enabled ? 'Disable' : 'Enable'}</button>}
-        <button className={selectedMod.status === 'installed' ? 'secondary' : 'primary'} type="button" disabled={busy !== null || (selectedMod.status === 'installed' ? !selectedMod.updateAvailable : selectedMod.canInstall === false)} onClick={() => install(selectedMod)}>{busy === selectedMod.id ? 'Working…' : actionLabel(selectedMod)}</button>
+        <button className={selectedMod.status === 'installed' ? 'secondary' : 'primary'} type="button" disabled={busy !== null || selectedMod.canInstall === false} onClick={() => install(selectedMod)}>{busy === selectedMod.id ? 'Working…' : actionLabel(selectedMod)}</button>
       </div>
     </> : <p className="settings-empty">Select a mod from the catalog to manage it.</p>}
   </section>;
