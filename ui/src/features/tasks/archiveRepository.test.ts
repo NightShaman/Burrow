@@ -27,6 +27,14 @@ describe('archiveRepository', () => {
     expect(apiMock).toHaveBeenNthCalledWith(2, '/api/archive/sessions/agent%2Fname/session%2Fname', { signal: undefined });
   });
 
+  it('omits agentId for All agents and preserves explicit agent filters', async () => {
+    apiMock.mockResolvedValue({ runs: [] });
+    await repository.listRuns('');
+    await repository.listRuns('agent/name');
+    expect(apiMock).toHaveBeenNthCalledWith(1, '/api/archive/runs?limit=100', { signal: undefined });
+    expect(apiMock).toHaveBeenNthCalledWith(2, '/api/archive/runs?limit=100&agentId=agent%2Fname', { signal: undefined });
+  });
+
   it('normalizes dream summaries and loads full dream documents', async () => {
     apiMock.mockResolvedValueOnce({ entries: [{ ...dream, excerpt: 'Summary' }] }).mockResolvedValueOnce({ document: { markdown: '# Full dream' } });
 
