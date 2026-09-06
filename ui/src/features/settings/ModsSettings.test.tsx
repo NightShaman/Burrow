@@ -23,12 +23,13 @@ describe('ModsSettings layout contract', () => {
     const { container } = render(<ModsSettings section="installed" overflowTarget={overflow} />);
     await waitFor(() => expect(container.textContent).toContain('Manage installation, version, and availability'));
     expect(container.querySelector('.mod-configuration')).toBeTruthy();
-    expect(container.querySelector('.mod-configuration.setting-section')).toBeNull();
+    expect(container.querySelector('.mod-configuration.setting-section')).toBeTruthy();
     expect(overflow.textContent).toContain('Alpha');
     expect(overflow.textContent).not.toContain('Core');
     expect(overflow.querySelector('[aria-label="System mod"]')).toBeTruthy();
     expect(overflow.querySelector('.memory-connection.selected')).toBeNull();
     expect(container.textContent).not.toContain('Beta');
+    expect(screen.queryByRole('button', { name: 'Refresh catalog' })).toBeNull();
     expect(overflow.getAttribute('aria-label')).toBeNull();
     expect(overflow.querySelector('[aria-label="Mod catalog"]')?.textContent).toContain('Beta');
     fireEvent.click(screen.getAllByRole('button', { name: 'Manage' })[1]);
@@ -37,15 +38,17 @@ describe('ModsSettings layout contract', () => {
   });
 
   it('keeps source configuration in column 3 and configured sources in column 4', async () => {
-    loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [{ id: 'source-1', url: 'https://mods.example/catalog.json', status: 'Ready' }] });
+    loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [{ id: 'source-1', url: 'https://mods.example/catalog.json', status: 'Ready', lastCheckedAt: '2026-09-06T00:25:00Z' }] });
     const overflow = document.createElement('section');
     document.body.appendChild(overflow);
     const { container } = render(<ModsSettings section="sources" overflowTarget={overflow} />);
     await waitFor(() => expect(overflow.textContent).toContain('mods.example'));
     expect(container.querySelector('input[placeholder="https://example.invalid/mods.json"]')).toBeTruthy();
     expect(container.querySelector('.mod-source-configuration')).toBeTruthy();
-    expect(container.querySelector('.mod-source-configuration.setting-section')).toBeNull();
+    expect(container.querySelector('.mod-source-configuration.setting-section')).toBeTruthy();
     expect(container.textContent).not.toContain('mods.example');
+    expect(overflow.textContent).toContain(`Checked ${new Date('2026-09-06T00:25:00Z').toLocaleString()}`);
+    expect(overflow.textContent).not.toContain('2026-09-06T00:25:00Z');
     expect(overflow.querySelector('[aria-label="Configured mod sources"]')?.textContent).toContain('Ready');
     overflow.remove();
   });

@@ -33,7 +33,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
 
 
 .settings-request-error{margin:10px 0 0;color:var(--danger);font-size:12px;line-height:1.4}
-.mod-management-settings{display:grid;gap:12px;min-width:0}.mod-restart-notice{margin:0}.mod-configuration{display:grid;gap:14px;min-width:0}.mod-configuration h2{margin:0;font-size:20px}.memory-connection strong:has(.mod-system-dot){display:flex;align-items:center;gap:7px}.mod-system-dot{display:inline-block;flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 2px color-mix(in srgb,var(--ok) 18%,transparent)}
+.mod-management-settings{display:grid;gap:12px;min-width:0}.mod-restart-notice{margin:0}.memory-connection strong:has(.mod-system-dot){display:flex;align-items:center;gap:7px}.mod-system-dot{display:inline-block;flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 2px color-mix(in srgb,var(--ok) 18%,transparent)}
 .settings-confirm-backdrop{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:20px;background:var(--overlay)}
 .settings-confirm-dialog{width:min(420px,100%);padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:0 18px 48px rgb(0 0 0 / 38%)}
 .settings-confirm-dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.settings-confirm-dialog h2{margin:4px 0 0;color:var(--text-strong);font-size:18px}.settings-confirm-dialog p{margin:16px 0 0;color:var(--text);line-height:1.5}.settings-confirm-close{width:30px;height:30px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:22px;line-height:1}.settings-confirm-close:hover{background:var(--surface-hover);color:var(--text)}
@@ -306,7 +306,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
 
 /* Blank-slate step 6: real configuration content enters Column 3 without changing the frame. */
 .settings-prototype-configuration{align-content:start}
-.settings-prototype-configuration>.setting-section{margin:0;min-width:0}
+.settings-prototype-configuration>.setting-section,.settings-prototype-configuration>.mod-management-settings>.setting-section{margin:0;min-width:0}
 .settings-prototype-configuration>.api-target-settings{grid-column:auto;grid-template-columns:1fr}
 .settings-prototype-configuration>.connections-stack{grid-column:auto;grid-row:auto;grid-template-columns:minmax(0,1fr);width:100%}
 .settings-prototype-configuration>.connections-stack>.connections-models-column{width:100%}
@@ -448,6 +448,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
   overscroll-behavior:contain;
   scrollbar-gutter:stable;
 }
+.settings-prototype-configuration>.mod-management-settings>.setting-section,
 .settings-prototype-configuration>.setting-section,
 .settings-prototype-configuration>.connections-stack>.connections-models-column>.setting-section,
 .settings-prototype-overflow .settings-overflow-content>.setting-section{
@@ -457,6 +458,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
   background:transparent;
   box-shadow:none;
 }
+.settings-prototype-configuration>.mod-management-settings>.setting-section>h2,
 .settings-prototype-configuration>.setting-section>h2,
 .settings-prototype-configuration>.connections-stack>.connections-models-column>.setting-section>h2,
 .settings-prototype-overflow .settings-overflow-content>.setting-section>h2{
