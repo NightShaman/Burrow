@@ -59,3 +59,22 @@ it('does not restore pending detail after changing the agent filter', async () =
   await act(async () => finish(value));
   expect(screen.queryByRole('heading', { level: 2, name: 'smatchet objective' })).toBeNull();
 });
+
+it('renders linked child summaries as safe Markdown with chat line breaks', async () => {
+  const value = run();
+  value.subagents = [{ id: 'child', status: 'succeeded', phase: null, purpose: 'Markdown child', createdAt: null, completedAt: null, model: null, trace: {}, result: { summary: '## Child reply\n\n**Completed** with `code`\nNext line\n\n- First finding\n- Second finding\n\n```js\nconst done = true;\n```\n\n[Reference](https://example.com)\n\n<script>alert(1)</script>\n\n<img src=x onerror=alert(1)>\n\n[Unsafe](javascript:alert(1))', evidence: 2, changedFiles: 0 } }];
+  vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue([value]);
+  vi.spyOn(archiveRepository, 'loadRun').mockResolvedValue(value);
+  render(<ArchiveRunsProof selectedAgent="" search="" />);
+  fireEvent.click(await screen.findByRole('button', { name: /smatchet objective/ }));
+  const heading = await screen.findByRole('heading', { name: 'Child reply', level: 2 });
+  const summary = heading.closest('.proof-child-summary')!;
+  expect(summary.querySelector('strong')?.textContent).toBe('Completed');
+  expect(summary.querySelector('code')?.textContent).toBe('code');
+  expect(summary.querySelector('br')).not.toBeNull();
+  expect(summary.querySelectorAll('ul > li')).toHaveLength(2);
+  expect(summary.querySelector('pre > code')?.textContent).toBe('const done = true;\n');
+  expect(screen.getByRole('link', { name: 'Reference' }).getAttribute('href')).toBe('https://example.com');
+  expect(summary.querySelector('script, img, [onerror]')).toBeNull();
+  expect(screen.getByText('Unsafe').getAttribute('href')).not.toContain('javascript:');
+});
