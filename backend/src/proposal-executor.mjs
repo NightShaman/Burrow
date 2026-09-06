@@ -1,3 +1,4 @@
+import { redactText } from './redaction.mjs';
 import { runExec } from './harness/exec.mjs';
 import { createProcessExecutionRouter, resolveProcessExecutionTarget } from './process-execution-router.mjs';
 import { createNativeFilesystemExecutionRouter, resolveNativeFilesystemExecutionTarget } from './native-filesystem-execution-router.mjs';
@@ -87,7 +88,13 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
     }
     if (action.tool === 'shell_exec') {
       const target = resolveProcessExecutionTarget(executionContext || {});
+      const traceDetails = {
+        command: redactText(action.command).slice(0, 2000),
+        cwd: redactText(action.cwd ? path.resolve(action.cwd) : (executionContext?.executionEnvironment?.workspaceRoot || executionRoot)).slice(0, 1000),
+        providerId: target.kind === 'remote' ? target.providerId : null,
+      };
       const started = await traceLogger?.toolStart?.({
+        ...traceDetails,
         tool: 'shell_exec',
         toolCallId: action.toolCallId || null,
         targetId: target.kind === 'remote' ? target.targetId : null,
@@ -101,6 +108,7 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
         const result = { tool: 'shell_exec', ok: false, command: action.command, cwd: action.cwd ? path.resolve(action.cwd) : executionRoot, error: protectedInput.errors.join(','), protectedBindings: protectedInput.bindings };
         toolResults.push(result);
         await (traceLogger?.toolEnd || traceLogger?.tool)?.({
+          ...traceDetails,
           tool: 'shell_exec',
           ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}),
           toolCallId: action.toolCallId || null,
@@ -115,7 +123,11 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
         command: action.command,
         cwd: action.cwd ? path.resolve(action.cwd) : (executionContext?.executionEnvironment?.workspaceRoot || executionRoot),
         env: protectedInput.env,
-        traceLogger,
+        traceLogger: traceLogger ? {
+          ...traceLogger,
+          toolStart: traceLogger.toolStart ? (payload) => traceLogger.toolStart({ ...payload, toolCallId: action.toolCallId || null }) : undefined,
+          toolEnd: traceLogger.toolEnd ? (payload) => traceLogger.toolEnd({ ...payload, toolCallId: action.toolCallId || null }) : undefined,
+        } : traceLogger,
         artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-shell_exec`,
         reason: action.reason,
         abortSignal,
@@ -141,6 +153,9 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
       result = withExecutionProvenance(result, target, executionContext, action.toolCallId);
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({
+        ...traceDetails,
+        exitCode: result.exitCode ?? null,
+        operationId: result.execution?.operationId || result.operationId || null,
         tool: 'shell_exec',
         ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}),
         toolCallId: action.toolCallId || null,
@@ -218,7 +233,7 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
 
     if (action.tool === 'mcp_call') {
       const selected = grantedMcpTool({ connections: executionContext?.mcpConnections, grants: executionContext?.mcpTools, provider: action.mcpProvider, toolName: action.mcpToolName });
-      const started = await traceLogger?.toolStart?.({ tool: 'mcp_call', provider: action.mcpProvider, mcpToolName: action.mcpToolName, connectionId: selected.connection?.id || null });
+      const started = await traceLogger?.toolStart?.({ tool: 'mcp_call', toolCallId: action.toolCallId || null, provider: action.mcpProvider, mcpToolName: action.mcpToolName, connectionId: selected.connection?.id || null });
       let result;
       try {
         if (selected.error) throw new Error(selected.error);
@@ -227,7 +242,7 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
         result = { tool: 'mcp_call', ok: true, provider: selected.connection.name, mcpToolName: action.mcpToolName, connectionId: selected.connection.id, output: protectedOutput.safeOutput, ...(protectedOutput.protectedValues.length ? { protectedValues: protectedOutput.protectedValues } : {}) };
       } catch (error) { result = { tool: 'mcp_call', ok: false, provider: action.mcpProvider, mcpToolName: action.mcpToolName, connectionId: selected.connection?.id || null, error: publicMcpError(error, 'mcp_tool_failed'), ...publicMcpFailureDetail(error, [selected.connection?.apiKey, ...Object.values(selected.connection?.environmentVariables || {})]) }; }
       toolResults.push(result);
-      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'mcp_call', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, provider: result.provider, mcpToolName: result.mcpToolName, connectionId: result.connectionId, error: result.error || null });
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'mcp_call', toolCallId: action.toolCallId || null, ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, provider: result.provider, mcpToolName: result.mcpToolName, connectionId: result.connectionId, error: result.error || null });
       continue;
     }
 

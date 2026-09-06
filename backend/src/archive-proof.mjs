@@ -2,6 +2,7 @@ import { listSessionRecords, readSessionEntries } from './session-store.mjs';
 import { readRunEvidence } from './run-evidence.mjs';
 import { listSubagentRecords, subagentVisibilitySummary } from './subagent-store.mjs';
 import { summarizeTrace } from './trace-summary.mjs';
+import { redactAndTruncateText } from './redaction.mjs';
 
 const MAX_RUNS = 200;
 const MAX_TIMELINE = 80;
@@ -31,37 +32,111 @@ function requestFor(entries, runId) {
 }
 function activitiesFor(entries, runId) {
   return entries.filter((entry) => entry.visibility === 'activity' && entry.runId === runId)
-    .map((entry) => ({ ts: entry.ts || null, summary: text(entry.content), toolActivity: entry.metadata?.toolActivity || null }))
-    .slice(-24);
+    .map((entry) => ({ ts: entry.ts || null, summary: text(entry.content), toolActivity: entry.metadata?.toolActivity || null }));
 }
 
 function executionEntriesFor(entries, runId) {
   return entries.filter((entry) => entry.runId === runId && entry.metadata?.canonicalExecution === true
-    && ['tool_call', 'tool_result'].includes(String(entry.type || '')))
-    .slice(-48);
+    && ['tool_call', 'tool_result'].includes(String(entry.type || '')));
 }
 
-function executionTimelineFor(entries = []) {
-  const timeline = [];
-  for (const entry of entries) {
-    if (entry.type === 'tool_call') {
-      const calls = Array.isArray(entry.metadata?.toolCalls) ? entry.metadata.toolCalls : [];
-      const names = calls.map((call) => text(call?.tool) || text(call?.name)).filter(Boolean);
-      timeline.push({
-        kind: 'tool_call', status: 'ok', ts: entry.ts || null,
-        summary: names.length ? `Tool call${names.length === 1 ? '' : 's'}: ${names.join(', ')}` : 'Tool call recorded.',
-        evidence: 'session_execution',
-      });
-    } else {
-      const name = text(entry.metadata?.tool) || 'Tool';
-      const ok = entry.metadata?.ok;
-      timeline.push({
-        kind: 'tool_result', status: ok === false ? 'failed' : 'ok', ts: entry.ts || null,
-        summary: `${name} ${ok === false ? 'failed' : 'completed'}.`, evidence: 'session_execution',
-      });
+const TOOL_DETAIL_LIMIT = 320;
+function safeDetail(value) {
+  const source = typeof value === 'string' ? value.trim() : value === null || value === undefined ? '' : String(value);
+  const compact = redactAndTruncateText(source.replace(/\s+/gu, ' '), { maxChars: TOOL_DETAIL_LIMIT });
+  return compact.text ? `${compact.text}${compact.truncated ? '…' : ''}` : '';
+}
+function resultForEntry(entry = {}) {
+  if (entry.metadata?.normalizedResult && typeof entry.metadata.normalizedResult === 'object') return entry.metadata.normalizedResult;
+  try {
+    const parsed = JSON.parse(entry.content || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch { return {}; }
+}
+function toolSummary(item = {}) {
+  const result = item.result || {};
+  const payload = item.payload || {};
+  const args = item.arguments || {};
+  const tool = text(result.tool) || text(item.tool) || text(payload.tool) || 'Tool';
+  const failed = item.status === 'failed';
+  const running = item.status === 'running';
+  const state = failed ? 'failed' : running ? 'started' : 'completed';
+  const command = safeDetail(result.command || args.command || payload.command);
+  const cwd = safeDetail(result.cwd || args.cwd || payload.cwd);
+  const exitCode = result.exitCode ?? payload.exitCode;
+  const execution = result.execution && typeof result.execution === 'object' ? result.execution : {};
+  const provider = safeDetail(result.provider || execution.providerId || payload.provider || payload.providerId);
+  const target = safeDetail(execution.targetId || result.target?.root || args.target?.root || payload.targetId || payload.target?.root);
+  const mcpName = safeDetail(result.mcpToolName || args.mcpToolName || args.toolName || payload.mcpToolName);
+  if (tool === 'shell_exec' || command) {
+    const lead = failed ? 'Command failed' : running ? 'Running command' : 'Ran command';
+    return `${lead}${command ? `: ${command}` : ''}${cwd ? ` · cwd: ${cwd}` : ''}${exitCode !== undefined && exitCode !== null ? ` · exit: ${safeDetail(exitCode)}` : ''}${provider ? ` · provider: ${provider}` : ''}${target ? ` · target: ${target}` : ''}`;
+  }
+  if (tool === 'mcp_call') {
+    const identity = [provider, mcpName].filter(Boolean).join('/');
+    return `MCP${identity ? ` ${identity}` : ' call'} ${state}${target ? ` · target: ${target}` : ''}.`;
+  }
+  const filePath = safeDetail(result.filePath || result.path || args.filePath || args.path || payload.filePath);
+  if (filePath) {
+    const verb = tool === 'files_read' ? 'Read' : tool === 'files_edit' ? 'Edited' : tool === 'files_write' ? 'Wrote' : tool === 'files_patch' ? 'Patched' : tool === 'files_search' ? 'Searched' : tool === 'files_find' ? 'Found files in' : tool;
+    return `${verb} ${filePath}${state === 'completed' ? '.' : ` (${state}).`}`;
+  }
+  return `${tool}${provider ? ` via ${provider}` : ''}${target ? ` on ${target}` : ''} ${state}.`;
+}
+
+function correlatedToolTimeline(executionEntries = [], trace = null) {
+  const calls = new Set();
+  const byId = new Map();
+  let anonymous = 0;
+  const obtain = (ids, source) => {
+    const stableIds = (Array.isArray(ids) ? ids : [ids]).map(text).filter(Boolean);
+    let call = stableIds.map((id) => byId.get(id)).find(Boolean);
+    if (!call) {
+      call = { id: stableIds[0] || null, sources: new Set(), status: 'running', ts: null, finishedAt: null, anonymous: stableIds.length ? null : `${source}-anonymous-${anonymous += 1}` };
+      calls.add(call);
+    }
+    for (const id of stableIds) byId.set(id, call);
+    return call;
+  };
+  for (const item of Array.isArray(trace?.toolActivity) ? trace.toolActivity : []) {
+    const call = obtain([item.id, item.payload?.toolCallId], 'trace');
+    call.sources.add('trace');
+    call.tool = text(item.tool) || call.tool;
+    call.payload = { ...(call.payload || {}), ...(item.payload || {}) };
+    call.ts ||= item.startedAt || item.finishedAt || null;
+    if (item.status !== 'running') {
+      call.status = item.status === 'failed' ? 'failed' : 'completed';
+      call.finishedAt = item.finishedAt || call.finishedAt;
     }
   }
-  return timeline;
+  for (const entry of executionEntries) {
+    if (entry.type === 'tool_call') {
+      for (const raw of Array.isArray(entry.metadata?.toolCalls) ? entry.metadata.toolCalls : []) {
+        const call = obtain(raw?.id, 'session-call');
+        call.sources.add('session');
+        call.tool = text(raw?.tool) || text(raw?.name) || call.tool;
+        call.arguments = raw?.arguments && typeof raw.arguments === 'object' ? raw.arguments : {};
+        call.ts ||= entry.ts || null;
+      }
+      continue;
+    }
+    const result = resultForEntry(entry);
+    const call = obtain([entry.metadata?.callId, result.activityId, result.execution?.toolCallId], 'session-result');
+    call.sources.add('session');
+    call.result = result;
+    call.tool = text(result.tool) || text(entry.metadata?.tool) || call.tool;
+    call.status = (entry.metadata?.ok ?? result.ok) === false ? 'failed' : 'completed';
+    call.finishedAt = entry.ts || call.finishedAt;
+    call.ts ||= entry.ts || null;
+  }
+  return [...calls.values()].map((call) => ({
+    kind: call.sources.has('session') ? (call.status === 'running' ? 'tool_call' : 'tool_result') : 'tool_trace',
+    status: call.status === 'failed' ? 'failed' : call.status === 'running' ? 'warning' : 'ok',
+    ts: call.finishedAt || call.ts || null,
+    summary: toolSummary(call),
+    evidence: call.sources.size > 1 ? 'session_execution+trace_receipt' : call.sources.has('session') ? 'session_execution' : 'trace_receipt',
+    ...(call.id ? { callId: call.id } : {}),
+  }));
 }
 
 function runBounds(entries, runId, trace = null) {
@@ -70,26 +145,6 @@ function runBounds(entries, runId, trace = null) {
     ...(Array.isArray(trace?.timeline) ? trace.timeline.map((entry) => text(entry.ts)) : []),
   ].filter(Boolean).sort();
   return { startedAt: timestamps[0] || null, lastActivityAt: timestamps.at(-1) || null };
-}
-
-function traceToolSummary(item = {}) {
-  const tool = text(item.tool) || 'Tool';
-  const payload = item.payload && typeof item.payload === 'object' ? item.payload : {};
-  const command = text(payload.command);
-  const filePath = text(payload.filePath);
-  const status = item.status === 'failed' ? 'failed' : item.status === 'running' ? 'started' : 'completed';
-  if (command) return `${status === 'failed' ? 'Command failed' : status === 'started' ? 'Running command' : 'Ran command'}: ${command}`;
-  if (filePath) {
-    const verb = tool === 'files_read' ? 'Read' : tool === 'files_edit' ? 'Edited' : tool === 'files_write' ? 'Wrote' : tool === 'files_patch' ? 'Patched' : tool === 'files_search' ? 'Searched' : tool === 'files_find' ? 'Found files in' : tool;
-    return `${verb} ${filePath}${status === 'completed' ? '.' : ` (${status}).`}`;
-  }
-  return `${tool} ${status}.`;
-}
-function traceToolTimeline(trace = null) {
-  return (Array.isArray(trace?.toolActivity) ? trace.toolActivity : []).map((item) => {
-    const status = item.status === 'failed' ? 'failed' : item.status === 'running' ? 'warning' : 'ok';
-    return { kind: 'tool_trace', status, ts: item.finishedAt || item.startedAt || null, summary: traceToolSummary(item), evidence: 'trace_receipt' };
-  });
 }
 
 function operatorToolSummary(item = {}) {
@@ -317,9 +372,10 @@ function contextEventSummary(event = {}) {
 }
 function timelineFor({ receipt, answer, activities, executionEntries, trace, evidence, context, subagents, lastActivityAt = null }) {
   const timeline = [];
-  timeline.push(...traceToolTimeline(trace));
-  timeline.push(...executionTimelineFor(executionEntries));
-  for (const activity of activities) {
+  timeline.push(...correlatedToolTimeline(executionEntries, trace));
+  // Activity cards are a legacy aggregate. Canonical calls/results or trace
+  // activities are more precise and must not be rendered a second time.
+  if (!executionEntries.length && !(Array.isArray(trace?.toolActivity) && trace.toolActivity.length)) for (const activity of activities) {
     const items = Array.isArray(activity.toolActivity?.items) ? activity.toolActivity.items : [];
     if (items.length) {
       for (const item of items) timeline.push({ kind: 'tool_activity', status: item.status === 'error' ? 'failed' : item.status === 'pending' ? 'warning' : 'ok', ts: activity.ts, summary: operatorToolSummary(item), evidence: 'session_activity' });

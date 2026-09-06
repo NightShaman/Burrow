@@ -66,7 +66,7 @@ async function inspectSource(url) {
 }
 
 async function downloadArchive(url, destination) {
-  const response = await fetch(url, { headers: { accept: 'application/octet-stream', 'user-agent': 'Burrow-Mod-Manager' }, redirect: 'follow', signal: AbortSignal.timeout(60_000) });
+  const response = await fetch(url, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'Burrow-Mod-Manager' }, redirect: 'follow', signal: AbortSignal.timeout(60_000) });
   if (!response.ok || !response.body) throw new Error(`mod_archive_download_failed:${response.status}`);
   const declared = Number(response.headers.get('content-length') || 0);
   if (declared > MAX_ARCHIVE_BYTES) throw new Error('mod_archive_too_large');
