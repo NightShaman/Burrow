@@ -461,7 +461,17 @@ async function recordsFor(rootDir, sessionId = null) {
   return listSessionRecords({ rootDir, includeArchived: true, limit: 500 });
 }
 
-export async function listArchiveRuns({ rootDir, dataRoot = null, traceRoot = null, agentId, agentName = null, sessionId = null, limit = 100 } = {}) {
+function traceRootFor({ traceRoot = null, resolveTraceRoot = null, sessionId } = {}) {
+  return typeof resolveTraceRoot === 'function' ? resolveTraceRoot(sessionId) : traceRoot;
+}
+
+export function mergeArchiveRuns(runLists = [], limit = 100) {
+  return runLists.flat()
+    .sort((left, right) => String(right.completedAt || right.startedAt || '').localeCompare(String(left.completedAt || left.startedAt || '')))
+    .slice(0, boundedInteger(limit));
+}
+
+export async function listArchiveRuns({ rootDir, dataRoot = null, traceRoot = null, resolveTraceRoot = null, agentId, agentName = null, sessionId = null, limit = 100 } = {}) {
   if (!rootDir || !agentId) throw new Error('archive_run_scope_required');
   const results = [];
   const subagentRecords = dataRoot ? await listSubagentRecords({ dataRoot, includeFinal: true, limit: 500 }) : [];
@@ -475,12 +485,13 @@ export async function listArchiveRuns({ rootDir, dataRoot = null, traceRoot = nu
     // Tool calls, results, and activity events are already persisted before a
     // terminal receipt. A runtime restart must not hide that existing evidence.
     for (const entry of entries) if (entry.runId) if (!byRun.has(entry.runId)) byRun.set(entry.runId, null);
-    for (const [runId, item] of byRun) results.push(await proofDetail({ agentId, agentName, sessionId: id, runId, entries, evidence: item, subagentRecords, traceRoot }));
+    const sessionTraceRoot = traceRootFor({ traceRoot, resolveTraceRoot, sessionId: id });
+    for (const [runId, item] of byRun) results.push(await proofDetail({ agentId, agentName, sessionId: id, runId, entries, evidence: item, subagentRecords, traceRoot: sessionTraceRoot }));
   }
   return results.sort((left, right) => String(right.completedAt || right.startedAt || '').localeCompare(String(left.completedAt || left.startedAt || ''))).slice(0, boundedInteger(limit));
 }
 
-export async function readArchiveRun({ rootDir, dataRoot = null, traceRoot = null, agentId, agentName = null, runId } = {}) {
+export async function readArchiveRun({ rootDir, dataRoot = null, traceRoot = null, resolveTraceRoot = null, agentId, agentName = null, runId } = {}) {
   if (!rootDir || !agentId || !runId) throw new Error('archive_run_target_required');
   const subagentRecords = dataRoot ? await listSubagentRecords({ dataRoot, includeFinal: true, limit: 500 }) : [];
   for (const session of await recordsFor(rootDir)) {
@@ -489,7 +500,7 @@ export async function readArchiveRun({ rootDir, dataRoot = null, traceRoot = nul
       readRunEvidence({ rootDir, sessionId: session.id, limit: MAX_RUNS }),
     ]);
     const item = evidence.find((candidate) => candidate.runId === runId) || null;
-    if (item || entries.some((entry) => entry.runId === runId)) return proofDetail({ agentId, agentName, sessionId: session.id, runId, entries, evidence: item, subagentRecords, traceRoot });
+    if (item || entries.some((entry) => entry.runId === runId)) return proofDetail({ agentId, agentName, sessionId: session.id, runId, entries, evidence: item, subagentRecords, traceRoot: traceRootFor({ traceRoot, resolveTraceRoot, sessionId: session.id }) });
   }
   return null;
 }

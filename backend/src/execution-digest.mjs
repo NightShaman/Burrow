@@ -17,33 +17,41 @@ function resultSubject(result = {}) {
 }
 
 function resultFinding(result = {}) {
-  const candidates = [
-    result.error,
-    result.summary,
-    result.preview,
-    result.reason,
-    result.stdout,
-    result.stderr,
-    result.reply?.content,
-  ];
+  if (Array.isArray(result.changedFiles) && result.changedFiles.length) return `changed ${result.changedFiles.slice(0, 8).join(', ')}`;
+  if (Array.isArray(result.touchedFiles) && result.touchedFiles.length) return `touched ${result.touchedFiles.slice(0, 8).join(', ')}`;
+  const candidates = result.ok === false
+    ? [result.error, result.stderr, result.summary, result.preview, result.stdout, result.content, result.reply?.error, result.reply?.content]
+    : [result.error, result.summary, result.preview, result.content, result.stdout, result.stderr, result.reply?.content];
   for (const candidate of candidates) {
     const value = compactText(candidate, 480);
     if (value) return value;
   }
-  if (Array.isArray(result.changedFiles) && result.changedFiles.length) return `changed ${result.changedFiles.slice(0, 8).join(', ')}`;
-  if (Array.isArray(result.touchedFiles) && result.touchedFiles.length) return `touched ${result.touchedFiles.slice(0, 8).join(', ')}`;
   if (typeof result.exists === 'boolean') return result.exists ? 'path exists' : 'path does not exist';
   if (Number.isFinite(Number(result.exitCode))) return `exit ${result.exitCode}`;
   if (Number.isFinite(Number(result.resultCount))) return `${result.resultCount} result${Number(result.resultCount) === 1 ? '' : 's'}`;
   return result.ok === false ? 'failed without a detailed error' : 'completed';
 }
 
+function executionOrigin(result = {}) {
+  const execution = result.execution && typeof result.execution === 'object' ? result.execution : {};
+  const origin = execution.kind === 'remote'
+    ? `remote${execution.targetId ? `:${compactText(execution.targetId, 120)}` : ''}${execution.providerId ? ` via ${compactText(execution.providerId, 80)}` : ''}`
+    : execution.kind === 'local' ? 'local' : '';
+  const correlation = [
+    execution.operationId ? `operation:${compactText(execution.operationId, 160)}` : '',
+    execution.toolCallId ? `call:${compactText(execution.toolCallId, 160)}` : '',
+    execution.parentRunId ? `parent:${compactText(execution.parentRunId, 160)}` : '',
+  ];
+  return [origin, ...correlation].filter(Boolean).join('; ');
+}
+
 function digestLine(result = {}) {
   const tool = compactText(result.tool || result.mcpToolName || 'tool', 120);
   const subject = resultSubject(result);
+  const origin = executionOrigin(result);
   const status = result.ok === false ? 'failed' : result.ok === true ? 'ok' : 'completed';
   const finding = resultFinding(result);
-  return `- ${tool}${subject ? ` (${subject})` : ''}: ${status}${finding ? ` — ${finding}` : ''}`;
+  return `- ${tool}${subject ? ` (${subject})` : ''}${origin ? ` [${origin}]` : ''}: ${status}${finding ? ` — ${finding}` : ''}`;
 }
 
 function isMutation(result = {}) {
@@ -56,13 +64,11 @@ function isMutation(result = {}) {
 }
 
 function isOutcome(result = {}) {
-  if (result.verificationCheck === true) return true;
-  const command = String(result.command || '');
-  return result.tool === 'shell_exec' && /\b(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:check|test|lint|build)\b|\b(?:check|test|lint|build|verify|validate)\b|\bgit\s+(?:commit|push)\b|\b(?:deploy|release)\b/i.test(command);
+  return result.verificationCheck === true;
 }
 
 function targetKey(result = {}) {
-  return `${result.tool || result.mcpToolName || 'tool'}\u0000${resultSubject(result) || 'default'}`;
+  return `${result.tool || result.mcpToolName || 'tool'}\u0000${result.execution?.kind || ''}:${result.execution?.providerId || ''}:${result.execution?.targetId || ''}\u0000${resultSubject(result) || 'default'}`;
 }
 
 /**
@@ -77,12 +83,11 @@ function selectDigestResults(results, limit) {
     if (selected.size < limit) selected.add(index);
   };
 
-  // Preserve consequences before intermediate failures. Failures remain useful
-  // only after terminal outcomes and mutations have had first claim on the
-  // bounded digest budget.
-  for (let index = 0; index < results.length; index += 1) if (isOutcome(results[index])) add(index);
-  for (let index = 0; index < results.length; index += 1) if (isMutation(results[index])) add(index);
-  for (let index = 0; index < results.length; index += 1) if (results[index].ok === false) add(index);
+  // Failures and explicit structured outcomes are consequences. Walk newest
+  // first so a final failure cannot be displaced by older successful checks.
+  for (let index = results.length - 1; index >= 0; index -= 1) if (results[index].ok === false) add(index);
+  for (let index = results.length - 1; index >= 0; index -= 1) if (isOutcome(results[index])) add(index);
+  for (let index = results.length - 1; index >= 0; index -= 1) if (isMutation(results[index])) add(index);
 
   // For routine work, retain the most recent result for each tool/target pair.
   // Iterate backwards so repeated reads/searches do not evict their latest fact.
@@ -97,7 +102,7 @@ function selectDigestResults(results, limit) {
   // Fill remaining space from the end of the run, where final findings live.
   for (let index = results.length - 1; index >= 0 && selected.size < limit; index -= 1) add(index);
 
-  return [...selected].sort((left, right) => left - right).map((index) => results[index]);
+  return [...selected].map((index) => results[index]);
 }
 
 /**

@@ -20,7 +20,7 @@ import { appendSessionEntry, archiveSession, forkSession, listResetSessionArchiv
 import { runPendingRecoveryContinuations } from '../src/recovery-continuation-runner.mjs';
 import { recordActiveRunInterruptions } from '../src/interrupted-run-recovery.mjs';
 import { generateArchiveSummary } from '../src/archive-summary.mjs';
-import { listArchiveRuns, readArchiveRun } from '../src/archive-proof.mjs';
+import { listArchiveRuns, mergeArchiveRuns, readArchiveRun } from '../src/archive-proof.mjs';
 import { loadWorkingContinuity, normalizeContinuityScope, projectHandoffsIntoWorkingContinuity } from '../src/working-memory-continuity.mjs';
 import { persistSessionWorkingContext, workingContextFromSession } from '../src/working-context.mjs';
 import { appendGroupChannelTurn, createGroupChannel, listGroupChannels, readGroupChannel, readGroupChannelTurns } from '../src/group-channel-store.mjs';
@@ -1912,16 +1912,48 @@ async function archiveContinuityCardDetail({ agentId, cardId, limit = 200 } = {}
   return { ok: true, card: { ...card, kind: 'continuity', agentId, agentName: agent.name }, history };
 }
 
-async function archiveRuns({ agentRuntime, sessionId = null, limit = 100 } = {}) {
+async function archiveRunsForAgent({ agentRuntime, sessionId = null, limit = 100 } = {}) {
   const agent = agentsStore().resolve(agentRuntime.agentId) || { id: agentRuntime.agentId, name: agentRuntime.agentId };
   const runtime = await runtimeConfig(agentRuntime.agentId);
-  return listArchiveRuns({ rootDir: agentRuntime.agentWorkspaceRoot, dataRoot: agentRuntime.agentDataRoot, traceRoot: runtimeTraceRoot(runtime, sessionId || 'default', agentRuntime.agentId), agentId: agentRuntime.agentId, agentName: agent.name, sessionId, limit });
+  return listArchiveRuns({
+    rootDir: agentRuntime.agentWorkspaceRoot,
+    dataRoot: agentRuntime.agentDataRoot,
+    resolveTraceRoot: (actualSessionId) => runtimeTraceRoot(runtime, actualSessionId, agentRuntime.agentId),
+    agentId: agentRuntime.agentId,
+    agentName: agent.name,
+    sessionId,
+    limit,
+  });
 }
 
-async function archiveRunDetail({ agentRuntime, runId } = {}) {
+async function archiveRuns({ agentRuntime = null, sessionId = null, limit = 100 } = {}) {
+  if (agentRuntime) return archiveRunsForAgent({ agentRuntime, sessionId, limit });
+  const resolvedLimit = boundedInteger(limit, { fallback: 100, min: 1, max: 200 });
+  const agents = agentsStore().list({ includeDisabled: false });
+  const lists = await Promise.all(agents.map(async (agent) => archiveRunsForAgent({ agentRuntime: await resolveAgentRuntime(agent.id), sessionId, limit: resolvedLimit })));
+  return mergeArchiveRuns(lists, resolvedLimit);
+}
+
+async function archiveRunDetailForAgent({ agentRuntime, runId } = {}) {
   const agent = agentsStore().resolve(agentRuntime.agentId) || { id: agentRuntime.agentId, name: agentRuntime.agentId };
   const runtime = await runtimeConfig(agentRuntime.agentId);
-  return readArchiveRun({ rootDir: agentRuntime.agentWorkspaceRoot, dataRoot: agentRuntime.agentDataRoot, traceRoot: runtimeTraceRoot(runtime, 'default', agentRuntime.agentId), agentId: agentRuntime.agentId, agentName: agent.name, runId });
+  return readArchiveRun({
+    rootDir: agentRuntime.agentWorkspaceRoot,
+    dataRoot: agentRuntime.agentDataRoot,
+    resolveTraceRoot: (actualSessionId) => runtimeTraceRoot(runtime, actualSessionId, agentRuntime.agentId),
+    agentId: agentRuntime.agentId,
+    agentName: agent.name,
+    runId,
+  });
+}
+
+async function archiveRunDetail({ agentRuntime = null, runId } = {}) {
+  if (agentRuntime) return archiveRunDetailForAgent({ agentRuntime, runId });
+  for (const agent of agentsStore().list({ includeDisabled: false })) {
+    const run = await archiveRunDetailForAgent({ agentRuntime: await resolveAgentRuntime(agent.id), runId });
+    if (run) return run;
+  }
+  return null;
 }
 
 async function archiveSessions({ includeArchived = true, query = '', limit = 200, includeDisabled = false } = {}) {

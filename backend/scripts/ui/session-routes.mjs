@@ -120,7 +120,8 @@ export function createSessionRoutes({
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/runs') {
-      const agentRuntime = await resolveAgentRuntime(url.searchParams.get('agentId'));
+      const agentId = url.searchParams.get('agentId');
+      const agentRuntime = agentId ? await resolveAgentRuntime(agentId) : null;
       const result = await archiveRuns({ agentRuntime, sessionId: url.searchParams.get('sessionId'), limit: url.searchParams.get('limit') || 100 });
       sendJson(res, 200, { ok: true, runs: result });
       return true;
@@ -128,7 +129,8 @@ export function createSessionRoutes({
     if (req.method === 'GET' && url.pathname.startsWith('/api/archive/runs/')) {
       const runId = decodeURIComponent(url.pathname.slice('/api/archive/runs/'.length));
       if (!runId) { sendJson(res, 400, { ok: false, error: 'archive_run_target_required' }); return true; }
-      const agentRuntime = await resolveAgentRuntime(url.searchParams.get('agentId'));
+      const agentId = url.searchParams.get('agentId');
+      const agentRuntime = agentId ? await resolveAgentRuntime(agentId) : null;
       const run = await archiveRunDetail({ agentRuntime, runId });
       sendJson(res, run ? 200 : 404, run ? { ok: true, run } : { ok: false, error: 'archive_run_not_found' });
       return true;

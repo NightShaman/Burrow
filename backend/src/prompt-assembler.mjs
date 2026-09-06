@@ -31,6 +31,7 @@ function sourceForSection(name) {
     'action-output-contract': 'runtime-output-contract',
     conversation: 'conversation-provider',
     'prior-conversation-summary': 'conversation-provider',
+    'support-group-channel': 'group-channel-provider',
     'support-session-recall': 'session-recall-provider',
     'relevant-run-evidence': 'run-evidence-provider',
     'support-dream-preload': 'dream-preload-provider',
@@ -528,7 +529,11 @@ export async function assemblePrompt({
   const retainedManifest = Array.isArray(retainedAttachmentManifest) && retainedAttachmentManifest.length
     ? retainedAttachmentManifest : attachmentManifest;
   const currentManifest = Array.isArray(currentAttachmentManifest) ? currentAttachmentManifest : [];
-  const renderedAttachmentManifest = renderAttachmentManifest([...retainedManifest, ...currentManifest], { artifactRoot: attachmentArtifactRoot });
+  const selectedCurrentManifest = currentManifest.slice(-24);
+  const retainedSlots = Math.max(0, 24 - selectedCurrentManifest.length);
+  const selectedRetainedManifest = retainedSlots > 0 ? retainedManifest.slice(-retainedSlots) : [];
+  const selectedAttachmentManifest = [...selectedRetainedManifest, ...selectedCurrentManifest];
+  const renderedAttachmentManifest = renderAttachmentManifest(selectedAttachmentManifest, { artifactRoot: attachmentArtifactRoot });
   const renderedProfileFiles = renderProfileFilesBudgeted(profileFiles, { totalBudget: profileFilesLimit, perFileBudget: profileFilePerFileLimit });
 
   const rawSections = [
@@ -553,7 +558,7 @@ export async function assemblePrompt({
     section('active-ui-target', clampText(renderUiTarget(supportContext?.uiTarget || null), limits.uiTargetChars ?? 2_500)),
     section('verified-child-evidence', clampText(renderVerifiedChildEvidence(supportContext?.childEvidence || []), limits.childEvidenceChars ?? 10_000)),
     section('support-extra-eyes', clampText(renderExtraEyesReview(supportContext?.extraEyesReview || null), limits.extraEyesChars ?? 6_000)),
-    section('attachment-manifest', renderedAttachmentManifest, { items: (Array.isArray(attachmentManifest) ? attachmentManifest : []).slice(-24).map((item) => ({ name: item?.name || 'attachment', type: item?.type || item?.mimeType || 'application/octet-stream', artifactPath: item?.artifactPath || null })) }),
+    section('attachment-manifest', renderedAttachmentManifest, { items: selectedAttachmentManifest.map((item) => ({ name: item?.name || 'attachment', type: item?.type || item?.mimeType || 'application/octet-stream', artifactPath: item?.artifactPath || null })) }),
     ...renderedAttachments.sections,
     section('available-capabilities', renderAvailableCapabilities(availableSkills)),
     section('skills', skillTexts.join('\n\n---\n\n'), {
@@ -618,7 +623,7 @@ export async function assemblePrompt({
     profileFileProvenance: profileFilesSection?.files || [],
     omittedProfileFileProvenance: profileFilesSection?.omittedFiles || [],
     attachments: renderedAttachments.provenance,
-    attachmentManifest: [...retainedManifest, ...currentManifest].slice(-24).map((item) => ({
+    attachmentManifest: selectedAttachmentManifest.map((item) => ({
       name: String(item?.name || 'attachment'),
       type: String(item?.type || item?.mimeType || 'application/octet-stream'),
       size: Number.isFinite(Number(item?.size)) ? Number(item.size) : null,
@@ -626,8 +631,8 @@ export async function assemblePrompt({
       ...(item?.storedAt ? { storedAt: String(item.storedAt) } : {}),
       ...(item?.runId ? { runId: String(item.runId) } : {}),
     })),
-    retainedAttachmentManifest: retainedManifest.slice(-24).map((item) => ({ ...item })),
-    currentAttachmentManifest: currentManifest.slice(-24).map((item) => ({ ...item })),
+    retainedAttachmentManifest: selectedRetainedManifest.map((item) => ({ ...item })),
+    currentAttachmentManifest: selectedCurrentManifest.map((item) => ({ ...item })),
     attachmentChars: renderedAttachments.usedChars,
   };
 

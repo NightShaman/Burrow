@@ -45,15 +45,25 @@ function bounded(value, limit = MAX_ITEM_CHARS) { const v = text(value); return 
 function list(value) { return Array.isArray(value) ? value : []; }
 function unique(values, limit = MAX_ITEMS) { return [...new Set(values.map(text).filter(Boolean))].slice(0, limit); }
 function sourceRefs({ runId, traceDir } = {}) { return unique([runId ? `run:${runId}` : '', traceDir ? `trace:${traceDir}` : ''], MAX_SOURCE_REFS); }
+function executionRefs(result = {}) {
+  const execution = result.execution && typeof result.execution === 'object' ? result.execution : {};
+  return unique([
+    execution.kind ? `execution:${text(execution.kind)}${execution.targetId ? `:${text(execution.targetId)}` : ''}` : '',
+    execution.providerId ? `provider:${text(execution.providerId)}` : '',
+    execution.parentRunId ? `parent-run:${text(execution.parentRunId)}` : '',
+    execution.toolCallId ? `tool-call:${text(execution.toolCallId)}` : '',
+    execution.operationId ? `operation:${text(execution.operationId)}` : '',
+  ], MAX_SOURCE_REFS);
+}
 export function extractRunEvidenceTargets(values = []) {
   const tokens = [];
   for (const value of list(values)) {
-    const candidate = text(value);
-    if (!candidate) continue;
     const explicit = typeof value === 'object' && value !== null
-      ? [value.path, value.file, value.repository, value.repo, value.commit, value.workItemId, value.taskId, value.continuityScope].map(text)
+      ? [value.path, value.filePath, value.file, value.repository, value.repo, value.commit, value.workItemId, value.taskId, value.continuityScope].map(text).filter(Boolean)
       : [];
     tokens.push(...explicit);
+    const candidate = text(value);
+    if (!candidate) continue;
     if (!explicit.length) {
       tokens.push(...(candidate.match(/(?:\/[A-Za-z0-9._-]+)+(?:\.[A-Za-z0-9._-]+)?/gu) || []));
       tokens.push(...(candidate.match(/\b[0-9a-f]{7,40}\b/giu) || []).filter((token) => !/^\d{8}$/u.test(token)));
@@ -86,34 +96,29 @@ function verificationText(result = {}) {
   const failure = bounded(text(result.error || result.stderr || result.summary || result.message), 180);
   return `Verification failed: ${command}${failure ? ` — ${failure}` : ''}`;
 }
-function resultRef(result = {}) { return text(result.filePath || result.path || result.artifactPath || result.resultPath || result.traceDir || result.command); }
+function resultRef(result = {}) { return text(result.filePath || result.path || result.artifactPath || result.resultPath || result.traceDir); }
 function isValidation(result = {}) {
-  const tool = text(result.tool).toLowerCase();
-  const command = text(result.command).toLowerCase();
-  return /(?:test|check|lint|build|typecheck|validate|verify)/u.test(`${tool} ${command}`);
+  return result.verificationCheck === true || result.checkResult === true;
 }
 function isChange(result = {}) {
   const tool = text(result.tool).toLowerCase();
-  const command = text(result.command).toLowerCase();
-  return /(?:write|edit|patch|create|delete|move|rename|commit)/u.test(tool)
-    || /\bgit\s+commit\b/u.test(command)
-    || Boolean(result.changed || result.mutated);
+  return ['files_write', 'files_edit', 'files_patch'].includes(tool)
+    || Boolean(result.sideEffectsApplied || result.changed || result.mutated
+      || list(result.changedFiles).length || list(result.touchedFiles).length);
 }
 function changeText(result = {}) {
-  const command = commandLabel(result);
-  const commit = command.match(/\bgit\s+commit\s+-m\s+["']([^"']+)["']/iu);
-  if (commit) return `Git commit created: ${commit[1]}`;
+  const changed = unique([...list(result.changedFiles), ...list(result.touchedFiles)], 8);
+  if (changed.length) return bounded(`Changed: ${changed.join(', ')}`);
   return bounded(`${text(result.tool || 'change')}: ${resultText(result) || (result.ok === true ? 'completed successfully' : 'completed')}`);
 }
 function operationKey(result = {}) {
+  const execution = result.execution && typeof result.execution === 'object' ? result.execution : {};
+  const correlation = text(execution.operationId || execution.toolCallId || result.activityId);
+  if (correlation) return `execution:${correlation}`;
   const tool = text(result.tool || result.label || 'tool').toLowerCase();
-  const command = text(result.command).toLowerCase();
   const target = text(result.filePath || result.path || result.repository || result.repo);
-  if (/\bgit\s+push\b/u.test(command)) return 'git:push';
-  if (/\bgit\s+commit\b/u.test(command)) return 'git:commit';
-  if (isValidation(result)) return `validation:${command}`;
   if (target) return `${tool}:${target}`;
-  return `${tool}:${command || text(result.mcpToolName || result.toolName)}`;
+  return `${tool}:${text(result.command || result.mcpToolName || result.toolName)}`;
 }
 function terminalFailures(results = []) {
   const terminalByOperation = new Map();
@@ -154,7 +159,7 @@ export function deriveRunEvidence({ agentId, sessionId, runId, traceDir, objecti
     const tool = text(result.tool || result.label || 'tool');
     const detail = resultText(result);
     const ref = resultRef(result);
-    const refs = unique([...source, ref ? `receipt:${ref}` : ''], MAX_SOURCE_REFS);
+    const refs = unique([...source, ...executionRefs(result), ref ? `receipt:${ref}` : ''], MAX_SOURCE_REFS);
     const change = isChange(result);
     const validation = !change && isValidation(result);
     const fact = change

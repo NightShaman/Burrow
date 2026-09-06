@@ -309,6 +309,19 @@ function nativeToolReceipt(result = {}) {
     if (value === null || typeof value === 'boolean' || typeof value === 'number') receipt[key] = value;
     else if (typeof value === 'string') receipt[key] = truncatedNativeText(value, 1_000);
   }
+  // Preserve compact execution origin and correlation so observations from
+  // different hosts/runs remain distinguishable on the provider wire.
+  if (result?.execution && typeof result.execution === 'object') {
+    const execution = result.execution;
+    receipt.execution = {
+      ...(typeof execution.kind === 'string' ? { kind: execution.kind } : {}),
+      ...(typeof execution.providerId === 'string' ? { providerId: truncatedNativeText(execution.providerId, 120) } : {}),
+      ...(typeof execution.targetId === 'string' ? { targetId: truncatedNativeText(execution.targetId, 240) } : {}),
+      ...(typeof execution.parentRunId === 'string' ? { parentRunId: truncatedNativeText(execution.parentRunId, 240) } : {}),
+      ...(typeof execution.toolCallId === 'string' ? { toolCallId: truncatedNativeText(execution.toolCallId, 240) } : {}),
+      ...(typeof execution.operationId === 'string' ? { operationId: truncatedNativeText(execution.operationId, 240) } : {}),
+    };
+  }
   // Preserve complete result fields here. Native continuation preparation is
   // the only authority allowed to project them for a provider budget.
   for (const key of ['content', 'stdout', 'stderr', 'summary', 'output']) {
@@ -350,53 +363,19 @@ function nativeToolReceipt(result = {}) {
   if (Array.isArray(result?.paths)) receipt.paths = result.paths;
   if (Array.isArray(result?.entries)) receipt.entries = result.entries;
   if (Array.isArray(result?.matches)) receipt.matches = result.matches;
-  if (Array.isArray(result?.tasks)) receipt.tasks = result.tasks.slice(0, 12).map((task) => ({
-    id: task?.id || null, projectId: task?.projectId || null,
-    title: truncatedNativeText(task?.title, 500), description: truncatedNativeText(task?.description, 1_200),
-    status: task?.status || null, priority: task?.priority || null,
-    assignedAgentId: task?.assignedAgentId || null, updatedAt: task?.updatedAt || null,
-  }));
-  if (Array.isArray(result?.providers)) receipt.providers = result.providers.slice(0, 20).map((provider) => ({
-    id: provider?.id || null, name: truncatedNativeText(provider?.name, 120), transport: provider?.transport || null,
-    catalogToolCount: Number(provider?.catalogToolCount) || 0, grantedToolCount: Number(provider?.grantedToolCount) || 0,
-    available: provider?.available === true,
-  }));
-  if (Array.isArray(result?.tools) && result?.tool === 'mcp_capabilities') receipt.tools = result.tools.slice(0, 20).map((tool) => ({
-    name: truncatedNativeText(tool?.name, 240), description: truncatedNativeText(tool?.description, 2_000),
-    inputSchema: tool?.inputSchema && typeof tool.inputSchema === 'object' && !Array.isArray(tool.inputSchema) ? tool.inputSchema : { type: 'object', properties: {} },
-    granted: tool?.granted === true,
-  }));
-  // Skill discovery is decision-critical capability evidence. Keep bounded
-  // cards on the actual provider wire; full bodies appear only after an
-  // explicit load_skill call.
-  if (Array.isArray(result?.skills) && result?.tool === 'list_skills') receipt.skills = result.skills.slice(0, 20).map((skill) => ({
-    id: truncatedNativeText(skill?.id, 160), name: truncatedNativeText(skill?.name, 240),
-    description: truncatedNativeText(skill?.description, 1_000), version: truncatedNativeText(skill?.version, 120),
-    lifecycle: truncatedNativeText(skill?.lifecycle, 80), available: skill?.available === true,
-    ownership: skill?.ownership && typeof skill.ownership === 'object'
-      ? { scope: skill.ownership.scope || null, agentId: skill.ownership.agentId || null }
-      : null,
-  }));
-  if (result?.skill && typeof result.skill === 'object' && result?.tool === 'load_skill') receipt.skill = {
-    id: truncatedNativeText(result.skill.id, 160), name: truncatedNativeText(result.skill.name, 240),
-    description: truncatedNativeText(result.skill.description, 1_000), version: truncatedNativeText(result.skill.version, 120),
-    lifecycle: truncatedNativeText(result.skill.lifecycle, 80), available: result.skill.available === true,
-    ownership: result.skill.ownership && typeof result.skill.ownership === 'object'
-      ? { scope: result.skill.ownership.scope || null, agentId: result.skill.ownership.agentId || null }
-      : null,
-    content: typeof result.skill.content === 'string' ? result.skill.content : null,
-  };
-  for (const key of ['provider', 'nextCursor']) if (typeof result?.[key] === 'string') receipt[key] = truncatedNativeText(result[key], 500);
+  if (Array.isArray(result?.tasks)) receipt.tasks = result.tasks;
+  if (Array.isArray(result?.providers)) receipt.providers = result.providers;
+  if (Array.isArray(result?.tools) && result?.tool === 'mcp_capabilities') receipt.tools = result.tools;
+  // Capability and task-board results are selected evidence. Preserve the
+  // selected records until continuation preparation applies its actual model
+  // budget; shaping or clipping them here silently presents partial results as
+  // complete collections.
+  if (Array.isArray(result?.skills) && result?.tool === 'list_skills') receipt.skills = result.skills;
+  if (result?.skill && typeof result.skill === 'object' && result?.tool === 'load_skill') receipt.skill = result.skill;
+  for (const key of ['provider', 'nextCursor']) if (typeof result?.[key] === 'string') receipt[key] = result[key];
   for (const key of ['totalCount']) if (typeof result?.[key] === 'number') receipt[key] = result[key];
-  if (result?.task && typeof result.task === 'object') receipt.task = {
-    id: result.task.id || null, projectId: result.task.projectId || null,
-    title: truncatedNativeText(result.task.title, 500), status: result.task.status || null,
-    priority: result.task.priority || null, assignedAgentId: result.task.assignedAgentId || null,
-    updatedAt: result.task.updatedAt || null,
-  };
-  if (result?.artifacts && typeof result.artifacts === 'object') {
-    receipt.artifacts = Object.fromEntries(Object.entries(result.artifacts).slice(0, 12).map(([key, value]) => [key, typeof value === 'string' ? value.slice(0, 800) : null]));
-  }
+  if (result?.task && typeof result.task === 'object') receipt.task = result.task;
+  if (result?.artifacts && typeof result.artifacts === 'object') receipt.artifacts = result.artifacts;
   return receipt;
 }
 
