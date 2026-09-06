@@ -22,7 +22,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   const [chatError, setChatError] = useState('');
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
   const [a2aActivities, setA2aActivities] = useState<ActiveA2AActivity[]>([]);
-  const hadA2aRunsRef = useRef(false);
+  const childSessionsRef = useRef(new Set<string>());
   const [, setToolActivityVersion] = useState(0);
   const conversationCacheRef = useRef<ConversationCache>(readConversationCache());
   // The displayed chat session may be a child session. Agent-status is scoped
@@ -200,11 +200,13 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   useEffect(() => {
     if (!selectedAgentId || !sessionId || isNewSession) {
       setA2aActivities([]);
-      hadA2aRunsRef.current = false;
+
       return;
     }
     let cancelled = false;
     let timer: number | undefined;
+    let hadRuns = false;
+    const isChildSession = childSessionsRef.current.has(conversationCacheKey(selectedAgentId, sessionId));
     const poll = async () => {
       try {
         const owner = targetForResource(targets, selectedAgentId);
@@ -216,14 +218,18 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
           const status: ActiveA2AActivity['status'] = run.status === 'cancelled' ? 'cancelled' : run.phase === 'streaming' ? 'streaming' : 'running';
           return [{ id: `a2a:${run.runId}`, status, parentAgentId: run.a2a.parentAgentId, recipient: { agentId: run.agentId, sessionId: run.sessionId, runId: run.runId }, messageMode: run.a2a.messageMode, progress: run.progress ?? [] }];
         });
-        const hadRuns = hadA2aRunsRef.current;
-        hadA2aRunsRef.current = Boolean(response.runs?.length);
+        const shouldRefresh = isChildSession || Boolean(response.runs?.length) || hadRuns;
+        hadRuns = Boolean(response.runs?.length);
         setA2aActivities(activities.slice(-12));
-        if (response.runs?.length || hadRuns) {
+        // Worker children persist their transcript outside the active chat-run
+        // registry. Keep the selected child fresh even when that registry is empty,
+        // including terminal writes that arrive after the worker stops.
+        if (shouldRefresh) {
           const cacheKey = conversationCacheKey(selectedAgentId, sessionId);
-          const cachedTurns = conversationCacheRef.current[cacheKey] ?? [];
+          const cachedTurns = conversationCacheRef.current[cacheKey];
           const session = await sessionRepository.loadSession(selectedAgentId, sessionId);
-          const nextTurns = reconcileSessionTurns(session, cachedTurns);
+          if (cancelled || conversationCacheRef.current[cacheKey] !== cachedTurns) return;
+          const nextTurns = reconcileSessionTurns(session, cachedTurns ?? []);
           conversationCacheRef.current[cacheKey] = nextTurns;
           writeConversationCache(conversationCacheRef.current, cacheKey);
           if (!cancelled && selectedChatRef.current.agentId === selectedAgentId && selectedChatRef.current.sessionId === sessionId) setTurns(nextTurns);
@@ -236,7 +242,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
     };
     void poll();
     return () => { cancelled = true; if (timer !== undefined) window.clearTimeout(timer); };
-  }, [isNewSession, selectedAgentId, sessionId, targets]);
+  }, [isNewSession, selectedAgentId, sessionId, targets, sessionRepository]);
 
   const selectSession = useCallback((targetSessionId: string) => {
     if (!selectedAgentId || !targetSessionId || targetSessionId === sessionId) return;
@@ -261,6 +267,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
     setChatError('');
   }, []);
   const selectChildSession = useCallback((agentId: string, childSessionId: string) => {
+    childSessionsRef.current.add(conversationCacheKey(agentId, childSessionId));
     sessionIdByAgentRef.current[agentId] = childSessionId;
     setSessionId(childSessionId);
     setTurns(conversationCacheRef.current[conversationCacheKey(agentId, childSessionId)] ?? []);

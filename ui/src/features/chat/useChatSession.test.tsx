@@ -247,3 +247,51 @@ describe('useChatSession', () => {
     expect(result.current.turns).toEqual([]);
   });
 });
+
+it('polls selected worker child activity and late terminal turns with no active chat runs', async () => {
+  let childTurns = [{ role: 'user', content: 'Delegated task' }];
+  apiMock.mockImplementation(async (_target, path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (path === conversationPath) return { session: { turns: [] } };
+    if (path.startsWith('/api/chat/runs/active?')) return { runs: [] };
+    if (path === `/api/sessions/child?agentId=${agentId}`) return { session: { turns: childTurns } };
+    throw new Error(path);
+  });
+  const { result, unmount } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+  act(() => result.current.selectChildSession(agentId, 'child'));
+  await waitFor(() => expect(result.current.turns).toEqual(childTurns));
+  childTurns = [...childTurns, { role: 'assistant', content: 'Working' }];
+  await waitFor(() => expect(result.current.turns).toEqual(childTurns), { timeout: 2500 });
+  childTurns = [...childTurns, { role: 'assistant', content: 'Final response' }];
+  await waitFor(() => expect(result.current.turns).toEqual(childTurns), { timeout: 2500 });
+  unmount();
+});
+
+it('discards an in-flight child poll after selecting the parent, including its cached result', async () => {
+  const pending = deferred<{ session: { turns: { role: string; content: string }[] } }>();
+  let hold = false;
+  let requested = false;
+  apiMock.mockImplementation(async (_target, path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (path === conversationPath) return { session: { turns: [{ role: 'assistant', content: 'Parent' }] } };
+    if (path.startsWith('/api/chat/runs/active?')) return { runs: [] };
+    if (path === `/api/sessions/child?agentId=${agentId}`) {
+      if (hold) { requested = true; return pending.promise; }
+      return { session: { turns: [{ role: 'assistant', content: 'Child' }] } };
+    }
+    throw new Error(path);
+  });
+  const { result, unmount } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+  act(() => result.current.selectChildSession(agentId, 'child'));
+  await waitFor(() => expect(result.current.turns[0]?.content).toBe('Child'));
+  hold = true;
+  await waitFor(() => expect(requested).toBe(true), { timeout: 2500 });
+  act(() => result.current.selectSession(sessionId));
+  await waitFor(() => expect(result.current.turns[0]?.content).toBe('Parent'));
+  await act(async () => pending.resolve({ session: { turns: [{ role: 'assistant', content: 'Stale child' }] } }));
+  expect(result.current.turns[0]?.content).toBe('Parent');
+  expect(JSON.stringify(localStorage)).not.toContain('Stale child');
+  unmount();
+});
