@@ -29,7 +29,7 @@ type ChatTranscriptProps = {
 
 export function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, a2aActivities = [] }: ChatTranscriptProps) {
   const isSubagent = 'stream' in selected;
-  const messages = turns.filter((turn) => turn.type === 'message' && turn.content && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && isChatCommand(textFromChatValue(turn.content))));
+  const messages = turns.filter((turn) => turn.type === 'message' && turn.metadata?.visibility !== 'debug' && turn.metadata?.kind !== 'subagent-runtime-context' && turn.metadata?.kind !== 'subagent-task' && turn.content && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && isChatCommand(textFromChatValue(turn.content))));
   const activityByRun = new Map<string, ToolActivity>();
   for (const turn of turns) {
     const activity = turn.metadata?.toolActivity;
@@ -53,6 +53,12 @@ export function ChatTranscript({ selected, parent, operator, isNewSession, turns
       {isSubagent && <div className="stream-banner"><span>Subagent stream</span><strong>{selected.name}</strong><small>Workspace remains attached to {parent.name}</small></div>}
       {isLoading && <p className="chat-state">{messages.length ? 'Refreshing conversation…' : 'Loading conversation…'}</p>}
       {messages.map((turn, index) => {
+        const isDelegatedTask = turn.role === 'user' && (turn.metadata?.kind === 'subagent-delegated-task' || (isSubagent && Boolean(turn.metadata?.workerProfile || turn.metadata?.subagentId)));
+        const parentId = turn.metadata?.parentAgentId;
+        const delegatedParent = parentId ? (parentId === parent.id ? parent : null) : isSubagent ? parent : null;
+        const delegatedName = delegatedParent?.name || parentId || 'Parent agent';
+        const userName = isDelegatedTask ? delegatedName : operator.name;
+        const userAvatar = isDelegatedTask ? delegatedParent?.avatar || delegatedName.slice(0, 1).toUpperCase() : operator.avatar || operator.name.slice(0, 1).toUpperCase();
         const isAgentMessage = turn.role === 'agent';
         const fromCurrentAgent = turn.metadata?.fromAgentId === selected.id;
         const senderName = turn.metadata?.fromAgentName ?? turn.metadata?.fromAgentId ?? 'Agent';
@@ -60,7 +66,7 @@ export function ChatTranscript({ selected, parent, operator, isNewSession, turns
         const messageName = isAgentMessage ? `${senderName} → ${recipientName}` : selected.name;
         const persistedActivity = turn.metadata?.toolActivity;
         const isPersistedTerminalTurn = turn.role === 'assistant' && turn.runId === activeRunId && Boolean(turn.metadata?.progress || persistedActivity || turn.content);
-        return <ChatMessage key={`${turn.runId ?? 'turn'}-${index}`} side={turn.role === 'user' || (isAgentMessage && !fromCurrentAgent) ? 'operator' : 'agent'} name={turn.role === 'user' ? operator.name : isAgentMessage ? messageName : selected.name} avatar={turn.role === 'user' ? operator.avatar || operator.name.slice(0, 1).toUpperCase() : isAgentMessage && !fromCurrentAgent ? senderName.slice(0, 1).toUpperCase() : selected.avatar} time={formatTime(turn.ts)} text={textFromChatValue(turn.content)} activity={turn.role === 'assistant' ? (persistedActivity ?? (turn.runId === activeRunId ? activeActivity : activityByRun.get(turn.runId ?? ''))) : undefined} progress={turn.role === 'assistant' ? turn.metadata?.progress : undefined} streamedAnswer={turn.role === 'assistant' ? turn.metadata?.streamedAnswer : undefined} activityLive={turn.role === 'assistant' && turn.runId === activeRunId && !isPersistedTerminalTurn} attachments={turn.metadata?.attachments} />;
+        return <ChatMessage key={`${turn.runId ?? 'turn'}-${index}`} side={turn.role === 'user' || (isAgentMessage && !fromCurrentAgent) ? 'operator' : 'agent'} name={turn.role === 'user' ? userName : isAgentMessage ? messageName : selected.name} avatar={turn.role === 'user' ? userAvatar : isAgentMessage && !fromCurrentAgent ? senderName.slice(0, 1).toUpperCase() : selected.avatar} time={formatTime(turn.ts)} text={textFromChatValue(turn.content)} activity={turn.role === 'assistant' ? (persistedActivity ?? (turn.runId === activeRunId ? activeActivity : activityByRun.get(turn.runId ?? ''))) : undefined} progress={turn.role === 'assistant' ? turn.metadata?.progress : undefined} streamedAnswer={turn.role === 'assistant' ? turn.metadata?.streamedAnswer : undefined} activityLive={turn.role === 'assistant' && turn.runId === activeRunId && !isPersistedTerminalTurn} attachments={turn.metadata?.attachments} />;
       })}
       {a2aActivities.length > 0 && <section className="a2a-activity-list" aria-label="Agent-to-agent activity">{a2aActivities.map((activity) => <A2AActivityCard key={activity.id} activity={activity} selectedName={selected.name} />)}</section>}
       {isSending && !messages.some((turn) => turn.role === 'assistant' && turn.runId === activeRunId && Boolean(turn.metadata?.progress || turn.metadata?.toolActivity || turn.content)) && <LiveAssistantTurn name={selected.name} avatar={selected.avatar} progress={liveProgress} activity={activeActivity} answer={liveAnswer} />}

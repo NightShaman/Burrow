@@ -215,6 +215,11 @@ export type SessionTurn = {
     progress?: RunProgress;
     streamedAnswer?: string;
     kind?: string;
+    parentAgentId?: string;
+    workerProfile?: unknown;
+    subagentId?: string;
+    visibility?: string;
+    promptEligible?: boolean;
     fromAgentId?: string;
     fromAgentName?: string;
     toAgentId?: string;
