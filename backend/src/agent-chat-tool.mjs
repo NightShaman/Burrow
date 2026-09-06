@@ -18,6 +18,28 @@ async function serializeRecipientReply({ rootDir, sessionId, operation }) {
   finally { if (replyQueues.get(key) === current) replyQueues.delete(key); }
 }
 
+// Track waits before entering either reply/session queue. This includes independent
+// concurrent exchanges, not only nested calls sharing an async execution context.
+// Session serialization remains intact; cyclic requests fail before transcript ingress.
+const replyWaits = new Set();
+function replySessionKey(rootDir, session) { return JSON.stringify([String(rootDir), session]); }
+function beginReplyWait(from, to) {
+  const pending = [to];
+  const visited = new Set();
+  while (pending.length) {
+    const current = pending.pop();
+    if (current === from) {
+      throw new Error('agent_message_reply_cycle: recipient is waiting on this session; return your question or result as your final reply to the existing exchange instead of requesting another reply');
+    }
+    if (visited.has(current)) continue;
+    visited.add(current);
+    for (const edge of replyWaits) if (edge.from === current) pending.push(edge.to);
+  }
+  const edge = { from, to };
+  replyWaits.add(edge);
+  return () => replyWaits.delete(edge);
+}
+
 function text(value) { return String(value ?? '').trim(); }
 function agentId(value, field) {
   const id = text(value);
@@ -107,15 +129,23 @@ export async function sendAgentMessage({ senderRuntime, resolveRecipientRuntime,
   // A2A message while the first recipient run owns this session advances the
   // transcript underneath it and makes the first terminal commit stale. Queue
   // both delivery and execution per recipient session instead.
-  const { recipientEntry, sourceEntry, receipt, reply } = await serializeRecipientReply({
-    rootDir: recipientRuntime.agentWorkspaceRoot,
-    sessionId: session,
-    operation: async () => {
-      const delivery = await deliver();
-      const response = await runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, inboundEntryId: delivery.recipientEntry.id });
-      return { ...delivery, reply: response };
-    },
-  });
+  const releaseWait = beginReplyWait(
+    replySessionKey(senderRuntime.agentWorkspaceRoot, source),
+    replySessionKey(recipientRuntime.agentWorkspaceRoot, session),
+  );
+  let exchange;
+  try {
+    exchange = await serializeRecipientReply({
+      rootDir: recipientRuntime.agentWorkspaceRoot,
+      sessionId: session,
+      operation: async () => {
+        const delivery = await deliver();
+        const response = await runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, inboundEntryId: delivery.recipientEntry.id });
+        return { ...delivery, reply: response };
+      },
+    });
+  } finally { releaseWait(); }
+  const { sourceEntry, receipt, reply } = exchange;
   const replyText = text(reply?.answerText);
   if (!replyText) return { ...receipt, reply: { ok: false, error: reply?.error || 'agent_message_reply_empty' } };
   const replyEntry = await appendAgentMessage({
