@@ -33,7 +33,7 @@ function subagentFinishToolSchema() {
         additionalProperties: false,
         properties: {
           status: { type: 'string', enum: ['completed', 'incomplete', 'failed'] },
-          summary: { type: 'string' },
+          summary: { type: 'string', description: 'Readable final Markdown report for the parent and child transcript. Preserve paragraphs, lists, code, and headings where useful; do not compress the report into one paragraph.' },
           blockers: { type: 'array', items: { type: 'string' } },
           warnings: { type: 'array', items: { type: 'string' } },
           verification: {
@@ -62,7 +62,7 @@ function subagentToolSchemas({ includeFinish = true } = {}) {
 
 function childPrompt({ task, target }) {
   return [
-    'You are an isolated child agent. Inspect independently and return concise findings for the parent.',
+    'You are an isolated child agent. Inspect independently and return concise, readable Markdown findings for the parent. Use paragraphs and lists where useful, not a compressed wall of text. Put your final report in finish_subagent.summary; do not duplicate it in accompanying assistant text.',
     `Working directory: ${target.root}`,
     'The structural target establishes working context, cwd, lineage, and evidence provenance. It is not a tool permission cage.',
     'Use the normal runtime tool surface when useful. Runtime validates selected actions and rejects only malformed input or configured hard blocks.',
@@ -409,7 +409,7 @@ export async function runSpawnSubagentChild({
   await progress?.({ type: 'subagent-progress', phase: 'started', id });
   await updateSubagentStatus({ dataRoot, id, status: 'running', phase: 'model-loop', provenance: { source: 'spawn-subagent-child', reason: 'started' } });
   const prompt = childPrompt({ task, target });
-  await appendSessionTurn({ rootDir: dataRoot, sessionId: childSessionId, role: 'user', content: prompt, runId: id, traceDir, metadata: { kind: 'subagent-task', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null } });
+  await appendSessionEntry({ rootDir: dataRoot, sessionId: childSessionId, type: 'event', content: prompt, visibility: 'debug', entersPrompt: false, runId: id, traceDir, metadata: { kind: 'subagent-runtime-context', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null } });
 
   const modelTrace = traceDir ? {
     traceDir,
@@ -440,7 +440,7 @@ export async function runSpawnSubagentChild({
   const firstToolCalls = choiceToolCalls(first.choice);
   const firstText = choiceText(first.choice);
   // Tool requests are persisted as canonical structured activity, not fake assistant text.
-  if (compactString(firstText)) await appendSessionTurn({ rootDir: dataRoot, sessionId: childSessionId, role: 'assistant', content: firstText, runId: id, traceDir, metadata: { kind: 'subagent-model-response', toolCallCount: firstToolCalls.length } });
+  if (compactString(firstText)) await appendSessionTurn({ visibility: terminalResultFromToolCalls(firstToolCalls) ? 'debug' : 'chat', entersPrompt: !terminalResultFromToolCalls(firstToolCalls), rootDir: dataRoot, sessionId: childSessionId, role: 'assistant', content: firstText, runId: id, traceDir, metadata: { kind: 'subagent-model-response', toolCallCount: firstToolCalls.length } });
 
   let lastText = firstText;
   let activitySequence = 0;
@@ -521,7 +521,7 @@ export async function runSpawnSubagentChild({
     terminalResult = terminalResultFromToolCalls(nextToolCalls, { toolResults, target });
     const nextText = choiceText(next.choice);
     if (compactString(nextText)) lastText = nextText;
-    if (compactString(nextText)) await appendSessionTurn({ rootDir: dataRoot, sessionId: childSessionId, role: 'assistant', content: nextText, runId: id, traceDir, metadata: { kind: nextToolCalls.length ? 'subagent-model-response' : 'subagent-final-response', evidenceCount: toolResults.length, toolCallCount: nextToolCalls.length } });
+    if (compactString(nextText)) await appendSessionTurn({ visibility: terminalResult ? 'debug' : 'chat', entersPrompt: !terminalResult, rootDir: dataRoot, sessionId: childSessionId, role: 'assistant', content: nextText, runId: id, traceDir, metadata: { kind: nextToolCalls.length ? 'subagent-model-response' : 'subagent-final-response', evidenceCount: toolResults.length, toolCallCount: nextToolCalls.length } });
   }
 
   if (terminalResult) {
@@ -552,7 +552,7 @@ export async function runSpawnSubagentChild({
   if (compactString(synthesisText)) lastText = synthesisText;
   const synthesisToolCalls = choiceToolCalls(synthesis.choice);
   terminalResult = terminalResultFromToolCalls(synthesisToolCalls, { toolResults, target });
-  await appendSessionTurn({ rootDir: dataRoot, sessionId: childSessionId, role: 'assistant', content: synthesisText || (synthesisToolCalls.length ? '[terminal signal]' : '[missing terminal signal]'), runId: id, traceDir, metadata: { kind: 'subagent-final-response', evidenceCount: toolResults.length, toolCallCount: synthesisToolCalls.length, finalSynthesis: true } });
+  if (compactString(synthesisText) || !terminalResult) await appendSessionTurn({ visibility: terminalResult ? 'debug' : 'chat', entersPrompt: !terminalResult, rootDir: dataRoot, sessionId: childSessionId, role: 'assistant', content: synthesisText || (synthesisToolCalls.length ? '[terminal signal]' : '[missing terminal signal]'), runId: id, traceDir, metadata: { kind: 'subagent-final-response', evidenceCount: toolResults.length, toolCallCount: synthesisToolCalls.length, finalSynthesis: true } });
 
   if (terminalResult) {
     const status = terminalResult.ok ? 'succeeded' : 'failed';

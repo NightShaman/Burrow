@@ -36,7 +36,7 @@ export async function startSubagentChildSession({ dataRoot, id, workerProfile, p
     content: purpose || `Run ${workerProfile || 'subagent'}`,
     runId: trace.runId || null,
     parentId: parentRunId || null,
-    metadata: { workerProfile, subagentId: id, parentSessionId, parentConversationId, parentRunId: parentRunId || null },
+    metadata: { kind: 'subagent-delegated-task', parentAgentId: owner.agentId || null, workerProfile, subagentId: id, parentSessionId, parentConversationId, parentRunId: parentRunId || null },
   });
   await appendSessionEntry({
     rootDir: dataRoot,
