@@ -25,11 +25,11 @@ function parseLimit(value, fallback = 50) {
 }
 
 function queryTerms(query) {
-  return String(query || '').toLowerCase().match(/[a-z0-9][a-z0-9._-]*/gu)?.filter((term) => term.length >= 3) || [];
+  return [...new Set(String(query || '').toLowerCase().match(/[a-z0-9][a-z0-9._-]*/gu)?.filter((term) => term.length >= 3) || [])];
 }
 
-function matchesQuery(entry, query) {
-  if (!query) return true;
+function queryMatch(entry, query) {
+  if (!query) return { matches: true, score: 0 };
   const haystack = [
     entry.id,
     entry.role,
@@ -38,10 +38,27 @@ function matchesQuery(entry, query) {
     entry.content,
     entry.metadata?.compressionSummary?.text,
   ].map(normalized).join('\n');
-  const exact = normalized(query);
-  if (haystack.includes(exact)) return true;
+  const exact = normalized(query).trim();
+  if (exact && haystack.includes(exact)) return { matches: true, score: 1000 };
   const terms = queryTerms(query);
-  return terms.length ? terms.every((term) => haystack.includes(term)) : true;
+  if (!terms.length) return { matches: true, score: 0 };
+  const positions = terms.map((term) => haystack.indexOf(term));
+  const matchedPositions = positions.filter((position) => position >= 0);
+  const matchedCount = matchedPositions.length;
+  const minimumCoverage = terms.length === 1 ? 1 : 2;
+  if (matchedCount < minimumCoverage) return { matches: false, score: 0 };
+  const allTerms = matchedCount === terms.length;
+  const coverage = matchedCount / terms.length;
+  const span = matchedCount > 1 ? Math.max(...matchedPositions) - Math.min(...matchedPositions) : Number.POSITIVE_INFINITY;
+  const proximity = Number.isFinite(span) ? Math.max(0, 100 - Math.floor(span / 8)) : 0;
+  return {
+    matches: true,
+    score: (allTerms ? 700 : 0) + Math.round(coverage * 400) + (matchedCount * 20) + proximity,
+  };
+}
+
+function matchesQuery(entry, query) {
+  return queryMatch(entry, query).matches;
 }
 
 function recallEligible(entry) {
@@ -54,12 +71,10 @@ function recallEligible(entry) {
 
 function recallScore(entry, query) {
   const content = normalized(entry.metadata?.compressionSummary?.text || entry.content);
-  const terms = queryTerms(query);
-  const matchedTerms = terms.filter((term) => content.includes(term)).length;
   const decisionLanguage = /\b(?:decid(?:e|ed|ing)|agreed|require(?:s|d)?|must|should|need(?:s|ed)?|will|won't|do not|don't|keep|remain|stay|real)\b/iu.test(content);
   const incidentalLanguage = /\b(?:fake|mock|dead code|cleanup|remove|removed)\b/iu.test(content);
   const roleWeight = entry.role === 'user' ? 5 : entry.role === 'assistant' ? 4 : entry.role === 'agent' ? 3 : 1;
-  return (matchedTerms * 20) + (decisionLanguage ? 30 : 0) + roleWeight - (incidentalLanguage ? 15 : 0);
+  return queryMatch(entry, query).score + (decisionLanguage ? 30 : 0) + roleWeight - (incidentalLanguage ? 15 : 0);
 }
 
 function matchesRole(entry, role) {
@@ -165,7 +180,11 @@ export async function searchSessionEvidence({ rootDir, sessionId = 'default', qu
     .filter((entry) => matchesSourceId(entry, sourceId))
     .filter((entry) => matchesTime(entry, { since, until }))
     .filter((entry) => matchesQuery(entry, query));
-  const results = entries.slice(-max).map((entry) => compactEntry(entry, query));
+  const rankedEntries = query
+    ? [...entries].sort((left, right) => recallScore(right, query) - recallScore(left, query) || String(right.ts || '').localeCompare(String(left.ts || '')))
+    : entries;
+  const selectedEntries = query ? rankedEntries.slice(0, max) : rankedEntries.slice(-max);
+  const results = selectedEntries.map((entry) => compactEntry(entry, query));
   const summaries = compressionSummariesFromTranscript(transcript);
   return {
     ok: true,
