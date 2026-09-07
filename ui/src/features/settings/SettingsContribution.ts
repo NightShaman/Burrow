@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-export type SettingsLayout = 'form' | 'list-detail' | 'activity';
+export type SettingsLayout = 'form' | 'form-inventory' | 'list-detail' | 'activity';
 
 export type SettingsField = {
   id: string;
@@ -32,6 +32,8 @@ export type SettingsItem = {
   description?: string;
   meta?: string;
   detail?: string;
+  metadata?: Array<{ label: string; value: string }>;
+  editLabel?: string;
   fields?: SettingsField[];
   actions?: SettingsAction[];
 };
@@ -102,7 +104,7 @@ export function validateSettingsContribution(value: unknown): SettingsContributi
     if (!section || typeof section !== 'object') return [];
     const item = section as Partial<SettingsSection>;
     if (typeof item.id !== 'string' || !idPattern.test(item.id) || seen.has(item.id) || typeof item.label !== 'string' || !item.label.trim()) return [];
-    if (item.layout !== 'form' && item.layout !== 'list-detail' && item.layout !== 'activity') return [];
+    if (item.layout !== 'form' && item.layout !== 'form-inventory' && item.layout !== 'list-detail' && item.layout !== 'activity') return [];
     seen.add(item.id);
     const fields = validateFields(item.fields);
     const actions = validateActions(item.actions);
@@ -119,6 +121,8 @@ export function validateSettingsContribution(value: unknown): SettingsContributi
         description: typeof item.description === 'string' ? item.description : undefined,
         meta: typeof item.meta === 'string' ? item.meta : undefined,
         detail: typeof item.detail === 'string' ? item.detail : undefined,
+        ...(typeof item.editLabel === 'string' ? { editLabel: item.editLabel } : {}),
+        ...(Array.isArray(item.metadata) ? { metadata: item.metadata.filter(entry => entry && typeof entry.label === 'string' && typeof entry.value === 'string').map(({ label, value }) => ({ label, value })) } : {}),
         ...(itemFields ? { fields: itemFields } : {}),
         ...(itemActions ? { actions: itemActions } : {}),
       }];

@@ -696,3 +696,5 @@ button:disabled{cursor:not-allowed;opacity:.45}
     transition: none;
   }
 }
+
+.settings-inventory-card{display:grid;min-width:0;overflow-wrap:anywhere}.settings-inventory-card dl{display:grid;gap:8px;margin:0;font-size:12px}.settings-inventory-card dl>div{display:grid;grid-template-columns:minmax(80px,1fr) minmax(0,2fr);gap:12px}.settings-inventory-card dt{color:var(--muted)}.settings-inventory-card dd{margin:0;min-width:0}.settings-inventory-card .memory-connection-actions,.settings-inventory-card .card-actions{flex-wrap:wrap}

@@ -81,3 +81,26 @@ describe('settings contribution item IDs', () => {
     expect(validateSettingsContribution(contribution([{ id, label: 'Unsafe' }]))).toBeNull();
   });
 });
+
+it('keeps saved gateways in inventory and uses an explicit, cancellable rotation form', async () => {
+  const contribution = validateSettingsContribution({ sections: [{ id: 'gateways', label: 'Gateways', layout: 'form-inventory', fields: [{ id: 'new-id', label: 'Gateway ID' }], actions: [{ id: 'enroll', label: 'Enroll gateway' }], items: ['Hatchet', 'Curator'].map(id => ({ id, label: id, editLabel: 'Rotate secret', metadata: [{ label: 'Version', value: '1.0' }], fields: [{ id: `secret:${id}`, label: 'New secret', control: 'password' }], actions: [{ id: `rotate:${id}`, label: 'Save new secret', tone: 'primary' }] })) }] });
+  const overflow = document.createElement('div');
+  const handleSettingsAction = vi.fn().mockResolvedValue(undefined);
+  const view = render(<DeclarativeSection contribution={contribution!} section={contribution!.sections[0]} module={{ handleSettingsAction }} overflowTarget={overflow} />);
+  expect(within(view.container).queryByText('Hatchet')).toBeNull();
+  expect(within(overflow).getByText('Hatchet')).toBeTruthy();
+  expect(within(overflow).getByText('Curator')).toBeTruthy();
+  fireEvent.click(within(overflow).getByRole('button', { name: 'Rotate secret Hatchet' }));
+  expect(within(view.container).getByRole('heading', { name: 'Rotate secret: Hatchet' })).toBeTruthy();
+  const secret = within(view.container).getByLabelText('New secret') as HTMLInputElement;
+  expect(secret.type).toBe('password');
+  fireEvent.change(secret, { target: { value: 'test-only' } });
+  fireEvent.click(within(view.container).getByText('Cancel'));
+  expect(handleSettingsAction).not.toHaveBeenCalled();
+  fireEvent.click(within(overflow).getByRole('button', { name: 'Rotate secret Hatchet' }));
+  expect((within(view.container).getByLabelText('New secret') as HTMLInputElement).value).toBe('');
+  fireEvent.change(within(view.container).getByLabelText('New secret'), { target: { value: 'test-only' } });
+  fireEvent.click(within(view.container).getByText('Save new secret'));
+  await waitFor(() => expect(handleSettingsAction).toHaveBeenCalledWith('rotate:Hatchet', expect.objectContaining({ 'secret:Hatchet': 'test-only' })));
+  await waitFor(() => expect(within(view.container).getByText('Enroll gateway')).toBeTruthy());
+});
