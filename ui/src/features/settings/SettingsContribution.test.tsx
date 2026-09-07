@@ -9,7 +9,7 @@ describe('settings contribution list-detail items', () => {
       id: 'assignments',
       label: 'Agent assignments',
       description: 'Choose where each agent executes future turns.',
-      layout: 'list-detail',
+      layout: 'form-inventory',
       items: [{
         id: 'smatchet',
         label: 'Smatchet',
@@ -27,22 +27,23 @@ describe('settings contribution list-detail items', () => {
     expect(result?.sections[0].items).toEqual([assignments.sections[0].items[0]]);
   });
 
-  it('renders the assignment list in primary and selected detail in overflow', () => {
+  it('keeps the assignment form in primary and the saved agent list in overflow', () => {
     const contribution = validateSettingsContribution(assignments);
     expect(contribution).not.toBeNull();
     const overflow = document.createElement('div');
     render(<DeclarativeSection contribution={contribution!} section={contribution!.sections[0]} module={{}} overflowTarget={overflow} />);
 
-    expect(within(document.body).getByRole('button', { name: /Smatchet/ })).toBeTruthy();
-    expect(within(overflow).getByRole('heading', { name: 'Smatchet' })).toBeTruthy();
-    expect(within(overflow).getByText('Assignments apply to future turns only.')).toBeTruthy();
-    expect(within(overflow).getByRole('button', { name: 'Save assignment' })).toBeTruthy();
+    expect(within(overflow).getByRole('button', { name: 'Edit Smatchet' })).toBeTruthy();
+    expect(within(document.body).getByLabelText('Runs on').tagName).toBe('SELECT');
+    expect(within(document.body).getByRole('button', { name: 'Save assignment' })).toBeTruthy();
+    expect(within(overflow).queryByRole('combobox')).toBeNull();
+    expect(within(overflow).queryByRole('button', { name: 'Save assignment' })).toBeNull();
   });
 
   it('passes displayed item defaults when saving after selecting an item', async () => {
     const contribution = validateSettingsContribution({
       sections: [{
-        id: 'assignments', label: 'Agent assignments', layout: 'list-detail', items: [
+        id: 'assignments', label: 'Agent assignments', layout: 'form-inventory', items: [
           { id: 'local', label: 'Local', fields: [{ id: 'gateway:local', label: 'Gateway', value: 'local' }], actions: [{ id: 'save:local', label: 'Save' }] },
           { id: 'Hatchet', label: 'Hatchet', fields: [{ id: 'gateway:Hatchet', label: 'Gateway', value: 'Hatchet' }], actions: [{ id: 'save:Hatchet', label: 'Save' }] },
         ],
@@ -52,8 +53,8 @@ describe('settings contribution list-detail items', () => {
     const overflow = document.createElement('div');
     render(<DeclarativeSection contribution={contribution!} section={contribution!.sections[0]} module={{ handleSettingsAction }} overflowTarget={overflow} />);
 
-    fireEvent.click(within(document.body).getByRole('button', { name: /Hatchet/ }));
-    fireEvent.click(within(overflow).getByRole('button', { name: 'Save' }));
+    fireEvent.click(within(overflow).getByRole('button', { name: /Hatchet/ }));
+    fireEvent.click(within(document.body).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(handleSettingsAction).toHaveBeenCalledWith('save:Hatchet', { 'gateway:local': 'local', 'gateway:Hatchet': 'Hatchet' }));
   });
 });
@@ -82,25 +83,26 @@ describe('settings contribution item IDs', () => {
   });
 });
 
-it('keeps saved gateways in inventory and uses an explicit, cancellable rotation form', async () => {
-  const contribution = validateSettingsContribution({ sections: [{ id: 'gateways', label: 'Gateways', layout: 'form-inventory', fields: [{ id: 'new-id', label: 'Gateway ID' }], actions: [{ id: 'enroll', label: 'Enroll gateway' }], items: ['Hatchet', 'Curator'].map(id => ({ id, label: id, editLabel: 'Rotate secret', metadata: [{ label: 'Version', value: '1.0' }], fields: [{ id: `secret:${id}`, label: 'New secret', control: 'password' }], actions: [{ id: `rotate:${id}`, label: 'Save new secret', tone: 'primary' }] })) }] });
+it('keeps the gateway form in primary and only saved cards with revoke in overflow', async () => {
+  const contribution = validateSettingsContribution({ sections: [{ id: 'gateways', label: 'Gateways', layout: 'form-inventory', fields: [{ id: 'new-id', label: 'Gateway ID' }], actions: [{ id: 'enroll', label: 'Enroll or rotate gateway' }], items: ['Hatchet', 'Curator'].map(id => ({ id, label: id, metadata: [{ label: 'Version', value: '1.0' }], actions: [{ id: `revoke:${id}`, label: 'Revoke', tone: 'danger' }] })) }] });
   const overflow = document.createElement('div');
   const handleSettingsAction = vi.fn().mockResolvedValue(undefined);
   const view = render(<DeclarativeSection contribution={contribution!} section={contribution!.sections[0]} module={{ handleSettingsAction }} overflowTarget={overflow} />);
+  expect(within(view.container).getByLabelText('Gateway ID')).toBeTruthy();
+  expect(within(view.container).getByText('Enroll or rotate gateway')).toBeTruthy();
   expect(within(view.container).queryByText('Hatchet')).toBeNull();
   expect(within(overflow).getByText('Hatchet')).toBeTruthy();
   expect(within(overflow).getByText('Curator')).toBeTruthy();
-  fireEvent.click(within(overflow).getByRole('button', { name: 'Rotate secret Hatchet' }));
-  expect(within(view.container).getByRole('heading', { name: 'Rotate secret: Hatchet' })).toBeTruthy();
-  const secret = within(view.container).getByLabelText('New secret') as HTMLInputElement;
-  expect(secret.type).toBe('password');
-  fireEvent.change(secret, { target: { value: 'test-only' } });
-  fireEvent.click(within(view.container).getByText('Cancel'));
-  expect(handleSettingsAction).not.toHaveBeenCalled();
-  fireEvent.click(within(overflow).getByRole('button', { name: 'Rotate secret Hatchet' }));
-  expect((within(view.container).getByLabelText('New secret') as HTMLInputElement).value).toBe('');
-  fireEvent.change(within(view.container).getByLabelText('New secret'), { target: { value: 'test-only' } });
-  fireEvent.click(within(view.container).getByText('Save new secret'));
-  await waitFor(() => expect(handleSettingsAction).toHaveBeenCalledWith('rotate:Hatchet', expect.objectContaining({ 'secret:Hatchet': 'test-only' })));
-  await waitFor(() => expect(within(view.container).getByText('Enroll gateway')).toBeTruthy());
+  expect(within(overflow).queryByRole('textbox')).toBeNull();
+  expect(within(overflow).getAllByRole('button').map(button => button.textContent)).toEqual(['Revoke', 'Revoke']);
+  fireEvent.click(within(overflow).getAllByText('Revoke')[0]);
+  await waitFor(() => expect(handleSettingsAction).toHaveBeenCalledWith('revoke:Hatchet', expect.anything()));
+  expect(within(view.container).getByLabelText('Gateway ID')).toBeTruthy();
+});
+
+it('retains the form and inline inventory without an overflow target, including empty inventories', () => {
+  const contribution = validateSettingsContribution({ sections: [{ id: 'gateways', label: 'Gateways', layout: 'form-inventory', fields: [{ id: 'gateway', label: 'Gateway ID' }], items: [] }] });
+  const view = render(<DeclarativeSection contribution={contribution!} section={contribution!.sections[0]} module={{}} overflowTarget={null} />);
+  expect(within(view.container).getByLabelText('Gateway ID')).toBeTruthy();
+  expect(within(view.container).getByText('No saved items yet.')).toBeTruthy();
 });

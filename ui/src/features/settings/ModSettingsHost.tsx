@@ -54,7 +54,7 @@ export function DeclarativeSection({ contribution, section, module, overflowTarg
   const runAction = async (actionId: string) => {
     setActionState({ id: actionId, status: 'saving', message: 'Saving…' });
     const actionValues = { ...defaultFieldValues(definition), ...values };
-    try { await module.handleSettingsAction?.(actionId, actionValues); setActionState({ id: actionId, status: 'success', message: 'Saved.' }); setValues(current => Object.fromEntries(Object.entries(current).map(([id, value]) => [id, [...(definition.fields ?? []), ...(definition.items?.flatMap(item => item.fields ?? []) ?? [])].some(field => field.id === id && field.control === 'password') ? '' : value]))); setEditingId(null); }
+    try { await module.handleSettingsAction?.(actionId, actionValues); setActionState({ id: actionId, status: 'success', message: 'Saved.' }); setValues(current => Object.fromEntries(Object.entries(current).map(([id, value]) => [id, [...(definition.fields ?? []), ...(definition.items?.flatMap(item => item.fields ?? []) ?? [])].some(field => field.id === id && field.control === 'password') ? '' : value]))); if (definition.fields?.length) setEditingId(null); }
     catch (cause) { setActionState({ id: actionId, status: 'error', message: cause instanceof Error ? cause.message : 'The action could not be completed.' }); }
   };
   const actions = (items: SettingsAction[] | undefined) => items?.length ? <>
@@ -63,7 +63,7 @@ export function DeclarativeSection({ contribution, section, module, overflowTarg
   </> : null;
   const feedback = actionState && <p className={actionState.status === 'error' ? 'settings-request-error' : 'settings-help'} role={actionState.status === 'error' ? 'alert' : 'status'}>{actionState.message}</p>;
   if (definition.layout === 'form-inventory') {
-    const editing = definition.items?.find(item => item.id === editingId);
+    const editing = definition.items?.find(item => item.id === editingId) ?? (!definition.fields?.length ? definition.items?.[0] : undefined);
     const busy = actionState?.status === 'saving';
     const reset = () => { setEditingId(null); setValues(defaultFieldValues(definition)); setActionState(null); };
     const inventoryContents = definition.items?.length ? <div className="memory-connection-list">{definition.items.map(item => <article className="memory-connection settings-inventory-card" key={item.id}>
@@ -76,9 +76,10 @@ export function DeclarativeSection({ contribution, section, module, overflowTarg
     const inventory = <div className="settings-overflow-content memory-saved">{inventoryContents}</div>;
     return <><SettingSection title={editing ? `${editing.editLabel ?? 'Edit'}: ${editing.label}` : definition.label}>
       {definition.description && <p className="settings-description">{definition.description}</p>}
-      {(editing?.fields ?? definition.fields)?.map(field => <Field label={field.label} key={field.id}><input type={field.control === 'password' ? 'password' : 'text'} disabled={busy} value={String(values[field.id] ?? '')} onChange={event => update(field.id, event.currentTarget.value)} />{field.description && <small className="settings-help">{field.description}</small>}</Field>)}
+      {!editing && !definition.fields?.length && <p className="settings-empty">No items available to configure.</p>}
+      {(editing?.fields ?? definition.fields)?.map(field => <Field label={field.label} key={field.id}>{field.control === 'select' ? <select disabled={busy} value={String(values[field.id] ?? '')} onChange={event => update(field.id, event.currentTarget.value)}>{field.options?.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : field.control === 'boolean' ? <input type="checkbox" disabled={busy} checked={values[field.id] === true} onChange={event => update(field.id, event.currentTarget.checked)} /> : <input type={field.control === 'password' ? 'password' : field.control === 'number' ? 'number' : 'text'} disabled={busy} value={String(values[field.id] ?? '')} onChange={event => update(field.id, event.currentTarget.value)} />}{field.description && <small className="settings-help">{field.description}</small>}</Field>)}
       {actions(editing ? editing.actions?.filter(action => action.tone !== 'danger') : definition.actions)}
-      {editing && <button type="button" disabled={busy} onClick={reset}>Cancel</button>}{feedback}
+      {editing && Boolean(definition.fields?.length) && <button type="button" disabled={busy} onClick={reset}>Cancel</button>}{feedback}
       {!overflowTarget && <details className="memory-saved saved-accordion"><summary>Saved {definition.label.toLowerCase()}</summary>{inventoryContents}</details>}
     </SettingSection>{overflowTarget && createPortal(inventory, overflowTarget)}</>;
   }
@@ -192,7 +193,9 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
         await module?.handleSettingsAction?.(actionId, values);
         if (module?.createSettingsContribution) {
           try {
-            const refreshed = validateSettingsContribution(await module.createSettingsContribution({ api: modApi(modId), agents: agentsRef.current }));
+            const { agents: currentAgents } = await api<{ agents: Agent[] }>('/api/agents');
+            const refreshed = validateSettingsContribution(await module.createSettingsContribution({ api: modApi(modId), agents: currentAgents }));
+            void onAgentsChangedRef.current();
             if (!refreshed) throw new Error("Invalid settings response.");
             setContribution(refreshed); setError('');
           } catch { setError('Saved, but could not refresh settings. Reopen Settings to reload the inventory.'); }
