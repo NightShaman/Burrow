@@ -33,7 +33,7 @@ describe('settings contribution list-detail items', () => {
     const overflow = document.createElement('div');
     render(<DeclarativeSection contribution={contribution!} section={contribution!.sections[0]} module={{}} overflowTarget={overflow} />);
 
-    expect(within(overflow).getByRole('button', { name: 'Edit Smatchet' })).toBeTruthy();
+    expect(within(overflow).getByRole('button', { name: /Smatchet/, pressed: true })).toBeTruthy();
     expect(within(document.body).getByLabelText('Runs on').tagName).toBe('SELECT');
     expect(within(document.body).getByRole('button', { name: 'Save assignment' })).toBeTruthy();
     expect(within(overflow).queryByRole('combobox')).toBeNull();
@@ -54,6 +54,8 @@ describe('settings contribution list-detail items', () => {
     render(<DeclarativeSection contribution={contribution!} section={contribution!.sections[0]} module={{ handleSettingsAction }} overflowTarget={overflow} />);
 
     fireEvent.click(within(overflow).getByRole('button', { name: /Hatchet/ }));
+    expect(within(overflow).getByRole('button', { name: /Hatchet/, pressed: true })).toBeTruthy();
+    expect(within(overflow).getByRole('button', { name: 'Local', pressed: false })).toBeTruthy();
     fireEvent.click(within(document.body).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(handleSettingsAction).toHaveBeenCalledWith('save:Hatchet', { 'gateway:local': 'local', 'gateway:Hatchet': 'Hatchet' }));
   });
@@ -105,4 +107,20 @@ it('retains the form and inline inventory without an overflow target, including 
   const view = render(<DeclarativeSection contribution={contribution!} section={contribution!.sections[0]} module={{}} overflowTarget={null} />);
   expect(within(view.container).getByLabelText('Gateway ID')).toBeTruthy();
   expect(within(view.container).getByText('No saved items yet.')).toBeTruthy();
+});
+
+it('selects credential forms without conflating selection and revoke, and clears secrets on cancel', () => {
+  const contribution = validateSettingsContribution({ sections: [{ id: 'gateways', label: 'Gateways', layout: 'form-inventory', fields: [{ id: 'new-id', label: 'Gateway ID' }], items: [{ id: 'Hatchet', label: 'Hatchet', fields: [{ id: 'secret:Hatchet', label: 'New secret', control: 'password' }], actions: [{ id: 'rotate:Hatchet', label: 'Save new secret' }, { id: 'revoke:Hatchet', label: 'Revoke', tone: 'danger', confirm: 'Revoke Hatchet?' }] }] }] });
+  const overflow = document.createElement('div');
+  const view = render(<DeclarativeSection contribution={contribution!} section={contribution!.sections[0]} module={{}} overflowTarget={overflow} />);
+  fireEvent.click(within(overflow).getByRole('button', { name: 'Revoke' }));
+  expect(within(view.container).getByLabelText('Gateway ID')).toBeTruthy();
+  fireEvent.click(within(overflow).getByRole('button', { name: 'Cancel' }));
+  fireEvent.click(within(overflow).getByRole('button', { name: 'Hatchet' }));
+  expect(within(overflow).getByRole('button', { name: 'Hatchet', pressed: true })).toBeTruthy();
+  fireEvent.change(within(view.container).getByLabelText('New secret'), { target: { value: 'fixture-secret' } });
+  fireEvent.click(within(view.container).getByRole('button', { name: 'Cancel' }));
+  expect(within(view.container).getByLabelText('Gateway ID')).toBeTruthy();
+  fireEvent.click(within(overflow).getByRole('button', { name: 'Hatchet' }));
+  expect((within(view.container).getByLabelText('New secret') as HTMLInputElement).value).toBe('');
 });

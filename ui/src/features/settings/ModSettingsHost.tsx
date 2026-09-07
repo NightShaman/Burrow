@@ -66,11 +66,8 @@ export function DeclarativeSection({ contribution, section, module, overflowTarg
     const editing = definition.items?.find(item => item.id === editingId) ?? (!definition.fields?.length ? definition.items?.[0] : undefined);
     const busy = actionState?.status === 'saving';
     const reset = () => { setEditingId(null); setValues(defaultFieldValues(definition)); setActionState(null); };
-    const inventoryContents = definition.items?.length ? <div className="memory-connection-list">{definition.items.map(item => <article className="memory-connection settings-inventory-card" key={item.id}>
-      <div><strong>{item.label}</strong>{item.meta && <small>{item.meta}</small>}</div>
-      {item.metadata && <dl>{item.metadata.map(entry => <div key={entry.label}><dt>{entry.label}</dt><dd>{entry.value}</dd></div>)}</dl>}
-      {item.detail && <p>{item.detail}</p>}
-      {Boolean(item.fields?.length) && <div className="memory-connection-actions"><button type="button" disabled={busy} onClick={() => { setValues(defaultFieldValues(definition)); setEditingId(item.id); setActionState(null); }}>{item.editLabel ?? 'Edit'} {item.label}</button></div>}
+    const inventoryContents = definition.items?.length ? <div className="memory-connection-list">{definition.items.map(item => <article className={`memory-connection settings-inventory-card${editing?.id === item.id ? ' active' : ''}`} key={item.id}>
+      {item.fields?.length ? <button type="button" className="settings-inventory-select" aria-pressed={editing?.id === item.id} disabled={busy} onClick={() => { setValues(defaultFieldValues(definition)); setEditingId(item.id); setActionState(null); }}><strong>{item.label}</strong>{item.meta && <small>{item.meta}</small>}</button> : <div><strong>{item.label}</strong>{item.meta && <small>{item.meta}</small>}</div>}
       {actions(item.actions?.filter(action => !item.fields?.length || action.tone === 'danger'))}
     </article>)}</div> : <p className="settings-empty">No saved items yet.</p>;
     const inventory = <div className="settings-overflow-content memory-saved">{inventoryContents}</div>;
@@ -78,6 +75,7 @@ export function DeclarativeSection({ contribution, section, module, overflowTarg
       {definition.description && <p className="settings-description">{definition.description}</p>}
       {!editing && !definition.fields?.length && <p className="settings-empty">No items available to configure.</p>}
       {(editing?.fields ?? definition.fields)?.map(field => <Field label={field.label} key={field.id}>{field.control === 'select' ? <select disabled={busy} value={String(values[field.id] ?? '')} onChange={event => update(field.id, event.currentTarget.value)}>{field.options?.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : field.control === 'boolean' ? <input type="checkbox" disabled={busy} checked={values[field.id] === true} onChange={event => update(field.id, event.currentTarget.checked)} /> : <input type={field.control === 'password' ? 'password' : field.control === 'number' ? 'number' : 'text'} disabled={busy} value={String(values[field.id] ?? '')} onChange={event => update(field.id, event.currentTarget.value)} />}{field.description && <small className="settings-help">{field.description}</small>}</Field>)}
+      {editing?.metadata?.length && <details><summary>Details</summary><dl>{editing.metadata.map(entry => <div key={entry.label}><dt>{entry.label}</dt><dd>{entry.value}</dd></div>)}</dl></details>}
       {actions(editing ? editing.actions?.filter(action => action.tone !== 'danger') : definition.actions)}
       {editing && Boolean(definition.fields?.length) && <button type="button" disabled={busy} onClick={reset}>Cancel</button>}{feedback}
       {!overflowTarget && <details className="memory-saved saved-accordion"><summary>Saved {definition.label.toLowerCase()}</summary>{inventoryContents}</details>}
