@@ -9,7 +9,7 @@ import { inspectSessionContext, inspectSessionContextStatus } from '../src/conte
 import { activeConversationLimits } from '../src/context-preparation.mjs';
 import { createChatTurnRunId, runChatTurnFromBody, runChatTurnFromWorkbenchContinuation, chatTurnResponse, chatTurnProgressResponse, chatTurnErrorResponse, loadRuntimeConfig } from '../src/chat-turn-controller.mjs';
 import { resolveModelConfig, resolveRuntimeTracePath } from '../src/config.mjs';
-import { getSettingsMeta, setSettingsMeta, settingsOwnershipInventory } from '../src/settings-database.mjs';
+import { getSettingsMeta, openSettingsDatabase, setSettingsMeta, settingsOwnershipInventory } from '../src/settings-database.mjs';
 import { ApiTokenStore, API_TOKEN_SCOPES } from '../src/api-token-store.mjs';
 import { completeSetup, readSetupStatus } from '../src/setup-state-store.mjs';
 import { getUiAuthSecret, hasUiAuthSecret, setUiAuthSecret } from '../src/ui-auth-secrets.mjs';
@@ -1375,7 +1375,7 @@ function bearerToken(req) {
 function apiTokenScopeForRequest(req, url) {
   if (req.method !== 'GET') return null;
   const pathname = url.pathname;
-  if (pathname === '/api/health' || pathname === '/api/status' || pathname === '/api/metrics' || pathname === '/api/agents' || pathname === '/api/agent-status' || pathname === '/api/sessions' || pathname === '/api/session/context' || pathname === '/api/session/context-status' || pathname === '/api/context' || pathname === '/api/chat/runs/active' || pathname === '/api/traces' || pathname.startsWith('/api/traces/') || pathname === '/api/archive/runs' || pathname.startsWith('/api/archive/runs/') || pathname === '/api/archive/sessions' || pathname.startsWith('/api/archive/sessions/')) return 'diagnostics:read';
+  if (pathname === '/api/health' || pathname === '/api/status' || pathname === '/api/metrics' || pathname === '/api/diagnostics/inventory' || pathname === '/api/agents' || pathname === '/api/agent-status' || pathname === '/api/sessions' || pathname === '/api/session/context' || pathname === '/api/session/context-status' || pathname === '/api/context' || pathname === '/api/chat/runs/active' || pathname === '/api/traces' || pathname.startsWith('/api/traces/') || pathname === '/api/archive/runs' || pathname.startsWith('/api/archive/runs/') || pathname === '/api/archive/sessions' || pathname.startsWith('/api/archive/sessions/')) return 'diagnostics:read';
   return null;
 }
 
@@ -2962,6 +2962,21 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {
       if (await serveV18Asset(url, res)) return;
       return sendJson(res, 404, { ok: false, error: 'ui_artifact_not_found' });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/diagnostics/inventory') {
+      const db = openSettingsDatabase({ databasePath: settingsDatabasePath() });
+      let mcpConfigured;
+      try { mcpConfigured = Number(db.prepare('SELECT COUNT(*) AS count FROM mcp_connections').get()?.count || 0); }
+      finally { db.close(); }
+      const modInventory = await modDistribution.list();
+      const installedMods = modInventory.mods.filter((mod) => mod.status === 'installed');
+      return sendJson(res, 200, {
+        ok: true,
+        inventory: {
+          mcp: { configured: mcpConfigured },
+          mods: { installed: installedMods.length, enabled: installedMods.filter((mod) => mod.enabled === true).length },
+        },
+      });
     }
     if (req.method === 'GET' && url.pathname === '/api/settings/api-tokens') {
       const store = new ApiTokenStore({ databasePath: settingsDatabasePath() });
