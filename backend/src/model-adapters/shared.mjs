@@ -13,10 +13,6 @@ const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const CLAUDE_CODE_VERSION = '2.1.226';
 const CLAUDE_CODE_BILLING_SYSTEM_BLOCK = `x-anthropic-billing-header: cc_version=${CLAUDE_CODE_VERSION}; cc_entrypoint=sdk-cli;`;
 const MAX_MODEL_TEXT_CHARS = 64 * 1024;
-const MAX_TOOL_ARGUMENT_CHARS = 16 * 1024;
-// A native tool call is protocol data, not answer prose. Its full SSE envelope
-// must stay small enough that malformed arguments cannot become live loop state.
-const MAX_TOOL_CALL_STREAM_BYTES = 128 * 1024;
 const MAX_STREAM_TOOL_CALLS = 32;
 // SSE needs only a short unfinished line/event carry. Provider events are
 // normalized immediately; never build a response-sized string just to parse it.
@@ -138,49 +134,13 @@ function boundedText(value, maxChars) {
   return text.length <= maxChars ? text : text.slice(0, maxChars);
 }
 
-// Provider tool-call arguments can be arbitrary JSON-like graphs. Do not
-// stringify a whole graph and only then cap it: that creates the very large
-// transient string this boundary is meant to prevent.
-function boundedJsonText(value, { maxChars = MAX_TOOL_ARGUMENT_CHARS, maxDepth = 12, maxItems = 64, maxKeys = 64 } = {}) {
-  const seen = new WeakSet();
-  // Keep the sanitized graph itself small enough that one normal JSON.stringify
-  // is bounded and always produces valid provider argument JSON.
-  const itemLimit = Math.min(Math.max(1, maxItems), 32);
-  const keyLimit = Math.min(Math.max(1, maxKeys), 32);
-  const stringLimit = Math.min(256, Math.max(32, Math.floor(maxChars / Math.max(1, keyLimit * 2))));
-  const visit = (item, depth = 0) => {
-    if (item === null || typeof item === 'boolean' || typeof item === 'number') return item;
-    if (typeof item === 'string') return item.length > stringLimit ? `${item.slice(0, stringLimit)}… [truncated]` : item;
-    if (typeof item !== 'object') return String(item);
-    if (depth >= maxDepth || seen.has(item)) return '[truncated]';
-    seen.add(item);
-    if (Array.isArray(item)) {
-      const result = [];
-      const count = Math.min(item.length, itemLimit);
-      for (let index = 0; index < count; index += 1) result.push(visit(item[index], depth + 1));
-      if (item.length > count) result.push('[truncated]');
-      return result;
-    }
-    const result = {};
-    let count = 0;
-    for (const key in item) {
-      if (!Object.hasOwn(item, key)) continue;
-      if (count >= keyLimit) { result.__truncated = '[truncated]'; break; }
-      count += 1;
-      result[key] = visit(item[key], depth + 1);
-    }
-    return result;
-  };
-  const text = JSON.stringify(visit(value));
-  // The graph limits above keep ordinary provider argument JSON well below the
-  // boundary. A tiny caller-supplied cap still gets valid JSON rather than a
-  // sliced invalid fragment.
-  return text.length <= maxChars ? text : JSON.stringify({ __truncated: '[truncated]' });
+function jsonText(value) {
+  return JSON.stringify(value);
 }
 
 function parseArguments(value) {
   if (value && typeof value === 'object') return value;
-  if (!value || typeof value !== 'string' || value.length > MAX_TOOL_ARGUMENT_CHARS) return {};
+  if (!value || typeof value !== 'string') return {};
   try { return JSON.parse(value); } catch { return {}; }
 }
 
@@ -190,15 +150,14 @@ function normalizeToolCall(call = {}, index = 0) {
   const rawArguments = fn.arguments ?? call.arguments ?? {};
   const rawArgumentText = typeof rawArguments === 'string'
     ? rawArguments
-    : boundedJsonText(rawArguments);
+    : jsonText(rawArguments);
   return {
     id: boundedText(call.id || call.call_id || `tool-call-${index}`, 256),
     type: boundedText(call.type || 'function', 64),
     name: boundedText(name, 256) || null,
     ...(call.providerItemId ? { providerItemId: boundedText(call.providerItemId, 256) } : {}),
     arguments: parseArguments(rawArguments),
-    rawArguments: boundedText(rawArgumentText, MAX_TOOL_ARGUMENT_CHARS),
-    argumentsTruncated: rawArgumentText.length > MAX_TOOL_ARGUMENT_CHARS,
+    rawArguments: rawArgumentText,
   };
 }
 
@@ -249,7 +208,7 @@ function compactResponseToolOutput(output = []) {
       call_id: boundedText(item.call_id || item.id || `tool-call-${index}`, 256),
       providerItemId: boundedText(item.id || item.call_id || `tool-call-${index}`, 256),
       name: boundedText(item.name || item.function?.name, 256),
-      arguments: boundedText(typeof item.arguments === 'string' ? item.arguments : boundedJsonText(item.arguments || item.function?.arguments || {}), MAX_TOOL_ARGUMENT_CHARS),
+      arguments: typeof item.arguments === 'string' ? item.arguments : jsonText(item.arguments ?? item.function?.arguments ?? {}),
     }));
 }
 
@@ -271,7 +230,6 @@ function mergeResponseFunctionCall(calls, fragment = {}) {
           : '';
   const replaceArguments = typeof fragment.arguments === 'string' || typeof fragment.item?.arguments === 'string' || typeof fragment.function?.arguments === 'string';
   const nextArguments = replaceArguments ? argumentFragment : `${prior.arguments || ''}${argumentFragment}`;
-  if (nextArguments.length > MAX_TOOL_ARGUMENT_CHARS) return false;
   calls[outputIndex] = {
     type: 'function_call',
     id: boundedText(prior.call_id || callId, 256),
@@ -474,14 +432,14 @@ function boundedNativeBaseMessages(messages = []) {
 
 function nativeToolCall(call = {}, index = 0) {
   const rawArguments = typeof call?.rawArguments === 'string'
-    ? boundedText(call.rawArguments, MAX_TOOL_ARGUMENT_CHARS)
-    : boundedJsonText(call?.arguments || {});
+    ? call.rawArguments
+    : jsonText(call?.arguments ?? {});
   return {
     id: boundedText(call?.id || `tool-call-${index}`, 256),
     type: 'function',
     function: {
       name: boundedText(call?.name, 256),
-      arguments: boundedText(rawArguments, MAX_TOOL_ARGUMENT_CHARS),
+      arguments: rawArguments,
     },
   };
 }
@@ -537,7 +495,7 @@ function messagesToResponsesInput(messages, prompt) {
           type: 'function_call',
           call_id: String(call.id || call.call_id || `tool-call-${input.length}`).slice(0, 256),
           name: String(fn.name || call.name || '').slice(0, 256),
-          arguments: typeof fn.arguments === 'string' ? boundedText(fn.arguments, MAX_TOOL_ARGUMENT_CHARS) : boundedJsonText(fn.arguments ?? call.arguments ?? {}),
+          arguments: typeof fn.arguments === 'string' ? fn.arguments : jsonText(fn.arguments ?? call.arguments ?? {}),
         });
       }
       continue;
@@ -591,33 +549,12 @@ async function notifyStreamDelta(callback, delta, totalChars) {
 
 function streamToolCallFailure(calls, fragment = {}) {
   const index = Number.isInteger(fragment.index) ? fragment.index : calls.length;
-  if (index < 0 || index >= MAX_STREAM_TOOL_CALLS) return `model_tool_call_index_invalid:${index}`;
-  const priorArguments = String(calls[index]?.function?.arguments || '');
-  const argumentFragment = String(fragment.function?.arguments || '');
-  const argumentChars = priorArguments.length + argumentFragment.length;
-  return argumentChars > MAX_TOOL_ARGUMENT_CHARS
-    ? `model_tool_arguments_too_large:${argumentChars}>${MAX_TOOL_ARGUMENT_CHARS}`
-    : null;
+  return index < 0 || index >= MAX_STREAM_TOOL_CALLS ? `model_tool_call_index_invalid:${index}` : null;
 }
 
 function responseFunctionCallFailure(calls, fragment = {}) {
   const outputIndex = Number.isInteger(fragment.output_index) ? fragment.output_index : Number.isInteger(fragment.index) ? fragment.index : calls.length;
-  if (outputIndex < 0 || outputIndex >= MAX_STREAM_TOOL_CALLS) return `model_tool_call_index_invalid:${outputIndex}`;
-  const priorArguments = String(calls[outputIndex]?.arguments || '');
-  const argumentFragment = typeof fragment.delta === 'string'
-    ? fragment.delta
-    : typeof fragment.arguments === 'string'
-      ? fragment.arguments
-      : typeof fragment.item?.arguments === 'string'
-        ? fragment.item.arguments
-        : typeof fragment.function?.arguments === 'string'
-          ? fragment.function.arguments
-          : '';
-  const replaceArguments = typeof fragment.arguments === 'string' || typeof fragment.item?.arguments === 'string' || typeof fragment.function?.arguments === 'string';
-  const argumentChars = replaceArguments ? argumentFragment.length : priorArguments.length + argumentFragment.length;
-  return argumentChars > MAX_TOOL_ARGUMENT_CHARS
-    ? `model_tool_arguments_too_large:${argumentChars}>${MAX_TOOL_ARGUMENT_CHARS}`
-    : null;
+  return outputIndex < 0 || outputIndex >= MAX_STREAM_TOOL_CALLS ? `model_tool_call_index_invalid:${outputIndex}` : null;
 }
 
 function mergeStreamToolCall(calls, fragment = {}) {
@@ -626,8 +563,6 @@ function mergeStreamToolCall(calls, fragment = {}) {
   const prior = calls[index] || { id: null, type: 'function', function: { name: null, arguments: '' } };
   const argumentFragment = String(fragment.function?.arguments || '');
   const priorArguments = String(prior.function?.arguments || '');
-  // Refuse an over-limit call before concatenating it into a new large string.
-  if (priorArguments.length + argumentFragment.length > MAX_TOOL_ARGUMENT_CHARS) return false;
   calls[index] = {
     ...prior,
     id: boundedText(fragment.id || prior.id, 256),
@@ -692,7 +627,6 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   let usage = null;
   const toolCalls = [];
   const responseToolCalls = [];
-  let toolCallStreamBytes = 0;
   let toolCallFailure = null;
   const recordToolCallFailure = (failure) => {
     if (!toolCallFailure && failure) toolCallFailure = failure;
@@ -724,25 +658,16 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
       if (event?.type === 'response.output_text.delta' && typeof event.delta === 'string') await emit(event.delta);
       if ((event?.type === 'response.reasoning.delta' || event?.type === 'response.reasoning_summary_text.delta') && typeof event.delta === 'string') await emitThought(event.delta);
       if ((event?.type === 'response.output_item.added' || event?.type === 'response.output_item.done') && (event.item?.type === 'function_call' || event.item?.type === 'tool_call')) {
-        const fragmentBytes = Buffer.byteLength(String(event.item?.arguments || '')) + Buffer.byteLength(String(event.item?.name || '')) + Buffer.byteLength(String(event.item?.call_id || event.item?.id || ''));
-        toolCallStreamBytes += fragmentBytes;
         recordToolCallFailure(responseFunctionCallFailure(responseToolCalls, event));
         if (!toolCallFailure && !mergeResponseFunctionCall(responseToolCalls, event)) recordToolCallFailure('model_tool_call_invalid');
-        if (toolCallStreamBytes > MAX_TOOL_CALL_STREAM_BYTES) recordToolCallFailure(`model_tool_call_too_large:${toolCallStreamBytes}>${MAX_TOOL_CALL_STREAM_BYTES}`);
       }
       if (event?.type === 'response.function_call_arguments.delta') {
-        const fragmentBytes = Buffer.byteLength(String(event.delta || ''));
-        toolCallStreamBytes += fragmentBytes;
         recordToolCallFailure(responseFunctionCallFailure(responseToolCalls, event));
         if (!toolCallFailure && !mergeResponseFunctionCall(responseToolCalls, event)) recordToolCallFailure('model_tool_call_invalid');
-        if (toolCallStreamBytes > MAX_TOOL_CALL_STREAM_BYTES) recordToolCallFailure(`model_tool_call_too_large:${toolCallStreamBytes}>${MAX_TOOL_CALL_STREAM_BYTES}`);
       }
       if (event?.type === 'response.function_call_arguments.done') {
-        const fragmentBytes = Buffer.byteLength(String(event.arguments || ''));
-        toolCallStreamBytes += fragmentBytes;
         recordToolCallFailure(responseFunctionCallFailure(responseToolCalls, event));
         if (!toolCallFailure && !mergeResponseFunctionCall(responseToolCalls, event)) recordToolCallFailure('model_tool_call_invalid');
-        if (toolCallStreamBytes > MAX_TOOL_CALL_STREAM_BYTES) recordToolCallFailure(`model_tool_call_too_large:${toolCallStreamBytes}>${MAX_TOOL_CALL_STREAM_BYTES}`);
       }
       if (event?.type === 'response.completed' && event.response && typeof event.response === 'object') {
         finalData = compactResponseCompletion(event.response);
@@ -779,15 +704,8 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
     if (typeof choice.delta?.reasoning_content === 'string') await emitThought(choice.delta.reasoning_content);
     if (typeof choice.delta?.reasoning === 'string') await emitThought(choice.delta.reasoning);
     for (const call of choice.delta?.tool_calls || []) {
-      // Count only tool-call protocol fragments. Answer prose remains governed
-      // by the larger response transport guard and its 64 KiB retained cap.
-      const fragmentBytes = Buffer.byteLength(String(call?.function?.arguments || ''))
-        + Buffer.byteLength(String(call?.function?.name || ''))
-        + Buffer.byteLength(String(call?.id || ''));
-      toolCallStreamBytes += fragmentBytes;
       recordToolCallFailure(streamToolCallFailure(toolCalls, call));
       if (!toolCallFailure && !mergeStreamToolCall(toolCalls, call)) recordToolCallFailure('model_tool_call_invalid');
-      if (toolCallStreamBytes > MAX_TOOL_CALL_STREAM_BYTES) recordToolCallFailure(`model_tool_call_too_large:${toolCallStreamBytes}>${MAX_TOOL_CALL_STREAM_BYTES}`);
     }
     if (choice.finish_reason) finishReason = choice.finish_reason;
     if (event.usage) usage = event.usage;
@@ -905,8 +823,6 @@ export {
   CLAUDE_CODE_VERSION,
   CLAUDE_CODE_BILLING_SYSTEM_BLOCK,
   MAX_MODEL_TEXT_CHARS,
-  MAX_TOOL_ARGUMENT_CHARS,
-  MAX_TOOL_CALL_STREAM_BYTES,
   MAX_STREAM_TOOL_CALLS,
   MAX_SSE_CARRY_CHARS,
   MAX_SSE_EVENT_CHARS,

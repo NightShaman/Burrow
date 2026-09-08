@@ -15,10 +15,8 @@ import {
   contextUsageFromResponse,
   compactResponseCompletion,
   MAX_MODEL_TEXT_CHARS,
-  MAX_TOOL_ARGUMENT_CHARS,
   MAX_SSE_CARRY_CHARS,
   MAX_SSE_EVENT_CHARS,
-  MAX_TOOL_CALL_STREAM_BYTES,
   DEFAULT_MAX_RESPONSE_BYTES,
   mergeStreamToolCall,
 } from './model-adapters/shared.mjs';
@@ -51,9 +49,7 @@ export const __test__ = {
   anthropicCachedTokens: anthropicTest.anthropicCachedTokens,
   defaultMaxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES,
   maxModelTextChars: MAX_MODEL_TEXT_CHARS,
-  maxToolArgumentChars: MAX_TOOL_ARGUMENT_CHARS,
   maxSseCarryChars: MAX_SSE_CARRY_CHARS,
   maxSseEventChars: MAX_SSE_EVENT_CHARS,
-  maxToolCallStreamBytes: MAX_TOOL_CALL_STREAM_BYTES,
   mergeStreamToolCall,
 };
