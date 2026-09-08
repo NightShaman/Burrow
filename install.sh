@@ -375,47 +375,47 @@ rm -f "$WRAPPER_TMP"
 # The launcher is self-locating and must be emitted literally. An unquoted
 # heredoc executes command substitutions while writing it; that can launch a
 # child `burrow serve` during update and wedge the restart.
-cat > "$WRAPPER_TMP" <<WRAPPER
+cat > "$WRAPPER_TMP" <<'WRAPPER'
 #!/bin/sh
 set -eu
-BURROW_HOME="\$(CDPATH= cd -- "\$(dirname -- "\$0")/.." && pwd)"
-[ ! -f "\$BURROW_HOME/burrow.env" ] || { set -a; . "\$BURROW_HOME/burrow.env"; set +a; }
+BURROW_HOME="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+[ ! -f "$BURROW_HOME/burrow.env" ] || { set -a; . "$BURROW_HOME/burrow.env"; set +a; }
 # The launcher location is authoritative after a portable restore; never let a
 # copied burrow.env redirect the active installation back to its former home.
-export BURROW_RUNTIME_ROOT="\$BURROW_HOME"
-case "\${1:-}" in
-  update) shift; exec "\$BURROW_HOME/app/install.sh" --dir "\$BURROW_HOME" "\$@" ;;
-  uninstall) shift; exec "\$BURROW_HOME/app/install.sh" --dir "\$BURROW_HOME" --uninstall "\$@" ;;
+export BURROW_RUNTIME_ROOT="$BURROW_HOME"
+case "${1:-}" in
+  update) shift; exec "$BURROW_HOME/app/install.sh" --dir "$BURROW_HOME" "$@" ;;
+  uninstall) shift; exec "$BURROW_HOME/app/install.sh" --dir "$BURROW_HOME" --uninstall "$@" ;;
   service)
     shift
-    SERVICE_ACTION="\${1:-status}"
-    SERVICE_DIR="\${XDG_CONFIG_HOME:-\$HOME/.config}/systemd/user"
-    SERVICE_UNIT="\$SERVICE_DIR/burrow.service"
+    SERVICE_ACTION="${1:-status}"
+    SERVICE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    SERVICE_UNIT="$SERVICE_DIR/burrow.service"
     command -v systemctl >/dev/null 2>&1 || { echo "Burrow service: systemd user services are unavailable." >&2; exit 1; }
-    case "\$SERVICE_ACTION" in
+    case "$SERVICE_ACTION" in
       install)
         # A service install promises persistence across logout and reboot.
         # `burrow serve` remains the explicit session-only option.
         command -v loginctl >/dev/null 2>&1 || { echo "Burrow service: loginctl is required to enable persistent user services; use 'burrow serve' for a session-only runtime." >&2; exit 1; }
-        SERVICE_USER="\$(id -un)"
-        if ! loginctl enable-linger "\$SERVICE_USER" >/dev/null 2>&1 || [ "\$(loginctl show-user "\$SERVICE_USER" -p Linger --value 2>/dev/null || true)" != "yes" ]; then
-          echo "Burrow service: could not enable lingering for \$SERVICE_USER; service installation requires lingering to persist after logout and reboot. Use 'burrow serve' for a session-only runtime." >&2
+        SERVICE_USER="$(id -un)"
+        if ! loginctl enable-linger "$SERVICE_USER" >/dev/null 2>&1 || [ "$(loginctl show-user "$SERVICE_USER" -p Linger --value 2>/dev/null || true)" != "yes" ]; then
+          echo "Burrow service: could not enable lingering for $SERVICE_USER; service installation requires lingering to persist after logout and reboot. Use 'burrow serve' for a session-only runtime." >&2
           exit 1
         fi
-        mkdir -p "\$SERVICE_DIR"
+        mkdir -p "$SERVICE_DIR"
         # systemd user services do not inherit the login shell PATH. Preserve
         # the current baseline and include npm's user-global bin directory so
         # MCPs that legitimately invoke user-installed CLIs work normally.
-        SERVICE_PATH="\$PATH"
-        NPM_GLOBAL_PREFIX="\$(npm prefix -g 2>/dev/null || true)"
-        NPM_GLOBAL_BIN="\${NPM_GLOBAL_PREFIX:+\$NPM_GLOBAL_PREFIX/bin}"
-        if [ -n "\$NPM_GLOBAL_BIN" ] && [ -d "\$NPM_GLOBAL_BIN" ]; then
-          case ":\$SERVICE_PATH:" in
-            *":\$NPM_GLOBAL_BIN:"*) ;;
-            *) SERVICE_PATH="\$NPM_GLOBAL_BIN:\$SERVICE_PATH" ;;
+        SERVICE_PATH="$PATH"
+        NPM_GLOBAL_PREFIX="$(npm prefix -g 2>/dev/null || true)"
+        NPM_GLOBAL_BIN="${NPM_GLOBAL_PREFIX:+$NPM_GLOBAL_PREFIX/bin}"
+        if [ -n "$NPM_GLOBAL_BIN" ] && [ -d "$NPM_GLOBAL_BIN" ]; then
+          case ":$SERVICE_PATH:" in
+            *":$NPM_GLOBAL_BIN:"*) ;;
+            *) SERVICE_PATH="$NPM_GLOBAL_BIN:$SERVICE_PATH" ;;
           esac
         fi
-        cat > "\$SERVICE_UNIT" <<UNIT
+        cat > "$SERVICE_UNIT" <<UNIT
 [Unit]
 Description=Burrow runtime
 After=network-online.target
@@ -423,9 +423,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-Environment="PATH=\$SERVICE_PATH"
-EnvironmentFile=\$BURROW_HOME/burrow.env
-ExecStart=\$BURROW_HOME/bin/burrow serve
+Environment="PATH=$SERVICE_PATH"
+EnvironmentFile=$BURROW_HOME/burrow.env
+ExecStart=$BURROW_HOME/bin/burrow serve
 Restart=on-failure
 RestartSec=5
 
@@ -434,23 +434,23 @@ WantedBy=default.target
 UNIT
         systemctl --user daemon-reload
         systemctl --user enable --now burrow.service
-        echo "Burrow service: installed, started, and persistent for \$SERVICE_USER."
+        echo "Burrow service: installed, started, and persistent for $SERVICE_USER."
         ;;
       uninstall)
         systemctl --user disable --now burrow.service || true
-        rm -f "\$SERVICE_UNIT"
+        rm -f "$SERVICE_UNIT"
         systemctl --user daemon-reload
         echo "Burrow service: removed."
         ;;
-      start|stop|restart|status) exec systemctl --user "\$SERVICE_ACTION" burrow.service ;;
-      logs) shift; exec journalctl --user-unit burrow.service --no-pager "\$@" ;;
+      start|stop|restart|status) exec systemctl --user "$SERVICE_ACTION" burrow.service ;;
+      logs) shift; exec journalctl --user-unit burrow.service --no-pager "$@" ;;
       *) echo "Usage: burrow service {install|uninstall|start|stop|restart|status|logs}" >&2; exit 2 ;;
     esac
     ;;
-  serve) shift; exec node "\$BURROW_HOME/app/backend/bin/burrow.mjs" serve --root "\$BURROW_HOME/app/backend" "\$@" ;;
-  install-backup) shift; exec node "\$BURROW_HOME/app/backend/bin/burrow.mjs" install-backup --root "\$BURROW_HOME" "\$@" ;;
-  install-restore) shift; exec node "\$BURROW_HOME/app/backend/bin/burrow.mjs" install-restore "\$@" ;;
-  *) exec node "\$BURROW_HOME/app/backend/bin/burrow.mjs" "\$@" --root "\$BURROW_HOME/app/backend" ;;
+  serve) shift; exec node "$BURROW_HOME/app/backend/bin/burrow.mjs" serve --root "$BURROW_HOME/app/backend" "$@" ;;
+  install-backup) shift; exec node "$BURROW_HOME/app/backend/bin/burrow.mjs" install-backup --root "$BURROW_HOME" "$@" ;;
+  install-restore) shift; exec node "$BURROW_HOME/app/backend/bin/burrow.mjs" install-restore "$@" ;;
+  *) exec node "$BURROW_HOME/app/backend/bin/burrow.mjs" "$@" --root "$BURROW_HOME/app/backend" ;;
 esac
 WRAPPER
 chmod 0755 "$WRAPPER_TMP"
