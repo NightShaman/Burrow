@@ -664,12 +664,12 @@ export async function readSessionPendingActions({ rootDir, sessionId } = {}) {
     return pending.map((action) => ({ ...action, turnId: entry.id || null, role: entry.role || null }));
   });
 }
-async function readFiltered({ rootDir, sessionId, limit, predicate, includeHistory = false }) {
-  const entries = await readSessionTurns({ rootDir, sessionId, limit: limit > 0 ? Math.max(limit * 4, 100) : 0, includeHistory });
+async function readFiltered({ rootDir, sessionId, limit, predicate, includeHistory = false, includeResetHistory = false }) {
+  const entries = await readSessionTurns({ rootDir, sessionId, limit: limit > 0 ? Math.max(limit * 4, 100) : 0, includeHistory, includeResetHistory });
   const matched = entries.filter(predicate);
   return Number.isFinite(limit) && limit > 0 ? matched.slice(-limit) : matched;
 }
-export async function readChatMessages({ rootDir, sessionId, limit = 20, includeHistory = false } = {}) { return readFiltered({ rootDir, sessionId, limit, includeHistory, predicate: isChatMessage }); }
+export async function readChatMessages({ rootDir, sessionId, limit = 20, includeHistory = false, includeResetHistory = false } = {}) { return readFiltered({ rootDir, sessionId, limit, includeHistory, includeResetHistory, predicate: isChatMessage }); }
 export async function readActivityEvents({ rootDir, sessionId, limit = 50, includeHistory = false } = {}) { return readFiltered({ rootDir, sessionId, limit, includeHistory, predicate: (entry) => entry.visibility === 'activity' }); }
 export async function readDebugEntries({ rootDir, sessionId, limit = 50, includeHistory = false } = {}) { return readFiltered({ rootDir, sessionId, limit, includeHistory, predicate: (entry) => entry.visibility === 'debug' || entry.visibility === 'hidden' }); }
 
