@@ -102,6 +102,13 @@ export function summarizeToolResults(toolResults = []) {
       connectionId: undefined,
       toolErrorCode: typeof toolResult.toolErrorCode === 'string' ? compactText(toolResult.toolErrorCode, 80) : undefined,
       diagnostic: typeof toolResult.diagnostic === 'string' ? compactText(toolResult.diagnostic, RECEIPT_TEXT_LIMITS.error) : undefined,
+      protection: toolResult.protection && typeof toolResult.protection === 'object' ? {
+        status: ['clear', 'protected', 'withheld'].includes(toolResult.protection.status) ? toolResult.protection.status : 'withheld',
+        count: Number.isFinite(Number(toolResult.protection.count)) ? Number(toolResult.protection.count) : 0,
+        types: Array.isArray(toolResult.protection.types) ? toolResult.protection.types.filter((item) => typeof item === 'string').slice(0, 8) : undefined,
+        reason: typeof toolResult.protection.reason === 'string' ? compactText(toolResult.protection.reason, 120) : undefined,
+        producer: typeof toolResult.protection.producer === 'string' ? compactText(toolResult.protection.producer, 120) : undefined,
+      } : undefined,
     } : {}),
     command: toolResult.command ? compactText(toolResult.command, RECEIPT_TEXT_LIMITS.command) : null,
     reason: toolResult.reason ? compactText(toolResult.reason, 500) : null,

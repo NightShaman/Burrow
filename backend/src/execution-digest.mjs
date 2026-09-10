@@ -17,6 +17,9 @@ function resultSubject(result = {}) {
 }
 
 function resultFinding(result = {}) {
+  if (result.protection?.status === 'protected') return `${Number(result.protection.count) || 0} sensitive value${Number(result.protection.count) === 1 ? '' : 's'} protected`;
+  if (result.protection?.status === 'withheld') return `sensitive response withheld${result.protection.reason ? ` (${result.protection.reason})` : ''}`;
+  if (result.protection?.status === 'clear' && result.tool === 'mcp_call') return 'response declared clear';
   if (Array.isArray(result.changedFiles) && result.changedFiles.length) return `changed ${result.changedFiles.slice(0, 8).join(', ')}`;
   if (Array.isArray(result.touchedFiles) && result.touchedFiles.length) return `touched ${result.touchedFiles.slice(0, 8).join(', ')}`;
   const candidates = result.ok === false
