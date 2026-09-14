@@ -70,7 +70,7 @@ function renderedContent(value) {
   return typeof value === 'string'
     ? value
     : Array.isArray(value)
-      ? value.map((part) => part?.text || `[${part?.type || 'content'}]`).join('')
+      ? value.map((part) => part?.text || part?.image_url?.url || part?.input_image?.image_url || `[${part?.type || 'content'}]`).join('')
       : String(value || '');
 }
 

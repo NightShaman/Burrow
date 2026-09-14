@@ -17,6 +17,7 @@ import {
   redactHeaders,
   serializedMessageHash,
   toolOutputText,
+  attachmentViewUserMessage,
   trimSlash,
   readResponseTextBounded,
 } from './shared.mjs';
@@ -81,7 +82,18 @@ function anthropicMessages(messages = [], prompt = '') {
     const role = message?.role === 'assistant' ? 'assistant' : message?.role === 'system' ? 'system' : 'user';
     if (role === 'system') { system.push(String(message.content || '')); continue; }
     if (message?.role === 'tool') {
-      converted.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: String(message.tool_call_id || message.id || 'tool-call'), content: String(message.content || '') }] });
+      const resultContent = Array.isArray(message.content)
+        ? message.content.map((part) => {
+          if (part?.type === 'image_url') {
+            const url = part.image_url?.url || part.url || '';
+            const m = /^data:([^;]+);base64,(.*)$/i.exec(url);
+            if (m) return { type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } };
+          }
+          if (part?.type === 'text') return { type: 'text', text: String(part.text || '') };
+          return { type: 'text', text: typeof part === 'string' ? part : JSON.stringify(part || {}) };
+        })
+        : String(message.content || '');
+      converted.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: String(message.tool_call_id || message.id || 'tool-call'), content: resultContent }] });
       continue;
     }
     const content = anthropicContentParts(message?.content);
@@ -357,13 +369,21 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
         ? { role: 'assistant', content: preservedBlocks }
         : { role: 'assistant', content: '', tool_calls: toolCalls.map((call, index) => ({ id: call.id || `tool-call-${index}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments || {}) } })) });
     }
-    for (let index = 0; index < toolResults.length; index += 1) transcript.push({ role: 'tool', tool_call_id: toolCalls[index]?.id || `tool-call-${index}`, content: toolOutputText(toolResults[index]) });
+    for (let index = 0; index < toolResults.length; index += 1) {
+      transcript.push({ role: 'tool', tool_call_id: toolCalls[index]?.id || `tool-call-${index}`, content: toolOutputText(toolResults[index]) });
+      const imageMessage = attachmentViewUserMessage(toolResults[index], toolCalls[index], index);
+      if (imageMessage) transcript.push(imageMessage);
+    }
     const result = await complete({ ...options, messages: transcript });
     if (result.ok || !preservedBlocks || !anthropicErrorLooksLikeSignedThinking(result.error)) return result;
     await options.traceLogger?.model?.({ stage: 'model-request-repair', requestId: result.requestId, provider: 'anthropic', api: 'anthropic-messages', model, reason: 'signed_thinking_rejected', error: result.error, ts: clock() });
     const repairedTranscript = [...baseMessages];
     if (toolCalls.length) repairedTranscript.push({ role: 'assistant', content: '', tool_calls: toolCalls.map((call, index) => ({ id: call.id || `tool-call-${index}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments || {}) } })) });
-    for (let index = 0; index < toolResults.length; index += 1) repairedTranscript.push({ role: 'tool', tool_call_id: toolCalls[index]?.id || `tool-call-${index}`, content: toolOutputText(toolResults[index]) });
+    for (let index = 0; index < toolResults.length; index += 1) {
+      repairedTranscript.push({ role: 'tool', tool_call_id: toolCalls[index]?.id || `tool-call-${index}`, content: toolOutputText(toolResults[index]) });
+      const imageMessage = attachmentViewUserMessage(toolResults[index], toolCalls[index], index);
+      if (imageMessage) repairedTranscript.push(imageMessage);
+    }
     const repaired = await complete({ ...options, messages: repairedTranscript });
     if (repaired && typeof repaired === 'object') repaired.repairedContinuation = { reason: 'signed_thinking_rejected', originalRequestId: result.requestId };
     return repaired;

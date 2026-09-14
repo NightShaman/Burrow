@@ -3,6 +3,7 @@ import path from 'node:path';
 import { AgentRegistryStore } from './agent-registry.mjs';
 
 export const ATTACHMENT_RETENTION_DAYS = 30;
+export const MODEL_VISIBLE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 const MAX_NAME_LENGTH = 160;
 
 function text(value) { return String(value ?? '').trim(); }
@@ -64,6 +65,42 @@ export async function resolveAttachmentArtifact({ agentWorkspaceRoot, artifactPa
   const filePath = path.resolve(root, String(artifactPath));
   if (!contained(root, filePath) || !filePath.startsWith(`${attachmentRoot(root)}${path.sep}`)) return null;
   return resolveRegularFileWithoutSymlinks(root, filePath);
+}
+
+function mimeFromAttachment(attachment = {}, filePath = '') {
+  const explicit = text(attachment.type || attachment.mimeType);
+  if (explicit) return explicit;
+  const ext = path.extname(filePath || attachment.name || '').toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.svg') return 'image/svg+xml';
+  if (ext === '.txt' || ext === '.md') return 'text/plain';
+  if (ext === '.json') return 'application/json';
+  return 'application/octet-stream';
+}
+
+export async function readAttachmentArtifact({ agentWorkspaceRoot, artifactPath, attachment = {}, maxTextBytes = 256 * 1024 } = {}) {
+  const resolved = await resolveAttachmentArtifact({ agentWorkspaceRoot, artifactPath });
+  if (!resolved) return null;
+  const type = mimeFromAttachment(attachment, resolved.filePath);
+  const bytes = await fs.readFile(resolved.filePath);
+  const base = {
+    id: String(artifactPath),
+    artifactPath: String(artifactPath),
+    name: safeName(attachment.name || path.basename(resolved.filePath)),
+    type,
+    size: resolved.stat.size,
+    storedAt: attachment.storedAt || resolved.stat.mtime.toISOString(),
+  };
+  if (type.toLowerCase().startsWith('image/')) {
+    const normalizedType = type.toLowerCase();
+    if (MODEL_VISIBLE_IMAGE_TYPES.has(normalizedType)) return { ...base, type: normalizedType, kind: 'image', dataUrl: `data:${normalizedType};base64,${bytes.toString('base64')}` };
+    return { ...base, kind: 'binary', unsupportedReason: 'image_type_not_model_visible', supportedImageTypes: [...MODEL_VISIBLE_IMAGE_TYPES] };
+  }
+  if (/^(text\/|application\/(json|xml|javascript)|application\/x-ndjson)/i.test(type) && bytes.length <= maxTextBytes) return { ...base, kind: 'text', text: bytes.toString('utf8') };
+  return { ...base, kind: 'binary' };
 }
 
 export async function deleteAttachmentArtifact({ agentWorkspaceRoot, artifactPath } = {}) {

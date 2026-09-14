@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-export const ALLOWED_TOOLS = new Set(['shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'files_write', 'files_patch', 'spawn_subagent', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call', 'list_skills', 'load_skill']);
+export const ALLOWED_TOOLS = new Set(['shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'attachment_view', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'files_write', 'files_patch', 'spawn_subagent', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call', 'list_skills', 'load_skill']);
 
 const TARGET_KIND_ALIASES = new Map([
   ['filesystem', 'filesystem'],
@@ -73,6 +73,7 @@ function normalizeAction(action, index) {
     maxBytes: Number.isFinite(Number(action?.maxBytes)) ? Math.max(1, Math.floor(Number(action.maxBytes))) : null,
     query: action?.query ? String(action.query) : null,
     cursor: action?.cursor === undefined || action?.cursor === null ? null : String(action.cursor),
+    attachmentId: action?.attachmentId || action?.id ? String(action.attachmentId || action.id).trim() : null,
     sessionScope: action?.scope ? String(action.scope) : 'agent_sessions',
     project: action?.project ? String(action.project) : null,
     title: action?.title ? String(action.title) : null,
@@ -125,6 +126,7 @@ function normalizeAction(action, index) {
   if (tool === 'files_edit' && (normalized.oldText === null || normalized.newText === null)) errors.push('oldText_and_newText_required');
   if ((tool === 'session_search' || tool === 'memory_working_search' || tool === 'memory_rolling_search') && !normalized.query) errors.push('query_required');
   if (tool === 'session_search' && normalized.sessionScope !== 'agent_sessions') errors.push('session_history_scope_invalid');
+  if (tool === 'attachment_view' && !normalized.attachmentId) errors.push('attachmentId_required');
   if (tool === 'memory_working_write') {
     if (!normalized.project) errors.push('project_required');
     if (!normalized.memoryKind) errors.push('kind_required');
@@ -225,6 +227,19 @@ export function nativeToolSchemas({ includeMutations = true, includeWorkingMemor
           additionalProperties: false,
           properties: { filePath: { type: 'string' }, offsetBytes: { type: 'number' }, maxBytes: { type: 'number' }, reason: { type: 'string' } },
           required: ['filePath'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'attachment_view',
+        description: 'Reopen an attachment by its runtime-owned attachment id/reference from this agent/session. PNG, JPEG, GIF, and WebP images are returned as model-visible image content; text/JSON-like attachments return bounded text; other types return metadata. The id must come from Burrow attachment metadata, not an arbitrary filesystem path.',
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { attachmentId: { type: 'string' }, reason: { type: 'string' } },
+          required: ['attachmentId'],
         },
       },
     },
@@ -406,6 +421,7 @@ export function actionFromNativeToolCall(call = {}, index = 0) {
   const normalizeNative = (action) => normalizeAction({ ...action, toolCallId: call.id }, index);
   if (tool === 'shell_exec') return normalizeNative({ tool, reason: args.reason, command: args.command, cwd: args.cwd, protectedBindings: args.protectedBindings });
   if (tool === 'files_read') return normalizeNative({ tool, reason: args.reason, filePath: args.filePath, offsetBytes: args.offsetBytes, maxBytes: args.maxBytes });
+  if (tool === 'attachment_view') return normalizeNative({ tool, reason: args.reason, attachmentId: args.attachmentId || args.id });
   if (tool === 'session_search') return normalizeNative({ tool, reason: args.reason, query: args.query, scope: args.scope, limit: args.limit });
   if (tool === 'files_list') return normalizeNative({ tool, reason: args.reason, dirPath: args.dirPath, maxDepth: args.maxDepth, maxEntries: args.maxEntries });
   if (tool === 'files_find') return normalizeNative({ tool, reason: args.reason, pattern: args.pattern, dirPath: args.dirPath, maxDepth: args.maxDepth, maxEntries: args.maxEntries });

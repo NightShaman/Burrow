@@ -13,6 +13,7 @@ import { executeContinuityHandoffWriteTool, executeRollingContinuitySearchTool, 
 import { searchAgentSessionEvidence } from './session-search.mjs';
 import { executeTaskBoardCreateTool, executeTaskBoardDeleteTool, executeTaskBoardListTool, executeTaskBoardReassignTool, executeTaskBoardUpdateTool } from './task-board-tool-executor.mjs';
 import { compactToolReceipts } from './runtime-result-shapes.mjs';
+import { readAttachmentArtifact } from './attachment-store.mjs';
 import { reviewProposalActions } from './action-safety.mjs';
 import { invokeMcpTool, publicMcpError, publicMcpFailureDetail } from './mcporter-adapter.mjs';
 import { grantedMcpTool, mcpCapabilitiesReceipt, mcpProvidersReceipt } from './mcp-menu.mjs';
@@ -188,6 +189,32 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
       continue;
     }
     if (action.tool === 'files_edit') { toolResults.push(await executeFilesystem(action, { filePath: workspacePath(action.filePath, executionRoot, rootDir), oldText: action.oldText, newText: action.newText, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-edit`, reason: action.reason })); continue; }
+
+    if (action.tool === 'attachment_view') {
+      const attachmentId = action.attachmentId;
+      const agentWorkspaceRoot = executionContext?.agentWorkspaceRoot || workspaceRoot || rootDir;
+      const started = await traceLogger?.toolStart?.({ tool: 'attachment_view', attachmentId, toolCallId: action.toolCallId || null });
+      let result;
+      try {
+        const attachment = await readAttachmentArtifact({ agentWorkspaceRoot, artifactPath: attachmentId, attachment: { name: path.basename(attachmentId) } });
+        result = attachment
+          ? { tool: 'attachment_view', ok: true, attachmentId, attachment }
+          : { tool: 'attachment_view', ok: false, attachmentId, error: 'attachment_not_found' };
+      } catch (error) {
+        result = { tool: 'attachment_view', ok: false, attachmentId, error: String(error?.message || error) };
+      }
+      toolResults.push(withExecutionProvenance(result, { kind: 'local' }, executionContext, action.toolCallId));
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({
+        tool: 'attachment_view',
+        ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}),
+        toolCallId: action.toolCallId || null,
+        attachmentId,
+        ok: result.ok,
+        type: result.attachment?.type || null,
+        error: result.error || null,
+      });
+      continue;
+    }
 
     if (action.tool === 'list_skills' || action.tool === 'load_skill') {
       const skillsWorkspace = executionContext?.agentWorkspaceRoot ? path.dirname(executionContext.agentWorkspaceRoot) : executionRoot;

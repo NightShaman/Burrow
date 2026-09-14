@@ -7,6 +7,8 @@ import {
   toolNames,
   responseApiTool,
   toolOutputText,
+  toolOutputContent,
+  attachmentViewUserMessage,
   messagesToResponsesInput,
   chatToolContinuationMessages,
   buildProviderMessageManifest,
@@ -40,11 +42,16 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
     if (!isToolContinuation && (!resolvedMessages.length || !resolvedMessages.some((message) => message.content))) throw new Error('prompt or messages are required');
     const resolvedTools = Array.isArray(tools) && tools.length ? tools : null;
     const resolvedToolNames = toolNames(resolvedTools);
-    const continuationOutput = (toolContinuation?.toolResults || []).map((result, index) => ({
-      type: 'function_call_output',
-      call_id: toolContinuation?.toolCalls?.[index]?.id || `tool-call-${index}`,
-      output: toolOutputText(result),
-    }));
+    const continuationOutput = (toolContinuation?.toolResults || []).flatMap((result, index) => {
+      const call = toolContinuation?.toolCalls?.[index] || {};
+      const output = {
+        type: 'function_call_output',
+        call_id: call.id || `tool-call-${index}`,
+        output: toolOutputContent(result),
+      };
+      const imageMessage = attachmentViewUserMessage(result, call, index);
+      return imageMessage ? [output, ...messagesToResponsesInput([imageMessage])] : [output];
+    });
     // The runtime prepares native continuation messages against the real
     // provider budget. Preserve that protocol-valid sequence here; direct
     // adapter callers retain the unprepared compatibility construction.

@@ -316,6 +316,17 @@ function nativeToolReceipt(result = {}) {
       error: typeof result.reply.error === 'string' ? result.reply.error : null,
     };
   }
+  if (result?.tool === 'attachment_view' && result?.attachment && typeof result.attachment === 'object') {
+    const attachment = result.attachment;
+    receipt.attachment = {
+      id: typeof attachment.id === 'string' ? attachment.id : null,
+      name: typeof attachment.name === 'string' ? attachment.name : null,
+      type: typeof attachment.type === 'string' ? attachment.type : null,
+      size: Number.isFinite(Number(attachment.size)) ? Number(attachment.size) : null,
+      kind: typeof attachment.kind === 'string' ? attachment.kind : null,
+      ...(typeof attachment.text === 'string' ? { text: attachment.text } : {}),
+    };
+  }
   // These are explicit tool-returned evidence collections. Preserve them whole
   // until provider-budget preparation projects them with truthful coverage.
   if (Array.isArray(result?.paths)) receipt.paths = result.paths;
@@ -337,8 +348,33 @@ function nativeToolReceipt(result = {}) {
   return receipt;
 }
 
-function toolOutputText(result = {}) {
+function toolOutputContent(result = {}) {
+  // Tool-result transport must remain textual. Chat Completions tool messages
+  // are text-only in practice, and Responses function_call_output must not be
+  // handed Chat-style image_url parts. Image bytes are carried in an adjacent
+  // provider-native user message built by attachmentViewUserMessage().
   return JSON.stringify(nativeToolReceipt(result));
+}
+
+function toolOutputText(result = {}) {
+  return toolOutputContent(result);
+}
+
+function attachmentViewUserMessage(result = {}, call = {}, index = 0) {
+  const attachment = result?.attachment;
+  if (result?.tool !== 'attachment_view' || !result?.ok || attachment?.kind !== 'image' || !attachment?.dataUrl) return null;
+  const callId = String(call?.id || call?.call_id || `tool-call-${index}`).slice(0, 256);
+  const name = typeof attachment.name === 'string' ? attachment.name : 'attachment';
+  const type = typeof attachment.type === 'string' ? attachment.type : 'image';
+  const id = typeof attachment.id === 'string' ? attachment.id : (typeof result.attachmentId === 'string' ? result.attachmentId : null);
+  return {
+    role: 'user',
+    content: [
+      { type: 'text', text: `Attachment image from attachment_view result for tool_call_id ${callId}: ${name}${id ? ` (${id})` : ''}, ${type}. Use this image with the preceding tool receipt.` },
+      { type: 'image_url', image_url: { url: String(attachment.dataUrl) } },
+    ],
+    metadata: { providerMessageSource: 'attachment-view-image' },
+  };
 }
 
 function truncatedNativeTailText(value, maxChars) {
@@ -445,15 +481,27 @@ function nativeToolCall(call = {}, index = 0) {
 }
 
 function nativeToolRound({ toolCalls = [], toolResults = [] } = {}) {
-  return providerToolRound({
-    toolCalls: (toolCalls || []).map(nativeToolCall).map((call) => ({
-      id: call.id,
-      name: call.function.name,
-      rawArguments: call.function.arguments,
-    })),
+  const calls = (toolCalls || []).map(nativeToolCall).map((call) => ({
+    id: call.id,
+    name: call.function.name,
+    rawArguments: call.function.arguments,
+  }));
+  const round = providerToolRound({
+    toolCalls: calls,
     toolResults,
-    toolResultContent: toolOutputText,
+    toolResultContent: toolOutputContent,
   });
+  if (!round.length) return round;
+  const expanded = [];
+  let toolIndex = 0;
+  for (const message of round) {
+    expanded.push(message);
+    if (message?.role !== 'tool') continue;
+    const imageMessage = attachmentViewUserMessage((toolResults || [])[toolIndex], calls[toolIndex], toolIndex);
+    toolIndex += 1;
+    if (imageMessage) expanded.push(imageMessage);
+  }
+  return normalizeProviderMessages(expanded);
 }
 
 function nativeMessageChars(message = {}) {
@@ -504,7 +552,7 @@ function messagesToResponsesInput(messages, prompt) {
       input.push({
         type: 'function_call_output',
         call_id: String(message.tool_call_id || message.id || `tool-call-${input.length}`).slice(0, 256),
-        output: String(message.content || ''),
+        output: typeof message.content === 'string' ? message.content : JSON.stringify(message.content || ''),
       });
       continue;
     }
@@ -844,6 +892,8 @@ export {
   messagesToResponsesInput,
   toolNames,
   toolOutputText,
+  toolOutputContent,
+  attachmentViewUserMessage,
   messageContentChars,
   readResponseTextBounded,
   readResponseSseBounded,

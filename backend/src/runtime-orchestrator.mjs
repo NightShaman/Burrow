@@ -568,6 +568,7 @@ function compactPromptEvidenceResult(result = {}) {
     bytes: result.bytes ?? null,
     truncated: Boolean(result.truncated),
     command: typeof result.command === 'string' ? result.command.slice(0, 800) : null,
+    attachmentId: typeof result.attachmentId === 'string' ? result.attachmentId : null,
     exitCode: result.exitCode ?? null,
     reason: typeof result.reason === 'string' ? result.reason.slice(0, 500) : null,
     stdoutOriginalChars: Number.isFinite(Number(result.stdoutOriginalChars)) ? Number(result.stdoutOriginalChars) : null,
@@ -590,6 +591,14 @@ function compactPromptEvidenceResult(result = {}) {
   if (typeof result.stdout === 'string') compact.stdout = result.stdout.slice(0, 4_000);
   if (typeof result.stderr === 'string') compact.stderr = result.stderr.slice(0, 1_200);
   if (typeof result.summary === 'string') compact.summary = result.summary.slice(0, 4_000);
+  if (result.attachment && typeof result.attachment === 'object') compact.attachment = {
+    id: result.attachment.id || null,
+    name: result.attachment.name || null,
+    type: result.attachment.type || null,
+    size: result.attachment.size ?? null,
+    kind: result.attachment.kind || null,
+    ...(typeof result.attachment.text === 'string' ? { text: result.attachment.text.slice(0, CHAT_TOOL_SINGLE_EXCERPT_CHARS) } : {}),
+  };
   if (typeof result.query === 'string') compact.query = result.query.slice(0, 1_000);
   if (typeof result.project === 'string') compact.project = result.project.slice(0, 500);
   if (Array.isArray(result.entries)) compact.entries = result.entries.slice(0, 20).map((item) => ({ path: item?.path || null, type: item?.type || null }));

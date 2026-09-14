@@ -111,6 +111,7 @@ export function summarizeToolResults(toolResults = []) {
       } : undefined,
     } : {}),
     command: toolResult.command ? compactText(toolResult.command, RECEIPT_TEXT_LIMITS.command) : null,
+    attachmentId: typeof toolResult.attachmentId === 'string' ? compactText(toolResult.attachmentId, 500) : undefined,
     reason: toolResult.reason ? compactText(toolResult.reason, 500) : null,
     filePath: toolResult.filePath || null,
     path: toolResult.path || undefined,
