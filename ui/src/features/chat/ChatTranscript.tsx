@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import { textFromChatValue, type ProgressEntry, type RunProgress, type SessionAttachment, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
 import type { Agent, Subagent } from '../../app/types';
+import { toolDisplayName } from '../../app/toolDisplayName';
 
 export type OperatorProfile = { name: string; avatar: string };
 
@@ -180,7 +181,7 @@ function A2AActivityCard({ activity, selectedName }: { activity: import('../../a
     const type = event.type ?? 'activity';
     const data = event.data ?? {};
     const tool = typeof data.tool === 'string' ? data.tool : type.replace(/^tool\./, '').replace('.', ' ');
-    return [{ id: `${activity.id}:${index}`, label: tool, status: type.endsWith('completed') ? (data.ok === false ? 'error' : 'ok') : 'pending' }];
+    return [{ id: `${activity.id}:${index}`, label: toolDisplayName(tool), status: type.endsWith('completed') ? (data.ok === false ? 'error' : 'ok') : 'pending' }];
   });
   // A2A activity is supplemental operational context. The actual request and
   // reply are persisted as attributed `agent` chat turns above; never open this
@@ -189,7 +190,8 @@ function A2AActivityCard({ activity, selectedName }: { activity: import('../../a
 }
 
 function ToolActivityCard({ activity, live }: { activity: ToolActivity; live?: boolean }) {
-  const items = activity.items ?? [];
+  // Render a friendly label only; activity items remain the raw stored receipt.
+  const items = (activity.items ?? []).map((item) => ({ ...item, label: toolDisplayName(item.label) }));
   const activeItem = [...items].reverse().find((item) => item.status === 'pending') ?? items.at(-1);
   const label = live ? activeItem?.label ?? 'Working through it' : `${items.length} runtime ${items.length === 1 ? 'action' : 'actions'}`;
   const keepExpandedCardInView = (event: SyntheticEvent<HTMLDetailsElement>) => {

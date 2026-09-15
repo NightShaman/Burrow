@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { api, type ProgressEntry } from '../../app/api';
+import { toolDisplayName } from '../../app/toolDisplayName';
 import type { Agent } from '../../app/types';
 import { useConfirm } from '../../app/ConfirmDialog';
 
@@ -34,8 +35,8 @@ function publicProgressLabel(entry: { type?: string; data?: Record<string, unkno
   const data = entry.data ?? {};
   if (entry.type === 'model.started') return 'Model started';
   if (entry.type === 'model.completed') return data.ok === false ? 'Model failed' : 'Model completed';
-  if (entry.type === 'tool.started') return `Started ${typeof data.label === 'string' ? data.label : typeof data.tool === 'string' ? data.tool.replaceAll('_', ' ') : 'tool'}`;
-  if (entry.type === 'tool.completed') return `Completed ${typeof data.label === 'string' ? data.label : typeof data.tool === 'string' ? data.tool.replaceAll('_', ' ') : 'tool'}`;
+  if (entry.type === 'tool.started') return `Started ${toolDisplayName(typeof data.label === 'string' ? data.label : typeof data.tool === 'string' ? data.tool : 'tool')}`;
+  if (entry.type === 'tool.completed') return `Completed ${toolDisplayName(typeof data.label === 'string' ? data.label : typeof data.tool === 'string' ? data.tool : 'tool')}`;
   if (entry.type === 'verification.completed') return data.ok === false ? 'Verification failed' : 'Verification completed';
   if (entry.type === 'route.decided') return 'Route selected';
   if (entry.type === 'runtime.notice') return 'Runtime notice';

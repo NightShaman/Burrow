@@ -56,3 +56,15 @@ it('shows an externally started task run before its first persisted chat turn', 
   expect(screen.getAllByText('Inspect status')).toHaveLength(2);
   expect(screen.getByLabelText('Agent-to-agent activity')).toBeTruthy();
 });
+
+it('renders spawn_subagent as Spawn Minion without mutating stored tool evidence', () => {
+  const activity = { runId: 'run-1', items: [{ id: 'spawn-1', label: 'spawn_subagent', status: 'ok' as const }] };
+  show([{ type: 'message', role: 'assistant', content: 'Delegated.', metadata: { toolActivity: activity } }]);
+  expect(screen.getByText('Spawn Minion')).toBeTruthy();
+  expect(activity.items[0].label).toBe('spawn_subagent');
+});
+
+it('uses the Minion label for live tool activity too', () => {
+  render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[]} isLoading={false} error="" isSending activeRunId="run-1" activeToolActivity={{ runId: 'run-1', items: [{ id: 'spawn-1', label: 'spawn_subagent', status: 'pending' }] }} liveProgress={[]} liveAnswer="" />);
+  expect(screen.getAllByText('Spawn Minion')).toHaveLength(2);
+});
