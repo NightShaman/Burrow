@@ -372,7 +372,17 @@ export async function runDreamCycle({ agentId, databasePath = null, rootDir = nu
     const preferenceByKey = new Map();
     for (const phase of PHASES) {
       const messages = phaseWindows[phase];
-      const extraction = await extractPhaseCandidates({ phase, messages, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger });
+      let extraction;
+      let extractionError = null;
+      try {
+        extraction = await extractPhaseCandidates({ phase, messages, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger });
+      } catch (error) {
+        // Extraction is structured-memory input, not a prerequisite for the
+        // operator-facing diary. A model that cannot satisfy the JSON contract
+        // must not erase the whole cycle or prevent other phases from running.
+        extraction = { memories: [], preferences: [], chunks: 0 };
+        extractionError = clamp(error?.message || error, 500);
+      }
       // Light and REM are reflective phases: their extracted memories may
       // inform diary output and preference reinforcement, but only Deep may
       // contribute notes to the durable DreamMemory document.
@@ -392,9 +402,15 @@ export async function runDreamCycle({ agentId, databasePath = null, rootDir = nu
       }
       const selected = extraction.memories.slice(0, Math.max(1, Math.min(12, Number(limit) || DEFAULT_LIMIT)));
       const summary = `${phase.toUpperCase()} pass inspected ${messages.length} persisted chat message${messages.length === 1 ? '' : 's'} in its ${PHASE_WINDOWS_DAYS[phase]}-day window and selected ${selected.length} candidate${selected.length === 1 ? '' : 's'}.`;
-      const diaryNarrative = await generateOperatorDiary({ phase, settings, soul, items: extraction.memories, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger });
-      pendingDiaries.push({ entryDate: generatedAt.slice(0, 10), phase, narrative: diaryNarrative, sourceRefs: selected.flatMap((item) => item.sourceRefs || []).slice(0, 16) });
-      phaseResults.push({ phase, windowDays: PHASE_WINDOWS_DAYS[phase], inspected: messages.length, recorded: selected.length, selected: selected.length, summary, chunks: extraction.chunks, windowStart: phaseWindowStart({ phase, generatedAt }), windowEnd: generatedAt, earliestAt: messages[0]?.at || null, latestAt: messages.at(-1)?.at || null });
+      let diaryNarrative = null;
+      let diaryError = null;
+      try {
+        diaryNarrative = await generateOperatorDiary({ phase, settings, soul, items: extraction.memories, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger });
+      } catch (error) {
+        diaryError = clamp(error?.message || error, 500);
+      }
+      if (diaryNarrative) pendingDiaries.push({ entryDate: generatedAt.slice(0, 10), phase, narrative: diaryNarrative, sourceRefs: selected.flatMap((item) => item.sourceRefs || []).slice(0, 16) });
+      phaseResults.push({ phase, windowDays: PHASE_WINDOWS_DAYS[phase], inspected: messages.length, recorded: selected.length, selected: selected.length, summary, chunks: extraction.chunks, ...(extractionError ? { extractionError } : {}), ...(diaryError ? { diaryError } : {}), windowStart: phaseWindowStart({ phase, generatedAt }), windowEnd: generatedAt, earliestAt: messages[0]?.at || null, latestAt: messages.at(-1)?.at || null });
     }
     for (const candidate of preferenceByKey.values()) appendPreferenceSignal({ agentId: id, signal: candidate, databasePath, at: generatedAt });
     const dreamMemoryCandidates = [...selectedByKey.values()].slice(0, Math.max(1, Math.min(36, Number(limit) * 3 || 36)));
@@ -415,11 +431,12 @@ export async function runDreamCycle({ agentId, databasePath = null, rootDir = nu
       }
     }
     const preferences = await adjudicatePreferences({ agentId: id, profileStore, databasePath, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger });
-    for (const [index, entry] of pendingDiaries.entries()) phaseResults[index].diaryId = diaryStore.append(id, entry).id;
+    for (const entry of pendingDiaries) phaseResults.find((result) => result.phase === entry.phase).diaryId = diaryStore.append(id, entry).id;
     const nextRunAt = nextCronOccurrence(settings.cron, settings.timezone, new Date(generatedAt));
     const state = { version: 1, agentId: id, enabled: true, cron: settings.cron, timezone: settings.timezone, nextRunAt, lastRunAt: generatedAt, updatedAt: generatedAt };
     db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`).run(phaseState(id), json(state), generatedAt);
-    const receipt = { version: 1, ok: true, runId, agentId: id, phases: phaseResults, dreamMemoryItemCount: consolidation.itemCount, dreamPreloadCount: dreamPreloads.length, preferences, nextRunAt, generatedAt };
+    const hasErrors = phaseResults.some((phase) => phase.extractionError || phase.diaryError);
+    const receipt = { version: 1, ok: !hasErrors, status: hasErrors ? (pendingDiaries.length ? 'partial' : 'failed') : 'completed', runId, agentId: id, phases: phaseResults, dreamMemoryItemCount: consolidation.itemCount, dreamPreloadCount: dreamPreloads.length, preferences, nextRunAt, generatedAt };
     db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?)`).run(receiptState(id, runId), json(receipt), generatedAt);
     return receipt;
   } catch (error) {
