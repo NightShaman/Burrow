@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { apiForTarget, textFromChatValue, type ActiveA2AActivity, type ActiveChatRun, type ChatAttachment, type SessionSummary, type SessionTurn, type ToolActivity } from '../../app/api';
+import { apiForTarget, textFromChatValue, type ActiveA2AActivity, type ActiveChatRun, type ChatAttachment, type ProgressEntry, type SessionSummary, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
 import { localApiTarget, targetForResource, type ApiTarget } from '../../app/apiTargets';
 import { conversationCacheKey, readConversationCache, writeConversationCache, type ConversationCache } from './chatConversationCache';
 import { readDraftCache, writeDraftCache, type DraftCache } from './chatDraftCache';
@@ -9,6 +9,50 @@ import { createChatSessionRepository, readSessionListCache } from './chatSession
 export { conversationCacheKey } from './chatConversationCache';
 
 const defaultApiTargets = [localApiTarget];
+
+type RuntimeRunForSelection = {
+  runId: string;
+  agentId: string;
+  sessionId: string;
+  latestUserMessage: string;
+  progress: ProgressEntry[];
+  toolActivity?: ToolActivity;
+};
+
+function runtimeRunProgress(run: ActiveChatRun): ProgressEntry[] {
+  return (run.progress ?? []).flatMap((event, index) => {
+    if (event.type !== 'assistant.thought' || typeof event.data?.delta !== 'string') return [];
+    const modelCall = Number(event.data.modelCall);
+    return [{ id: `${run.runId}:thought:${index}`, text: event.data.delta, ts: typeof event.ts === 'string' ? event.ts : new Date().toISOString(), ...(Number.isFinite(modelCall) ? { modelCall } : {}), status: 'streaming' as const }];
+  });
+}
+
+function runtimeToolActivity(run: ActiveChatRun): ToolActivity | undefined {
+  const itemsById = new Map<string, ToolActivityItem>();
+  for (const [index, event] of (run.progress ?? []).entries()) {
+    if (event.type !== 'tool.started' && event.type !== 'tool.completed') continue;
+    const data = event.data ?? {};
+    const tool = typeof data.tool === 'string' ? data.tool.trim() : '';
+    if (!tool) continue;
+    const mcpToolName = typeof data.mcpToolName === 'string' ? data.mcpToolName.trim() : '';
+    const label = tool === 'mcp_call' && mcpToolName
+      ? 'MCP tool'
+      : typeof data.label === 'string' && data.label.trim() ? data.label.trim() : tool.replace(/[-_]/g, ' ');
+    const id = typeof data.activityId === 'string' && data.activityId ? data.activityId : `${run.runId}:tool:${index}`;
+    const status = event.type === 'tool.started' ? 'pending' as const : data.ok === false || data.status === 'failed' ? 'error' as const : 'ok' as const;
+    itemsById.set(id, { ...itemsById.get(id), id, label, status });
+  }
+  const items = [...itemsById.values()];
+  if (!items.length) return undefined;
+  const hasError = items.some((item) => item.status === 'error');
+  const hasPending = items.some((item) => item.status === 'pending');
+  return { runId: run.runId, items, status: hasError ? 'warn' : hasPending ? 'running' : 'ok' };
+}
+
+function runtimeRunForSelection(run: ActiveChatRun | undefined): RuntimeRunForSelection | null {
+  if (!run) return null;
+  return { runId: run.runId, agentId: run.agentId, sessionId: run.sessionId, latestUserMessage: typeof run.latestUserMessage === 'string' ? run.latestUserMessage : '', progress: runtimeRunProgress(run), toolActivity: runtimeToolActivity(run) };
+}
 
 /** Owns durable chat-session state, draft retention, and runtime reconciliation. */
 export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = defaultApiTargets) {
@@ -22,6 +66,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   const [chatError, setChatError] = useState('');
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
   const [a2aActivities, setA2aActivities] = useState<ActiveA2AActivity[]>([]);
+  const [runtimeRun, setRuntimeRun] = useState<RuntimeRunForSelection | null>(null);
   const childSessionsRef = useRef(new Set<string>());
   const [, setToolActivityVersion] = useState(0);
   const conversationCacheRef = useRef<ConversationCache>(readConversationCache());
@@ -63,6 +108,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   // loading flag and therefore renders the new-session logo.
   useLayoutEffect(() => {
     committedAgentIdRef.current = selectedAgentId;
+    setRuntimeRun(null);
     if (!selectedAgentId) {
       setIsNewSession(false);
       setSessionId('');
@@ -200,6 +246,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   useEffect(() => {
     if (!selectedAgentId || !sessionId || isNewSession) {
       setA2aActivities([]);
+      setRuntimeRun(null);
 
       return;
     }
@@ -211,7 +258,9 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
       try {
         const owner = targetForResource(targets, selectedAgentId);
         const response = await apiForTarget<{ runs?: ActiveChatRun[] }>(owner.target, `/api/chat/runs/active?agentId=${encodeURIComponent(owner.resourceId)}&sessionId=${encodeURIComponent(sessionId)}`);
-        if (cancelled) return;
+        if (cancelled || selectedChatRef.current.agentId !== selectedAgentId || selectedChatRef.current.sessionId !== sessionId) return;
+        const selectedRuntimeRun = response.runs?.[0];
+        setRuntimeRun(runtimeRunForSelection(selectedRuntimeRun));
         const activities = (response.runs ?? []).flatMap((run) => {
           if (run.a2aActivities?.length) return run.a2aActivities;
           if (run.source !== 'a2a' || !run.a2a) return [];
@@ -245,6 +294,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   }, [isNewSession, selectedAgentId, sessionId, targets, sessionRepository]);
 
   const selectSession = useCallback((targetSessionId: string) => {
+    setRuntimeRun(null);
     if (!selectedAgentId || !targetSessionId || targetSessionId === sessionId) return;
     // Remember explicit choices before React state changes so concurrent list
     // refreshes cannot restore the previous session.
@@ -255,6 +305,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
     setChatError('');
   }, [selectedAgentId, sessionId]);
   const prepareAgentSelection = useCallback((agentId: string) => {
+    setRuntimeRun(null);
     // Rail selections always reopen the parent's canonical session rather than
     // inheriting a displayed child session.
     const targetSessionId = parentSessionIdByAgentRef.current[agentId] ?? '';
@@ -267,6 +318,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
     setChatError('');
   }, []);
   const selectChildSession = useCallback((agentId: string, childSessionId: string) => {
+    setRuntimeRun(null);
     childSessionsRef.current.add(conversationCacheKey(agentId, childSessionId));
     sessionIdByAgentRef.current[agentId] = childSessionId;
     setSessionId(childSessionId);
@@ -307,8 +359,16 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   const setAttachment = useCallback((attachments: ChatAttachment[]) => setAttached((current) => [...current, ...attachments]), []);
   const clearAttachment = useCallback(() => setAttached([]), []);
   const removeAttachment = useCallback((index: number) => setAttached((current) => current.filter((_, attachmentIndex) => attachmentIndex !== index)), []);
+  const cancelRuntimeRun = useCallback(async (run: RuntimeRunForSelection) => {
+    const owner = targetForResource(targets, run.agentId);
+    try {
+      await apiForTarget(owner.target, `/api/chat/${encodeURIComponent(run.runId)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: owner.resourceId, reason: 'Stopped by operator' }) });
+    } catch (error) {
+      setChatError(error instanceof Error ? `Could not stop run: ${error.message}` : 'Could not stop run.');
+    }
+  }, [targets]);
   const reportError = useCallback((message: string) => setChatError(message), []);
   const clearError = useCallback(() => setChatError(''), []);
 
-  return { attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation: isLoadingConversation || isSwitchingAgent, draft, setDraft, refreshSessions, refreshConversation, selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun, a2aActivities };
+  return { attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation: isLoadingConversation || isSwitchingAgent, draft, setDraft, refreshSessions, refreshConversation, selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun, a2aActivities, runtimeRun, cancelRuntimeRun };
 }

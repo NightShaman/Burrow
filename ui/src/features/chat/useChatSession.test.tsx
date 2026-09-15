@@ -295,3 +295,80 @@ it('discards an in-flight child poll after selecting the parent, including its c
   expect(JSON.stringify(localStorage)).not.toContain('Stale child');
   unmount();
 });
+
+it('exposes a destination session task run with live tools, thoughts, and A2A activity', async () => {
+  apiMock.mockImplementation(async (_target, path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
+    if (path.startsWith('/api/chat/runs/active?')) return {
+      runs: [{
+        runId: 'task-run', agentId, sessionId, status: 'running', phase: 'streaming', source: 'task',
+        progress: [
+          { type: 'assistant.thought', ts: '2026-09-15T12:00:00.000Z', data: { delta: 'Checking the runtime.', modelCall: 2 } },
+          { type: 'tool.started', data: { activityId: 'tool-1', tool: 'shell_exec', label: 'Inspect status' } },
+        ],
+        a2aActivities: [{ id: 'a2a-1', status: 'running', parentAgentId: agentId, recipient: { agentId: 'minion', sessionId: 'child' }, progress: [] }],
+      }],
+    };
+    throw new Error(path);
+  });
+
+  const { result, unmount } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+  await waitFor(() => expect(result.current.runtimeRun).toMatchObject({
+    runId: 'task-run',
+    progress: [expect.objectContaining({ text: 'Checking the runtime.', modelCall: 2 })],
+    toolActivity: { runId: 'task-run', items: [expect.objectContaining({ label: 'Inspect status', status: 'pending' })] },
+  }));
+  expect(result.current.a2aActivities).toEqual([expect.objectContaining({ id: 'a2a-1' })]);
+  unmount();
+});
+
+it('reduces task tool completion onto its started activity and exposes the task prompt', async () => {
+  apiMock.mockImplementation(async (_target, path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
+    if (path.startsWith('/api/chat/runs/active?')) return { runs: [{
+      runId: 'task-run', agentId, sessionId, status: 'running', phase: 'tool', source: 'task', latestUserMessage: 'Inspect the destination session.',
+      progress: [
+        { type: 'tool.started', data: { activityId: 'tool-1', tool: 'shell_exec', label: 'Inspect status' } },
+        { type: 'tool.completed', data: { activityId: 'tool-1', tool: 'shell_exec', label: 'Inspect status', ok: true, status: 'completed' } },
+      ],
+    }] };
+    throw new Error(path);
+  });
+  const { result, unmount } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.runtimeRun).toMatchObject({ runId: 'task-run', latestUserMessage: 'Inspect the destination session.' }));
+  expect(result.current.runtimeRun?.toolActivity?.items).toEqual([{ id: 'tool-1', label: 'Inspect status', status: 'ok' }]);
+  unmount();
+});
+
+it('cancels the selected external task run with its resource owner', async () => {
+  apiMock.mockImplementation(async (_target, path, init) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
+    if (path.startsWith('/api/chat/runs/active?')) return { runs: [{ runId: 'task-run', agentId, sessionId, status: 'running', latestUserMessage: 'Stop me', progress: [] }] };
+    if (path === '/api/chat/task-run/cancel') { expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({ agentId, reason: 'Stopped by operator' }) }); return { ok: true }; }
+    throw new Error(path);
+  });
+  const { result, unmount } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('task-run'));
+  await act(async () => { await result.current.cancelRuntimeRun(result.current.runtimeRun!); });
+  expect(apiMock).toHaveBeenCalledWith(localApiTarget, '/api/chat/task-run/cancel', expect.objectContaining({ method: 'POST' }));
+  unmount();
+});
+
+it('clears a task run immediately when selecting another session', async () => {
+  const otherSessionId = 'session-2';
+  apiMock.mockImplementation(async (_target, path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }, { id: otherSessionId }] };
+    if (path === conversationPath || path === `/api/sessions/${otherSessionId}?agentId=${agentId}`) return { session: { id: sessionId, turns: [] } };
+    if (path.startsWith('/api/chat/runs/active?')) return { runs: [{ runId: 'task-run', agentId, sessionId, status: 'running', latestUserMessage: 'Old session task', progress: [] }] };
+    throw new Error(path);
+  });
+  const { result, unmount } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('task-run'));
+  act(() => result.current.selectSession(otherSessionId));
+  expect(result.current.runtimeRun).toBeNull();
+  unmount();
+});

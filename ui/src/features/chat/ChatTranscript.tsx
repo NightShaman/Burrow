@@ -25,9 +25,10 @@ type ChatTranscriptProps = {
   liveProgress: ProgressEntry[];
   liveAnswer: string;
   a2aActivities?: import('../../app/api').ActiveA2AActivity[];
+  runtimeUserMessage?: string;
 };
 
-export function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, a2aActivities = [] }: ChatTranscriptProps) {
+export function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, a2aActivities = [], runtimeUserMessage = '' }: ChatTranscriptProps) {
   const isSubagent = 'stream' in selected;
   const messages = turns.filter((turn) => turn.type === 'message' && turn.metadata?.visibility !== 'debug' && turn.metadata?.kind !== 'subagent-runtime-context' && turn.metadata?.kind !== 'subagent-task' && turn.content && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && isChatCommand(textFromChatValue(turn.content))));
   const activityByRun = new Map<string, ToolActivity>();
@@ -36,7 +37,10 @@ export function ChatTranscript({ selected, parent, operator, isNewSession, turns
     if (activity && (turn.runId || activity.runId)) activityByRun.set(turn.runId || activity.runId || '', activity);
   }
   const activeActivity = activeRunId ? activeToolActivity ?? activityByRun.get(activeRunId) : undefined;
-  const isEmptySession = !isLoading && (isNewSession || !messages.length);
+  // An externally started task run can reach this destination session before
+  // its first durable turn. Keep the live run visible instead of replacing it
+  // with the empty-session watermark.
+  const isEmptySession = !isLoading && !isSending && !a2aActivities.length && (isNewSession || !messages.length);
   const messagesRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const updateScrollIntent = () => {
@@ -52,6 +56,7 @@ export function ChatTranscript({ selected, parent, operator, isNewSession, turns
     {isEmptySession ? <div className="new-session-empty"><img src="/burrow-logo.png" alt="Burrow" /></div> : <>
       {isSubagent && <div className="stream-banner"><span>Minion stream</span><strong>{selected.name}</strong><small>Workspace remains attached to {parent.name}</small></div>}
       {isLoading && <p className="chat-state">{messages.length ? 'Refreshing conversation…' : 'Loading conversation…'}</p>}
+      {runtimeUserMessage && !messages.some((turn) => turn.role === 'user' && textFromChatValue(turn.content) === runtimeUserMessage) && <ChatMessage side="operator" name={operator.name} avatar={operator.avatar || operator.name.slice(0, 1).toUpperCase()} time="Now" text={runtimeUserMessage} />}
       {messages.map((turn, index) => {
         const isDelegatedTask = turn.role === 'user' && (turn.metadata?.kind === 'subagent-delegated-task' || (isSubagent && Boolean(turn.metadata?.workerProfile || turn.metadata?.subagentId)));
         const parentId = turn.metadata?.parentAgentId;

@@ -48,3 +48,11 @@ it('preserves safe Markdown and line breaks in actual child replies', () => {
   expect(container.querySelector('li')?.textContent).toBe('Verified');
   expect(container.querySelector('script')).toBeNull();
 });
+
+it('shows an externally started task run before its first persisted chat turn', () => {
+  render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[]} isLoading={false} error="" isSending activeRunId="task-run" activeToolActivity={{ runId: 'task-run', items: [{ id: 'tool-1', label: 'Inspect status', status: 'pending' }] }} liveProgress={[{ id: 'thought-1', text: 'Checking the runtime.', ts: '2026-09-15T12:00:00.000Z', status: 'streaming' }]} liveAnswer="" runtimeUserMessage="Inspect task destination" a2aActivities={[{ id: 'a2a-1', status: 'running', parentAgentId: 'hatchet', recipient: { agentId: 'minion' }, progress: [] }]} />);
+  expect(screen.getByText('Inspect task destination')).toBeTruthy();
+  expect(screen.getByText('Checking the runtime.')).toBeTruthy();
+  expect(screen.getAllByText('Inspect status')).toHaveLength(2);
+  expect(screen.getByLabelText('Agent-to-agent activity')).toBeTruthy();
+});

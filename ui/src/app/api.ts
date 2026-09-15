@@ -188,6 +188,7 @@ export type ActiveChatRun = {
   sessionId: string;
   status: string;
   phase?: string;
+  latestUserMessage?: string | null;
   progress?: Array<{ type?: string; data?: Record<string, unknown>; ts?: string }>;
   source?: string | null;
   a2a?: { parentAgentId?: string; parentRunId?: string; messageMode?: string } | null;
