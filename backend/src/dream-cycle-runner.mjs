@@ -26,7 +26,34 @@ function receiptState(agentId, runId) { return `dream-cycle-receipt:${agentId}:$
 function occurrenceState(agentId, scheduledFor) { return `dream-cycle-occurrence:${agentId}:${scheduledFor}`; }
 function entryId(agentId, phase, title, content) { return `dream-${phase}-${Buffer.from(`${agentId}\0${title}\0${content}`).toString('base64url').slice(0, 40)}`; }
 function clamp(value, limit) { const source = text(value).replace(/\s+/g, ' '); return source.length <= limit ? source : `${source.slice(0, limit).trim()}…`; }
-function modelText(result) { return text(result?.choice?.text ?? result?.text ?? result?.message ?? result?.content ?? result?.answerText); }
+function modelText(result) {
+  const choice = result?.choice || result?.choices?.[0] || null;
+  const content = choice?.message?.content ?? choice?.content ?? result?.message?.content ?? result?.content;
+  const contentText = Array.isArray(content)
+    ? content.map((part) => typeof part === 'string' ? part : part?.text || '').join('')
+    : content;
+  return text(choice?.text ?? contentText ?? result?.output_text ?? result?.text ?? result?.message ?? result?.answerText);
+}
+
+function parseModelJson(value) {
+  const source = text(value).replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  try { return JSON.parse(source); } catch {}
+  const start = source.search(/[\[{]/);
+  if (start < 0) throw new Error('dream_extraction_invalid_json');
+  const opener = source[start];
+  const closer = opener === '[' ? ']' : '}';
+  let depth = 0; let quoted = false; let escaped = false;
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index];
+    if (quoted) { if (escaped) escaped = false; else if (character === '\\\\') escaped = true; else if (character === '"') quoted = false; continue; }
+    if (character === '"') { quoted = true; continue; }
+    if (character === opener) depth += 1;
+    else if (character === closer && --depth === 0) {
+      try { return JSON.parse(source.slice(start, index + 1)); } catch { break; }
+    }
+  }
+  throw new Error('dream_extraction_invalid_json');
+}
 
 function readableList(items, limit = 4) {
   const names = items.slice(0, limit).map((item) => clamp(item.title, 72)).filter(Boolean);
@@ -96,7 +123,11 @@ function fitsPrompt(content, modelConfig) {
 async function completeText({ content, modelAdapter, modelConfig, traceLogger }) {
   if (!modelAdapter) throw new Error('dream_model_unavailable');
   if (!fitsPrompt(content, modelConfig)) throw new Error('dream_prompt_budget_exceeded');
-  const result = modelText(await modelAdapter.complete({ messages: [{ role: 'user', content }], traceLogger }));
+  let result = modelText(await modelAdapter.complete({ messages: [{ role: 'user', content }], traceLogger }));
+  if (!result) {
+    const retryContent = `${content}\n\nThe previous attempt returned no usable text. Retry now and output only the requested result; do not stop after internal reasoning.`;
+    result = modelText(await modelAdapter.complete({ messages: [{ role: 'user', content: retryContent }], traceLogger }));
+  }
   if (!result) throw new Error('dream_model_empty_response');
   return result;
 }
@@ -139,7 +170,7 @@ function phaseWindowStart({ phase, generatedAt }) {
 
 function parsePhaseExtraction(value) {
   let parsed = null;
-  try { parsed = JSON.parse(text(value)); } catch { throw new Error('dream_extraction_invalid_json'); }
+  parsed = parseModelJson(value);
   const normalizeRefs = (refs, allowed) => [...new Set((Array.isArray(refs) ? refs : []).map(text).filter((ref) => allowed.has(ref)))].slice(0, 8);
   const allowed = new Set(parsed?.allowedSourceRefs || []);
   const memories = (Array.isArray(parsed?.memories) ? parsed.memories : []).map((item) => ({
@@ -188,7 +219,7 @@ async function extractPhaseCandidates({ phase, messages, generatedAt, modelAdapt
   for (const chunk of promptChunks(messages, prompt, modelConfig)) {
     const result = await completeText({ content: prompt(chunk), modelAdapter, modelConfig, traceLogger });
     let parsed;
-    try { parsed = JSON.parse(result); } catch { throw new Error('dream_extraction_invalid_json'); }
+    parsed = parseModelJson(result);
     if (!Array.isArray(parsed?.memories) || !Array.isArray(parsed?.preferences)) throw new Error('dream_extraction_invalid_shape');
     const source = parsePhaseExtraction(JSON.stringify({ ...parsed, allowedSourceRefs: chunk.map((item) => item.sourceRef) }));
     output.memories.push(...source.memories);
