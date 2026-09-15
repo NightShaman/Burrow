@@ -476,7 +476,7 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
         });
       } catch (error) {
         const code = String(error?.code || error?.message || 'subagent_dispatch_failed').split(':')[0];
-        result = { tool: 'spawn_subagent', ok: false, spawned: false, status: 'failed', task: action.task || action.purpose || action.reason || null, target: action.target || null, blockers: [`subagent_dispatch_failed:${code}`], warnings: [], evidence: [], summary: `Subagent dispatch failed (${code}).`, record: null };
+        result = { tool: 'spawn_subagent', ok: false, spawned: false, status: 'failed', task: action.task || action.purpose || action.reason || null, target: action.target || null, blockers: [`subagent_dispatch_failed:${code}`], warnings: [], evidence: [], summary: `Minion dispatch failed (${code}).`, record: null };
         await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'spawn_subagent', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: false, status: 'failed', blockers: result.blockers });
       }
       toolResults.push(result);

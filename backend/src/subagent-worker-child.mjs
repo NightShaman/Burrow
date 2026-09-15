@@ -27,6 +27,6 @@ async function main() {
 
 main().catch((error) => {
   const detail = error?.message || String(error);
-  process.stdout.write(`${JSON.stringify({ __burrowSubagentResult: true, ok: false, error: detail, result: { ok: false, summary: `Subagent child failed: ${detail}`, blockers: [`subagent_child_failed:${detail}`], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false } })}\n`);
+  process.stdout.write(`${JSON.stringify({ __burrowSubagentResult: true, ok: false, error: detail, result: { ok: false, summary: `Minion child failed: ${detail}`, blockers: [`subagent_child_failed:${detail}`], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false } })}\n`);
   process.exitCode = 1;
 });

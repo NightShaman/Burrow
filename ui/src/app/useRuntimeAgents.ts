@@ -151,7 +151,7 @@ export function useRuntimeAgents({ selectedAgentId, targets, setSelectedAgentId,
       const childStatuses = entry.status.agents.filter((item) => item.parentSessionId === parentStatus?.sessionId);
       const subagents: Subagent[] = childStatuses.map((child) => {
         const childContext = entry.contexts[child.sessionId] ?? {};
-        return { id: ownedResourceId(target.id, child.sessionId), resourceId: child.sessionId, targetId: target.id, name: child.label || child.subagentId || 'Subagent', avatar: '↳', activity: formatAgentActivity(child.status), context: contextPercent(childContext), contextDetails: contextDetails(childContext), stream: ownedResourceId(target.id, child.sessionId), subagentId: child.subagentId };
+        return { id: ownedResourceId(target.id, child.sessionId), resourceId: child.sessionId, targetId: target.id, name: child.label || child.subagentId || 'Minion', avatar: '↳', activity: formatAgentActivity(child.status), context: contextPercent(childContext), contextDetails: contextDetails(childContext), stream: ownedResourceId(target.id, child.sessionId), subagentId: child.subagentId };
       });
       const selection = entry.selection;
       const selectedProvider = runtimeProviders.current.find((item) => item.id === selection?.connectionId && item.models.includes(selection.model));

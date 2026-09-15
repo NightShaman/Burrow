@@ -33,7 +33,7 @@ export async function startSubagentChildSession({ dataRoot, id, workerProfile, p
     sessionId,
     type: 'message',
     role: 'user',
-    content: purpose || `Run ${workerProfile || 'subagent'}`,
+    content: purpose || `Run ${workerProfile || 'minion'}`,
     runId: trace.runId || null,
     parentId: parentRunId || null,
     metadata: { kind: 'subagent-delegated-task', parentAgentId: owner.agentId || null, workerProfile, subagentId: id, parentSessionId, parentConversationId, parentRunId: parentRunId || null },
@@ -42,7 +42,7 @@ export async function startSubagentChildSession({ dataRoot, id, workerProfile, p
     rootDir: dataRoot,
     sessionId,
     type: 'event',
-    content: `${workerProfile || 'Subagent'} started.`,
+    content: `${workerProfile || 'Minion'} started.`,
     runId: trace.runId || null,
     parentId: parentRunId || null,
     metadata: { kind: 'subagent-start', workerProfile, subagentId: id, parentSessionId, parentConversationId },
@@ -53,7 +53,7 @@ export async function startSubagentChildSession({ dataRoot, id, workerProfile, p
 
 export async function finishSubagentChildSession({ dataRoot, sessionId, id, workerProfile, owner = {}, result = {}, trace = {}, status = null, model = null } = {}) {
   if (!dataRoot || !sessionId) return null;
-  const summary = compact(result.summary, `${workerProfile || 'Subagent'} finished.`);
+  const summary = compact(result.summary, `${workerProfile || 'Minion'} finished.`);
   await appendSessionEntry({
     rootDir: dataRoot,
     sessionId,

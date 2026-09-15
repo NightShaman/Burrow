@@ -112,7 +112,7 @@ export async function runSubagentProcess({
         spawned: false,
         error: error?.message || String(error),
         ...streams(),
-        result: { ok: false, summary: 'Subagent failed to spawn.', blockers: ['subagent_spawn_failed'], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false },
+        result: { ok: false, summary: 'Minion failed to spawn.', blockers: ['subagent_spawn_failed'], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false },
       });
     });
     child.on('close', async (code, signal) => {
@@ -124,7 +124,7 @@ export async function runSubagentProcess({
       } catch (error) {
         parsed = {
           ok: false,
-          result: { ok: false, summary: 'Subagent returned invalid JSON.', blockers: [`subagent_invalid_json:${error?.message || error}`], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false },
+          result: { ok: false, summary: 'Minion returned invalid JSON.', blockers: [`subagent_invalid_json:${error?.message || error}`], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false },
         };
       }
       await finish({

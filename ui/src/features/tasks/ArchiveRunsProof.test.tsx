@@ -21,7 +21,7 @@ for (const [status, label] of statuses) for (const expected of [false, true]) fo
     vi.spyOn(archiveRepository, 'loadRun').mockResolvedValue(value);
     render(<ArchiveRunsProof selectedAgent="" search="" />);
     fireEvent.click(await screen.findByRole('button', { name: /smatchet objective/ }));
-    const outcome = await screen.findByText(`Child completed · ${label}`);
+    const outcome = await screen.findByText(`Minion completed · ${label}`);
     expect(outcome.classList.contains('proof-status-failed')).toBe(status === 'failed');
     expect(screen.getByText(actionRequired ? 'Action required' : 'No action required')).toBeTruthy();
     expect(screen.queryByText(actionRequired ? 'No action required' : 'Action required')).toBeNull();

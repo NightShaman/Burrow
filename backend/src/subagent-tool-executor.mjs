@@ -116,7 +116,7 @@ function reusedSubagentResult({ record, task, target, request } = {}) {
     evidence: result.evidence || [],
     blockers: result.blockers || [],
     warnings: [...(result.warnings || []), 'subagent_exact_request_reused'],
-    summary: result.summary || 'Reused existing subagent receipt.',
+    summary: result.summary || 'Reused existing minion receipt.',
     spawnRequestKey: request.key,
     record: subagentVisibilitySummary(record),
     queued: null,
@@ -319,10 +319,10 @@ export async function executeSpawnSubagentTool({
       spawned: remoteExecution,
       exitCode: null,
       durationMs: null,
-      result: { ok: false, summary: 'Subagent child failed to start or dispatch.', blockers: [`subagent_child_dispatch_failed:${code}`], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false },
+      result: { ok: false, summary: 'Minion child failed to start or dispatch.', blockers: [`subagent_child_dispatch_failed:${code}`], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false },
     };
   }
-  const childResult = childRun.result || { ok: false, summary: 'Subagent returned no result.', blockers: ['subagent_result_missing'], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
+  const childResult = childRun.result || { ok: false, summary: 'Minion returned no result.', blockers: ['subagent_result_missing'], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
   const status = childRun.ok && childResult.ok ? 'succeeded' : 'failed';
   const receiptRef = traceDir ? path.join(traceDir, 'receipt.json') : null;
   if (receiptRef) {
@@ -332,7 +332,7 @@ export async function executeSpawnSubagentTool({
   const child = childFrom({ parentSessionId, parentConversationId, parentRunId, childSessionId, receiptRefs: receiptRef ? [receiptRef] : [], dataRoot });
   const result = {
     ok: status === 'succeeded',
-    summary: childResult.summary || (status === 'succeeded' ? 'Subagent completed.' : 'Subagent failed.'),
+    summary: childResult.summary || (status === 'succeeded' ? 'Minion completed.' : 'Minion failed.'),
     blockers: childResult.blockers || [],
     warnings: [...targetWarnings, ...(childResult.warnings || [])],
     evidence: childResult.evidence || [],

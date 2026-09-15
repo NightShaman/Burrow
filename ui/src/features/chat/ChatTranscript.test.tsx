@@ -11,6 +11,10 @@ function show(turns: SessionTurn[], selected: Agent | Subagent = child) {
   return render(<ChatTranscript selected={selected} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={turns} isLoading={false} error="" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" />);
 }
 const message = (content: string, metadata?: SessionTurn['metadata']): SessionTurn => ({ type: 'message', role: 'user', content, metadata });
+it('labels a child conversation as a Minion stream without changing its internal metadata', () => {
+  show([message('Visible conversation')]);
+  expect(screen.getByText('Minion stream')).toBeTruthy();
+});
 it('hides modern and legacy generated context without altering stored turns or hiding operator followups', () => {
   const turns = [message('runtime prompt', { kind: 'subagent-runtime-context' }), message('legacy prompt', { kind: 'subagent-task' }), message('debug prompt', { visibility: 'debug', promptEligible: false }), { ...message('debug event'), type: 'debug' }, message('Actual followup')];
   const before = JSON.stringify(turns);

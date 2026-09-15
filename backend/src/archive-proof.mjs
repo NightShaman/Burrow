@@ -333,9 +333,9 @@ function childProof(records = [], runId) {
 function childTimelineSummary(child) {
   const name = child.label || child.id;
   const details = child.result ? ` — ${child.result.evidence} finding${child.result.evidence === 1 ? '' : 's'} · ${child.result.changedFiles} change${child.result.changedFiles === 1 ? '' : 's'}` : '';
-  if (child.verification?.status === 'failed_expected') return `Subagent ${name} completed — verification failed as expected${details}`;
-  if (child.verification?.status === 'failed') return `Subagent ${name} completed — verification failed${details}`;
-  return `Subagent ${name}: ${child.status}${details}`;
+  if (child.verification?.status === 'failed_expected') return `Minion ${name} completed — verification failed as expected${details}`;
+  if (child.verification?.status === 'failed') return `Minion ${name} completed — verification failed${details}`;
+  return `Minion ${name}: ${child.status}${details}`;
 }
 function childVerificationEvidence(subagents = []) {
   return subagents.filter((child) => child.verification).map((child) => {

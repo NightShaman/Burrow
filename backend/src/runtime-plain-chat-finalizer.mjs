@@ -57,7 +57,7 @@ function activityLabel(result = {}) {
   if (tool === 'shell_exec' && /\b(?:ls|find|rg|grep)\b/i.test(command)) return 'Inspecting files';
   if (tool === 'shell_exec') return 'Running a task';
   if (tool === 'mcp_call') return result.mcpToolName ? `MCP ${result.mcpToolName}` : 'MCP call';
-  if (tool === 'spawn_subagent') return result.label || result.summary || 'Running subagent';
+  if (tool === 'spawn_subagent') return result.label || result.summary || 'Running minion';
   return tool.split(/[-_]/).filter(Boolean).map((part) => part[0]?.toUpperCase() + part.slice(1)).join(' ') || 'Working';
 }
 

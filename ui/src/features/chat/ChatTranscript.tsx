@@ -50,7 +50,7 @@ export function ChatTranscript({ selected, parent, operator, isNewSession, turns
   }, [isLoading, isNewSession, messages.length, isSending, liveProgress, liveAnswer, activeActivity]);
   return <div className={`chat-messages ${isEmptySession ? 'new-session-view' : ''}`} ref={messagesRef} onScroll={updateScrollIntent} aria-busy={isLoading || isSending}>
     {isEmptySession ? <div className="new-session-empty"><img src="/burrow-logo.png" alt="Burrow" /></div> : <>
-      {isSubagent && <div className="stream-banner"><span>Subagent stream</span><strong>{selected.name}</strong><small>Workspace remains attached to {parent.name}</small></div>}
+      {isSubagent && <div className="stream-banner"><span>Minion stream</span><strong>{selected.name}</strong><small>Workspace remains attached to {parent.name}</small></div>}
       {isLoading && <p className="chat-state">{messages.length ? 'Refreshing conversation…' : 'Loading conversation…'}</p>}
       {messages.map((turn, index) => {
         const isDelegatedTask = turn.role === 'user' && (turn.metadata?.kind === 'subagent-delegated-task' || (isSubagent && Boolean(turn.metadata?.workerProfile || turn.metadata?.subagentId)));

@@ -379,7 +379,7 @@ export function nativeToolSchemas({ includeMutations = true, includeWorkingMemor
       type: 'function',
       function: {
         name: 'spawn_subagent',
-        description: 'Spawn an isolated child agent session for explicit task/target work. Runtime validates the structural target and configured hard blocks.',
+        description: 'Spawn an isolated minion (child agent) session for explicit task/target work. Runtime validates the structural target and configured hard blocks.',
         parameters: {
           type: 'object',
           additionalProperties: false,

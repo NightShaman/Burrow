@@ -27,7 +27,7 @@ function subagentFinishToolSchema() {
     type: 'function',
     function: {
       name: 'finish_subagent',
-      description: 'Terminal subagent completion signal. Use exactly once when no more tools are needed. The runtime only treats this structured tool call as child completion.',
+      description: 'Terminal minion completion signal. Use exactly once when no more tools are needed. The runtime only treats this structured tool call as child completion.',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -297,7 +297,7 @@ function compactEvidenceForHandoff(toolResults = []) {
 function subagentResult({ ok, summary, blockers = [], warnings = [], verification = null, toolResults = [], target = null } = {}) {
   return {
     ok: Boolean(ok),
-    summary: compactText(summary, 12_000) || (ok ? 'Subagent completed.' : 'Subagent failed.'),
+    summary: compactText(summary, 12_000) || (ok ? 'Minion completed.' : 'Minion failed.'),
     blockers: blockers.slice(0, 20),
     warnings: warnings.slice(0, 20),
     // Full raw tool output is preserved in the child trace artifacts. The IPC
@@ -320,7 +320,7 @@ function choiceToolCalls(choice = {}) {
   return Array.isArray(choice?.toolCalls) ? choice.toolCalls : [];
 }
 
-function subagentEmptyFinalResult({ toolResults = [], target = null, reason = 'subagent_empty_final_response', summary = 'Subagent gathered evidence but produced no final report.' } = {}) {
+function subagentEmptyFinalResult({ toolResults = [], target = null, reason = 'subagent_empty_final_response', summary = 'Minion gathered evidence but produced no final report.' } = {}) {
   return subagentResult({
     ok: false,
     summary,
@@ -331,7 +331,7 @@ function subagentEmptyFinalResult({ toolResults = [], target = null, reason = 's
 }
 
 function subagentTerminalMissingResult({ toolResults = [], target = null, text = '' } = {}) {
-  const summary = compactString(text) || 'Subagent did not emit a structured terminal completion signal.';
+  const summary = compactString(text) || 'Minion did not emit a structured terminal completion signal.';
   return subagentResult({ ok: false, summary, blockers: ['subagent_terminal_signal_missing'], toolResults, target });
 }
 
@@ -349,7 +349,7 @@ function terminalResultFromToolCalls(toolCalls = [], { toolResults = [], target 
     observed: compactString(args.verification.observed) || null,
     actionRequired: Boolean(args.verification.actionRequired),
   } : null;
-  if (!summary) return subagentResult({ ok: false, summary: 'Subagent terminal signal omitted summary.', blockers: ['subagent_terminal_summary_required'], warnings, verification, toolResults, target });
+  if (!summary) return subagentResult({ ok: false, summary: 'Minion terminal signal omitted summary.', blockers: ['subagent_terminal_summary_required'], warnings, verification, toolResults, target });
   if (status === 'completed') return subagentResult({ ok: true, summary, blockers, warnings, verification, toolResults, target });
   return subagentResult({ ok: false, summary, blockers: blockers.length ? blockers : [`subagent_${status || 'incomplete'}`], warnings, verification, toolResults, target });
 }
@@ -403,7 +403,7 @@ export async function runSpawnSubagentChild({
   if (!childSessionId) blockers.push('subagent_child_session_required');
   if (!modelConfig) blockers.push('subagent_model_config_required');
   if (blockers.length) {
-    return { ok: false, summary: 'Subagent child did not run.', blockers, warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
+    return { ok: false, summary: 'Minion child did not run.', blockers, warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
   }
 
   await progress?.({ type: 'subagent-progress', phase: 'started', id });
@@ -432,7 +432,7 @@ export async function runSpawnSubagentChild({
   const first = await adapter.complete({ messages, tools: subagentToolSchemas(), traceLogger: modelTrace });
   await progress?.({ type: 'subagent-progress', phase: 'model-response', id });
   if (!first.ok) {
-    const result = { ok: false, summary: 'Subagent model call failed.', blockers: [`subagent_model_failed:${first.error || first.status}`], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
+    const result = { ok: false, summary: 'Minion model call failed.', blockers: [`subagent_model_failed:${first.error || first.status}`], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
     await updateSubagentStatus({ dataRoot, id, status: 'failed', phase: 'idle', result, provenance: { source: 'spawn-subagent-child', reason: 'model_failed' } });
     return result;
   }
@@ -501,7 +501,7 @@ export async function runSpawnSubagentChild({
     } catch (error) {
       const result = subagentResult({
         ok: false,
-        summary: 'Subagent follow-up model call failed.',
+        summary: 'Minion follow-up model call failed.',
         blockers: [`subagent_model_failed:${error?.message || String(error)}`],
         toolResults,
         target,
@@ -512,7 +512,7 @@ export async function runSpawnSubagentChild({
     await progress?.({ type: 'subagent-progress', phase: 'model-response', id });
     if (nativeContinuation && Array.isArray(next?.nativeTranscript)) messages.splice(0, messages.length, ...next.nativeTranscript);
     if (!next.ok) {
-      const result = subagentResult({ ok: false, summary: 'Subagent follow-up model call failed.', blockers: [`subagent_model_failed:${next.error || next.status}`], toolResults, target });
+      const result = subagentResult({ ok: false, summary: 'Minion follow-up model call failed.', blockers: [`subagent_model_failed:${next.error || next.status}`], toolResults, target });
       await updateSubagentStatus({ dataRoot, id, status: 'failed', phase: 'idle', result, provenance: { source: 'spawn-subagent-child', reason: 'model_failed_after_tools' } });
       return result;
     }
@@ -543,7 +543,7 @@ export async function runSpawnSubagentChild({
   });
   await progress?.({ type: 'subagent-progress', phase: 'terminal-response', id });
   if (!synthesis.ok) {
-    const result = subagentResult({ ok: false, summary: 'Subagent final synthesis model call failed.', blockers: [`subagent_model_failed:${synthesis.error || synthesis.status}`], toolResults, target });
+    const result = subagentResult({ ok: false, summary: 'Minion final synthesis model call failed.', blockers: [`subagent_model_failed:${synthesis.error || synthesis.status}`], toolResults, target });
     await updateSubagentStatus({ dataRoot, id, status: 'failed', phase: 'idle', result, provenance: { source: 'spawn-subagent-child', reason: 'final_synthesis_failed' } });
     await writeSessionMetadata({ rootDir: dataRoot, sessionId: childSessionId, extra: { sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: 'failed', subagentOk: false, workerProfile: 'spawn_subagent' } });
     return result;
