@@ -98,20 +98,22 @@ function itemPaths(item, path, paths) {
   for (const [key, value] of Object.entries(item)) {
     const child = `${path}.${key}`;
     if (key === 'notes') {
-      if (typeof value !== 'string') return false;
-      mark(child, paths);
+      if (value !== null && typeof value !== 'string') return false;
+      if (value !== null) mark(child, paths);
     } else if (key === 'login') {
+      if (value === null) continue;
       if (!keysAllowed(value, LOGIN_KEYS)) return false;
       for (const [loginKey, loginValue] of Object.entries(value)) {
         const loginPath = `${child}.${loginKey}`;
         if (loginKey === 'password' || loginKey === 'totp') {
-          if (typeof loginValue !== 'string') return false;
-          mark(loginPath, paths);
+          if (loginValue !== null && typeof loginValue !== 'string') return false;
+          if (loginValue !== null) mark(loginPath, paths);
         } else if (loginKey === 'uris') {
           if (!Array.isArray(loginValue) || !loginValue.every((uri) => keysAllowed(uri, URI_KEYS) && Object.values(uri).every(scalarOrNull))) return false;
         } else if (!scalarOrNull(loginValue)) return false;
       }
     } else if (key === 'fields') {
+      if (value === null) continue;
       if (!Array.isArray(value)) return false;
       for (let index = 0; index < value.length; index += 1) {
         const field = value[index];
@@ -119,6 +121,7 @@ function itemPaths(item, path, paths) {
         if (typeof field.value === 'string') mark(`${child}[${index}].value`, paths);
       }
     } else if (key === 'passwordHistory') {
+      if (value === null) continue;
       if (!Array.isArray(value)) return false;
       for (let index = 0; index < value.length; index += 1) {
         const history = value[index];
@@ -126,10 +129,11 @@ function itemPaths(item, path, paths) {
         mark(`${child}[${index}].password`, paths);
       }
     } else if (key === 'collectionIds') {
+      if (value === null) continue;
       if (!Array.isArray(value) || !value.every((entry) => typeof entry === 'string')) return false;
     } else if (!scalarOrNull(value)) return false;
   }
-  return paths.size > 0;
+  return Object.keys(item).length > 0;
 }
 
 function passwordPaths(value, path, paths) {
@@ -162,9 +166,27 @@ function parseProducerText(block) {
 
 function credentialShape(value, producer) {
   const paths = new Set();
-  const inspect = (payload, path) => producer === 'bitwarden-keychain-get-item-reveal'
-    ? itemPaths(payload, path, paths)
-    : passwordPaths(payload, path, paths);
+  const inspect = (payload, path) => {
+    // Warden's declared contracts, not inferred secret-looking field names.
+    if (producer === 'bitwarden-keychain-get-password' && isObject(payload) && Object.hasOwn(payload, 'result')) {
+      if (!keysAllowed(payload, new Set(['result']))) return false;
+      const result = payload.result;
+      if (!keysAllowed(result, new Set(['kind', 'value', 'revealed'])) || result.kind !== 'password'
+        || typeof result.revealed !== 'boolean' || !Object.hasOwn(result, 'value')
+        || (result.value !== null && typeof result.value !== 'string')) return false;
+      // Even an unrevealed string must never escape protection (e.g. a masked value).
+      if (result.value !== null) mark(`${path}.result.value`, paths);
+      return true;
+    }
+    if (producer === 'bitwarden-keychain-get-item-reveal') {
+      if (isObject(payload) && Object.hasOwn(payload, 'item')) {
+        return keysAllowed(payload, new Set(['item']))
+          && (payload.item === null || itemPaths(payload.item, `${path}.item`, paths));
+      }
+      return itemPaths(payload, path, paths);
+    }
+    return passwordPaths(payload, path, paths);
+  };
   if (typeof value === 'string') return inspect(value, '$') ? { value, paths } : null;
   if (!isObject(value)) return null;
 
@@ -180,7 +202,7 @@ function credentialShape(value, producer) {
       normalized = { ...normalized, content: [{ ...value.content[0], text: payload }] };
     }
     if (Object.hasOwn(value, 'structuredContent') && !inspect(value.structuredContent, '$.structuredContent')) return null;
-    return paths.size ? { value: normalized, paths } : null;
+    return { value: normalized, paths };
   }
   return inspect(value, '$') ? { value, paths } : null;
 }
