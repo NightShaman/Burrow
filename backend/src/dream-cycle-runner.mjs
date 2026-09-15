@@ -30,9 +30,29 @@ function modelText(result) {
   const choice = result?.choice || result?.choices?.[0] || null;
   const content = choice?.message?.content ?? choice?.content ?? result?.message?.content ?? result?.content;
   const contentText = Array.isArray(content)
-    ? content.map((part) => typeof part === 'string' ? part : part?.text || '').join('')
+    ? content.map((part) => typeof part === 'string' ? part : part?.text || part?.content || '').join('')
     : content;
-  return text(choice?.text ?? contentText ?? result?.output_text ?? result?.text ?? result?.message ?? result?.answerText);
+  const outputContent = Array.isArray(result?.output)
+    ? result.output.flatMap((item) => Array.isArray(item?.content) ? item.content : [item]).map((part) => typeof part === 'string' ? part : part?.text || part?.content || '').join('')
+    : '';
+  return text(choice?.text || contentText || result?.output_text || outputContent || result?.text || result?.message || result?.answerText);
+}
+
+function modelResponseDiagnostics(result) {
+  const choice = result?.choice || result?.choices?.[0] || null;
+  const content = choice?.message?.content ?? choice?.content ?? result?.message?.content ?? result?.content;
+  const parts = Array.isArray(content) ? content.map((part) => typeof part === 'string' ? 'string' : String(part?.type || 'object')).slice(0, 12) : [];
+  return {
+    provider: result?.provider || null,
+    api: result?.api || null,
+    status: result?.status ?? null,
+    ok: result?.ok ?? null,
+    finishReason: choice?.finishReason || result?.finishReason || null,
+    responseChars: modelText(result).length,
+    responseBytes: result?.raw?.responseBytes ?? null,
+    contentParts: parts,
+    error: result?.error ? clamp(result.error, 240) : null,
+  };
 }
 
 function parseModelJson(value) {
@@ -123,12 +143,14 @@ function fitsPrompt(content, modelConfig) {
 async function completeText({ content, modelAdapter, modelConfig, traceLogger }) {
   if (!modelAdapter) throw new Error('dream_model_unavailable');
   if (!fitsPrompt(content, modelConfig)) throw new Error('dream_prompt_budget_exceeded');
-  let result = modelText(await modelAdapter.complete({ messages: [{ role: 'user', content }], traceLogger }));
+  let response = await modelAdapter.complete({ messages: [{ role: 'user', content }], traceLogger });
+  let result = modelText(response);
   if (!result) {
     const retryContent = `${content}\n\nThe previous attempt returned no usable text. Retry now and output only the requested result; do not stop after internal reasoning.`;
-    result = modelText(await modelAdapter.complete({ messages: [{ role: 'user', content: retryContent }], traceLogger }));
+    response = await modelAdapter.complete({ messages: [{ role: 'user', content: retryContent }], traceLogger });
+    result = modelText(response);
   }
-  if (!result) throw new Error('dream_model_empty_response');
+  if (!result) throw new Error(`dream_model_empty_response:${JSON.stringify(modelResponseDiagnostics(response))}`);
   return result;
 }
 
@@ -168,9 +190,20 @@ function phaseWindowStart({ phase, generatedAt }) {
   return new Date(new Date(generatedAt).getTime() - days * 24 * 60 * 60 * 1000).toISOString();
 }
 
+function extractionPayload(parsed) {
+  let current = parsed;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (current && typeof current === 'object' && !Array.isArray(current)
+      && (Array.isArray(current.memories) || Array.isArray(current.preferences))) return current;
+    const next = current?.result ?? current?.data ?? current?.output ?? current?.response;
+    if (!next || next === current) break;
+    current = next;
+  }
+  return current;
+}
+
 function parsePhaseExtraction(value) {
-  let parsed = null;
-  parsed = parseModelJson(value);
+  let parsed = extractionPayload(parseModelJson(value));
   const normalizeRefs = (refs, allowed) => [...new Set((Array.isArray(refs) ? refs : []).map(text).filter((ref) => allowed.has(ref)))].slice(0, 8);
   const allowed = new Set(parsed?.allowedSourceRefs || []);
   const memories = (Array.isArray(parsed?.memories) ? parsed.memories : []).map((item) => ({
@@ -219,8 +252,11 @@ async function extractPhaseCandidates({ phase, messages, generatedAt, modelAdapt
   for (const chunk of promptChunks(messages, prompt, modelConfig)) {
     const result = await completeText({ content: prompt(chunk), modelAdapter, modelConfig, traceLogger });
     let parsed;
-    parsed = parseModelJson(result);
-    if (!Array.isArray(parsed?.memories) || !Array.isArray(parsed?.preferences)) throw new Error('dream_extraction_invalid_shape');
+    parsed = extractionPayload(parseModelJson(result));
+    if (!Array.isArray(parsed?.memories) || !Array.isArray(parsed?.preferences)) {
+      const keys = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? Object.keys(parsed).slice(0, 12) : [];
+      throw new Error(`dream_extraction_invalid_shape:${JSON.stringify({ keys, type: Array.isArray(parsed) ? 'array' : typeof parsed })}`);
+    }
     const source = parsePhaseExtraction(JSON.stringify({ ...parsed, allowedSourceRefs: chunk.map((item) => item.sourceRef) }));
     output.memories.push(...source.memories);
     output.preferences.push(...source.preferences);
