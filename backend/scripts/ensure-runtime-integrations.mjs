@@ -5,7 +5,7 @@ import path from 'node:path';
 
 export const INTEGRATIONS = Object.freeze([
   Object.freeze({ id: 'mcporter', packageName: 'mcporter', version: '0.13.7', executable: 'mcporter' }),
-  Object.freeze({ id: 'claude-code', packageName: '@anthropic-ai/claude-code', version: '2.1.232', executable: 'claude' }),
+  Object.freeze({ id: 'claude-code', packageName: '@anthropic-ai/claude-code', version: '2.1.251', executable: 'claude' }),
 ]);
 
 function run(binary, args, { cwd } = {}) {

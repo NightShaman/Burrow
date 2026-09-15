@@ -11,7 +11,7 @@ const ARCHIVE_ROOT = 'burrow-install';
 const MANIFEST = 'portable-install-manifest.json';
 const TAR_LIST_MAX_BUFFER = 64 * 1024 * 1024;
 const MCPORTER_VERSION = '0.13.7';
-const CLAUDE_CODE_VERSION = '2.1.232';
+const CLAUDE_CODE_VERSION = '2.1.251';
 
 function nonEmpty(value, name) { if (!value) throw new Error(`${name} is required`); return value; }
 

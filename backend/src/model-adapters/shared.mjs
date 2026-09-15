@@ -10,7 +10,7 @@ import { normalizeProviderMessage, normalizeProviderMessages, providerMessageMan
 // transport guard for genuinely pathological upstreams; normalized text,
 // thought, tool arguments, and continuation receipts remain bounded.
 const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
-const CLAUDE_CODE_VERSION = '2.1.226';
+const CLAUDE_CODE_VERSION = '2.1.251';
 const CLAUDE_CODE_BILLING_SYSTEM_BLOCK = `x-anthropic-billing-header: cc_version=${CLAUDE_CODE_VERSION}; cc_entrypoint=sdk-cli;`;
 const MAX_MODEL_TEXT_CHARS = 64 * 1024;
 const MAX_STREAM_TOOL_CALLS = 32;
