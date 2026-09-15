@@ -317,8 +317,8 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
   cat > "$STAGING/integrations/claude-code/package.json" <<'PACKAGE'
 {
   "private": true,
-  "dependencies": { "@anthropic-ai/claude-code": "2.1.232" },
-  "allowScripts": { "@anthropic-ai/claude-code@2.1.232": true }
+  "dependencies": { "@anthropic-ai/claude-code": "2.1.251" },
+  "allowScripts": { "@anthropic-ai/claude-code@2.1.251": true }
 }
 PACKAGE
   npm install --prefix "$STAGING/integrations/claude-code" --omit=dev --no-package-lock --ignore-scripts=false --no-audit --no-fund --loglevel=error
