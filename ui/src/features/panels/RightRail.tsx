@@ -1,11 +1,16 @@
 import { useState, type DragEvent, type PointerEvent, type ReactNode } from 'react';
 import type { Account, PanelId } from '../../app/types';
+import type { RailLayout } from '../../app/usePersistedLayout';
 import { formatUsageReset } from '../../app/useRuntimeDashboard';
 import { Chevron, RailExpander } from '../workspace/WorkspaceRail';
 import { getPanelTitle } from '../../app/panelRegistry';
 import { AccountCard } from './AccountCard';
 export type PanelContext = { accounts: Account[] };
-export function RightRail({ collapsed, topPanel, bottomPanel, renderPanel, onExpand, onCollapse, onResizeSplit }: { collapsed: boolean; topPanel: PanelId; bottomPanel: PanelId; renderPanel: (panel: PanelId) => ReactNode; onExpand: () => void; onCollapse: () => void; onResizeSplit: (event: PointerEvent) => void }) { return <aside className={`right-rail ${collapsed ? 'collapsed' : ''}`}>{collapsed ? <RailExpander label="Open right rail" onClick={onExpand} side="right" /> : <><div className="rail-head"><span>{getPanelTitle(topPanel)}</span><button onClick={onCollapse} aria-label="Collapse right rail"><Chevron direction="right" /></button></div><div className="right-panes"><section className="rail-panel top">{renderPanel(topPanel)}</section><button className="resize-divider vertical" onPointerDown={onResizeSplit} aria-label="Resize right rail panels" /><section className="rail-panel bottom"><div className="rail-head"><span>{getPanelTitle(bottomPanel)}</span></div>{renderPanel(bottomPanel)}</section></div></>}</aside>; }
+export function RightRail({ collapsed, topPanel, bottomPanel, singlePanel, layout, renderPanel, onExpand, onCollapse, onResizeSplit }: { collapsed: boolean; topPanel: PanelId; bottomPanel: PanelId; singlePanel?: PanelId; layout: RailLayout; renderPanel: (panel: PanelId) => ReactNode; onExpand: () => void; onCollapse: () => void; onResizeSplit: (event: PointerEvent) => void }) {
+ const fullPanel = layout === 'divided' ? topPanel : singlePanel ?? (layout === 'bottom' ? bottomPanel : topPanel);
+ const isDivided = layout === 'divided';
+ return <aside className={`right-rail ${collapsed ? 'collapsed' : ''}`}>{collapsed ? <RailExpander label="Open right rail" onClick={onExpand} side="right" /> : <><div className="rail-head"><span>{getPanelTitle(fullPanel)}</span><button onClick={onCollapse} aria-label="Collapse right rail"><Chevron direction="right" /></button></div><div className={`right-panes ${isDivided ? 'divided' : 'full'}`}><section className="rail-panel top">{renderPanel(isDivided ? topPanel : fullPanel)}</section>{isDivided && <><button className="resize-divider vertical" onPointerDown={onResizeSplit} aria-label="Resize right rail panels" /><section className="rail-panel bottom"><div className="rail-head"><span>{getPanelTitle(bottomPanel)}</span></div>{renderPanel(bottomPanel)}</section></>}</div></>}</aside>;
+}
 
 export function CodexAccounts({ accounts, onReorder }: { accounts: Account[]; onReorder?: (draggedId: string, targetId: string) => void }) {
  const [draggedId, setDraggedId] = useState<string | null>(null);

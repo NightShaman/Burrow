@@ -33,6 +33,9 @@ const isString: StoredValueValidator<string> = (value): value is string => typeo
 const isBoolean: StoredValueValidator<boolean> = (value): value is boolean => typeof value === 'boolean';
 const isTheme: StoredValueValidator<Theme> = (value): value is Theme => typeof value === 'string' && themes.includes(value as Theme);
 const isPanel: StoredValueValidator<PanelId> = (value): value is PanelId => typeof value === 'string' && panelIds.includes(value as PanelId);
+export const railLayouts = ['divided', 'single', 'top', 'bottom'] as const;
+export type RailLayout = typeof railLayouts[number];
+const isRailLayout: StoredValueValidator<RailLayout> = (value): value is RailLayout => typeof value === 'string' && railLayouts.includes(value as RailLayout);
 const boundedNumber = (min: number, max: number): StoredValueValidator<number> => (value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
 
 function useStoredState<T>(key: string, fallback: T, validate: StoredValueValidator<T>, decodeLegacy: (raw: string) => T | undefined) {
@@ -59,9 +62,13 @@ export function usePersistedLayout() {
   const [rightSplit, setRightSplit] = useStoredState('hc.rightSplit', 50, boundedNumber(25, 75), (raw) => { const value = Number(raw); return Number.isFinite(value) ? value : undefined; });
   const [leftTopPanel, setLeftTopPanel] = useStoredState<PanelId>('hc.leftTopPanel', 'agents', isPanel, (raw) => isPanel(raw) ? raw : undefined);
   const [leftBottomPanel, setLeftBottomPanel] = useStoredState<PanelId>('hc.leftBottomPanel', 'workspace', isPanel, (raw) => isPanel(raw) ? raw : undefined);
+  const [leftRailLayout, setLeftRailLayout] = useStoredState<RailLayout>('hc.leftRailLayout', 'divided', isRailLayout, (raw) => railLayouts.includes(raw as RailLayout) ? raw as RailLayout : undefined);
+  const [leftSinglePanel, setLeftSinglePanel] = useStoredState<PanelId>('hc.leftSinglePanel', leftRailLayout === 'bottom' ? leftBottomPanel : leftTopPanel, isPanel, (raw) => isPanel(raw) ? raw : undefined);
   const [rightTopPanel, setRightTopPanel] = useStoredState<PanelId>('hc.rightTopPanel', 'none', isPanel, (raw) => isPanel(raw) ? raw : undefined);
   const [rightBottomPanel, setRightBottomPanel] = useStoredState<PanelId>('hc.rightBottomPanel', 'none', isPanel, (raw) => isPanel(raw) ? raw : undefined);
-  return { leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed, leftSplit, setLeftSplit, rightSplit, setRightSplit, leftTopPanel, setLeftTopPanel, leftBottomPanel, setLeftBottomPanel, rightTopPanel, setRightTopPanel, rightBottomPanel, setRightBottomPanel };
+  const [rightRailLayout, setRightRailLayout] = useStoredState<RailLayout>('hc.rightRailLayout', 'divided', isRailLayout, (raw) => railLayouts.includes(raw as RailLayout) ? raw as RailLayout : undefined);
+  const [rightSinglePanel, setRightSinglePanel] = useStoredState<PanelId>('hc.rightSinglePanel', rightRailLayout === 'bottom' ? rightBottomPanel : rightTopPanel, isPanel, (raw) => isPanel(raw) ? raw : undefined);
+  return { leftSinglePanel, setLeftSinglePanel, rightSinglePanel, setRightSinglePanel, leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed, leftSplit, setLeftSplit, rightSplit, setRightSplit, leftTopPanel, setLeftTopPanel, leftBottomPanel, setLeftBottomPanel, rightTopPanel, setRightTopPanel, rightBottomPanel, setRightBottomPanel, leftRailLayout, setLeftRailLayout, rightRailLayout, setRightRailLayout };
 }
 
 export function listenResize(move: (event: globalThis.PointerEvent) => void) {

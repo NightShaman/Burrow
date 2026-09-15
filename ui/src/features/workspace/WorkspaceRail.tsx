@@ -1,5 +1,6 @@
 import { useEffect, useState, type PointerEvent, type ReactNode } from 'react';
 import type { Agent, FileNode, PanelId } from '../../app/types';
+import type { RailLayout } from '../../app/usePersistedLayout';
 import { apiForTarget, type RuntimeHealth, type RuntimeMetrics } from '../../app/api';
 import type { ApiTarget } from '../../app/apiTargets';
 import type { ProviderConnectionStatus } from '../../app/useRuntimeDashboard';
@@ -12,8 +13,10 @@ export function RailExpander({ label, onClick, side }: { label: string; onClick:
 
 export type WorkspacePanelContext = { agents: Agent[]; selected: Agent; selectedStreamId: string; expandedAgents: Set<string>; onToggleAgent: (id: string) => void; onSelectAgent: (agent: Agent) => void; onSelectSubagent: (agentId: string, subagentId: string) => void; onOpenFile: (node: FileNode) => void };
 
-export function WorkspaceRail({ collapsed, topPanel, bottomPanel, renderPanel, onExpand, onCollapse, onResizeSplit }: { collapsed: boolean; topPanel: PanelId; bottomPanel: PanelId; renderPanel: (panel: PanelId) => ReactNode; onExpand: () => void; onCollapse: () => void; onResizeSplit: (event: PointerEvent) => void }) {
-  return <aside className={`left-rail ${collapsed ? 'collapsed' : ''}`}>{collapsed ? <RailExpander label="Open left rail" onClick={onExpand} side="left" /> : <><div className="rail-head"><span>{getPanelTitle(topPanel)}</span><button onClick={onCollapse} aria-label="Collapse left rail"><Chevron direction="left" /></button></div><div className="left-panes"><section className="rail-panel top">{renderPanel(topPanel)}</section><button className="resize-divider vertical" onPointerDown={onResizeSplit} aria-label="Resize left rail panels" /><section className="rail-panel bottom"><div className="rail-head"><span>{getPanelTitle(bottomPanel)}</span></div>{renderPanel(bottomPanel)}</section></div></>}</aside>;
+export function WorkspaceRail({ collapsed, topPanel, bottomPanel, singlePanel, layout, renderPanel, onExpand, onCollapse, onResizeSplit }: { collapsed: boolean; topPanel: PanelId; bottomPanel: PanelId; singlePanel?: PanelId; layout: RailLayout; renderPanel: (panel: PanelId) => ReactNode; onExpand: () => void; onCollapse: () => void; onResizeSplit: (event: PointerEvent) => void }) {
+  const fullPanel = layout === 'divided' ? topPanel : singlePanel ?? (layout === 'bottom' ? bottomPanel : topPanel);
+  const isDivided = layout === 'divided';
+  return <aside className={`left-rail ${collapsed ? 'collapsed' : ''}`}>{collapsed ? <RailExpander label="Open left rail" onClick={onExpand} side="left" /> : <><div className="rail-head"><span>{getPanelTitle(fullPanel)}</span><button onClick={onCollapse} aria-label="Collapse left rail"><Chevron direction="left" /></button></div><div className={`left-panes ${isDivided ? 'divided' : 'full'}`}><section className="rail-panel top">{renderPanel(isDivided ? topPanel : fullPanel)}</section>{isDivided && <><button className="resize-divider vertical" onPointerDown={onResizeSplit} aria-label="Resize left rail panels" /><section className="rail-panel bottom"><div className="rail-head"><span>{getPanelTitle(bottomPanel)}</span></div>{renderPanel(bottomPanel)}</section></>}</div></>}</aside>;
 }
 
 export function AgentsPanel({ agents, selectedStreamId, expandedAgents, onToggleAgent, onSelectAgent, onSelectSubagent }: Pick<WorkspacePanelContext, 'agents' | 'selectedStreamId' | 'expandedAgents' | 'onToggleAgent' | 'onSelectAgent' | 'onSelectSubagent'>) {
