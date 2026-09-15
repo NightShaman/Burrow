@@ -165,8 +165,8 @@ function supportsAnthropicXhighEffort(model = '') {
 }
 
 function anthropicReasoningEffort(config = {}) {
-  const effort = String(config.extra?.reasoning?.effort || '').trim().toLowerCase();
-  return ['minimal', 'low', 'medium', 'high', 'xhigh', 'ultra'].includes(effort) ? effort : null;
+  const effort = String(config.reasoningEffort ?? config.extra?.reasoning?.effort ?? '').trim().toLowerCase();
+  return ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'ultra'].includes(effort) ? effort : null;
 }
 
 function anthropicExtraWithoutGenericReasoning(extra = {}, model = '') {
@@ -183,6 +183,18 @@ function anthropicExtraWithoutGenericReasoning(extra = {}, model = '') {
 
 function anthropicThinkingConfig({ model, config = {}, maxTokens = 4096 } = {}) {
   const effort = anthropicReasoningEffort(config);
+  if (effort === 'off' && supportsAnthropicThinking(model)) {
+    const extra = { ...anthropicExtraWithoutGenericReasoning(config.extra, model) };
+    // Explicit off must override inherited native thinking and effort, while
+    // preserving unrelated output configuration (for example JSON schemas).
+    delete extra.thinking;
+    if (extra.output_config && typeof extra.output_config === 'object') {
+      extra.output_config = { ...extra.output_config };
+      delete extra.output_config.effort;
+      if (!Object.keys(extra.output_config).length) delete extra.output_config;
+    }
+    return { enabled: false, thinking: { type: 'disabled' }, maxTokens, extra };
+  }
   if (!effort || !supportsAnthropicThinking(model)) return { enabled: false, maxTokens, extra: anthropicExtraWithoutGenericReasoning(config.extra, model) };
   if (supportsAdaptiveAnthropicThinking(model)) {
     const mappedEffort = ANTHROPIC_ADAPTIVE_EFFORTS[effort] || 'medium';
@@ -316,7 +328,7 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
       max_tokens: thinking.maxTokens,
       ...(resolvedTools ? { tools: promptCaching ? anthropicCacheableTools(resolvedTools) : resolvedTools } : {}),
       ...(thinking.extra || {}),
-      ...(thinking.enabled ? { thinking: thinking.thinking } : {}),
+      ...(thinking.thinking ? { thinking: thinking.thinking } : {}),
       ...(thinking.outputConfig ? { output_config: thinking.outputConfig } : {}),
       ...(streaming ? { stream: true } : {}),
     };
