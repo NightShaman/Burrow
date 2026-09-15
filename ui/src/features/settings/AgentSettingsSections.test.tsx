@@ -1,4 +1,4 @@
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiForTarget } from '../../app/api';
 import type { ApiTarget } from '../../app/apiTargets';
@@ -21,12 +21,95 @@ function pendingRequestSignals() {
   return apiMock.mock.calls.map(([, , init]) => init?.signal).filter((signal): signal is AbortSignal => Boolean(signal));
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (cause?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => { resolve = nextResolve; reject = nextReject; });
+  return { promise, resolve, reject };
+}
+
+const dreamSettings = (overrides = {}) => ({ enabled: false, cron: '0 4 * * *', timezone: 'UTC', prompt: '', modelConnectionId: null, model: null, ...overrides });
+
 afterEach(cleanup);
 
 describe('agent settings sections', () => {
   beforeEach(() => {
     apiMock.mockReset();
     apiMock.mockImplementation(() => new Promise(() => undefined));
+  });
+
+
+  it('blocks Dream edits until its initial settings request resolves', async () => {
+    const load = deferred<{ settings: ReturnType<typeof dreamSettings> }>();
+    apiMock.mockReturnValue(load.promise);
+    render(<AgentDreams agentId="smatchet" targets={targets} savedProviders={[]} />);
+
+    expect(screen.getByLabelText('Enable scheduled dreaming').getAttribute('disabled')).not.toBeNull();
+    expect(screen.getByLabelText('Cron').getAttribute('disabled')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Dream model' }).getAttribute('disabled')).not.toBeNull();
+    expect(screen.getByLabelText('Dream prompt').getAttribute('disabled')).not.toBeNull();
+
+    await act(async () => { load.resolve({ settings: dreamSettings() }); });
+    expect(screen.getByLabelText('Enable scheduled dreaming').getAttribute('disabled')).toBeNull();
+  });
+
+  it('ignores an old Dream save response after switching agents', async () => {
+    const firstLoad = deferred<{ settings: ReturnType<typeof dreamSettings> }>();
+    const save = deferred<{ settings: ReturnType<typeof dreamSettings> }>();
+    const secondLoad = deferred<{ settings: ReturnType<typeof dreamSettings> }>();
+    apiMock.mockImplementation((_target, _path, init) => {
+      if (init?.method === 'PUT') return save.promise;
+      return apiMock.mock.calls.filter(([, , request]) => !request?.method).length === 1 ? firstLoad.promise : secondLoad.promise;
+    });
+    const view = render(<AgentDreams agentId="smatchet" targets={targets} savedProviders={[]} />);
+    await act(async () => { firstLoad.resolve({ settings: dreamSettings({ prompt: 'Agent A' }) }); });
+    await screen.findByDisplayValue('Agent A');
+    fireEvent.click(screen.getByRole('button', { name: 'Save dream settings' }));
+    expect(screen.getByLabelText('Dream prompt').getAttribute('disabled')).not.toBeNull();
+
+    view.rerender(<AgentDreams agentId="node-1::hatchet" targets={targets} savedProviders={[]} />);
+    await act(async () => { secondLoad.resolve({ settings: dreamSettings({ prompt: 'Agent B' }) }); });
+    await screen.findByDisplayValue('Agent B');
+    await act(async () => { save.resolve({ settings: dreamSettings({ prompt: 'Old save' }) }); });
+
+    expect(screen.getByDisplayValue('Agent B')).toBeTruthy();
+    expect(screen.getByLabelText('Dream prompt').getAttribute('disabled')).toBeNull();
+  });
+
+  it('shows an unavailable persisted Dream model instead of pretending it inherits', async () => {
+    apiMock.mockResolvedValue({ settings: { enabled: false, cron: '0 4 * * *', timezone: 'UTC', prompt: '', modelConnectionId: 'removed-connection', model: 'gone-model' } });
+    render(<AgentDreams agentId="smatchet" targets={targets} savedProviders={[]} />);
+
+    expect(await screen.findByText('Unavailable model · removed-connection · gone-model')).toBeTruthy();
+  });
+
+  it('shows an unconfigured effective model and its resolution error', async () => {
+    apiMock.mockResolvedValue({ settings: { enabled: false, cron: '0 4 * * *', timezone: 'UTC', prompt: '' }, effectiveModel: null, modelResolutionError: 'No chat model is configured for this agent.' });
+    render(<AgentDreams agentId="smatchet" targets={targets} savedProviders={[]} />);
+
+    expect(await screen.findByText('Effective model: Unconfigured')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('Model resolution error: No chat model is configured for this agent.');
+  });
+
+  it('shows the resolved effective Dream model', async () => {
+    apiMock.mockResolvedValue({ settings: { enabled: false, cron: '0 4 * * *', timezone: 'UTC', prompt: '' }, effectiveModel: { modelConnectionId: 'connection-1', model: 'model-1' } });
+    render(<AgentDreams agentId="smatchet" targets={targets} savedProviders={[{ id: 'connection-1', provider: 'Claude', apiType: 'anthropic-messages', url: '', apiKey: '', models: ['model-1'] }]} />);
+
+    expect(await screen.findByText('Effective model: Claude · model-1')).toBeTruthy();
+  });
+
+  it('saves an explicit null model selection when inheritance is chosen', async () => {
+    apiMock.mockResolvedValue({ settings: { enabled: false, cron: '0 4 * * *', timezone: 'UTC', prompt: '', modelConnectionId: 'connection-1', model: 'model-1' } });
+    render(<AgentDreams agentId="smatchet" targets={targets} savedProviders={[{ id: 'connection-1', provider: 'Claude', apiType: 'anthropic-messages', url: '', apiKey: '', models: ['model-1'] }]} />);
+
+    await screen.findByText('Claude · model-1');
+    fireEvent.click(screen.getByRole('button', { name: 'Dream model' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Use agent chat model' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save dream settings' }));
+
+    await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(2));
+    const [, , init] = apiMock.mock.calls[1];
+    expect(JSON.parse(init?.body as string)).toMatchObject({ modelConnectionId: null, model: null });
   });
 
   it.each([

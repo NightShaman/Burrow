@@ -4,9 +4,11 @@ import { apiForTarget } from '../../app/api';
 import { targetForResource, type ApiTarget } from '../../app/apiTargets';
 import { Field, SettingSection } from './SettingsPrimitives';
 
-type DreamSettings = { enabled: boolean; cron: string; timezone: string; prompt: string; modelConnectionId?: string | null; model?: string | null };
+type DreamModel = { modelConnectionId?: string | null; model?: string | null };
+type DreamSettings = { enabled: boolean; cron: string; timezone: string; prompt: string } & DreamModel;
+type DreamSettingsResponse = { settings: DreamSettings; effectiveModel?: DreamModel | null; modelResolutionError?: string | null };
 function dreamModelValue(connectionId: string, model: string) { return JSON.stringify([connectionId, model]); }
-function settingsModelValue(settings: DreamSettings) { return settings.modelConnectionId && settings.model ? dreamModelValue(settings.modelConnectionId, settings.model) : ''; }
+function settingsModelValue(settings: DreamModel) { return settings.modelConnectionId && settings.model ? dreamModelValue(settings.modelConnectionId, settings.model) : ''; }
 function dreamModelFromValue(value: string) {
   if (!value) return { modelConnectionId: null, model: null };
   try {
@@ -15,10 +17,17 @@ function dreamModelFromValue(value: string) {
   } catch { return { modelConnectionId: null, model: null }; }
 }
 
-function DreamModelSelect({ value, options, onChange }: { value: string; options: { value: string; label: string }[]; onChange: (value: string) => void }) {
+function modelLabel(model: DreamModel, options: { value: string; label: string }[]) {
+  const value = settingsModelValue(model);
+  const selected = options.find((option) => option.value === value);
+  if (selected) return selected.label;
+  return model.modelConnectionId && model.model ? `Unavailable model · ${model.modelConnectionId} · ${model.model}` : 'Use agent chat model';
+}
+
+function DreamModelSelect({ value, model, options, onChange, disabled }: { value: string; model: DreamModel; options: { value: string; label: string }[]; onChange: (value: string) => void; disabled: boolean }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const selected = options.find((option) => option.value === value) ?? options[0];
+  const selected = options.find((option) => option.value === value);
 
   useEffect(() => {
     if (!open) return;
@@ -29,9 +38,11 @@ function DreamModelSelect({ value, options, onChange }: { value: string; options
     return () => document.removeEventListener('mousedown', close);
   }, [open]);
 
+  useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
+
   return <div className="dream-model-select" ref={menuRef}>
-    <button type="button" className="dream-model-trigger" aria-haspopup="listbox" aria-expanded={open} aria-label="Dream model" onClick={() => setOpen((current) => !current)}>
-      <span>{selected?.label ?? 'Use agent chat model'}</span><span className="dream-phase-chevron" aria-hidden="true">⌄</span>
+    <button type="button" className="dream-model-trigger" aria-haspopup="listbox" aria-expanded={open} aria-label="Dream model" disabled={disabled} onClick={() => setOpen((current) => !current)}>
+      <span>{selected?.label ?? modelLabel(model, options)}</span><span className="dream-phase-chevron" aria-hidden="true">⌄</span>
     </button>
     {open && <div className="dream-model-menu" role="listbox" aria-label="Dream model">
       {options.map((option) => <button type="button" role="option" aria-selected={option.value === value} className={option.value === value ? 'selected' : ''} key={option.value} onClick={() => { onChange(option.value); setOpen(false); }}>{option.label}</button>)}
@@ -47,33 +58,52 @@ export function AgentDreams({ agentId, targets, savedProviders }: { agentId: str
   const selectedDreamModel = settingsModelValue(settings);
   const [state, setState] = useState<'loading' | 'idle' | 'saving'>('loading');
   const [error, setError] = useState('');
+  const [effectiveModel, setEffectiveModel] = useState<DreamModel | null>(null);
+  const [modelResolutionError, setModelResolutionError] = useState<string | null>(null);
+  const requestVersion = useRef(0);
 
   useEffect(() => {
+    const version = ++requestVersion.current;
     const controller = new AbortController();
     setState('loading'); setError('');
-    request<{ settings: DreamSettings }>(`/api/agents/${encodeURIComponent(owner.resourceId)}/dream-settings`, { signal: controller.signal }).then(dreamSettings => {
-      if (controller.signal.aborted) return;
+    request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(owner.resourceId)}/dream-settings`, { signal: controller.signal }).then(dreamSettings => {
+      if (controller.signal.aborted || version !== requestVersion.current) return;
       setSettings(dreamSettings.settings);
+      setEffectiveModel(dreamSettings.effectiveModel ?? null);
+      setModelResolutionError(dreamSettings.modelResolutionError ?? null);
       setState('idle');
     }).catch(cause => {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || version !== requestVersion.current) return;
       setError(cause instanceof Error ? `Could not load dream settings: ${cause.message}` : 'Could not load dream settings.');
       setState('idle');
     });
     return () => controller.abort();
   }, [owner.target.id, owner.resourceId]);
   const save = async () => {
+    const version = requestVersion.current;
     setState('saving'); setError('');
-    try { const result = await request<{ settings: DreamSettings }>(`/api/agents/${encodeURIComponent(owner.resourceId)}/dream-settings`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(settings) }); setSettings(result.settings); }
-    catch (cause) { setError(cause instanceof Error ? `Could not save dream settings: ${cause.message}` : 'Could not save dream settings.'); }
-    finally { setState('idle'); }
+    try {
+      const result = await request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(owner.resourceId)}/dream-settings`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(settings) });
+      if (version !== requestVersion.current) return;
+      setSettings(result.settings);
+      setEffectiveModel(result.effectiveModel ?? null);
+      setModelResolutionError(result.modelResolutionError ?? null);
+    } catch (cause) {
+      if (version !== requestVersion.current) return;
+      setError(cause instanceof Error ? `Could not save dream settings: ${cause.message}` : 'Could not save dream settings.');
+    } finally {
+      if (version === requestVersion.current) setState('idle');
+    }
   };
+  const disabled = state !== 'idle';
   return <SettingSection title="Dreams">
     <p className="settings-description">Configure scheduled dreaming for this agent.</p>
     <div className="dream-settings-fields">
-      <label className="agent-enabled"><input type="checkbox" checked={settings.enabled} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} /><span>Enable scheduled dreaming</span></label>
-      <div className="dream-schedule-fields"><Field label="Cron"><input value={settings.cron} onChange={(event) => setSettings({ ...settings, cron: event.target.value })} /></Field><Field label="Timezone"><input value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} /></Field><Field label="Model"><DreamModelSelect value={selectedDreamModel} options={[{ value: '', label: 'Use agent chat model' }, ...dreamModels.map((option) => ({ value: dreamModelValue(option.connectionId, option.model), label: option.label }))]} onChange={(value) => setSettings({ ...settings, ...dreamModelFromValue(value) })} /></Field></div>
-      <Field label="Dream prompt"><textarea rows={6} value={settings.prompt} onChange={(event) => setSettings({ ...settings, prompt: event.target.value })} /></Field>
+      <label className="agent-enabled"><input type="checkbox" checked={settings.enabled} disabled={disabled} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} /><span>Enable scheduled dreaming</span></label>
+      <div className="dream-schedule-fields"><Field label="Cron"><input value={settings.cron} disabled={disabled} onChange={(event) => setSettings({ ...settings, cron: event.target.value })} /></Field><Field label="Timezone"><input value={settings.timezone} disabled={disabled} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} /></Field><Field label="Model"><DreamModelSelect value={selectedDreamModel} model={settings} options={[{ value: '', label: 'Use agent chat model' }, ...dreamModels.map((option) => ({ value: dreamModelValue(option.connectionId, option.model), label: option.label }))]} onChange={(value) => setSettings({ ...settings, ...dreamModelFromValue(value) })} disabled={disabled} /></Field></div>
+      <p className="settings-description">Effective model: {effectiveModel?.modelConnectionId && effectiveModel.model ? modelLabel(effectiveModel, [{ value: '', label: 'Use agent chat model' }, ...dreamModels.map((option) => ({ value: dreamModelValue(option.connectionId, option.model), label: option.label }))]) : 'Unconfigured'}</p>
+      {modelResolutionError && <p className="settings-request-error" role="alert">Model resolution error: {modelResolutionError}</p>}
+      <Field label="Dream prompt"><textarea rows={6} value={settings.prompt} disabled={disabled} onChange={(event) => setSettings({ ...settings, prompt: event.target.value })} /></Field>
     </div>
     <div className="dream-actions">
       <button className="primary" onClick={() => void save()} disabled={state !== 'idle'}>{state === 'saving' ? 'Saving…' : 'Save dream settings'}</button>

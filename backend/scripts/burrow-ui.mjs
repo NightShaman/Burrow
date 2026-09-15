@@ -861,8 +861,17 @@ async function agentProfileDocuments(agentId, body = null) {
 async function agentDreamSettings(agentId, body = null) {
   const store = dreamSettingsStore();
   try {
-    if (body === null) return { ok: true, settings: store.get(agentId) };
-    return { ok: true, settings: store.save(agentId, body) };
+    const settings = body === null ? store.get(agentId) : store.save(agentId, body);
+    // Resolve exactly as the Dream runner does; never persist the inherited result.
+    let effectiveModel = null;
+    let modelResolutionError = null;
+    try {
+      const config = await resolveModelConfig(settings.modelConnectionId && settings.model
+        ? { modelConnectionId: settings.modelConnectionId, model: settings.model, settingsDb: settingsDatabasePath() }
+        : { agentId, settingsDb: settingsDatabasePath() });
+      if (config) effectiveModel = { modelConnectionId: config.connectionId, model: config.model };
+    } catch (error) { modelResolutionError = String(error?.message || error); }
+    return { ok: true, settings, effectiveModel, modelResolutionError };
   } catch (error) {
     const message = String(error?.message || error);
     return { ok: false, status: message === 'agent_not_found' ? 404 : 400, error: message };
