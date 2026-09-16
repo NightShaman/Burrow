@@ -296,6 +296,9 @@ function nativeToolReceipt(result = {}) {
     receipt.totalMatches = Number.isFinite(result.totalMatches) ? result.totalMatches : result.results.length;
     receipt.results = result.results;
   }
+  // Explicit handoff reads must deliver their body, not just a success flag.
+  // The store bounds records; provider-budget preparation owns any projection.
+  if (result?.tool === 'session_read_handoff') receipt.handoff = result.handoff ?? null;
   // MCP output is external evidence. Preserve a bounded JSON rendering so a
   // provider-native continuation can reason about the actual response rather
   // than a misleading transport-only { ok: true } receipt.

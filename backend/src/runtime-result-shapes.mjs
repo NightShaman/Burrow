@@ -256,7 +256,22 @@ export function summarizeToolResults(toolResults = []) {
         : undefined),
     record: compactToolRecord(toolResult.record),
     handoff: toolResult.handoff && typeof toolResult.handoff === 'object'
-      ? { id: toolResult.handoff.id || null, agentId: toolResult.handoff.agentId || null, sessionId: toolResult.handoff.sessionId || null, runId: toolResult.handoff.runId || null, title: typeof toolResult.handoff.title === 'string' ? compactText(toolResult.handoff.title, 500) : null, sourceRefs: compactList(toolResult.handoff.sourceRefs), expiresAt: toolResult.handoff.expiresAt || null }
+      ? {
+        id: toolResult.handoff.id || null,
+        agentId: toolResult.handoff.agentId || null,
+        sessionId: toolResult.handoff.sessionId || null,
+        runId: toolResult.handoff.runId || null,
+        title: typeof toolResult.handoff.title === 'string' ? compactText(toolResult.handoff.title, 500) : null,
+        sourceRefs: compactList(toolResult.handoff.sourceRefs),
+        expiresAt: toolResult.handoff.expiresAt || null,
+        // Explicit reads retain the store-bounded body; writes remain metadata-only.
+        ...(toolResult.tool === 'session_read_handoff' && typeof toolResult.handoff.content === 'string' ? {
+          content: toolResult.handoff.content,
+          contentChars: toolResult.handoff.content.length,
+          contentComplete: toolResult.handoff.contentComplete !== false,
+          evidenceSummary: toolResult.handoff.evidenceSummary || null,
+        } : {}),
+      }
       : undefined,
     coverage: coverageFromToolResult(toolResult),
     delivery: deliveryFromToolResult(toolResult),
