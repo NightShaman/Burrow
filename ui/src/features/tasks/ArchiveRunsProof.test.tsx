@@ -78,3 +78,18 @@ it('renders linked child summaries as safe Markdown with chat line breaks', asyn
   expect(summary.querySelector('script, img, [onerror]')).toBeNull();
   expect(screen.getByText('Unsafe').getAttribute('href')).not.toContain('javascript:');
 });
+
+it('lazy-loads and expands full redacted tool evidence from the trace API', async () => {
+  const value = run();
+  value.sessionId = 'proof-session';
+  vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue([value]);
+  vi.spyOn(archiveRepository, 'loadRun').mockResolvedValue(value);
+  const trace = vi.spyOn(archiveRepository, 'loadRunTrace').mockResolvedValue({ tools: [{ name: 'shell', output: '[REDACTED]' }] });
+  render(<ArchiveRunsProof selectedAgent="" search="" />);
+  fireEvent.click(await screen.findByRole('button', { name: /smatchet objective/ }));
+  const summary = await screen.findByText('Full redacted tool evidence');
+  expect(trace).not.toHaveBeenCalled();
+  fireEvent.click(summary);
+  expect(await screen.findByText(/"output": "\[REDACTED\]"/)).toBeTruthy();
+  expect(trace).toHaveBeenCalledWith('shared', 'smatchet', 'proof-session', expect.any(AbortSignal));
+});

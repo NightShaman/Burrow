@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import type { ArchiveRunDetail } from '../../app/api';
@@ -84,6 +84,28 @@ function proofMarkdown(run: ArchiveRunDetail) {
 function EvidenceList({ title, items }: { title: string; items: ArchiveRunDetail['evidence']['observations'] }) {
   return <section className="proof-section"><h3>{title}<span>{items.length}</span></h3>{items.length ? <ul>{items.map((item, index) => <li key={`${item.text}-${index}`}><strong className={`proof-status proof-status-${item.status}`}>{item.status}</strong><span>{item.text}</span></li>)}</ul> : <p className="proof-muted">No {title.toLowerCase()} recorded.</p>}</section>;
 }
+function FullToolEvidence({ run }: { run: ArchiveRunDetail }) {
+  const request = useRef<AbortController | null>(null);
+  const [trace, setTrace] = useState<unknown>();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => () => request.current?.abort(), []);
+  const load = () => {
+    request.current?.abort();
+    const abort = new AbortController(); request.current = abort; setLoading(true); setError('');
+    archiveRepository.loadRunTrace(run.runId, run.agentId, run.sessionId, abort.signal)
+      .then((value) => { if (!abort.signal.aborted) setTrace(value); })
+      .catch((cause) => { if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : 'Could not load tool evidence.'); })
+      .finally(() => { if (!abort.signal.aborted) setLoading(false); });
+  };
+  const toggle = (event: SyntheticEvent<HTMLDetailsElement>) => {
+    if (event.currentTarget.open && trace === undefined && !loading) load();
+  };
+  return <details className="proof-full-evidence" onToggle={toggle}>
+    <summary><span><strong>Full redacted tool evidence</strong><small>Loaded from the retained run trace on demand</small></span><span className="proof-expand-label">Expand</span></summary>
+    <div className="proof-full-evidence-body" aria-live="polite">{loading ? <p className="proof-muted">Loading retained trace…</p> : error ? <div className="proof-evidence-error"><p>Could not load full tool evidence: {error}</p><button type="button" onClick={load}>Retry</button></div> : trace === undefined ? null : <><p className="proof-evidence-note">Sensitive values are redacted by the trace API. Evidence is shown exactly as returned.</p><pre><code>{JSON.stringify(trace, null, 2) ?? 'null'}</code></pre></>}</div>
+  </details>;
+}
 function ProofDetail({ run }: { run: ArchiveRunDetail }) {
   const compression = run.context?.compression;
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
@@ -99,6 +121,7 @@ function ProofDetail({ run }: { run: ArchiveRunDetail }) {
     {run.finalAnswer ? <section className="proof-final"><h3>Final outcome</h3><ReactMarkdown remarkPlugins={[remarkBreaks]}>{run.finalAnswer}</ReactMarkdown></section> : null}
     <div className="proof-counts">{Object.entries({ Observations: run.counts.observations, Changes: run.counts.changes, Verifications: run.counts.verifications, Unresolved: run.counts.unresolved, 'Tool activity': run.counts.toolActivities, Minions: run.counts.subagents }).map(([label, count]) => <div key={label}><strong>{count}</strong><span>{label}</span></div>)}</div>
     <div className="proof-evidence-grid"><EvidenceList title="Actions / changes" items={run.evidence.changes} /><EvidenceList title="Verification" items={run.evidence.verifications} /><EvidenceList title="Unresolved" items={run.evidence.unresolved} /></div>
+    <FullToolEvidence key={`${run.agentId}:${run.runId}`} run={run} />
     <section className="proof-section"><h3>Timeline<span>{run.timeline.length}</span></h3>{run.timeline.length ? <ol className="proof-timeline">{run.timeline.map((event, index) => <li key={`${event.kind}-${event.ts}-${index}`}><span className={`proof-timeline-dot proof-status-${event.status}`} aria-hidden="true" /><div><strong>{event.kind.replace('_', ' ')}</strong><time>{date(event.ts)}</time><p>{event.summary}</p></div></li>)}</ol> : <p className="proof-muted">No timeline evidence recorded.</p>}</section>
     {run.context ? <section className="proof-section"><h3>Context / compression proof</h3><div className="proof-context-grid"><div><span>Estimated tokens</span><strong>{String(run.context.budget?.estimatedTokens ?? '—')}</strong></div><div><span>Context window</span><strong>{String(run.context.budget?.contextWindow ?? '—')}</strong></div><div><span>Pressure</span><strong>{String(run.context.budget?.pressure ?? '—')}</strong></div><div><span>Attachments</span><strong>{run.context.attachments}</strong></div><div><span>Compression</span><strong>{compression?.label || 'Not recorded'}</strong></div><div><span>Turns summarized</span><strong>{compression?.summarizedTurnCount == null ? '—' : String(compression.summarizedTurnCount)}</strong></div></div><p className="proof-muted">{compression?.detail || 'No compression decision was recorded for this older run.'}</p></section> : null}
     {run.subagents.length ? <section className="proof-section"><h3>Linked minions<span>{run.subagents.length}</span></h3><div className="proof-subagents">{run.subagents.map((child) => { const verification = child.verification; const execution = child.status === 'succeeded' ? 'Minion completed' : `Minion ${child.status || 'status unknown'}`; return <article key={child.id}><strong>{child.label || child.purpose}</strong><span className={verification ? childVerificationStatus[verification.status].className : ''}>{execution}{verification ? ` · ${childVerificationStatus[verification.status].label}` : ''}</span>{verification ? <div className="proof-child-outcome"><b>{verification.actionRequired ? 'Action required' : 'No action required'}</b>{verification.check ? <span>Check: {verification.check}</span> : null}<span>Observed: {verification.observed}</span></div> : child.result?.summary ? <div className="proof-child-summary"><ReactMarkdown remarkPlugins={[remarkBreaks]}>{child.result.summary}</ReactMarkdown></div> : null}<small>{child.result ? `${child.result.evidence || 0} findings · ${child.result.changedFiles || 0} changes` : 'No minion result recorded'} · {child.trace?.runId ? `Trace ${String(child.trace.runId)}` : child.id}</small></article>; })}</div></section> : null}

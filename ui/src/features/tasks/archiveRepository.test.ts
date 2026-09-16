@@ -54,3 +54,9 @@ describe('archiveRepository', () => {
     expect(apiMock).toHaveBeenNthCalledWith(2, '/api/archive/runs/run%2Fname?agentId=agent%2Fname', { signal: undefined });
   });
 });
+
+it('loads full redacted trace output with agent and session scope', async () => {
+  apiMock.mockResolvedValueOnce({ trace: { events: ['redacted'] } });
+  await expect(repository.loadRunTrace('run/name', 'agent/name', 'session/name')).resolves.toEqual({ events: ['redacted'] });
+  expect(apiMock).toHaveBeenCalledWith('/api/traces/run%2Fname?agentId=agent%2Fname&sessionId=session%2Fname&output=true', { signal: undefined });
+});

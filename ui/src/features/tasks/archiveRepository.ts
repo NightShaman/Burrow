@@ -35,6 +35,10 @@ export function createArchiveRepository() {
     async loadRun(runId: string, agentId: string, signal?: AbortSignal) {
       return (await api<ArchiveRunResponse>(`/api/archive/runs/${encodeURIComponent(runId)}?agentId=${encodeURIComponent(agentId)}`, { signal })).run;
     },
+    async loadRunTrace(runId: string, agentId: string, sessionId: string, signal?: AbortSignal) {
+      const query = new URLSearchParams({ agentId, sessionId, output: 'true' });
+      return (await api<{ trace: unknown }>(`/api/traces/${encodeURIComponent(runId)}?${query}`, { signal })).trace;
+    },
   };
 }
 

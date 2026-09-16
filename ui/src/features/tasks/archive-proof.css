@@ -278,3 +278,34 @@
 .proof-status-notice p {
   margin:3px 0 0
 }
+
+.proof-full-evidence {
+  margin-top:18px;
+  border:1px solid var(--line);
+  border-radius:9px;
+  background:var(--panel);
+  overflow:hidden
+}
+.proof-full-evidence summary {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:14px 16px;
+  color:var(--text-strong);
+  cursor:pointer;
+  list-style:none
+}
+.proof-full-evidence summary::-webkit-details-marker { display:none }
+.proof-full-evidence summary span:first-child { display:grid; gap:3px }
+.proof-full-evidence summary strong { font-size:13px }
+.proof-full-evidence summary small,.proof-evidence-note { color:var(--muted); font-size:11px }
+.proof-expand-label { color:var(--accent-strong); font-size:10px; font-weight:800; text-transform:uppercase }
+.proof-full-evidence[open] .proof-expand-label::before { content:'Collapse'; font-size:0 }
+.proof-full-evidence[open] .proof-expand-label { font-size:0 }
+.proof-full-evidence[open] .proof-expand-label::after { content:'Collapse'; font-size:10px }
+.proof-full-evidence-body { padding:0 16px 16px; border-top:1px solid var(--line) }
+.proof-evidence-note { margin:12px 0 8px }
+.proof-full-evidence pre { max-height:520px; margin:0; padding:12px; overflow:auto; border:1px solid var(--line); border-radius:7px; background:var(--surface-raised); color:var(--text); font-size:11px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere }
+.proof-evidence-error { display:flex; align-items:center; justify-content:space-between; gap:12px; padding-top:12px; color:var(--danger,#ef6a7a); font-size:12px }
+.proof-evidence-error p { margin:0 }
