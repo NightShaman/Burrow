@@ -1,7 +1,9 @@
 # Burrow
 
 > [!WARNING]
-> Burrow does not provide guardrails for every tool action or external integration. Run it only where you understand the credentials, systems, and data it can reach—and the blast radius of an agent acting with that access. Start with least privilege, isolated test targets, and deliberate integration grants.
+> **Burrow is not safe by default and does not provide comprehensive guardrails around agent actions.**
+>
+> Agents can use every tool and integration you grant them, including access to files, credentials, remote systems, and external services. Burrow assumes the operator understands and accepts that blast radius. Use least-privilege credentials, isolated test targets, and only the integrations you deliberately intend to expose.
 
 <p align="center">
   <img src="burrow-logo.png" alt="Burrow" width="480">
@@ -11,24 +13,17 @@
 
 Burrow keeps conversation first. Tools, traces, receipts, tasks, and debug data stay behind the curtain unless they are useful to inspect.
 
-## Project scope
-
-Burrow is a public personal project, built around the maintainer's own needs and direction. Issues and thoughtful feedback are welcome and will be read, but opening an issue does not create an obligation to implement it. Changes that do not fit the project's vision may be declined or left unaddressed.
-
-Burrow is assembled from two human-edited source repositories:
-
-- **[Burrow-Backend](https://github.com/NightShaman/Burrow-Backend)** → `backend/`
-- **[Burrow-UI](https://github.com/NightShaman/Burrow-UI)** → `ui/`
-
-`backend/` and `ui/` are tracked snapshots, not submodules and not primary development locations. Each assembly records its exact source commits in `SOURCE_VERSIONS`.
-
 ## Install
+
+> **Before installing:** Burrow's safety boundary is the access you grant it, not an internal command sandbox. Do not run it with credentials or host permissions whose full blast radius you are unwilling to accept.
 
 Burrow installs into one self-contained user home, `~/.burrow` by default:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/NightShaman/Burrow/main/install.sh | sh
 ```
+
+Node.js, npm, `curl`, and `tar` must be available. The installer does not require `/opt`, root access, or Docker.
 
 To install elsewhere, download the script first and pass `--dir`:
 
@@ -51,30 +46,7 @@ The installer downloads the assembled `main` revision, installs dependencies, bu
 └── integrations/
 ```
 
-Node.js, npm, `curl`, and `tar` must be available. The installer does not require `/opt`, root access, or Docker.
-
-## Install a Node Goblin
-
-A Node Goblin is the lightweight execution service for a remote Burrow controller. Install the latest calendar-versioned release from the main Burrow repository:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/NightShaman/Burrow/main/install-node-goblin.sh | sudo sh
-sudo node-goblin configure
-sudo node-goblin connect
-```
-
-The installer downloads the release tarball and checksum from `NightShaman/Node-Goblin`, verifies it, and installs the systemd service. Configuration asks only for the controller address and stable node ID. On first connection, compare the pairing code printed by the Node Goblin with Burrow's pending pairing and approve it in Settings.
-
-Pin a calendar release or configure non-interactively with non-secret values:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/NightShaman/Burrow/main/install-node-goblin.sh \
-  | sudo sh -s -- --version 2026.09.01 --controller gkl42.example:7443 --node-id hatchet
-```
-
-The installer adopts a conventional existing `burrow` account or creates a narrow service account with UID/GID `4226:4226`. It does not grant sudo, alter supplementary groups, or manufacture host permissions.
-
-### Options
+### Installer options
 
 ```text
 --dir PATH                    install root; defaults to ~/.burrow
@@ -94,7 +66,7 @@ Start Burrow:
 ~/.burrow/bin/burrow serve
 ```
 
-The default listener is `127.0.0.1:42817`. Configure it explicitly during unattended installation, for example `sh install.sh --host 0.0.0.0 --port 42817`. Re-running the installer without listener flags preserves the existing values; supplying either flag updates that value and a managed service is restarted after activation.
+The default listener is `127.0.0.1:42817`. Configure it explicitly during unattended installation, for example `sh install.sh --host 0.0.0.0 --port 42817`. Re-running the installer without listener flags preserves the existing values; supplying either flag updates that value and restarts a managed service after activation.
 
 Update in place:
 
@@ -112,7 +84,7 @@ On Linux hosts with systemd user services, install and start a persistent servic
 ~/.burrow/bin/burrow service install
 ```
 
-It creates `~/.config/systemd/user/burrow.service`, enables it, and starts it. Management commands are:
+Management commands are:
 
 ```sh
 ~/.burrow/bin/burrow service status
@@ -123,17 +95,61 @@ It creates `~/.config/systemd/user/burrow.service`, enables it, and starts it. M
 ~/.burrow/bin/burrow service uninstall
 ```
 
-The service uses `~/.burrow/burrow.env` and starts `~/.burrow/bin/burrow serve`. It restarts after failures and is persistent across logout and reboot: installation requires `loginctl` to enable and verify systemd user lingering for the installing account. If lingering or systemd user services are unavailable, service installation fails rather than creating a session-only service; run `burrow serve` under your own supervisor for that case.
+The service uses `~/.burrow/burrow.env`, restarts after failures, and persists across logout and reboot. Installation requires `loginctl` to enable and verify systemd user lingering. If lingering or systemd user services are unavailable, service installation fails rather than creating a session-only service; run `burrow serve` under your own supervisor instead.
+
+## Docker
+
+The published image stores durable runtime state in `/data` and runs as UID/GID `4226:4226` by default.
+
+Create `compose.yml`:
+
+```yaml
+services:
+  burrow:
+    image: ghcr.io/nightshaman/burrow:latest
+    pull_policy: always
+    init: true
+    user: "4226:4226"
+    environment:
+      HOME: /home/burrow
+    restart: unless-stopped
+    ports:
+      - "42817:42817"
+      - "7443:7443"
+    volumes:
+      - burrow-data:/data
+
+volumes:
+  burrow-data:
+```
+
+Then start it:
+
+```sh
+docker compose up -d
+```
+
+Open `http://<docker-host>:42817`. These port mappings are reachable through the Docker host; restrict them with the host firewall, network policy, or a trusted reverse proxy. TCP `7443` is used by approved Node Goblin execution nodes.
+
+The persistent volume must be writable by the configured numeric identity. Migrate existing Burrow-owned data deliberately rather than recursively changing unrelated container or service data.
+
+To build from source for development instead, clone this repository and use its root `Dockerfile`.
+
+## Mods
+
+Mods are optional projects maintained separately from Burrow. Their repositories contain their installation, configuration, and update instructions.
+
+- **[Node Goblin](https://github.com/NightShaman/Node-Goblin)** — run approved Burrow tools on remote machines.
 
 ## Uninstall
 
-Remove the application while preserving all durable state:
+Remove the application while preserving durable state:
 
 ```sh
 ~/.burrow/bin/burrow uninstall
 ```
 
-The command prompts before removing `app/` and the launcher. To remove the entire Burrow home, including configuration, workspace, sessions, and other durable state:
+Remove the entire Burrow home, including configuration, workspace, sessions, and other durable state:
 
 ```sh
 ~/.burrow/bin/burrow uninstall --purge
@@ -145,50 +161,6 @@ For non-interactive use, include `--yes` explicitly:
 ~/.burrow/bin/burrow uninstall --purge --yes
 ```
 
-## Docker
+## Project status
 
-The published image stores all durable runtime state in `/data`. It runs as the dedicated `burrow` identity with UID/GID `4226:4226`; the image build accepts `BURROW_UID` and `BURROW_GID` build arguments when another deliberate numeric identity is required. The supplied Compose file pins `4226:4226` and publishes TCP `42817` for Burrow plus TCP `7443` for authenticated outbound Node Goblin connections. Control exposure with the host firewall, reverse proxy, and network policy appropriate to the deployment.
-
-Existing persistent volumes must be writable by the configured numeric identity. For a disposable empty runtime, recreate the volume. For a runtime containing durable state, migrate only Burrow-owned data deliberately rather than recursively changing unrelated container or service data.
-
-```sh
-git clone https://github.com/NightShaman/Burrow.git
-cd Burrow
-docker compose up -d
-```
-
-Open `http://<docker-host>:42817`. The supplied mapping is remotely reachable; restrict it with the host firewall or a trusted reverse proxy according to the network and authentication model you intend.
-
-To build the exact checked-out deployment payload instead of pulling the published image:
-
-```sh
-docker build -t burrow:local .
-docker run --init --rm -p 127.0.0.1:42817:42817 -v burrow-data:/data burrow:local
-```
-
-Docker packaging is canonical in Burrow-Backend under `deploy/docker/`. A successful generated assembly materializes the root `Dockerfile`, `docker-entrypoint.sh`, `compose.yml`, and `.dockerignore`, then builds `ghcr.io/nightshaman/burrow` from that exact generated commit.
-
-## Generated integration policy
-
-`Burrow` is generated output. Human source changes belong in `Burrow-Backend` or `Burrow-UI`; the next assembly can overwrite generated snapshots.
-
-After a verified source push, `.github/workflows/assemble.yml`:
-
-1. resolves the triggering source revision and the configured revision of the other source;
-2. tests the backend and UI, builds the UI, and writes immutable source SHAs to `SOURCE_VERSIONS`;
-3. commits the assembled application, installer, and Docker assets to `main`;
-4. builds and publishes `ghcr.io/nightshaman/burrow:sha-<Burrow commit>` and `ghcr.io/nightshaman/burrow:latest` from that generated commit.
-
-The assembly requires a `BURROW_SOURCE_TOKEN` repository secret to fetch the source repositories and publish the image. Source repositories use `BURROW_DISPATCH_TOKEN` to request an assembly after their own verification succeeds.
-
-## Mods
-
-Mods are separate from the Burrow product repository. Install them beneath the active runtime root, normally `~/.burrow/mods/<mod-id>`, and restart Burrow after installation. Burrow discovers a mod from its `burrow.mod.json` manifest.
-
-For example, the Node Goblin mod is maintained at <https://github.com/NightShaman/Node-Goblin>:
-
-```sh
-mkdir -p "$HOME/.burrow/mods"
-git clone https://github.com/NightShaman/Node-Goblin.git \
-  "$HOME/.burrow/mods/node-goblin"
-```
+Burrow is a public personal project built around the maintainer's own needs and direction. Issues and thoughtful feedback are welcome and will be read, but opening an issue does not create an obligation to implement it. Changes that do not fit the project's vision may be declined or left unaddressed.
