@@ -398,7 +398,8 @@ export class ModelSettingsStore {
     const id = normalize(input.id) || randomUUID();
     const existing = this.db.prepare('SELECT id FROM model_connections WHERE id = ?').get(id);
     const existingAuth = existing ? this.auth(id) : null;
-    const auth = input.auth === undefined && input.apiKey === undefined ? existingAuth : normalizeAuth(input, connection.provider);
+    const suppliedAuth = normalizeAuth(input, connection.provider);
+    const auth = suppliedAuth || existingAuth;
     connection = canonicalizeOauthConnection(connection, auth);
     const duplicateLabel = this.db.prepare('SELECT id FROM model_connections WHERE lower(provider) = lower(?) AND id <> ?').get(connection.provider, id);
     if (duplicateLabel) throw new Error('provider_label_duplicate');
@@ -427,8 +428,14 @@ export class ModelSettingsStore {
         this.db.prepare(`INSERT INTO model_connections (id, provider, api_type, base_url, accepted_input_json, models_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
           .run(id, connection.provider, connection.apiType, connection.baseUrl, stringifyJson(acceptedInput), stringifyJson(models), timestamp, timestamp);
       }
-      if (auth) {
-        if (auth.type === 'api_key' && input.auth === undefined) this.saveSecret(id, LEGACY_API_KEY_SECRET_NAME, auth.apiKey, timestamp);
+      if (suppliedAuth) {
+        if (auth.type === 'api_key' && input.auth === undefined) {
+          this.saveSecret(id, LEGACY_API_KEY_SECRET_NAME, auth.apiKey, timestamp);
+          // An explicit key replaces effective auth, including structured auth
+          // that would otherwise shadow this legacy Settings input.
+          this.db.prepare('DELETE FROM model_connection_secrets WHERE connection_id = ? AND name = ?').run(id, AUTH_SECRET_NAME);
+          this.db.prepare('DELETE FROM settings_meta WHERE key = ?').run(`model_auth_preview:${id}`);
+        }
         else {
           this.saveSecret(id, AUTH_SECRET_NAME, JSON.stringify(auth), timestamp);
           this.db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?)
