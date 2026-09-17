@@ -16,6 +16,7 @@ import { appendPreferenceSignal, applyPreferenceUpdate, parsePreferenceAdjudicat
 const PHASES = Object.freeze(['light', 'rem', 'deep']);
 const DEFAULT_LIMIT = 12;
 const PHASE_WINDOWS_DAYS = Object.freeze({ light: 1, deep: 14, rem: 30 });
+export const DREAM_INTERRUPTED_ERROR = 'Dream interrupted by runtime restart before completion';
 
 function text(value) { return String(value ?? '').trim(); }
 function now() { return new Date().toISOString(); }
@@ -24,6 +25,12 @@ function parseJson(value) { try { return JSON.parse(value || '{}'); } catch { re
 function phaseState(value) { return `dream-cycle:${value}`; }
 function receiptState(agentId, runId) { return `dream-cycle-receipt:${agentId}:${runId}`; }
 function occurrenceState(agentId, scheduledFor) { return `dream-cycle-occurrence:${agentId}:${scheduledFor}`; }
+const dreamRuntimeInstanceId = randomUUID();
+const activeDreamRunIds = new Set();
+function writeReceipt(db, receipt, at) {
+  db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`)
+    .run(receiptState(receipt.agentId, receipt.runId), json(receipt), at);
+}
 function entryId(agentId, phase, title, content) { return `dream-${phase}-${Buffer.from(`${agentId}\0${title}\0${content}`).toString('base64url').slice(0, 40)}`; }
 function clamp(value, limit) { const source = text(value).replace(/\s+/g, ' '); return source.length <= limit ? source : `${source.slice(0, limit).trim()}…`; }
 function diagnosticLabel(value, limit) { const source = clamp(value, limit); return source && /^[a-z0-9._:/-]+$/i.test(source) ? source : null; }
@@ -381,13 +388,15 @@ export function claimDueDreamCycle({ agentId, databasePath = null, at = now() } 
       const scheduledFor = current.nextRunAt;
       if (!configured || !configured.enabled || !scheduledFor || scheduledFor > at) return null;
       const nextRunAt = nextCronOccurrence(configured.cron_expression, configured.timezone, new Date(scheduledFor));
-      const occurrence = { version: 1, agentId: id, scheduledFor, claimedAt: at, nextRunAt };
+      const runId = `dream-cycle-${randomUUID()}`;
+      const occurrence = { version: 1, agentId: id, runId, scheduledFor, claimedAt: at, nextRunAt };
       try { db.prepare('INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?)').run(occurrenceState(id, scheduledFor), json(occurrence), at); }
       catch (error) { if (/UNIQUE constraint failed/i.test(String(error?.message || error))) return null; throw error; }
       const state = { ...current, version: 1, agentId: id, enabled: true, cron: configured.cron_expression, timezone: configured.timezone, nextRunAt, updatedAt: at };
       const changed = db.prepare('UPDATE settings_meta SET value_json=?, updated_at=? WHERE key=? AND value_json=?').run(json(state), at, phaseState(id), json(current));
       if (changed.changes !== 1) throw new Error('dream_cycle_claim_lost');
-      return { agentId: id, scheduledFor, nextRunAt };
+      writeReceipt(db, { version: 1, ok: null, status: 'running', runId, agentId: id, trigger: 'scheduled', scheduledFor, generatedAt: scheduledFor, startedAt: at, runtimeInstanceId: dreamRuntimeInstanceId, error: null }, at);
+      return { agentId: id, runId, scheduledFor, nextRunAt };
     });
   } finally { db.close(); }
 }
@@ -422,7 +431,7 @@ export async function runDreamExtractionDiagnostic({ agentId, databasePath = nul
   } finally { settingsStore.close(); }
 }
 
-export async function runDreamCycle({ agentId, databasePath = null, rootDir = null, generatedAt = now(), limit = DEFAULT_LIMIT, modelAdapter = null, modelConfig = null, traceLogger = null } = {}) {
+export async function runDreamCycle({ agentId, databasePath = null, rootDir = null, generatedAt = now(), runId: requestedRunId = null, scheduledFor = null, trigger = null, limit = DEFAULT_LIMIT, modelAdapter = null, modelConfig = null, traceLogger = null } = {}) {
   const id = text(agentId);
   if (!id) throw new Error('dream_cycle_agent_required');
   const settingsStore = new DreamSettingsStore({ databasePath });
@@ -430,7 +439,11 @@ export async function runDreamCycle({ agentId, databasePath = null, rootDir = nu
   const diaryStore = new DreamDiaryStore({ databasePath });
   const profileStore = new AgentProfileStore({ databasePath });
   const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  const runId = `dream-cycle-${randomUUID()}`;
+  const runId = text(requestedRunId) || `dream-cycle-${randomUUID()}`;
+  const startedAt = now();
+  const lifecycle = { version: 1, ok: null, status: 'running', runId, agentId: id, trigger: trigger || (scheduledFor ? 'scheduled' : 'manual'), scheduledFor: scheduledFor || null, generatedAt, startedAt, runtimeInstanceId: dreamRuntimeInstanceId, error: null };
+  activeDreamRunIds.add(runId);
+  writeReceipt(db, lifecycle, startedAt);
   try {
     const settings = settingsStore.get(id);
     if (!settings.enabled) throw new Error('dream_cycle_disabled');
@@ -520,20 +533,40 @@ export async function runDreamCycle({ agentId, databasePath = null, rootDir = nu
     const state = { version: 1, agentId: id, enabled: true, cron: settings.cron, timezone: settings.timezone, nextRunAt, lastRunAt: generatedAt, updatedAt: generatedAt };
     db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`).run(phaseState(id), json(state), generatedAt);
     const hasErrors = phaseResults.some((phase) => phase.extractionError || phase.diaryError);
-    const receipt = { version: 1, ok: !hasErrors, status: hasErrors ? (pendingDiaries.length ? 'partial' : 'failed') : 'completed', runId, agentId: id, phases: phaseResults, dreamMemoryItemCount: consolidation.itemCount, dreamPreloadCount: dreamPreloads.length, preferences, nextRunAt, generatedAt };
-    db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?)`).run(receiptState(id, runId), json(receipt), generatedAt);
+    const completedAt = now();
+    const receipt = { ...lifecycle, ok: !hasErrors, status: hasErrors ? (pendingDiaries.length ? 'partial' : 'failed') : 'completed', phases: phaseResults, dreamMemoryItemCount: consolidation.itemCount, dreamPreloadCount: dreamPreloads.length, preferences, nextRunAt, completedAt };
+    writeReceipt(db, receipt, completedAt);
     return receipt;
   } catch (error) {
-    const receipt = { version: 1, ok: false, runId, agentId: id, error: String(error?.message || error), generatedAt };
-    try { db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?)`).run(receiptState(id, runId), json(receipt), generatedAt); } catch {}
+    const completedAt = now();
+    const receipt = { ...lifecycle, ok: false, status: 'failed', error: String(error?.message || error), completedAt };
+    try { writeReceipt(db, receipt, completedAt); } catch {}
     throw error;
   } finally {
+    activeDreamRunIds.delete(runId);
     db.close();
     diaryStore.close();
     profileStore.close();
     memoryStore.close();
     settingsStore.close();
   }
+}
+
+export function reconcileInterruptedDreamCycles({ databasePath = null, at = now() } = {}) {
+  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
+  try {
+    return withSettingsTransaction(db, () => {
+      const rows = db.prepare("SELECT key,value_json FROM settings_meta WHERE key LIKE 'dream-cycle-receipt:%'").all();
+      let interrupted = 0;
+      for (const row of rows) {
+        const receipt = parseJson(row.value_json);
+        if (receipt.status !== 'running' || activeDreamRunIds.has(receipt.runId) || receipt.runtimeInstanceId === dreamRuntimeInstanceId) continue;
+        writeReceipt(db, { ...receipt, ok: false, status: 'interrupted', error: DREAM_INTERRUPTED_ERROR, completedAt: at }, at);
+        interrupted += 1;
+      }
+      return interrupted;
+    });
+  } finally { db.close(); }
 }
 
 export function latestDreamCycleReceipts({ agentId, databasePath = null, limit = 20 } = {}) {
@@ -561,7 +594,7 @@ export function createDreamCycleScheduler({ databasePath = null, intervalMs = 30
       for (const item of due) {
         const claim = claimDueDreamCycle({ agentId: item.agent.id, databasePath, at });
         if (!claim) continue;
-        try { results.push(await runDreamCycle({ agentId: item.agent.id, databasePath, rootDir: await resolveAgentRoot?.(item.agent.id), generatedAt: claim.scheduledFor })); }
+        try { results.push(await runDreamCycle({ agentId: item.agent.id, databasePath, rootDir: await resolveAgentRoot?.(item.agent.id), generatedAt: claim.scheduledFor, scheduledFor: claim.scheduledFor, runId: claim.runId, trigger: 'scheduled' })); }
         catch (error) { results.push({ ok: false, agentId: item.agent.id, error: String(error?.message || error), generatedAt: at }); }
       }
       return results;

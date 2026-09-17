@@ -57,9 +57,10 @@ describe('agent settings sections', () => {
     const firstLoad = deferred<{ settings: ReturnType<typeof dreamSettings> }>();
     const save = deferred<{ settings: ReturnType<typeof dreamSettings> }>();
     const secondLoad = deferred<{ settings: ReturnType<typeof dreamSettings> }>();
-    apiMock.mockImplementation((_target, _path, init) => {
+    apiMock.mockImplementation((_target, path, init) => {
       if (init?.method === 'PUT') return save.promise;
-      return apiMock.mock.calls.filter(([, , request]) => !request?.method).length === 1 ? firstLoad.promise : secondLoad.promise;
+      if (path.includes('/dream-cycle')) return Promise.resolve({ receipts: [] });
+      return apiMock.mock.calls.filter(([, requestPath]) => requestPath.includes('/dream-settings')).length === 1 ? firstLoad.promise : secondLoad.promise;
     });
     const view = render(<AgentDreams agentId="smatchet" targets={targets} savedProviders={[]} />);
     await act(async () => { firstLoad.resolve({ settings: dreamSettings({ prompt: 'Agent A' }) }); });
@@ -107,9 +108,23 @@ describe('agent settings sections', () => {
     fireEvent.click(screen.getByRole('option', { name: 'Use agent chat model' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save dream settings' }));
 
-    await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(2));
-    const [, , init] = apiMock.mock.calls[1];
+    await waitFor(() => expect(apiMock.mock.calls.some(([, , init]) => init?.method === 'PUT')).toBe(true));
+    const [, , init] = apiMock.mock.calls.find(([, , request]) => request?.method === 'PUT')!;
     expect(JSON.parse(init?.body as string)).toMatchObject({ modelConnectionId: null, model: null });
+  });
+
+  it('shows running and interrupted Dream activity with the backend error', async () => {
+    apiMock.mockImplementation((_target, path) => path.includes('/dream-cycle')
+      ? Promise.resolve({ receipts: [
+        { runId: 'running-1', status: 'running', startedAt: '2026-09-18T03:00:00.000Z' },
+        { runId: 'interrupted-1', status: 'interrupted', error: 'Dream interrupted by runtime restart before completion', completedAt: '2026-09-18T03:05:00.000Z' },
+      ] })
+      : Promise.resolve({ settings: dreamSettings() }));
+    render(<AgentDreams agentId="smatchet" targets={targets} savedProviders={[]} />);
+
+    expect(await screen.findByText('Running')).toBeTruthy();
+    expect(screen.getByText('Interrupted')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toBe('Dream interrupted by runtime restart before completion');
   });
 
   it.each([

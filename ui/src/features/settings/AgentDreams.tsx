@@ -7,6 +7,15 @@ import { Field, SettingSection } from './SettingsPrimitives';
 type DreamModel = { modelConnectionId?: string | null; model?: string | null };
 type DreamSettings = { enabled: boolean; cron: string; timezone: string; prompt: string } & DreamModel;
 type DreamSettingsResponse = { settings: DreamSettings; effectiveModel?: DreamModel | null; modelResolutionError?: string | null };
+type DreamCycleReceipt = {
+  runId: string;
+  status: 'running' | 'completed' | 'partial' | 'failed' | 'interrupted' | string;
+  error?: string | null;
+  trigger?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+};
+type DreamCycleResponse = { receipts: DreamCycleReceipt[] };
 function dreamModelValue(connectionId: string, model: string) { return JSON.stringify([connectionId, model]); }
 function settingsModelValue(settings: DreamModel) { return settings.modelConnectionId && settings.model ? dreamModelValue(settings.modelConnectionId, settings.model) : ''; }
 function dreamModelFromValue(value: string) {
@@ -60,17 +69,26 @@ export function AgentDreams({ agentId, targets, savedProviders }: { agentId: str
   const [error, setError] = useState('');
   const [effectiveModel, setEffectiveModel] = useState<DreamModel | null>(null);
   const [modelResolutionError, setModelResolutionError] = useState<string | null>(null);
+  const [receipts, setReceipts] = useState<DreamCycleReceipt[]>([]);
+  const [receiptError, setReceiptError] = useState('');
   const requestVersion = useRef(0);
 
   useEffect(() => {
     const version = ++requestVersion.current;
     const controller = new AbortController();
-    setState('loading'); setError('');
-    request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(owner.resourceId)}/dream-settings`, { signal: controller.signal }).then(dreamSettings => {
+    setState('loading'); setError(''); setReceiptError(''); setReceipts([]);
+    Promise.all([
+      request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(owner.resourceId)}/dream-settings`, { signal: controller.signal }),
+      request<DreamCycleResponse>(`/api/agents/${encodeURIComponent(owner.resourceId)}/dream-cycle?limit=5`, { signal: controller.signal }).catch((cause) => {
+        if (!controller.signal.aborted && version === requestVersion.current) setReceiptError(cause instanceof Error ? `Could not load recent dream activity: ${cause.message}` : 'Could not load recent dream activity.');
+        return { receipts: [] };
+      }),
+    ]).then(([dreamSettings, dreamCycles]) => {
       if (controller.signal.aborted || version !== requestVersion.current) return;
       setSettings(dreamSettings.settings);
       setEffectiveModel(dreamSettings.effectiveModel ?? null);
       setModelResolutionError(dreamSettings.modelResolutionError ?? null);
+      setReceipts(Array.isArray(dreamCycles.receipts) ? dreamCycles.receipts : []);
       setState('idle');
     }).catch(cause => {
       if (controller.signal.aborted || version !== requestVersion.current) return;
@@ -104,6 +122,20 @@ export function AgentDreams({ agentId, targets, savedProviders }: { agentId: str
       <p className="settings-description">Effective model: {effectiveModel?.modelConnectionId && effectiveModel.model ? modelLabel(effectiveModel, [{ value: '', label: 'Use agent chat model' }, ...dreamModels.map((option) => ({ value: dreamModelValue(option.connectionId, option.model), label: option.label }))]) : 'Unconfigured'}</p>
       {modelResolutionError && <p className="settings-request-error" role="alert">Model resolution error: {modelResolutionError}</p>}
       <Field label="Dream prompt"><textarea rows={6} value={settings.prompt} disabled={disabled} onChange={(event) => setSettings({ ...settings, prompt: event.target.value })} /></Field>
+    </div>
+    <div className="dream-cycle-activity" aria-label="Recent dream activity">
+      <h3>Recent activity</h3>
+      {receipts.length ? <div className="dream-cycle-list">
+        {receipts.map((receipt) => {
+          const at = receipt.completedAt || receipt.startedAt;
+          const label = receipt.status === 'running' ? 'Running' : receipt.status === 'interrupted' ? 'Interrupted' : receipt.status.charAt(0).toUpperCase() + receipt.status.slice(1);
+          return <div className={`dream-cycle-receipt dream-cycle-${receipt.status}`} key={receipt.runId}>
+            <div className="dream-cycle-receipt-heading"><strong>{label}</strong>{at && <time dateTime={at}>{new Date(at).toLocaleString()}</time>}</div>
+            {receipt.error && <p role={receipt.status === 'interrupted' || receipt.status === 'failed' ? 'alert' : undefined}>{receipt.error}</p>}
+          </div>;
+        })}
+      </div> : <p className="settings-description">No dream activity recorded yet.</p>}
+      {receiptError && <p className="settings-request-error" role="alert">{receiptError}</p>}
     </div>
     <div className="dream-actions">
       <button className="primary" onClick={() => void save()} disabled={state !== 'idle'}>{state === 'saving' ? 'Saving…' : 'Save dream settings'}</button>

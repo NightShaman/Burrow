@@ -50,7 +50,7 @@ import { AGENT_PROFILE_KINDS, AgentProfileStore } from '../src/agent-profile-sto
 import { DreamDiaryStore } from '../src/dream-diary-store.mjs';
 import { DreamSettingsStore } from '../src/dream-settings-store.mjs';
 import { consolidateDreamMemory } from '../src/dream-memory-consolidator.mjs';
-import { createDreamCycleScheduler, latestDreamCycleReceipts, runDreamCycle } from '../src/dream-cycle-runner.mjs';
+import { createDreamCycleScheduler, latestDreamCycleReceipts, reconcileInterruptedDreamCycles, runDreamCycle } from '../src/dream-cycle-runner.mjs';
 import { createTiddleScheduler, listTiddleCards, tiddleHistory, tiddleStatus } from '../src/tiddle-continuity.mjs';
 import { cleanupAgentAttachments, createAttachmentCleanupScheduler, deleteAttachmentArtifact, listSessionAttachments, resolveAttachmentArtifact } from '../src/attachment-store.mjs';
 import { TaskBoardStore, TASK_PRIORITIES, TASK_STATUSES } from '../src/task-board-store.mjs';
@@ -3100,6 +3100,7 @@ server.on('clientError', (error, socket) => { void serverLogger.event('client_er
 server.on('connection', (socket) => { socket.once('error', (error) => { void serverLogger.event('socket_error', { code: error?.code || null, error: String(error?.message || error), remoteAddress: socket.remoteAddress || null }); }); });
 server.listen(port, host, async () => {
   await serverLogger.event('listener_started', { host, port, pid: process.pid, version: releaseVersion });
+  reconcileInterruptedDreamCycles({ databasePath: settingsDatabasePath() });
   if (backgroundSchedulersEnabled()) {
     const store = new ScheduledJobStore({ databasePath: settingsDatabasePath() });
     try { store.markMissedRuns(); store.markMissedSchedules(); } finally { store.close(); }
