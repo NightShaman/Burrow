@@ -127,6 +127,16 @@ describe('agent settings sections', () => {
     expect(screen.getByRole('alert').textContent).toBe('Dream interrupted by runtime restart before completion');
   });
 
+  it('renders Dream activity with a missing status without crashing Agents settings', async () => {
+    apiMock.mockImplementation((_target, path) => path.includes('/dream-cycle')
+      ? Promise.resolve({ receipts: [{ runId: 'legacy-1', completedAt: '2026-09-18T03:05:00.000Z' }] })
+      : Promise.resolve({ settings: dreamSettings() }));
+    render(<AgentDreams agentId="smatchet" targets={targets} savedProviders={[]} />);
+
+    expect(await screen.findByText('Unknown')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save dream settings' })).toBeTruthy();
+  });
+
   it.each([
     ['profile documents', (agentId: string) => <AgentProfileDocuments agentId={agentId} targets={targets} />],
     ['dream settings', (agentId: string) => <AgentDreams agentId={agentId} targets={targets} savedProviders={[]} />],

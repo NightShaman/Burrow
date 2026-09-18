@@ -9,7 +9,7 @@ type DreamSettings = { enabled: boolean; cron: string; timezone: string; prompt:
 type DreamSettingsResponse = { settings: DreamSettings; effectiveModel?: DreamModel | null; modelResolutionError?: string | null };
 type DreamCycleReceipt = {
   runId: string;
-  status: 'running' | 'completed' | 'partial' | 'failed' | 'interrupted' | string;
+  status?: 'running' | 'completed' | 'partial' | 'failed' | 'interrupted' | string | null;
   error?: string | null;
   trigger?: string | null;
   startedAt?: string | null;
@@ -128,10 +128,11 @@ export function AgentDreams({ agentId, targets, savedProviders }: { agentId: str
       {receipts.length ? <div className="dream-cycle-list">
         {receipts.map((receipt) => {
           const at = receipt.completedAt || receipt.startedAt;
-          const label = receipt.status === 'running' ? 'Running' : receipt.status === 'interrupted' ? 'Interrupted' : receipt.status.charAt(0).toUpperCase() + receipt.status.slice(1);
-          return <div className={`dream-cycle-receipt dream-cycle-${receipt.status}`} key={receipt.runId}>
+          const status = typeof receipt.status === 'string' && receipt.status.trim() ? receipt.status.trim().toLowerCase() : 'unknown';
+          const label = status === 'running' ? 'Running' : status === 'interrupted' ? 'Interrupted' : status.charAt(0).toUpperCase() + status.slice(1);
+          return <div className={`dream-cycle-receipt dream-cycle-${status}`} key={receipt.runId}>
             <div className="dream-cycle-receipt-heading"><strong>{label}</strong>{at && <time dateTime={at}>{new Date(at).toLocaleString()}</time>}</div>
-            {receipt.error && <p role={receipt.status === 'interrupted' || receipt.status === 'failed' ? 'alert' : undefined}>{receipt.error}</p>}
+            {receipt.error && <p role={status === 'interrupted' || status === 'failed' ? 'alert' : undefined}>{receipt.error}</p>}
           </div>;
         })}
       </div> : <p className="settings-description">No dream activity recorded yet.</p>}
