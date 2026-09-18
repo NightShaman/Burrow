@@ -137,7 +137,7 @@ export async function listSubagentRecords({ dataRoot, legacyDataRoot = null, com
     .slice(0, limit);
 }
 
-export async function updateSubagentStatus({ dataRoot, id, status, phase = null, trace = null, model = null, result = null, provenance = null, clock = nowIso } = {}) {
+export async function updateSubagentStatus({ dataRoot, id, status, phase = null, trace = null, model = null, result = null, activity = null, provenance = null, clock = nowIso } = {}) {
   if (!dataRoot) throw new Error('dataRoot is required');
   if (!id) throw new Error('id is required');
   if (!status) throw new Error('status is required');
@@ -155,6 +155,7 @@ export async function updateSubagentStatus({ dataRoot, id, status, phase = null,
       trace: trace ? { ...current.trace, ...trace } : current.trace,
       model: model === null ? current.model : model,
       result: result === null ? current.result : result,
+      activity: activity === null ? current.activity : activity,
       provenance: provenance ? [...(current.provenance || []), ...(Array.isArray(provenance) ? provenance : [provenance])] : current.provenance,
       updatedAt: clock(),
     });
@@ -176,6 +177,7 @@ export async function updateSubagentRecord({ dataRoot, id, patch = {}, clock = n
       trace: patch.trace || null,
       model: Object.hasOwn(patch, 'model') ? patch.model : null,
       result: Object.hasOwn(patch, 'result') ? patch.result : null,
+      activity: Object.hasOwn(patch, 'activity') ? patch.activity : null,
       provenance: patch.provenance || null,
       clock,
     });
@@ -265,6 +267,22 @@ export function subagentVisibilitySummary(record = {}) {
       traceDir: record.trace?.traceDir || null,
       childSessionId: record.trace?.childSessionId || null,
     },
+    activity: record.activity ? {
+      kind: record.activity.kind || null,
+      status: record.activity.status || null,
+      phase: record.activity.phase || null,
+      label: record.activity.label || null,
+      sequence: record.activity.sequence ?? null,
+      startedAt: record.activity.startedAt || null,
+      completedAt: record.activity.completedAt || null,
+      lastActualActivityAt: record.activity.lastActualActivityAt || null,
+      heartbeatAt: record.activity.heartbeatAt || null,
+      tool: record.activity.tool || null,
+      model: record.activity.model || null,
+      error: record.activity.error || null,
+      counts: record.activity.counts || null,
+    } : null,
+    lastActualActivityAt: record.activity?.lastActualActivityAt || record.updatedAt || null,
     result: record.result ? {
       ok: Boolean(record.result.ok),
       summary: record.result.summary || '',

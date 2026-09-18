@@ -27,9 +27,10 @@ type ChatTranscriptProps = {
   liveAnswer: string;
   a2aActivities?: import('../../app/api').ActiveA2AActivity[];
   runtimeUserMessage?: string;
+  runtimeChildActivities?: ToolActivity[];
 };
 
-export function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, a2aActivities = [], runtimeUserMessage = '' }: ChatTranscriptProps) {
+export function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, a2aActivities = [], runtimeUserMessage = '', runtimeChildActivities = [] }: ChatTranscriptProps) {
   const isSubagent = 'stream' in selected;
   const messages = turns.filter((turn) => turn.type === 'message' && turn.metadata?.visibility !== 'debug' && turn.metadata?.kind !== 'subagent-runtime-context' && turn.metadata?.kind !== 'subagent-task' && turn.content && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && isChatCommand(textFromChatValue(turn.content))));
   const activityByRun = new Map<string, ToolActivity>();
@@ -38,10 +39,11 @@ export function ChatTranscript({ selected, parent, operator, isNewSession, turns
     if (activity && (turn.runId || activity.runId)) activityByRun.set(turn.runId || activity.runId || '', activity);
   }
   const activeActivity = activeRunId ? activeToolActivity ?? activityByRun.get(activeRunId) : undefined;
+  const visibleRuntimeChildActivities = runtimeChildActivities.filter((activity) => activity.runId !== activeActivity?.runId);
   // An externally started task run can reach this destination session before
   // its first durable turn. Keep the live run visible instead of replacing it
   // with the empty-session watermark.
-  const isEmptySession = !isLoading && !isSending && !a2aActivities.length && (isNewSession || !messages.length);
+  const isEmptySession = !isLoading && !isSending && !a2aActivities.length && !visibleRuntimeChildActivities.length && (isNewSession || !messages.length);
   const messagesRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const updateScrollIntent = () => {
@@ -75,6 +77,7 @@ export function ChatTranscript({ selected, parent, operator, isNewSession, turns
         return <ChatMessage key={`${turn.runId ?? 'turn'}-${index}`} side={turn.role === 'user' || (isAgentMessage && !fromCurrentAgent) ? 'operator' : 'agent'} name={turn.role === 'user' ? userName : isAgentMessage ? messageName : selected.name} avatar={turn.role === 'user' ? userAvatar : isAgentMessage && !fromCurrentAgent ? senderName.slice(0, 1).toUpperCase() : selected.avatar} time={formatTime(turn.ts)} text={textFromChatValue(turn.content)} activity={turn.role === 'assistant' ? (persistedActivity ?? (turn.runId === activeRunId ? activeActivity : activityByRun.get(turn.runId ?? ''))) : undefined} progress={turn.role === 'assistant' ? turn.metadata?.progress : undefined} streamedAnswer={turn.role === 'assistant' ? turn.metadata?.streamedAnswer : undefined} activityLive={turn.role === 'assistant' && turn.runId === activeRunId && !isPersistedTerminalTurn} attachments={turn.metadata?.attachments} />;
       })}
       {a2aActivities.length > 0 && <section className="a2a-activity-list" aria-label="Agent-to-agent activity">{a2aActivities.map((activity) => <A2AActivityCard key={activity.id} activity={activity} selectedName={selected.name} />)}</section>}
+      {visibleRuntimeChildActivities.length > 0 && <section className="a2a-activity-list" aria-label="Minion activity">{visibleRuntimeChildActivities.map((activity) => <ToolActivityCard key={activity.runId} activity={activity} live={activity.status === 'running'} />)}</section>}
       {isSending && !messages.some((turn) => turn.role === 'assistant' && turn.runId === activeRunId && Boolean(turn.metadata?.progress || turn.metadata?.toolActivity || turn.content)) && <LiveAssistantTurn name={selected.name} avatar={selected.avatar} progress={liveProgress} activity={activeActivity} answer={liveAnswer} />}
       {error && <p className="chat-error" role="alert">{error}</p>}
     </>}

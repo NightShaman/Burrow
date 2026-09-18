@@ -58,8 +58,8 @@ export function useChatRun({ selectedAgentId, selected, selectedTarget = localAp
   const streamAbortRef = useRef<Record<string, AbortController>>({});
   const activeRunForSelection = selectedAgentId && session.sessionId ? activeRuns[runKey(selectedAgentId, session.sessionId)] ?? null : null;
 
-  const sendMessage = async () => {
-    const message = session.draft.trim() || (session.attached.length ? 'Please analyze the attached files.' : '');
+  const sendMessage = async (draftOverride?: string) => {
+    const message = (draftOverride ?? session.draft).trim() || (session.attached.length ? 'Please analyze the attached files.' : '');
     if (!message || !selectedAgentId || !session.sessionId || activeRunForSelection) return;
     const target = { agentId: selectedAgentId, resourceAgentId: selected?.resourceId ?? selectedAgentId, sessionId: session.sessionId };
     const runId = createRunId(target.sessionId);

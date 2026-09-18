@@ -2926,8 +2926,27 @@ async function cancelChatRun(runId, body = {}, agentRuntime = null) {
   return cancelActiveChatRun(activeChatRuns, runId, { body, agentId: agentRuntime?.agentId || null });
 }
 
-function currentActiveChatRunSummaries({ agentId = null, sessionId = null } = {}) {
-  return activeChatRunSummaries(activeChatRuns, { agentId, sessionId });
+async function currentActiveChatRunSummaries({ agentId = null, sessionId = null } = {}) {
+  const runs = activeChatRunSummaries(activeChatRuns, { agentId, sessionId });
+  const childRecords = [];
+  const runtimes = agentId ? [await resolveAgentRuntime(agentId)] : await Promise.all(agentsStore().list().map((agent) => resolveAgentRuntime(agent.id)));
+  for (const agentRuntime of runtimes) {
+    const records = await listSubagentRecords({ dataRoot: agentRuntime.agentDataRoot, includeFinal: false, limit: 100 });
+    for (const record of records) {
+      const summary = subagentVisibilitySummary(record);
+      if (sessionId && summary.owner?.sessionId !== sessionId && summary.trace?.childSessionId !== sessionId) continue;
+      childRecords.push({
+        ...summary,
+        agentId: agentRuntime.agentId,
+        runId: summary.trace?.runId || summary.id,
+        sessionId: summary.trace?.childSessionId || null,
+        parentSessionId: summary.owner?.sessionId || null,
+        parentRunId: summary.owner?.parentRunId || summary.owner?.turnId || null,
+        source: 'subagent',
+      });
+    }
+  }
+  return { runs, subagents: childRecords };
 }
 
 const exportRoute = createExportRoutes({ readJsonBody, sendJson, exportCatalog, normalizeImportRequest, decodeExport, buildExport, exportSnapshot, importPreview, applyImport });

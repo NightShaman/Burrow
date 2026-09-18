@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { apiForTarget, textFromChatValue, type ActiveA2AActivity, type ActiveChatRun, type ChatAttachment, type ProgressEntry, type SessionSummary, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
+import { apiForTarget, textFromChatValue, type ActiveA2AActivity, type ActiveChatRun, type ActiveChatRunsResponse, type ActiveSubagent, type ChatAttachment, type ProgressEntry, type SessionSummary, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
 import { localApiTarget, targetForResource, type ApiTarget } from '../../app/apiTargets';
 import { conversationCacheKey, readConversationCache, writeConversationCache, type ConversationCache } from './chatConversationCache';
 import { readDraftCache, writeDraftCache, type DraftCache } from './chatDraftCache';
@@ -17,6 +17,7 @@ type RuntimeRunForSelection = {
   latestUserMessage: string;
   progress: ProgressEntry[];
   toolActivity?: ToolActivity;
+  subagent?: ActiveSubagent;
 };
 
 function runtimeRunProgress(run: ActiveChatRun): ProgressEntry[] {
@@ -54,6 +55,52 @@ function runtimeRunForSelection(run: ActiveChatRun | undefined): RuntimeRunForSe
   return { runId: run.runId, agentId: run.agentId, sessionId: run.sessionId, latestUserMessage: typeof run.latestUserMessage === 'string' ? run.latestUserMessage : '', progress: runtimeRunProgress(run), toolActivity: runtimeToolActivity(run) };
 }
 
+function formatElapsed(from?: string | null, to = Date.now()) {
+  if (!from) return '';
+  const at = new Date(from).getTime();
+  if (!Number.isFinite(at)) return '';
+  const seconds = Math.max(0, Math.floor((to - at) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+function subagentToolActivity(child: ActiveSubagent, now = Date.now()): ToolActivity {
+  const activity = child.activity ?? {};
+  const status = String(activity.status || child.status || '').toLowerCase();
+  const final = child.final === true || ['completed', 'failed', 'cancelled'].includes(status);
+  const hasError = Boolean(activity.error) || status === 'failed';
+  const rawLabel = activity.tool || activity.label || activity.model || activity.phase || child.phase || child.status || 'Subagent activity';
+  const age = formatElapsed(activity.lastActualActivityAt || child.lastActualActivityAt, now);
+  const elapsed = formatElapsed(activity.startedAt, now);
+  const detail = [
+    activity.kind ? `${activity.kind}` : null,
+    activity.model ? `model ${activity.model}` : null,
+    elapsed ? `elapsed ${elapsed}` : null,
+    age ? `last actual event ${age} ago` : null,
+    activity.error || null,
+  ].filter(Boolean).join(' · ');
+  return {
+    runId: child.runId || child.id,
+    status: hasError ? 'warn' : final ? 'ok' : 'running',
+    title: final ? 'Minion activity' : 'Minion running',
+    summary: detail || undefined,
+    items: [{ id: `${child.id}:${activity.sequence ?? 'activity'}`, label: String(rawLabel), status: hasError ? 'error' : final ? 'ok' : 'pending', ...(detail ? { detail } : {}) }],
+  };
+}
+
+function runtimeRunForSubagent(child: ActiveSubagent | undefined): RuntimeRunForSelection | null {
+  if (!child || child.final) return null;
+  const runId = child.runId || child.id;
+  const agentId = child.agentId || '';
+  const traceChildSessionId = child.trace && 'childSessionId' in child.trace && typeof child.trace.childSessionId === 'string' ? child.trace.childSessionId : '';
+  const sessionId = child.sessionId || traceChildSessionId || '';
+  if (!runId || !agentId || !sessionId) return null;
+  return { runId, agentId, sessionId, latestUserMessage: child.purpose || child.label || '', progress: [], toolActivity: subagentToolActivity(child), subagent: child };
+}
+
 /** Owns durable chat-session state, draft retention, and runtime reconciliation. */
 export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = defaultApiTargets) {
   const sessionRepository = useMemo(() => createChatSessionRepository(targets), [targets]);
@@ -67,6 +114,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
   const [a2aActivities, setA2aActivities] = useState<ActiveA2AActivity[]>([]);
   const [runtimeRun, setRuntimeRun] = useState<RuntimeRunForSelection | null>(null);
+  const [runtimeChildActivities, setRuntimeChildActivities] = useState<ToolActivity[]>([]);
   const childSessionsRef = useRef(new Set<string>());
   const [, setToolActivityVersion] = useState(0);
   const conversationCacheRef = useRef<ConversationCache>(readConversationCache());
@@ -109,6 +157,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   useLayoutEffect(() => {
     committedAgentIdRef.current = selectedAgentId;
     setRuntimeRun(null);
+    setRuntimeChildActivities([]);
     if (!selectedAgentId) {
       setIsNewSession(false);
       setSessionId('');
@@ -247,6 +296,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
     if (!selectedAgentId || !sessionId || isNewSession) {
       setA2aActivities([]);
       setRuntimeRun(null);
+      setRuntimeChildActivities([]);
 
       return;
     }
@@ -257,18 +307,30 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
     const poll = async () => {
       try {
         const owner = targetForResource(targets, selectedAgentId);
-        const response = await apiForTarget<{ runs?: ActiveChatRun[] }>(owner.target, `/api/chat/runs/active?agentId=${encodeURIComponent(owner.resourceId)}&sessionId=${encodeURIComponent(sessionId)}`);
+        const response = await apiForTarget<ActiveChatRunsResponse>(owner.target, `/api/chat/runs/active?agentId=${encodeURIComponent(owner.resourceId)}&sessionId=${encodeURIComponent(sessionId)}`);
         if (cancelled || selectedChatRef.current.agentId !== selectedAgentId || selectedChatRef.current.sessionId !== sessionId) return;
-        const selectedRuntimeRun = response.runs?.[0];
-        setRuntimeRun(runtimeRunForSelection(selectedRuntimeRun));
+        const selectedRuntimeRun = response.runs?.find((run) => run.agentId === owner.resourceId && run.sessionId === sessionId);
+        const matchingLiveSubagents = (response.subagents ?? []).filter((child) => {
+          const traceChildSessionId = child.trace && 'childSessionId' in child.trace && typeof child.trace.childSessionId === 'string' ? child.trace.childSessionId : '';
+          const childAgentId = child.agentId || '';
+          const parentRunId = child.parentRunId || (child.trace && 'runId' in child.trace && typeof child.trace.runId === 'string' ? child.trace.runId : '');
+          return !child.final
+            && (child.parentSessionId === sessionId || (isChildSession && (child.sessionId === sessionId || traceChildSessionId === sessionId)))
+            && (!childAgentId || childAgentId === owner.resourceId)
+            && (!parentRunId || !selectedRuntimeRun || parentRunId === selectedRuntimeRun.runId);
+        });
+        const childActivities = matchingLiveSubagents.map((child) => subagentToolActivity(child));
+        setRuntimeRun(runtimeRunForSelection(selectedRuntimeRun) ?? runtimeRunForSubagent(isChildSession ? matchingLiveSubagents[0] : undefined));
+        setRuntimeChildActivities(childActivities);
         const activities = (response.runs ?? []).flatMap((run) => {
           if (run.a2aActivities?.length) return run.a2aActivities;
           if (run.source !== 'a2a' || !run.a2a) return [];
           const status: ActiveA2AActivity['status'] = run.status === 'cancelled' ? 'cancelled' : run.phase === 'streaming' ? 'streaming' : 'running';
           return [{ id: `a2a:${run.runId}`, status, parentAgentId: run.a2a.parentAgentId, recipient: { agentId: run.agentId, sessionId: run.sessionId, runId: run.runId }, messageMode: run.a2a.messageMode, progress: run.progress ?? [] }];
         });
-        const shouldRefresh = isChildSession || Boolean(response.runs?.length) || hadRuns;
-        hadRuns = Boolean(response.runs?.length);
+        const hasLiveSubagents = Boolean(matchingLiveSubagents.length);
+        const shouldRefresh = isChildSession || Boolean(response.runs?.length) || hasLiveSubagents || hadRuns;
+        hadRuns = Boolean(response.runs?.length) || hasLiveSubagents;
         setA2aActivities(activities.slice(-12));
         // Worker children persist their transcript outside the active chat-run
         // registry. Keep the selected child fresh even when that registry is empty,
@@ -295,6 +357,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
 
   const selectSession = useCallback((targetSessionId: string) => {
     setRuntimeRun(null);
+    setRuntimeChildActivities([]);
     if (!selectedAgentId || !targetSessionId || targetSessionId === sessionId) return;
     // Remember explicit choices before React state changes so concurrent list
     // refreshes cannot restore the previous session.
@@ -306,6 +369,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   }, [selectedAgentId, sessionId]);
   const prepareAgentSelection = useCallback((agentId: string) => {
     setRuntimeRun(null);
+    setRuntimeChildActivities([]);
     // Rail selections always reopen the parent's canonical session rather than
     // inheriting a displayed child session.
     const targetSessionId = parentSessionIdByAgentRef.current[agentId] ?? '';
@@ -319,6 +383,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   }, []);
   const selectChildSession = useCallback((agentId: string, childSessionId: string) => {
     setRuntimeRun(null);
+    setRuntimeChildActivities([]);
     childSessionsRef.current.add(conversationCacheKey(agentId, childSessionId));
     sessionIdByAgentRef.current[agentId] = childSessionId;
     setSessionId(childSessionId);
@@ -370,5 +435,5 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   const reportError = useCallback((message: string) => setChatError(message), []);
   const clearError = useCallback(() => setChatError(''), []);
 
-  return { attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation: isLoadingConversation || isSwitchingAgent, draft, setDraft, refreshSessions, refreshConversation, selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun, a2aActivities, runtimeRun, cancelRuntimeRun };
+  return { attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation: isLoadingConversation || isSwitchingAgent, draft, setDraft, refreshSessions, refreshConversation, selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun, a2aActivities, runtimeRun, runtimeChildActivities, cancelRuntimeRun };
 }

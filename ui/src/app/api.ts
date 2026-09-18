@@ -182,6 +182,38 @@ export type ActiveA2AActivity = {
   messageMode?: string;
   progress?: Array<{ type?: string; data?: Record<string, unknown>; ts?: string }>;
 };
+export type ActiveSubagentActivity = {
+  kind?: string | null;
+  status?: string | null;
+  phase?: string | null;
+  label?: string | null;
+  sequence?: number | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  lastActualActivityAt?: string | null;
+  heartbeatAt?: string | null;
+  tool?: string | null;
+  model?: string | null;
+  error?: string | null;
+  counts?: Record<string, unknown> | null;
+};
+export type ActiveSubagent = {
+  id: string;
+  status?: string | null;
+  phase?: string | null;
+  final?: boolean;
+  agentId?: string | null;
+  runId?: string | null;
+  sessionId?: string | null;
+  parentSessionId?: string | null;
+  parentRunId?: string | null;
+  lastActualActivityAt?: string | null;
+  activity?: ActiveSubagentActivity | null;
+  trace?: { runId?: string | null; childSessionId?: string | null; traceDir?: string | null } | Record<string, unknown> | null;
+  label?: string | null;
+  purpose?: string | null;
+  result?: { ok?: boolean; summary?: string; blockers?: number; warnings?: number } | null;
+};
 export type ActiveChatRun = {
   runId: string;
   agentId: string;
@@ -194,7 +226,7 @@ export type ActiveChatRun = {
   a2a?: { parentAgentId?: string; parentRunId?: string; messageMode?: string } | null;
   a2aActivities?: ActiveA2AActivity[];
 };
-export type ActiveChatRunsResponse = { ok: boolean; runs: ActiveChatRun[] };
+export type ActiveChatRunsResponse = { ok: boolean; runs: ActiveChatRun[]; subagents?: ActiveSubagent[] };
 
 export type SessionAttachment = {
   index?: number;

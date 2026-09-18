@@ -324,6 +324,81 @@ it('exposes a destination session task run with live tools, thoughts, and A2A ac
   unmount();
 });
 
+it('exposes active subagent activity when no chat run is registered', async () => {
+  const now = Date.now();
+  const startedAt = new Date(now - 120_000).toISOString();
+  const lastActualActivityAt = new Date(now - 420_000).toISOString();
+  apiMock.mockImplementation(async (_target, path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (path === conversationPath || path === `/api/sessions/child-session?agentId=${agentId}`) return { session: { id: sessionId, turns: [] } };
+    if (path.startsWith('/api/chat/runs/active?')) return { runs: [], subagents: [{
+      id: 'child-1', agentId, runId: 'child-run', sessionId: 'child-session', parentSessionId: sessionId, status: 'running', phase: 'tool', final: false,
+      label: 'Repo check', purpose: 'Inspect UI activity', lastActualActivityAt,
+      activity: { kind: 'tool', status: 'running', phase: 'tool', label: 'shell_exec', tool: 'shell_exec', sequence: 3, startedAt, lastActualActivityAt },
+      trace: { runId: 'child-run', childSessionId: 'child-session' },
+    }] };
+    throw new Error(path);
+  });
+  const { result, unmount } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+  act(() => result.current.selectChildSession(agentId, 'child-session'));
+  await waitFor(() => expect(result.current.runtimeRun).toMatchObject({ runId: 'child-run', latestUserMessage: 'Inspect UI activity' }));
+  expect(result.current.runtimeRun?.toolActivity?.items?.[0]).toMatchObject({ label: 'shell_exec', status: 'pending', detail: expect.stringContaining('last actual event 7m ago') });
+  expect(result.current.runtimeRun?.toolActivity?.items?.[0].detail).toContain('elapsed 2m');
+  unmount();
+});
+
+it('keeps parent runtime identity while surfacing all matching child activity', async () => {
+  apiMock.mockImplementation(async (_target, path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
+    if (path.startsWith('/api/chat/runs/active?')) return { runs: [{ runId: 'parent-run', agentId, sessionId, status: 'running', latestUserMessage: 'Parent prompt', progress: [] }], subagents: [
+      { id: 'child-1', agentId, runId: 'child-run-1', parentRunId: 'parent-run', sessionId: 'child-a', parentSessionId: sessionId, final: false, activity: { label: 'shell_exec', tool: 'shell_exec', status: 'running' } },
+      { id: 'child-2', agentId, runId: 'child-run-2', parentRunId: 'parent-run', sessionId: 'child-b', parentSessionId: sessionId, final: false, activity: { label: 'files_read', tool: 'files_read', status: 'running' } },
+      { id: 'child-other-session', agentId, runId: 'child-run-3', parentRunId: 'parent-run', sessionId: 'child-c', parentSessionId: 'other-session', final: false, activity: { label: 'ignored', tool: 'ignored', status: 'running' } },
+      { id: 'child-other-agent', agentId: 'smatchet', runId: 'child-run-4', parentRunId: 'parent-run', sessionId: 'child-d', parentSessionId: sessionId, final: false, activity: { label: 'ignored', tool: 'ignored', status: 'running' } },
+      { id: 'child-other-run', agentId, runId: 'child-run-5', parentRunId: 'other-run', sessionId: 'child-e', parentSessionId: sessionId, final: false, activity: { label: 'ignored', tool: 'ignored', status: 'running' } },
+    ] };
+    throw new Error(path);
+  });
+  const { result, unmount } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('parent-run'));
+  expect(result.current.runtimeRun).toMatchObject({ agentId, sessionId, latestUserMessage: 'Parent prompt' });
+  expect(result.current.runtimeChildActivities.map((activity) => activity.runId)).toEqual(['child-run-1', 'child-run-2']);
+  unmount();
+});
+
+it('uses child-only runtime activity only for selected child sessions, without assigning child identity to the parent selection', async () => {
+  apiMock.mockImplementation(async (_target, path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
+    if (path.startsWith('/api/chat/runs/active?')) return { runs: [], subagents: [{
+      id: 'child-1', agentId, runId: 'child-run', sessionId: 'child-session', parentSessionId: sessionId, final: false,
+      purpose: 'Child work', activity: { label: 'shell_exec', tool: 'shell_exec', status: 'running' },
+    }] };
+    throw new Error(path);
+  });
+  const { result, unmount } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.runtimeChildActivities.map((activity) => activity.runId)).toEqual(['child-run']));
+  expect(result.current.runtimeRun).toBeNull();
+  unmount();
+});
+
+it('cleans up child activity when children become terminal', async () => {
+  let final = false;
+  apiMock.mockImplementation(async (_target, path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
+    if (path.startsWith('/api/chat/runs/active?')) return { runs: [{ runId: 'parent-run', agentId, sessionId, status: 'running', progress: [] }], subagents: final ? [] : [{ id: 'child-1', agentId, runId: 'child-run', parentRunId: 'parent-run', sessionId: 'child-session', parentSessionId: sessionId, final: false, activity: { label: 'shell_exec', tool: 'shell_exec', status: 'running' } }] };
+    throw new Error(path);
+  });
+  const { result, unmount } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.runtimeChildActivities).toHaveLength(1));
+  final = true;
+  await waitFor(() => expect(result.current.runtimeChildActivities).toHaveLength(0), { timeout: 2500 });
+  unmount();
+});
+
 it('reduces task tool completion onto its started activity and exposes the task prompt', async () => {
   apiMock.mockImplementation(async (_target, path) => {
     if (path === sessionListPath) return { sessions: [{ id: sessionId }] };

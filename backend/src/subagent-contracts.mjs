@@ -140,6 +140,31 @@ function normalizeModelSelection(model = null) {
   return requestedProfile || resolvedProfile || resolvedModel ? { requestedProfile, resolvedProfile, resolvedModel } : null;
 }
 
+function normalizeActivity(activity = null) {
+  if (!activity || typeof activity !== 'object') return null;
+  const kind = compactString(activity.kind) || compactString(activity.type) || null;
+  const status = compactString(activity.status) || null;
+  const phase = compactString(activity.phase) || null;
+  const lastActualActivityAt = compactString(activity.lastActualActivityAt) || compactString(activity.updatedAt) || null;
+  const label = compactString(activity.label) || null;
+  const normalized = {
+    kind,
+    status,
+    phase,
+    label,
+    sequence: Number.isFinite(Number(activity.sequence)) ? Number(activity.sequence) : null,
+    startedAt: compactString(activity.startedAt) || null,
+    completedAt: compactString(activity.completedAt) || null,
+    lastActualActivityAt,
+    heartbeatAt: compactString(activity.heartbeatAt) || null,
+    tool: compactString(activity.tool) || null,
+    model: compactString(activity.model) || null,
+    error: compactString(activity.error).slice(0, 500) || null,
+    counts: activity.counts && typeof activity.counts === 'object' ? activity.counts : null,
+  };
+  return Object.values(normalized).some((value) => value !== null) ? normalized : null;
+}
+
 function normalizeVerification(verification = null) {
   if (!verification || typeof verification !== 'object') return null;
   const status = compactString(verification.status);
@@ -183,6 +208,7 @@ export function createSubagentContract({
   model = null,
   result = null,
   phase = null,
+  activity = null,
   provenance = [],
   createdAt = null,
   updatedAt = null,
@@ -204,6 +230,7 @@ export function createSubagentContract({
     spawnRequest: normalizeSpawnRequest(spawnRequest),
     model: normalizeModelSelection(model),
     result: normalizeResult(result),
+    activity: normalizeActivity(activity),
     provenance: Array.isArray(provenance) ? provenance : [],
     createdAt: createdAt || null,
     updatedAt: updatedAt || null,

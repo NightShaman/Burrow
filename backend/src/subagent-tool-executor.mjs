@@ -304,7 +304,8 @@ export async function executeSpawnSubagentTool({
     provenance: ['spawn-subagent-tool', 'context:isolated'],
   });
   await startSubagentChildSession({ dataRoot, id, workerProfile: 'spawn_subagent', purpose: task, owner, trace: { runId: id, childSessionId, traceDir }, model: modelSelection });
-  const running = await updateSubagentStatus({ dataRoot, id, status: 'running', phase: 'spawned', trace: { runId: id, childSessionId, traceDir }, provenance: { source: 'spawn-subagent-tool', reason: 'spawned' } });
+  const spawnedAt = new Date().toISOString();
+  const running = await updateSubagentStatus({ dataRoot, id, status: 'running', phase: 'spawned', trace: { runId: id, childSessionId, traceDir }, activity: { kind: 'run', status: 'running', phase: 'spawned', label: 'Subagent spawned', sequence: 0, startedAt: spawnedAt, lastActualActivityAt: spawnedAt }, provenance: { source: 'spawn-subagent-tool', reason: 'spawned' } });
 
   const remoteExecution = resolveNativeFilesystemExecutionTarget(executionContext || {}).kind === 'remote';
   let childRun;
