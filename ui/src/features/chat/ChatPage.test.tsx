@@ -45,7 +45,7 @@ function renderChat(overrides: Partial<Parameters<typeof Chat>[0]> = {}) {
     sessionId: 'default',
     ...overrides,
   };
-  return { ...render(<Chat {...props} />), setDraft, onSend };
+  return { ...render(<Chat {...props} />), props, setDraft, onSend };
 }
 
 afterEach(() => {
@@ -67,6 +67,31 @@ describe('Chat composer draft ownership', () => {
     expect(setDraft).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(setDraft).toHaveBeenCalledWith('Typing stays responsive');
+  });
+
+  it('does not replace active typing with a delayed persistence echo', () => {
+    vi.useFakeTimers();
+    const { props, rerender, setDraft } = renderChat();
+    const composer = screen.getByRole('textbox', { name: 'Message' });
+
+    fireEvent.change(composer, { target: { value: 'super' } });
+    vi.advanceTimersByTime(250);
+    expect(setDraft).toHaveBeenCalledWith('super');
+
+    fireEvent.change(composer, { target: { value: 'super fast' } });
+    rerender(<Chat {...props} draft="super" />);
+
+    expect((composer as HTMLTextAreaElement).value).toBe('super fast');
+  });
+
+  it('hydrates the correct draft when the conversation changes', () => {
+    const { props, rerender } = renderChat({ draft: 'First conversation' });
+    const composer = screen.getByRole('textbox', { name: 'Message' });
+    fireEvent.change(composer, { target: { value: 'Unsaved first conversation edit' } });
+
+    rerender(<Chat {...props} sessionId="another-session" draft="Second conversation" />);
+
+    expect((composer as HTMLTextAreaElement).value).toBe('Second conversation');
   });
 
   it('flushes the latest draft when leaving the chat', () => {
