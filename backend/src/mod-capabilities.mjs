@@ -80,7 +80,7 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
       const config = await resolveModelConfig({ modelConnectionId: connectionId, model, settingsDb: databasePath, fetchImpl });
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
-      const result = await createModelAdapter({ config: { ...config, maxResponseBytes: 64 * 1024 }, fetchImpl }).complete({ prompt, maxTokens: tokens, tools: null, signal });
+      const result = await createModelAdapter({ config, fetchImpl }).complete({ prompt, maxTokens: tokens, tools: null, signal });
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
       if (result.error || !result.choice || result.choice.toolCalls?.length) throw new Error('mod_model_generation_failed');
       const text = result.choice.text;
