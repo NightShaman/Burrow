@@ -114,6 +114,7 @@ let modelSettingsStore = null;
 let agentRegistryStore = null;
 let mcpSettingsStore = null;
 let scheduledJobScheduler = null;
+let loadedMods = [];
 let dreamCycleScheduler = null;
 let tiddleScheduler = null;
 let attachmentCleanupScheduler = null;
@@ -158,6 +159,7 @@ function scheduler() {
   if (!scheduledJobScheduler) scheduledJobScheduler = createScheduledJobScheduler({
     storeFactory: () => new ScheduledJobStore({ databasePath: settingsDatabasePath() }),
     resolveAgentRuntime, rootDir: projectRoot,
+    activeOwnerModIds: () => loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id),
   });
   return scheduledJobScheduler;
 }
@@ -2966,15 +2968,17 @@ const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJ
 const authRoute = createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
 const chatRoute = createChatRoutes({ handleChat, readJsonBody, sendJson, selectedAgentRuntime, cancelChatRun });
 const modsRuntimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
-const mods = await loadMods({ runtimeRoot: modsRuntimeRoot, databasePath: settingsDatabasePath(), executionProviders, resolveAgentRuntime, resolveAgentWorkspaceRoot: async (id) => {
+const mods = await loadMods({ runtimeRoot: modsRuntimeRoot, databasePath: settingsDatabasePath(), executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), resolveAgentWorkspaceRoot: async (id) => {
   const agent = agentsStore().get(id);
   if (!agent) throw new Error('agent_not_found');
   return agentRuntimeContext({ runtimeState: (await runtimeConfig()).runtimeState, agent }).agentWorkspaceRoot;
 } });
+loadedMods = mods;
 const modRoute = createModRoute({ mods, readJsonBody, sendJson });
 const modDistribution = createModDistribution({
   runtimeRoot: modsRuntimeRoot,
   databasePath: settingsDatabasePath(),
+  onLifecycleChange({ modId, enabled, installed }) { const mod = loadedMods.find((entry) => entry.id === modId); if (mod && (!installed || !enabled)) mod.status = installed ? 'disabled' : 'uninstalled'; },
   restart() {
     // Installed code is never hot-swapped into a live process. The service
     // manager restarts Burrow after the response has reached the operator.
@@ -3130,7 +3134,7 @@ server.listen(port, host, async () => {
   reconcileInterruptedDreamCycles({ databasePath: settingsDatabasePath() });
   if (backgroundSchedulersEnabled()) {
     const store = new ScheduledJobStore({ databasePath: settingsDatabasePath() });
-    try { store.markMissedRuns(); store.markMissedSchedules(); } finally { store.close(); }
+    try { store.markMissedRuns(); store.markMissedSchedules({ activeOwnerModIds: loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id) }); } finally { store.close(); }
     await scheduler().start();
     await dreamScheduler().start();
     await rollingContinuityScheduler().start();

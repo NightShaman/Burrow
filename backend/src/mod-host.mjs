@@ -108,7 +108,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     // Never replace the controller of an in-flight request with a forged ID.
     if (activeCapabilities.has(requestId)) return;
     const controller = new AbortController();
-    if (activeCapabilities.size >= 4 || !capabilities || !["listAgents", "listConversations", "readConversation", "listModels", "generateText"].includes(message.method)) {
+    if (activeCapabilities.size >= 4 || !capabilities || !["listAgents", "listConversations", "readConversation", "listModels", "generateText", "listScheduledJobs", "readScheduledJob", "createScheduledJob", "updateScheduledJob", "deleteScheduledJob", "listScheduledJobRuns", "triggerScheduledJob"].includes(message.method)) {
       child.send({ type: "capability-result", requestId, error: "mod_capability_unavailable" }, () => {}); return;
     }
     let inputSize;

@@ -2,6 +2,7 @@ import { readModConversationPage } from './mod-conversation-pager.mjs';
 import { createHash } from 'node:crypto';
 import { AgentRegistryStore } from './agent-registry.mjs';
 import { ModelSettingsStore } from './model-settings-store.mjs';
+import { ScheduledJobStore } from './scheduled-job-store.mjs';
 import { resolveModelConfig } from './config.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
 import { listSessionRecords, listResetSessionArchives } from './session-store.mjs';
@@ -10,11 +11,47 @@ function invalid() { throw new Error('mod_capability_input_invalid'); }
 function bounded(value, max) { if (typeof value !== 'string' || !value || value.length > max) invalid(); return value; }
 function count(value, fallback, max) { if (value === undefined) return fallback; if (!Number.isInteger(value) || value < 1 || value > max) invalid(); return value; }
 function plain(value) { if (!value || typeof value !== 'object' || Array.isArray(value)) invalid(); return value; }
+const SCHEDULER_PAGE_MAX_BYTES = 240_000;
+function resultBytes(value) { return Buffer.byteLength(JSON.stringify(value)); }
+function summarizedRun(run) {
+  return {
+    id: run.id,
+    jobId: run.jobId,
+    scheduledFor: run.scheduledFor,
+    status: run.status,
+    agentId: run.agentId,
+    sessionId: run.sessionId,
+    runId: run.runId,
+    dispatchedAt: run.dispatchedAt,
+    completedAt: run.completedAt,
+    ok: run.ok,
+    error: run.error ? String(run.error).slice(0, 1024) : null,
+    result: { truncated: true, reason: 'scheduled_job_run_output_limit' },
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+  };
+}
 
 // Only this core-side service has access to SQLite secrets and provider credentials.
-export function createModCapabilities({ databasePath, resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch } = {}) {
+export function createModCapabilities({ databasePath, resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null } = {}) {
   if (typeof resolveAgentRuntime !== 'function') throw new Error('mod_agent_resolver_required');
   const withStore = (Store, fn) => { const store = new Store({ databasePath }); try { return fn(store); } finally { store.close(); } };
+  const withJobs = (fn) => withStore(ScheduledJobStore, fn);
+  const schedulerOwner = () => { if (typeof ownerModId !== 'string' || !ownerModId) throw new Error('mod_scheduler_owner_unavailable'); return ownerModId; };
+  const ownedJob = (store, jobId) => store.getOwnedJob(schedulerOwner(), bounded(jobId, 96));
+  function page(input = {}, max = 100) { const value = plain(input); const limit = count(value.limit, 50, max); let offset = 0; if (value.cursor !== undefined && value.cursor !== null) { let cursor; try { cursor = JSON.parse(Buffer.from(bounded(value.cursor, 512), 'base64url').toString('utf8')); } catch { invalid(); } if (cursor?.ownerModId !== schedulerOwner() || !Number.isSafeInteger(cursor.offset) || cursor.offset < 1) invalid(); offset = cursor.offset; } return { value, limit, offset }; }
+  const cursor = (offset) => Buffer.from(JSON.stringify({ ownerModId: schedulerOwner(), offset })).toString('base64url');
+  function budgetPage(key, candidates, { offset, limit, transform = (item) => item } = {}) {
+    const items = [];
+    for (const candidate of candidates.slice(0, limit)) {
+      const item = transform(candidate);
+      const tentative = { [key]: [...items, item], hasMore: true, nextCursor: cursor(offset + items.length + 1) };
+      if (resultBytes(tentative) > SCHEDULER_PAGE_MAX_BYTES) break;
+      items.push(item);
+    }
+    const hasMore = items.length < candidates.length;
+    return { [key]: items, hasMore, nextCursor: hasMore ? cursor(offset + items.length) : null };
+  }
   async function agentRoot(id) {
     bounded(id, 96);
     const agent = withStore(AgentRegistryStore, (store) => store.get(id));
@@ -25,6 +62,45 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
     return root;
   }
   return Object.freeze({
+    async listScheduledJobs(input) {
+      const { value, limit, offset } = page(input);
+      if (!Number.isSafeInteger(offset) || offset < 0) invalid();
+      if (value.enabled !== undefined && typeof value.enabled !== 'boolean') invalid();
+      const jobs = withJobs((store) => store.listJobs({ ownerModId: schedulerOwner(), enabled: value.enabled ?? null, limit: limit + 1, offset }));
+      return budgetPage('jobs', jobs, { offset, limit });
+    },
+    async readScheduledJob(input) {
+      const value = plain(input); const job = withJobs((store) => ownedJob(store, value.jobId));
+      if (!job) throw new Error('scheduled_job_not_found'); return job;
+    },
+    async createScheduledJob(input) {
+      const value = plain(input);
+      if ('ownerModId' in value || 'id' in value) invalid();
+      return withJobs((store) => store.createJob(value, { ownerModId: schedulerOwner() }));
+    },
+    async updateScheduledJob(input) {
+      const value = plain(input); const jobId = bounded(value.jobId, 96); const patch = plain(value.patch);
+      if ('ownerModId' in patch || 'id' in patch) invalid();
+      const job = withJobs((store) => store.updateJob(jobId, patch, { ownerModId: schedulerOwner() }));
+      if (!job) throw new Error('scheduled_job_not_found'); return job;
+    },
+    async deleteScheduledJob(input) {
+      const value = plain(input); const job = withJobs((store) => store.deleteJob(value.jobId, { ownerModId: schedulerOwner() }));
+      if (!job) throw new Error('scheduled_job_not_found'); return job;
+    },
+    async listScheduledJobRuns(input) {
+      const { value, limit, offset } = page(input, 100); const jobId = bounded(value.jobId, 96);
+      if (!Number.isSafeInteger(offset) || offset < 0) invalid();
+      const exists = withJobs((store) => ownedJob(store, jobId)); if (!exists) throw new Error('scheduled_job_not_found');
+      const runs = withJobs((store) => store.listRuns(jobId, { ownerModId: schedulerOwner(), limit: limit + 1, offset }));
+      return budgetPage('runs', runs, { offset, limit, transform: (run) => resultBytes({ runs: [run], hasMore: true, nextCursor: cursor(offset + 1) }) <= SCHEDULER_PAGE_MAX_BYTES ? run : summarizedRun(run) });
+    },
+    async triggerScheduledJob(input) {
+      const value = plain(input); const jobId = bounded(value.jobId, 96);
+      if (!withJobs((store) => ownedJob(store, jobId))) throw new Error('scheduled_job_not_found');
+      if (!scheduledJobScheduler) throw new Error('scheduled_job_scheduler_unavailable');
+      return scheduledJobScheduler.trigger(jobId, { ownerModId: schedulerOwner() });
+    },
     async listAgents() {
       return withStore(AgentRegistryStore, (store) => store.list().map(({ id, name, enabled }) => ({ id, name, enabled })));
     },

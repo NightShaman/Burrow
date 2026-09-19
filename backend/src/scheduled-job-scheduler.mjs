@@ -9,9 +9,11 @@ function boundedResult(result = {}) {
   };
 }
 
-export function createScheduledJobScheduler({ storeFactory, resolveAgentRuntime, rootDir, intervalMs = 30_000, clock = () => new Date().toISOString() } = {}) {
+export function createScheduledJobScheduler({ storeFactory, resolveAgentRuntime, rootDir, executeTurn = runChatTurnFromBody, intervalMs = 30_000, activeOwnerModIds = () => [], clock = () => new Date().toISOString() } = {}) {
   if (typeof storeFactory !== 'function' || typeof resolveAgentRuntime !== 'function') throw new Error('scheduled_job_scheduler_dependencies_required');
   const active = new Map();
+  const availableOwners = () => { const owners = activeOwnerModIds(); return Array.isArray(owners) ? owners : []; };
+  const ownerAvailable = (job) => !job.ownerModId || availableOwners().includes(job.ownerModId);
   let timer = null;
   let ticking = false;
 
@@ -21,9 +23,14 @@ export function createScheduledJobScheduler({ storeFactory, resolveAgentRuntime,
     const record = { jobId: job.id, runId: run.id, chatRunId: runId, controller, startedAt: clock() };
     active.set(run.id, record);
     try {
+      if (!ownerAvailable(job)) throw new Error('scheduled_job_owner_inactive');
+      const validationStore = storeFactory();
+      try { validationStore.validateModel(job); } finally { validationStore.close(); }
+      if (!ownerAvailable(job)) throw new Error('scheduled_job_owner_inactive');
       const agentRuntime = await resolveAgentRuntime(job.agentId);
-      const result = await runChatTurnFromBody({
-        body: { message: job.prompt, sessionId: job.sessionId, runId, abortSignal: controller.signal },
+      if (!ownerAvailable(job)) throw new Error('scheduled_job_owner_inactive');
+      const result = await executeTurn({
+        body: { message: job.prompt, sessionId: job.sessionId, runId, abortSignal: controller.signal, ...(job.modelConnectionId ? { modelConnectionId: job.modelConnectionId, model: job.model } : {}) },
         rootDir,
         agentRuntime,
         resolveAgentRuntime,
@@ -42,18 +49,19 @@ export function createScheduledJobScheduler({ storeFactory, resolveAgentRuntime,
     try {
       const store = storeFactory();
       let claims;
-      try { claims = store.claimDueJobs({ at: clock() }); } finally { store.close(); }
+      try { claims = store.claimDueJobs({ at: clock(), activeOwnerModIds: availableOwners() }); } finally { store.close(); }
       for (const claim of claims) if (claim.run.status === 'running') void dispatch(claim.job, claim.run);
       return claims;
     } finally { ticking = false; }
   }
 
-  async function trigger(jobId) {
+  async function trigger(jobId, { ownerModId = undefined } = {}) {
     const store = storeFactory();
     let job; let run;
     try {
-      job = store.getJob(jobId);
+      job = ownerModId === undefined ? store.getJob(jobId) : store.getOwnedJob(ownerModId, jobId);
       if (!job) return { ok: false, error: 'scheduled_job_not_found' };
+      if (!ownerAvailable(job)) return { ok: false, error: 'scheduled_job_owner_inactive' };
       const activeRun = store.listRuns(job.id, { limit: 1 }).find((item) => item.status === 'running');
       if (activeRun) return { ok: false, error: 'scheduled_job_already_running', job, run: activeRun };
       run = store.createManualRun(job.id, { at: clock() });

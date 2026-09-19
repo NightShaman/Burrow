@@ -60,11 +60,11 @@ export function AgentSettings({ selected, targets, savedProviders, onAgentsChang
   if (section === 'details') return details;
   if (section === 'profile-documents') return <AgentProfileDocuments agentId={selected.id} targets={targets} overflowTarget={overflowTarget} />;
   if (section === 'mcp-tools') return <AgentMcpTools agentId={selected.id} targets={targets} />;
-  if (section === 'cron-jobs') return <AgentSchedules agentId={selected.id} targets={targets} overflowTarget={overflowTarget} />;
+  if (section === 'cron-jobs') return <AgentSchedules agentId={selected.id} targets={targets} savedProviders={savedProviders} overflowTarget={overflowTarget} />;
   if (section === 'dreams') return <AgentDreams agentId={selected.id} targets={targets} savedProviders={savedProviders} overflowTarget={overflowTarget} />;
   return <div className="agent-settings-grid">
     <div className="agent-settings-left">{details}<div className="agent-profile-documents"><AgentProfileDocuments agentId={selected.id} targets={targets} /></div></div>
-    <div className="agent-settings-middle"><AgentMcpTools agentId={selected.id} targets={targets} /><AgentSchedules agentId={selected.id} targets={targets} /></div>
+    <div className="agent-settings-middle"><AgentMcpTools agentId={selected.id} targets={targets} /><AgentSchedules agentId={selected.id} targets={targets} savedProviders={savedProviders} /></div>
     <div className="agent-settings-right agent-settings-dreams"><AgentDreams agentId={selected.id} targets={targets} savedProviders={savedProviders} /></div>
   </div>;
 }

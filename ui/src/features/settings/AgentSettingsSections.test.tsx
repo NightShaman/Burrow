@@ -1,10 +1,12 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiForTarget } from '../../app/api';
+import { ConfirmProvider } from '../../app/ConfirmDialog';
 import type { ApiTarget } from '../../app/apiTargets';
 import { AgentDreams } from './AgentDreams';
 import { AgentMcpTools } from './AgentMcpTools';
 import { AgentProfileDocuments } from './AgentProfileDocuments';
+import { AgentSchedules } from './AgentSchedules';
 
 vi.mock('../../app/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../app/api')>()),
@@ -38,6 +40,46 @@ describe('agent settings sections', () => {
     apiMock.mockImplementation(() => new Promise(() => undefined));
   });
 
+
+  it('saves an explicit cron model override without changing the agent model', async () => {
+    apiMock.mockImplementation((_target, _path, init) => init?.method === 'POST' ? Promise.resolve({}) : Promise.resolve({ jobs: [] }));
+    render(<ConfirmProvider><AgentSchedules agentId="smatchet" targets={targets} savedProviders={[{ id: 'connection-1', provider: 'Claude', apiType: 'anthropic-messages', url: '', apiKey: '', models: ['model-1'] }]} /></ConfirmProvider>);
+
+    await screen.findByText('No cron jobs configured for this agent.');
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Briefing' } });
+    fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Prepare it.' } });
+    fireEvent.change(screen.getByRole('combobox', { name: /Model/ }), { target: { value: JSON.stringify(['connection-1', 'model-1']) } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add job' }));
+
+    await waitFor(() => expect(apiMock.mock.calls.some(([, path, init]) => path === '/api/scheduled-jobs' && init?.method === 'POST')).toBe(true));
+    const [, , init] = apiMock.mock.calls.find(([, path, request]) => path === '/api/scheduled-jobs' && request?.method === 'POST')!;
+    expect(JSON.parse(init?.body as string)).toMatchObject({ agentId: 'smatchet', modelConnectionId: 'connection-1', model: 'model-1' });
+    expect(apiMock.mock.calls.some(([, path]) => path.includes('/api/agents/'))).toBe(false);
+  });
+
+  it('saves null cron model fields when inheriting the agent chat model', async () => {
+    apiMock.mockImplementation((_target, _path, init) => init?.method === 'POST' ? Promise.resolve({}) : Promise.resolve({ jobs: [] }));
+    render(<ConfirmProvider><AgentSchedules agentId="smatchet" targets={targets} savedProviders={[]} /></ConfirmProvider>);
+
+    await screen.findByText('No cron jobs configured for this agent.');
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Briefing' } });
+    fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Prepare it.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add job' }));
+
+    await waitFor(() => expect(apiMock.mock.calls.some(([, path, init]) => path === '/api/scheduled-jobs' && init?.method === 'POST')).toBe(true));
+    const [, , init] = apiMock.mock.calls.find(([, path, request]) => path === '/api/scheduled-jobs' && request?.method === 'POST')!;
+    expect(JSON.parse(init?.body as string)).toMatchObject({ modelConnectionId: null, model: null });
+  });
+
+  it('shows a persisted unavailable cron override and blocks silent fallback', async () => {
+    apiMock.mockResolvedValue({ jobs: [{ id: 'job-1', agentId: 'smatchet', name: 'Briefing', prompt: 'Prepare it.', cron: '0 9 * * *', timezone: 'UTC', enabled: true, modelConnectionId: 'removed', model: 'gone' }] });
+    render(<ConfirmProvider><AgentSchedules agentId="smatchet" targets={targets} savedProviders={[]} /></ConfirmProvider>);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    expect(screen.getByRole('alert').textContent).toContain('will not silently fall back');
+    expect((screen.getByRole('combobox', { name: /Model/ }) as HTMLSelectElement).value).toBe(JSON.stringify(['removed', 'gone']));
+    expect(screen.getByRole('button', { name: 'Save job' }).getAttribute('disabled')).not.toBeNull();
+  });
 
   it('places recent Dream activity in the fourth column without moving the settings form', async () => {
     apiMock.mockImplementation((_target, path) => Promise.resolve(path.includes('/dream-cycle')

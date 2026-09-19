@@ -194,7 +194,7 @@ function sourceRows(db) { return db.prepare('SELECT id,url,provider,mod_id,mod_n
 function installationRows(db) { return new Map(db.prepare('SELECT mod_id,source_id,version,archive_sha256,installed_at,updated_at FROM mod_installations').all().map((row) => [row.mod_id, row])); }
 function lifecycleRows(db) { return new Map(db.prepare('SELECT mod_id,enabled,created_at,updated_at FROM mod_lifecycle').all().map((row) => [row.mod_id, row])); }
 
-export function createModDistribution({ runtimeRoot, databasePath, restart = null, logger = console, settingsKey = null } = {}) {
+export function createModDistribution({ runtimeRoot, databasePath, restart = null, onLifecycleChange = null, logger = console, settingsKey = null } = {}) {
   if (!runtimeRoot || !databasePath) throw new Error('mod_distribution_configuration_required');
   const modsRoot = path.join(runtimeRoot, 'mods');
   function sourceCredential(db, id) {
@@ -289,6 +289,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       const timestamp = now();
       db.prepare(`INSERT INTO mod_lifecycle (mod_id,enabled,created_at,updated_at) VALUES (?,?,?,?)
         ON CONFLICT(mod_id) DO UPDATE SET enabled=excluded.enabled,updated_at=excluded.updated_at`).run(id, enabled ? 1 : 0, timestamp, timestamp);
+      onLifecycleChange?.({ modId: id, enabled: Boolean(enabled), installed: true });
       restart?.();
       return { ok: true, modId: id, enabled: Boolean(enabled), restartRequired: true };
     } finally { db.close(); locks.delete(id); }
@@ -304,6 +305,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       await fs.rm(path.join(modsRoot, id), { recursive: true, force: true });
       db.prepare('DELETE FROM mod_installations WHERE mod_id=?').run(id);
       db.prepare('DELETE FROM mod_lifecycle WHERE mod_id=?').run(id);
+      onLifecycleChange?.({ modId: id, enabled: false, installed: false });
       restart?.();
       return { ok: true, modId: id, uninstalled: true, settingsPreserved: true, restartRequired: true };
     } finally { db.close(); locks.delete(id); }
