@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import { textFromChatValue, type SessionTurn } from '../../app/api';
@@ -90,16 +90,48 @@ function Placeholder({ title, detail }: { title: string; detail: string }) {
   return <section className="archive-empty-state archive-reader-placeholder"><div className="archive-empty-mark" aria-hidden="true">⌁</div><div><h3>{title}</h3><p>{detail}</p></div></section>;
 }
 
-export function ChatArchiveReader({ session, detail, loading, error }: { session: ArchiveSession | null; detail: ArchiveDetail | null; loading: boolean; error: string }) {
+export function ChatArchiveReader({ session, detail, loading, error, earlierLoading, earlierError, historyUnavailable, onLoadEarlier, onRestart }: { session: ArchiveSession | null; detail: ArchiveDetail | null; loading: boolean; error: string; earlierLoading: boolean; earlierError: string; historyUnavailable: boolean; onLoadEarlier: () => void; onRestart: () => void }) {
+  const readerRef = useRef<HTMLDivElement>(null);
+  const pendingScroll = useRef<{ height: number; top: number } | null>(null);
+  const activeSession = `${session?.agentId}:${session?.sessionId}`;
+  const lastSession = useRef(activeSession);
+  if (lastSession.current !== activeSession) { pendingScroll.current = null; lastSession.current = activeSession; }
+  useLayoutEffect(() => {
+    pendingScroll.current = null;
+    if (readerRef.current) readerRef.current.scrollTop = readerRef.current.scrollHeight;
+  }, [activeSession]);
+  const turns = detail?.session?.turns || detail?.turns || detail?.chatTurns || [];
+  useLayoutEffect(() => {
+    const node = readerRef.current;
+    if (!node || !detail || loading) return;
+    if (pendingScroll.current) {
+      node.scrollTop = pendingScroll.current.top + node.scrollHeight - pendingScroll.current.height;
+      pendingScroll.current = null;
+    } else if (node.dataset.initialized !== activeSession) {
+      node.scrollTop = node.scrollHeight;
+      node.dataset.initialized = activeSession;
+    }
+  }, [activeSession, detail, loading]);
   if (!session) return <Placeholder title="Select a conversation." detail="Choose a chat from the list to read it here." />;
-  const turns = detail?.turns || detail?.chatTurns || detail?.session?.turns || [];
   const copyValue = turns.map((turn) => archiveTurnText(turn, session.agentName || 'Agent')).filter(Boolean).join('\n\n');
+  const load = () => {
+    const node = readerRef.current;
+    if (node) pendingScroll.current = { height: node.scrollHeight, top: node.scrollTop };
+    onLoadEarlier();
+  };
   return <>
-    <ArchiveReaderToolbar eyebrow={session.agentName || session.agentId || 'Archived chat'} title={archiveSessionTitle(session)} detail={`${formatArchiveDate(archiveSessionDate(session))} · ${session.chatTurnCount ?? session.turnCount ?? 0} turns`} value={copyValue} copyLabel="Copy chat" />
-    <div className="archive-content-body archive-reader-body">
-      {loading ? <LoadingState title="Loading conversation." detail="Opening the archived transcript." /> : null}
+    <ArchiveReaderToolbar eyebrow={session.agentName || session.agentId || 'Archived chat'} title={archiveSessionTitle(session)} detail={`${formatArchiveDate(archiveSessionDate(session))} · ${turns.length} loaded turns${detail?.hasMore ? ' · more available' : ''}`} value={copyValue} copyLabel="Copy loaded chat" />
+    <div className="archive-content-body archive-reader-body" ref={readerRef}>
+      {loading ? <LoadingState title="Loading conversation." detail="Opening the most recent messages." /> : null}
       {error ? <ErrorState title="Could not open this conversation." error={error} /> : null}
-      {!loading && !error ? <div className="archive-reader"><div className="archive-reader-summary">{session.summary || 'A mysterious little shelf item.'}</div>{turns.length ? turns.map((turn, index) => { const role = ['user', 'operator', 'human'].includes((turn.role || '').toLowerCase()) ? 'operator' : 'agent'; const text = textFromChatValue(turn.content); return <article className={`archive-turn ${role}`} key={`${turn.ts || 'turn'}-${index}`}><div className="archive-turn-meta"><strong>{role === 'operator' ? 'You' : session.agentName || 'Agent'}</strong><span>{formatTurnDate(turn.ts)}</span></div>{text ? <div className="archive-turn-body"><ReactMarkdown remarkPlugins={[remarkBreaks]}>{text}</ReactMarkdown></div> : null}</article>; }) : <p className="archive-reader-empty">This conversation has no readable chat turns.</p>}</div> : null}
+      {!loading && detail ? <div className="archive-reader">
+        <div className="archive-history-boundary" role="status">
+          {historyUnavailable ? <span>Earlier retained history is unavailable.</span> : detail.hasMore && detail.nextCursor ? <button type="button" disabled={earlierLoading} onClick={load}>{earlierLoading ? 'Loading earlier messages…' : 'Load earlier messages'}</button> : <span>Beginning of retained history</span>}
+          {earlierError ? <div><span>Earlier messages could not be loaded: {earlierError}</span> <button type="button" onClick={load}>Retry</button> <button type="button" onClick={onRestart}>Restart from latest</button></div> : null}
+        </div>
+        <div className="archive-reader-summary">{session.summary || 'A mysterious little shelf item.'}</div>
+        {turns.length ? turns.map((turn, index) => { const role = ['user', 'operator', 'human'].includes((turn.role || '').toLowerCase()) ? 'operator' : 'agent'; const text = textFromChatValue(turn.content); return <article className={`archive-turn ${role}`} key={`${turn.ts || 'turn'}-${index}`}><div className="archive-turn-meta"><strong>{role === 'operator' ? 'You' : session.agentName || 'Agent'}</strong><span>{formatTurnDate(turn.ts)}</span></div>{text ? <div className="archive-turn-body"><ReactMarkdown remarkPlugins={[remarkBreaks]}>{text}</ReactMarkdown></div> : null}</article>; }) : <p className="archive-reader-empty">This conversation has no readable chat turns.</p>}
+      </div> : null}
     </div>
   </>;
 }

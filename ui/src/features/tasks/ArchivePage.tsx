@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Agent } from '../../app/types';
 import { ArchiveRunsProof } from './ArchiveRunsProof';
-import { readArchiveDetailCache, readArchiveSessionCache, writeArchiveDetailCache, writeArchiveSessionCache } from './archiveCache';
+import { readArchiveSessionCache, writeArchiveSessionCache } from './archiveCache';
 import { archiveRepository } from './archiveRepository';
 import { archiveSessionDate, buildCalendarDays, buildDateBuckets, dateFromMonthKey, dreamDate, filterArchiveSessions, filterDreamEntries, groupDreamEntries, monthKey } from './archiveDerivations';
 import { archiveSessionTitle, ChatArchiveReader, DreamArchiveReader, formatArchiveDate, TiddleArchiveReader } from './ArchiveReaders';
@@ -36,6 +36,12 @@ export function Archive({ agents }: { agents: Agent[] }) {
   const [detail, setDetail] = useState<ArchiveDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [earlierLoading, setEarlierLoading] = useState(false);
+  const [earlierError, setEarlierError] = useState('');
+  const [historyUnavailable, setHistoryUnavailable] = useState(false);
+  const earlierAbort = useRef<AbortController | null>(null);
+  const loadingEarlier = useRef(false);
+  const selectionRef = useRef('');
   const [dreamDetailLoading, setDreamDetailLoading] = useState(false);
   const [error, setError] = useState('');
   const [detailError, setDetailError] = useState('');
@@ -99,22 +105,62 @@ export function Archive({ agents }: { agents: Agent[] }) {
   }, [kind, search]);
 
   useEffect(() => {
-    if (!selectedSession || kind !== 'chat') return;
     const abort = new AbortController();
-    const cachedDetail = readArchiveDetailCache(selectedSession);
-    setDetail(cachedDetail);
+    earlierAbort.current?.abort();
+    loadingEarlier.current = false;
+    const identity = kind === 'chat' && selectedSession ? `${selectedSession.agentId}:${selectedSession.sessionId}` : '';
+    selectionRef.current = identity;
+    setDetail(null);
+    setEarlierError('');
+    setHistoryUnavailable(false);
+    setEarlierLoading(false);
+    if (!identity || !selectedSession) { setDetailLoading(false); return () => abort.abort(); }
     setDetailError('');
-    setDetailLoading(!cachedDetail);
+    setDetailLoading(true);
     archiveRepository.loadSession(selectedSession, abort.signal)
-      .then((nextDetail) => {
-        if (abort.signal.aborted) return;
-        setDetail(nextDetail);
-        writeArchiveDetailCache(selectedSession, nextDetail);
-      })
-      .catch((nextError: Error) => { if (!abort.signal.aborted && !cachedDetail) setDetailError(nextError.message || 'Could not load this conversation.'); })
-      .finally(() => { if (!abort.signal.aborted) setDetailLoading(false); });
-    return () => abort.abort();
+      .then((page) => { if (!abort.signal.aborted && selectionRef.current === identity) { setDetail(page); setHistoryUnavailable(page.historyStatus === 'unavailable'); } })
+      .catch((cause: Error) => { if (!abort.signal.aborted && selectionRef.current === identity) setDetailError(cause.message || 'Could not load this conversation.'); })
+      .finally(() => { if (!abort.signal.aborted && selectionRef.current === identity) setDetailLoading(false); });
+    return () => { abort.abort(); if (selectionRef.current === identity) selectionRef.current = ''; earlierAbort.current?.abort(); };
   }, [kind, selectedSession]);
+
+  const loadEarlier = () => {
+    if (!selectedSession || !detail?.hasMore || !detail.nextCursor || loadingEarlier.current || historyUnavailable) return;
+    const identity = selectionRef.current;
+    const cursor = detail.nextCursor;
+    const abort = new AbortController();
+    earlierAbort.current = abort;
+    loadingEarlier.current = true;
+    setEarlierLoading(true);
+    setEarlierError('');
+    archiveRepository.loadSession(selectedSession, abort.signal, cursor)
+      .then((page) => {
+        if (abort.signal.aborted || selectionRef.current !== identity) return;
+        setDetail((current) => {
+          if (!current || current.nextCursor !== cursor) return current;
+          const existing = current.session?.turns || current.turns || current.chatTurns || [];
+          const incoming = page.session?.turns || page.turns || page.chatTurns || [];
+          const key = (turn: typeof incoming[number]) => JSON.stringify(turn);
+          const seen = new Map<string, number>();
+          existing.forEach((turn) => seen.set(key(turn), (seen.get(key(turn)) || 0) + 1));
+          const older = incoming.filter((turn) => {
+            const fingerprint = key(turn);
+            const count = seen.get(fingerprint) || 0;
+            if (!count) return true;
+            seen.set(fingerprint, count - 1);
+            return false;
+          });
+          return { ...current, turns: [...older, ...existing], chatTurns: undefined, session: undefined, hasMore: page.hasMore, nextCursor: page.nextCursor, historyStatus: page.historyStatus };
+        });
+        setHistoryUnavailable(page.historyStatus === 'unavailable');
+      })
+      .catch((cause: Error) => {
+        if (abort.signal.aborted || selectionRef.current !== identity) return;
+        const status = (cause as Error & { status?: number }).status;
+        setEarlierError(status === 409 ? 'History changed or is unavailable. Restart from latest to request a fresh page.' : status === 400 ? 'This page cursor is invalid. Restart from latest to request a fresh page.' : cause.message || 'Earlier messages could not be loaded.');
+      })
+      .finally(() => { if (!abort.signal.aborted && selectionRef.current === identity) { loadingEarlier.current = false; setEarlierLoading(false); } });
+  };
 
   useEffect(() => {
     if (!selectedDreamGroup || kind !== 'dreams') return;
@@ -154,6 +200,8 @@ export function Archive({ agents }: { agents: Agent[] }) {
   const calendarLabel = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(dateFromMonthKey(calendarMonth));
   const handleKindChange = (nextKind: ArchiveKind) => {
     setKind(nextKind);
+    selectionRef.current = "";
+    earlierAbort.current?.abort();
     setSelectedSession(null);
     setSelectedDreamGroup(null);
     setSelectedTiddleCard(null);
@@ -184,10 +232,10 @@ export function Archive({ agents }: { agents: Agent[] }) {
             <div className="archive-split-view">
               <section className="archive-results-pane" aria-label="Archived conversations">
                 <div className="archive-pane-heading"><span className="eyebrow">Chat</span><strong>{visibleSessions.length} conversations</strong></div>
-                <div className="archive-session-list">{visibleSessions.map((session) => <button type="button" key={`${session.agentId || 'agent'}:${session.sessionId}`} className={`archive-session-card${selectedSession && session.sessionId === selectedSession.sessionId && session.agentId === selectedSession.agentId ? ' selected' : ''}`} onClick={() => setSelectedSession(session)}><div className="archive-session-main"><div className="archive-session-meta"><span>{session.agentName || session.agentId || 'Unknown agent'}</span><span>{formatArchiveDate(archiveSessionDate(session))}</span></div><h3>{archiveSessionTitle(session)}</h3><p>{session.summary || 'No summary is available yet.'}</p></div><div className="archive-session-side"><strong>{session.chatTurnCount ?? session.turnCount ?? 0}</strong><span>turns</span>{session.archived ? <em>Archived</em> : <em>Active</em>}</div></button>)}</div>
+                <div className="archive-session-list">{visibleSessions.map((session) => <button type="button" key={`${session.agentId || 'agent'}:${session.sessionId}`} className={`archive-session-card${selectedSession && session.sessionId === selectedSession.sessionId && session.agentId === selectedSession.agentId ? ' selected' : ''}`} onClick={() => { selectionRef.current = ""; earlierAbort.current?.abort(); setSelectedSession(session); }}><div className="archive-session-main"><div className="archive-session-meta"><span>{session.agentName || session.agentId || 'Unknown agent'}</span><span>{formatArchiveDate(archiveSessionDate(session))}</span></div><h3>{archiveSessionTitle(session)}</h3><p>{session.summary || 'No summary is available yet.'}</p></div><div className="archive-session-side"><strong>{session.chatTurnCount ?? session.turnCount ?? 0}</strong><span>turns</span>{session.archived ? <em>Archived</em> : <em>Active</em>}</div></button>)}</div>
               </section>
               <section className="archive-reader-pane">
-                <ChatArchiveReader session={selectedSession} detail={detail} loading={detailLoading} error={detailError} />
+                <ChatArchiveReader session={selectedSession} detail={detail} loading={detailLoading} error={detailError} earlierLoading={earlierLoading} earlierError={earlierError} historyUnavailable={historyUnavailable} onLoadEarlier={loadEarlier} onRestart={() => setSelectedSession((current) => current ? { ...current } : null)} />
               </section>
             </div>
           ) : kind === 'dreams' ? (

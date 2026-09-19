@@ -8,8 +8,10 @@ export function createArchiveRepository() {
     async listSessions(query: string, signal?: AbortSignal) {
       return (await api<{ sessions: ArchiveSession[] }>(`/api/archive/sessions?archived=true&limit=200&q=${encodeURIComponent(query)}`, { signal })).sessions;
     },
-    loadSession(session: ArchiveSession, signal?: AbortSignal) {
-      return api<ArchiveDetail>(`/api/archive/sessions/${encodeURIComponent(session.agentId ?? '')}/${encodeURIComponent(session.sessionId)}`, { signal });
+    loadSession(session: ArchiveSession, signal?: AbortSignal, before?: string) {
+      const query = new URLSearchParams({ limit: '100' });
+      if (before) query.set('before', before);
+      return api<ArchiveDetail>(`/api/archive/sessions/${encodeURIComponent(session.agentId ?? '')}/${encodeURIComponent(session.sessionId)}?${query}`, { signal });
     },
     async listDreams(signal?: AbortSignal): Promise<DreamEntry[]> {
       const response = await api<{ entries: ArchiveDream[] }>('/api/archive/dreams?limit=200', { signal });

@@ -1,11 +1,13 @@
 import { createReadStream, promises as fs } from 'node:fs';
+import { createInterface } from 'node:readline';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { boundedRedactedValue, redactAndTruncateText } from './redaction.mjs';
 import { normalizeSessionContextState } from './session-context-state.mjs';
 import { assessInterruptedRunRecovery } from './recovery-resume-policy.mjs';
 
 const SESSION_TAIL_READ_MAX_BYTES = 4 * 1024 * 1024;
+const archiveCursorKey = randomUUID(); // Process-local: restart invalidates old cursors explicitly.
 
 function safeId(value) {
   return String(value || '').trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120) || randomUUID();
@@ -596,16 +598,17 @@ export async function listResetSessionArchives({ rootDir, query = '', limit = 10
   return snapshots.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))).slice(0, limit);
 }
 
-export async function readResetSessionArchive({ rootDir, archiveId } = {}) {
+export async function readResetSessionArchive({ rootDir, archiveId, includeTurns = true } = {}) {
   const id = String(archiveId || '').trim();
-  const snapshot = (await listResetSessionArchives({ rootDir, limit: 10_000 })).find((item) => item.id === id);
+  const snapshot = (await listResetSessionArchives({ rootDir, limit: Infinity })).find((item) => item.id === id);
   if (!snapshot) return null;
+  if (!includeTurns) return snapshot;
   const turns = await readTranscriptFile(path.join(sessionDir(rootDir, snapshot.sourceSessionId), snapshot.fileName), snapshot.sourceSessionId);
   return { ...snapshot, turns };
 }
 
 export async function writeResetSessionArchiveMetadata({ rootDir, archiveId, metadata = {} } = {}) {
-  const snapshot = (await listResetSessionArchives({ rootDir, limit: 10_000 })).find((item) => item.id === String(archiveId || '').trim());
+  const snapshot = (await listResetSessionArchives({ rootDir, limit: Infinity })).find((item) => item.id === String(archiveId || '').trim());
   if (!snapshot) return null;
   const filePath = resetArchiveMetaFile(rootDir, snapshot.sourceSessionId, snapshot.fileName);
   let prior = {};
@@ -653,6 +656,117 @@ export async function exportSessionTranscript({ rootDir, sessionId } = {}) {
     schemaVersion: '1',
     session: { id, metadata },
     entries,
+  };
+}
+
+// Archive-only reader: signed cursors pin the retained manifest and an active
+// transcript byte boundary. Ordinary appends beyond that boundary do not alter
+// the snapshot; rotation/reset or a changed retained file invalidates it.
+function archiveReadError(code, statusCode = 400) { return Object.assign(new Error(code), { statusCode }); }
+function archiveCursorSignature(payload) { return createHmac('sha256', archiveCursorKey).update(JSON.stringify(payload)).digest('hex'); }
+function archiveTimestamp(value) {
+  if (value == null || value === '') return null;
+  if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(value) || !Number.isFinite(Date.parse(value))) throw archiveReadError('archive_time_invalid');
+  return new Date(value).toISOString();
+}
+export async function readArchiveConversationPage({ rootDir, sessionId, archiveId = null, limit = 100, before = null, from = null, to = null } = {}) {
+  if (!rootDir || !sessionId) throw archiveReadError('archive_session_target_required');
+  if (!Number.isInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > 200) throw archiveReadError('archive_limit_invalid');
+  const start = archiveTimestamp(from);
+  const end = archiveTimestamp(to);
+  if (start && end && start > end) throw archiveReadError('archive_time_invalid');
+  const id = safeId(sessionId);
+  const root = createHash('sha256').update(path.resolve(rootDir)).digest('hex');
+  let cursor = null;
+  if (before != null) {
+    try {
+      if (typeof before !== 'string' || !/^[A-Za-z0-9_-]{1,8192}$/.test(before)) throw Error();
+      cursor = JSON.parse(Buffer.from(before, 'base64url').toString('utf8'));
+      const { mac, ...payload } = cursor;
+      const expected = archiveCursorSignature(payload);
+      if (typeof mac !== 'string' || !/^[a-f0-9]{64}$/.test(mac) || !timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) throw Error();
+      if (cursor.v !== 2 || cursor.root !== root || cursor.id !== id || cursor.archiveId !== archiveId || cursor.from !== start || cursor.to !== end || !Number.isSafeInteger(cursor.offset) || cursor.offset < 1 || !Number.isSafeInteger(cursor.activeSize) || cursor.activeSize < 0) throw Error();
+    } catch { throw archiveReadError('archive_cursor_invalid'); }
+  }
+  const directory = sessionDir(rootDir, id);
+  let names;
+  try { names = await fs.readdir(directory); } catch (error) { if (error?.code === 'ENOENT') return null; throw error; }
+  let sources;
+  let generation;
+  let unavailable = false;
+  if (archiveId) {
+    const fileName = names.find((name) => /^session\.reset\..+\.jsonl$/.test(name) && resetSnapshotId(id, name) === archiveId);
+    if (!fileName) return null;
+    let archiveMetadata = null;
+    try { archiveMetadata = JSON.parse(await fs.readFile(resetArchiveMetaFile(rootDir, id, fileName), 'utf8')); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
+    // Old reset snapshots did not persist their compacted-generation manifest.
+    // The reset file is readable, but it cannot prove the history is complete.
+    unavailable = !Array.isArray(archiveMetadata?.compactedTranscripts);
+    sources = [...(archiveMetadata?.compactedTranscripts || []), fileName];
+    generation = fileName;
+    if (sources.some((name) => !names.includes(name) || !/^session\.(?:compacted|reset)\..+\.jsonl$/.test(name))) throw archiveReadError('archive_history_unavailable', 409);
+  } else {
+    const metadata = await readSessionMetadata({ rootDir, sessionId: id });
+    if (!metadata) return null;
+    unavailable = !Array.isArray(metadata.compactedTranscripts);
+    sources = [...(metadata.compactedTranscripts || []), 'session.jsonl'];
+    generation = metadata.conversationId || metadata.transcriptGeneration || null;
+    if ((metadata.compactedTranscripts || []).some((name) => !/^session\.compacted\..+\.jsonl$/.test(name) || !names.includes(name))) throw archiveReadError('archive_history_unavailable', 409);
+    if (!names.includes('session.jsonl') && (metadata.chatTurnCount || 0) > 0) throw archiveReadError('archive_history_unavailable', 409);
+    sources = sources.filter((name) => names.includes(name));
+  }
+  const files = [];
+  for (const name of sources) {
+    let stat;
+    try { stat = await fs.stat(path.join(directory, name)); } catch (error) { if (error?.code === 'ENOENT') throw archiveReadError('archive_history_unavailable', 409); throw error; }
+    const active = !archiveId && name === 'session.jsonl';
+    if (active && cursor && stat.size < cursor.activeSize) throw archiveReadError('archive_cursor_stale', 409);
+    files.push({ name, size: active && cursor ? cursor.activeSize : stat.size, actualSize: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino, active });
+  }
+  const activeSize = files.find((file) => file.active)?.size || 0;
+  // Exclude active mtime: it changes on every ordinary append. Retained files
+  // remain immutable; their size and mtime protect the pinned manifest.
+  const signature = createHash('sha256').update(JSON.stringify({ generation, files: files.map(({ name, size, mtimeMs, ino, active }) => [name, size, active ? null : mtimeMs, ino]) })).digest('hex');
+  if (cursor && cursor.signature !== signature) throw archiveReadError('archive_cursor_stale', 409);
+  const seen = new Set();
+  const page = [];
+  let count = 0;
+  // Stream lines and hold only the requested window (plus IDs needed to
+  // suppress copied compaction tails). No full transcript/turn array per page.
+  for (const file of files) {
+    if (!file.size) continue;
+    const stream = createReadStream(path.join(directory, file.name), { encoding: 'utf8', end: file.size - 1 });
+    const lines = createInterface({ input: stream, crlfDelay: Infinity });
+    for await (const line of lines) {
+      if (!line.trim()) continue;
+      let turn;
+      try {
+        const raw = JSON.parse(line);
+        if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || !raw.id || typeof raw.ts !== 'string') throw Error();
+        turn = normalizeTranscriptEntry(raw, { sessionId: id });
+      } catch { unavailable = true; continue; }
+      if (!isChatMessage(turn) || seen.has(turn.id)) continue;
+      seen.add(turn.id);
+      if ((start && turn.ts < start) || (end && turn.ts > end)) continue;
+      if (cursor && count >= cursor.offset) { count += 1; continue; }
+      count += 1;
+      page.push(turn);
+      if (page.length > Number(limit)) page.shift();
+    }
+  }
+  for (const file of files) {
+    let stat;
+    try { stat = await fs.stat(path.join(directory, file.name)); } catch (error) { if (error?.code === 'ENOENT') throw archiveReadError('archive_cursor_stale', 409); throw error; }
+    if (stat.ino !== file.ino || (file.active ? stat.size < file.size : stat.size !== file.size || stat.mtimeMs !== file.mtimeMs)) throw archiveReadError('archive_cursor_stale', 409);
+  }
+  if (cursor && cursor.offset > count) throw archiveReadError('archive_cursor_stale', 409);
+  const boundary = cursor?.offset ?? count;
+  const nextOffset = boundary - page.length;
+  const payload = { v: 2, root, id, archiveId, from: start, to: end, signature, activeSize, offset: nextOffset };
+  return {
+    turns: page, hasMore: nextOffset > 0,
+    nextCursor: nextOffset > 0 ? Buffer.from(JSON.stringify({ ...payload, mac: archiveCursorSignature(payload) })).toString('base64url') : null,
+    historyStatus: unavailable ? 'unavailable' : 'complete',
   };
 }
 
@@ -751,8 +865,8 @@ export async function resetSession({ rootDir, sessionId, clock = nowIso } = {}) 
   const archived = await fileExists(active);
   if (archived) await fs.rename(active, archivePath);
   const archiveEntries = archived ? await readTranscriptFile(archivePath, id) : [];
-  if (archiveEntries.length) await atomicWriteJson(resetArchiveMetaFile(rootDir, id, path.basename(archivePath)), { title: deriveArchiveTitle(archiveEntries.filter(isChatMessage), { fallback: `Conversation from ${id}` }), titleSource: 'derived', summary: null, summaryStatus: 'not_configured', summarizedAt: null, createdAt: clock() });
   const prior = await readSessionMetadata({ rootDir, sessionId: id });
+  if (archiveEntries.length) await atomicWriteJson(resetArchiveMetaFile(rootDir, id, path.basename(archivePath)), { compactedTranscripts: prior?.compactedTranscripts || [], title: deriveArchiveTitle(archiveEntries.filter(isChatMessage), { fallback: `Conversation from ${id}` }), titleSource: 'derived', summary: null, summaryStatus: 'not_configured', summarizedAt: null, createdAt: clock() });
   const metadata = { ...initialMetadata(id, clock()), conversationId: randomUUID(), resetAt: clock(), resetArchive: path.basename(archivePath), archived: prior?.archived || false, archivedAt: prior?.archivedAt || null };
   await writeMetadata(rootDir, id, metadata);
   await fs.rm(continuityHeadFile(rootDir, id), { force: true });

@@ -143,7 +143,7 @@ export function createSessionRoutes({
       const parts = url.pathname.slice('/api/archive/sessions/'.length).split('/').map(decodeURIComponent);
       const [agentId, sessionId] = parts;
       if (!agentId || !sessionId) { sendJson(res, 400, { ok: false, error: 'archive_session_target_required' }); return true; }
-      const detail = await archiveSessionDetail(agentId, sessionId);
+      const detail = await archiveSessionDetail(agentId, sessionId, { limit: url.searchParams.get('limit') ?? 100, before: url.searchParams.get('before'), from: url.searchParams.get('from'), to: url.searchParams.get('to') });
       sendJson(res, detail ? 200 : 404, detail ? { ok: true, ...detail } : { ok: false, error: 'not_found' });
       return true;
     }

@@ -16,7 +16,7 @@ import { getUiAuthSecret, hasUiAuthSecret, setUiAuthSecret } from '../src/ui-aut
 import { collectTraceObservability } from '../src/trace-observability.mjs';
 import { listSubagentRecords, subagentVisibilitySummary } from '../src/subagent-store.mjs';
 import { ContinuityHandoffStore, buildContinuityHandoff, listContinuityHandoffs } from '../src/continuity-handoff-store.mjs';
-import { appendSessionEntry, archiveSession, forkSession, listResetSessionArchives, listSessionRecords, readActivityEvents, readChatMessages, readResetSessionArchive, readSessionMetadata, readSessionTurns, exportSessionTranscript, renameSession, resetSession, summarizeSessionTurns, writeResetSessionArchiveMetadata, writeSessionMetadata } from '../src/session-store.mjs';
+import { appendSessionEntry, archiveSession, forkSession, listResetSessionArchives, listSessionRecords, readActivityEvents, readChatMessages, readResetSessionArchive, readArchiveConversationPage, readSessionMetadata, readSessionTurns, exportSessionTranscript, renameSession, resetSession, summarizeSessionTurns, writeResetSessionArchiveMetadata, writeSessionMetadata } from '../src/session-store.mjs';
 import { runPendingRecoveryContinuations } from '../src/recovery-continuation-runner.mjs';
 import { recordActiveRunInterruptions } from '../src/interrupted-run-recovery.mjs';
 import { generateArchiveSummary } from '../src/archive-summary.mjs';
@@ -2058,12 +2058,13 @@ async function sessionDetail(id, { rootDir } = {}) {
   return { id, turnCount: metadata.turnCount ?? turns.length, metadata, summary: metadata.summary || summarizeSessionTurns(chatTurns, { maxChars: 2000 }), turns, activities };
 }
 
-async function archiveSessionDetail(agentId, sessionId) {
+async function archiveSessionDetail(agentId, sessionId, pageOptions = {}) {
   const agentRuntime = await resolveAgentRuntime(agentId);
   const agent = agentsStore().resolve(agentRuntime.agentId) || { id: agentRuntime.agentId, name: agentRuntime.agentId };
-  const resetSnapshot = await readResetSessionArchive({ rootDir: agentRuntime.agentWorkspaceRoot, archiveId: sessionId });
+  const resetSnapshot = await readResetSessionArchive({ rootDir: agentRuntime.agentWorkspaceRoot, archiveId: sessionId, includeTurns: false });
+  const page = await readArchiveConversationPage({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId: resetSnapshot?.sourceSessionId || sessionId, archiveId: resetSnapshot?.id || null, ...pageOptions });
   if (resetSnapshot) {
-    const chatTurns = resetSnapshot.turns.filter((turn) => turn.visibility === 'chat').map(compactChatTurn);
+    const chatTurns = page.turns.map(compactChatTurn);
     return {
       agentId: agentRuntime.agentId,
       agentName: agent.name || agentRuntime.agentId,
@@ -2083,11 +2084,14 @@ async function archiveSessionDetail(agentId, sessionId) {
         turns: chatTurns,
         activities: [],
       },
+      hasMore: page.hasMore, nextCursor: page.nextCursor, historyStatus: page.historyStatus,
     };
   }
-  const session = await sessionDetail(sessionId, { rootDir: agentRuntime.agentWorkspaceRoot });
-  if (!session) return null;
+  const metadata = await readSessionMetadata({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId });
+  if (!metadata || !page) return null;
+  const session = { id: sessionId, turnCount: metadata.turnCount ?? page.turns.length, metadata, summary: metadata.summary || summarizeSessionTurns(page.turns, { maxChars: 2000 }), turns: page.turns.map(compactChatTurn), activities: [] };
   return {
+    hasMore: page.hasMore, nextCursor: page.nextCursor, historyStatus: page.historyStatus,
     agentId: agentRuntime.agentId,
     agentName: agent.name || agentRuntime.agentId,
     sessionId: session.id,

@@ -24,7 +24,7 @@ describe('archiveRepository', () => {
     await expect(repository.loadSession(session)).resolves.toEqual({ turns: [] });
 
     expect(apiMock).toHaveBeenNthCalledWith(1, '/api/archive/sessions?archived=true&limit=200&q=design%20%26%20css', { signal: undefined });
-    expect(apiMock).toHaveBeenNthCalledWith(2, '/api/archive/sessions/agent%2Fname/session%2Fname', { signal: undefined });
+    expect(apiMock).toHaveBeenNthCalledWith(2, '/api/archive/sessions/agent%2Fname/session%2Fname?limit=100', { signal: undefined });
   });
 
   it('omits agentId for All agents and preserves explicit agent filters', async () => {
