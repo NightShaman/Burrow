@@ -1,5 +1,4 @@
 import { readModConversationPage } from './mod-conversation-pager.mjs';
-import { createHash } from 'node:crypto';
 import { AgentRegistryStore } from './agent-registry.mjs';
 import { ModelSettingsStore } from './model-settings-store.mjs';
 import { ScheduledJobStore } from './scheduled-job-store.mjs';
@@ -114,20 +113,28 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
       // no reset snapshot or session can be silently lost between page windows.
       const sessions = await listSessionRecords({ rootDir, includeArchived, limit: Infinity });
       const resets = includeArchived ? await listResetSessionArchives({ rootDir, limit: Infinity }) : [];
+      const entryKey = (entry) => entry.archiveId ? `archive:${entry.archiveId}` : `session:${entry.id}`;
       const entries = [...sessions.map(({ id, metadata, updatedAt, archived }) => ({ id, agentId, archiveTitle: metadata?.archiveTitle || null, updatedAt, archived: Boolean(archived), archiveId: null })),
         ...resets.map(({ id, sourceSessionId, archiveTitle, updatedAt }) => ({ id, agentId, sourceSessionId, archiveTitle, updatedAt, archived: true, archiveId: id }))]
-        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')) || String(a.archiveId || a.id).localeCompare(String(b.archiveId || b.id)));
-      const digest = createHash('sha256').update(JSON.stringify(entries)).digest('hex');
-      let offset = 0;
+        .sort((a, b) => entryKey(a) < entryKey(b) ? -1 : entryKey(a) > entryKey(b) ? 1 : 0);
+      let afterKey = null;
       if (cursor !== null) {
         let parsed;
         try { parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')); } catch { invalid(); }
-        if (parsed?.agentId !== agentId || parsed?.includeArchived !== includeArchived || parsed?.digest !== digest || !Number.isSafeInteger(parsed.offset) || parsed.offset < 1 || parsed.offset > entries.length) throw new Error('mod_conversation_cursor_stale');
-        offset = parsed.offset;
+        if (parsed?.v !== 1) throw new Error('mod_conversation_cursor_stale');
+        if (parsed.agentId !== agentId || parsed.includeArchived !== includeArchived || typeof parsed.afterKey !== 'string' || !/^(?:archive|session):.{1,512}$/.test(parsed.afterKey)) throw new Error('mod_conversation_cursor_stale');
+        afterKey = parsed.afterKey;
       }
+      // Stable identity keyset pagination deliberately ignores mutable listing
+      // metadata (updatedAt/title/archive state) for cursor validity. Sessions
+      // already beyond the cursor stay discoverable even if earlier items are
+      // updated or deleted. New identities that sort at or before the cursor are
+      // behind this traversal and require a fresh list traversal to discover.
+      const start = afterKey === null ? 0 : entries.findIndex((entry) => entryKey(entry) > afterKey);
+      const offset = start < 0 ? entries.length : start;
       const conversations = entries.slice(offset, offset + max);
       const hasMore = offset + conversations.length < entries.length;
-      const nextCursor = hasMore ? Buffer.from(JSON.stringify({ agentId, includeArchived, digest, offset: offset + conversations.length })).toString('base64url') : null;
+      const nextCursor = hasMore ? Buffer.from(JSON.stringify({ v: 1, agentId, includeArchived, afterKey: entryKey(conversations.at(-1)) })).toString('base64url') : null;
       return { conversations, hasMore, nextCursor };
 
     },
