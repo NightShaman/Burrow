@@ -45,11 +45,21 @@ async function copyText(text: string) {
   return copied;
 }
 
-function archiveTurnText(turn: SessionTurn, agentName: string) {
-  const role = ['user', 'operator', 'human'].includes((turn.role || '').toLowerCase()) ? 'You' : agentName || 'Agent';
+function archiveTurnSpeaker(turn: SessionTurn, sessionAgentName: string, agentNames: ReadonlyMap<string, string>, operatorName: string) {
+  const role = (turn.role || '').toLowerCase();
+  if (['user', 'operator', 'human'].includes(role)) {
+    const delegatedParentId = turn.metadata?.parentAgentId;
+    return delegatedParentId ? agentNames.get(delegatedParentId) || delegatedParentId : operatorName || 'Operator';
+  }
+  const senderId = turn.metadata?.fromAgentId;
+  return turn.metadata?.fromAgentName || (senderId ? agentNames.get(senderId) || senderId : '') || sessionAgentName || 'Agent';
+}
+
+export function archiveTurnText(turn: SessionTurn, sessionAgentName: string, agentNames: ReadonlyMap<string, string> = new Map(), operatorName = 'Operator') {
+  const speaker = archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName);
   const text = textFromChatValue(turn.content);
   const date = formatTurnDate(turn.ts);
-  return text ? `## ${role}${date ? ` · ${date}` : ''}\n\n${text}` : '';
+  return text ? `## ${speaker}${date ? ` · ${date}` : ''}\n\n${text}` : '';
 }
 
 function ArchiveReaderToolbar({ eyebrow, title, detail, value, copyLabel }: { eyebrow: string; title: string; detail: string; value: string; copyLabel: string }) {
@@ -90,7 +100,7 @@ function Placeholder({ title, detail }: { title: string; detail: string }) {
   return <section className="archive-empty-state archive-reader-placeholder"><div className="archive-empty-mark" aria-hidden="true">⌁</div><div><h3>{title}</h3><p>{detail}</p></div></section>;
 }
 
-export function ChatArchiveReader({ session, detail, loading, error, earlierLoading, earlierError, historyUnavailable, onLoadEarlier, onRestart }: { session: ArchiveSession | null; detail: ArchiveDetail | null; loading: boolean; error: string; earlierLoading: boolean; earlierError: string; historyUnavailable: boolean; onLoadEarlier: () => void; onRestart: () => void }) {
+export function ChatArchiveReader({ session, detail, loading, error, earlierLoading, earlierError, historyUnavailable, onLoadEarlier, onRestart, agentNames = new Map(), operatorName = 'Operator' }: { session: ArchiveSession | null; detail: ArchiveDetail | null; loading: boolean; error: string; earlierLoading: boolean; earlierError: string; historyUnavailable: boolean; onLoadEarlier: () => void; onRestart: () => void; agentNames?: ReadonlyMap<string, string>; operatorName?: string }) {
   const readerRef = useRef<HTMLDivElement>(null);
   const pendingScroll = useRef<{ height: number; top: number } | null>(null);
   const activeSession = `${session?.agentId}:${session?.sessionId}`;
@@ -113,7 +123,8 @@ export function ChatArchiveReader({ session, detail, loading, error, earlierLoad
     }
   }, [activeSession, detail, loading]);
   if (!session) return <Placeholder title="Select a conversation." detail="Choose a chat from the list to read it here." />;
-  const copyValue = turns.map((turn) => archiveTurnText(turn, session.agentName || 'Agent')).filter(Boolean).join('\n\n');
+  const sessionAgentName = session.agentName || (session.agentId ? agentNames.get(session.agentId) : '') || session.agentId || 'Agent';
+  const copyValue = turns.map((turn) => archiveTurnText(turn, sessionAgentName, agentNames, operatorName)).filter(Boolean).join('\n\n');
   const load = () => {
     const node = readerRef.current;
     if (node) pendingScroll.current = { height: node.scrollHeight, top: node.scrollTop };

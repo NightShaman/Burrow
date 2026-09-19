@@ -20,7 +20,8 @@ function formatDreamGroupDay(value: string) {
   return month && day && year ? `${month}-${day}-${year}` : value;
 }
 
-export function Archive({ agents }: { agents: Agent[] }) {
+export function Archive({ agents, operatorName = 'Operator' }: { agents: Agent[]; operatorName?: string }) {
+  const agentNames = useMemo(() => new Map(agents.map((agent) => [agent.id, agent.name])), [agents]);
   const [kind, setKind] = useState<ArchiveKind>('chat');
   const [selectedAgent, setSelectedAgent] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
@@ -235,7 +236,7 @@ export function Archive({ agents }: { agents: Agent[] }) {
                 <div className="archive-session-list">{visibleSessions.map((session) => <button type="button" key={`${session.agentId || 'agent'}:${session.sessionId}`} className={`archive-session-card${selectedSession && session.sessionId === selectedSession.sessionId && session.agentId === selectedSession.agentId ? ' selected' : ''}`} onClick={() => { selectionRef.current = ""; earlierAbort.current?.abort(); setSelectedSession(session); }}><div className="archive-session-main"><div className="archive-session-meta"><span>{session.agentName || session.agentId || 'Unknown agent'}</span><span>{formatArchiveDate(archiveSessionDate(session))}</span></div><h3>{archiveSessionTitle(session)}</h3><p>{session.summary || 'No summary is available yet.'}</p></div><div className="archive-session-side"><strong>{session.chatTurnCount ?? session.turnCount ?? 0}</strong><span>turns</span>{session.archived ? <em>Archived</em> : <em>Active</em>}</div></button>)}</div>
               </section>
               <section className="archive-reader-pane">
-                <ChatArchiveReader session={selectedSession} detail={detail} loading={detailLoading} error={detailError} earlierLoading={earlierLoading} earlierError={earlierError} historyUnavailable={historyUnavailable} onLoadEarlier={loadEarlier} onRestart={() => setSelectedSession((current) => current ? { ...current } : null)} />
+                <ChatArchiveReader session={selectedSession} detail={detail} loading={detailLoading} error={detailError} earlierLoading={earlierLoading} earlierError={earlierError} historyUnavailable={historyUnavailable} onLoadEarlier={loadEarlier} onRestart={() => setSelectedSession((current) => current ? { ...current } : null)} agentNames={agentNames} operatorName={operatorName} />
               </section>
             </div>
           ) : kind === 'dreams' ? (

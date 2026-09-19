@@ -43,6 +43,9 @@ type ChatComposerProps = {
   resourceAgentId?: string;
   sessionId?: string;
   apiTarget?: ApiTarget;
+  assistantName?: string;
+  operatorName?: string;
+  agentNames?: ReadonlyMap<string, string>;
 };
 
 export function ChatComposer({
@@ -61,6 +64,9 @@ export function ChatComposer({
   resourceAgentId = selectedAgentId,
   sessionId = '',
   apiTarget,
+  assistantName = 'Assistant',
+  operatorName = 'You',
+  agentNames = new Map(),
 }: ChatComposerProps) {
   const canSend = Boolean(draft.trim() || attached.length) && !disabled;
   const [projectContext, setProjectContext] = useState<ProjectOption | null>(null);
@@ -116,10 +122,7 @@ export function ChatComposer({
     onAttach(Array.from(event.dataTransfer.files));
   };
   const copyConversation = async () => {
-    const transcript = conversationTurns
-      .filter((turn) => textFromChatValue(turn.content).trim())
-      .map((turn) => `${['user', 'operator', 'human'].includes((turn.role ?? '').toLowerCase()) ? 'You' : 'Assistant'} — ${formatTimestamp(turn.ts)}\n${textFromChatValue(turn.content)}`)
-      .join('\n\n');
+    const transcript = formatConversationCopy(conversationTurns, { assistantName, operatorName, agentNames });
     if (!transcript) return;
     const didCopy = await copyMarkdown(transcript);
     setCopyState(didCopy ? 'copied' : 'failed');
@@ -161,6 +164,23 @@ export function ChatComposer({
       </div>
     </div>
   );
+}
+
+function conversationSpeaker(turn: SessionTurn, assistantName: string, operatorName: string, agentNames: ReadonlyMap<string, string>) {
+  const role = (turn.role ?? '').toLowerCase();
+  if (['user', 'operator', 'human'].includes(role)) {
+    const parentId = turn.metadata?.parentAgentId;
+    return parentId ? agentNames.get(parentId) || parentId : operatorName || 'You';
+  }
+  const senderId = turn.metadata?.fromAgentId;
+  return turn.metadata?.fromAgentName || (senderId ? agentNames.get(senderId) || senderId : '') || assistantName || 'Assistant';
+}
+
+export function formatConversationCopy(turns: SessionTurn[], { assistantName = 'Assistant', operatorName = 'You', agentNames = new Map() }: { assistantName?: string; operatorName?: string; agentNames?: ReadonlyMap<string, string> } = {}) {
+  return turns
+    .filter((turn) => textFromChatValue(turn.content).trim())
+    .map((turn) => `${conversationSpeaker(turn, assistantName, operatorName, agentNames)} — ${formatTimestamp(turn.ts)}\n${textFromChatValue(turn.content)}`)
+    .join('\n\n');
 }
 
 function formatTimestamp(value?: string) { if (!value) return 'Now'; const date = new Date(value); return Number.isNaN(date.getTime()) ? 'Now' : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date); }
