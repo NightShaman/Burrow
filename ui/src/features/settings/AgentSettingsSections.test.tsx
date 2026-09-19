@@ -81,6 +81,28 @@ describe('agent settings sections', () => {
     expect(screen.getByRole('button', { name: 'Save job' }).getAttribute('disabled')).not.toBeNull();
   });
 
+  it('offers Run now for mod-owned jobs without exposing edit or delete and reports scheduler refusal', async () => {
+    apiMock.mockImplementation((_target, path, init) => path.endsWith('/trigger') && init?.method === 'POST'
+      ? Promise.resolve({ ok: false, error: 'scheduled_job_owner_inactive' })
+      : Promise.resolve({ jobs: [{ id: 'owned-1', ownerModId: 'lore-master', agentId: 'smatchet', name: 'Daily lore', prompt: 'Collect', cron: '0 9 * * *', timezone: 'UTC', enabled: true }] }));
+    render(<ConfirmProvider><AgentSchedules agentId="smatchet" targets={targets} savedProviders={[]} /></ConfirmProvider>);
+    expect(await screen.findByText('Managed by lore-master')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Run now' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('scheduled_job_owner_inactive'));
+    expect(apiMock.mock.calls.some(([, path, init]) => path === '/api/scheduled-jobs/owned-1/trigger' && init?.method === 'POST')).toBe(true);
+  });
+
+  it('reports accepted dispatch without claiming the cron run completed', async () => {
+    apiMock.mockImplementation((_target, path, init) => path.endsWith('/trigger') && init?.method === 'POST'
+      ? Promise.resolve({ ok: true, run: { id: 'run-1' } })
+      : Promise.resolve({ jobs: [{ id: 'job-1', agentId: 'smatchet', name: 'Briefing', prompt: 'Prepare it.', cron: '0 9 * * *', timezone: 'UTC', enabled: false }] }));
+    render(<ConfirmProvider><AgentSchedules agentId="smatchet" targets={targets} savedProviders={[]} /></ConfirmProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Run now' }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('started. The run continues in the background'));
+  });
+
   it('places recent Dream activity in the fourth column without moving the settings form', async () => {
     apiMock.mockImplementation((_target, path) => Promise.resolve(path.includes('/dream-cycle')
       ? { receipts: [{ runId: 'cycle-1', status: 'completed' }] }
