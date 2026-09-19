@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Field } from './SettingsPrimitives';
 import { loadModManagement, modLifecyclePath, modManagementAction, type ModRecord, type ModSource, type NormalizedModManagement } from './modManagementApi';
@@ -20,6 +20,13 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   const [state, setState] = useState<NormalizedModManagement>({ mods: [], sources: [], restartRequired: false });
   const [selectedModId, setSelectedModId] = useState<string | null>(null);
   const [sourceUrl, setSourceUrl] = useState('');
+  const [sourceUsername, setSourceUsername] = useState('');
+  const sourceSecretRef = useRef<HTMLInputElement>(null);
+  // Do not retain the secret in React state or browser storage. Wipe the DOM field on unmount.
+  useEffect(() => {
+    const input = sourceSecretRef.current;
+    return () => { if (input) input.value = ''; };
+  }, []);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,15 +45,18 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   }, [state.mods, selectedModId]);
   const selectedMod = state.mods.find((mod) => mod.id === selectedModId) ?? null;
 
-  const run = async (key: string, path: string, init?: RequestInit) => {
+  const run = async (key: string, path: string, init?: RequestInit, onSubmitted?: () => void) => {
     setBusy(key);
     setError(null);
     try {
       const result = await modManagementAction(path, init);
+      onSubmitted?.();
       const next = await loadModManagement();
       setState({ ...next, restartRequired: next.restartRequired || result?.restartRequired === true });
+      return true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Mod operation failed.');
+      setError(key === 'source' ? 'Could not add mod source. Check the URL and credentials.' : cause instanceof Error ? cause.message : 'Mod operation failed.');
+      return false;
     } finally {
       setBusy(null);
     }
@@ -58,10 +68,55 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   const lifecycle = (mod: ModRecord, action: 'uninstall' | 'enable' | 'disable') => {
     void run(mod.id, modLifecyclePath(mod.id, action), { method: 'POST' });
   };
-  const addSource = () => {
+  const addSource = async () => {
     const url = sourceUrl.trim();
     if (!url) return;
-    void run('source', '/api/mod-management/sources', { method: 'POST', body: JSON.stringify({ url }) }).then(() => setSourceUrl(''));
+    const username = sourceUsername.trim();
+    const secret = sourceSecretRef.current?.value ?? '';
+    if (username || secret) {
+      if (!/^https:\/\/[^/]+/i.test(url)) {
+        setError('Private repository credentials are supported only for HTTPS Git URLs. Configure SSH access on the Core service account instead.');
+        return;
+      }
+      if (username && !secret) {
+        setError('Enter a password or access token when specifying a private repository username.');
+        return;
+      }
+    }
+    const body = JSON.stringify({ url, ...(secret ? { auth: { ...(username ? { username } : {}), token: secret } } : {}) });
+    setBusy('source');
+    setError(null);
+    let submitted = false;
+    let discoveryError = false;
+    try {
+      await modManagementAction('/api/mod-management/sources', { method: 'POST', body });
+      submitted = true;
+    } catch {
+      // Core may retain the source even if discovery failed. Reload before
+      // reporting the outcome rather than implying nothing was saved.
+      discoveryError = true;
+    }
+    if (submitted) {
+      setSourceUrl('');
+      setSourceUsername('');
+      if (sourceSecretRef.current) sourceSecretRef.current.value = '';
+    }
+    try {
+      const next = await loadModManagement();
+      setState(next);
+      if (discoveryError) {
+        const retained = next.sources.find((source) => source.url === url);
+        setError(retained
+          ? `Source saved, but discovery failed. ${retained.error || 'See the configured source status for details.'}`
+          : 'Could not add mod source. Check the repository URL and credentials.');
+      }
+    } catch {
+      setError(submitted
+        ? 'Source added, but the catalog could not be refreshed. Refresh sources to see its status.'
+        : 'Could not confirm whether the source was saved. Catalog refresh failed; check configured sources before retrying.');
+    } finally {
+      setBusy(null);
+    }
   };
 
   const modInventoryContents = state.mods.length === 0
@@ -81,7 +136,7 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
       <Field label="Mod ID"><input value={selectedMod.id} readOnly /></Field>
       <div className="field-pair"><Field label="Current version"><input value={selectedMod.status === 'installed' ? selectedMod.version || 'Unknown' : 'Not installed'} readOnly /></Field><Field label="Latest version"><input value={selectedMod.latestVersion || 'Unknown'} readOnly /></Field></div>
       <p className="settings-description">{selectedMod.status === 'installed' ? `Installed · ${selectedMod.enabled ? 'Enabled' : 'Disabled'}` : 'Available from a configured source'}{selectedMod.reason ? ` · ${selectedMod.reason}` : ''}</p>
-      <p className="settings-help">Install, update, and reinstall use the latest release from the configured source.</p>
+      <p className="settings-help">Install, update, and reinstall use the latest version-tagged release from the configured source. New installs start disabled; updates and reinstalls preserve the current enabled or disabled state.</p>
       <div className="model-actions">
         {selectedMod.status === 'installed' && <button className="danger" type="button" disabled={busy !== null} onClick={() => lifecycle(selectedMod, 'uninstall')}>{busy === selectedMod.id ? 'Working…' : 'Uninstall'}</button>}
         {selectedMod.status === 'installed' && <button className="secondary" type="button" disabled={busy !== null} onClick={() => lifecycle(selectedMod, selectedMod.enabled ? 'disable' : 'enable')}>{busy === selectedMod.id ? 'Working…' : selectedMod.enabled ? 'Disable' : 'Enable'}</button>}
@@ -96,7 +151,15 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   const sourceInventory = overflowTarget
     ? <div className="settings-overflow-content memory-saved" aria-label="Configured mod sources">{sourceInventoryContents}</div>
     : <details className="memory-saved saved-accordion" open><summary><h3>Configured sources</h3><span>{state.sources.length}</span></summary>{sourceInventoryContents}</details>;
-  const sourceConfiguration = <section className="setting-section mod-source-configuration" aria-labelledby="mod-sources-heading"><h2 id="mod-sources-heading">Mod sources</h2><p className="settings-description">Add a source URL for Core to check for mod releases.</p><Field label="Source URL"><input value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://example.invalid/mods.json" /></Field><div className="model-actions"><button className="secondary" type="button" disabled={busy !== null} onClick={() => void run('refresh', '/api/mod-management/refresh', { method: 'POST' })}>{busy === 'refresh' ? 'Refreshing…' : 'Refresh sources'}</button><button className="primary" type="button" disabled={!sourceUrl.trim() || busy !== null} onClick={addSource}>{busy === 'source' ? 'Adding…' : 'Add source'}</button></div></section>;
+  const sourceConfiguration = <section className="setting-section mod-source-configuration" aria-labelledby="mod-sources-heading">
+    <h2 id="mod-sources-heading">Mod sources</h2>
+    <p className="settings-description">Add a Git repository URL (HTTP(S), ssh://, or scp-style SSH). Core discovers version-tagged releases containing burrow.mod.json.</p>
+    <Field label="Git repository URL"><input value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://git.example.com/team/mod.git" /></Field>
+    <Field label="Private repository username (optional)"><input value={sourceUsername} onChange={(event) => setSourceUsername(event.target.value)} autoComplete="off" /></Field>
+    <Field label="Password or access token (optional)"><input ref={sourceSecretRef} type="password" autoComplete="new-password" /></Field>
+    <p className="settings-help">Public repositories need only a URL. Credentials are for HTTPS Git repositories only and are stored encrypted by Core, not shown here again. For SSH, configure keys and host trust on the Core service account.</p>
+    <div className="model-actions"><button className="secondary" type="button" disabled={busy !== null} onClick={() => void run('refresh', '/api/mod-management/refresh', { method: 'POST' })}>{busy === 'refresh' ? 'Refreshing…' : 'Refresh sources'}</button><button className="primary" type="button" disabled={!sourceUrl.trim() || busy !== null} onClick={() => void addSource()}>{busy === 'source' ? 'Adding…' : 'Add source'}</button></div>
+  </section>;
 
   const primary = section === 'installed' ? modConfiguration : sourceConfiguration;
   const supporting = section === 'installed' ? modInventory : sourceInventory;

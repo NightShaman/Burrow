@@ -1,78 +1,135 @@
-import crypto from 'node:crypto';
-import { createWriteStream } from 'node:fs';
+import crypto, { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
 import { execFile } from 'node:child_process';
 import { discoverMods } from './mod-runtime.mjs';
 import { openSettingsDatabase } from './settings-database.mjs';
+import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
 
 const execFileAsync = promisify(execFile);
 const MOD_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const VERSION = /^v?(\d{4}\.\d{2}\.\d{2}(?:\.\d+)?|\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$/;
+const VERSION = /^v?(\d{4}\.\d{2}\.\d{2}(?:\.\d+)?|\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)$/;
 const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
+const GIT_TIMEOUT_MS = 60_000;
 const locks = new Set();
 
 function now() { return new Date().toISOString(); }
 function sourceId(url) { return crypto.createHash('sha256').update(url).digest('hex').slice(0, 24); }
 function normalizeVersion(value) { const text = String(value || '').trim(); return text.startsWith('v') ? text.slice(1) : text; }
-function versionParts(value) { return normalizeVersion(value).split('.').map((part) => Number.parseInt(part, 10)); }
+function versionParts(value) {
+  const text = normalizeVersion(value);
+  const calendar = text.match(/^(\d{4})\.(\d{2})\.(\d{2})(?:\.(\d+))?$/);
+  if (calendar) return { core: calendar.slice(1, 4).map(BigInt).concat(BigInt(calendar[4] || 0)), pre: null };
+  const match = text.match(/^(\d+\.\d+\.\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/);
+  if (!match) throw new Error('mod_version_unavailable');
+  return { core: match[1].split('.').map(BigInt), pre: match[2]?.split('.') || null };
+}
 function compareVersions(a, b) {
   const aa = versionParts(a); const bb = versionParts(b);
-  for (let index = 0; index < Math.max(aa.length, bb.length); index += 1) {
-    const difference = (aa[index] || 0) - (bb[index] || 0);
-    if (difference) return difference;
+  for (let i = 0; i < Math.max(aa.core.length, bb.core.length); i += 1) {
+    const difference = (aa.core[i] || 0n) - (bb.core[i] || 0n);
+    if (difference) return difference > 0n ? 1 : -1;
+  }
+  if (!aa.pre || !bb.pre) return aa.pre ? -1 : bb.pre ? 1 : 0;
+  for (let i = 0; i < Math.max(aa.pre.length, bb.pre.length); i += 1) {
+    const left = aa.pre[i]; const right = bb.pre[i];
+    if (left === right) continue;
+    if (left === undefined) return -1;
+    if (right === undefined) return 1;
+    const ln = /^\d+$/.test(left); const rn = /^\d+$/.test(right);
+    if (ln && rn) { const diff = BigInt(left) - BigInt(right); if (diff) return diff > 0n ? 1 : -1; }
+    else if (ln !== rn) return ln ? -1 : 1;
+    else return left < right ? -1 : 1;
   }
   return 0;
 }
 
 export function normalizeModSourceUrl(value) {
+  const input = String(value || '').trim();
+  if (!input || /[\r\n\0]/.test(input)) throw new Error('mod_source_url_invalid');
+  const scp = input.match(/^([A-Za-z0-9_.-]+)@([A-Za-z0-9.-]+):(.+)$/);
+  if (scp) {
+    const repo = scp[3].replace(/\.git$/i, '').replace(/^\/+|\/+$/g, '');
+    if (!repo || repo.split('/').some((part) => !part || part === '.' || part === '..')) throw new Error('mod_source_repository_invalid');
+    return `${scp[1]}@${scp[2]}:${repo}.git`;
+  }
   let parsed;
-  try { parsed = new URL(String(value || '').trim()); } catch { throw new Error('mod_source_url_invalid'); }
-  if (parsed.protocol !== 'https:' || parsed.hostname.toLowerCase() !== 'github.com') throw new Error('mod_source_github_https_required');
-  const parts = parsed.pathname.replace(/\.git$/i, '').split('/').filter(Boolean);
-  if (parts.length !== 2 || parts.some((part) => !/^[A-Za-z0-9_.-]+$/.test(part))) throw new Error('mod_source_repository_invalid');
-  parsed.pathname = `/${parts[0]}/${parts[1]}`; parsed.search = ''; parsed.hash = '';
+  try { parsed = new URL(input); } catch { throw new Error('mod_source_url_invalid'); }
+  if (!['http:', 'https:', 'ssh:'].includes(parsed.protocol)) throw new Error('mod_source_protocol_unsupported');
+  if (!parsed.hostname || parsed.search || parsed.hash) throw new Error('mod_source_repository_invalid');
+  if (parsed.password || (parsed.username && parsed.protocol !== 'ssh:')) throw new Error('mod_source_embedded_credentials_forbidden');
+  const pathname = parsed.pathname.replace(/\/+$/, '').replace(/\.git$/i, '');
+  if (!pathname || pathname.split('/').some((part) => part === '..')) throw new Error('mod_source_repository_invalid');
+  parsed.pathname = `${pathname}.git`;
   return parsed.toString().replace(/\/$/, '');
 }
 
-function githubCoordinates(url) { const parsed = new URL(url); const [owner, repo] = parsed.pathname.split('/').filter(Boolean); return { owner, repo }; }
-async function fetchJson(url) {
-  const response = await fetch(url, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'Burrow-Mod-Manager' }, signal: AbortSignal.timeout(20_000) });
-  if (!response.ok) throw new Error(`mod_source_fetch_failed:${response.status}`);
-  return response.json();
+function credentialInput(value = {}) {
+  if (!value || typeof value !== 'object') return null;
+  const username = String(value.username || (value.token ? 'oauth2' : '')).trim();
+  const password = String(value.password || value.token || '');
+  if (!password) return null;
+  return { username: username || 'oauth2', password };
 }
-
-async function inspectSource(url) {
-  const { owner, repo } = githubCoordinates(url);
-  const repository = await fetchJson(`https://api.github.com/repos/${owner}/${repo}`);
-  const branch = String(repository?.default_branch || 'main');
-  const manifest = await fetchJson(`https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(branch)}/burrow.mod.json`);
-  const modId = String(manifest?.id || '').trim();
-  const modName = String(manifest?.name || '').trim();
-  if (!MOD_ID.test(modId) || !modName) throw new Error('mod_source_manifest_invalid');
-  let release;
-  try { release = await fetchJson(`https://api.github.com/repos/${owner}/${repo}/releases/latest`); }
-  catch (error) {
-    if (!String(error?.message || error).endsWith(':404')) throw error;
-    const tags = await fetchJson(`https://api.github.com/repos/${owner}/${repo}/tags?per_page=1`);
-    release = Array.isArray(tags) && tags[0] ? { tag_name: tags[0].name, tarball_url: tags[0].tarball_url } : null;
+function aad(source) { return Buffer.from(`burrow-mod-source-secret-v1|${source}`); }
+function sealCredential(key, source, value) {
+  const nonce = randomBytes(12); const cipher = createCipheriv('aes-256-gcm', key, nonce); cipher.setAAD(aad(source));
+  return { ciphertext: Buffer.concat([cipher.update(JSON.stringify(value), 'utf8'), cipher.final()]), nonce, authTag: cipher.getAuthTag() };
+}
+function openCredential(key, source, row) {
+  const decipher = createDecipheriv('aes-256-gcm', key, row.nonce); decipher.setAAD(aad(source)); decipher.setAuthTag(row.auth_tag);
+  return JSON.parse(Buffer.concat([decipher.update(row.ciphertext), decipher.final()]).toString('utf8'));
+}
+function safeGitError(error) {
+  const text = String(error?.stderr || error?.message || error).replace(/(?:https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, '$1[redacted]@');
+  if (/authentication|authorization|credentials|could not read username|permission denied|access denied/i.test(text)) return 'mod_source_authentication_failed';
+  if (/timed out|aborted/i.test(text)) return 'mod_source_timeout';
+  return 'mod_source_git_failed';
+}
+async function gitContext(url, credential) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'burrow-mod-git-'));
+  let askpass = null;
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+  Object.assign(env, { GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull, GIT_OPTIONAL_LOCKS: '0', GIT_ALLOW_PROTOCOL: 'http:https:ssh', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10' });
+  if (process.env.GIT_SSL_CAINFO) env.GIT_SSL_CAINFO = process.env.GIT_SSL_CAINFO;
+  if (credential) {
+    if (!url.startsWith('https://')) { await fs.rm(root, { recursive: true, force: true }); throw new Error('mod_source_credentials_require_https'); }
+    askpass = path.join(root, 'askpass.sh');
+    await fs.writeFile(askpass, '#!/bin/sh\ncase "$1" in *sername*) printf "%s" "$BURROW_GIT_USERNAME";; *) printf "%s" "$BURROW_GIT_PASSWORD";; esac\n', { mode: 0o700 });
+    env.GIT_CONFIG_COUNT = '1'; env.GIT_CONFIG_KEY_0 = 'http.followRedirects'; env.GIT_CONFIG_VALUE_0 = 'false';
+    Object.assign(env, { GIT_ASKPASS: askpass, BURROW_GIT_USERNAME: credential.username, BURROW_GIT_PASSWORD: credential.password });
   }
-  const tag = String(release?.tag_name || '').trim();
-  if (!VERSION.test(tag)) throw new Error('mod_source_version_invalid');
-  return { modId, modName, latestVersion: normalizeVersion(tag), archiveUrl: String(release?.tarball_url || `https://api.github.com/repos/${owner}/${repo}/tarball/${encodeURIComponent(tag)}`) };
+  const run = async (args, options = {}) => {
+    try { return await execFileAsync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'submodule.recurse=false', ...args], { cwd: root, env, timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: 8 * 1024 * 1024, ...options }); }
+    catch (error) { throw new Error(safeGitError(error)); }
+  };
+  return { root, run, cleanup: () => fs.rm(root, { recursive: true, force: true }) };
 }
-
-async function downloadArchive(url, destination) {
-  const response = await fetch(url, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'Burrow-Mod-Manager' }, redirect: 'follow', signal: AbortSignal.timeout(60_000) });
-  if (!response.ok || !response.body) throw new Error(`mod_archive_download_failed:${response.status}`);
-  const declared = Number(response.headers.get('content-length') || 0);
-  if (declared > MAX_ARCHIVE_BYTES) throw new Error('mod_archive_too_large');
-  let received = 0;
-  const limiter = new TransformStream({ transform(chunk, controller) { received += chunk.byteLength; if (received > MAX_ARCHIVE_BYTES) throw new Error('mod_archive_too_large'); controller.enqueue(chunk); } });
-  await pipeline(response.body.pipeThrough(limiter), createWriteStream(destination, { mode: 0o600 }));
+async function prepareRepository(url, credential, { archivePath = null } = {}) {
+  const context = await gitContext(url, credential);
+  try {
+    const { stdout } = await context.run(['ls-remote', '--tags', '--refs', url]);
+    const tags = stdout.split('\n').filter(Boolean).map((line) => { const [oid, ref] = line.split('\t'); return { oid, tag: ref?.replace('refs/tags/', '') }; }).filter(({ tag }) => VERSION.test(tag));
+    if (!tags.length) throw new Error('mod_source_version_invalid');
+    tags.sort((a, b) => compareVersions(a.tag, b.tag) || a.tag.localeCompare(b.tag)); const { tag, oid } = tags.at(-1); const repo = path.join(context.root, 'repository.git');
+    await context.run(['init', '--bare', repo]);
+    await context.run(['--git-dir', repo, 'fetch', '--depth=1', '--no-tags', url, `refs/tags/${tag}:refs/tags/${tag}`]);
+    const fetched = (await context.run(['--git-dir', repo, 'rev-parse', `refs/tags/${tag}`])).stdout.trim();
+    if (fetched !== oid) throw new Error('mod_source_tag_changed');
+    let manifest;
+    try { manifest = JSON.parse((await context.run(['--git-dir', repo, 'show', `${tag}:burrow.mod.json`], { maxBuffer: 1024 * 1024 })).stdout); }
+    catch { throw new Error('mod_source_manifest_invalid'); }
+    const modId = String(manifest?.id || '').trim(); const modName = String(manifest?.name || '').trim();
+    if (!MOD_ID.test(modId) || !modName) throw new Error('mod_source_manifest_invalid');
+    if (manifest.version != null && (!VERSION.test(String(manifest.version)) || compareVersions(manifest.version, tag) !== 0)) throw new Error('mod_source_manifest_version_mismatch');
+    if (archivePath) {
+      await context.run(['--git-dir', repo, 'archive', '--format=tar.gz', `--prefix=${modId}/`, `--output=${archivePath}`, tag]);
+      const stat = await fs.stat(archivePath); if (stat.size > MAX_ARCHIVE_BYTES) throw new Error('mod_archive_too_large');
+    }
+    return { modId, modName, latestVersion: normalizeVersion(tag), archiveUrl: `git-tag:${tag}` };
+  } finally { await context.cleanup(); }
 }
 
 async function archiveSha256(filePath) {
@@ -84,8 +141,8 @@ async function archiveSha256(filePath) {
 
 async function validateArchiveEntries(archivePath) {
   const [{ stdout: names }, { stdout: verbose }] = await Promise.all([
-    execFileAsync('tar', ['-tzf', archivePath], { maxBuffer: 8 * 1024 * 1024 }),
-    execFileAsync('tar', ['-tvzf', archivePath], { maxBuffer: 16 * 1024 * 1024 }),
+    execFileAsync('tar', ['-tzf', archivePath], { maxBuffer: 8 * 1024 * 1024, timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL' }),
+    execFileAsync('tar', ['-tvzf', archivePath], { maxBuffer: 16 * 1024 * 1024, timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL' }),
   ]);
   const entries = names.split('\n').filter(Boolean);
   if (!entries.length || entries.length > 20_000) throw new Error('mod_archive_invalid');
@@ -137,13 +194,18 @@ function sourceRows(db) { return db.prepare('SELECT id,url,provider,mod_id,mod_n
 function installationRows(db) { return new Map(db.prepare('SELECT mod_id,source_id,version,archive_sha256,installed_at,updated_at FROM mod_installations').all().map((row) => [row.mod_id, row])); }
 function lifecycleRows(db) { return new Map(db.prepare('SELECT mod_id,enabled,created_at,updated_at FROM mod_lifecycle').all().map((row) => [row.mod_id, row])); }
 
-export function createModDistribution({ runtimeRoot, databasePath, restart = null, logger = console } = {}) {
+export function createModDistribution({ runtimeRoot, databasePath, restart = null, logger = console, settingsKey = null } = {}) {
   if (!runtimeRoot || !databasePath) throw new Error('mod_distribution_configuration_required');
   const modsRoot = path.join(runtimeRoot, 'mods');
+  function sourceCredential(db, id) {
+    const row = db.prepare('SELECT ciphertext,nonce,auth_tag FROM mod_source_secrets WHERE source_id=?').get(id);
+    if (!row) return null;
+    return openCredential(settingsKey || settingsKeyFromEnvironment(), id, row);
+  }
   async function refreshSource(db, row) {
     const checkedAt = now();
     try {
-      const inspected = await inspectSource(row.url);
+      const inspected = await prepareRepository(row.url, sourceCredential(db, row.id));
       db.prepare("UPDATE mod_sources SET mod_id=?,mod_name=?,latest_version=?,archive_url=?,status='ready',error=NULL,last_checked_at=?,updated_at=? WHERE id=?").run(inspected.modId, inspected.modName, inspected.latestVersion, inspected.archiveUrl, checkedAt, checkedAt, row.id);
       return { ...row, ...inspected, status: 'ready', error: null };
     } catch (error) {
@@ -165,17 +227,24 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
         const version = record?.version || normalizeVersion(mod.manifest?.version || '') || undefined;
         const latestVersion = source?.latest_version || undefined;
         const enabled = lifecycle.get(mod.id)?.enabled !== 0;
-        return { id: mod.id, name: mod.name, version, status: mod.status === 'failed' ? 'failed' : 'installed', enabled, system: mod.manifest?.system === true, source: source?.url, latestVersion, updateAvailable: Boolean(version && latestVersion && compareVersions(latestVersion, version) > 0), canInstall: source?.status === 'ready', ...(source?.error ? { reason: source.error } : {}) };
+        return { id: mod.id, name: mod.name, version, status: mod.status === 'failed' ? 'failed' : 'installed', enabled, system: mod.manifest?.system === true, source: source?.url, latestVersion, updateAvailable: Boolean(version && latestVersion && VERSION.test(version) && VERSION.test(latestVersion) && compareVersions(latestVersion, version) > 0), canInstall: source?.status === 'ready', ...(source?.error ? { reason: source.error } : {}) };
       });
       for (const source of sources) if (source.mod_id && !mods.some((mod) => mod.id === source.mod_id)) mods.push({ id: source.mod_id, name: source.mod_name || source.mod_id, status: 'available', source: source.url, latestVersion: source.latest_version || undefined, canInstall: source.status === 'ready', ...(source.error ? { reason: source.error } : {}) });
       return { ok: true, restartRequired: false, mods, sources: sources.map((row) => ({ id: row.id, url: row.url, status: row.status, ...(row.error ? { error: row.error } : {}), ...(row.last_checked_at ? { lastCheckedAt: row.last_checked_at } : {}) })) };
     } finally { db.close(); }
   }
-  async function addSource(urlValue) {
-    const url = normalizeModSourceUrl(urlValue); const id = sourceId(url); const timestamp = now(); const db = openSettingsDatabase({ databasePath });
+  async function addSource(urlValue, authValue = null) {
+    const url = normalizeModSourceUrl(urlValue); const id = sourceId(url); const timestamp = now(); const auth = credentialInput(authValue); const db = openSettingsDatabase({ databasePath });
     try {
-      db.prepare(`INSERT INTO mod_sources (id,url,provider,status,created_at,updated_at) VALUES (?,?,?,'pending',?,?) ON CONFLICT(url) DO NOTHING`).run(id, url, 'github', timestamp, timestamp);
+      db.prepare(`INSERT INTO mod_sources (id,url,provider,status,created_at,updated_at) VALUES (?,?,?,'pending',?,?) ON CONFLICT(url) DO NOTHING`).run(id, url, 'git', timestamp, timestamp);
       const row = db.prepare('SELECT * FROM mod_sources WHERE url=?').get(url);
+      if (auth) {
+        const encrypted = sealCredential(settingsKey || settingsKeyFromEnvironment(), row.id, auth);
+        db.prepare(`INSERT INTO mod_source_secrets (source_id,ciphertext,nonce,auth_tag,created_at,updated_at) VALUES (?,?,?,?,?,?)
+          ON CONFLICT(source_id) DO UPDATE SET ciphertext=excluded.ciphertext,nonce=excluded.nonce,auth_tag=excluded.auth_tag,updated_at=excluded.updated_at`)
+          .run(row.id, encrypted.ciphertext, encrypted.nonce, encrypted.authTag, timestamp, timestamp);
+      }
+
       const refreshed = await refreshSource(db, row);
       return { ok: refreshed.status === 'ready', source: refreshed, ...(refreshed.error ? { error: refreshed.error } : {}) };
     } finally { db.close(); }
@@ -189,14 +258,14 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
     try {
       let source = db.prepare('SELECT * FROM mod_sources WHERE mod_id=? LIMIT 1').get(id);
       if (!source) throw new Error('mod_source_not_resolved');
-      source = await refreshSource(db, source);
-      if (source.status !== 'ready') throw new Error(source.error || 'mod_source_unavailable');
-      const version = normalizeVersion(requestedVersion || source.latestVersion);
-      if (!version || version !== source.latestVersion) throw new Error('mod_version_unavailable');
       scratch = await fs.mkdtemp(path.join(runtimeRoot, `.mod-staging-${process.pid}-`));
       const archive = path.join(scratch, 'mod.tar.gz'); const extract = path.join(scratch, 'extract');
-      await downloadArchive(source.archiveUrl, archive); await validateArchiveEntries(archive); await fs.mkdir(extract);
-      await execFileAsync('tar', ['--no-same-owner', '--no-same-permissions', '-xzf', archive, '-C', extract]);
+      const inspected = await prepareRepository(source.url, sourceCredential(db, source.id), { archivePath: archive });
+      if (inspected.modId !== id) throw new Error('mod_manifest_id_mismatch');
+      const version = inspected.latestVersion;
+      if (requestedVersion && compareVersions(requestedVersion, version) !== 0) throw new Error('mod_version_unavailable');
+      await validateArchiveEntries(archive); await fs.mkdir(extract);
+      await execFileAsync('tar', ['--no-same-owner', '--no-same-permissions', '-xzf', archive, '-C', extract], { timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL' });
       const prepared = await findPreparedMod(extract);
       if (prepared.id !== id && source.mod_id) throw new Error('mod_manifest_id_mismatch');
       const target = path.join(modsRoot, prepared.id); const digest = await archiveSha256(archive);
@@ -204,8 +273,8 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       const timestamp = now();
       db.prepare('UPDATE mod_sources SET mod_id=?,mod_name=?,latest_version=?,status=\'ready\',error=NULL,updated_at=? WHERE id=?').run(prepared.id, prepared.name, version, timestamp, source.id);
       db.prepare(`INSERT INTO mod_installations (mod_id,source_id,version,archive_sha256,installed_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(mod_id) DO UPDATE SET source_id=excluded.source_id,version=excluded.version,archive_sha256=excluded.archive_sha256,installed_at=excluded.installed_at,updated_at=excluded.updated_at`).run(prepared.id, source.id, version, digest, timestamp, timestamp);
-      db.prepare(`INSERT INTO mod_lifecycle (mod_id,enabled,created_at,updated_at) VALUES (?,1,?,?)
-        ON CONFLICT(mod_id) DO UPDATE SET enabled=1,updated_at=excluded.updated_at`).run(prepared.id, timestamp, timestamp);
+      db.prepare(`INSERT INTO mod_lifecycle (mod_id,enabled,created_at,updated_at) VALUES (?,0,?,?)
+        ON CONFLICT(mod_id) DO NOTHING`).run(prepared.id, timestamp, timestamp);
       restart?.();
       return { ok: true, modId: prepared.id, version, archiveSha256: digest, restartRequired: true };
     } finally { db.close(); if (scratch) await fs.rm(scratch, { recursive: true, force: true }); locks.delete(id); }
@@ -245,7 +314,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
 export function createModManagementRoute({ distribution, readJsonBody, sendJson } = {}) {
   return async ({ req, res, url } = {}) => {
     if (url.pathname === '/api/mod-management' && req.method === 'GET') { sendJson(res, 200, await distribution.list()); return true; }
-    if (url.pathname === '/api/mod-management/sources' && req.method === 'POST') { const body = await readJsonBody(req); const result = await distribution.addSource(body.url); sendJson(res, result.ok ? 201 : 502, result); return true; }
+    if (url.pathname === '/api/mod-management/sources' && req.method === 'POST') { const body = await readJsonBody(req); const result = await distribution.addSource(body.url, body.auth || body.credentials || (body.token ? { token: body.token, username: body.username } : null)); sendJson(res, result.ok ? 201 : 502, result); return true; }
     if (url.pathname === '/api/mod-management/refresh' && req.method === 'POST') { sendJson(res, 200, await distribution.refresh()); return true; }
     let match = url.pathname.match(/^\/api\/mod-management\/sources\/([^/]+)$/);
     if (match && req.method === 'DELETE') { const result = await distribution.removeSource(decodeURIComponent(match[1])); sendJson(res, result.ok ? 200 : 404, result); return true; }

@@ -43,7 +43,7 @@ describe('ModsSettings layout contract', () => {
     document.body.appendChild(overflow);
     const { container } = render(<ModsSettings section="sources" overflowTarget={overflow} />);
     await waitFor(() => expect(overflow.textContent).toContain('mods.example'));
-    expect(container.querySelector('input[placeholder="https://example.invalid/mods.json"]')).toBeTruthy();
+    expect(container.querySelector('input[placeholder="https://git.example.com/team/mod.git"]')).toBeTruthy();
     expect(container.querySelector('.mod-source-configuration')).toBeTruthy();
     expect(container.querySelector('.mod-source-configuration.setting-section')).toBeTruthy();
     expect(container.textContent).not.toContain('mods.example');
@@ -94,5 +94,98 @@ describe('ModsSettings version and lifecycle truth', () => {
     expect((screen.getByLabelText('Current version') as HTMLInputElement).value).toBe(status === 'installed' ? 'Unknown' : 'Not installed');
     fireEvent.click(button);
     expect(management.modManagementAction).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('Git mod sources', () => {
+  it('submits a public Git URL without auth and clears on success', async () => {
+    loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
+    vi.mocked(management.modManagementAction).mockResolvedValue({ ok: true });
+    render(<ModsSettings section="sources" />);
+    fireEvent.change(screen.getByLabelText('Git repository URL'), { target: { value: ' https://git.example.com/public/mod.git ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
+    await waitFor(() => expect(management.modManagementAction).toHaveBeenCalledWith('/api/mod-management/sources', { method: 'POST', body: JSON.stringify({ url: 'https://git.example.com/public/mod.git' }) }));
+    await waitFor(() => expect((screen.getByLabelText('Git repository URL') as HTMLInputElement).value).toBe(''));
+    expect(screen.getByText(/version-tagged releases containing burrow.mod.json/)).toBeTruthy();
+    expect(screen.getByText(/configure keys and host trust on the Core service account/)).toBeTruthy();
+  });
+
+  it('submits HTTPS credentials, masks and wipes secret on success and unmount', async () => {
+    loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
+    vi.mocked(management.modManagementAction).mockResolvedValue({ ok: true });
+    const { unmount } = render(<ModsSettings section="sources" />);
+    const secret = screen.getByLabelText('Password or access token (optional)') as HTMLInputElement;
+    expect(secret.type).toBe('password');
+    expect(secret.value).toBe('');
+    fireEvent.change(screen.getByLabelText('Git repository URL'), { target: { value: 'https://git.example.com/private.git' } });
+    fireEvent.change(screen.getByLabelText('Private repository username (optional)'), { target: { value: 'alice' } });
+    fireEvent.change(secret, { target: { value: 'private-token' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
+    await waitFor(() => expect(management.modManagementAction).toHaveBeenCalledWith('/api/mod-management/sources', { method: 'POST', body: JSON.stringify({ url: 'https://git.example.com/private.git', auth: { username: 'alice', token: 'private-token' } }) }));
+    await waitFor(() => expect(secret.value).toBe(''));
+    expect((screen.getByLabelText('Private repository username (optional)') as HTMLInputElement).value).toBe('');
+    fireEvent.change(secret, { target: { value: 'second-secret' } });
+    unmount();
+    expect(secret.value).toBe('');
+  });
+
+  it('keeps successful submission distinct from a failed catalog reload', async () => {
+    loadMock.mockResolvedValueOnce({ restartRequired: false, mods: [], sources: [] }).mockRejectedValueOnce(new Error('catalog offline'));
+    vi.mocked(management.modManagementAction).mockResolvedValue({ ok: true });
+    render(<ModsSettings section="sources" />);
+    fireEvent.change(screen.getByLabelText('Git repository URL'), { target: { value: 'https://git.example.com/new.git' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Source added, but the catalog could not be refreshed'));
+    expect(screen.getByRole('alert').textContent).not.toContain('credentials');
+    expect((screen.getByLabelText('Git repository URL') as HTMLInputElement).value).toBe('');
+  });
+
+  it('shows a retained failed source with its discovery error after POST rejects', async () => {
+    const url = 'https://git.example.com/broken.git';
+    loadMock.mockResolvedValueOnce({ restartRequired: false, mods: [], sources: [] })
+      .mockResolvedValueOnce({ restartRequired: false, mods: [], sources: [{ id: 'bad', url, status: 'failed', error: 'mod_source_authentication_failed' }] });
+    vi.mocked(management.modManagementAction).mockRejectedValue(new Error('mod_source_authentication_failed'));
+    render(<ModsSettings section="sources" />);
+    fireEvent.change(screen.getByLabelText('Git repository URL'), { target: { value: url } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Source saved, but discovery failed'));
+    expect(screen.getByRole('alert').textContent).toContain('mod_source_authentication_failed');
+    expect(screen.getByText(url)).toBeTruthy();
+    expect(screen.getByText(/failed · mod_source_authentication_failed/)).toBeTruthy();
+    expect((screen.getByLabelText('Git repository URL') as HTMLInputElement).value).toBe(url);
+  });
+
+  it('allows token-only HTTPS authentication using the backend default username', async () => {
+    loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
+    vi.mocked(management.modManagementAction).mockResolvedValue({ ok: true });
+    render(<ModsSettings section="sources" />);
+    fireEvent.change(screen.getByLabelText('Git repository URL'), { target: { value: 'https://git.example.com/private.git' } });
+    fireEvent.change(screen.getByLabelText('Password or access token (optional)'), { target: { value: 'secret-token' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
+    await waitFor(() => expect(management.modManagementAction).toHaveBeenCalledWith('/api/mod-management/sources', {
+      method: 'POST', body: JSON.stringify({ url: 'https://git.example.com/private.git', auth: { token: 'secret-token' } }),
+    }));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('rejects SSH credentials and retains entries after a failed request', async () => {
+    loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
+    vi.mocked(management.modManagementAction).mockRejectedValue(new Error('secret-containing server error'));
+    render(<ModsSettings section="sources" />);
+    const url = screen.getByLabelText('Git repository URL') as HTMLInputElement;
+    const username = screen.getByLabelText('Private repository username (optional)') as HTMLInputElement;
+    const secret = screen.getByLabelText('Password or access token (optional)') as HTMLInputElement;
+    fireEvent.change(url, { target: { value: 'git@git.example.com:private.git' } });
+    fireEvent.change(username, { target: { value: 'alice' } });
+    fireEvent.change(secret, { target: { value: 'private-token' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
+    expect(screen.getByRole('alert').textContent).toContain('only for HTTPS');
+    expect(management.modManagementAction).not.toHaveBeenCalled();
+    fireEvent.change(url, { target: { value: 'https://git.example.com/private.git' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Could not add mod source'));
+    expect(screen.getByRole('alert').textContent).not.toContain('secret-containing');
+    expect(secret.value).toBe('private-token');
   });
 });
