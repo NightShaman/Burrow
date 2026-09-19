@@ -26,7 +26,8 @@ describe('ModsSettings layout contract', () => {
     expect(container.querySelector('.mod-configuration.setting-section')).toBeTruthy();
     expect(overflow.textContent).toContain('Alpha');
     expect(overflow.textContent).not.toContain('Core');
-    expect(overflow.querySelector('[aria-label="System mod"]')).toBeTruthy();
+    expect(overflow.querySelector('.mod-system-dot')).toBeNull();
+    expect(overflow.querySelector('.mod-system-badge')?.textContent).toBe('System');
     expect(overflow.querySelector('.memory-connection.selected')).toBeNull();
     expect(container.textContent).not.toContain('Beta');
     expect(screen.queryByRole('button', { name: 'Refresh catalog' })).toBeNull();

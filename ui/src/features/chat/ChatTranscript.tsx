@@ -1,5 +1,5 @@
-import { useLayoutEffect, useRef, useState } from 'react';
-import type { SyntheticEvent } from 'react';
+import { isValidElement, useLayoutEffect, useRef, useState } from 'react';
+import type { HTMLAttributes, ReactNode, SyntheticEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import { textFromChatValue, type ProgressEntry, type RunProgress, type SessionAttachment, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
@@ -108,6 +108,31 @@ async function copyMarkdown(text: string) {
   return copied;
 }
 
+function codeText(value: ReactNode): string {
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (Array.isArray(value)) return value.map(codeText).join('');
+  if (isValidElement<{ children?: ReactNode }>(value)) return codeText(value.props.children);
+  return '';
+}
+
+function CodeBlock({ children, ...props }: HTMLAttributes<HTMLPreElement>) {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const text = codeText(children).replace(/\n$/, '');
+  const copy = async () => {
+    const didCopy = await copyMarkdown(text);
+    setCopyState(didCopy ? 'copied' : 'failed');
+    window.setTimeout(() => setCopyState('idle'), 1500);
+  };
+  const label = copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy code';
+  return <div className="code-block"><button type="button" className="copy-code" onClick={copy} aria-label="Copy code block" title={label}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg><span aria-live="polite">{label}</span></button><pre {...props}>{children}</pre></div>;
+}
+
+const markdownComponents = { pre: CodeBlock };
+
+function Markdown({ children }: { children: string }) {
+  return <ReactMarkdown remarkPlugins={[remarkBreaks]} components={markdownComponents}>{children}</ReactMarkdown>;
+}
+
 function markdownText(value: unknown) {
   if (typeof value === 'string') return value;
   if (Array.isArray(value)) return value.map((item) => {
@@ -121,16 +146,16 @@ function markdownText(value: unknown) {
 
 function ProgressCard({ items, live = false, status }: { items: ProgressEntry[]; live?: boolean; status?: RunProgress['status'] }) {
   const terminalLabel = status && status !== 'complete' ? ` · ${status}` : '';
-  return <details className={`run-progress${live ? ' live' : ''}`} open={live || status !== undefined}><summary><span aria-hidden="true">✦</span><span>{live ? 'Progress' : 'Progress recorded'} · {items.length}{terminalLabel}</span><span className="run-progress-chevron" aria-hidden="true">⌄</span></summary><ol className="run-progress-body run-progress-timeline">{items.map((item) => <li key={item.id}><small>{item.modelCall === undefined ? 'Reasoning' : `Model call ${item.modelCall}`}</small><ReactMarkdown remarkPlugins={[remarkBreaks]}>{markdownText(item.text)}</ReactMarkdown></li>)}</ol></details>;
+  return <details className={`run-progress${live ? ' live' : ''}`} open={live || status !== undefined}><summary><span aria-hidden="true">✦</span><span>{live ? 'Progress' : 'Progress recorded'} · {items.length}{terminalLabel}</span><span className="run-progress-chevron" aria-hidden="true">⌄</span></summary><ol className="run-progress-body run-progress-timeline">{items.map((item) => <li key={item.id}><small>{item.modelCall === undefined ? 'Reasoning' : `Model call ${item.modelCall}`}</small><Markdown>{markdownText(item.text)}</Markdown></li>)}</ol></details>;
 }
 
 function StreamedAnswerCard({ text }: { text: string }) {
-  return <details className="streamed-answer"><summary><span aria-hidden="true">≈</span><span>Streamed response</span><span className="streamed-answer-chevron" aria-hidden="true">⌄</span></summary><div className="streamed-answer-body"><ReactMarkdown remarkPlugins={[remarkBreaks]}>{text}</ReactMarkdown></div></details>;
+  return <details className="streamed-answer"><summary><span aria-hidden="true">≈</span><span>Streamed response</span><span className="streamed-answer-chevron" aria-hidden="true">⌄</span></summary><div className="streamed-answer-body"><Markdown>{text}</Markdown></div></details>;
 }
 
 function avatarSource(value: string) { return /^(?:data:image\/[\w+.-]+;base64,|https?:\/\/|blob:|\/)/.test(value.trim()) ? value.trim() : null; }
 
-function LiveAssistantTurn({ name, avatar, progress, activity, answer }: { name: string; avatar: string; progress: ProgressEntry[]; activity?: ToolActivity; answer: string }) { const image = avatarSource(avatar); return <article className="message agent live-assistant-turn"><div className="message-avatar" aria-label={`${name} avatar`}>{image ? <img src={image} alt="" /> : avatar}</div><div className="message-content"><small>{name.toUpperCase()} · NOW</small>{progress.length > 0 && <ProgressCard items={progress} live />}{activity && <ToolActivityCard activity={activity} live />}{answer ? <div className="message-bubble final-answer live-answer"><ReactMarkdown remarkPlugins={[remarkBreaks]}>{answer}</ReactMarkdown><span className="stream-caret" aria-hidden="true" /></div> : !progress.length && !activity && <div className="live-waiting" role="status">Waiting for progress…</div>}</div></article>; }
+function LiveAssistantTurn({ name, avatar, progress, activity, answer }: { name: string; avatar: string; progress: ProgressEntry[]; activity?: ToolActivity; answer: string }) { const image = avatarSource(avatar); return <article className="message agent live-assistant-turn"><div className="message-avatar" aria-label={`${name} avatar`}>{image ? <img src={image} alt="" /> : avatar}</div><div className="message-content"><small>{name.toUpperCase()} · NOW</small>{progress.length > 0 && <ProgressCard items={progress} live />}{activity && <ToolActivityCard activity={activity} live />}{answer ? <div className="message-bubble final-answer live-answer"><Markdown>{answer}</Markdown><span className="stream-caret" aria-hidden="true" /></div> : !progress.length && !activity && <div className="live-waiting" role="status">Waiting for progress…</div>}</div></article>; }
 
 type ModelErrorDetails = { overloaded: boolean; message: string };
 
@@ -169,7 +194,7 @@ export function ChatMessage({ side, name, avatar, time, text, activity, progress
     window.setTimeout(() => setCopyState('idle'), 1500);
   };
   const copyLabel = copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : '';
-  return <article className={`message ${side}${modelError ? ' model-error-message' : ''}`}><div className="message-avatar" aria-label={`${name} avatar`}>{image ? <img src={image} alt="" /> : avatar}</div><div className="message-content"><small>{name.toUpperCase()} · {time.toUpperCase()}</small>{attachments.length ? <div className="message-attachments" aria-label={`${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`}>{attachments.map((attachment, index) => <span className="message-attachment" key={`${attachment.index ?? index}-${attachment.name}`} title={attachment.type}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m4 18 5.5-5.5 3.5 3.5 2.5-2.5 4.5 4.5" /></svg><span>{attachment.name}</span></span>)}</div> : null}{streamedAnswer ? <StreamedAnswerCard text={streamedAnswer} /> : null}{progress?.items?.length ? <ProgressCard items={progress.items} status={progress.status} /> : null}{modelError ? <div className="message-bubble model-error-card" role="alert"><div className="model-error-sigil" aria-hidden="true">⚠</div><div><strong>{modelError.overloaded ? 'The model servers are throwing goblets' : modelErrorTitle}</strong><p>{modelError.message}</p><span>The chat is fine. The upstream model is being stupid.</span></div></div> : text && <div className="message-bubble final-answer"><ReactMarkdown remarkPlugins={[remarkBreaks]}>{text}</ReactMarkdown></div>}{activity && <ToolActivityCard activity={activity} live={activityLive} />}{text && <button className="copy-message" onClick={copy} aria-label={`Copy ${name} message as Markdown`} title={copyState === 'copied' ? 'Copied Markdown' : copyState === 'failed' ? 'Copy failed' : 'Copy Markdown'}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg><span aria-live="polite">{copyLabel}</span></button>}</div></article>;
+  return <article className={`message ${side}${modelError ? ' model-error-message' : ''}`}><div className="message-avatar" aria-label={`${name} avatar`}>{image ? <img src={image} alt="" /> : avatar}</div><div className="message-content"><small>{name.toUpperCase()} · {time.toUpperCase()}</small>{attachments.length ? <div className="message-attachments" aria-label={`${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`}>{attachments.map((attachment, index) => <span className="message-attachment" key={`${attachment.index ?? index}-${attachment.name}`} title={attachment.type}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m4 18 5.5-5.5 3.5 3.5 2.5-2.5 4.5 4.5" /></svg><span>{attachment.name}</span></span>)}</div> : null}{streamedAnswer ? <StreamedAnswerCard text={streamedAnswer} /> : null}{progress?.items?.length ? <ProgressCard items={progress.items} status={progress.status} /> : null}{modelError ? <div className="message-bubble model-error-card" role="alert"><div className="model-error-sigil" aria-hidden="true">⚠</div><div><strong>{modelError.overloaded ? 'The model servers are throwing goblets' : modelErrorTitle}</strong><p>{modelError.message}</p><span>The chat is fine. The upstream model is being stupid.</span></div></div> : text && <div className="message-bubble final-answer"><Markdown>{text}</Markdown></div>}{activity && <ToolActivityCard activity={activity} live={activityLive} />}{text && <button className="copy-message" onClick={copy} aria-label={`Copy ${name} message as Markdown`} title={copyState === 'copied' ? 'Copied Markdown' : copyState === 'failed' ? 'Copy failed' : 'Copy Markdown'}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg><span aria-live="polite">{copyLabel}</span></button>}</div></article>;
 }
 
 function agentDisplayName(value: string) {

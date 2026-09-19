@@ -1,5 +1,5 @@
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
 import type { Agent, Subagent } from '../../app/types';
 import type { SessionTurn } from '../../app/api';
 import { ChatTranscript } from './ChatTranscript';
@@ -47,6 +47,27 @@ it('preserves safe Markdown and line breaks in actual child replies', () => {
   expect(container.querySelector('br')).toBeTruthy();
   expect(container.querySelector('li')?.textContent).toBe('Verified');
   expect(container.querySelector('script')).toBeNull();
+});
+
+it('copies only a fenced code block without its Markdown fence or surrounding message', async () => {
+  const copied: string[] = [];
+  const execCommand = vi.fn(() => {
+    copied.push(document.querySelector<HTMLTextAreaElement>('body > textarea')?.value ?? '');
+    return true;
+  });
+  Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand });
+  show([{ type: 'message', role: 'assistant', content: 'Run this:\n\n```bash\necho "goblin"\nprintf "done"\n```\n\nThen continue.' }]);
+
+  expect(screen.getByText('Run this:')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Copy code block' }));
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Copy code block' }).textContent).toContain('Copied'));
+  expect(copied).toEqual(['echo "goblin"\nprintf "done"']);
+});
+
+it('does not add a code copy button for inline code', () => {
+  show([{ type: 'message', role: 'assistant', content: 'Use `npm run build` here.' }]);
+  expect(screen.queryByRole('button', { name: 'Copy code block' })).toBeNull();
 });
 
 it('shows an externally started task run before its first persisted chat turn', () => {

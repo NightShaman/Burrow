@@ -124,7 +124,7 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   const modInventoryContents = state.mods.length === 0
     ? <p className="settings-empty">No mods found. Add a source in Mod sources.</p>
     : <div className="memory-connection-list">{state.mods.map((mod) => <article className="memory-connection" key={mod.id}>
-      <div><strong>{mod.name}{mod.system && <span className="mod-system-dot" role="img" aria-label="System mod" title="System mod" />}</strong><small>{mod.status === 'installed' ? (mod.enabled ? 'Installed · Enabled' : 'Installed · Disabled') : 'Available'}{mod.version ? ` · ${mod.version}` : ''}</small></div>
+      <div><strong>{mod.name}{mod.system && <span className="mod-system-badge">System</span>}</strong><small>{mod.status === 'installed' ? (mod.enabled ? 'Installed · Enabled' : 'Installed · Disabled') : 'Available'}{mod.version ? ` · ${mod.version}` : ''}</small></div>
       <div className="memory-connection-actions"><button type="button" className="secondary memory-edit" aria-pressed={mod.id === selectedModId} disabled={busy !== null} onClick={() => setSelectedModId(mod.id)}>Manage</button></div>
     </article>)}</div>;
   const modInventory = overflowTarget
