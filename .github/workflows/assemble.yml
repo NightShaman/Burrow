@@ -46,6 +46,9 @@ jobs:
           printf 'backend=%s\nui=%s\nnode_goblin_version=%s\n' "$backend_ref" "$ui_ref" "$EVENT_NODE_GOBLIN_VERSION" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
+          # Queued dispatches retain an old event SHA. Resolve the publishing
+          # branch when this serialized job actually starts instead.
+          ref: main
           path: assembled
       - uses: actions/checkout@v4
         with:
@@ -131,11 +134,9 @@ jobs:
           git add -A
           if ! git diff --cached --quiet; then
             git commit -m "build: assemble Burrow"
-            # Main may advance while source verification/building runs. Rebase
-            # the generated commit onto the current remote before publishing;
-            # never turn a harmless race into a failed assembly or force-push.
-            git fetch origin main
-            git rebase origin/main
+            # Publishers are serialized and started from current main. Do not
+            # rebase generated artifacts: a normal push safely rejects any
+            # unexpected external branch advance without rewriting history.
             git push origin HEAD:main
           fi
           printf 'commit=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
