@@ -198,7 +198,7 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
   }
 }
 
-export async function loadMods({ runtimeRoot, databasePath, logger = console, executionProviders = null, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs } = {}) {
+export async function loadMods({ runtimeRoot, databasePath, logger = console, executionProviders = null, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs } = {}) {
   const discovered = await discoverMods({ runtimeRoot });
   const lifecycleDb = openSettingsDatabase({ databasePath });
   let disabled;
@@ -228,7 +228,7 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
         let unregisterController = null;
         store = new ModSettingsStore({ modId: mod.id, databasePath });
         host = startModHost({
-          mod, store, logger, systemCapability, capabilities: resolveAgentRuntime ? createModCapabilities({ databasePath, resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl: capabilityFetch }) : null, capabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs,
+          mod, store, logger, systemCapability, capabilities: resolveAgentRuntime ? createModCapabilities({ databasePath, resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl: capabilityFetch }) : null, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs,
           onSystemControllerReady(controllerProxy) {
             if (!systemCapability || !executionProviders) return;
             unregisterController = executionProviders.register(mod.id, controllerProxy);

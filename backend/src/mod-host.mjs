@@ -86,7 +86,7 @@ const STORE_METHODS = Object.freeze({
   secrets: Object.freeze({ get: 'getSecret', set: 'setSecret', clear: 'clearSecret', has: 'hasSecret' }),
 });
 
-export function startModHost({ mod, store, logger = console, systemCapability = null, capabilities = null, capabilityTimeoutMs = 20_000, activationTimeoutMs = 10_000, routeTimeoutMs = DEFAULT_MOD_ROUTE_TIMEOUT_MS, cleanupTimeoutMs = 5_000, systemProcessWatchdogGraceMs = SYSTEM_PROCESS_WATCHDOG_GRACE_MS, onUnavailable = null, onSystemControllerReady = null, onSystemControllerUnavailable = null } = {}) {
+export function startModHost({ mod, store, logger = console, systemCapability = null, capabilities = null, capabilityTimeoutMs = 20_000, modelCapabilityTimeoutMs = 300_000, activationTimeoutMs = 10_000, routeTimeoutMs = DEFAULT_MOD_ROUTE_TIMEOUT_MS, cleanupTimeoutMs = 5_000, systemProcessWatchdogGraceMs = SYSTEM_PROCESS_WATCHDOG_GRACE_MS, onUnavailable = null, onSystemControllerReady = null, onSystemControllerUnavailable = null } = {}) {
   if (!store) throw hostError('mod_store_required', mod?.id);
   const child = fork(CHILD_PATH, [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], serialization: 'advanced' });
   const pending = new Map();
@@ -101,7 +101,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   const controllerInstanceId = systemCapability ? randomUUID() : null;
   const pendingSystemProcess = new Map();
   const activeCapabilities = new Map();
-  const cancelCapabilities = () => { for (const controller of activeCapabilities.values()) controller.abort(); activeCapabilities.clear(); };
+  const cancelCapabilities = () => { for (const controller of activeCapabilities.values()) controller.abort(hostError("mod_capability_shutdown")); activeCapabilities.clear(); };
   async function serviceCapabilityRequest(message) {
     const requestId = String(message?.requestId || "");
     if (!requestId || requestId.length > 128 || closing || stopped || !child.connected) return;
@@ -115,14 +115,19 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     try { inputSize = Buffer.byteLength(JSON.stringify(message.input ?? {})); } catch { inputSize = Infinity; }
     if (inputSize > 32_000) { child.send({ type: "capability-result", requestId, error: "mod_capability_input_invalid" }, () => {}); return; }
     activeCapabilities.set(requestId, controller);
-    const timer = setTimeout(() => controller.abort(), finiteTimeout(capabilityTimeoutMs, 20_000));
+    const deadline = message.method === "generateText"
+      ? finiteTimeout(modelCapabilityTimeoutMs, 300_000)
+      : finiteTimeout(capabilityTimeoutMs, 20_000);
+    const timer = setTimeout(() => controller.abort(hostError("mod_capability_timeout")), deadline);
     try {
-      const result = await Promise.race([capabilities[message.method](message.input, { signal: controller.signal }), new Promise((_, reject) => controller.signal.addEventListener("abort", () => reject(hostError("mod_capability_cancelled")), { once: true }))]);
+      const result = await Promise.race([capabilities[message.method](message.input, { signal: controller.signal }), new Promise((_, reject) => controller.signal.addEventListener("abort", () => reject(controller.signal.reason || hostError("mod_capability_cancelled")), { once: true }))]);
       let bytes;
       try { bytes = modCapabilityResultBytes(result); } catch { bytes = Infinity; }
       if (bytes > MOD_CAPABILITY_RESULT_MAX_BYTES || result === undefined) throw hostError("mod_capability_output_limit");
       if (!controller.signal.aborted && !closing && child.connected) child.send({ type: "capability-result", requestId, result }, () => {});
     } catch (error) {
+      // Adapter abort errors can win the race; preserve the host cancellation cause.
+      if (controller.signal.aborted) error = controller.signal.reason || hostError("mod_capability_cancelled");
       if (!closing && child.connected) child.send({ type: "capability-result", requestId, error: /^[a-z0-9_]+$/.test(String(error?.message)) ? error.message : "mod_capability_failed" }, () => {});
     } finally { clearTimeout(timer); if (activeCapabilities.get(requestId) === controller) activeCapabilities.delete(requestId); }
   }
