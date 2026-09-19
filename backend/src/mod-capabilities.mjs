@@ -63,8 +63,8 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
       for (const date of [from, to]) if (date !== null) bounded(date, 64);
       const page = await readArchiveConversationPage({ rootDir, sessionId, archiveId, limit: count(limit, 50, 100), before, from, to });
       if (!page) throw new Error('archive_conversation_not_found');
-      // A partial or corrupt history cannot be presented as a complete conversation.
-      if (page.historyStatus !== 'complete') throw new Error('archive_history_unavailable');
+      // Preserve the archive reader's completeness marker: legacy snapshots can
+      // still expose their retained turns without claiming the missing history.
       if (JSON.stringify(page).length > 256_000) throw new Error("mod_capability_output_limit");
       return { agentId, sessionId, archiveId, ...page };
     },
