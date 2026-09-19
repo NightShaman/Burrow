@@ -89,3 +89,13 @@ it('uses the Minion label for live tool activity too', () => {
   render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[]} isLoading={false} error="" isSending activeRunId="run-1" activeToolActivity={{ runId: 'run-1', items: [{ id: 'spawn-1', label: 'spawn_subagent', status: 'pending' }] }} liveProgress={[]} liveAnswer="" />);
   expect(screen.getAllByText('Spawn Minion')).toHaveLength(2);
 });
+
+it('places spawn activity before subsequent progress in live and persisted assistant turns', () => {
+  const activity = { runId: 'run-1', items: [{ id: 'spawn', label: 'spawn_subagent', status: 'ok' as const }] };
+  const progress = { items: [{ id: 'later', text: 'Waiting for model continuation', ts: '2026-09-19T12:00:00Z' }], status: 'complete' as const };
+  const { container, rerender } = render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[]} isLoading={false} error="" isSending activeRunId="run-1" activeToolActivity={activity} liveProgress={progress.items} liveAnswer="" />);
+  const order = () => Array.from(container.querySelectorAll('.message-content > .tool-activity, .message-content > .run-progress')).map((node) => node.classList.contains('tool-activity') ? 'spawn' : 'progress');
+  expect(order()).toEqual(['spawn', 'progress']);
+  rerender(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[{ type: 'message', role: 'assistant', content: 'Done', runId: 'run-1', metadata: { toolActivity: activity, progress } }]} isLoading={false} error="" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" />);
+  expect(order()).toEqual(['spawn', 'progress']);
+});
