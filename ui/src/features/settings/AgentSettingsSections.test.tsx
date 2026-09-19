@@ -39,6 +39,21 @@ describe('agent settings sections', () => {
   });
 
 
+  it('places recent Dream activity in the fourth column without moving the settings form', async () => {
+    apiMock.mockImplementation((_target, path) => Promise.resolve(path.includes('/dream-cycle')
+      ? { receipts: [{ runId: 'cycle-1', status: 'completed' }] }
+      : { settings: dreamSettings() }));
+    const overflow = document.createElement('section');
+    document.body.append(overflow);
+    const view = render(<AgentDreams agentId="smatchet" targets={targets} savedProviders={[]} overflowTarget={overflow} />);
+    await waitFor(() => expect(overflow.textContent).toContain('Completed'));
+    expect(view.container.querySelector('textarea')).toBeTruthy();
+    expect(view.container.textContent).not.toContain('Recent activity');
+    expect(overflow.textContent).toContain('Recent activity');
+    view.unmount();
+    overflow.remove();
+  });
+
   it('blocks Dream edits until its initial settings request resolves', async () => {
     const load = deferred<{ settings: ReturnType<typeof dreamSettings> }>();
     apiMock.mockReturnValue(load.promise);

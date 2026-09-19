@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { SavedProvider } from '../../app/types';
 import { apiForTarget } from '../../app/api';
 import { targetForResource, type ApiTarget } from '../../app/apiTargets';
@@ -59,7 +60,7 @@ function DreamModelSelect({ value, model, options, onChange, disabled }: { value
   </div>;
 }
 
-export function AgentDreams({ agentId, targets, savedProviders }: { agentId: string; targets: ApiTarget[]; savedProviders: SavedProvider[] }) {
+export function AgentDreams({ agentId, targets, savedProviders, overflowTarget }: { agentId: string; targets: ApiTarget[]; savedProviders: SavedProvider[]; overflowTarget?: HTMLElement | null }) {
   const owner = targetForResource(targets, agentId);
   const request = <T,>(path: string, init?: RequestInit) => apiForTarget<T>(owner.target, path, init);
   const dreamModels = savedProviders.flatMap((provider) => provider.models.map((model) => ({ connectionId: provider.id, model, label: `${provider.provider} · ${provider.modelLabels?.[model] ?? model}` })));
@@ -114,17 +115,8 @@ export function AgentDreams({ agentId, targets, savedProviders }: { agentId: str
     }
   };
   const disabled = state !== 'idle';
-  return <SettingSection title="Dreams">
-    <p className="settings-description">Configure scheduled dreaming for this agent.</p>
-    <div className="dream-settings-fields">
-      <label className="agent-enabled"><input type="checkbox" checked={settings.enabled} disabled={disabled} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} /><span>Enable scheduled dreaming</span></label>
-      <div className="dream-schedule-fields"><Field label="Cron"><input value={settings.cron} disabled={disabled} onChange={(event) => setSettings({ ...settings, cron: event.target.value })} /></Field><Field label="Timezone"><input value={settings.timezone} disabled={disabled} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} /></Field><Field label="Model"><DreamModelSelect value={selectedDreamModel} model={settings} options={[{ value: '', label: 'Use agent chat model' }, ...dreamModels.map((option) => ({ value: dreamModelValue(option.connectionId, option.model), label: option.label }))]} onChange={(value) => setSettings({ ...settings, ...dreamModelFromValue(value) })} disabled={disabled} /></Field></div>
-      <p className="settings-description">Effective model: {effectiveModel?.modelConnectionId && effectiveModel.model ? modelLabel(effectiveModel, [{ value: '', label: 'Use agent chat model' }, ...dreamModels.map((option) => ({ value: dreamModelValue(option.connectionId, option.model), label: option.label }))]) : 'Unconfigured'}</p>
-      {modelResolutionError && <p className="settings-request-error" role="alert">Model resolution error: {modelResolutionError}</p>}
-      <Field label="Dream prompt"><textarea rows={6} value={settings.prompt} disabled={disabled} onChange={(event) => setSettings({ ...settings, prompt: event.target.value })} /></Field>
-    </div>
-    <div className="dream-cycle-activity" aria-label="Recent dream activity">
-      <h3>Recent activity</h3>
+  const activity = <div className="dream-cycle-activity" aria-label="Recent dream activity">
+      {!overflowTarget && <h3>Recent activity</h3>}
       {receipts.length ? <div className="dream-cycle-list">
         {receipts.map((receipt) => {
           const at = receipt.completedAt || receipt.startedAt;
@@ -137,11 +129,21 @@ export function AgentDreams({ agentId, targets, savedProviders }: { agentId: str
         })}
       </div> : <p className="settings-description">No dream activity recorded yet.</p>}
       {receiptError && <p className="settings-request-error" role="alert">{receiptError}</p>}
+    </div>;
+  return <><SettingSection title="Dreams">
+    <p className="settings-description">Configure scheduled dreaming for this agent.</p>
+    <div className="dream-settings-fields">
+      <label className="agent-enabled"><input type="checkbox" checked={settings.enabled} disabled={disabled} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} /><span>Enable scheduled dreaming</span></label>
+      <div className="dream-schedule-fields"><Field label="Cron"><input value={settings.cron} disabled={disabled} onChange={(event) => setSettings({ ...settings, cron: event.target.value })} /></Field><Field label="Timezone"><input value={settings.timezone} disabled={disabled} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} /></Field><Field label="Model"><DreamModelSelect value={selectedDreamModel} model={settings} options={[{ value: '', label: 'Use agent chat model' }, ...dreamModels.map((option) => ({ value: dreamModelValue(option.connectionId, option.model), label: option.label }))]} onChange={(value) => setSettings({ ...settings, ...dreamModelFromValue(value) })} disabled={disabled} /></Field></div>
+      <p className="settings-description">Effective model: {effectiveModel?.modelConnectionId && effectiveModel.model ? modelLabel(effectiveModel, [{ value: '', label: 'Use agent chat model' }, ...dreamModels.map((option) => ({ value: dreamModelValue(option.connectionId, option.model), label: option.label }))]) : 'Unconfigured'}</p>
+      {modelResolutionError && <p className="settings-request-error" role="alert">Model resolution error: {modelResolutionError}</p>}
+      <Field label="Dream prompt"><textarea rows={6} value={settings.prompt} disabled={disabled} onChange={(event) => setSettings({ ...settings, prompt: event.target.value })} /></Field>
     </div>
+    {!overflowTarget && activity}
     <div className="dream-actions">
       <button className="primary" onClick={() => void save()} disabled={state !== 'idle'}>{state === 'saving' ? 'Saving…' : 'Save dream settings'}</button>
     </div>
     {error && <p className="settings-request-error" role="alert">{error}</p>}
-  </SettingSection>;
+  </SettingSection>{overflowTarget && createPortal(<div className="settings-overflow-content"><SettingSection title="Recent activity">{activity}</SettingSection></div>, overflowTarget)}</>;
 }
 
