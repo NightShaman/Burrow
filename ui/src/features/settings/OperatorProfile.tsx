@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from 'react';
 import { api } from '../../app/api';
 
-const MAX_AVATAR_FILE_SIZE = 2_000_000;
+const MAX_AVATAR_FILE_SIZE = 50_000_000;
 const MAX_AVATAR_DATA_URL_SIZE = 512_000;
 const AVATAR_MAX_DIMENSION = 512;
 
 export async function optimizeAvatar(file: File): Promise<string> {
   if (!file.type.startsWith('image/')) throw new Error('Choose or paste an image file for the avatar.');
-  if (file.size > MAX_AVATAR_FILE_SIZE) throw new Error('Avatar image is too large. Maximum file size is 2 MB.');
+  if (file.size > MAX_AVATAR_FILE_SIZE) throw new Error('Avatar image is too large to process. Maximum original file size is 50 MB.');
 
   const source = await new Promise<HTMLImageElement>((resolve, reject) => {
     const url = URL.createObjectURL(file);
