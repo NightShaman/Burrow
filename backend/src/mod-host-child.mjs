@@ -6,6 +6,16 @@ let stopping = false;
 let systemController = null;
 const handlers = new Map();
 const pendingStore = new Map();
+const pendingCapabilities = new Map();
+function capabilityRequest(method, input) {
+  if (stopping || !process.connected) return Promise.reject(new Error("mod_capability_unavailable"));
+  const requestId = `cap-${process.pid}-${++sequence}`;
+  return new Promise((resolve, reject) => {
+    pendingCapabilities.set(requestId, { resolve, reject });
+    send({ type: "capability-request", requestId, method, input }, (error) => { if (error && pendingCapabilities.delete(requestId)) reject(new Error("mod_capability_unavailable")); });
+  });
+}
+
 const activeSystemProcesses = new Map();
 const activeSystemFilesystems = new Map();
 const NATIVE_FILESYSTEM_TOOLS = new Set(['files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_write', 'files_edit']);
@@ -112,6 +122,9 @@ async function activate(message) {
     api: registration.api,
     settings: settingsApi(),
     secrets: secretsApi(),
+    conversations: Object.freeze({ list: (input) => capabilityRequest("listConversations", input), read: (input) => capabilityRequest("readConversation", input) }),
+    models: Object.freeze({ list: () => capabilityRequest("listModels", {}), generateText: (input) => capabilityRequest("generateText", input) }),
+    agents: Object.freeze({ list: () => capabilityRequest("listAgents", {}) }),
     logger: logger(modId),
   };
   if (message.systemCapability === SYSTEM_PROTOCOL) {
@@ -148,6 +161,8 @@ async function shutdown() {
   if (stopping) return;
   stopping = true;
   rejectStoreRequests(new Error('mod_store_unavailable'));
+  for (const entry of pendingCapabilities.values()) entry.reject(new Error("mod_capability_unavailable"));
+  pendingCapabilities.clear();
   for (const active of activeSystemProcesses.values()) active.abort.abort();
   activeSystemProcesses.clear();
   for (const active of activeSystemFilesystems.values()) active.abort.abort();
@@ -211,6 +226,13 @@ process.on('message', async (message) => {
     } finally { activeSystemProcesses.delete(message.requestId); }
     return;
   }
+  if (message?.type === 'capability-result') {
+    const entry = pendingCapabilities.get(message.requestId);
+    if (!entry) return;
+    pendingCapabilities.delete(message.requestId);
+    if (message.error) entry.reject(new Error(message.error)); else entry.resolve(message.result);
+    return;
+  }
   if (message?.type === 'store-result') {
     const entry = pendingStore.get(message.requestId);
     if (!entry) return;
@@ -239,5 +261,7 @@ process.on('message', async (message) => {
 
 process.on('disconnect', async () => {
   rejectStoreRequests(new Error('mod_store_unavailable'));
+  for (const entry of pendingCapabilities.values()) entry.reject(new Error("mod_capability_unavailable"));
+  pendingCapabilities.clear();
   try { await shutdown(); } finally { process.exit(process.exitCode || 0); }
 });

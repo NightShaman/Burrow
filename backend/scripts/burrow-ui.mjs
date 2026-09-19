@@ -2966,7 +2966,11 @@ const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJ
 const authRoute = createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
 const chatRoute = createChatRoutes({ handleChat, readJsonBody, sendJson, selectedAgentRuntime, cancelChatRun });
 const modsRuntimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
-const mods = await loadMods({ runtimeRoot: modsRuntimeRoot, databasePath: settingsDatabasePath(), executionProviders });
+const mods = await loadMods({ runtimeRoot: modsRuntimeRoot, databasePath: settingsDatabasePath(), executionProviders, resolveAgentRuntime, resolveAgentWorkspaceRoot: async (id) => {
+  const agent = agentsStore().get(id);
+  if (!agent) throw new Error('agent_not_found');
+  return agentRuntimeContext({ runtimeState: (await runtimeConfig()).runtimeState, agent }).agentWorkspaceRoot;
+} });
 const modRoute = createModRoute({ mods, readJsonBody, sendJson });
 const modDistribution = createModDistribution({
   runtimeRoot: modsRuntimeRoot,

@@ -85,7 +85,7 @@ const STORE_METHODS = Object.freeze({
   secrets: Object.freeze({ get: 'getSecret', set: 'setSecret', clear: 'clearSecret', has: 'hasSecret' }),
 });
 
-export function startModHost({ mod, store, logger = console, systemCapability = null, activationTimeoutMs = 10_000, routeTimeoutMs = DEFAULT_MOD_ROUTE_TIMEOUT_MS, cleanupTimeoutMs = 5_000, systemProcessWatchdogGraceMs = SYSTEM_PROCESS_WATCHDOG_GRACE_MS, onUnavailable = null, onSystemControllerReady = null, onSystemControllerUnavailable = null } = {}) {
+export function startModHost({ mod, store, logger = console, systemCapability = null, capabilities = null, capabilityTimeoutMs = 20_000, activationTimeoutMs = 10_000, routeTimeoutMs = DEFAULT_MOD_ROUTE_TIMEOUT_MS, cleanupTimeoutMs = 5_000, systemProcessWatchdogGraceMs = SYSTEM_PROCESS_WATCHDOG_GRACE_MS, onUnavailable = null, onSystemControllerReady = null, onSystemControllerUnavailable = null } = {}) {
   if (!store) throw hostError('mod_store_required', mod?.id);
   const child = fork(CHILD_PATH, [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], serialization: 'advanced' });
   const pending = new Map();
@@ -99,6 +99,32 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   let systemControllerReady = false;
   const controllerInstanceId = systemCapability ? randomUUID() : null;
   const pendingSystemProcess = new Map();
+  const activeCapabilities = new Map();
+  const cancelCapabilities = () => { for (const controller of activeCapabilities.values()) controller.abort(); activeCapabilities.clear(); };
+  async function serviceCapabilityRequest(message) {
+    const requestId = String(message?.requestId || "");
+    if (!requestId || requestId.length > 128 || closing || stopped || !child.connected) return;
+    // Never replace the controller of an in-flight request with a forged ID.
+    if (activeCapabilities.has(requestId)) return;
+    const controller = new AbortController();
+    if (activeCapabilities.size >= 4 || !capabilities || !["listAgents", "listConversations", "readConversation", "listModels", "generateText"].includes(message.method)) {
+      child.send({ type: "capability-result", requestId, error: "mod_capability_unavailable" }, () => {}); return;
+    }
+    let inputSize;
+    try { inputSize = Buffer.byteLength(JSON.stringify(message.input ?? {})); } catch { inputSize = Infinity; }
+    if (inputSize > 32_000) { child.send({ type: "capability-result", requestId, error: "mod_capability_input_invalid" }, () => {}); return; }
+    activeCapabilities.set(requestId, controller);
+    const timer = setTimeout(() => controller.abort(), finiteTimeout(capabilityTimeoutMs, 20_000));
+    try {
+      const result = await Promise.race([capabilities[message.method](message.input, { signal: controller.signal }), new Promise((_, reject) => controller.signal.addEventListener("abort", () => reject(hostError("mod_capability_cancelled")), { once: true }))]);
+      let bytes;
+      try { bytes = Buffer.byteLength(JSON.stringify(result)); } catch { bytes = Infinity; }
+      if (bytes > 256_000 || result === undefined) throw hostError("mod_capability_output_limit");
+      if (!controller.signal.aborted && !closing && child.connected) child.send({ type: "capability-result", requestId, result }, () => {});
+    } catch (error) {
+      if (!closing && child.connected) child.send({ type: "capability-result", requestId, error: /^[a-z0-9_]+$/.test(String(error?.message)) ? error.message : "mod_capability_failed" }, () => {});
+    } finally { clearTimeout(timer); if (activeCapabilities.get(requestId) === controller) activeCapabilities.delete(requestId); }
+  }
   const pendingSystemFilesystem = new Map();
   const rejectSystemProcesses = (code = 'remote_process_controller_unavailable') => {
     const error = hostError(code);
@@ -177,6 +203,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   }, finiteTimeout(activationTimeoutMs, 10_000));
 
   child.on('message', (message) => {
+    if (message?.type === 'capability-request') { serviceCapabilityRequest(message); return; }
     if (message?.type === 'store-request') {
       serviceStoreRequest(message);
       return;
@@ -265,6 +292,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       rejectActivation(error);
     }
     rejectPending(error);
+    cancelCapabilities();
     markUnavailable('mod_host_disconnected');
     if (!stopped) child.kill('SIGKILL');
   });
@@ -277,6 +305,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       rejectActivation(error);
     }
     rejectPending(error);
+    cancelCapabilities();
     markUnavailable('mod_host_exited');
     resolveExit({ code, signal });
   });
@@ -288,6 +317,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       rejectActivation(wrapped);
     }
     rejectPending(wrapped);
+    cancelCapabilities();
     markUnavailable('mod_host_error');
     if (!stopped) child.kill('SIGKILL');
   });
@@ -419,6 +449,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   function close() {
     if (closePromise) return closePromise;
     closing = true;
+    cancelCapabilities();
     revokeSystemController('system_controller_shutdown');
     closePromise = (async () => {
       if (stopped) return exited;
