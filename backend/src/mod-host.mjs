@@ -86,7 +86,7 @@ const STORE_METHODS = Object.freeze({
   secrets: Object.freeze({ get: 'getSecret', set: 'setSecret', clear: 'clearSecret', has: 'hasSecret' }),
 });
 
-export function startModHost({ mod, store, logger = console, systemCapability = null, capabilities = null, capabilityTimeoutMs = 20_000, modelCapabilityTimeoutMs = 300_000, activationTimeoutMs = 10_000, routeTimeoutMs = DEFAULT_MOD_ROUTE_TIMEOUT_MS, cleanupTimeoutMs = 5_000, systemProcessWatchdogGraceMs = SYSTEM_PROCESS_WATCHDOG_GRACE_MS, onUnavailable = null, onSystemControllerReady = null, onSystemControllerUnavailable = null } = {}) {
+export function startModHost({ mod, store, logger = console, systemCapability = null, capabilities = null, capabilityTimeoutMs = null, modelCapabilityTimeoutMs = null, activationTimeoutMs = 10_000, routeTimeoutMs = DEFAULT_MOD_ROUTE_TIMEOUT_MS, cleanupTimeoutMs = 5_000, systemProcessWatchdogGraceMs = SYSTEM_PROCESS_WATCHDOG_GRACE_MS, onUnavailable = null, onSystemControllerReady = null, onSystemControllerUnavailable = null } = {}) {
   if (!store) throw hostError('mod_store_required', mod?.id);
   const child = fork(CHILD_PATH, [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], serialization: 'advanced' });
   const pending = new Map();
@@ -115,10 +115,11 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     try { inputSize = Buffer.byteLength(JSON.stringify(message.input ?? {})); } catch { inputSize = Infinity; }
     if (inputSize > 32_000) { child.send({ type: "capability-result", requestId, error: "mod_capability_input_invalid" }, () => {}); return; }
     activeCapabilities.set(requestId, controller);
-    const deadline = message.method === "generateText"
-      ? finiteTimeout(modelCapabilityTimeoutMs, 300_000)
-      : finiteTimeout(capabilityTimeoutMs, 20_000);
-    const timer = setTimeout(() => controller.abort(hostError("mod_capability_timeout")), deadline);
+    const configuredTimeout = message.method === "generateText" ? modelCapabilityTimeoutMs : capabilityTimeoutMs;
+    const deadline = Number(configuredTimeout);
+    const timer = Number.isFinite(deadline) && deadline > 0
+      ? setTimeout(() => controller.abort(hostError("mod_capability_timeout")), deadline)
+      : null;
     try {
       const result = await Promise.race([capabilities[message.method](message.input, { signal: controller.signal }), new Promise((_, reject) => controller.signal.addEventListener("abort", () => reject(controller.signal.reason || hostError("mod_capability_cancelled")), { once: true }))]);
       let bytes;
