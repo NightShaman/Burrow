@@ -1,9 +1,10 @@
+import { readModConversationPage } from './mod-conversation-pager.mjs';
 import { createHash } from 'node:crypto';
 import { AgentRegistryStore } from './agent-registry.mjs';
 import { ModelSettingsStore } from './model-settings-store.mjs';
 import { resolveModelConfig } from './config.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
-import { listSessionRecords, listResetSessionArchives, readArchiveConversationPage } from './session-store.mjs';
+import { listSessionRecords, listResetSessionArchives } from './session-store.mjs';
 
 function invalid() { throw new Error('mod_capability_input_invalid'); }
 function bounded(value, max) { if (typeof value !== 'string' || !value || value.length > max) invalid(); return value; }
@@ -61,17 +62,16 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
       if (archiveId !== null) bounded(archiveId, 256);
       if (before !== null) bounded(before, 8192);
       for (const date of [from, to]) if (date !== null) bounded(date, 64);
-      const page = await readArchiveConversationPage({ rootDir, sessionId, archiveId, limit: count(limit, 50, 100), before, from, to });
+      const page = await readModConversationPage({ rootDir, agentId, sessionId, archiveId, limit: count(limit, 50, 100), before, from, to });
       if (!page) throw new Error('archive_conversation_not_found');
       // Preserve the archive reader's completeness marker: legacy snapshots can
       // still expose their retained turns without claiming the missing history.
-      if (JSON.stringify(page).length > 256_000) throw new Error("mod_capability_output_limit");
-      return { agentId, sessionId, archiveId, ...page };
+      return page;
     },
     async listModels() {
       return withStore(ModelSettingsStore, (store) => store.list().flatMap((connection) => (connection.models || [])
         .filter((model) => model.selected !== false && store.hasAuth(connection.id))
-        .map((model) => ({ connectionId: connection.id, model: model.id, provider: connection.provider }))));
+        .map((model) => ({ connectionId: connection.id, model: model.id, provider: connection.provider, ...(Number(model.contextWindow) > 0 ? { contextWindow: Number(model.contextWindow) } : {}) }))));
     },
     async generateText(input, { signal } = {}) {
       const { connectionId, model, prompt, maxTokens } = plain(input);

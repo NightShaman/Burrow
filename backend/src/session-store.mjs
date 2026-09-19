@@ -2,12 +2,15 @@ import { createReadStream, promises as fs } from 'node:fs';
 import { createInterface } from 'node:readline';
 import path from 'node:path';
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
 import { boundedRedactedValue, redactAndTruncateText } from './redaction.mjs';
 import { normalizeSessionContextState } from './session-context-state.mjs';
 import { assessInterruptedRunRecovery } from './recovery-resume-policy.mjs';
 
 const SESSION_TAIL_READ_MAX_BYTES = 4 * 1024 * 1024;
-const archiveCursorKey = randomUUID(); // Process-local: restart invalidates old cursors explicitly.
+// Standalone archive readers without a configured runtime key retain the legacy
+// process-local convention. Core's persisted key keeps paged scans valid on restart.
+const archiveFallbackKey = randomUUID();
 
 function safeId(value) {
   return String(value || '').trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120) || randomUUID();
@@ -663,7 +666,10 @@ export async function exportSessionTranscript({ rootDir, sessionId } = {}) {
 // transcript byte boundary. Ordinary appends beyond that boundary do not alter
 // the snapshot; rotation/reset or a changed retained file invalidates it.
 function archiveReadError(code, statusCode = 400) { return Object.assign(new Error(code), { statusCode }); }
-function archiveCursorSignature(payload) { return createHmac('sha256', archiveCursorKey).update(JSON.stringify(payload)).digest('hex'); }
+function archiveCursorSignature(payload) {
+  const key = process.env.BURROW_SETTINGS_KEY ? settingsKeyFromEnvironment() : archiveFallbackKey;
+  return createHmac('sha256', key).update('burrow-archive-cursor-v2\0').update(JSON.stringify(payload)).digest('hex');
+}
 function archiveTimestamp(value) {
   if (value == null || value === '') return null;
   if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(value) || !Number.isFinite(Date.parse(value))) throw archiveReadError('archive_time_invalid');

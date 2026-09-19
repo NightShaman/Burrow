@@ -1,3 +1,4 @@
+import { MOD_CAPABILITY_RESULT_MAX_BYTES, modCapabilityResultBytes } from './mod-capability-envelope.mjs';
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -118,8 +119,8 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     try {
       const result = await Promise.race([capabilities[message.method](message.input, { signal: controller.signal }), new Promise((_, reject) => controller.signal.addEventListener("abort", () => reject(hostError("mod_capability_cancelled")), { once: true }))]);
       let bytes;
-      try { bytes = Buffer.byteLength(JSON.stringify(result)); } catch { bytes = Infinity; }
-      if (bytes > 256_000 || result === undefined) throw hostError("mod_capability_output_limit");
+      try { bytes = modCapabilityResultBytes(result); } catch { bytes = Infinity; }
+      if (bytes > MOD_CAPABILITY_RESULT_MAX_BYTES || result === undefined) throw hostError("mod_capability_output_limit");
       if (!controller.signal.aborted && !closing && child.connected) child.send({ type: "capability-result", requestId, result }, () => {});
     } catch (error) {
       if (!closing && child.connected) child.send({ type: "capability-result", requestId, error: /^[a-z0-9_]+$/.test(String(error?.message)) ? error.message : "mod_capability_failed" }, () => {});
