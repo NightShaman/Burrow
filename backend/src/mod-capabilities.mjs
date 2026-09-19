@@ -138,14 +138,14 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
       return { conversations, hasMore, nextCursor };
 
     },
-    async readConversation(input) {
+    async readConversation(input, { signal } = {}) {
       const { agentId, sessionId, archiveId = null, limit, before = null, from = null, to = null } = plain(input);
       const rootDir = await agentRoot(agentId);
       bounded(sessionId, 128);
       if (archiveId !== null) bounded(archiveId, 256);
       if (before !== null) bounded(before, 8192);
       for (const date of [from, to]) if (date !== null) bounded(date, 64);
-      const page = await readModConversationPage({ rootDir, agentId, sessionId, archiveId, limit: count(limit, 50, 100), before, from, to });
+      const page = await readModConversationPage({ rootDir, agentId, sessionId, archiveId, limit: count(limit, 50, 100), before, from, to, signal });
       if (!page) throw new Error('archive_conversation_not_found');
       // Preserve the archive reader's completeness marker: legacy snapshots can
       // still expose their retained turns without claiming the missing history.

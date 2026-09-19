@@ -2,6 +2,7 @@ import { createReadStream, promises as fs } from 'node:fs';
 import { createInterface } from 'node:readline';
 import path from 'node:path';
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { channel } from 'node:diagnostics_channel';
 import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
 import { boundedRedactedValue, redactAndTruncateText } from './redaction.mjs';
 import { normalizeSessionContextState } from './session-context-state.mjs';
@@ -11,6 +12,7 @@ const SESSION_TAIL_READ_MAX_BYTES = 4 * 1024 * 1024;
 // Standalone archive readers without a configured runtime key retain the legacy
 // process-local convention. Core's persisted key keeps paged scans valid on restart.
 const archiveFallbackKey = randomUUID();
+const archiveReadDiagnostics = channel('burrow.session-store.archive-read');
 
 function safeId(value) {
   return String(value || '').trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120) || randomUUID();
@@ -675,8 +677,10 @@ function archiveTimestamp(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(value) || !Number.isFinite(Date.parse(value))) throw archiveReadError('archive_time_invalid');
   return new Date(value).toISOString();
 }
-export async function readArchiveConversationPage({ rootDir, sessionId, archiveId = null, limit = 100, before = null, from = null, to = null } = {}) {
+export async function readArchiveConversationPage({ rootDir, sessionId, archiveId = null, limit = 100, before = null, from = null, to = null, signal = null, includeNavigation = false } = {}) {
   if (!rootDir || !sessionId) throw archiveReadError('archive_session_target_required');
+  const checkCancelled = () => { if (signal?.aborted) throw signal.reason || archiveReadError('archive_read_cancelled', 499); };
+  checkCancelled();
   if (!Number.isInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > 200) throw archiveReadError('archive_limit_invalid');
   const start = archiveTimestamp(from);
   const end = archiveTimestamp(to);
@@ -737,13 +741,16 @@ export async function readArchiveConversationPage({ rootDir, sessionId, archiveI
   const seen = new Set();
   const page = [];
   let count = 0;
+  if (archiveReadDiagnostics.hasSubscribers) archiveReadDiagnostics.publish({ rootDir, sessionId: id, archiveId, limit: Number(limit) });
   // Stream lines and hold only the requested window (plus IDs needed to
   // suppress copied compaction tails). No full transcript/turn array per page.
   for (const file of files) {
+    checkCancelled();
     if (!file.size) continue;
-    const stream = createReadStream(path.join(directory, file.name), { encoding: 'utf8', end: file.size - 1 });
+    const stream = createReadStream(path.join(directory, file.name), { encoding: 'utf8', end: file.size - 1, signal: signal || undefined });
     const lines = createInterface({ input: stream, crlfDelay: Infinity });
     for await (const line of lines) {
+      checkCancelled();
       if (!line.trim()) continue;
       let turn;
       try {
@@ -768,12 +775,24 @@ export async function readArchiveConversationPage({ rootDir, sessionId, archiveI
   if (cursor && cursor.offset > count) throw archiveReadError('archive_cursor_stale', 409);
   const boundary = cursor?.offset ?? count;
   const nextOffset = boundary - page.length;
-  const payload = { v: 2, root, id, archiveId, from: start, to: end, signature, activeSize, offset: nextOffset };
-  return {
+  const cursorAt = (offset) => {
+    if (offset <= 0) return null;
+    const payload = { v: 2, root, id, archiveId, from: start, to: end, signature, activeSize, offset };
+    return Buffer.from(JSON.stringify({ ...payload, mac: archiveCursorSignature(payload) })).toString('base64url');
+  };
+  const result = {
     turns: page, hasMore: nextOffset > 0,
-    nextCursor: nextOffset > 0 ? Buffer.from(JSON.stringify({ ...payload, mac: archiveCursorSignature(payload) })).toString('base64url') : null,
+    nextCursor: cursorAt(nextOffset),
     historyStatus: unavailable ? 'unavailable' : 'complete',
   };
+  // Internal callers that must stop partway through a real page can continue
+  // at any returned turn without rescanning once per turn. These cursors use
+  // the exact same signed snapshot/date-filter envelope as nextCursor.
+  if (includeNavigation) {
+    result.turnCursors = page.map((_turn, index) => cursorAt(nextOffset + index));
+    result.turnReadCursors = page.map((_turn, index) => cursorAt(nextOffset + index + 1));
+  }
+  return result;
 }
 
 // Planner state is structured turn metadata, not a prose-history window.

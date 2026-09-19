@@ -50,7 +50,7 @@ function segmentTurn(turn, offset, target, status, before, next, scope) {
   return best ? make(best) : null;
 }
 
-export async function readModConversationPage({ rootDir, sessionId, archiveId, limit, before, from, to, agentId }) {
+export async function readModConversationPage({ rootDir, sessionId, archiveId, limit, before, from, to, agentId, signal = null }) {
   const target = { agentId, sessionId, archiveId };
   const scope = createHash('sha256').update(JSON.stringify({ rootDir, target, from, to })).digest('hex');
   let segment = null;
@@ -60,39 +60,44 @@ export async function readModConversationPage({ rootDir, sessionId, archiveId, l
     if (raw?.v === 1) segment = decode(before);
   }
   if (segment && segment.scope !== scope) badCursor();
-  let cursor = segment ? segment.before : before;
-  let status = null;
+  const cursor = segment ? segment.before : before;
+
+  // Fetch a genuine archive page once. The archive reader supplies signed
+  // continuation points for members of this page so byte-envelope truncation
+  // and content segmentation remain exact without a transcript rescan per turn.
+  const page = await readArchiveConversationPage({ rootDir, sessionId, archiveId, limit, before: cursor, from, to, signal, includeNavigation: true });
+  if (!page) return null;
+  const status = page.historyStatus;
+  if (!page.turns.length) return output(target, [], [], false, null, status);
   const turns = [];
   const gaps = [];
-  for (let i = 0; i < limit; i++) {
-    const page = await readArchiveConversationPage({ rootDir, sessionId, archiveId, limit: 1, before: cursor, from, to });
-    if (!page) { if (i === 0) return null; throw new Error('archive_conversation_not_found'); }
-    status = page.historyStatus === 'unavailable' || status === 'unavailable' ? 'unavailable' : 'complete';
-    const turn = page.turns[0];
-    if (!turn) return output(target, turns, gaps, false, null, status);
+  for (let index = page.turns.length - 1; index >= 0; index -= 1) {
+    if (signal?.aborted) throw signal.reason || new Error('mod_capability_cancelled');
+    const turn = page.turns[index];
+    const beforeTurn = page.turnReadCursors[index];
+    const afterTurn = page.turnCursors[index];
     if (segment) {
-      if (digest(turn) !== segment.digest || typeof turn.content !== 'string') badCursor();
-      const piece = segmentTurn(turn, segment.offset, target, status, cursor, page.nextCursor, scope);
-      if (!piece) badCursor(); // A previously issued segment must remain resumable.
+      if (index !== page.turns.length - 1 || digest(turn) !== segment.digest || typeof turn.content !== 'string') badCursor();
+      const piece = segmentTurn(turn, segment.offset, target, status, beforeTurn, afterTurn, scope);
+      if (!piece) badCursor();
       return piece;
     }
-    const candidate = output(target, [...turns, turn], gaps, page.hasMore, page.nextCursor, status);
+    const hasMore = Boolean(afterTurn);
+    const candidate = output(target, [...turns, turn], gaps, hasMore, afterTurn, status);
     if (modCapabilityResultBytes(candidate) > MOD_CAPABILITY_RESULT_MAX_BYTES) {
-      if (turns.length || gaps.length) return output(target, turns, gaps, true, cursor, status);
+      if (turns.length || gaps.length) return output(target, turns, gaps, true, beforeTurn, status);
       if (typeof turn.content === 'string' && turn.content.length) {
-        const piece = segmentTurn(turn, 0, target, status, cursor, page.nextCursor, scope);
+        const piece = segmentTurn(turn, 0, target, status, beforeTurn, afterTurn, scope);
         if (piece) return piece;
       }
       // Even one content scalar cannot fit with the turn's metadata. Report
       // the omitted turn explicitly and advance instead of retrying forever.
       const gap = { turnId: turn.id, reason: 'turn_metadata_exceeds_envelope' };
-      const omitted = output(target, turns, [gap], page.hasMore, page.nextCursor, status);
+      const omitted = output(target, turns, [gap], hasMore, afterTurn, status);
       if (modCapabilityResultBytes(omitted) > MOD_CAPABILITY_RESULT_MAX_BYTES) throw new Error('mod_capability_output_limit');
       return omitted;
     }
     turns.push(turn);
-    if (!page.hasMore) return candidate;
-    cursor = page.nextCursor;
   }
-  return output(target, turns, gaps, true, cursor, status);
+  return output(target, turns, gaps, page.hasMore, page.nextCursor, status);
 }
