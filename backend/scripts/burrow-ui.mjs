@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { diagnosticMods, modJobs, pendingModOperations } from '../src/mod-diagnostics.mjs';
 import { releaseVersion } from '../src/release-version.mjs';
 import { createServer } from 'node:http';
 import { promises as fs } from 'node:fs';
@@ -1386,7 +1387,7 @@ function bearerToken(req) {
 function apiTokenScopeForRequest(req, url) {
   if (req.method !== 'GET') return null;
   const pathname = url.pathname;
-  if (pathname === '/api/health' || pathname === '/api/status' || pathname === '/api/metrics' || pathname === '/api/diagnostics/inventory' || pathname === '/api/agents' || pathname === '/api/agent-status' || pathname === '/api/sessions' || pathname === '/api/session/context' || pathname === '/api/session/context-status' || pathname === '/api/context' || pathname === '/api/chat/runs/active' || pathname === '/api/traces' || pathname.startsWith('/api/traces/') || pathname === '/api/archive/runs' || pathname.startsWith('/api/archive/runs/') || pathname === '/api/archive/sessions' || pathname.startsWith('/api/archive/sessions/')) return 'diagnostics:read';
+  if (pathname === '/api/health' || pathname === '/api/status' || pathname === '/api/metrics' || pathname === '/api/diagnostics/inventory' || pathname === '/api/diagnostics/mods' || /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/pending$/.test(pathname) || /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/jobs(?:\/[A-Za-z0-9_-]+)?$/.test(pathname) || pathname === '/api/agents' || pathname === '/api/agent-status' || pathname === '/api/sessions' || pathname === '/api/session/context' || pathname === '/api/session/context-status' || pathname === '/api/context' || pathname === '/api/chat/runs/active' || pathname === '/api/traces' || pathname.startsWith('/api/traces/') || pathname === '/api/archive/runs' || pathname.startsWith('/api/archive/runs/') || pathname === '/api/archive/sessions' || pathname.startsWith('/api/archive/sessions/')) return 'diagnostics:read';
   return null;
 }
 
@@ -3002,6 +3003,19 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {
       if (await serveV18Asset(url, res)) return;
       return sendJson(res, 404, { ok: false, error: 'ui_artifact_not_found' });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/diagnostics/mods') return sendJson(res, 200, { ok: true, mods: diagnosticMods(mods) });
+    if (req.method === 'GET' && /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/pending$/.test(url.pathname)) {
+      try { return sendJson(res, 200, { ok: true, ...pendingModOperations(mods, url.pathname.split('/')[4]) }); }
+      catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'mod_diagnostics_unavailable' }); }
+    }
+    if (req.method === 'GET' && url.pathname.startsWith('/api/diagnostics/mods/')) {
+      const match = /^\/api\/diagnostics\/mods\/([a-z0-9-]+)\/jobs(?:\/([A-Za-z0-9_-]+))?$/.exec(url.pathname);
+      if (!match) return sendJson(res, 404, { ok: false, error: 'not_found' });
+      const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : 50;
+      const cursor = url.searchParams.has('cursor') ? url.searchParams.get('cursor') : undefined;
+      try { return sendJson(res, 200, { ok: true, ...await modJobs(mods, match[1], { jobId: match[2], limit, cursor }) }); }
+      catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'mod_diagnostics_unavailable' }); }
     }
     if (req.method === 'GET' && url.pathname === '/api/diagnostics/inventory') {
       const db = openSettingsDatabase({ databasePath: settingsDatabasePath() });

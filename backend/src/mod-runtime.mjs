@@ -244,7 +244,9 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
             mod.error = code;
           },
         });
-        const descriptions = await host.activated;
+        const activation = await host.activated;
+        const descriptions = activation;
+        mod.diagnosticsSupported = activation.diagnosticsSupported;
         if (!Array.isArray(descriptions)) throw new Error(`mod_route_description_invalid:${mod.id}`);
         const routeIds = new Set();
         const routeKeys = new Set();

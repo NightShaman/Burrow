@@ -5,6 +5,7 @@ let sequence = 0;
 let stopping = false;
 let systemController = null;
 const handlers = new Map();
+let diagnosticHandlers = null;
 const pendingStore = new Map();
 const pendingCapabilities = new Map();
 function capabilityRequest(method, input) {
@@ -92,6 +93,10 @@ function registrar(modId) {
   };
   return {
     routes,
+    diagnostics: Object.freeze({ register(adapter) {
+      if (diagnosticHandlers || !adapter || typeof adapter.listJobs !== "function" || typeof adapter.getJob !== "function") throw new Error("mod_diagnostics_invalid");
+      diagnosticHandlers = { listJobs: adapter.listJobs, getJob: adapter.getJob };
+    } }),
     api: Object.freeze({
       get: (path, handler) => add('GET', path, handler),
       post: (path, handler) => add('POST', path, handler),
@@ -120,6 +125,7 @@ async function activate(message) {
   const context = {
     id: modId,
     api: registration.api,
+    diagnostics: registration.diagnostics,
     settings: settingsApi(),
     secrets: secretsApi(),
     conversations: Object.freeze({ list: (input) => capabilityRequest("listConversations", input), read: (input) => capabilityRequest("readConversation", input) }),
@@ -149,11 +155,11 @@ async function activate(message) {
   }
   const result = await module.activate(Object.freeze(context));
   cleanup = typeof result === 'function' ? result : result && typeof result.close === 'function' ? () => result.close() : null;
-  send({ type: 'activated', routes: registration.routes });
+  send({ type: 'activated', routes: registration.routes, diagnostics: Boolean(diagnosticHandlers) });
 }
 
 async function invoke(message) {
-  const handler = handlers.get(message.routeId);
+  const handler = message.routeId === "diagnostic-list" ? diagnosticHandlers?.listJobs : message.routeId === "diagnostic-detail" ? diagnosticHandlers?.getJob : handlers.get(message.routeId);
   if (!handler) throw new Error('mod_route_handler_not_found');
   return handler(message.request);
 }
