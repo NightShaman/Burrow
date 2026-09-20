@@ -9,6 +9,7 @@ import { listSessionRecords, listResetSessionArchives } from './session-store.mj
 function invalid() { throw new Error('mod_capability_input_invalid'); }
 function bounded(value, max) { if (typeof value !== 'string' || !value || value.length > max) invalid(); return value; }
 function count(value, fallback, max) { if (value === undefined) return fallback; if (!Number.isInteger(value) || value < 1 || value > max) invalid(); return value; }
+function positiveSafeInteger(value) { if (value === undefined) return undefined; if (!Number.isSafeInteger(value) || value < 1) invalid(); return value; }
 function plain(value) { if (!value || typeof value !== 'object' || Array.isArray(value)) invalid(); return value; }
 const SCHEDULER_PAGE_MAX_BYTES = 240_000;
 function resultBytes(value) { return Buffer.byteLength(JSON.stringify(value)); }
@@ -158,16 +159,17 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
     },
     async generateText(input, { signal } = {}) {
       const { connectionId, model, prompt, maxTokens } = plain(input);
-      bounded(connectionId, 128); bounded(model, 256); bounded(prompt, 24_000);
-      const tokens = count(maxTokens, 512, 2048);
+      bounded(connectionId, 128); bounded(model, 256);
+      if (typeof prompt !== 'string' || !prompt) invalid();
+      const tokens = positiveSafeInteger(maxTokens);
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
       const config = await resolveModelConfig({ modelConnectionId: connectionId, model, settingsDb: databasePath, fetchImpl });
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
-      const result = await createModelAdapter({ config, fetchImpl }).complete({ prompt, maxTokens: tokens, tools: null, signal });
+      const result = await createModelAdapter({ config, fetchImpl }).complete({ prompt, ...(tokens === undefined ? {} : { maxTokens: tokens }), tools: null, signal });
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
       if (result.error || !result.choice || result.choice.toolCalls?.length) throw new Error('mod_model_generation_failed');
       const text = result.choice.text;
-      if (typeof text !== 'string' || text.length > 16_000) throw new Error('mod_model_output_limit');
+      if (typeof text !== 'string') throw new Error('mod_model_generation_failed');
       return { text };
     },
   });
