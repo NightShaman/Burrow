@@ -1,4 +1,3 @@
-import { MOD_CAPABILITY_RESULT_MAX_BYTES, modCapabilityResultBytes } from './mod-capability-envelope.mjs';
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -101,7 +100,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   const controllerInstanceId = systemCapability ? randomUUID() : null;
   const pendingSystemProcess = new Map();
   const activeCapabilities = new Map();
-  const cancelCapabilities = () => { for (const { controller } of activeCapabilities.values()) controller.abort(hostError("mod_capability_shutdown")); activeCapabilities.clear(); };
+  const cancelCapabilities = () => { for (const { controller } of activeCapabilities.values()) controller.abort(hostError("mod_capability_shutdown")); activeCapabilities.clear(); capabilities?.dispose?.(); };
   async function serviceCapabilityRequest(message) {
     const requestId = String(message?.requestId || "");
     if (!requestId || requestId.length > 128 || closing || stopped || !child.connected) return;
@@ -111,26 +110,34 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     if (activeCapabilities.size >= 4 || !capabilities || !["listAgents", "listConversations", "readConversation", "listModels", "generateText", "listScheduledJobs", "readScheduledJob", "createScheduledJob", "updateScheduledJob", "deleteScheduledJob", "listScheduledJobRuns", "triggerScheduledJob"].includes(message.method)) {
       child.send({ type: "capability-result", requestId, error: "mod_capability_unavailable" }, () => {}); return;
     }
-    let inputSize;
-    try { inputSize = Buffer.byteLength(JSON.stringify(message.input ?? {})); } catch { inputSize = Infinity; }
-    if (inputSize > 32_000) { child.send({ type: "capability-result", requestId, error: "mod_capability_input_invalid" }, () => {}); return; }
+    // Capability methods validate their own inputs; transport does not impose a
+    // smaller arbitrary envelope than the model/provider or archive reader.
     activeCapabilities.set(requestId, { controller, method: message.method, startedAt: Date.now() });
     const configuredTimeout = message.method === "generateText" ? modelCapabilityTimeoutMs : capabilityTimeoutMs;
     const deadline = Number(configuredTimeout);
     const timer = Number.isFinite(deadline) && deadline > 0
       ? setTimeout(() => controller.abort(hostError("mod_capability_timeout")), deadline)
       : null;
+    let onAbort;
     try {
-      const result = await Promise.race([capabilities[message.method](message.input, { signal: controller.signal }), new Promise((_, reject) => controller.signal.addEventListener("abort", () => reject(controller.signal.reason || hostError("mod_capability_cancelled")), { once: true }))]);
-      let bytes;
-      try { bytes = modCapabilityResultBytes(result); } catch { bytes = Infinity; }
-      if (bytes > MOD_CAPABILITY_RESULT_MAX_BYTES || result === undefined) throw hostError("mod_capability_output_limit");
+      // Install rejection before invoking even a synchronous reader. Deferring
+      // invocation also catches synchronous throws and already-aborted signals.
+      const cancelled = new Promise((_, reject) => {
+        onAbort = () => reject(controller.signal.reason || hostError("mod_capability_cancelled"));
+        controller.signal.addEventListener("abort", onAbort, { once: true });
+        if (controller.signal.aborted) onAbort();
+      });
+      const result = await Promise.race([cancelled, Promise.resolve().then(() => {
+        if (controller.signal.aborted) throw controller.signal.reason;
+        return capabilities[message.method](message.input, { signal: controller.signal });
+      })]);
+      if (result === undefined) throw hostError("mod_capability_output_invalid");
       if (!controller.signal.aborted && !closing && child.connected) child.send({ type: "capability-result", requestId, result }, () => {});
     } catch (error) {
       // Adapter abort errors can win the race; preserve the host cancellation cause.
       if (controller.signal.aborted) error = controller.signal.reason || hostError("mod_capability_cancelled");
       if (!closing && child.connected) child.send({ type: "capability-result", requestId, error: /^[a-z0-9_]+$/.test(String(error?.message)) ? error.message : "mod_capability_failed" }, () => {});
-    } finally { clearTimeout(timer); if (activeCapabilities.get(requestId)?.controller === controller) activeCapabilities.delete(requestId); }
+    } finally { controller.signal.removeEventListener("abort", onAbort); clearTimeout(timer); if (activeCapabilities.get(requestId)?.controller === controller) activeCapabilities.delete(requestId); }
   }
   const pendingSystemFilesystem = new Map();
   const rejectSystemProcesses = (code = 'remote_process_controller_unavailable') => {
@@ -211,6 +218,11 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
 
   child.on('message', (message) => {
     if (message?.type === 'capability-request') { serviceCapabilityRequest(message); return; }
+    if (message?.type === 'capability-cancel') {
+      const entry = activeCapabilities.get(message.requestId);
+      if (entry) entry.controller.abort(hostError('mod_capability_cancelled'));
+      return;
+    }
     if (message?.type === 'store-request') {
       serviceStoreRequest(message);
       return;

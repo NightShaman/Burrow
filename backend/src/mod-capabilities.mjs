@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readModConversationPage } from './mod-conversation-pager.mjs';
 import { AgentRegistryStore } from './agent-registry.mjs';
 import { ModelSettingsStore } from './model-settings-store.mjs';
@@ -61,7 +62,15 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
     if (typeof root !== 'string' || !root) throw new Error('agent_workspace_unavailable');
     return root;
   }
+  // Per-installed-mod host instance: opaque cursors cannot cross owners, roots,
+  // filters or reloads. Fixed expiry bounds abandoned traversals; disposal clears
+  // all inventory on host shutdown. Never evict an active traversal silently.
+  const inventories = new Map();
+  const inventoryTtlMs = 5 * 60_000;
+  let disposed = false;
+  const dispose = () => { disposed = true; for (const item of inventories.values()) clearTimeout(item.timer); inventories.clear(); };
   return Object.freeze({
+    dispose,
     async listScheduledJobs(input) {
       const { value, limit, offset } = page(input);
       if (!Number.isSafeInteger(offset) || offset < 0) invalid();
@@ -110,32 +119,39 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
       if (cursor !== null) bounded(cursor, 8192);
       const rootDir = await agentRoot(agentId);
       const max = count(limit, 50, 100);
-      // The store's limit is applied after sorting; fetch both complete sets so
-      // no reset snapshot or session can be silently lost between page windows.
-      const sessions = await listSessionRecords({ rootDir, includeArchived, limit: Infinity });
-      const resets = includeArchived ? await listResetSessionArchives({ rootDir, limit: Infinity }) : [];
-      const entryKey = (entry) => entry.archiveId ? `archive:${entry.archiveId}` : `session:${entry.id}`;
-      const entries = [...sessions.map(({ id, metadata, updatedAt, archived }) => ({ id, agentId, archiveTitle: metadata?.archiveTitle || null, updatedAt, archived: Boolean(archived), archiveId: null })),
-        ...resets.map(({ id, sourceSessionId, archiveTitle, updatedAt }) => ({ id, agentId, sourceSessionId, archiveTitle, updatedAt, archived: true, archiveId: id }))]
-        .sort((a, b) => entryKey(a) < entryKey(b) ? -1 : entryKey(a) > entryKey(b) ? 1 : 0);
-      let afterKey = null;
+      if (disposed) throw new Error('mod_capability_shutdown');
+      let snapshot;
+      let offset = 0;
       if (cursor !== null) {
         let parsed;
         try { parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')); } catch { invalid(); }
-        if (parsed?.v !== 1) throw new Error('mod_conversation_cursor_stale');
-        if (parsed.agentId !== agentId || parsed.includeArchived !== includeArchived || typeof parsed.afterKey !== 'string' || !/^(?:archive|session):.{1,512}$/.test(parsed.afterKey)) throw new Error('mod_conversation_cursor_stale');
-        afterKey = parsed.afterKey;
+        snapshot = inventories.get(parsed?.id);
+        if (!snapshot?.entries || snapshot.expiresAt <= Date.now() || snapshot.agentId !== agentId || snapshot.rootDir !== rootDir || snapshot.includeArchived !== includeArchived || !Number.isSafeInteger(parsed.offset) || parsed.offset < 1 || parsed.offset >= snapshot.entries.length) throw new Error('mod_conversation_cursor_stale');
+        offset = parsed.offset;
+      } else {
+        if (inventories.size >= 16) throw new Error('mod_conversation_snapshot_capacity');
+        const id = randomUUID();
+        snapshot = { id, agentId, rootDir, includeArchived, expiresAt: Date.now() + inventoryTtlMs };
+        snapshot.timer = setTimeout(() => inventories.delete(id), inventoryTtlMs);
+        snapshot.timer.unref?.();
+        inventories.set(id, snapshot);
+        try {
+          // Read the whole inventory only at traversal creation, never per page.
+          const sessions = await listSessionRecords({ rootDir, includeArchived, limit: Infinity });
+          const resets = includeArchived ? await listResetSessionArchives({ rootDir, limit: Infinity }) : [];
+          const entryKey = (entry) => entry.archiveId ? `archive:${entry.archiveId}` : `session:${entry.id}`;
+          const entries = [...sessions.map(({ id, metadata, updatedAt, archived }) => ({ id, agentId, archiveTitle: metadata?.archiveTitle || null, updatedAt, archived: Boolean(archived), archiveId: null })),
+            ...resets.map(({ id, sourceSessionId, archiveTitle, updatedAt }) => ({ id, agentId, sourceSessionId, archiveTitle, updatedAt, archived: true, archiveId: id }))]
+            .sort((a, b) => entryKey(a) < entryKey(b) ? -1 : entryKey(a) > entryKey(b) ? 1 : 0);
+          snapshot.entries = Object.freeze(entries.map((entry) => Object.freeze(entry)));
+          if (disposed) throw new Error('mod_capability_shutdown');
+        } catch (error) { clearTimeout(snapshot.timer); inventories.delete(id); throw error; }
       }
-      // Stable identity keyset pagination deliberately ignores mutable listing
-      // metadata (updatedAt/title/archive state) for cursor validity. Sessions
-      // already beyond the cursor stay discoverable even if earlier items are
-      // updated or deleted. New identities that sort at or before the cursor are
-      // behind this traversal and require a fresh list traversal to discover.
-      const start = afterKey === null ? 0 : entries.findIndex((entry) => entryKey(entry) > afterKey);
-      const offset = start < 0 ? entries.length : start;
-      const conversations = entries.slice(offset, offset + max);
-      const hasMore = offset + conversations.length < entries.length;
-      const nextCursor = hasMore ? Buffer.from(JSON.stringify({ v: 1, agentId, includeArchived, afterKey: entryKey(conversations.at(-1)) })).toString('base64url') : null;
+      // Clone the public page: callers cannot mutate the retained snapshot.
+      const conversations = snapshot.entries.slice(offset, offset + max).map((entry) => ({ ...entry }));
+      const hasMore = offset + conversations.length < snapshot.entries.length;
+      const nextCursor = hasMore ? Buffer.from(JSON.stringify({ id: snapshot.id, offset: offset + conversations.length })).toString('base64url') : null;
+      if (!hasMore) { clearTimeout(snapshot.timer); inventories.delete(snapshot.id); }
       return { conversations, hasMore, nextCursor };
 
     },

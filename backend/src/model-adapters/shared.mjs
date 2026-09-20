@@ -12,7 +12,9 @@ import { normalizeProviderMessage, normalizeProviderMessages, providerMessageMan
 const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const CLAUDE_CODE_VERSION = '2.1.251';
 const CLAUDE_CODE_BILLING_SYSTEM_BLOCK = `x-anthropic-billing-header: cc_version=${CLAUDE_CODE_VERSION}; cc_entrypoint=sdk-cli;`;
-const MAX_MODEL_TEXT_CHARS = 64 * 1024;
+// Match the adapter transport budget rather than silently clipping successful
+// model generations at 64K characters (notably JSON accounts from mods).
+const MAX_MODEL_TEXT_CHARS = DEFAULT_MAX_RESPONSE_BYTES;
 const MAX_STREAM_TOOL_CALLS = 32;
 // SSE needs only a short unfinished line/event carry. Provider events are
 // normalized immediately; never build a response-sized string just to parse it.

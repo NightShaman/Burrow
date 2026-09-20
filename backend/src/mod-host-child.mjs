@@ -8,12 +8,22 @@ const handlers = new Map();
 let diagnosticHandlers = null;
 const pendingStore = new Map();
 const pendingCapabilities = new Map();
-function capabilityRequest(method, input) {
+function capabilityRequest(method, input, { signal } = {}) {
   if (stopping || !process.connected) return Promise.reject(new Error("mod_capability_unavailable"));
+  if (signal?.aborted) return Promise.reject(new Error("mod_capability_cancelled"));
   const requestId = `cap-${process.pid}-${++sequence}`;
   return new Promise((resolve, reject) => {
-    pendingCapabilities.set(requestId, { resolve, reject });
-    send({ type: "capability-request", requestId, method, input }, (error) => { if (error && pendingCapabilities.delete(requestId)) reject(new Error("mod_capability_unavailable")); });
+    const cancel = () => {
+      if (!pendingCapabilities.delete(requestId)) return;
+      send({ type: "capability-cancel", requestId }, () => {});
+      reject(new Error("mod_capability_cancelled"));
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
+    pendingCapabilities.set(requestId, { resolve, reject, signal, cancel });
+    send({ type: "capability-request", requestId, method, input }, (error) => {
+      if (error && pendingCapabilities.delete(requestId)) { signal?.removeEventListener("abort", cancel); reject(new Error("mod_capability_unavailable")); }
+    });
+    if (signal?.aborted) cancel();
   });
 }
 
@@ -128,8 +138,8 @@ async function activate(message) {
     diagnostics: registration.diagnostics,
     settings: settingsApi(),
     secrets: secretsApi(),
-    conversations: Object.freeze({ list: (input) => capabilityRequest("listConversations", input), read: (input) => capabilityRequest("readConversation", input) }),
-    models: Object.freeze({ list: () => capabilityRequest("listModels", {}), generateText: (input) => capabilityRequest("generateText", input) }),
+    conversations: Object.freeze({ list: (input) => capabilityRequest("listConversations", input), read: (input, options) => capabilityRequest("readConversation", input, options) }),
+    models: Object.freeze({ list: () => capabilityRequest("listModels", {}), generateText: (input, options) => capabilityRequest("generateText", input, options) }),
     agents: Object.freeze({ list: () => capabilityRequest("listAgents", {}) }),
     scheduler: Object.freeze({ list: (input = {}) => capabilityRequest("listScheduledJobs", input), read: (jobId) => capabilityRequest("readScheduledJob", { jobId }), create: (input) => capabilityRequest("createScheduledJob", input), update: (jobId, patch) => capabilityRequest("updateScheduledJob", { jobId, patch }), delete: (jobId) => capabilityRequest("deleteScheduledJob", { jobId }), runs: (jobId, input = {}) => capabilityRequest("listScheduledJobRuns", { ...input, jobId }), trigger: (jobId) => capabilityRequest("triggerScheduledJob", { jobId }) }),
     logger: logger(modId),
@@ -237,6 +247,7 @@ process.on('message', async (message) => {
     const entry = pendingCapabilities.get(message.requestId);
     if (!entry) return;
     pendingCapabilities.delete(message.requestId);
+    entry.signal?.removeEventListener("abort", entry.cancel);
     if (message.error) entry.reject(new Error(message.error)); else entry.resolve(message.result);
     return;
   }
