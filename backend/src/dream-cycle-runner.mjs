@@ -350,16 +350,24 @@ function phaseInput({ phase, items, limit = DEFAULT_LIMIT }) {
   return items.slice(0, Math.max(1, Math.min(12, Number(limit) || DEFAULT_LIMIT)));
 }
 
+function reconciledDreamCycleState({ agentId, settings, current = {}, at }) {
+  const enabled = settings?.enabled === true || settings?.enabled === 1;
+  const cron = settings?.cron || settings?.cron_expression || '0 4 * * *';
+  const timezone = settings?.timezone || 'UTC';
+  const scheduleChanged = current.enabled !== enabled || current.cron !== cron || current.timezone !== timezone;
+  const nextRunAt = !enabled ? null
+    : scheduleChanged || !current.nextRunAt ? nextCronOccurrence(cron, timezone, new Date(at)) : current.nextRunAt;
+  return { version: 1, agentId, enabled, cron, timezone, nextRunAt, lastRunAt: current.lastRunAt || null, updatedAt: at };
+}
+
 export function ensureDreamCycleState({ agentId, settings, databasePath = null, at = now() } = {}) {
   const id = text(agentId);
   if (!id) throw new Error('dream_cycle_agent_required');
-  const enabled = settings?.enabled === true;
   const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
   try {
     const key = phaseState(id);
     const current = parseJson(db.prepare('SELECT value_json FROM settings_meta WHERE key=?').get(key)?.value_json);
-    const nextRunAt = enabled ? (current.nextRunAt || nextCronOccurrence(settings.cron, settings.timezone, new Date(at))) : null;
-    const state = { version: 1, agentId: id, enabled, cron: settings?.cron || '0 4 * * *', timezone: settings?.timezone || 'UTC', nextRunAt, lastRunAt: current.lastRunAt || null, updatedAt: at };
+    const state = reconciledDreamCycleState({ agentId: id, settings, current, at });
     db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`).run(key, json(state), at);
     return state;
   } finally { db.close(); }
@@ -384,15 +392,20 @@ export function claimDueDreamCycle({ agentId, databasePath = null, at = now() } 
   try {
     return withSettingsTransaction(db, () => {
       const configured = db.prepare('SELECT enabled,cron_expression,timezone FROM dream_settings WHERE agent_id=?').get(id);
-      const current = parseJson(db.prepare('SELECT value_json FROM settings_meta WHERE key=?').get(phaseState(id))?.value_json);
+      const stored = parseJson(db.prepare('SELECT value_json FROM settings_meta WHERE key=?').get(phaseState(id))?.value_json);
+      if (!configured) return null;
+      const current = reconciledDreamCycleState({ agentId: id, settings: configured, current: stored, at });
+      if (json(current) !== json(stored)) {
+        db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`).run(phaseState(id), json(current), at);
+      }
       const scheduledFor = current.nextRunAt;
-      if (!configured || !configured.enabled || !scheduledFor || scheduledFor > at) return null;
-      const nextRunAt = nextCronOccurrence(configured.cron_expression, configured.timezone, new Date(scheduledFor));
+      if (!current.enabled || !scheduledFor || scheduledFor > at) return null;
+      const nextRunAt = nextCronOccurrence(current.cron, current.timezone, new Date(scheduledFor));
       const runId = `dream-cycle-${randomUUID()}`;
       const occurrence = { version: 1, agentId: id, runId, scheduledFor, claimedAt: at, nextRunAt };
       try { db.prepare('INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?)').run(occurrenceState(id, scheduledFor), json(occurrence), at); }
       catch (error) { if (/UNIQUE constraint failed/i.test(String(error?.message || error))) return null; throw error; }
-      const state = { ...current, version: 1, agentId: id, enabled: true, cron: configured.cron_expression, timezone: configured.timezone, nextRunAt, updatedAt: at };
+      const state = { ...current, version: 1, agentId: id, enabled: true, cron: current.cron, timezone: current.timezone, nextRunAt, updatedAt: at };
       const changed = db.prepare('UPDATE settings_meta SET value_json=?, updated_at=? WHERE key=? AND value_json=?').run(json(state), at, phaseState(id), json(current));
       if (changed.changes !== 1) throw new Error('dream_cycle_claim_lost');
       writeReceipt(db, { version: 1, ok: null, status: 'running', runId, agentId: id, trigger: 'scheduled', scheduledFor, generatedAt: scheduledFor, startedAt: at, runtimeInstanceId: dreamRuntimeInstanceId, error: null }, at);
@@ -529,11 +542,15 @@ export async function runDreamCycle({ agentId, databasePath = null, rootDir = nu
     }
     const preferences = await adjudicatePreferences({ agentId: id, profileStore, databasePath, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger });
     for (const entry of pendingDiaries) phaseResults.find((result) => result.phase === entry.phase).diaryId = diaryStore.append(id, entry).id;
-    const nextRunAt = nextCronOccurrence(settings.cron, settings.timezone, new Date(generatedAt));
-    const state = { version: 1, agentId: id, enabled: true, cron: settings.cron, timezone: settings.timezone, nextRunAt, lastRunAt: generatedAt, updatedAt: generatedAt };
-    db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`).run(phaseState(id), json(state), generatedAt);
-    const hasErrors = phaseResults.some((phase) => phase.extractionError || phase.diaryError);
     const completedAt = now();
+    const nextRunAt = withSettingsTransaction(db, () => {
+      const configured = db.prepare('SELECT enabled,cron_expression,timezone FROM dream_settings WHERE agent_id=?').get(id);
+      const current = parseJson(db.prepare('SELECT value_json FROM settings_meta WHERE key=?').get(phaseState(id))?.value_json);
+      const state = { ...reconciledDreamCycleState({ agentId: id, settings: configured, current, at: completedAt }), lastRunAt: generatedAt };
+      db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`).run(phaseState(id), json(state), completedAt);
+      return state.nextRunAt;
+    });
+    const hasErrors = phaseResults.some((phase) => phase.extractionError || phase.diaryError);
     const receipt = { ...lifecycle, ok: !hasErrors, status: hasErrors ? (pendingDiaries.length ? 'partial' : 'failed') : 'completed', phases: phaseResults, dreamMemoryItemCount: consolidation.itemCount, dreamPreloadCount: dreamPreloads.length, preferences, nextRunAt, completedAt };
     writeReceipt(db, receipt, completedAt);
     return receipt;
