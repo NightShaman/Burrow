@@ -113,6 +113,14 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
     async listAgents() {
       return withStore(AgentRegistryStore, (store) => store.list().map(({ id, name, enabled }) => ({ id, name, enabled })));
     },
+    async getOperatorIdentity() {
+      // Deliberately project only public display identity. Avatars and the rest of
+      // the settings/profile surface are not mod capabilities.
+      return withStore(ModelSettingsStore, (store) => {
+        const operator = store.identities().operator;
+        return { id: operator.id, name: operator.name || null };
+      });
+    },
     async listConversations(input) {
       const { agentId, limit, includeArchived = true, cursor = null } = plain(input);
       if (typeof includeArchived !== 'boolean') invalid();
