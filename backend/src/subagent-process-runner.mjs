@@ -77,6 +77,7 @@ export async function runSubagentProcess({
   nodePath = process.execPath,
   childScriptPath: overrideChildScriptPath = null,
   maxStreamCaptureBytes = DEFAULT_STREAM_CAPTURE_BYTES,
+  signal = null,
 } = {}) {
   const { dir, payloadPath } = await writePayload({ args }, tempDir);
   const startedAt = Date.now();
@@ -97,7 +98,11 @@ export async function runSubagentProcess({
       stdio: ['ignore', 'pipe', 'pipe'],
       env: childEnv(),
     });
+    const abortChild = () => { if (!settled) child.kill('SIGTERM'); };
+    if (signal?.aborted) abortChild();
+    else signal?.addEventListener?.('abort', abortChild, { once: true });
     const finish = async (payload) => {
+      signal?.removeEventListener?.('abort', abortChild);
       await cleanupPayloadDir(dir);
       resolve({ durationMs: Date.now() - startedAt, payloadCleaned: true, ...payload });
     };

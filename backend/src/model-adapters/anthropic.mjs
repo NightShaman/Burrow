@@ -349,47 +349,151 @@ function mergeAnthropicStreamEvent(state, event) {
     if (event.delta?.type === 'input_json_delta') block.partial_json = `${block.partial_json || ''}${event.delta.partial_json || ''}`;
   } else if (type === 'content_block_stop') {
     const block = state.blocks[event.index || 0];
-    if (block?.type === 'tool_use' && block.partial_json) block.input = parseArguments(block.partial_json);
+    if (block?.type === 'tool_use' && block.partial_json) {
+      try { block.input = JSON.parse(block.partial_json); }
+      catch (error) { state.malformedToolInput = { index: event.index || 0, message: error?.message || 'invalid tool input JSON' }; }
+    }
   } else if (type === 'message_delta') {
     state.message = { ...(state.message || {}), stop_reason: event.delta?.stop_reason || state.message?.stop_reason, usage: event.usage || state.message?.usage };
   }
 }
 
 async function readAnthropicSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_BYTES, onTextDelta = null, onThoughtDelta = null } = {}) {
-  const textResult = await readResponseTextBounded(response, maxBytes);
-  if (!textResult.ok) return { ...textResult, data: null };
+  const limit = Number.isFinite(Number(maxBytes)) && Number(maxBytes) > 0 ? Number(maxBytes) : DEFAULT_MAX_RESPONSE_BYTES;
   const state = { message: {}, blocks: [] };
-  let currentEvent = null;
-  for (const rawLine of textResult.text.split(/\r?\n/)) {
-    const line = rawLine.trimEnd();
-    if (line.startsWith('event:')) currentEvent = line.slice(6).trim();
-    if (!line.startsWith('data:')) continue;
-    const payload = line.slice(5).trim();
-    if (!payload || payload === '[DONE]') continue;
+  const eventSequence = [];
+  let bytes = 0;
+  let text = '';
+  let lineCarry = '';
+  let pendingCr = false;
+  let eventName = '';
+  let dataLines = [];
+  let sawEvent = false;
+  let sawMessageStop = false;
+  let failure = null;
+
+  const fail = (error, details = {}) => {
+    if (!failure) failure = { error, errorDetails: details };
+  };
+  const recordEvent = (event, declaredType) => {
+    const type = boundedText(event?.type || declaredType || 'unknown', 64);
+    eventSequence.push(type);
+    if (eventSequence.length > 256) eventSequence.shift();
+    return type;
+  };
+  const dispatch = async () => {
+    if (!dataLines.length) { eventName = ''; return; }
+    const payload = dataLines.join('\n');
+    const declaredType = eventName;
+    eventName = '';
+    dataLines = [];
+    if (!payload || payload === '[DONE]') return;
     let event;
     try { event = JSON.parse(payload); }
     catch (error) {
-      return { ok: false, text: textResult.text, bytes: textResult.bytes, data: null, error: 'model_stream_malformed_event', errorDetails: { eventType: boundedText(currentEvent || 'unknown', 64), message: boundedText(error?.message || 'invalid JSON event payload', 500) }, event: currentEvent };
+      fail('model_stream_malformed_event', { eventType: boundedText(declaredType || 'unknown', 64), message: boundedText(error?.message || 'invalid JSON event payload', 500) });
+      return;
     }
+    sawEvent = true;
+    const type = recordEvent(event, declaredType);
+    if (declaredType && event?.type && declaredType !== event.type) {
+      fail('model_stream_event_type_mismatch', { eventType: boundedText(declaredType, 64), payloadType: boundedText(event.type, 64) });
+      return;
+    }
+    if (sawMessageStop) return; // Completion is sticky; trailing ping/metadata cannot undo it.
+    if (type === 'message_stop') sawMessageStop = true;
     if (event?.type === 'content_block_delta' && event.delta?.type === 'text_delta') await onTextDelta?.(event.delta.text || '');
     if (event?.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') await onThoughtDelta?.(event.delta.thinking || '');
     mergeAnthropicStreamEvent(state, event);
+  };
+  const consumeLine = async (line) => {
+    if (line === '') { await dispatch(); return; }
+    if (line.startsWith(':')) return;
+    const colon = line.indexOf(':');
+    const field = colon < 0 ? line : line.slice(0, colon);
+    let value = colon < 0 ? '' : line.slice(colon + 1);
+    if (value.startsWith(' ')) value = value.slice(1);
+    if (field === 'event') eventName = value;
+    else if (field === 'data') dataLines.push(value);
+  };
+  const consumeText = async (chunk, final = false) => {
+    let input = lineCarry + chunk;
+    lineCarry = '';
+    if (pendingCr) {
+      pendingCr = false;
+      if (input.startsWith('\n')) input = input.slice(1);
+    }
+    let start = 0;
+    for (let index = 0; index < input.length; index += 1) {
+      const char = input[index];
+      if (char !== '\r' && char !== '\n') continue;
+      await consumeLine(input.slice(start, index));
+      if (char === '\r' && index + 1 === input.length && !final) { pendingCr = true; start = input.length; break; }
+      if (char === '\r' && input[index + 1] === '\n') index += 1;
+      start = index + 1;
+    }
+    lineCarry = input.slice(start);
+    if (final) {
+      if (pendingCr) { pendingCr = false; await consumeLine(''); }
+      if (lineCarry) { await consumeLine(lineCarry); lineCarry = ''; }
+      await dispatch();
+    }
+  };
+
+  const contentType = String(response?.headers?.get?.('content-type') || '').toLowerCase();
+  const decoder = new TextDecoder();
+  if (response?.body?.getReader) {
+    const reader = response.body.getReader();
+    while (!failure) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytes += value?.byteLength || 0;
+      if (bytes > limit) { try { await reader.cancel(); } catch {} fail('provider_response_too_large', { maxBytes: limit }); break; }
+      const decoded = decoder.decode(value, { stream: true });
+      text += decoded;
+      await consumeText(decoded);
+    }
+    if (!failure) {
+      const tail = decoder.decode();
+      text += tail;
+      await consumeText(tail, true);
+    }
+  } else {
+    text = String(await response.text?.() || '');
+    bytes = Buffer.byteLength(text);
+    if (bytes > limit) fail('provider_response_too_large', { maxBytes: limit });
+    else await consumeText(text, true);
   }
+
+  const looksJson = /^\s*[\[{]/.test(text);
+  if (!sawEvent && (contentType.includes('application/json') || looksJson)) {
+    try {
+      const json = text ? JSON.parse(text) : {};
+      const providerError = json?.error || json;
+      return { ok: false, text, bytes, data: null, error: boundedText(providerError?.message || `HTTP ${response?.status || 0}`, 500), errorDetails: { ...(providerError?.type ? { type: boundedText(providerError.type, 128) } : {}), ...(providerError?.code ? { code: boundedText(providerError.code, 128) } : {}), status: response?.status || null, responseType: 'json' }, eventSequence };
+    } catch (error) {
+      if (contentType.includes('application/json')) fail('model_response_malformed_json', { message: boundedText(error?.message, 500), status: response?.status || null });
+    }
+  }
+  if (failure) return { ok: false, text, bytes, data: null, ...failure, eventSequence };
+  if (state.malformedToolInput) return { ok: false, text, bytes, data: null, error: 'model_stream_malformed_tool_input', errorDetails: { index: state.malformedToolInput.index, message: boundedText(state.malformedToolInput.message, 500) }, eventSequence };
   if (state.error) {
     const details = {
-      eventType: boundedText(state.errorEventType || currentEvent || 'error', 64),
+      eventType: boundedText(state.errorEventType || eventSequence.at(-1) || 'error', 64),
       ...(state.error.type ? { type: boundedText(state.error.type, 128) } : {}),
       ...(state.error.code ? { code: boundedText(state.error.code, 128) } : {}),
       ...(state.error.message ? { message: boundedText(state.error.message, 500) } : {}),
     };
-    return { ok: false, text: textResult.text, bytes: textResult.bytes, data: null, error: boundedText(state.error.message || 'model_stream_failed', 500), errorDetails: details, event: currentEvent };
+    return { ok: false, text, bytes, data: null, error: boundedText(state.error.message || 'model_stream_failed', 500), errorDetails: details, eventSequence };
   }
   const data = { ...(state.message || {}), content: state.blocks.filter(Boolean) };
   const stopReason = String(data.stop_reason || '');
-  const hasContent = Array.isArray(data.content) && data.content.length > 0;
-  if (stopReason === 'max_tokens' && !hasContent) return { ok: false, text: textResult.text, bytes: textResult.bytes, data, error: 'model_stream_max_tokens_empty', event: currentEvent };
-  if (textResult.text && currentEvent !== 'message_stop') return { ok: false, text: textResult.text, bytes: textResult.bytes, data, error: 'model_stream_truncated', event: currentEvent };
-  return { ok: true, text: textResult.text, bytes: textResult.bytes, data, event: currentEvent };
+  const hasContent = data.content.length > 0;
+  if (!sawEvent) return { ok: false, text, bytes, data: null, error: 'model_stream_empty', errorDetails: { status: response?.status || null }, eventSequence };
+  if (!sawMessageStop) return { ok: false, text, bytes, data, error: 'model_stream_truncated', errorDetails: { lastEventType: eventSequence.at(-1) || null }, eventSequence };
+  if (stopReason === 'max_tokens' && !hasContent) return { ok: false, text, bytes, data, error: 'model_stream_max_tokens_empty', eventSequence };
+  if (!stopReason) return { ok: false, text, bytes, data, error: 'model_stream_missing_stop_reason', eventSequence };
+  return { ok: true, text, bytes, data, eventSequence };
 }
 
 export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = globalThis.fetch, clock = () => new Date().toISOString(), idFactory = randomUUID } = {}) {
@@ -478,7 +582,7 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
     const failureDetails = responseBody.errorDetails || ((data?.error || data?.type) ? { ...(data?.error?.type ? { type: boundedText(data.error.type, 128) } : data?.type ? { type: boundedText(data.type, 128) } : {}), ...(data?.error?.code ? { code: boundedText(data.error.code, 128) } : {}), status: response.status } : null);
     const result = { ok: success, requestId, provider: 'anthropic', api: 'anthropic-messages', model, status: response.status, choice, responseId: success && typeof data?.id === 'string' ? boundedText(data.id, 256) : null, usage: data?.usage || null, contextUsage: contextUsageFromResponse(requestContextUsage, data?.usage || null, clock), error: success ? null : failureMessage, raw: success ? { responseBytes: responseBody.bytes, ...(streaming ? { streamedTextChars: choice?.text?.length || 0 } : {}) } : { error: { message: failureMessage, ...(failureDetails ? { details: failureDetails } : {}) } }, nativeTranscript, ...(choice?.anthropic?.assistantBlocks?.length ? { anthropicContinuation: { assistantBlocks: choice.anthropic.assistantBlocks } } : {}) };
     await onContextUsage?.(result.contextUsage);
-    await traceLogger?.model?.({ stage: 'model-response', requestId, provider: 'anthropic', api: 'anthropic-messages', model, status: response.status, ok: success, usage: result.usage, cachedTokens: anthropicCachedTokens(result.usage), stablePrefixHash, finishReason: result.choice?.finishReason || candidateChoice?.finishReason || null, responseChars: result.choice?.text?.length || 0, responseBytes: responseBody.bytes, streamed: streaming, error: result.error, ...(responseBody.errorDetails ? { errorDetails: responseBody.errorDetails } : {}), ts: clock() });
+    await traceLogger?.model?.({ stage: 'model-response', requestId, provider: 'anthropic', api: 'anthropic-messages', model, status: response.status, ok: success, usage: result.usage, cachedTokens: anthropicCachedTokens(result.usage), stablePrefixHash, finishReason: result.choice?.finishReason || candidateChoice?.finishReason || null, responseChars: result.choice?.text?.length || 0, responseBytes: responseBody.bytes, streamed: streaming, ...(streaming ? { streamEventSequence: responseBody.eventSequence || [] } : {}), error: result.error, ...(responseBody.errorDetails ? { errorDetails: responseBody.errorDetails } : {}), ts: clock() });
     return result;
   };
 

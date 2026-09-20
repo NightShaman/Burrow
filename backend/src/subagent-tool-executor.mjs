@@ -311,8 +311,8 @@ export async function executeSpawnSubagentTool({
   let childRun;
   try {
     childRun = remoteExecution
-      ? { ok: true, spawned: true, exitCode: 0, durationMs: null, result: await runSpawnSubagentChild({ id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy, parentExecutionContext: executionContext }) }
-      : await runSubagentProcess({ args: { id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy } });
+      ? { ok: true, spawned: true, exitCode: 0, durationMs: null, result: await runSpawnSubagentChild({ id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy, parentExecutionContext: executionContext, signal: executionContext?.abortSignal || null }) }
+      : await runSubagentProcess({ args: { id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy }, signal: executionContext?.abortSignal || null });
   } catch (error) {
     const code = compactString(error?.code || error?.message || 'subagent_child_dispatch_failed').split(':')[0];
     childRun = {

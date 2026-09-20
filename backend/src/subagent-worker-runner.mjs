@@ -417,6 +417,7 @@ export async function runSpawnSubagentChild({
   executionPolicy: executionPolicyInput = null,
   progress = null,
   parentExecutionContext = null,
+  signal = parentExecutionContext?.abortSignal || null,
 } = {}) {
   const blockers = [];
   if (!id) blockers.push('subagent_id_required');
@@ -467,7 +468,7 @@ export async function runSpawnSubagentChild({
   const messages = normalizeProviderMessages([{ role: 'system', content: 'Internal subagent task. This isolated child request is not parent conversation history.' }, { role: 'user', content: prompt }]);
   await progress?.({ type: 'subagent-progress', phase: 'model-request', id });
   await recordLiveActivity({ kind: 'model', phase: 'model-request', label: 'Waiting for model response', model: modelConfig?.model || null }, 'model_request');
-  const first = await adapter.complete({ messages, tools: subagentToolSchemas(), traceLogger: modelTrace });
+  const first = await adapter.complete({ messages, tools: subagentToolSchemas(), traceLogger: modelTrace, signal });
   await progress?.({ type: 'subagent-progress', phase: 'model-response', id });
   await recordLiveActivity({ kind: 'model', phase: 'model-response', label: first.ok ? 'Model response received' : 'Model response failed', status: first.ok ? 'completed' : 'error', model: modelConfig?.model || null, error: first.ok ? null : (first.error || first.status) }, first.ok ? 'model_response' : 'model_error');
   if (!first.ok) {
@@ -532,6 +533,7 @@ export async function runSpawnSubagentChild({
             preparedMessages: preparedContinuation.messages,
             ...(continuationTools ? { tools: continuationTools, toolChoice: 'auto' } : {}),
             traceLogger: modelTrace,
+            signal,
           })
         : await adapter.complete({
             messages: normalizeProviderMessages([
@@ -540,6 +542,7 @@ export async function runSpawnSubagentChild({
             ]),
             ...(continuationTools ? { tools: continuationTools, toolChoice: 'auto' } : {}),
             traceLogger: modelTrace,
+            signal,
           });
     } catch (error) {
       const result = subagentResult({
@@ -585,6 +588,7 @@ export async function runSpawnSubagentChild({
     tools: [subagentFinishToolSchema()],
     toolChoice: 'auto',
     traceLogger: modelTrace,
+    signal,
   });
   await progress?.({ type: 'subagent-progress', phase: 'terminal-response', id });
   await recordLiveActivity({ kind: 'model', phase: 'terminal-response', label: synthesis.ok ? 'Terminal summary received' : 'Terminal summary failed', status: synthesis.ok ? 'completed' : 'error', model: modelConfig?.model || null, error: synthesis.ok ? null : (synthesis.error || synthesis.status) }, synthesis.ok ? 'terminal_response' : 'terminal_error');
