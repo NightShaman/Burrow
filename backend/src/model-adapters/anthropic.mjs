@@ -6,7 +6,6 @@ import {
   CLAUDE_CODE_BILLING_SYSTEM_BLOCK,
   DEFAULT_MAX_RESPONSE_BYTES,
   MAX_MODEL_TEXT_CHARS,
-  MAX_STREAM_TOOL_CALLS,
   boundedText,
   contextUsageFromRequest,
   contextUsageFromResponse,
@@ -61,8 +60,8 @@ function anthropicContentParts(content) {
       if (typeof part === 'string') return { type: 'text', text: part };
       if (part?.type === 'text') return { type: 'text', text: String(part.text || '') };
       if (part?.type === 'tool_use') return { type: 'tool_use', id: String(part.id || randomUUID()), name: String(part.name || ''), input: parseArguments(part.input || {}) };
-      if (part?.type === 'thinking') return { type: 'thinking', thinking: String(part.thinking || ''), ...(part.signature ? { signature: String(part.signature) } : {}) };
-      if (part?.type === 'redacted_thinking') return { type: 'redacted_thinking', ...(part.data ? { data: String(part.data) } : {}), ...(part.signature ? { signature: String(part.signature) } : {}) };
+      if (part?.type === 'thinking') return { type: 'thinking', thinking: String(part.thinking || ''), ...('signature' in part ? { signature: String(part.signature ?? '') } : {}) };
+      if (part?.type === 'redacted_thinking') return { type: 'redacted_thinking', ...('data' in part ? { data: String(part.data ?? '') } : {}), ...('signature' in part ? { signature: String(part.signature ?? '') } : {}) };
       if (part?.type === 'image_url') {
         const url = part.image_url?.url || part.url || '';
         const m = /^data:([^;]+);base64,(.*)$/i.exec(url);
@@ -99,7 +98,7 @@ function anthropicMessages(messages = [], prompt = '') {
     }
     const content = anthropicContentParts(message?.content);
     if (Array.isArray(message?.tool_calls) && message.tool_calls.length) {
-      for (const call of message.tool_calls.slice(0, MAX_STREAM_TOOL_CALLS)) {
+      for (const call of message.tool_calls) {
         const fn = call.function || call;
         content.push({ type: 'tool_use', id: String(call.id || call.call_id || randomUUID()), name: String(fn.name || call.name || ''), input: parseArguments(fn.arguments ?? call.arguments ?? {}) });
       }
@@ -265,16 +264,49 @@ function anthropicMessageManifest(messages = []) {
   });
 }
 
+function toolCallIds(toolCalls = []) {
+  return (toolCalls || []).map((call, index) => String(call?.id || `tool-call-${index}`));
+}
+
+function assistantToolUseIds(message = {}) {
+  if (message?.role !== 'assistant') return [];
+  if (Array.isArray(message.content)) return message.content.filter((part) => part?.type === 'tool_use').map((part) => String(part.id || ''));
+  return (message.tool_calls || []).map((call) => String(call?.id || call?.call_id || ''));
+}
+
+function sameProtocolCallIdentity(message, toolCalls = []) {
+  const expected = toolCallIds(toolCalls);
+  const actual = assistantToolUseIds(message);
+  return expected.length > 0 && actual.length === expected.length && actual.every((id, index) => id === expected[index]);
+}
+
 function anthropicContinuationBlocksForToolCalls(previousModel = null, toolCalls = [], baseMessages = []) {
   const persisted = [...(Array.isArray(baseMessages) ? baseMessages : [])].reverse()
-    .find((message) => message?.role === 'assistant' && Array.isArray(message.content)
-      && message.content.some((part) => part?.type === 'tool_use'))?.content;
+    .find((message) => sameProtocolCallIdentity(message, toolCalls) && Array.isArray(message.content))?.content;
   const blocks = previousModel?.anthropicContinuation?.assistantBlocks || persisted;
   if (!Array.isArray(blocks) || !blocks.length) return null;
-  const expectedIds = new Set((toolCalls || []).map((call, index) => String(call?.id || `tool-call-${index}`)));
-  const blockIds = blocks.filter((part) => part?.type === 'tool_use').map((part) => String(part.id || ''));
-  if (!expectedIds.size || blockIds.length !== expectedIds.size || !blockIds.every((id) => expectedIds.has(id))) return null;
-  return blocks;
+  return sameProtocolCallIdentity({ role: 'assistant', content: blocks }, toolCalls) ? blocks : null;
+}
+
+function preparedAnthropicContinuation(preparedMessages = [], toolCalls = [], preservedBlocks = null) {
+  const transcript = normalizeProviderMessages(preparedMessages);
+  const matching = transcript.map((message, index) => sameProtocolCallIdentity(message, toolCalls) ? index : -1).filter((index) => index >= 0);
+  if (!matching.length) return transcript;
+  const opaque = matching.find((index) => Array.isArray(transcript[index]?.content)
+    && transcript[index].content.some((part) => part?.type === 'thinking' || part?.type === 'redacted_thinking'));
+  const keep = opaque ?? matching[0];
+  const result = transcript.filter((_message, index) => !matching.includes(index) || index === keep);
+  const kept = result.find((message) => sameProtocolCallIdentity(message, toolCalls));
+  if (preservedBlocks && kept && !Array.isArray(kept.content)) {
+    const index = result.indexOf(kept);
+    result[index] = { role: 'assistant', content: preservedBlocks };
+  }
+  const expectedIds = toolCallIds(toolCalls);
+  const resultIds = result.filter((message) => message?.role === 'tool').map((message) => String(message.tool_call_id || ''));
+  const paired = result.some((message) => sameProtocolCallIdentity(message, toolCalls))
+    && expectedIds.every((id) => resultIds.filter((resultId) => resultId === id).length === 1);
+  if (!paired) throw new Error('native_continuation_preparation_invalid');
+  return result;
 }
 
 function anthropicErrorLooksLikeSignedThinking(result = {}) {
@@ -297,7 +329,7 @@ function anthropicAssistantMessageFromChoice(choice = {}) {
 function normalizeAnthropicChoice(data = {}) {
   const content = Array.isArray(data.content) ? data.content : [];
   const text = boundedText(content.filter((part) => part?.type === 'text').map((part) => part.text || '').join(''), MAX_MODEL_TEXT_CHARS);
-  const toolCalls = content.filter((part) => part?.type === 'tool_use').slice(0, MAX_STREAM_TOOL_CALLS).map((part, index) => normalizeToolCall({ id: part.id || `tool-call-${index}`, name: part.name, arguments: part.input || {} }, index));
+  const toolCalls = content.filter((part) => part?.type === 'tool_use').map((part, index) => normalizeToolCall({ id: part.id || `tool-call-${index}`, name: part.name, arguments: part.input || {} }, index));
   const assistantBlocks = safeAnthropicAssistantBlocks(content);
   return { index: 0, finishReason: data.stop_reason || null, message: { role: 'assistant', content: text }, text, toolCalls, anthropic: assistantBlocks.length ? { assistantBlocks } : null };
 }
@@ -429,7 +461,9 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
     const candidateChoice = ok ? normalizeAnthropicChoice(data) : null;
     const maxTokensIncomplete = ok && candidateChoice?.finishReason === 'max_tokens';
     const success = ok && !maxTokensIncomplete;
-    const choice = success ? candidateChoice : null;
+    // An incomplete generation is still a failed call, but its bounded partial
+    // text and protocol blocks remain available for diagnostics and recovery.
+    const choice = candidateChoice;
     const assistantMessage = choice && !(choice.toolCalls || []).length ? anthropicAssistantMessageFromChoice(choice) : null;
     // Persist the exact provider assistant block sequence, including opaque
     // signed thinking, so continuation replay does not depend on an in-memory
@@ -448,16 +482,19 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
     return result;
   };
 
-  return { provider: 'anthropic', api: 'anthropic-messages', model, url, supportsVision: true, estimateRequest, complete, async continueWithToolResults({ previousModel = null, baseMessages = [], toolCalls = [], toolResults = [], ...options } = {}) {
-    const transcript = [...baseMessages];
+  return { provider: 'anthropic', api: 'anthropic-messages', model, url, supportsVision: true, estimateRequest, complete, async continueWithToolResults({ previousModel = null, baseMessages = [], toolCalls = [], toolResults = [], preparedMessages = null, ...options } = {}) {
     const preservedBlocks = anthropicContinuationBlocksForToolCalls(previousModel, toolCalls, baseMessages);
-    const persistedPendingAssistant = preservedBlocks && transcript.at(-1)?.role === 'assistant' && transcript.at(-1)?.content === preservedBlocks;
+    const hasPreparedMessages = Array.isArray(preparedMessages) && preparedMessages.length > 0;
+    const transcript = hasPreparedMessages
+      ? preparedAnthropicContinuation(preparedMessages, toolCalls, preservedBlocks)
+      : [...baseMessages];
+    const persistedPendingAssistant = transcript.some((message) => sameProtocolCallIdentity(message, toolCalls));
     if (toolCalls.length && !persistedPendingAssistant) {
       transcript.push(preservedBlocks
         ? { role: 'assistant', content: preservedBlocks }
         : { role: 'assistant', content: '', tool_calls: toolCalls.map((call, index) => ({ id: call.id || `tool-call-${index}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments || {}) } })) });
     }
-    for (let index = 0; index < toolResults.length; index += 1) {
+    if (!hasPreparedMessages) for (let index = 0; index < toolResults.length; index += 1) {
       transcript.push({ role: 'tool', tool_call_id: toolCalls[index]?.id || `tool-call-${index}`, content: toolOutputText(toolResults[index]) });
       const imageMessage = attachmentViewUserMessage(toolResults[index], toolCalls[index], index);
       if (imageMessage) transcript.push(imageMessage);
@@ -465,14 +502,10 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
     const result = await complete({ ...options, messages: transcript });
     if (result.ok || !preservedBlocks || !anthropicErrorLooksLikeSignedThinking(result)) return result;
     await options.traceLogger?.model?.({ stage: 'model-request-repair', requestId: result.requestId, provider: 'anthropic', api: 'anthropic-messages', model, reason: 'signed_thinking_rejected', error: result.error, ts: clock() });
-    const repairedTranscript = [...baseMessages];
-    if (persistedPendingAssistant) repairedTranscript.pop();
-    if (toolCalls.length) repairedTranscript.push({ role: 'assistant', content: '', tool_calls: toolCalls.map((call, index) => ({ id: call.id || `tool-call-${index}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments || {}) } })) });
-    for (let index = 0; index < toolResults.length; index += 1) {
-      repairedTranscript.push({ role: 'tool', tool_call_id: toolCalls[index]?.id || `tool-call-${index}`, content: toolOutputText(toolResults[index]) });
-      const imageMessage = attachmentViewUserMessage(toolResults[index], toolCalls[index], index);
-      if (imageMessage) repairedTranscript.push(imageMessage);
-    }
+    const repairedTranscript = transcript.map((message) => {
+      if (!sameProtocolCallIdentity(message, toolCalls) || !Array.isArray(message.content)) return message;
+      return { ...message, content: message.content.filter((part) => part?.type !== 'thinking' && part?.type !== 'redacted_thinking') };
+    });
     const repaired = await complete({ ...options, messages: repairedTranscript });
     if (repaired && typeof repaired === 'object') repaired.repairedContinuation = { reason: 'signed_thinking_rejected', originalRequestId: result.requestId };
     return repaired;

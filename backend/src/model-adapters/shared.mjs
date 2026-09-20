@@ -15,7 +15,6 @@ const CLAUDE_CODE_BILLING_SYSTEM_BLOCK = `x-anthropic-billing-header: cc_version
 // Match the adapter transport budget rather than silently clipping successful
 // model generations at 64K characters (notably JSON accounts from mods).
 const MAX_MODEL_TEXT_CHARS = DEFAULT_MAX_RESPONSE_BYTES;
-const MAX_STREAM_TOOL_CALLS = 32;
 // SSE needs only a short unfinished line/event carry. Provider events are
 // normalized immediately; never build a response-sized string just to parse it.
 const MAX_SSE_CARRY_CHARS = 1024 * 1024;
@@ -173,7 +172,7 @@ function normalizeChoice(data = {}) {
     // add reasoning/debug fields here that the runtime never consumes.
     message: { role: boundedText(choice?.message?.role || 'assistant', 64), content: text },
     text,
-    toolCalls: (choice?.message?.tool_calls || []).slice(0, 32).map(normalizeToolCall),
+    toolCalls: (choice?.message?.tool_calls || []).map(normalizeToolCall),
   };
 }
 
@@ -181,7 +180,7 @@ function textFromResponses(data = {}) {
   if (typeof data.output_text === 'string') return boundedText(data.output_text, MAX_MODEL_TEXT_CHARS);
   const chunks = [];
   let remaining = MAX_MODEL_TEXT_CHARS;
-  for (const item of (data.output || []).slice(0, 32)) {
+  for (const item of (data.output || [])) {
     for (const part of (item.content || []).slice(0, 64)) {
       if (typeof part.text !== 'string' || remaining <= 0) continue;
       const text = part.text.slice(0, remaining);
@@ -195,7 +194,6 @@ function textFromResponses(data = {}) {
 function normalizeResponseToolCalls(data = {}) {
   return (data.output || [])
     .filter((item) => item?.type === 'function_call' || item?.type === 'tool_call')
-    .slice(0, 32)
     .map(normalizeToolCall);
 }
 
@@ -203,7 +201,6 @@ function compactResponseToolOutput(output = []) {
   if (!Array.isArray(output)) return [];
   return output
     .filter((item) => item?.type === 'function_call' || item?.type === 'tool_call')
-    .slice(0, 32)
     .map((item, index) => ({
       type: item.type === 'tool_call' ? 'tool_call' : 'function_call',
       id: boundedText(item.call_id || item.id || `tool-call-${index}`, 256),
@@ -216,7 +213,7 @@ function compactResponseToolOutput(output = []) {
 
 function mergeResponseFunctionCall(calls, fragment = {}) {
   const outputIndex = Number.isInteger(fragment.output_index) ? fragment.output_index : Number.isInteger(fragment.index) ? fragment.index : calls.length;
-  if (outputIndex < 0 || outputIndex >= MAX_STREAM_TOOL_CALLS) return false;
+  if (outputIndex < 0) return false;
   const callId = fragment.call_id || fragment.item?.call_id || fragment.item?.id || fragment.id || `tool-call-${outputIndex}`;
   const providerItemId = fragment.item?.id || fragment.id || callId;
   const prior = calls[outputIndex] || { type: 'function_call', id: callId, call_id: callId, providerItemId, name: null, arguments: '' };
@@ -542,7 +539,7 @@ function messagesToResponsesInput(messages, prompt) {
   const input = [];
   for (const message of messages) {
     if (message?.role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length) {
-      for (const call of message.tool_calls.slice(0, MAX_STREAM_TOOL_CALLS)) {
+      for (const call of message.tool_calls) {
         const fn = call.function || call;
         input.push({
           type: 'function_call',
@@ -602,17 +599,17 @@ async function notifyStreamDelta(callback, delta, totalChars) {
 
 function streamToolCallFailure(calls, fragment = {}) {
   const index = Number.isInteger(fragment.index) ? fragment.index : calls.length;
-  return index < 0 || index >= MAX_STREAM_TOOL_CALLS ? `model_tool_call_index_invalid:${index}` : null;
+  return index < 0 ? `model_tool_call_index_invalid:${index}` : null;
 }
 
 function responseFunctionCallFailure(calls, fragment = {}) {
   const outputIndex = Number.isInteger(fragment.output_index) ? fragment.output_index : Number.isInteger(fragment.index) ? fragment.index : calls.length;
-  return outputIndex < 0 || outputIndex >= MAX_STREAM_TOOL_CALLS ? `model_tool_call_index_invalid:${outputIndex}` : null;
+  return outputIndex < 0 ? `model_tool_call_index_invalid:${outputIndex}` : null;
 }
 
 function mergeStreamToolCall(calls, fragment = {}) {
   const index = Number.isInteger(fragment.index) ? fragment.index : calls.length;
-  if (index < 0 || index >= MAX_STREAM_TOOL_CALLS) return false;
+  if (index < 0) return false;
   const prior = calls[index] || { id: null, type: 'function', function: { name: null, arguments: '' } };
   const argumentFragment = String(fragment.function?.arguments || '');
   const priorArguments = String(prior.function?.arguments || '');
@@ -728,7 +725,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
         if (!text && finalData.output_text) await emit(finalData.output_text);
         for (const call of (finalData.output || [])) {
           const outputIndex = responseToolCalls.length;
-          if (outputIndex < MAX_STREAM_TOOL_CALLS) responseToolCalls[outputIndex] ||= call;
+          responseToolCalls[outputIndex] ||= call;
         }
       }
       if (event?.type === 'response.failed' || event?.type === 'error') {
@@ -876,7 +873,6 @@ export {
   CLAUDE_CODE_VERSION,
   CLAUDE_CODE_BILLING_SYSTEM_BLOCK,
   MAX_MODEL_TEXT_CHARS,
-  MAX_STREAM_TOOL_CALLS,
   MAX_SSE_CARRY_CHARS,
   MAX_SSE_EVENT_CHARS,
   contextUsageFromRequest,
