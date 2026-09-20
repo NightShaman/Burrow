@@ -173,7 +173,7 @@ const collection = {
     folder('Mods', [
       req('List mod management state', 'GET', '/api/mod-management'),
       req('Get mod source refresh config', 'GET', '/api/mod-management/source-refresh'),
-      req('Update mod source refresh config', 'PUT', '/api/mod-management/source-refresh', { body: { enabled: true, intervalMs: 21600000, staleMs: 900000 } }),
+      req('Update mod source refresh config', 'PUT', '/api/mod-management/source-refresh', { body: { enabled: true, intervalMs: 21600000, staleMs: 900000, concurrency: 4, maxBackoffMs: 86400000 } }),
       req('Refresh mod sources now', 'POST', '/api/mod-management/refresh', { body: {} }),
     ]),
     folder('Retention', [

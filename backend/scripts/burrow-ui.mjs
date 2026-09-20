@@ -2981,6 +2981,15 @@ async function transitionMod({ modId, enabled, installed, action }) {
   const old = loadedMods.find((entry) => entry.id === modId) || null;
   if (old?.host?.activeOperationCount?.() > 0) throw Object.assign(new Error('mod_busy'), { statusCode: 409 });
   if (action === 'update-preflight') return;
+  // A failed uninstall can restore files and lifecycle records after the old
+  // host/catalog entry was removed. Re-discover a disabled mod as well as
+  // reactivating an enabled one so memory, filesystem, and SQLite converge.
+  if (action === 'uninstall-recovery' && installed && !enabled && !old) {
+    const [restored] = await loadMods({ ...modLoadOptions, onlyModIds: [modId] });
+    if (!restored) throw Object.assign(new Error('mod_recovery_failed'), { statusCode: 500 });
+    loadedMods = [...loadedMods, restored];
+    return;
+  }
   if (!installed || !enabled) {
     if (old) await cleanupMods([old]);
     loadedMods = installed
@@ -3008,6 +3017,10 @@ const modDistribution = createModDistribution({
   databasePath: settingsDatabasePath(),
   onLifecycleChange: transitionMod,
 });
+// Complete durable uninstall reconciliation before accepting requests. The
+// callback above is self-contained and does not call back into the distribution,
+// so this readiness barrier cannot form a lifecycle/distribution cycle.
+await modDistribution.ready;
 const modManagementRoute = createModManagementRoute({ distribution: modDistribution, readJsonBody, sendJson });
 
 const server = createServer(async (req, res) => {

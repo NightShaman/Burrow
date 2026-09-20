@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { discoverMods } from './mod-runtime.mjs';
 import { openSettingsDatabase } from './settings-database.mjs';
 import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
@@ -11,10 +11,10 @@ import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
 const execFileAsync = promisify(execFile);
 const MOD_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const VERSION = /^v?(\d{4}\.\d{2}\.\d{2}(?:\.\d+)?|\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)$/;
-const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
 const GIT_TIMEOUT_MS = 60_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
-const DEFAULT_SOURCE_REFRESH = Object.freeze({ enabled: true, intervalMs: 21_600_000, staleMs: 900_000 });
+const DEFAULT_SOURCE_REFRESH = Object.freeze({ enabled: true, intervalMs: 21_600_000, staleMs: 900_000, concurrency: 4, maxBackoffMs: 86_400_000 });
+const DEFAULT_ARCHIVE_RESOURCES = Object.freeze({ reserveBytes: 256 * 1024 * 1024, checkIntervalMs: 25 });
 
 function positiveTimerMs(value, field) {
   if (!Number.isSafeInteger(value) || value <= 0) throw Object.assign(new Error(`mod_source_refresh_${field}_invalid`), { statusCode: 400 });
@@ -22,7 +22,7 @@ function positiveTimerMs(value, field) {
 }
 export function validateModSourceRefreshConfig(value, { partial = false, base = DEFAULT_SOURCE_REFRESH } = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Object.assign(new Error('mod_source_refresh_config_invalid'), { statusCode: 400 });
-  const allowed = new Set(['enabled', 'intervalMs', 'staleMs']);
+  const allowed = new Set(['enabled', 'intervalMs', 'staleMs', 'concurrency', 'maxBackoffMs']);
   if (Object.keys(value).some((key) => !allowed.has(key))) throw Object.assign(new Error('mod_source_refresh_config_invalid'), { statusCode: 400 });
   if (!partial && !Object.hasOwn(value, 'enabled')) throw Object.assign(new Error('mod_source_refresh_enabled_invalid'), { statusCode: 400 });
   if (!partial && !Object.hasOwn(value, 'intervalMs')) throw Object.assign(new Error('mod_source_refresh_intervalMs_invalid'), { statusCode: 400 });
@@ -31,6 +31,8 @@ export function validateModSourceRefreshConfig(value, { partial = false, base = 
   if (Object.hasOwn(value, 'enabled')) { if (typeof value.enabled !== 'boolean') throw Object.assign(new Error('mod_source_refresh_enabled_invalid'), { statusCode: 400 }); output.enabled = value.enabled; }
   if (Object.hasOwn(value, 'intervalMs')) output.intervalMs = positiveTimerMs(value.intervalMs, 'intervalMs');
   if (Object.hasOwn(value, 'staleMs')) output.staleMs = positiveTimerMs(value.staleMs, 'staleMs');
+  if (Object.hasOwn(value, 'concurrency')) { if (!Number.isSafeInteger(value.concurrency) || value.concurrency < 1) throw Object.assign(new Error('mod_source_refresh_concurrency_invalid'), { statusCode: 400 }); output.concurrency = value.concurrency; }
+  if (Object.hasOwn(value, 'maxBackoffMs')) output.maxBackoffMs = positiveTimerMs(value.maxBackoffMs, 'maxBackoffMs');
   return output;
 }
 
@@ -107,8 +109,8 @@ function safeGitError(error) {
   if (/timed out|aborted/i.test(text)) return 'mod_source_timeout';
   return 'mod_source_git_failed';
 }
-async function gitContext(url, credential) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'burrow-mod-git-'));
+async function gitContext(url, credential, { parentRoot = os.tmpdir(), resourceMonitor = null } = {}) {
+  const root = await fs.mkdtemp(path.join(parentRoot, 'burrow-mod-git-'));
   let askpass = null;
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
   Object.assign(env, { GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull, GIT_OPTIONAL_LOCKS: '0', GIT_ALLOW_PROTOCOL: 'http:https:ssh', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10' });
@@ -121,13 +123,32 @@ async function gitContext(url, credential) {
     Object.assign(env, { GIT_ASKPASS: askpass, BURROW_GIT_USERNAME: credential.username, BURROW_GIT_PASSWORD: credential.password });
   }
   const run = async (args, options = {}) => {
-    try { return await execFileAsync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'submodule.recurse=false', ...args], { cwd: root, env, timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: 8 * 1024 * 1024, ...options }); }
-    catch (error) { throw new Error(safeGitError(error)); }
+    const { resourceMonitor: commandMonitor = resourceMonitor, ...execOptions } = options;
+    try {
+      if (!commandMonitor) return await execFileAsync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'submodule.recurse=false', ...args], { cwd: root, env, timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: 8 * 1024 * 1024, ...execOptions });
+      const initial = await fs.statfs(commandMonitor.root, { bigint: true });
+      if (initial.bavail * initial.bsize < BigInt(commandMonitor.reserveBytes)) throw new Error('mod_archive_resources_exceeded');
+      return await new Promise((resolve, reject) => {
+        let resourcesExceeded = false;
+        const child = execFile('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'submodule.recurse=false', ...args], { cwd: root, env, timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: 8 * 1024 * 1024, ...execOptions }, (error, stdout, stderr) => error ? reject(resourcesExceeded ? new Error('mod_archive_resources_exceeded') : error) : resolve({ stdout, stderr }));
+        let checking = false;
+        const timer = setInterval(async () => {
+          if (checking) return;
+          checking = true;
+          try {
+            const stats = await fs.statfs(commandMonitor.root, { bigint: true });
+            if (stats.bavail * stats.bsize < BigInt(commandMonitor.reserveBytes)) { resourcesExceeded = true; child.kill('SIGKILL'); }
+          } catch { resourcesExceeded = true; child.kill('SIGKILL'); }
+          finally { checking = false; }
+        }, commandMonitor.checkIntervalMs);
+        timer.unref?.(); child.once('close', () => clearInterval(timer)); child.once('error', () => clearInterval(timer));
+      });
+    } catch (error) { if (error?.message === 'mod_archive_resources_exceeded') throw error; throw new Error(safeGitError(error)); }
   };
   return { root, run, cleanup: () => fs.rm(root, { recursive: true, force: true }) };
 }
-async function prepareRepository(url, credential, { archivePath = null } = {}) {
-  const context = await gitContext(url, credential);
+async function prepareRepository(url, credential, { archivePath = null, archiveReserve = null } = {}) {
+  const context = await gitContext(url, credential, { ...(archivePath ? { parentRoot: path.dirname(archivePath) } : {}), resourceMonitor: archiveReserve });
   try {
     const { stdout } = await context.run(['ls-remote', '--tags', '--refs', url]);
     const tags = stdout.split('\n').filter(Boolean).map((line) => { const [oid, ref] = line.split('\t'); return { oid, tag: ref?.replace('refs/tags/', '') }; }).filter(({ tag }) => VERSION.test(tag));
@@ -145,7 +166,7 @@ async function prepareRepository(url, credential, { archivePath = null } = {}) {
     if (manifest.version != null && (!VERSION.test(String(manifest.version)) || compareVersions(manifest.version, tag) !== 0)) throw new Error('mod_source_manifest_version_mismatch');
     if (archivePath) {
       await context.run(['--git-dir', repo, 'archive', '--format=tar.gz', `--prefix=${modId}/`, `--output=${archivePath}`, tag]);
-      const stat = await fs.stat(archivePath); if (stat.size > MAX_ARCHIVE_BYTES) throw new Error('mod_archive_too_large');
+      await fs.stat(archivePath);
     }
     return { modId, modName, latestVersion: normalizeVersion(tag), archiveUrl: `git-tag:${tag}` };
   } finally { await context.cleanup(); }
@@ -161,7 +182,7 @@ async function archiveSha256(filePath) {
 async function validateArchiveEntries(archivePath) {
   const [{ stdout: names }, { stdout: verbose }] = await Promise.all([
     execFileAsync('tar', ['-tzf', archivePath], { maxBuffer: 8 * 1024 * 1024, timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL' }),
-    execFileAsync('tar', ['-tvzf', archivePath], { maxBuffer: 16 * 1024 * 1024, timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL' }),
+    execFileAsync('tar', ['--numeric-owner', '-tvzf', archivePath], { maxBuffer: 16 * 1024 * 1024, timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL' }),
   ]);
   const entries = names.split('\n').filter(Boolean);
   if (!entries.length || entries.length > 20_000) throw new Error('mod_archive_invalid');
@@ -169,10 +190,63 @@ async function validateArchiveEntries(archivePath) {
     const normalized = entry.replaceAll('\\', '/');
     if (normalized.startsWith('/') || normalized.split('/').some((part) => part === '..')) throw new Error('mod_archive_path_invalid');
   }
+  let expandedBytes = 0;
   for (const line of verbose.split('\n').filter(Boolean)) {
     const type = line[0];
     if (type === 'l' || type === 'h' || type === 'b' || type === 'c' || type === 'p') throw new Error('mod_archive_special_entry_invalid');
+    const match = line.match(/^.\S*\s+\d+\/\d+\s+(\d+)\s+/);
+    if (!match) throw new Error('mod_archive_invalid');
+    expandedBytes += Number(match[1]);
+    if (!Number.isSafeInteger(expandedBytes)) throw new Error('mod_archive_resources_exceeded');
   }
+  return { entries: entries.length, expandedBytes };
+}
+
+async function directoryBytes(root) {
+  let total = 0;
+  for (const entry of await fs.readdir(root, { withFileTypes: true })) {
+    const target = path.join(root, entry.name);
+    if (entry.isDirectory()) total += await directoryBytes(target);
+    else if (entry.isFile()) total += (await fs.stat(target)).size;
+  }
+  return total;
+}
+
+async function archiveBudget(stagingRoot, archivePath, policy) {
+  const stats = await fs.statfs(stagingRoot, { bigint: true });
+  const available = Number(stats.bavail * stats.bsize);
+  await fs.stat(archivePath);
+  // The compressed archive is already reflected in available space. Preserve
+  // the configured reserve rather than treating compression ratio as capacity.
+  return Math.max(0, available - policy.reserveBytes);
+}
+
+async function extractArchiveWithBudget(archivePath, extractRoot, budgetBytes, policy) {
+  if (!Number.isSafeInteger(budgetBytes) || budgetBytes <= 0) throw new Error('mod_archive_resources_unavailable');
+  await new Promise((resolve, reject) => {
+    const child = spawn('tar', ['--no-same-owner', '--no-same-permissions', '-xzf', archivePath, '-C', extractRoot], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = ''; let exceeded = false; let checking = false;
+    child.stderr.on('data', (chunk) => { if (stderr.length < 8192) stderr += chunk; });
+    const timeout = setTimeout(() => { exceeded = true; child.kill('SIGKILL'); }, GIT_TIMEOUT_MS); timeout.unref?.();
+    const timer = setInterval(async () => {
+      if (checking || exceeded) return;
+      checking = true;
+      try {
+        const [bytes, stats] = await Promise.all([directoryBytes(extractRoot), fs.statfs(extractRoot, { bigint: true })]);
+        if (bytes > budgetBytes || stats.bavail * stats.bsize < BigInt(policy.reserveBytes)) { exceeded = true; child.kill('SIGKILL'); }
+      } catch (error) { if (error?.code !== 'ENOENT') { exceeded = true; child.kill('SIGKILL'); } } finally { checking = false; }
+    }, policy.checkIntervalMs);
+    timer.unref?.();
+    child.once('error', (error) => { clearInterval(timer); clearTimeout(timeout); reject(error); });
+    child.once('close', async (code) => {
+      clearInterval(timer); clearTimeout(timeout);
+      try {
+        if (exceeded || await directoryBytes(extractRoot) > budgetBytes) return reject(new Error('mod_archive_resources_exceeded'));
+        if (code !== 0) return reject(new Error(stderr.trim() || 'mod_archive_extract_failed'));
+        resolve();
+      } catch (error) { reject(error); }
+    });
+  });
 }
 
 async function findPreparedMod(extractRoot) {
@@ -222,14 +296,78 @@ function sourceRows(db) { return db.prepare('SELECT id,url,provider,mod_id,mod_n
 function installationRows(db) { return new Map(db.prepare('SELECT mod_id,source_id,version,archive_sha256,installed_at,updated_at FROM mod_installations').all().map((row) => [row.mod_id, row])); }
 function lifecycleRows(db) { return new Map(db.prepare('SELECT mod_id,enabled,created_at,updated_at FROM mod_lifecycle').all().map((row) => [row.mod_id, row])); }
 
-export function createModDistribution({ runtimeRoot, databasePath, restart = null, onLifecycleChange = null, logger = console, settingsKey = null } = {}) {
+
+async function durableJson(filePath, value) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const temporary = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  const handle = await fs.open(temporary, 'wx', 0o600);
+  try { await handle.writeFile(`${JSON.stringify(value)}\n`); await handle.sync(); } finally { await handle.close(); }
+  await fs.rename(temporary, filePath);
+  const directory = await fs.open(path.dirname(filePath), 'r');
+  try { await directory.sync(); } finally { await directory.close(); }
+}
+
+async function removeDurably(filePath) {
+  await fs.rm(filePath, { force: true });
+  const directory = await fs.open(path.dirname(filePath), 'r');
+  try { await directory.sync(); } finally { await directory.close(); }
+}
+
+export function createModDistribution({ runtimeRoot, databasePath, restart = null, onLifecycleChange = null, logger = console, settingsKey = null, archiveResources = {}, removePath = fs.rm, renamePath = fs.rename, copyPath = fs.cp, cleanupPath = fs.rm, repositoryPreparation = prepareRepository } = {}) {
   if (!runtimeRoot || !databasePath) throw new Error('mod_distribution_configuration_required');
   const modsRoot = path.join(runtimeRoot, 'mods');
+  const archivePolicy = {
+    ...DEFAULT_ARCHIVE_RESOURCES,
+    ...(process.env.BURROW_MOD_ARCHIVE_RESERVE_BYTES ? { reserveBytes: Number(process.env.BURROW_MOD_ARCHIVE_RESERVE_BYTES) } : {}),
+    ...archiveResources,
+  };
+  if (!Number.isSafeInteger(archivePolicy.reserveBytes) || archivePolicy.reserveBytes < 0 || !Number.isSafeInteger(archivePolicy.checkIntervalMs) || archivePolicy.checkIntervalMs < 1) throw new Error('mod_archive_resource_policy_invalid');
   const locks = new Set();
   let refreshPromise = null;
   let pollTimer = null;
   let closed = false;
   let failureCount = 0;
+  const recoveryRoot = path.join(modsRoot, '.recovery');
+  async function reconcileUninstalls() {
+    let names;
+    try { names = await fs.readdir(recoveryRoot); } catch (error) { if (error?.code === 'ENOENT') return; throw error; }
+    for (const name of names.filter((entry) => entry.endsWith('.json'))) {
+      const journalPath = path.join(recoveryRoot, name);
+      const journal = JSON.parse(await fs.readFile(journalPath, 'utf8'));
+      const expectedTarget = path.join(modsRoot, journal.modId || '');
+      if (journal.operation !== 'uninstall' || !MOD_ID.test(journal.modId) || journal.target !== expectedTarget || !journal.quarantine.startsWith(`${expectedTarget}.uninstall-`) || journal.recovery !== `${journal.quarantine}.recovery`) throw new Error('mod_uninstall_recovery_journal_invalid');
+      if (journal.committed) {
+        await cleanupPath(journal.quarantine, { recursive: true, force: true });
+        await cleanupPath(journal.recovery, { recursive: true, force: true });
+        await removeDurably(journalPath);
+        continue;
+      }
+      const targetPresent = await fs.stat(journal.target).then(() => true, () => false);
+      if (!targetPresent) {
+        const preferred = journal.phase === 'journaled' ? journal.quarantine : journal.recovery;
+        const fallback = preferred === journal.recovery ? journal.quarantine : journal.recovery;
+        const restore = await fs.stat(preferred).then(() => preferred, () => fallback);
+        await renamePath(restore, journal.target);
+      }
+      await cleanupPath(journal.quarantine, { recursive: true, force: true });
+      await cleanupPath(journal.recovery, { recursive: true, force: true });
+      const recoveryDb = openSettingsDatabase({ databasePath });
+      try {
+        recoveryDb.exec('BEGIN IMMEDIATE');
+        if (journal.installation) recoveryDb.prepare('INSERT OR REPLACE INTO mod_installations (mod_id,source_id,version,archive_sha256,installed_at,updated_at) VALUES (?,?,?,?,?,?)').run(journal.installation.mod_id, journal.installation.source_id, journal.installation.version, journal.installation.archive_sha256, journal.installation.installed_at, journal.installation.updated_at);
+        if (journal.lifecycle) recoveryDb.prepare('INSERT OR REPLACE INTO mod_lifecycle (mod_id,enabled,created_at,updated_at) VALUES (?,?,?,?)').run(journal.lifecycle.mod_id, journal.lifecycle.enabled, journal.lifecycle.created_at, journal.lifecycle.updated_at);
+        recoveryDb.exec('COMMIT');
+      } catch (error) { recoveryDb.exec('ROLLBACK'); throw error; } finally { recoveryDb.close(); }
+      await onLifecycleChange?.({ modId: journal.modId, enabled: journal.lifecycle?.enabled === 1, installed: true, action: 'uninstall-recovery' });
+      await removeDurably(journalPath);
+    }
+    await fs.rmdir(recoveryRoot).catch((error) => { if (error?.code !== 'ENOENT' && error?.code !== 'ENOTEMPTY') throw error; });
+  }
+  const ready = reconcileUninstalls();
+  // Install a rejection observer immediately: callers still receive the same
+  // rejected promise, but startup failures cannot become transient unhandled
+  // rejections before the server reaches its explicit readiness await.
+  void ready.catch(() => {});
   function refreshSettings(db) {
     const row = db.prepare("SELECT value_json FROM settings_meta WHERE key='mod_source_refresh'").get();
     try { return validateModSourceRefreshConfig(JSON.parse(row?.value_json || '{}'), { partial: true }); }
@@ -254,8 +392,8 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
     try { settings = refreshSettings(db); } finally { db.close(); }
     if (!settings.enabled) return;
     const multiplier = 2 ** Math.min(failureCount, 52);
-    const backedOff = settings.intervalMs * multiplier;
-    const wait = delay ?? (Number.isSafeInteger(backedOff) ? backedOff : Number.MAX_SAFE_INTEGER);
+    const backedOff = Math.min(settings.intervalMs * multiplier, settings.maxBackoffMs);
+    const wait = delay ?? (Number.isSafeInteger(backedOff) ? backedOff : settings.maxBackoffMs);
     armPoll(wait);
   }
   function sourceRefreshConfig() {
@@ -265,7 +403,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
   function saveSourceRefreshConfig(value) {
     const db = openSettingsDatabase({ databasePath });
     try {
-      const config = validateModSourceRefreshConfig(value);
+      const config = validateModSourceRefreshConfig(value, { base: refreshSettings(db) });
       db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES ('mod_source_refresh',?,?)
         ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at`).run(JSON.stringify(config), now());
       schedulePoll();
@@ -280,7 +418,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
   async function refreshSource(db, row) {
     const checkedAt = now();
     try {
-      const inspected = await prepareRepository(row.url, sourceCredential(db, row.id));
+      const inspected = await repositoryPreparation(row.url, sourceCredential(db, row.id));
       db.prepare("UPDATE mod_sources SET mod_id=?,mod_name=?,latest_version=?,archive_url=?,status='ready',error=NULL,last_checked_at=?,updated_at=? WHERE id=?").run(inspected.modId, inspected.modName, inspected.latestVersion, inspected.archiveUrl, checkedAt, checkedAt, row.id);
       return { ...row, ...inspected, status: 'ready', error: null };
     } catch (error) {
@@ -290,6 +428,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
     }
   }
   async function list() {
+    await ready;
     const db = openSettingsDatabase({ databasePath });
     try {
       const discovered = await discoverMods({ runtimeRoot, logger });
@@ -308,10 +447,11 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       const refreshConfig = refreshSettings(db);
       const stale = sources.some((row) => !row.last_checked_at || Date.now() - Date.parse(row.last_checked_at) >= refreshConfig.staleMs);
       if (refreshConfig.enabled && stale && !refreshPromise) queueMicrotask(() => { void refresh(); });
-      return { ok: true, restartRequired: false, sourceRefresh: { enabled: Boolean(refreshConfig.enabled), intervalMs: refreshConfig.intervalMs, staleMs: refreshConfig.staleMs, refreshing: Boolean(refreshPromise), failures: failureCount }, mods, sources: sources.map((row) => ({ id: row.id, url: row.url, status: row.status, ...(row.error ? { error: row.error } : {}), ...(row.last_checked_at ? { lastCheckedAt: row.last_checked_at } : {}) })) };
+      return { ok: true, restartRequired: false, sourceRefresh: { enabled: Boolean(refreshConfig.enabled), intervalMs: refreshConfig.intervalMs, staleMs: refreshConfig.staleMs, concurrency: refreshConfig.concurrency, maxBackoffMs: refreshConfig.maxBackoffMs, refreshing: Boolean(refreshPromise), failures: failureCount }, mods, sources: sources.map((row) => ({ id: row.id, url: row.url, status: row.status, ...(row.error ? { error: row.error } : {}), ...(row.last_checked_at ? { lastCheckedAt: row.last_checked_at } : {}) })) };
     } finally { db.close(); }
   }
   async function addSource(urlValue, authValue = null) {
+    await ready;
     const url = normalizeModSourceUrl(urlValue); const id = sourceId(url); const timestamp = now(); const auth = credentialInput(authValue); const db = openSettingsDatabase({ databasePath });
     try {
       db.prepare(`INSERT INTO mod_sources (id,url,provider,status,created_at,updated_at) VALUES (?,?,?,'pending',?,?) ON CONFLICT(url) DO NOTHING`).run(id, url, 'git', timestamp, timestamp);
@@ -328,19 +468,28 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
     } finally { db.close(); }
   }
   async function refresh() {
+    await ready;
     if (refreshPromise) return refreshPromise;
     refreshPromise = (async () => {
       const db = openSettingsDatabase({ databasePath });
-      let failed = false;
-      try { for (const row of sourceRows(db)) { const result = await refreshSource(db, row); failed ||= result.status === 'failed'; } }
-      finally { db.close(); }
+      let rows; let settings;
+      try { rows = sourceRows(db); settings = refreshSettings(db); } finally { db.close(); }
+      let failed = false; let cursor = 0;
+      await Promise.all(Array.from({ length: Math.min(settings.concurrency, rows.length) }, async () => {
+        while (cursor < rows.length) {
+          const row = rows[cursor++]; const workerDb = openSettingsDatabase({ databasePath });
+          try { const result = await refreshSource(workerDb, row); failed ||= result.status === 'failed'; } finally { workerDb.close(); }
+        }
+      }));
       failureCount = failed ? failureCount + 1 : 0;
       return list();
     })();
     try { return await refreshPromise; } finally { refreshPromise = null; }
   }
-  async function removeSource(id) { const db = openSettingsDatabase({ databasePath }); try { const removed = db.prepare('DELETE FROM mod_sources WHERE id=?').run(String(id)).changes > 0; return { ok: removed, removed }; } finally { db.close(); } }
+  async function removeSource(id) {
+    await ready; const db = openSettingsDatabase({ databasePath }); try { const removed = db.prepare('DELETE FROM mod_sources WHERE id=?').run(String(id)).changes > 0; return { ok: removed, removed }; } finally { db.close(); } }
   async function install(modId, requestedVersion = null) {
+    await ready;
     const id = String(modId || '').trim(); if (!MOD_ID.test(id)) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
     locks.add(id); const db = openSettingsDatabase({ databasePath }); let scratch;
@@ -349,12 +498,14 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       if (!source) throw new Error('mod_source_not_resolved');
       scratch = await fs.mkdtemp(path.join(runtimeRoot, `.mod-staging-${process.pid}-`));
       const archive = path.join(scratch, 'mod.tar.gz'); const extract = path.join(scratch, 'extract');
-      const inspected = await prepareRepository(source.url, sourceCredential(db, source.id), { archivePath: archive });
+      const inspected = await repositoryPreparation(source.url, sourceCredential(db, source.id), { archivePath: archive, archiveReserve: { root: scratch, reserveBytes: archivePolicy.reserveBytes, checkIntervalMs: archivePolicy.checkIntervalMs } });
       if (inspected.modId !== id) throw new Error('mod_manifest_id_mismatch');
       const version = inspected.latestVersion;
       if (requestedVersion && compareVersions(requestedVersion, version) !== 0) throw new Error('mod_version_unavailable');
-      await validateArchiveEntries(archive); await fs.mkdir(extract);
-      await execFileAsync('tar', ['--no-same-owner', '--no-same-permissions', '-xzf', archive, '-C', extract], { timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL' });
+      const archiveInfo = await validateArchiveEntries(archive); await fs.mkdir(extract);
+      const budget = await archiveBudget(scratch, archive, archivePolicy);
+      if (archiveInfo.expandedBytes > budget) throw new Error('mod_archive_resources_exceeded');
+      await extractArchiveWithBudget(archive, extract, budget, archivePolicy);
       const prepared = await findPreparedMod(extract);
       if (prepared.id !== id && source.mod_id) throw new Error('mod_manifest_id_mismatch');
       const target = path.join(modsRoot, prepared.id); const digest = await archiveSha256(archive);
@@ -382,6 +533,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
     } finally { db.close(); if (scratch) await fs.rm(scratch, { recursive: true, force: true }); locks.delete(id); }
   }
   async function setEnabled(modId, enabled) {
+    await ready;
     const id = String(modId || '').trim(); if (!MOD_ID.test(id)) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
     locks.add(id); const db = openSettingsDatabase({ databasePath });
@@ -403,6 +555,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
     } finally { db.close(); locks.delete(id); }
   }
   async function uninstall(modId) {
+    await ready;
     const id = String(modId || '').trim(); if (!MOD_ID.test(id)) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
     locks.add(id); const db = openSettingsDatabase({ databasePath });
@@ -411,16 +564,74 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       const mod = discovered.find((entry) => entry.id === id);
       if (!mod) throw Object.assign(new Error('mod_not_found'), { statusCode: 404 });
       if (mod.manifest?.system === true) throw Object.assign(new Error('system_mod_uninstall_forbidden'), { statusCode: 409 });
-      await onLifecycleChange?.({ modId: id, enabled: false, installed: false, action: 'uninstall' });
-      await fs.rm(path.join(modsRoot, id), { recursive: true, force: true });
-      db.prepare('DELETE FROM mod_installations WHERE mod_id=?').run(id);
-      db.prepare('DELETE FROM mod_lifecycle WHERE mod_id=?').run(id);
+      const target = path.join(modsRoot, id); const quarantine = `${target}.uninstall-${crypto.randomUUID()}`; const recovery = `${quarantine}.recovery`;
+      const installation = db.prepare('SELECT mod_id,source_id,version,archive_sha256,installed_at,updated_at FROM mod_installations WHERE mod_id=?').get(id);
+      const lifecycle = db.prepare('SELECT mod_id,enabled,created_at,updated_at FROM mod_lifecycle WHERE mod_id=?').get(id);
+      const journalPath = path.join(recoveryRoot, `uninstall-${id}-${crypto.randomUUID()}.json`);
+      const journal = { version: 1, operation: 'uninstall', modId: id, target, quarantine, recovery, installation, lifecycle, phase: 'journaled', committed: false };
+      await durableJson(journalPath, journal);
+      await renamePath(target, quarantine);
+      // Recursive removal may fail after deleting part of the tree. Preserve an
+      // independent recovery copy until files, runtime registry, and DB agree.
+      try {
+        await copyPath(quarantine, recovery, { recursive: true, preserveTimestamps: true });
+        await durableJson(journalPath, { ...journal, phase: 'prepared' });
+      } catch (error) {
+        try {
+          await renamePath(quarantine, target);
+          await cleanupPath(recovery, { recursive: true, force: true });
+          await removeDurably(journalPath);
+        } catch (recoveryError) { error.filesystemRecoveryError = recoveryError; }
+        throw error;
+      }
+      let runtimeRemoved = false; let recordsDeleted = false; let committed = false;
+      try {
+        await onLifecycleChange?.({ modId: id, enabled: false, installed: false, action: 'uninstall' });
+        runtimeRemoved = true;
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          db.prepare('DELETE FROM mod_installations WHERE mod_id=?').run(id);
+          db.prepare('DELETE FROM mod_lifecycle WHERE mod_id=?').run(id);
+          db.exec('COMMIT'); recordsDeleted = true;
+        } catch (error) { db.exec('ROLLBACK'); throw error; }
+        await durableJson(journalPath, { ...journal, phase: 'removing' });
+        await removePath(quarantine, { recursive: true, force: true });
+        await durableJson(journalPath, { ...journal, phase: 'committed', committed: true });
+        committed = true;
+        await cleanupPath(recovery, { recursive: true, force: true });
+        await removeDurably(journalPath);
+        await fs.rmdir(recoveryRoot).catch((error) => { if (error?.code !== 'ENOENT' && error?.code !== 'ENOTEMPTY') throw error; });
+      } catch (error) {
+        // Once the durable committed marker exists, cleanup is retryable startup
+        // work. Never resurrect files or records for an already-committed delete.
+        if (committed) throw error;
+        try {
+          await cleanupPath(quarantine, { recursive: true, force: true });
+          await renamePath(recovery, target);
+        } catch (recoveryError) { error.filesystemRecoveryError = recoveryError; }
+        if (recordsDeleted) {
+          db.exec('BEGIN IMMEDIATE');
+          try {
+            if (installation) db.prepare('INSERT OR REPLACE INTO mod_installations (mod_id,source_id,version,archive_sha256,installed_at,updated_at) VALUES (?,?,?,?,?,?)').run(installation.mod_id, installation.source_id, installation.version, installation.archive_sha256, installation.installed_at, installation.updated_at);
+            if (lifecycle) db.prepare('INSERT OR REPLACE INTO mod_lifecycle (mod_id,enabled,created_at,updated_at) VALUES (?,?,?,?)').run(lifecycle.mod_id, lifecycle.enabled, lifecycle.created_at, lifecycle.updated_at);
+            db.exec('COMMIT');
+          } catch (recoveryError) { db.exec('ROLLBACK'); error.databaseRecoveryError = recoveryError; }
+        }
+        if (runtimeRemoved) {
+          try { await onLifecycleChange?.({ modId: id, enabled: lifecycle?.enabled === 1, installed: true, action: 'uninstall-recovery' }); }
+          catch (recoveryError) { error.runtimeRecoveryError = recoveryError; }
+        }
+        if (!error.filesystemRecoveryError && !error.databaseRecoveryError && !error.runtimeRecoveryError) {
+          try { await removeDurably(journalPath); } catch (recoveryError) { error.journalCleanupError = recoveryError; }
+        }
+        throw error;
+      }
       restart?.();
       return { ok: true, modId: id, uninstalled: true, settingsPreserved: true, restartRequired: Boolean(restart) };
     } finally { db.close(); locks.delete(id); }
   }
   schedulePoll();
-  return { list, sourceRefreshConfig, saveSourceRefreshConfig, addSource, refresh, removeSource, install, enable: (id) => setEnabled(id, true), disable: (id) => setEnabled(id, false), uninstall, async close() { closed = true; clearPoll(); try { await refreshPromise; } catch {} } };
+  return { ready, list, sourceRefreshConfig, saveSourceRefreshConfig, addSource, refresh, removeSource, install, enable: (id) => setEnabled(id, true), disable: (id) => setEnabled(id, false), uninstall, async close() { closed = true; clearPoll(); try { await ready; await refreshPromise; } catch {} } };
 }
 
 export function createModManagementRoute({ distribution, readJsonBody, sendJson } = {}) {
