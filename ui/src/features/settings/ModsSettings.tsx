@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { modsChangedEvent } from '../../app/modPanels';
+import { apiTargetsChangedEvent, modContributionsChangedEvent } from '../../app/apiTargets';
 import { Field } from './SettingsPrimitives';
-import { loadModManagement, modLifecyclePath, modManagementAction, type ModRecord, type ModSource, type NormalizedModManagement } from './modManagementApi';
+import { defaultSourceRefresh, isModBusyError, loadModManagement, loadSourceRefreshConfig, modLifecyclePath, modManagementAction, saveSourceRefreshConfig, type ModRecord, type ModSource, type NormalizedModManagement, type SourceRefreshConfig } from './modManagementApi';
 
 type ModsSection = 'installed' | 'sources';
 type Props = { section?: ModsSection; overflowTarget?: HTMLElement | null };
@@ -17,8 +18,31 @@ function actionLabel(mod: ModRecord) {
   return mod.version && mod.latestVersion && mod.updateAvailable === true ? 'Update' : 'Reinstall';
 }
 
+type DurationUnit = 'hours' | 'minutes' | 'seconds' | 'milliseconds';
+type DurationDraft = { value: string; unit: DurationUnit };
+const durationMultipliers: Record<DurationUnit, number> = { hours: 3_600_000, minutes: 60_000, seconds: 1_000, milliseconds: 1 };
+
+function durationDraft(milliseconds: number): DurationDraft {
+  for (const unit of ['hours', 'minutes', 'seconds'] as const) {
+    const multiplier = durationMultipliers[unit];
+    if (milliseconds % multiplier === 0) return { value: String(milliseconds / multiplier), unit };
+  }
+  return { value: String(milliseconds), unit: 'milliseconds' };
+}
+
+function durationMilliseconds(draft: DurationDraft) {
+  const value = Number(draft.value);
+  const milliseconds = value * durationMultipliers[draft.unit];
+  return Number.isFinite(value) && value > 0 && Number.isSafeInteger(milliseconds) ? milliseconds : null;
+}
+
+function formatDuration(milliseconds: number) {
+  const draft = durationDraft(milliseconds);
+  return `${draft.value} ${draft.unit}`;
+}
+
 export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
-  const [state, setState] = useState<NormalizedModManagement>({ mods: [], sources: [], restartRequired: false });
+  const [state, setState] = useState<NormalizedModManagement>({ mods: [], sources: [], restartRequired: false, sourceRefresh: defaultSourceRefresh });
   const [selectedModId, setSelectedModId] = useState<string | null>(null);
   const [sourceUrl, setSourceUrl] = useState('');
   const [sourceUsername, setSourceUsername] = useState('');
@@ -30,6 +54,27 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   }, []);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshConfig, setRefreshConfig] = useState<SourceRefreshConfig | null>(null);
+  const [refreshConfigError, setRefreshConfigError] = useState<string | null>(null);
+  const [refreshEnabled, setRefreshEnabled] = useState(false);
+  const [refreshInterval, setRefreshInterval] = useState<DurationDraft>({ value: '', unit: 'hours' });
+  const [refreshStale, setRefreshStale] = useState<DurationDraft>({ value: '', unit: 'minutes' });
+
+  const applyRefreshConfig = useCallback((config: SourceRefreshConfig) => {
+    setRefreshConfig(config);
+    setRefreshEnabled(config.enabled);
+    setRefreshInterval(durationDraft(config.intervalMs));
+    setRefreshStale(durationDraft(config.staleMs));
+  }, []);
+
+  const loadRefreshConfiguration = useCallback(async () => {
+    setRefreshConfigError(null);
+    try {
+      applyRefreshConfig(await loadSourceRefreshConfig());
+    } catch (cause) {
+      setRefreshConfigError(cause instanceof Error ? cause.message : 'Could not load source refresh settings.');
+    }
+  }, [applyRefreshConfig]);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -40,11 +85,13 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
     }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { if (section === 'sources') void loadRefreshConfiguration(); }, [section, loadRefreshConfiguration]);
 
   useEffect(() => {
     if (!state.mods.some((mod) => mod.id === selectedModId)) setSelectedModId(state.mods[0]?.id ?? null);
   }, [state.mods, selectedModId]);
   const selectedMod = state.mods.find((mod) => mod.id === selectedModId) ?? null;
+  const sourceRefresh = state.sourceRefresh ?? defaultSourceRefresh;
 
   const run = async (key: string, path: string, init?: RequestInit, onSubmitted?: () => void) => {
     setBusy(key);
@@ -52,13 +99,38 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
     try {
       const result = await modManagementAction(path, init);
       window.dispatchEvent(new Event(modsChangedEvent));
+      window.dispatchEvent(new Event(apiTargetsChangedEvent));
+      window.dispatchEvent(new Event(modContributionsChangedEvent));
       onSubmitted?.();
       const next = await loadModManagement();
       setState({ ...next, restartRequired: next.restartRequired || result?.restartRequired === true });
       return true;
     } catch (cause) {
-      setError(key === 'source' ? 'Could not add mod source. Check the URL and credentials.' : cause instanceof Error ? cause.message : 'Mod operation failed.');
+      setError(isModBusyError(cause)
+        ? 'This mod is busy with active work. Let that work finish, then try again; Burrow did not cancel it.'
+        : key === 'source' ? 'Could not add mod source. Check the URL and credentials.' : cause instanceof Error ? cause.message : 'Mod operation failed.');
       return false;
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const saveRefreshConfiguration = async () => {
+    const intervalMs = durationMilliseconds(refreshInterval);
+    const staleMs = durationMilliseconds(refreshStale);
+    if (intervalMs === null || staleMs === null) {
+      setRefreshConfigError('Enter positive whole durations that resolve to milliseconds.');
+      return;
+    }
+    setBusy('source-refresh-settings');
+    setRefreshConfigError(null);
+    try {
+      const saved = await saveSourceRefreshConfig({ enabled: refreshEnabled, intervalMs, staleMs });
+      applyRefreshConfig(saved);
+      const next = await loadModManagement();
+      setState(next);
+    } catch (cause) {
+      setRefreshConfigError(cause instanceof Error ? cause.message : 'Could not save source refresh settings.');
     } finally {
       setBusy(null);
     }
@@ -124,7 +196,7 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   const modInventoryContents = state.mods.length === 0
     ? <p className="settings-empty">No mods found. Add a source in Mod sources.</p>
     : <div className="memory-connection-list">{state.mods.map((mod) => <article className="memory-connection" key={mod.id}>
-      <div><strong>{mod.name}{mod.system && <span className="mod-system-badge">System</span>}</strong><small>{mod.status === 'installed' ? (mod.enabled ? 'Installed · Enabled' : 'Installed · Disabled') : 'Available'}{mod.version ? ` · ${mod.version}` : ''}</small></div>
+      <div><strong>{mod.name}{mod.system && <span className="mod-system-badge">System</span>}</strong><small>{mod.status === 'installed' ? (mod.enabled ? 'Installed · Enabled' : 'Installed · Disabled') : 'Available'}{mod.version ? ` · Installed ${mod.version}` : ''}{mod.runningVersion ? ` · Running ${mod.runningVersion}` : ''}</small></div>
       <div className="memory-connection-actions"><button type="button" className="secondary memory-edit" aria-pressed={mod.id === selectedModId} disabled={busy !== null} onClick={() => setSelectedModId(mod.id)}>Manage</button></div>
     </article>)}</div>;
   const modInventory = overflowTarget
@@ -136,9 +208,10 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
     {selectedMod ? <>
       <p className="settings-description">Manage installation, version, and availability for this mod.</p>
       <Field label="Mod ID"><input value={selectedMod.id} readOnly /></Field>
-      <div className="field-pair"><Field label="Current version"><input value={selectedMod.status === 'installed' ? selectedMod.version || 'Unknown' : 'Not installed'} readOnly /></Field><Field label="Latest version"><input value={selectedMod.latestVersion || 'Unknown'} readOnly /></Field></div>
+      <div className="field-pair"><Field label="Installed version"><input value={selectedMod.status === 'installed' ? selectedMod.version || 'Unknown' : 'Not installed'} readOnly /></Field><Field label="Running version"><input value={selectedMod.enabled ? selectedMod.runningVersion || 'Unavailable' : 'Not running'} readOnly /></Field></div>
+      <Field label="Latest source version"><input value={selectedMod.latestVersion || 'Unknown'} readOnly /></Field>
       <p className="settings-description">{selectedMod.status === 'installed' ? `Installed · ${selectedMod.enabled ? 'Enabled' : 'Disabled'}` : 'Available from a configured source'}{selectedMod.reason ? ` · ${selectedMod.reason}` : ''}</p>
-      <p className="settings-help">Install, update, and reinstall use the latest version-tagged release from the configured source. New installs start disabled; updates and reinstalls preserve the current enabled or disabled state.</p>
+      <p className="settings-help">Install, update, enable, and disable apply live without restarting Burrow. New installs start disabled; updates and reinstalls preserve the current enabled or disabled state.</p>
       <div className="model-actions">
         {selectedMod.status === 'installed' && <button className="danger" type="button" disabled={busy !== null} onClick={() => lifecycle(selectedMod, 'uninstall')}>{busy === selectedMod.id ? 'Working…' : 'Uninstall'}</button>}
         {selectedMod.status === 'installed' && <button className="secondary" type="button" disabled={busy !== null} onClick={() => lifecycle(selectedMod, selectedMod.enabled ? 'disable' : 'enable')}>{busy === selectedMod.id ? 'Working…' : selectedMod.enabled ? 'Disable' : 'Enable'}</button>}
@@ -156,6 +229,24 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   const sourceConfiguration = <section className="setting-section mod-source-configuration" aria-labelledby="mod-sources-heading">
     <h2 id="mod-sources-heading">Mod sources</h2>
     <p className="settings-description">Add a Git repository URL (HTTP(S), ssh://, or scp-style SSH). Core discovers version-tagged releases containing burrow.mod.json.</p>
+    <p className="settings-help" role="status">{sourceRefresh.refreshing
+      ? 'Checking configured sources now…'
+      : sourceRefresh.enabled
+        ? `Background source checks are active${sourceRefresh.intervalMs ? ` · every ${formatDuration(sourceRefresh.intervalMs)}` : ''}${sourceRefresh.failures ? ` · ${sourceRefresh.failures} consecutive failed refresh${sourceRefresh.failures === 1 ? '' : 'es'}` : ''}.`
+        : 'Background source checks are disabled.'}</p>
+    <div className="settings-subsection" aria-labelledby="source-refresh-settings-heading">
+      <h3 id="source-refresh-settings-heading">Automatic source checks</h3>
+      {refreshConfigError && <p className="settings-request-error" role="alert">{refreshConfigError}</p>}
+      {refreshConfig ? <>
+        <label className="agent-enabled"><input type="checkbox" checked={refreshEnabled} disabled={busy !== null} onChange={(event) => setRefreshEnabled(event.target.checked)} /><span>Enable background source checks</span></label>
+        <div className="field-pair">
+          <Field label="Check every"><div className="field-pair"><input type="number" step="any" value={refreshInterval.value} disabled={busy !== null} onChange={(event) => setRefreshInterval((current) => ({ ...current, value: event.target.value }))} /><select aria-label="Check interval unit" value={refreshInterval.unit} disabled={busy !== null} onChange={(event) => setRefreshInterval((current) => ({ ...current, unit: event.target.value as DurationUnit }))}>{Object.keys(durationMultipliers).map((unit) => <option value={unit} key={unit}>{unit}</option>)}</select></div></Field>
+          <Field label="Consider source stale after"><div className="field-pair"><input type="number" step="any" value={refreshStale.value} disabled={busy !== null} onChange={(event) => setRefreshStale((current) => ({ ...current, value: event.target.value }))} /><select aria-label="Stale threshold unit" value={refreshStale.unit} disabled={busy !== null} onChange={(event) => setRefreshStale((current) => ({ ...current, unit: event.target.value as DurationUnit }))}>{Object.keys(durationMultipliers).map((unit) => <option value={unit} key={unit}>{unit}</option>)}</select></div></Field>
+        </div>
+        <p className="settings-help">Durations are saved exactly in milliseconds. Decimal values are accepted only when they resolve to a whole millisecond.</p>
+        <div className="model-actions"><button className="primary" type="button" disabled={busy !== null} onClick={() => void saveRefreshConfiguration()}>{busy === 'source-refresh-settings' ? 'Saving…' : 'Save automatic checks'}</button></div>
+      </> : <div className="model-actions"><button className="secondary" type="button" disabled={busy !== null} onClick={() => void loadRefreshConfiguration()}>Retry settings</button></div>}
+    </div>
     <Field label="Git repository URL"><input value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://git.example.com/team/mod.git" /></Field>
     <Field label="Private repository username (optional)"><input value={sourceUsername} onChange={(event) => setSourceUsername(event.target.value)} autoComplete="off" /></Field>
     <Field label="Password or access token (optional)"><input ref={sourceSecretRef} type="password" autoComplete="new-password" /></Field>
@@ -167,7 +258,7 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   const supporting = section === 'installed' ? modInventory : sourceInventory;
   return <div className="mod-management-settings">
     {error && <p className="settings-request-error" role="alert">{error}</p>}
-    {state.restartRequired && <p className="settings-auth-warning mod-restart-notice" role="status"><strong>Restart required.</strong> Core needs a restart for the latest mod changes to take effect.</p>}
+    {state.restartRequired && <p className="settings-auth-warning mod-restart-notice" role="status"><strong>Restart required.</strong> This Core reported that the latest mod change still needs a restart.</p>}
     {primary}
     {!overflowTarget && supporting}
     {overflowTarget && createPortal(supporting, overflowTarget)}

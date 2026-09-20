@@ -170,6 +170,12 @@ const collection = {
       req('List Brain promotion candidates', 'GET', '/api/memory/brain-promotion-candidates', { query: [['agentId', '{{agentId}}'], ['limit', '50']] }),
       req('Update Brain promotion candidate', 'PATCH', '/api/memory/brain-promotion-candidates', { body: { id: 'candidate-id', status: 'dismissed' } }),
     ]),
+    folder('Mods', [
+      req('List mod management state', 'GET', '/api/mod-management'),
+      req('Get mod source refresh config', 'GET', '/api/mod-management/source-refresh'),
+      req('Update mod source refresh config', 'PUT', '/api/mod-management/source-refresh', { body: { enabled: true, intervalMs: 21600000, staleMs: 900000 } }),
+      req('Refresh mod sources now', 'POST', '/api/mod-management/refresh', { body: {} }),
+    ]),
     folder('Retention', [
       req('Retention dry run', 'GET', '/api/retention'),
       req('Run retention cleanup', 'POST', '/api/retention/cleanup', { body: { confirm: false } }),

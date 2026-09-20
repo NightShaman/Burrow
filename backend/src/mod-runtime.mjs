@@ -198,8 +198,10 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
   }
 }
 
-export async function loadMods({ runtimeRoot, databasePath, logger = console, executionProviders = null, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null } = {}) {
-  const discovered = await discoverMods({ runtimeRoot });
+export async function loadMods({ runtimeRoot, databasePath, logger = console, executionProviders = null, replaceExecutionProviders = false, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null, onlyModIds = null } = {}) {
+  const discoveredAll = await discoverMods({ runtimeRoot });
+  const selectedIds = onlyModIds ? new Set(onlyModIds) : null;
+  const discovered = selectedIds ? discoveredAll.filter((mod) => selectedIds.has(mod.id)) : discoveredAll;
   const lifecycleDb = openSettingsDatabase({ databasePath });
   let disabled;
   try {
@@ -215,6 +217,7 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
     let store = null;
     try {
       let routes = [];
+      let commitProviderReplacement = null;
       if (mod.server) {
         const requestedSystem = mod.manifest?.system === true;
         const declaredCapabilities = Array.isArray(mod.manifest?.systemCapabilities)
@@ -231,7 +234,8 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
           mod, store, logger, systemCapability, capabilities: resolveAgentRuntime ? createModCapabilities({ databasePath, resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl: capabilityFetch, ownerModId: mod.id, scheduledJobScheduler }) : null, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs,
           onSystemControllerReady(controllerProxy) {
             if (!systemCapability || !executionProviders) return;
-            unregisterController = executionProviders.register(mod.id, controllerProxy);
+            unregisterController = executionProviders.register(mod.id, controllerProxy, { replace: replaceExecutionProviders });
+            commitProviderReplacement = unregisterController.commit || null;
           },
           onSystemControllerUnavailable() {
             unregisterController?.();
@@ -264,7 +268,7 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
           return { method, path: routePath, ...compileRoute(routePath), handler: (request) => host.invoke(routeId, request) };
         });
       }
-      Object.assign(mod, { routes, store, lifecycleCleanup: host ? () => host.close() : null, host, status: 'loaded' });
+      Object.assign(mod, { routes, store, lifecycleCleanup: host ? () => host.close() : null, commitProviderReplacement, host, status: 'loaded' });
       loaded.push(mod);
     } catch (error) {
       if (host) {
@@ -320,10 +324,12 @@ function sendModResult(res, sendJson, result) {
   res.end(payload);
 }
 
-export function createModRoute({ mods = [], readJsonBody, sendJson } = {}) {
-  const byId = new Map(mods.map((mod) => [mod.id, mod]));
+export function createModRoute({ mods = [], getMods = null, readJsonBody, sendJson } = {}) {
+  const currentMods = () => getMods ? getMods() : mods;
   return async function handleModRoute({ req, res, url } = {}) {
-    if (req.method === 'GET' && url.pathname === '/api/mods') { sendJson(res, 200, { ok: true, mods: modCatalog(mods) }); return true; }
+    const activeMods = currentMods();
+    const byId = new Map(activeMods.map((mod) => [mod.id, mod]));
+    if (req.method === 'GET' && url.pathname === '/api/mods') { sendJson(res, 200, { ok: true, mods: modCatalog(activeMods) }); return true; }
     const match = url.pathname.match(/^\/api\/mods\/([^/]+)(?:\/(.*))?$/);
     if (!match) return false;
     const id = decodeURIComponent(match[1]);

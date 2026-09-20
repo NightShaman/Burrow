@@ -13,7 +13,26 @@ const MOD_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const VERSION = /^v?(\d{4}\.\d{2}\.\d{2}(?:\.\d+)?|\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)$/;
 const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
 const GIT_TIMEOUT_MS = 60_000;
-const locks = new Set();
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+const DEFAULT_SOURCE_REFRESH = Object.freeze({ enabled: true, intervalMs: 21_600_000, staleMs: 900_000 });
+
+function positiveTimerMs(value, field) {
+  if (!Number.isSafeInteger(value) || value <= 0) throw Object.assign(new Error(`mod_source_refresh_${field}_invalid`), { statusCode: 400 });
+  return value;
+}
+export function validateModSourceRefreshConfig(value, { partial = false, base = DEFAULT_SOURCE_REFRESH } = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw Object.assign(new Error('mod_source_refresh_config_invalid'), { statusCode: 400 });
+  const allowed = new Set(['enabled', 'intervalMs', 'staleMs']);
+  if (Object.keys(value).some((key) => !allowed.has(key))) throw Object.assign(new Error('mod_source_refresh_config_invalid'), { statusCode: 400 });
+  if (!partial && !Object.hasOwn(value, 'enabled')) throw Object.assign(new Error('mod_source_refresh_enabled_invalid'), { statusCode: 400 });
+  if (!partial && !Object.hasOwn(value, 'intervalMs')) throw Object.assign(new Error('mod_source_refresh_intervalMs_invalid'), { statusCode: 400 });
+  if (!partial && !Object.hasOwn(value, 'staleMs')) throw Object.assign(new Error('mod_source_refresh_staleMs_invalid'), { statusCode: 400 });
+  const output = { ...base };
+  if (Object.hasOwn(value, 'enabled')) { if (typeof value.enabled !== 'boolean') throw Object.assign(new Error('mod_source_refresh_enabled_invalid'), { statusCode: 400 }); output.enabled = value.enabled; }
+  if (Object.hasOwn(value, 'intervalMs')) output.intervalMs = positiveTimerMs(value.intervalMs, 'intervalMs');
+  if (Object.hasOwn(value, 'staleMs')) output.staleMs = positiveTimerMs(value.staleMs, 'staleMs');
+  return output;
+}
 
 function now() { return new Date().toISOString(); }
 function sourceId(url) { return crypto.createHash('sha256').update(url).digest('hex').slice(0, 24); }
@@ -182,12 +201,21 @@ async function swapMod(target, prepared) {
   try {
     try { await fs.rename(target, backup); backedUp = true; } catch (error) { if (error?.code !== 'ENOENT') throw error; }
     await fs.rename(prepared, target);
-    if (backedUp) await fs.rm(backup, { recursive: true, force: true });
   } catch (error) {
     await fs.rm(target, { recursive: true, force: true }).catch(() => {});
     if (backedUp) await fs.rename(backup, target).catch(() => {});
     throw error;
   }
+  return {
+    // Once the replacement host is published the old host cannot be recreated.
+    // Backup deletion is therefore cleanup, not a reason to roll files back
+    // underneath the live replacement if the filesystem refuses the removal.
+    async commit() { if (backedUp) await fs.rm(backup, { recursive: true, force: true }).catch(() => {}); },
+    async rollback() {
+      await fs.rm(target, { recursive: true, force: true });
+      if (backedUp) await fs.rename(backup, target);
+    },
+  };
 }
 
 function sourceRows(db) { return db.prepare('SELECT id,url,provider,mod_id,mod_name,latest_version,archive_url,status,error,last_checked_at FROM mod_sources ORDER BY created_at').all(); }
@@ -197,6 +225,53 @@ function lifecycleRows(db) { return new Map(db.prepare('SELECT mod_id,enabled,cr
 export function createModDistribution({ runtimeRoot, databasePath, restart = null, onLifecycleChange = null, logger = console, settingsKey = null } = {}) {
   if (!runtimeRoot || !databasePath) throw new Error('mod_distribution_configuration_required');
   const modsRoot = path.join(runtimeRoot, 'mods');
+  const locks = new Set();
+  let refreshPromise = null;
+  let pollTimer = null;
+  let closed = false;
+  let failureCount = 0;
+  function refreshSettings(db) {
+    const row = db.prepare("SELECT value_json FROM settings_meta WHERE key='mod_source_refresh'").get();
+    try { return validateModSourceRefreshConfig(JSON.parse(row?.value_json || '{}'), { partial: true }); }
+    catch { return { ...DEFAULT_SOURCE_REFRESH }; }
+  }
+  function clearPoll() { if (pollTimer) clearTimeout(pollTimer); pollTimer = null; }
+  function armPoll(wait) {
+    if (closed) return;
+    const delay = Math.min(wait, MAX_TIMER_DELAY_MS);
+    pollTimer = setTimeout(() => {
+      pollTimer = null;
+      if (wait > MAX_TIMER_DELAY_MS) { armPoll(wait - MAX_TIMER_DELAY_MS); return; }
+      void refresh().catch((error) => logger.error?.(`Burrow mod source refresh failed: ${String(error?.message || error)}`)).finally(() => schedulePoll());
+    }, delay);
+    pollTimer.unref?.();
+  }
+  function schedulePoll(delay = null) {
+    clearPoll();
+    if (closed) return;
+    const db = openSettingsDatabase({ databasePath });
+    let settings;
+    try { settings = refreshSettings(db); } finally { db.close(); }
+    if (!settings.enabled) return;
+    const multiplier = 2 ** Math.min(failureCount, 52);
+    const backedOff = settings.intervalMs * multiplier;
+    const wait = delay ?? (Number.isSafeInteger(backedOff) ? backedOff : Number.MAX_SAFE_INTEGER);
+    armPoll(wait);
+  }
+  function sourceRefreshConfig() {
+    const db = openSettingsDatabase({ databasePath });
+    try { return { ok: true, sourceRefresh: refreshSettings(db) }; } finally { db.close(); }
+  }
+  function saveSourceRefreshConfig(value) {
+    const db = openSettingsDatabase({ databasePath });
+    try {
+      const config = validateModSourceRefreshConfig(value);
+      db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES ('mod_source_refresh',?,?)
+        ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at`).run(JSON.stringify(config), now());
+      schedulePoll();
+      return { ok: true, sourceRefresh: config };
+    } finally { db.close(); }
+  }
   function sourceCredential(db, id) {
     const row = db.prepare('SELECT ciphertext,nonce,auth_tag FROM mod_source_secrets WHERE source_id=?').get(id);
     if (!row) return null;
@@ -230,7 +305,10 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
         return { id: mod.id, name: mod.name, version, status: mod.status === 'failed' ? 'failed' : 'installed', enabled, system: mod.manifest?.system === true, source: source?.url, latestVersion, updateAvailable: Boolean(version && latestVersion && VERSION.test(version) && VERSION.test(latestVersion) && compareVersions(latestVersion, version) > 0), canInstall: source?.status === 'ready', ...(source?.error ? { reason: source.error } : {}) };
       });
       for (const source of sources) if (source.mod_id && !mods.some((mod) => mod.id === source.mod_id)) mods.push({ id: source.mod_id, name: source.mod_name || source.mod_id, status: 'available', source: source.url, latestVersion: source.latest_version || undefined, canInstall: source.status === 'ready', ...(source.error ? { reason: source.error } : {}) });
-      return { ok: true, restartRequired: false, mods, sources: sources.map((row) => ({ id: row.id, url: row.url, status: row.status, ...(row.error ? { error: row.error } : {}), ...(row.last_checked_at ? { lastCheckedAt: row.last_checked_at } : {}) })) };
+      const refreshConfig = refreshSettings(db);
+      const stale = sources.some((row) => !row.last_checked_at || Date.now() - Date.parse(row.last_checked_at) >= refreshConfig.staleMs);
+      if (refreshConfig.enabled && stale && !refreshPromise) queueMicrotask(() => { void refresh(); });
+      return { ok: true, restartRequired: false, sourceRefresh: { enabled: Boolean(refreshConfig.enabled), intervalMs: refreshConfig.intervalMs, staleMs: refreshConfig.staleMs, refreshing: Boolean(refreshPromise), failures: failureCount }, mods, sources: sources.map((row) => ({ id: row.id, url: row.url, status: row.status, ...(row.error ? { error: row.error } : {}), ...(row.last_checked_at ? { lastCheckedAt: row.last_checked_at } : {}) })) };
     } finally { db.close(); }
   }
   async function addSource(urlValue, authValue = null) {
@@ -249,7 +327,18 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       return { ok: refreshed.status === 'ready', source: refreshed, ...(refreshed.error ? { error: refreshed.error } : {}) };
     } finally { db.close(); }
   }
-  async function refresh() { const db = openSettingsDatabase({ databasePath }); try { for (const row of sourceRows(db)) await refreshSource(db, row); } finally { db.close(); } return list(); }
+  async function refresh() {
+    if (refreshPromise) return refreshPromise;
+    refreshPromise = (async () => {
+      const db = openSettingsDatabase({ databasePath });
+      let failed = false;
+      try { for (const row of sourceRows(db)) { const result = await refreshSource(db, row); failed ||= result.status === 'failed'; } }
+      finally { db.close(); }
+      failureCount = failed ? failureCount + 1 : 0;
+      return list();
+    })();
+    try { return await refreshPromise; } finally { refreshPromise = null; }
+  }
   async function removeSource(id) { const db = openSettingsDatabase({ databasePath }); try { const removed = db.prepare('DELETE FROM mod_sources WHERE id=?').run(String(id)).changes > 0; return { ok: removed, removed }; } finally { db.close(); } }
   async function install(modId, requestedVersion = null) {
     const id = String(modId || '').trim(); if (!MOD_ID.test(id)) throw new Error('mod_id_invalid');
@@ -269,14 +358,27 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       const prepared = await findPreparedMod(extract);
       if (prepared.id !== id && source.mod_id) throw new Error('mod_manifest_id_mismatch');
       const target = path.join(modsRoot, prepared.id); const digest = await archiveSha256(archive);
-      await swapMod(target, prepared.root);
+      const wasInstalled = Boolean(db.prepare('SELECT 1 AS present FROM mod_installations WHERE mod_id=?').get(prepared.id));
+      const enabled = db.prepare('SELECT enabled FROM mod_lifecycle WHERE mod_id=?').get(prepared.id)?.enabled === 1;
+      // Reject already-active work before touching the files used by the live
+      // registry. transitionMod checks again after candidate activation to close
+      // the race with work that starts during staging.
+      if (wasInstalled && enabled) await onLifecycleChange?.({ modId: prepared.id, enabled: true, installed: true, action: 'update-preflight' });
+      const swap = await swapMod(target, prepared.root);
+      try {
+        if (wasInstalled && enabled) await onLifecycleChange?.({ modId: prepared.id, enabled: true, installed: true, action: 'update' });
+        await swap.commit();
+      } catch (error) {
+        await swap.rollback();
+        throw error;
+      }
       const timestamp = now();
       db.prepare('UPDATE mod_sources SET mod_id=?,mod_name=?,latest_version=?,status=\'ready\',error=NULL,updated_at=? WHERE id=?').run(prepared.id, prepared.name, version, timestamp, source.id);
       db.prepare(`INSERT INTO mod_installations (mod_id,source_id,version,archive_sha256,installed_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(mod_id) DO UPDATE SET source_id=excluded.source_id,version=excluded.version,archive_sha256=excluded.archive_sha256,installed_at=excluded.installed_at,updated_at=excluded.updated_at`).run(prepared.id, source.id, version, digest, timestamp, timestamp);
       db.prepare(`INSERT INTO mod_lifecycle (mod_id,enabled,created_at,updated_at) VALUES (?,0,?,?)
         ON CONFLICT(mod_id) DO NOTHING`).run(prepared.id, timestamp, timestamp);
       restart?.();
-      return { ok: true, modId: prepared.id, version, archiveSha256: digest, restartRequired: true };
+      return { ok: true, modId: prepared.id, version, archiveSha256: digest, restartRequired: Boolean(restart) };
     } finally { db.close(); if (scratch) await fs.rm(scratch, { recursive: true, force: true }); locks.delete(id); }
   }
   async function setEnabled(modId, enabled) {
@@ -287,11 +389,17 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       const discovered = await discoverMods({ runtimeRoot, logger });
       if (!discovered.some((entry) => entry.id === id)) throw Object.assign(new Error('mod_not_found'), { statusCode: 404 });
       const timestamp = now();
+      const previous = db.prepare('SELECT enabled FROM mod_lifecycle WHERE mod_id=?').get(id);
       db.prepare(`INSERT INTO mod_lifecycle (mod_id,enabled,created_at,updated_at) VALUES (?,?,?,?)
         ON CONFLICT(mod_id) DO UPDATE SET enabled=excluded.enabled,updated_at=excluded.updated_at`).run(id, enabled ? 1 : 0, timestamp, timestamp);
-      onLifecycleChange?.({ modId: id, enabled: Boolean(enabled), installed: true });
+      try { await onLifecycleChange?.({ modId: id, enabled: Boolean(enabled), installed: true, action: enabled ? 'enable' : 'disable' }); }
+      catch (error) {
+        if (previous) db.prepare('UPDATE mod_lifecycle SET enabled=?,updated_at=? WHERE mod_id=?').run(previous.enabled, timestamp, id);
+        else db.prepare('DELETE FROM mod_lifecycle WHERE mod_id=?').run(id);
+        throw error;
+      }
       restart?.();
-      return { ok: true, modId: id, enabled: Boolean(enabled), restartRequired: true };
+      return { ok: true, modId: id, enabled: Boolean(enabled), restartRequired: Boolean(restart) };
     } finally { db.close(); locks.delete(id); }
   }
   async function uninstall(modId) {
@@ -302,20 +410,24 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       const discovered = await discoverMods({ runtimeRoot, logger });
       const mod = discovered.find((entry) => entry.id === id);
       if (!mod) throw Object.assign(new Error('mod_not_found'), { statusCode: 404 });
+      if (mod.manifest?.system === true) throw Object.assign(new Error('system_mod_uninstall_forbidden'), { statusCode: 409 });
+      await onLifecycleChange?.({ modId: id, enabled: false, installed: false, action: 'uninstall' });
       await fs.rm(path.join(modsRoot, id), { recursive: true, force: true });
       db.prepare('DELETE FROM mod_installations WHERE mod_id=?').run(id);
       db.prepare('DELETE FROM mod_lifecycle WHERE mod_id=?').run(id);
-      onLifecycleChange?.({ modId: id, enabled: false, installed: false });
       restart?.();
-      return { ok: true, modId: id, uninstalled: true, settingsPreserved: true, restartRequired: true };
+      return { ok: true, modId: id, uninstalled: true, settingsPreserved: true, restartRequired: Boolean(restart) };
     } finally { db.close(); locks.delete(id); }
   }
-  return { list, addSource, refresh, removeSource, install, enable: (id) => setEnabled(id, true), disable: (id) => setEnabled(id, false), uninstall };
+  schedulePoll();
+  return { list, sourceRefreshConfig, saveSourceRefreshConfig, addSource, refresh, removeSource, install, enable: (id) => setEnabled(id, true), disable: (id) => setEnabled(id, false), uninstall, async close() { closed = true; clearPoll(); try { await refreshPromise; } catch {} } };
 }
 
 export function createModManagementRoute({ distribution, readJsonBody, sendJson } = {}) {
   return async ({ req, res, url } = {}) => {
     if (url.pathname === '/api/mod-management' && req.method === 'GET') { sendJson(res, 200, await distribution.list()); return true; }
+    if (url.pathname === '/api/mod-management/source-refresh' && req.method === 'GET') { sendJson(res, 200, distribution.sourceRefreshConfig()); return true; }
+    if (url.pathname === '/api/mod-management/source-refresh' && req.method === 'PUT') { const body = await readJsonBody(req); sendJson(res, 200, distribution.saveSourceRefreshConfig(body)); return true; }
     if (url.pathname === '/api/mod-management/sources' && req.method === 'POST') { const body = await readJsonBody(req); const result = await distribution.addSource(body.url, body.auth || body.credentials || (body.token ? { token: body.token, username: body.username } : null)); sendJson(res, result.ok ? 201 : 502, result); return true; }
     if (url.pathname === '/api/mod-management/refresh' && req.method === 'POST') { sendJson(res, 200, await distribution.refresh()); return true; }
     let match = url.pathname.match(/^\/api\/mod-management\/sources\/([^/]+)$/);

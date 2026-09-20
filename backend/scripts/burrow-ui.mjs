@@ -2969,22 +2969,44 @@ const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJ
 const authRoute = createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
 const chatRoute = createChatRoutes({ handleChat, readJsonBody, sendJson, selectedAgentRuntime, cancelChatRun });
 const modsRuntimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
-const mods = await loadMods({ runtimeRoot: modsRuntimeRoot, databasePath: settingsDatabasePath(), executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), resolveAgentWorkspaceRoot: async (id) => {
+const modLoadOptions = { runtimeRoot: modsRuntimeRoot, databasePath: settingsDatabasePath(), executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), resolveAgentWorkspaceRoot: async (id) => {
   const agent = agentsStore().get(id);
   if (!agent) throw new Error('agent_not_found');
   return agentRuntimeContext({ runtimeState: (await runtimeConfig()).runtimeState, agent }).agentWorkspaceRoot;
-} });
+} };
+const mods = await loadMods(modLoadOptions);
 loadedMods = mods;
-const modRoute = createModRoute({ mods, readJsonBody, sendJson });
+const modRoute = createModRoute({ getMods: () => loadedMods, readJsonBody, sendJson });
+async function transitionMod({ modId, enabled, installed, action }) {
+  const old = loadedMods.find((entry) => entry.id === modId) || null;
+  if (old?.host?.activeOperationCount?.() > 0) throw Object.assign(new Error('mod_busy'), { statusCode: 409 });
+  if (action === 'update-preflight') return;
+  if (!installed || !enabled) {
+    if (old) await cleanupMods([old]);
+    loadedMods = installed
+      ? loadedMods.map((entry) => entry.id === modId ? { ...entry, host: null, routes: [], store: null, lifecycleCleanup: null, status: 'disabled' } : entry)
+      : loadedMods.filter((entry) => entry.id !== modId);
+    return;
+  }
+  const [next] = await loadMods({ ...modLoadOptions, onlyModIds: [modId], replaceExecutionProviders: action === 'update' });
+  if (!next || next.status !== 'loaded') {
+    if (next) await cleanupMods([next]);
+    throw Object.assign(new Error(next?.error || 'mod_activation_failed'), { statusCode: 409 });
+  }
+  // Activation awaits child IPC and can take long enough for new work to start
+  // on the old host. Recheck immediately before the synchronous publication.
+  if (old?.host?.activeOperationCount?.() > 0) {
+    await cleanupMods([next]);
+    throw Object.assign(new Error('mod_busy'), { statusCode: 409 });
+  }
+  loadedMods = old ? loadedMods.map((entry) => entry.id === modId ? next : entry) : [...loadedMods, next];
+  next.commitProviderReplacement?.();
+  if (old) await cleanupMods([old]);
+}
 const modDistribution = createModDistribution({
   runtimeRoot: modsRuntimeRoot,
   databasePath: settingsDatabasePath(),
-  onLifecycleChange({ modId, enabled, installed }) { const mod = loadedMods.find((entry) => entry.id === modId); if (mod && (!installed || !enabled)) mod.status = installed ? 'disabled' : 'uninstalled'; },
-  restart() {
-    // Installed code is never hot-swapped into a live process. The service
-    // manager restarts Burrow after the response has reached the operator.
-    setTimeout(() => { process.kill(process.pid, 'SIGTERM'); }, 250).unref?.();
-  },
+  onLifecycleChange: transitionMod,
 });
 const modManagementRoute = createModManagementRoute({ distribution: modDistribution, readJsonBody, sendJson });
 
@@ -3004,9 +3026,9 @@ const server = createServer(async (req, res) => {
       if (await serveV18Asset(url, res)) return;
       return sendJson(res, 404, { ok: false, error: 'ui_artifact_not_found' });
     }
-    if (req.method === 'GET' && url.pathname === '/api/diagnostics/mods') return sendJson(res, 200, { ok: true, mods: diagnosticMods(mods) });
+    if (req.method === 'GET' && url.pathname === '/api/diagnostics/mods') return sendJson(res, 200, { ok: true, mods: diagnosticMods(loadedMods) });
     if (req.method === 'GET' && /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/pending$/.test(url.pathname)) {
-      try { return sendJson(res, 200, { ok: true, ...pendingModOperations(mods, url.pathname.split('/')[4]) }); }
+      try { return sendJson(res, 200, { ok: true, ...pendingModOperations(loadedMods, url.pathname.split('/')[4]) }); }
       catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'mod_diagnostics_unavailable' }); }
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/diagnostics/mods/')) {
@@ -3014,7 +3036,7 @@ const server = createServer(async (req, res) => {
       if (!match) return sendJson(res, 404, { ok: false, error: 'not_found' });
       const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : 50;
       const cursor = url.searchParams.has('cursor') ? url.searchParams.get('cursor') : undefined;
-      try { return sendJson(res, 200, { ok: true, ...await modJobs(mods, match[1], { jobId: match[2], limit, cursor }) }); }
+      try { return sendJson(res, 200, { ok: true, ...await modJobs(loadedMods, match[1], { jobId: match[2], limit, cursor }) }); }
       catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'mod_diagnostics_unavailable' }); }
     }
     if (req.method === 'GET' && url.pathname === '/api/diagnostics/inventory') {
@@ -3119,7 +3141,8 @@ async function shutdownRuntime(signal, { exitCode = signal === 'SIGINT' ? 130 : 
     await recordActiveRunInterruptions({ activeRuns: activeChatRuns, resolveAgentRuntime, reason: signal === 'SIGINT' ? 'service_interrupt' : 'service_shutdown' });
     server.closeIdleConnections?.();
     await Promise.race([closePromise, new Promise((resolve) => setTimeout(() => { forced = true; server.closeAllConnections?.(); resolve(); }, SHUTDOWN_DRAIN_MS))]);
-    await cleanupMods(mods);
+    await modDistribution.close();
+    await cleanupMods(loadedMods);
     await serverLogger.event('shutdown_complete', { signal, forced, drainMs: SHUTDOWN_DRAIN_MS });
   } catch (error) {
     await serverLogger.event('shutdown_error', { signal, error: String(error?.message || error) });

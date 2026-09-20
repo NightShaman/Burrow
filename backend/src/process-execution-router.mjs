@@ -78,12 +78,27 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
 export function createExecutionProviderRegistry() {
   const controllers = new Map();
   return Object.freeze({
-    register(providerId, controller) {
+    register(providerId, controller, { replace = false } = {}) {
       const id = requiredId(providerId, 'provider_id');
       if (!controller || typeof controller.executeProcess !== 'function') throw new Error('execution_provider_invalid');
-      if (controllers.has(id)) throw new Error(`execution_provider_duplicate:${id}`);
-      controllers.set(id, controller);
-      return () => controllers.delete(id);
+      const previous = controllers.get(id) || null;
+      if (previous && !replace) throw new Error(`execution_provider_duplicate:${id}`);
+      let committed = !previous;
+      if (!previous) controllers.set(id, controller);
+      const unregister = () => {
+        if (!committed) return;
+        if (controllers.get(id) === controller) controllers.delete(id);
+      };
+      // A replacement remains private until its host has fully activated and the
+      // live mod registry is ready to publish it. This prevents work from being
+      // routed into a candidate that may still be rolled back.
+      unregister.commit = () => {
+        if (committed) return;
+        if (controllers.get(id) !== previous) throw new Error(`execution_provider_replacement_conflict:${id}`);
+        controllers.set(id, controller);
+        committed = true;
+      };
+      return unregister;
     },
     get(providerId) { return controllers.get(String(providerId || '')) || null; },
   });

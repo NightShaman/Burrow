@@ -1,15 +1,20 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ModsSettings } from './ModsSettings';
 import * as management from './modManagementApi';
 
 vi.mock('./modManagementApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./modManagementApi')>();
-  return { ...actual, loadModManagement: vi.fn(), modManagementAction: vi.fn() };
+  return { ...actual, loadModManagement: vi.fn(), loadSourceRefreshConfig: vi.fn(), saveSourceRefreshConfig: vi.fn(), modManagementAction: vi.fn() };
 });
 
 const loadMock = vi.mocked(management.loadModManagement);
+const loadRefreshMock = vi.mocked(management.loadSourceRefreshConfig);
+const saveRefreshMock = vi.mocked(management.saveSourceRefreshConfig);
 
+beforeEach(() => {
+  loadRefreshMock.mockResolvedValue({ enabled: true, intervalMs: 21_600_000, staleMs: 900_000 });
+});
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe('ModsSettings layout contract', () => {
@@ -70,8 +75,8 @@ describe('ModsSettings version and lifecycle truth', () => {
     vi.mocked(management.modManagementAction).mockResolvedValue({ ok: true });
     render(<ModsSettings />);
     await screen.findByRole('button', { name: label });
-    const current = screen.getByLabelText('Current version') as HTMLInputElement;
-    const latest = screen.getByLabelText('Latest version') as HTMLInputElement;
+    const current = screen.getByLabelText('Installed version') as HTMLInputElement;
+    const latest = screen.getByLabelText('Latest source version') as HTMLInputElement;
     expect(current.value).toBe(versions.version || 'Unknown');
     expect(latest.value).toBe(versions.latestVersion || 'Unknown');
     expect(current.readOnly).toBe(true);
@@ -92,7 +97,7 @@ describe('ModsSettings version and lifecycle truth', () => {
     render(<ModsSettings />);
     const button = await screen.findByRole('button', { name: status === 'installed' ? 'Reinstall' : 'Install' });
     expect((button as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByLabelText('Current version') as HTMLInputElement).value).toBe(status === 'installed' ? 'Unknown' : 'Not installed');
+    expect((screen.getByLabelText('Installed version') as HTMLInputElement).value).toBe(status === 'installed' ? 'Unknown' : 'Not installed');
     fireEvent.click(button);
     expect(management.modManagementAction).not.toHaveBeenCalled();
   });
@@ -100,6 +105,45 @@ describe('ModsSettings version and lifecycle truth', () => {
 
 
 describe('Git mod sources', () => {
+  it('edits automatic checks in friendly units and saves exact milliseconds', async () => {
+    loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [], sourceRefresh: { enabled: true, intervalMs: 21_600_000, staleMs: 900_000, refreshing: false, failures: 0 } });
+    saveRefreshMock.mockResolvedValue({ enabled: false, intervalMs: 5_400_000, staleMs: 90_000 });
+    render(<ModsSettings section="sources" />);
+    const enabled = await screen.findByRole('checkbox', { name: 'Enable background source checks' });
+    expect((screen.getByLabelText('Check every') as HTMLInputElement).value).toBe('6');
+    expect((screen.getByLabelText('Check interval unit') as HTMLSelectElement).value).toBe('hours');
+    expect((screen.getByLabelText('Consider source stale after') as HTMLInputElement).value).toBe('15');
+    fireEvent.click(enabled);
+    fireEvent.change(screen.getByLabelText('Check every')!, { target: { value: '1.5' } });
+    fireEvent.change(screen.getByLabelText('Stale threshold unit'), { target: { value: 'seconds' } });
+    fireEvent.change(screen.getByLabelText('Consider source stale after')!, { target: { value: '90' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save automatic checks' }));
+    await waitFor(() => expect(saveRefreshMock).toHaveBeenCalledWith({ enabled: false, intervalMs: 5_400_000, staleMs: 90_000 }));
+  });
+
+  it('preserves millisecond precision and surfaces save failures', async () => {
+    loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
+    loadRefreshMock.mockResolvedValue({ enabled: true, intervalMs: 1_234, staleMs: 5_678 });
+    saveRefreshMock.mockRejectedValue(new Error('refresh settings unavailable'));
+    render(<ModsSettings section="sources" />);
+    await screen.findByRole('button', { name: 'Save automatic checks' });
+    expect((screen.getByLabelText('Check every') as HTMLInputElement).value).toBe('1234');
+    expect((screen.getByLabelText('Check interval unit') as HTMLSelectElement).value).toBe('milliseconds');
+    fireEvent.click(screen.getByRole('button', { name: 'Save automatic checks' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('refresh settings unavailable'));
+  });
+
+  it('rejects durations that do not resolve to positive safe integer milliseconds', async () => {
+    loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
+    render(<ModsSettings section="sources" />);
+    await screen.findByRole('button', { name: 'Save automatic checks' });
+    fireEvent.change(screen.getByLabelText('Check every')!, { target: { value: '0.0001' } });
+    fireEvent.change(screen.getByLabelText('Check interval unit'), { target: { value: 'seconds' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save automatic checks' }));
+    expect(screen.getByRole('alert').textContent).toContain('positive whole durations');
+    expect(saveRefreshMock).not.toHaveBeenCalled();
+  });
+
   it('submits a public Git URL without auth and clears on success', async () => {
     loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
     vi.mocked(management.modManagementAction).mockResolvedValue({ ok: true });

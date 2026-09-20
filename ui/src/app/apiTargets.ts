@@ -20,6 +20,7 @@ type ModsResponse = {
   mods?: Array<{
     id?: unknown;
     name?: unknown;
+    version?: unknown;
     contributions?: { apiTargets?: unknown; settings?: unknown };
     ui?: { settingsUrl?: unknown };
   }>;
@@ -70,10 +71,12 @@ export type ApiTargetContribution = {
   name: string;
   endpoint?: string;
   settingsUrl?: string;
+  version?: string;
   settings?: ModSettingsContribution[];
 };
 
 export const apiTargetsChangedEvent = 'burrow:api-targets-changed';
+export const modContributionsChangedEvent = 'burrow:mod-contributions-changed';
 
 const validTargetId = /^[a-z0-9][a-z0-9._-]*$/i;
 
@@ -111,7 +114,7 @@ export async function loadApiTargetContributions(): Promise<ApiTargetContributio
     const settings = Array.isArray(mod.contributions?.settings)
       ? mod.contributions.settings.map(normalizeSettingsContribution).filter((item): item is ModSettingsContribution => Boolean(item))
       : [];
-    return [{ modId: mod.id, name: typeof mod.name === 'string' && mod.name.trim() ? mod.name.trim() : mod.id, ...(validEndpoint ? { endpoint: validEndpoint } : {}), ...(validSettingsUrl ? { settingsUrl: validSettingsUrl } : {}), ...(settings.length ? { settings } : {}) }];
+    return [{ modId: mod.id, name: typeof mod.name === 'string' && mod.name.trim() ? mod.name.trim() : mod.id, ...(typeof mod.version === 'string' ? { version: mod.version } : {}), ...(validEndpoint ? { endpoint: validEndpoint } : {}), ...(validSettingsUrl ? { settingsUrl: validSettingsUrl } : {}), ...(settings.length ? { settings } : {}) }];
   });
 }
 

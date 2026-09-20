@@ -16,7 +16,7 @@ import { ApiTokensSettings } from './ApiTokensSettings';
 import { AuthenticationSettings } from './AuthenticationSettings';
 import { CuratorSettings } from './CuratorSettings';
 import { RetentionSettings } from './RetentionSettings';
-import { loadApiTargetContributions, type ApiTargetContribution, type ModSettingsContribution } from '../../app/apiTargets';
+import { loadApiTargetContributions, modContributionsChangedEvent, type ApiTargetContribution, type ModSettingsContribution } from '../../app/apiTargets';
 import type { ApiTarget } from '../../app/apiTargets';
 import { ApiTargetsSettings } from './ApiTargetsSettings';
 import { ExecutionBoundaries } from './ExecutionBoundaries';
@@ -51,7 +51,14 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
   useEffect(() => {
     if (!agents.some((agent) => agent.id === settingsAgentId)) setSettingsAgentId(selected.id);
   }, [agents, selected.id, settingsAgentId]);
-  useEffect(() => { let cancelled = false; void loadApiTargetContributions().then((items) => { if (!cancelled) setTargetContributions(items); }); return () => { cancelled = true; }; }, []);
+  useEffect(() => {
+    let cancelled = false;
+    let sequence = 0;
+    const refresh = () => { const current = ++sequence; void loadApiTargetContributions().then((items) => { if (!cancelled && current === sequence) setTargetContributions(items); }); };
+    refresh();
+    window.addEventListener(modContributionsChangedEvent, refresh);
+    return () => { cancelled = true; window.removeEventListener(modContributionsChangedEvent, refresh); };
+  }, []);
   useEffect(() => {
     let cancelled = false;
     void api<SetupStatus>('/api/setup/status').then((status) => { if (!cancelled) setSetupStatus(status); }).catch(() => { if (!cancelled) setSetupStatus(null); });
@@ -130,7 +137,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
         {tab === 'connections' && connectionSection === 'mcp-servers' && <McpConnections overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'api-tokens' && <ApiTokensSettings overflowTarget={overflowColumn} />}
         {tab === 'mods' && <ModsSettings section={modsSection} overflowTarget={overflowColumn} />}
-        {selectedContribution?.settingsUrl ? <ModSettingsHost modId={selectedContribution.modId} settingsUrl={selectedContribution.settingsUrl} agents={agents} onAgentsChanged={onAgentsChanged} navigationTarget={modNavigationColumn} overflowTarget={overflowColumn} /> : selectedContribution && <ApiTargetsSettings contribution={selectedContribution} settings={selectedModSettings} overflowTarget={overflowColumn} />}
+        {selectedContribution?.settingsUrl ? <ModSettingsHost key={`${selectedContribution.modId}:${selectedContribution.version ?? ''}`} modId={selectedContribution.modId} settingsUrl={`${selectedContribution.settingsUrl}${selectedContribution.version ? `?v=${encodeURIComponent(selectedContribution.version)}` : ''}`} agents={agents} onAgentsChanged={onAgentsChanged} navigationTarget={modNavigationColumn} overflowTarget={overflowColumn} /> : selectedContribution && <ApiTargetsSettings contribution={selectedContribution} settings={selectedModSettings} overflowTarget={overflowColumn} />}
       </section>
       <section className="settings-blank-column settings-prototype-overflow" ref={setOverflowColumn} aria-label="Additional settings" />
       <aside className="settings-utility-panel" aria-label="System statistics" aria-hidden={!utilityPanelOpen}>
