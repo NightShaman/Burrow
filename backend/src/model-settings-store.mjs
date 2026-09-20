@@ -12,6 +12,7 @@ function asBoolean(value) { return value === true || value === 1; }
 function parseJson(value, fallback) { try { return JSON.parse(value); } catch { return fallback; } }
 function stringifyJson(value) { return JSON.stringify(value ?? {}); }
 function numberOrNull(value) { const n = Number(value); return Number.isFinite(n) && n > 0 ? n : null; }
+function positiveInteger(value) { const n = Number(value); return Number.isInteger(n) && n > 0 ? n : null; }
 
 function parseSemver(value = '') {
   const match = String(value || '').trim().match(/^(?:rust-v|v)?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/i);
@@ -129,12 +130,14 @@ function safeModelMetadata(model = {}, { provider = '', apiType = '' } = {}) {
   const defaultReasoningEffort = normalize(model.defaultReasoningEffort ?? model.default_reasoning_effort ?? model.default_reasoning_level ?? model.defaultReasoningLevel ?? metadata.default_reasoning_level ?? metadata.defaultReasoningLevel);
   const knownCapabilities = knownModelCapabilities({ provider, apiType, modelId: model.id });
   const supportsTemperatureValue = model.supportsTemperature ?? model.supports_temperature ?? metadata.supportsTemperature ?? metadata.supports_temperature ?? capabilities.supportsTemperature ?? capabilities.supports_temperature ?? knownCapabilities.supportsTemperature;
+  const outputTokens = positiveInteger(model.outputTokens ?? model.output_tokens ?? model.maxOutputTokens ?? model.max_output_tokens ?? metadata.output_tokens ?? metadata.outputTokens ?? metadata.max_output_tokens ?? metadata.maxOutputTokens ?? capabilities.output_tokens ?? capabilities.outputTokens ?? capabilities.max_output_tokens ?? capabilities.maxOutputTokens);
   return {
     ...(displayName ? { displayName } : {}),
     ...(reasoningEfforts.length ? { reasoningEfforts } : {}),
     ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
     ...(typeof supportsTemperatureValue === 'boolean' ? { supportsTemperature: supportsTemperatureValue } : {}),
     ...(Number.isFinite(Number(model.contextWindow ?? model.context_window ?? metadata.context_window ?? metadata.contextWindow ?? capabilities.context_length)) ? { contextWindow: Number(model.contextWindow ?? model.context_window ?? metadata.context_window ?? metadata.contextWindow ?? capabilities.context_length) } : {}),
+    ...(outputTokens ? { outputTokens } : {}),
     ...(discovered ? { discoveredInput: discovered } : {}),
     ...(Array.isArray(override) ? { acceptedInputOverride: normalizedInput(override) } : {}),
   };

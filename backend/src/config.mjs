@@ -16,6 +16,22 @@ const absolute = (value, fallback) => path.resolve(text(value) || fallback);
 const env = (name, fallback = undefined) => process.env[name] === undefined ? fallback : process.env[name];
 
 export const PROVIDER_DEFAULT_CONTEXT_TOKENS = Object.freeze({ openai: 292_000, anthropic: 1_000_000 });
+export const DEFAULT_MODEL_OUTPUT_TOKENS = 32_768;
+
+function positiveInteger(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function resolveEffectiveModelOutputTokens({ explicit = null, outputTokens = null, maxOutputTokens = null, maxTokens = null } = {}) {
+  const explicitTokens = positiveInteger(explicit);
+  if (explicitTokens) return explicitTokens;
+  for (const value of [outputTokens, maxOutputTokens, maxTokens]) {
+    const parsed = positiveInteger(value);
+    if (parsed) return parsed;
+  }
+  return DEFAULT_MODEL_OUTPUT_TOKENS;
+}
 
 export function resolveEffectiveModelContextTokens({ contextTokens = null, contextWindow = null, provider = '', api = '' } = {}) {
   for (const value of [contextTokens, contextWindow]) {
@@ -102,6 +118,10 @@ export async function resolveModelConfig(args = {}) {
     temperature,
     contextWindow: model.contextWindow ?? undefined,
     contextTokens: resolveEffectiveModelContextTokens({ contextTokens: model.contextTokens, contextWindow: model.contextWindow, provider: connection.provider, api: connection.apiType }) ?? undefined,
+    ...(args.max_tokens !== undefined || args.maxTokens !== undefined || args.output_tokens !== undefined || args.outputTokens !== undefined || model.outputTokens !== undefined || model.maxOutputTokens !== undefined || model.maxTokens !== undefined ? {
+      outputTokens: resolveEffectiveModelOutputTokens({ explicit: args.max_tokens ?? args.maxTokens ?? args.output_tokens ?? args.outputTokens, outputTokens: model.outputTokens, maxOutputTokens: model.maxOutputTokens, maxTokens: model.maxTokens }),
+      maxTokens: resolveEffectiveModelOutputTokens({ explicit: args.max_tokens ?? args.maxTokens ?? args.output_tokens ?? args.outputTokens, outputTokens: model.outputTokens, maxOutputTokens: model.maxOutputTokens, maxTokens: model.maxTokens }),
+    } : {}),
     reasoningEfforts: model.reasoningEfforts ?? undefined,
     defaultReasoningEffort: model.defaultReasoningEffort ?? undefined,
     supportsTemperature: modelSupportsTemperature({ provider: connection.provider, api: connection.apiType, model: model.id, declared: model.supportsTemperature }),
@@ -124,7 +144,7 @@ export async function resolveModelConfig(args = {}) {
 }
 export function redactModelConfig(modelConfig) {
   if (!modelConfig) return null;
-  return { provider: modelConfig.provider, providerName: modelConfig.providerName, api: modelConfig.api, baseUrl: modelConfig.baseUrl, model: modelConfig.model, temperature: modelConfig.temperature ?? 0.2, hasApiKey: Boolean(modelConfig.apiKey), contextWindow: modelConfig.contextWindow || null, contextTokens: modelConfig.contextTokens || null, connectionId: modelConfig.connectionId || null, selectedModel: modelConfig.selectedModel || null };
+  return { provider: modelConfig.provider, providerName: modelConfig.providerName, api: modelConfig.api, baseUrl: modelConfig.baseUrl, model: modelConfig.model, temperature: modelConfig.temperature ?? 0.2, hasApiKey: Boolean(modelConfig.apiKey), contextWindow: modelConfig.contextWindow || null, contextTokens: modelConfig.contextTokens || null, outputTokens: modelConfig.outputTokens || null, maxTokens: modelConfig.maxTokens || null, connectionId: modelConfig.connectionId || null, selectedModel: modelConfig.selectedModel || null };
 }
 
 

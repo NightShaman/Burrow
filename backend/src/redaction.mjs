@@ -1,12 +1,17 @@
 const SECRET_ASSIGNMENT = /\b([A-Z0-9_]*(?:TOKEN|API[_-]?KEY|SECRET|PASSWORD|PASS|AUTH)[A-Z0-9_]*)\s*=\s*([^\s'\"]+)/gi;
 const AUTH_HEADER = /\b(authorization\s*[:=]\s*)(bearer\s+)?[^\s'\"]+/gi;
 const KEY_VALUE_EQUALS = /\b(api[_-]?key|token|secret|password|passwd)\s*[:=]\s*([^\s'\"]+)/gi;
-const KEY_VALUE_FLAG = /(--?(?:api[_-]?key|token|secret|password|passwd))\s+([^\s'\"]+)/gi;
+const KEY_VALUE_FLAG = /(?<![\w-])(--?(?:api[_-]?key|token|secret|password|passwd))\s+([^\s'\"]+)/gi;
 const PROVIDER_KEY_PREFIX = /\b(sk|xox[baprs]|gh[pousr])[-_]([A-Za-z0-9_-]{8,})\b/g;
 // An explicit wrapper covers opaque values whose format cannot safely be
 // recognized. Keep the wrapper out of every durable/logged projection while
 // leaving the raw current turn available to the model for this request.
 const SECRET_BLOCK = /<secret(?:\s+[^>]*)?>[\s\S]*?<\/secret>/gi;
+
+function redactSecretAssignment(match, key) {
+  if (/^(?:output_tokens|max_output_tokens|context_tokens|estimated_tokens)$/i.test(String(key || ''))) return match;
+  return `${key}=[redacted]`;
+}
 
 export function redactProtectedText(value, protectedValues = []) {
   let text = redactText(value);
@@ -19,7 +24,7 @@ export function redactProtectedText(value, protectedValues = []) {
 export function redactText(value) {
   return String(value ?? '')
     .replace(SECRET_BLOCK, '<secret>[redacted]</secret>')
-    .replace(SECRET_ASSIGNMENT, '$1=[redacted]')
+    .replace(SECRET_ASSIGNMENT, redactSecretAssignment)
     .replace(AUTH_HEADER, '$1$2[redacted]')
     .replace(KEY_VALUE_EQUALS, '$1=[redacted]')
     .replace(KEY_VALUE_FLAG, '$1 [redacted]')

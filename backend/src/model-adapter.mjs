@@ -47,6 +47,7 @@ export const __test__ = {
   contextUsageFromResponse,
   compactResponseCompletion,
   anthropicCachedTokens: anthropicTest.anthropicCachedTokens,
+  anthropicThinkingConfig: anthropicTest.anthropicThinkingConfig,
   defaultMaxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES,
   maxModelTextChars: MAX_MODEL_TEXT_CHARS,
   maxSseCarryChars: MAX_SSE_CARRY_CHARS,

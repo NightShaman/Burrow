@@ -1,4 +1,5 @@
 import { redactText } from '../redaction.mjs';
+import { DEFAULT_MODEL_OUTPUT_TOKENS } from '../config.mjs';
 import { anthropicSupportsSamplingParameters } from '../anthropic-model-capabilities.mjs';
 import {
   CLAUDE_CODE_VERSION,
@@ -181,7 +182,7 @@ function anthropicExtraWithoutGenericReasoning(extra = {}, model = '') {
   return Object.keys(rest).length ? rest : undefined;
 }
 
-function anthropicThinkingConfig({ model, config = {}, maxTokens = 4096 } = {}) {
+function anthropicThinkingConfig({ model, config = {}, maxTokens = DEFAULT_MODEL_OUTPUT_TOKENS } = {}) {
   const effort = anthropicReasoningEffort(config);
   if (effort === 'off' && supportsAnthropicThinking(model)) {
     const extra = { ...anthropicExtraWithoutGenericReasoning(config.extra, model) };
@@ -209,14 +210,22 @@ function anthropicThinkingConfig({ model, config = {}, maxTokens = 4096 } = {}) 
       extra: anthropicExtraWithoutGenericReasoning(config.extra, model),
     };
   }
-  const budgetTokens = ANTHROPIC_THINKING_BUDGETS[effort] || ANTHROPIC_THINKING_BUDGETS.medium;
+  const totalMaxTokens = Number(maxTokens) || DEFAULT_MODEL_OUTPUT_TOKENS;
+  if (totalMaxTokens <= ANTHROPIC_THINKING_BUDGETS.minimal) {
+    throw new Error(`Anthropic manual thinking requires max_tokens greater than ${ANTHROPIC_THINKING_BUDGETS.minimal}; received ${totalMaxTokens}`);
+  }
+  const requestedBudgetTokens = ANTHROPIC_THINKING_BUDGETS[effort] || ANTHROPIC_THINKING_BUDGETS.medium;
+  // Anthropic manual thinking budgets are part of the total max_tokens allowance,
+  // and the protocol requires budget_tokens to be strictly less than max_tokens.
+  // Preserve the caller/provider total and clamp only the mapped effort budget.
+  const budgetTokens = Math.min(requestedBudgetTokens, totalMaxTokens - 1);
   return {
     enabled: true,
     mode: 'manual',
     effort,
     budgetTokens,
     thinking: { type: 'enabled', budget_tokens: budgetTokens },
-    maxTokens: Math.max(Number(maxTokens) || 4096, budgetTokens + 4096),
+    maxTokens: totalMaxTokens,
     extra: anthropicExtraWithoutGenericReasoning(config.extra, model),
   };
 }
@@ -265,7 +274,10 @@ function normalizeAnthropicChoice(data = {}) {
 
 function mergeAnthropicStreamEvent(state, event) {
   const type = event?.type;
-  if (type === 'message_start') state.message = event.message || state.message || {};
+  if (type === 'error') {
+    state.error = event.error || { message: event.message || 'model_stream_failed' };
+    state.errorEventType = type;
+  } else if (type === 'message_start') state.message = event.message || state.message || {};
   else if (type === 'content_block_start') state.blocks[event.index || 0] = event.content_block || {};
   else if (type === 'content_block_delta') {
     const block = state.blocks[event.index || 0] || (state.blocks[event.index || 0] = {});
@@ -299,7 +311,21 @@ async function readAnthropicSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_BYTE
       mergeAnthropicStreamEvent(state, event);
     } catch {}
   }
-  return { ok: true, text: textResult.text, bytes: textResult.bytes, data: { ...(state.message || {}), content: state.blocks.filter(Boolean) }, event: currentEvent };
+  if (state.error) {
+    const details = {
+      eventType: boundedText(state.errorEventType || currentEvent || 'error', 64),
+      ...(state.error.type ? { type: boundedText(state.error.type, 128) } : {}),
+      ...(state.error.code ? { code: boundedText(state.error.code, 128) } : {}),
+      ...(state.error.message ? { message: boundedText(state.error.message, 500) } : {}),
+    };
+    return { ok: false, text: textResult.text, bytes: textResult.bytes, data: null, error: boundedText(state.error.message || 'model_stream_failed', 500), errorDetails: details, event: currentEvent };
+  }
+  const data = { ...(state.message || {}), content: state.blocks.filter(Boolean) };
+  const stopReason = String(data.stop_reason || '');
+  const hasContent = Array.isArray(data.content) && data.content.length > 0;
+  if (stopReason === 'max_tokens' && !hasContent) return { ok: false, text: textResult.text, bytes: textResult.bytes, data, error: 'model_stream_max_tokens_empty', event: currentEvent };
+  if (textResult.text && currentEvent !== 'message_stop') return { ok: false, text: textResult.text, bytes: textResult.bytes, data, error: 'model_stream_truncated', event: currentEvent };
+  return { ok: true, text: textResult.text, bytes: textResult.bytes, data, event: currentEvent };
 }
 
 export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = globalThis.fetch, clock = () => new Date().toISOString(), idFactory = randomUUID } = {}) {
@@ -311,7 +337,7 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
   const imageCountFor = (messages = []) => (Array.isArray(messages) ? messages : []).reduce((count, message) => count + (Array.isArray(message?.content) ? message.content.filter((part) => part?.type === 'image_url' || part?.type === 'input_image' || part?.image_url || part?.input_image).length : 0), 0);
   const textPromptCharsFor = (messages = []) => (Array.isArray(messages) ? messages : []).reduce((total, message) => total + (typeof message?.content === 'string' ? message.content.length : (Array.isArray(message?.content) ? message.content.reduce((chars, part) => chars + String(part?.text || '').length, 0) : 0)), 0);
 
-  const buildRequest = ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens || 4096, tools = null, streaming = false } = {}) => {
+  const buildRequest = ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens ?? config.outputTokens ?? DEFAULT_MODEL_OUTPUT_TOKENS, tools = null, streaming = false } = {}) => {
     const sourceTranscript = normalizeProviderMessages(messages?.length ? messages : [{ role: 'user', content: String(prompt || '') }]);
     const converted = anthropicMessages(sourceTranscript);
     if (!converted.messages.length || !converted.messages.some((message) => Array.isArray(message.content) && message.content.length)) throw new Error('prompt or messages are required');
@@ -341,7 +367,7 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
     return contextUsageFromRequest({ promptChars: request.promptChars, bodyChars: request.serializedBody.length, imageCount: request.imageCount, model, api: 'anthropic-messages', modelCall: options.modelCall, clock });
   };
 
-  const complete = async ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens || 4096, tools = null, traceLogger, signal = null, onTextDelta = null, onThoughtDelta = null, onContextUsage = null, modelCall = null } = {}) => {
+  const complete = async ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens ?? config.outputTokens ?? DEFAULT_MODEL_OUTPUT_TOKENS, tools = null, traceLogger, signal = null, onTextDelta = null, onThoughtDelta = null, onContextUsage = null, modelCall = null } = {}) => {
     const requestId = idFactory();
     const streaming = typeof onTextDelta === 'function' || typeof onThoughtDelta === 'function';
     const { body, serializedBody, promptChars, imageCount, sourceTranscript, resolvedTools, promptCaching, thinking } = buildRequest({ prompt, messages, temperature, maxTokens, tools, streaming });
@@ -360,16 +386,21 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
       catch { data = { raw: responseBody.text }; }
     }
     const ok = Boolean(response.ok) && responseBody.ok;
-    const choice = ok ? normalizeAnthropicChoice(data) : null;
+    const candidateChoice = ok ? normalizeAnthropicChoice(data) : null;
+    const emptyMaxTokens = ok && candidateChoice?.finishReason === 'max_tokens' && !candidateChoice.text && !(candidateChoice.toolCalls || []).length;
+    const success = ok && !emptyMaxTokens;
+    const choice = success ? candidateChoice : null;
     const assistantMessage = choice && !(choice.toolCalls || []).length ? anthropicAssistantMessageFromChoice(choice) : null;
     // If the model returned tool_use blocks, keep them out of nativeTranscript:
     // runtime passes the pending toolCalls separately to continueWithToolResults,
     // which appends the assistant/tool pair atomically. Including pending calls
     // here duplicates Anthropic tool_use ids on the next continuation.
     const nativeTranscript = assistantMessage ? normalizeProviderMessages([...sourceTranscript, assistantMessage]) : sourceTranscript;
-    const result = { ok, requestId, provider: 'anthropic', api: 'anthropic-messages', model, status: response.status, choice, responseId: ok && typeof data?.id === 'string' ? boundedText(data.id, 256) : null, usage: data?.usage || null, contextUsage: contextUsageFromResponse(requestContextUsage, data?.usage || null, clock), error: ok ? null : (responseBody.error || data?.error?.message || data?.message || responseBody.text?.slice?.(0, 500) || `HTTP ${response.status}`), raw: ok ? { responseBytes: responseBody.bytes, ...(streaming ? { streamedTextChars: choice?.text?.length || 0 } : {}) } : { error: { message: responseBody.error || data?.error?.message || data?.message || `HTTP ${response.status}`, ...((data?.error || data?.type) ? { details: { ...(data?.error?.type ? { type: boundedText(data.error.type, 128) } : data?.type ? { type: boundedText(data.type, 128) } : {}), ...(data?.error?.code ? { code: boundedText(data.error.code, 128) } : {}), status: response.status } } : {}) } }, nativeTranscript, ...(choice?.anthropic?.assistantBlocks?.length ? { anthropicContinuation: { assistantBlocks: choice.anthropic.assistantBlocks } } : {}) };
+    const failureMessage = emptyMaxTokens ? 'model_max_tokens_empty' : (responseBody.error || data?.error?.message || data?.message || responseBody.text?.slice?.(0, 500) || `HTTP ${response.status}`);
+    const failureDetails = responseBody.errorDetails || ((data?.error || data?.type) ? { ...(data?.error?.type ? { type: boundedText(data.error.type, 128) } : data?.type ? { type: boundedText(data.type, 128) } : {}), ...(data?.error?.code ? { code: boundedText(data.error.code, 128) } : {}), status: response.status } : null);
+    const result = { ok: success, requestId, provider: 'anthropic', api: 'anthropic-messages', model, status: response.status, choice, responseId: success && typeof data?.id === 'string' ? boundedText(data.id, 256) : null, usage: data?.usage || null, contextUsage: contextUsageFromResponse(requestContextUsage, data?.usage || null, clock), error: success ? null : failureMessage, raw: success ? { responseBytes: responseBody.bytes, ...(streaming ? { streamedTextChars: choice?.text?.length || 0 } : {}) } : { error: { message: failureMessage, ...(failureDetails ? { details: failureDetails } : {}) } }, nativeTranscript, ...(choice?.anthropic?.assistantBlocks?.length ? { anthropicContinuation: { assistantBlocks: choice.anthropic.assistantBlocks } } : {}) };
     await onContextUsage?.(result.contextUsage);
-    await traceLogger?.model?.({ stage: 'model-response', requestId, provider: 'anthropic', api: 'anthropic-messages', model, status: response.status, ok, usage: result.usage, cachedTokens: anthropicCachedTokens(result.usage), stablePrefixHash, finishReason: result.choice?.finishReason || null, responseChars: result.choice?.text?.length || 0, responseBytes: responseBody.bytes, streamed: streaming, error: result.error, ts: clock() });
+    await traceLogger?.model?.({ stage: 'model-response', requestId, provider: 'anthropic', api: 'anthropic-messages', model, status: response.status, ok: success, usage: result.usage, cachedTokens: anthropicCachedTokens(result.usage), stablePrefixHash, finishReason: result.choice?.finishReason || candidateChoice?.finishReason || null, responseChars: result.choice?.text?.length || 0, responseBytes: responseBody.bytes, streamed: streaming, error: result.error, ...(responseBody.errorDetails ? { errorDetails: responseBody.errorDetails } : {}), ts: clock() });
     return result;
   };
 

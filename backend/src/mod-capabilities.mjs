@@ -237,7 +237,7 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
       if (result.error || !result.choice || result.choice.toolCalls?.length) throw modelGenerationFailure(result, result.choice?.toolCalls?.length ? 'unexpected_tool_call' : 'model_generation_failed');
       const text = result.choice.text;
-      if (typeof text !== 'string') throw modelGenerationFailure(result, 'model_generation_failed');
+      if (typeof text !== 'string' || (result.choice.finishReason === 'max_tokens' && !text)) throw modelGenerationFailure(result, 'model_generation_failed');
       return { text };
     },
   });
