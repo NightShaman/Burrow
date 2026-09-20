@@ -195,7 +195,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         // transport receipt, or the explicit error shape expected by callers.
         raw: ok
           ? { responseBytes: responseBody.bytes, ...(streaming ? { streamedTextChars: responseBody.streamedTextChars || 0, streamFallback: providerReturnedJson } : {}) }
-          : { error: { message: responseBody.error || data?.error?.message || data?.message || `HTTP ${response.status}`, ...(responseBody.errorDetails ? { details: responseBody.errorDetails } : {}) } },
+          : { error: { message: responseBody.error || data?.error?.message || data?.message || `HTTP ${response.status}`, ...((responseBody.errorDetails || data?.error) ? { details: responseBody.errorDetails || { ...(data?.error?.type ? { type: boundedText(data.error.type, 128) } : {}), ...(data?.error?.code ? { code: boundedText(data.error.code, 128) } : {}), ...(data?.error?.param ? { param: boundedText(data.error.param, 128) } : {}), status: response.status } } : {}) } },
         // Chat Completions has no server-side previous-response chain. Return
         // this bounded, protocol-native transcript so the caller can append
         // the next call/result pair instead of forgetting prior tool rounds.

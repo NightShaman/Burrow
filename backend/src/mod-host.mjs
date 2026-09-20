@@ -18,6 +18,18 @@ function hostError(code, detail = '') {
   error.code = code;
   return error;
 }
+function safeErrorDetails(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  try {
+    const parsed = JSON.parse(JSON.stringify(value));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch { return null; }
+}
+function capabilityErrorEnvelope(error, fallback = 'mod_capability_failed') {
+  const message = String(error?.message || '');
+  const code = /^[a-z0-9_]+$/.test(message) ? message : fallback;
+  return { error: code, ...(safeErrorDetails(error?.details) ? { errorDetails: safeErrorDetails(error.details) } : {}) };
+}
 
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 const NATIVE_FILESYSTEM_TOOLS = new Set(['files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_write', 'files_edit']);
@@ -136,7 +148,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     } catch (error) {
       // Adapter abort errors can win the race; preserve the host cancellation cause.
       if (controller.signal.aborted) error = controller.signal.reason || hostError("mod_capability_cancelled");
-      if (!closing && child.connected) child.send({ type: "capability-result", requestId, error: /^[a-z0-9_]+$/.test(String(error?.message)) ? error.message : "mod_capability_failed" }, () => {});
+      if (!closing && child.connected) child.send({ type: "capability-result", requestId, ...capabilityErrorEnvelope(error) }, () => {});
     } finally { controller.signal.removeEventListener("abort", onAbort); clearTimeout(timer); if (activeCapabilities.get(requestId)?.controller === controller) activeCapabilities.delete(requestId); }
   }
   const pendingSystemFilesystem = new Map();

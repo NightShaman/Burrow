@@ -14,6 +14,44 @@ function positiveSafeInteger(value) { if (value === undefined) return undefined;
 function plain(value) { if (!value || typeof value !== 'object' || Array.isArray(value)) invalid(); return value; }
 const SCHEDULER_PAGE_MAX_BYTES = 240_000;
 function resultBytes(value) { return Buffer.byteLength(JSON.stringify(value)); }
+function boundedDiagnosticText(value, max = 512) { return typeof value === 'string' ? value.slice(0, max) : null; }
+function safeProviderErrorDetails(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const out = {};
+  for (const key of ['type', 'code', 'param', 'eventType', 'responseStatus']) {
+    const item = value[key];
+    if (typeof item === 'string' && item) out[key] = boundedDiagnosticText(item, 128);
+  }
+  for (const key of ['status']) {
+    const item = value[key];
+    if (Number.isInteger(item) || (typeof item === 'string' && item)) out[key] = item;
+  }
+  return Object.keys(out).length ? out : null;
+}
+function parseLimitError(error) {
+  const match = /^([a-z0-9_]+):(\d+)>(\d+)$/.exec(String(error || ''));
+  return match ? { code: match[1], bytes: Number(match[2]), limit: Number(match[3]) } : null;
+}
+function modelGenerationFailure(result = {}, reason = 'model_generation_failed') {
+  const error = new Error('mod_model_generation_failed');
+  const limit = parseLimitError(result.error);
+  const providerDetails = safeProviderErrorDetails(result.raw?.error?.details);
+  const status = Number(result.status);
+  const cause = limit ? 'output_limit' : Number.isInteger(status) && status >= 400 ? 'provider_rejection' : reason;
+  error.details = {
+    version: 1,
+    cause,
+    ...(typeof result.provider === 'string' ? { provider: boundedDiagnosticText(result.provider, 64) } : {}),
+    ...(typeof result.api === 'string' ? { api: boundedDiagnosticText(result.api, 64) } : {}),
+    ...(typeof result.model === 'string' ? { model: boundedDiagnosticText(result.model, 256) } : {}),
+    ...(typeof result.requestId === 'string' ? { requestId: boundedDiagnosticText(result.requestId, 128) } : {}),
+    ...(Number.isInteger(status) ? { status } : {}),
+    ...(typeof result.choice?.finishReason === 'string' ? { finishReason: boundedDiagnosticText(result.choice.finishReason, 128) } : {}),
+    ...(limit ? { outputLimit: { code: limit.code, bytes: limit.bytes, limit: limit.limit } } : {}),
+    ...(providerDetails ? { providerError: providerDetails } : {}),
+  };
+  return error;
+}
 function summarizedRun(run) {
   return {
     id: run.id,
@@ -189,11 +227,17 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
       const config = await resolveModelConfig({ modelConnectionId: connectionId, model, settingsDb: databasePath, fetchImpl });
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
-      const result = await createModelAdapter({ config, fetchImpl }).complete({ prompt, ...(tokens === undefined ? {} : { maxTokens: tokens }), tools: null, signal });
+      let result;
+      try {
+        result = await createModelAdapter({ config, fetchImpl }).complete({ prompt, ...(tokens === undefined ? {} : { maxTokens: tokens }), tools: null, signal });
+      } catch (error) {
+        if (signal?.aborted || error?.name === 'AbortError') throw new Error('mod_capability_cancelled');
+        throw error;
+      }
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
-      if (result.error || !result.choice || result.choice.toolCalls?.length) throw new Error('mod_model_generation_failed');
+      if (result.error || !result.choice || result.choice.toolCalls?.length) throw modelGenerationFailure(result, result.choice?.toolCalls?.length ? 'unexpected_tool_call' : 'model_generation_failed');
       const text = result.choice.text;
-      if (typeof text !== 'string') throw new Error('mod_model_generation_failed');
+      if (typeof text !== 'string') throw modelGenerationFailure(result, 'model_generation_failed');
       return { text };
     },
   });

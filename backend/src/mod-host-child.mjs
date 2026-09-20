@@ -49,6 +49,13 @@ function opaqueCode(error, fallback = 'remote_process_failed') {
   const code = String(error?.code || error?.message || '');
   return /^[a-z0-9_]+$/.test(code) ? code : fallback;
 }
+function safeErrorDetails(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  try {
+    const parsed = JSON.parse(JSON.stringify(value));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch { return null; }
+}
 
 function validSystemMessage(message, type) {
   return message?.type === type && message.protocol === SYSTEM_PROTOCOL && message.controllerInstanceId === controllerInstanceId
@@ -249,7 +256,12 @@ process.on('message', async (message) => {
     if (!entry) return;
     pendingCapabilities.delete(message.requestId);
     entry.signal?.removeEventListener("abort", entry.cancel);
-    if (message.error) entry.reject(new Error(message.error)); else entry.resolve(message.result);
+    if (message.error) {
+      const error = new Error(message.error);
+      const details = safeErrorDetails(message.errorDetails);
+      if (details) error.details = details;
+      entry.reject(error);
+    } else entry.resolve(message.result);
     return;
   }
   if (message?.type === 'store-result') {
