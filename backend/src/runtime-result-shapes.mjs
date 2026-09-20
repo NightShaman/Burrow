@@ -100,7 +100,8 @@ export function summarizeToolResults(toolResults = []) {
       // adapter; otherwise an mcp_call receipt turns every provider failure
       // back into an unhelpful generic mcp_tool_failed.
       connectionId: undefined,
-      toolErrorCode: typeof toolResult.toolErrorCode === 'string' ? compactText(toolResult.toolErrorCode, 80) : undefined,
+      toolErrorCode: typeof toolResult.toolErrorCode === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(toolResult.toolErrorCode) ? toolResult.toolErrorCode : undefined,
+      httpStatus: Number.isInteger(toolResult.httpStatus) && toolResult.httpStatus >= 100 && toolResult.httpStatus <= 599 ? toolResult.httpStatus : undefined,
       diagnostic: typeof toolResult.diagnostic === 'string' ? compactText(toolResult.diagnostic, RECEIPT_TEXT_LIMITS.error) : undefined,
       protection: toolResult.protection && typeof toolResult.protection === 'object' ? {
         status: ['clear', 'protected', 'withheld'].includes(toolResult.protection.status) ? toolResult.protection.status : 'withheld',

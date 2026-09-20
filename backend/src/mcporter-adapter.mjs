@@ -98,7 +98,13 @@ function diagnosticText(value, protectedValues = []) {
   return redactProtectedText(String(value || '').slice(0, 4_000), protectedValues).trim() || null;
 }
 
-function runtimeFailure(code, { stdout = '', stderr = '', detail = null, protectedValues = [], toolErrorCode = null } = {}) {
+const safeProviderCode = (value, protectedValues = []) => {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_.-]{1,80}$/.test(value)) return null;
+  return redactProtectedText(value, protectedValues) === value ? value : null;
+};
+const safeHttpStatus = (value) => Number.isInteger(value) && value >= 100 && value <= 599 ? value : null;
+
+function runtimeFailure(code, { stdout = '', stderr = '', detail = null, protectedValues = [], toolErrorCode = null, httpStatus = null } = {}) {
   const error = new Error(code);
   // Keep raw streams only on the transient internal Error so callers can
   // recognize mcporter's documented non-zero exit for an MCP isError result.
@@ -110,28 +116,39 @@ function runtimeFailure(code, { stdout = '', stderr = '', detail = null, protect
   // Remote provider codes are useful causal context, but only expose a small,
   // inert identifier. The provider's free-form text stays in the redacted,
   // bounded diagnostic rather than becoming a public error classification.
-  if (typeof toolErrorCode === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(toolErrorCode)) error.toolErrorCode = toolErrorCode;
+  if (safeProviderCode(toolErrorCode, protectedValues)) error.toolErrorCode = toolErrorCode;
+  if (safeHttpStatus(httpStatus)) error.httpStatus = httpStatus;
   return error;
 }
 
 function providerFailureDetail(result) {
-  const error = result?.error;
   const contentText = Array.isArray(result?.content)
     ? result.content.filter((item) => item?.type === 'text' && typeof item.text === 'string').map((item) => item.text).join('\n')
     : null;
-  const detail = typeof error === 'string' ? error : error?.message || contentText || null;
-  return {
-    detail,
-    toolErrorCode: typeof error?.code === 'string' ? error.code : null,
-  };
+  // MCP tool failures may wrap the provider's JSON envelope in either
+  // structuredContent or a text block. Only project the typed code/status;
+  // never copy the envelope's details/body into public diagnostics.
+  const parsedText = (() => {
+    if (!contentText) return null;
+    try { const value = JSON.parse(contentText); return value && typeof value === 'object' && !Array.isArray(value) ? value : null; } catch { return null; }
+  })();
+  const envelope = [result?.structuredContent, parsedText, result]
+    .find((value) => value && typeof value === 'object' && !Array.isArray(value)
+      && (value.ok === false || value.success === false || value.isError === true)
+      && (typeof value.error === 'string' || (value.error && typeof value.error === 'object')));
+  const error = envelope?.error ?? result?.error;
+  const toolErrorCode = typeof error === 'string' ? safeProviderCode(error) : safeProviderCode(error?.code);
+  const detail = envelope
+    ? (typeof error === 'string' ? (toolErrorCode || null) : error?.message || toolErrorCode || null)
+    : (typeof error === 'string' ? error : error?.message || contentText || null);
+  return { detail, toolErrorCode, httpStatus: safeHttpStatus(envelope?.status) };
 }
 
 export function publicMcpFailureDetail(error, protectedValues = []) {
   const detail = diagnosticText(error?.diagnostic || error?.message, protectedValues);
-  const toolErrorCode = typeof error?.toolErrorCode === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(error.toolErrorCode)
-    ? error.toolErrorCode
-    : null;
-  return { ...(toolErrorCode ? { toolErrorCode } : {}), ...(detail ? { diagnostic: detail } : {}) };
+  const toolErrorCode = safeProviderCode(error?.toolErrorCode, protectedValues);
+  const httpStatus = safeHttpStatus(error?.httpStatus);
+  return { ...(toolErrorCode ? { toolErrorCode } : {}), ...(httpStatus ? { httpStatus } : {}), ...(detail ? { diagnostic: detail } : {}) };
 }
 
 function run(command, args, { cwd, timeoutMs = 20_000, killAfterMs = 1_000, maxStreamCaptureBytes = DEFAULT_STREAM_CAPTURE_BYTES, protectedValues = [] } = {}) {
@@ -280,7 +297,7 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
       const parsed = JSON.parse(output);
       if (parsed?.isError === true || parsed?.error || parsed?.ok === false || parsed?.success === false) {
         const providerFailure = providerFailureDetail(parsed);
-        throw runtimeFailure('mcp_tool_failed', { stdout: boundedJson(parsed), protectedValues: [apiKey, ...Object.values(environmentVariables || {})], toolErrorCode: providerFailure.toolErrorCode, detail: providerFailure.detail });
+        throw runtimeFailure('mcp_tool_failed', { stdout: boundedJson(parsed), protectedValues: [apiKey, ...Object.values(environmentVariables || {})], toolErrorCode: providerFailure.toolErrorCode, httpStatus: providerFailure.httpStatus, detail: providerFailure.detail });
       }
       return parsed;
     } catch (error) {
