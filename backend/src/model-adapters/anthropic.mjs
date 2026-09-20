@@ -232,18 +232,44 @@ function anthropicThinkingConfig({ model, config = {}, maxTokens = DEFAULT_MODEL
 
 function safeAnthropicAssistantBlocks(content = []) {
   if (!Array.isArray(content)) return [];
-  return content.slice(0, 64).map((part) => {
+  return content.map((part) => {
     if (!part || typeof part !== 'object') return null;
     if (part.type === 'text') return { type: 'text', text: boundedText(part.text || '', MAX_MODEL_TEXT_CHARS) };
     if (part.type === 'tool_use') return { type: 'tool_use', id: boundedText(part.id || '', 256), name: boundedText(part.name || '', 256), input: parseArguments(part.input || {}) };
-    if (part.type === 'thinking') return { type: 'thinking', thinking: boundedText(part.thinking || '', MAX_MODEL_TEXT_CHARS), ...(part.signature ? { signature: boundedText(part.signature, 8192) } : {}) };
-    if (part.type === 'redacted_thinking') return { type: 'redacted_thinking', ...(part.data ? { data: boundedText(part.data, MAX_MODEL_TEXT_CHARS) } : {}), ...(part.signature ? { signature: boundedText(part.signature, 8192) } : {}) };
+    // Anthropic signs the complete opaque thinking block. These fields are
+    // protocol material, not display text: changing even one byte makes a
+    // valid tool-use continuation unverifiable.
+    if (part.type === 'thinking') return { type: 'thinking', thinking: String(part.thinking ?? ''), ...('signature' in part ? { signature: String(part.signature ?? '') } : {}) };
+    if (part.type === 'redacted_thinking') return { type: 'redacted_thinking', ...('data' in part ? { data: String(part.data ?? '') } : {}), ...('signature' in part ? { signature: String(part.signature ?? '') } : {}) };
     return null;
   }).filter(Boolean);
 }
 
-function anthropicContinuationBlocksForToolCalls(previousModel = null, toolCalls = []) {
-  const blocks = previousModel?.anthropicContinuation?.assistantBlocks;
+function anthropicMessageManifest(messages = []) {
+  return (Array.isArray(messages) ? messages : []).map((message, index) => {
+    const blocks = Array.isArray(message?.content) ? message.content : [];
+    return {
+      index,
+      role: String(message?.role || 'unknown'),
+      blockTypes: blocks.map((block) => String(block?.type || 'unknown')),
+      blocks: blocks.map((block, blockIndex) => {
+        const value = block?.type === 'thinking' ? block.thinking
+          : block?.type === 'redacted_thinking' ? block.data
+            : block?.type === 'tool_use' ? JSON.stringify(block.input ?? {})
+              : block?.type === 'tool_result' ? JSON.stringify(block.content ?? '')
+                : block?.text ?? '';
+        return { index: blockIndex, type: String(block?.type || 'unknown'), chars: String(value ?? '').length, contentHash: serializedMessageHash(value ?? '') };
+      }),
+      contentHash: serializedMessageHash(message?.content ?? ''),
+    };
+  });
+}
+
+function anthropicContinuationBlocksForToolCalls(previousModel = null, toolCalls = [], baseMessages = []) {
+  const persisted = [...(Array.isArray(baseMessages) ? baseMessages : [])].reverse()
+    .find((message) => message?.role === 'assistant' && Array.isArray(message.content)
+      && message.content.some((part) => part?.type === 'tool_use'))?.content;
+  const blocks = previousModel?.anthropicContinuation?.assistantBlocks || persisted;
   if (!Array.isArray(blocks) || !blocks.length) return null;
   const expectedIds = new Set((toolCalls || []).map((call, index) => String(call?.id || `tool-call-${index}`)));
   const blockIds = blocks.filter((part) => part?.type === 'tool_use').map((part) => String(part.id || ''));
@@ -251,8 +277,12 @@ function anthropicContinuationBlocksForToolCalls(previousModel = null, toolCalls
   return blocks;
 }
 
-function anthropicErrorLooksLikeSignedThinking(error = '') {
-  return /thinking|signature|redacted/i.test(String(error || ''));
+function anthropicErrorLooksLikeSignedThinking(result = {}) {
+  if (Number(result?.status) !== 400) return false;
+  const type = String(result?.raw?.error?.details?.type || '');
+  const message = String(result?.error || '');
+  return (!type || type === 'invalid_request_error')
+    && /(?:invalid|mismatch|verification|verify|corrupt(?:ed)?)\s+(?:thinking\s+)?signature|thinking\s+signature\s+(?:is\s+)?(?:invalid|mismatch|corrupt(?:ed)?)/i.test(message);
 }
 
 function anthropicAssistantMessageFromChoice(choice = {}) {
@@ -304,12 +334,14 @@ async function readAnthropicSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_BYTE
     if (!line.startsWith('data:')) continue;
     const payload = line.slice(5).trim();
     if (!payload || payload === '[DONE]') continue;
-    try {
-      const event = JSON.parse(payload);
-      if (event?.type === 'content_block_delta' && event.delta?.type === 'text_delta') await onTextDelta?.(event.delta.text || '');
-      if (event?.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') await onThoughtDelta?.(event.delta.thinking || '');
-      mergeAnthropicStreamEvent(state, event);
-    } catch {}
+    let event;
+    try { event = JSON.parse(payload); }
+    catch (error) {
+      return { ok: false, text: textResult.text, bytes: textResult.bytes, data: null, error: 'model_stream_malformed_event', errorDetails: { eventType: boundedText(currentEvent || 'unknown', 64), message: boundedText(error?.message || 'invalid JSON event payload', 500) }, event: currentEvent };
+    }
+    if (event?.type === 'content_block_delta' && event.delta?.type === 'text_delta') await onTextDelta?.(event.delta.text || '');
+    if (event?.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') await onThoughtDelta?.(event.delta.thinking || '');
+    mergeAnthropicStreamEvent(state, event);
   }
   if (state.error) {
     const details = {
@@ -359,7 +391,7 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
       ...(streaming ? { stream: true } : {}),
     };
     const serializedBody = JSON.stringify(body);
-    return { body, serializedBody, promptChars: textPromptCharsFor(sourceTranscript), imageCount: imageCountFor(sourceTranscript), sourceTranscript, resolvedTools, promptCaching, thinking };
+    return { body, serializedBody, promptChars: textPromptCharsFor(sourceTranscript), imageCount: imageCountFor(sourceTranscript), sourceTranscript, resolvedTools, promptCaching, thinking, providerMessageManifest: anthropicMessageManifest(body.messages) };
   };
 
   const estimateRequest = (options = {}) => {
@@ -370,14 +402,22 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
   const complete = async ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens ?? config.outputTokens ?? DEFAULT_MODEL_OUTPUT_TOKENS, tools = null, traceLogger, signal = null, onTextDelta = null, onThoughtDelta = null, onContextUsage = null, modelCall = null } = {}) => {
     const requestId = idFactory();
     const streaming = typeof onTextDelta === 'function' || typeof onThoughtDelta === 'function';
-    const { body, serializedBody, promptChars, imageCount, sourceTranscript, resolvedTools, promptCaching, thinking } = buildRequest({ prompt, messages, temperature, maxTokens, tools, streaming });
+    const { body, serializedBody, promptChars, imageCount, sourceTranscript, resolvedTools, promptCaching, thinking, providerMessageManifest } = buildRequest({ prompt, messages, temperature, maxTokens, tools, streaming });
     const headers = anthropicHeaders(config);
     // Keep trace inspection useful without retaining raw operator secrets.
-    const providerRequestArtifact = await traceLogger?.artifact?.(`provider-request-${requestId}.json`, redactText(serializedBody)) || null;
+    const diagnosticBody = { ...body, messages: body.messages.map((message) => ({
+      ...message,
+      content: message.content.map((block) => block?.type === 'thinking'
+        ? { ...block, thinking: '[redacted]', ...('signature' in block ? { signature: '[redacted]' } : {}) }
+        : block?.type === 'redacted_thinking'
+          ? { ...block, ...('data' in block ? { data: '[redacted]' } : {}), ...('signature' in block ? { signature: '[redacted]' } : {}) }
+          : block),
+    })) };
+    const providerRequestArtifact = await traceLogger?.artifact?.(`provider-request-${requestId}.json`, redactText(JSON.stringify(diagnosticBody))) || null;
     const requestContextUsage = contextUsageFromRequest({ promptChars, bodyChars: serializedBody.length, imageCount, model, api: 'anthropic-messages', modelCall, clock });
     await onContextUsage?.(requestContextUsage);
     const stablePrefixHash = serializedMessageHash({ system: body.system || null, tools: body.tools || [] });
-    await traceLogger?.model?.({ stage: 'model-request', requestId, provider: 'anthropic', api: 'anthropic-messages', model, url, headers: redactHeaders(headers), messageCount: body.messages.length, promptChars, bodyChars: serializedBody.length, continuation: false, toolCount: resolvedTools?.length || 0, toolNames: resolvedTools?.map((tool) => tool.name).filter(Boolean) || [], stablePrefixHash, promptCaching, thinking: thinking.enabled ? { mode: thinking.mode, effort: thinking.effort || null, budgetTokens: thinking.budgetTokens || null } : null, providerRequestArtifact, ts: clock() });
+    await traceLogger?.model?.({ stage: 'model-request', requestId, provider: 'anthropic', api: 'anthropic-messages', model, url, headers: redactHeaders(headers), messageCount: body.messages.length, promptChars, bodyChars: serializedBody.length, continuation: false, toolCount: resolvedTools?.length || 0, toolNames: resolvedTools?.map((tool) => tool.name).filter(Boolean) || [], providerMessageManifest, stablePrefixHash, promptCaching, thinking: thinking.enabled ? { mode: thinking.mode, effort: thinking.effort || null, budgetTokens: thinking.budgetTokens || null } : null, providerRequestArtifact, ts: clock() });
     const response = await fetchImpl(url, { method: 'POST', headers, body: serializedBody, ...(signal ? { signal } : {}) });
     const responseBody = streaming ? await readAnthropicSse(response, { maxBytes: config.maxResponseBytes, onTextDelta, onThoughtDelta }) : await readResponseTextBounded(response, config.maxResponseBytes);
     let data = streaming ? responseBody.data : null;
@@ -387,16 +427,20 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
     }
     const ok = Boolean(response.ok) && responseBody.ok;
     const candidateChoice = ok ? normalizeAnthropicChoice(data) : null;
-    const emptyMaxTokens = ok && candidateChoice?.finishReason === 'max_tokens' && !candidateChoice.text && !(candidateChoice.toolCalls || []).length;
-    const success = ok && !emptyMaxTokens;
+    const maxTokensIncomplete = ok && candidateChoice?.finishReason === 'max_tokens';
+    const success = ok && !maxTokensIncomplete;
     const choice = success ? candidateChoice : null;
     const assistantMessage = choice && !(choice.toolCalls || []).length ? anthropicAssistantMessageFromChoice(choice) : null;
-    // If the model returned tool_use blocks, keep them out of nativeTranscript:
-    // runtime passes the pending toolCalls separately to continueWithToolResults,
-    // which appends the assistant/tool pair atomically. Including pending calls
-    // here duplicates Anthropic tool_use ids on the next continuation.
-    const nativeTranscript = assistantMessage ? normalizeProviderMessages([...sourceTranscript, assistantMessage]) : sourceTranscript;
-    const failureMessage = emptyMaxTokens ? 'model_max_tokens_empty' : (responseBody.error || data?.error?.message || data?.message || responseBody.text?.slice?.(0, 500) || `HTTP ${response.status}`);
+    // Persist the exact provider assistant block sequence, including opaque
+    // signed thinking, so continuation replay does not depend on an in-memory
+    // side channel. continueWithToolResults recognizes this pending assistant
+    // turn and appends only its matching tool results.
+    const assistantBlocks = choice?.anthropic?.assistantBlocks;
+    const pendingAssistantMessage = choice && (choice.toolCalls || []).length && assistantBlocks?.length
+      ? { role: 'assistant', content: assistantBlocks }
+      : null;
+    const nativeTranscript = normalizeProviderMessages([...sourceTranscript, ...(pendingAssistantMessage ? [pendingAssistantMessage] : assistantMessage ? [assistantMessage] : [])]);
+    const failureMessage = maxTokensIncomplete ? (candidateChoice?.text || (candidateChoice?.toolCalls || []).length ? 'model_max_tokens_incomplete' : 'model_max_tokens_empty') : (responseBody.error || data?.error?.message || data?.message || responseBody.text?.slice?.(0, 500) || `HTTP ${response.status}`);
     const failureDetails = responseBody.errorDetails || ((data?.error || data?.type) ? { ...(data?.error?.type ? { type: boundedText(data.error.type, 128) } : data?.type ? { type: boundedText(data.type, 128) } : {}), ...(data?.error?.code ? { code: boundedText(data.error.code, 128) } : {}), status: response.status } : null);
     const result = { ok: success, requestId, provider: 'anthropic', api: 'anthropic-messages', model, status: response.status, choice, responseId: success && typeof data?.id === 'string' ? boundedText(data.id, 256) : null, usage: data?.usage || null, contextUsage: contextUsageFromResponse(requestContextUsage, data?.usage || null, clock), error: success ? null : failureMessage, raw: success ? { responseBytes: responseBody.bytes, ...(streaming ? { streamedTextChars: choice?.text?.length || 0 } : {}) } : { error: { message: failureMessage, ...(failureDetails ? { details: failureDetails } : {}) } }, nativeTranscript, ...(choice?.anthropic?.assistantBlocks?.length ? { anthropicContinuation: { assistantBlocks: choice.anthropic.assistantBlocks } } : {}) };
     await onContextUsage?.(result.contextUsage);
@@ -406,8 +450,9 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
 
   return { provider: 'anthropic', api: 'anthropic-messages', model, url, supportsVision: true, estimateRequest, complete, async continueWithToolResults({ previousModel = null, baseMessages = [], toolCalls = [], toolResults = [], ...options } = {}) {
     const transcript = [...baseMessages];
-    const preservedBlocks = anthropicContinuationBlocksForToolCalls(previousModel, toolCalls);
-    if (toolCalls.length) {
+    const preservedBlocks = anthropicContinuationBlocksForToolCalls(previousModel, toolCalls, baseMessages);
+    const persistedPendingAssistant = preservedBlocks && transcript.at(-1)?.role === 'assistant' && transcript.at(-1)?.content === preservedBlocks;
+    if (toolCalls.length && !persistedPendingAssistant) {
       transcript.push(preservedBlocks
         ? { role: 'assistant', content: preservedBlocks }
         : { role: 'assistant', content: '', tool_calls: toolCalls.map((call, index) => ({ id: call.id || `tool-call-${index}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments || {}) } })) });
@@ -418,9 +463,10 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
       if (imageMessage) transcript.push(imageMessage);
     }
     const result = await complete({ ...options, messages: transcript });
-    if (result.ok || !preservedBlocks || !anthropicErrorLooksLikeSignedThinking(result.error)) return result;
+    if (result.ok || !preservedBlocks || !anthropicErrorLooksLikeSignedThinking(result)) return result;
     await options.traceLogger?.model?.({ stage: 'model-request-repair', requestId: result.requestId, provider: 'anthropic', api: 'anthropic-messages', model, reason: 'signed_thinking_rejected', error: result.error, ts: clock() });
     const repairedTranscript = [...baseMessages];
+    if (persistedPendingAssistant) repairedTranscript.pop();
     if (toolCalls.length) repairedTranscript.push({ role: 'assistant', content: '', tool_calls: toolCalls.map((call, index) => ({ id: call.id || `tool-call-${index}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments || {}) } })) });
     for (let index = 0; index < toolResults.length; index += 1) {
       repairedTranscript.push({ role: 'tool', tool_call_id: toolCalls[index]?.id || `tool-call-${index}`, content: toolOutputText(toolResults[index]) });

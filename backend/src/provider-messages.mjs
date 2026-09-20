@@ -21,9 +21,15 @@ function content(value) {
 }
 
 export function normalizeProviderMessage(message = {}) {
-  const role = message.role === 'agent' ? 'assistant' : String(message.role || '');
+  // A peer transcript turn is external speech from another agent, never this
+  // model's own prior assistant output. Anthropic only has user/assistant
+  // dialogue roles, so preserve speaker identity in an attributed user turn.
+  const peerAgent = message.role === 'agent';
+  const role = peerAgent ? 'user' : String(message.role || '');
   if (!PROVIDER_ROLES.has(role)) return null;
-  const normalizedContent = content(message.content);
+  const normalizedContent = peerAgent
+    ? `[Agent message from ${message.metadata?.fromAgentName || message.metadata?.fromAgentId || 'another agent'} to ${message.metadata?.toAgentId || 'this agent'} — ${message.metadata?.messageMode || 'deliver'}]: ${String(message.content || '').trim()}`
+    : content(message.content);
   if (!normalizedContent && role !== 'assistant' && role !== 'tool') return null;
   const normalized = { role, content: normalizedContent };
   if (message?.metadata?.providerMessageSource) {
