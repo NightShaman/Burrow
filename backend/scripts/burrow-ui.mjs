@@ -795,7 +795,7 @@ async function resolveModelConnectionChatBody(body = {}) {
 }
 
 async function runtimeConfig(agentId = 'hatchet') {
-  return loadRuntimeConfig({ rootDir: projectRoot, args: { agent_id: String(agentId || 'hatchet') } });
+  return loadRuntimeConfig({ rootDir: projectRoot, args: { agent_id: String(agentId || 'hatchet') }, tolerateModelResolutionError: true });
 }
 
 async function resolveAgentRuntime(agentId = null) {
