@@ -304,7 +304,9 @@ it('exposes a destination session task run with live tools, thoughts, and A2A ac
       runs: [{
         runId: 'task-run', agentId, sessionId, status: 'running', phase: 'streaming', source: 'task',
         progress: [
-          { type: 'assistant.thought', ts: '2026-09-15T12:00:00.000Z', data: { delta: 'Checking the runtime.', modelCall: 2 } },
+          { type: 'assistant.thought', ts: '2026-09-15T12:00:00.000Z', data: { delta: 'Checking', modelCall: 2 } },
+          { type: 'assistant.thought', data: { delta: ' the runtime.', modelCall: 2 } },
+          { type: 'assistant.thought', data: { delta: '\nSecond call.', modelCall: 3 } },
           { type: 'tool.started', data: { activityId: 'tool-1', tool: 'shell_exec', label: 'Inspect status' } },
         ],
         a2aActivities: [{ id: 'a2a-1', status: 'running', parentAgentId: agentId, recipient: { agentId: 'minion', sessionId: 'child' }, progress: [] }],
@@ -317,7 +319,10 @@ it('exposes a destination session task run with live tools, thoughts, and A2A ac
   await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
   await waitFor(() => expect(result.current.runtimeRun).toMatchObject({
     runId: 'task-run',
-    progress: [expect.objectContaining({ text: 'Checking the runtime.', modelCall: 2 })],
+    progress: [
+      expect.objectContaining({ text: 'Checking the runtime.', modelCall: 2 }),
+      expect.objectContaining({ text: '\nSecond call.', modelCall: 3 }),
+    ],
     toolActivity: { runId: 'task-run', items: [expect.objectContaining({ label: 'Inspect status', status: 'pending' })] },
   }));
   expect(result.current.a2aActivities).toEqual([expect.objectContaining({ id: 'a2a-1' })]);

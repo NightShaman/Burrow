@@ -60,6 +60,35 @@ describe('useChatRun', () => {
     expect(session.refreshSessions).toHaveBeenCalledWith('nigel');
   });
 
+  it('coalesces word-sized thought deltas by model call without changing the terminal answer', async () => {
+    streamChatMock.mockImplementation(async ({ onEvent }) => {
+      onEvent({ type: 'assistant.thought', ts: '2026-09-22T10:00:00.000Z', data: { delta: 'decide', modelCall: 1 } });
+      onEvent({ type: 'assistant.thought', data: { delta: ' which', modelCall: 1 } });
+      onEvent({ type: 'assistant.thought', data: { delta: '\nnext', modelCall: 2 } });
+      onEvent({ type: 'assistant.thought', data: { delta: ' call', modelCall: 2 } });
+      return { terminalType: 'run.completed', finalResult: { ok: true, answerText: 'Final answer.' } };
+    });
+    const session = createSession();
+    const { result } = renderHook(() => useChatRun({
+      selectedAgentId: 'nigel',
+      selected: { id: 'nigel', name: 'Nigel', avatar: '', activity: 'idle', context: null, provider: '', model: '', effort: '', temperature: 1, workspace: '', files: [], subagents: [] },
+      savedProviders: [], session, setAgentActivity: vi.fn(),
+    }));
+
+    await act(async () => { await result.current.sendMessage(); });
+
+    expect(session.appendTurn).toHaveBeenLastCalledWith('nigel', 'session-1', expect.objectContaining({
+      role: 'assistant',
+      content: 'Final answer.',
+      metadata: expect.objectContaining({
+        progress: { status: 'complete', items: [
+          expect.objectContaining({ text: 'decide which', modelCall: 1, status: 'complete' }),
+          expect.objectContaining({ text: '\nnext call', modelCall: 2, status: 'complete' }),
+        ] },
+      }),
+    }));
+  });
+
   it('retains visible streamed output separately from the final answer', async () => {
     streamChatMock.mockImplementation(async ({ onEvent }) => {
       onEvent({ type: 'assistant.delta', data: { delta: 'Draft streamed response.' } });

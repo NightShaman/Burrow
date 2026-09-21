@@ -4,6 +4,7 @@ import { localApiTarget, targetForResource, type ApiTarget } from '../../app/api
 import { conversationCacheKey, readConversationCache, writeConversationCache, type ConversationCache } from './chatConversationCache';
 import { readDraftCache, writeDraftCache, type DraftCache } from './chatDraftCache';
 import { reconcileSessionTurns } from './chatTurnReconciliation';
+import { finalizeThoughtProgress, thoughtProgressFromEvents } from './chatThoughtProgress';
 import { createChatSessionRepository, readSessionListCache } from './chatSessionRepository';
 
 export { conversationCacheKey } from './chatConversationCache';
@@ -21,11 +22,7 @@ type RuntimeRunForSelection = {
 };
 
 function runtimeRunProgress(run: ActiveChatRun): ProgressEntry[] {
-  return (run.progress ?? []).flatMap((event, index) => {
-    if (event.type !== 'assistant.thought' || typeof event.data?.delta !== 'string') return [];
-    const modelCall = Number(event.data.modelCall);
-    return [{ id: `${run.runId}:thought:${index}`, text: event.data.delta, ts: typeof event.ts === 'string' ? event.ts : new Date().toISOString(), ...(Number.isFinite(modelCall) ? { modelCall } : {}), status: 'streaming' as const }];
-  });
+  return thoughtProgressFromEvents(run.progress ?? [], run.runId);
 }
 
 function runtimeToolActivity(run: ActiveChatRun): ToolActivity | undefined {
@@ -116,6 +113,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   const [runtimeRun, setRuntimeRun] = useState<RuntimeRunForSelection | null>(null);
   const [runtimeChildActivities, setRuntimeChildActivities] = useState<ToolActivity[]>([]);
   const childSessionsRef = useRef(new Set<string>());
+  const recoveredProgressByRunRef = useRef<Record<string, ProgressEntry[]>>({});
   const [, setToolActivityVersion] = useState(0);
   const conversationCacheRef = useRef<ConversationCache>(readConversationCache());
   // The displayed chat session may be a child session. Agent-status is scoped
@@ -320,7 +318,9 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
             && (!parentRunId || !selectedRuntimeRun || parentRunId === selectedRuntimeRun.runId);
         });
         const childActivities = matchingLiveSubagents.map((child) => subagentToolActivity(child));
-        setRuntimeRun(runtimeRunForSelection(selectedRuntimeRun) ?? runtimeRunForSubagent(isChildSession ? matchingLiveSubagents[0] : undefined));
+        const projectedRuntimeRun = runtimeRunForSelection(selectedRuntimeRun) ?? runtimeRunForSubagent(isChildSession ? matchingLiveSubagents[0] : undefined);
+        if (selectedRuntimeRun) recoveredProgressByRunRef.current[selectedRuntimeRun.runId] = projectedRuntimeRun?.progress ?? [];
+        setRuntimeRun(projectedRuntimeRun);
         setRuntimeChildActivities(childActivities);
         const activities = (response.runs ?? []).flatMap((run) => {
           if (run.a2aActivities?.length) return run.a2aActivities;
@@ -340,7 +340,16 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
           const cachedTurns = conversationCacheRef.current[cacheKey];
           const session = await sessionRepository.loadSession(selectedAgentId, sessionId);
           if (cancelled || conversationCacheRef.current[cacheKey] !== cachedTurns) return;
-          const nextTurns = reconcileSessionTurns(session, cachedTurns ?? []);
+          const nextTurns = reconcileSessionTurns(session, cachedTurns ?? []).map((turn) => {
+            if (turn.role !== 'assistant' || !turn.runId || turn.metadata?.progress) return turn;
+            const recovered = recoveredProgressByRunRef.current[turn.runId];
+            if (!recovered?.length) return turn;
+            const content = textFromChatValue(turn.content);
+            const terminalStatus: NonNullable<import('../../app/api').RunProgress['status']> = content.startsWith('[model_error:') ? 'failed' : 'complete';
+            const progress = finalizeThoughtProgress(recovered, terminalStatus, content);
+            delete recoveredProgressByRunRef.current[turn.runId];
+            return progress ? { ...turn, metadata: { ...turn.metadata, progress } } : turn;
+          });
           conversationCacheRef.current[cacheKey] = nextTurns;
           writeConversationCache(conversationCacheRef.current, cacheKey);
           if (!cancelled && selectedChatRef.current.agentId === selectedAgentId && selectedChatRef.current.sessionId === sessionId) setTurns(nextTurns);

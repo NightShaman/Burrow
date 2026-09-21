@@ -67,11 +67,12 @@ describe('chat turn reconciliation', () => {
     expect(reconcileConversationTurns(server, cached)[0].metadata?.attachments).toEqual(serverAttachments);
   });
 
-  it('retains a streamed answer until the server persists it', () => {
-    const cached = [turn('assistant', 'Answer', 'run-1', '2026-08-26T10:00:00.000Z', { streamedAnswer: 'Streamed answer' })];
+  it('retains streamed answer and finalized thought progress until the server persists them', () => {
+    const progress = { status: 'complete' as const, items: [{ id: 'thought-1', text: 'Reasoning', ts: '2026-08-26T10:00:00.000Z', status: 'complete' as const }] };
+    const cached = [turn('assistant', 'Answer', 'run-1', '2026-08-26T10:00:00.000Z', { streamedAnswer: 'Streamed answer', progress })];
     const server = [turn('assistant', 'Answer', 'run-1', '2026-08-26T10:00:00.000Z')];
 
-    expect(reconcileConversationTurns(server, cached)[0].metadata?.streamedAnswer).toBe('Streamed answer');
+    expect(reconcileConversationTurns(server, cached)[0].metadata).toMatchObject({ streamedAnswer: 'Streamed answer', progress });
   });
 
   it('normalizes content and merges server tool activity', () => {

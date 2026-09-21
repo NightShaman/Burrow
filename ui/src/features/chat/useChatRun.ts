@@ -3,6 +3,7 @@ import { answerFromChatResult, apiForTarget, createRunId, type ChatAttachment, t
 import { localApiTarget, type ApiTarget } from '../../app/apiTargets';
 import type { Agent, SavedProvider } from '../../app/types';
 import { streamChat } from './chatStream';
+import { appendThoughtDelta, finalizeThoughtProgress } from './chatThoughtProgress';
 
 type ActiveRun = { runId: string; agentId: string; sessionId: string };
 type StreamToolEvent = { tool?: unknown; rawTool?: unknown; activityId?: unknown; ok?: unknown; status?: unknown; label?: unknown; detail?: unknown; provider?: unknown; mcpToolName?: unknown; command?: unknown; cwd?: unknown; filePath?: unknown; dirPath?: unknown; query?: unknown; reason?: unknown; result?: unknown; output?: unknown; error?: unknown };
@@ -75,7 +76,7 @@ export function useChatRun({ selectedAgentId, selected, selectedTarget = localAp
     setLiveAnswerByRun((current) => ({ ...current, [targetKey]: '' }));
     setAgentActivity(target.agentId, 'thinking'); session.clearError(); session.setDraft(''); session.clearAttachment(); session.leaveNewSessionForMessage();
     session.appendTurn(target.agentId, target.sessionId, { type: 'message', role: 'user', content: message, ts: new Date().toISOString(), runId, ...(attachments.length ? { metadata: { attachments: attachments.map(({ name, type, size }, index) => ({ index, name, type, size, encoding: 'data-url' })) } } : {}) });
-    let streamedAnswer = ''; let progressEntries: ProgressEntry[] = []; let thoughtSequence = 0; let toolSequence = 0; let frame = 0;
+    let streamedAnswer = ''; let progressEntries: ProgressEntry[] = []; let toolSequence = 0; let frame = 0;
     const flushLiveText = () => { frame = 0; setLiveProgressByRun((current) => ({ ...current, [targetKey]: progressEntries })); setLiveAnswerByRun((current) => ({ ...current, [targetKey]: streamedAnswer })); };
     const scheduleLiveFlush = () => { if (!frame) frame = requestAnimationFrame(flushLiveText); };
     try {
@@ -83,8 +84,7 @@ export function useChatRun({ selectedAgentId, selected, selectedTarget = localAp
         if (!event || typeof event !== 'object') return;
         const envelope = event as { type?: string; ts?: unknown; data?: { delta?: unknown; response?: unknown; message?: unknown; status?: unknown; modelCall?: unknown } & StreamToolEvent };
         if (envelope.type === 'assistant.thought' && typeof envelope.data?.delta === 'string') {
-          const modelCall = Number.isFinite(Number(envelope.data.modelCall)) ? Number(envelope.data.modelCall) : undefined;
-          progressEntries = [...progressEntries, { id: `${runId}:thought:${++thoughtSequence}`, text: envelope.data.delta, ts: typeof envelope.ts === 'string' ? envelope.ts : new Date().toISOString(), ...(modelCall === undefined ? {} : { modelCall }), status: 'streaming' }];
+          progressEntries = appendThoughtDelta(progressEntries, envelope, runId);
           scheduleLiveFlush();
         } else if (envelope.type === 'assistant.delta' && typeof envelope.data?.delta === 'string') {
           streamedAnswer += envelope.data.delta; scheduleLiveFlush();
@@ -120,7 +120,7 @@ export function useChatRun({ selectedAgentId, selected, selectedTarget = localAp
       const failedMessage = terminalError.replace(/^Request failed:\s*/, '').trim() || 'The runtime could not complete the message.';
       const answer = runStatus === 'complete' ? answerFromChatResult(finalResult) || streamedAnswer : `[model_error: ${failedMessage}]`;
       const activity = session.toolActivityForRun(runId);
-      const progress: RunProgress | undefined = progressEntries.length ? { items: progressEntries.map((entry) => ({ ...entry, status: 'complete' })), status: runStatus } : undefined;
+      const progress = finalizeThoughtProgress(progressEntries, runStatus, answer);
       // The streamed visible response is a separate, secondary record. Keep it
       // out of the authoritative final answer, even when a provider's terminal
       // answer differs from the text it streamed along the way.

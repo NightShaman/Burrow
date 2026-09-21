@@ -37,9 +37,10 @@ export function reconcileConversationTurns(serverTurns: SessionTurn[], cachedTur
   const mergedServerTurns = serverTurns.map((turn) => {
     const cached = turn.runId && turn.role ? cachedTurnsByRunAndRole.get(`${turn.runId}:${turn.role}`) : undefined;
     const streamedAnswer = turn.role === 'assistant' && !turn.metadata?.streamedAnswer ? cached?.metadata?.streamedAnswer : undefined;
+    const progress = turn.role === 'assistant' && !turn.metadata?.progress ? cached?.metadata?.progress : undefined;
     const attachments = !turn.metadata?.attachments?.length ? cached?.metadata?.attachments : undefined;
-    return streamedAnswer || attachments
-      ? { ...turn, metadata: { ...turn.metadata, ...(streamedAnswer ? { streamedAnswer } : {}), ...(attachments ? { attachments } : {}) } }
+    return streamedAnswer || progress || attachments
+      ? { ...turn, metadata: { ...turn.metadata, ...(streamedAnswer ? { streamedAnswer } : {}), ...(progress ? { progress } : {}), ...(attachments ? { attachments } : {}) } }
       : turn;
   });
   if (!missingCachedTurns.length) return mergedServerTurns;
