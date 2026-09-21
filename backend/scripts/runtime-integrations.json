@@ -1,0 +1,12 @@
+{
+  "mcporter": {
+    "packageName": "mcporter",
+    "version": "0.13.7",
+    "executable": "mcporter"
+  },
+  "claude-code": {
+    "packageName": "@anthropic-ai/claude-code",
+    "version": "2.1.251",
+    "executable": "claude"
+  }
+}

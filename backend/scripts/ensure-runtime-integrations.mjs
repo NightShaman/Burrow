@@ -3,10 +3,9 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-export const INTEGRATIONS = Object.freeze([
-  Object.freeze({ id: 'mcporter', packageName: 'mcporter', version: '0.13.7', executable: 'mcporter' }),
-  Object.freeze({ id: 'claude-code', packageName: '@anthropic-ai/claude-code', version: '2.1.251', executable: 'claude' }),
-]);
+const integrationManifest = JSON.parse(await fs.readFile(new URL('./runtime-integrations.json', import.meta.url), 'utf8'));
+
+export const INTEGRATIONS = Object.freeze(Object.entries(integrationManifest).map(([id, spec]) => Object.freeze({ id, ...spec })));
 
 function run(binary, args, { cwd } = {}) {
   return new Promise((resolve, reject) => {

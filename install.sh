@@ -309,16 +309,19 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
   update_log "staging backend runtime dependencies..."
   verbose_log "running backend npm ci (production dependencies only)"
   (cd "$STAGING/backend" && npm ci --omit=dev --no-audit --no-fund --loglevel=error)
+  INTEGRATION_MANIFEST="$STAGING/backend/scripts/runtime-integrations.json"
+  MCPORTER_VERSION=$(node -p "require('$INTEGRATION_MANIFEST')['mcporter'].version")
+  CLAUDE_CODE_VERSION=$(node -p "require('$INTEGRATION_MANIFEST')['claude-code'].version")
   update_log "staging MCP integration..."
-  verbose_log "installing pinned mcporter integration"
-  npm install --prefix "$STAGING/integrations/mcporter" --omit=dev --no-package-lock --no-save --no-audit --no-fund --loglevel=error mcporter@0.13.7
+  verbose_log "installing pinned mcporter integration $MCPORTER_VERSION"
+  npm install --prefix "$STAGING/integrations/mcporter" --omit=dev --no-package-lock --no-save --no-audit --no-fund --loglevel=error "mcporter@$MCPORTER_VERSION"
   update_log "staging Claude Code integration..."
-  verbose_log "installing pinned Claude Code integration; no executable probe will run"
-  cat > "$STAGING/integrations/claude-code/package.json" <<'PACKAGE'
+  verbose_log "installing pinned Claude Code integration $CLAUDE_CODE_VERSION; no executable probe will run"
+  cat > "$STAGING/integrations/claude-code/package.json" <<PACKAGE
 {
   "private": true,
-  "dependencies": { "@anthropic-ai/claude-code": "2.1.232" },
-  "allowScripts": { "@anthropic-ai/claude-code@2.1.232": true }
+  "dependencies": { "@anthropic-ai/claude-code": "$CLAUDE_CODE_VERSION" },
+  "allowScripts": { "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION": true }
 }
 PACKAGE
   npm install --prefix "$STAGING/integrations/claude-code" --omit=dev --no-package-lock --ignore-scripts=false --no-audit --no-fund --loglevel=error
@@ -332,7 +335,8 @@ ENV_FILE="$INSTALL_DIR/burrow.env"
 if [ ! -f "$ENV_FILE" ]; then
   umask 077
   cat > "$ENV_FILE" <<ENV
-# Durable Burrow runtime state. Updates preserve this file.
+# Durable Burrow runtime state. Installer-managed paths are reconciled on update;
+# operator-owned and unknown settings are preserved.
 BURROW_RUNTIME_ROOT=$INSTALL_DIR
 BURROW_WORKSPACE_ROOT=$INSTALL_DIR/workspace
 BURROW_CACHE_ROOT=$INSTALL_DIR/cache
@@ -344,12 +348,7 @@ BURROW_UI_HOST=127.0.0.1
 BURROW_UI_PORT=42817
 ENV
 fi
-if ! grep -q '^BURROW_SETTINGS_KEY=' "$ENV_FILE"; then
-  umask 077
-  printf '%s=%s\n' 'BURROW_SETTINGS_KEY' "$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))')" >> "$ENV_FILE"
-fi
-# Listener values are durable by default. Explicit installer flags are the
-# supported deployment-management interface for changing them on install or update.
+
 set_env_value() {
   env_key=$1
   env_value=$2
@@ -363,6 +362,20 @@ set_env_value() {
   chmod 0600 "$env_tmp"
   mv "$env_tmp" "$ENV_FILE"
 }
+
+# These locations are owned by the installer and follow the active installation
+# root. Reconcile them on every update so old installs and restored installs gain
+# newly required runtime paths without replacing operator-owned settings.
+set_env_value BURROW_RUNTIME_ROOT "$INSTALL_DIR"
+set_env_value BURROW_WORKSPACE_ROOT "$INSTALL_DIR/workspace"
+set_env_value BURROW_CACHE_ROOT "$INSTALL_DIR/cache"
+set_env_value BURROW_SETTINGS_DB "$INSTALL_DIR/config/settings.sqlite"
+set_env_value BURROW_CLAUDE_BIN "$INSTALL_DIR/integrations/claude-code/node_modules/.bin/claude"
+if ! grep -q '^BURROW_SETTINGS_KEY=' "$ENV_FILE"; then
+  set_env_value BURROW_SETTINGS_KEY "$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))')"
+fi
+# Listener values are durable by default. Explicit installer flags are the
+# supported deployment-management interface for changing them on install or update.
 [ -z "$LISTEN_HOST" ] || set_env_value BURROW_UI_HOST "$LISTEN_HOST"
 [ -z "$LISTEN_PORT" ] || set_env_value BURROW_UI_PORT "$LISTEN_PORT"
 # Prepare and atomically activate the replacement while the current service remains
