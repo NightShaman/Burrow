@@ -452,13 +452,17 @@ async function withSessionAppendLock(rootDir, sessionId, operation) {
   return current.finally(() => { if (sessionAppendQueues.get(key) === current) sessionAppendQueues.delete(key); });
 }
 
-export async function appendSessionEntry({ rootDir, sessionId, type = 'message', role = null, content, runId = null, traceDir = null, metadata = {}, visibility = null, entersPrompt = undefined, parentId = null, clock = nowIso, maxContentChars = 20_000 } = {}) {
+export async function appendSessionEntry({ rootDir, sessionId, type = 'message', role = null, content, runId = null, traceDir = null, metadata = {}, visibility = null, entersPrompt = undefined, parentId = null, clock = nowIso, maxContentChars } = {}) {
   if (!rootDir) throw new Error('rootDir is required');
   if (!sessionId) throw new Error('sessionId is required');
   if (type === 'message' && !role) throw new Error('role is required for message entries');
   const resolvedSessionId = safeId(sessionId);
   await fs.mkdir(sessionDir(rootDir, resolvedSessionId), { recursive: true });
-  const contentEnvelope = redactAndTruncateText(content || '', { maxChars: maxContentChars });
+  // Chat messages are durable conversation and must survive intact. Keep the
+  // existing bounded default for diagnostic receipts/events/tools; callers may
+  // still opt into a narrower or wider diagnostic envelope explicitly.
+  const resolvedMaxContentChars = maxContentChars ?? (type === 'message' ? Infinity : 20_000);
+  const contentEnvelope = redactAndTruncateText(content || '', { maxChars: resolvedMaxContentChars });
   const resolvedVisibility = visibility || defaultVisibility({ type, role });
   const entry = normalizeTranscriptEntry({
     id: randomUUID(), parentId, ts: clock(), sessionId: resolvedSessionId, type: String(type),
@@ -482,8 +486,10 @@ export async function appendSessionEntryIfAbsent({ idempotencyKey, ...args } = {
     const lines = await readTailJsonLines(sessionFile(rootDir, resolvedSessionId), 2_000).catch((error) => error?.code === 'ENOENT' ? [] : Promise.reject(error));
     for (const line of lines) { try { const found = normalizeTranscriptEntry(JSON.parse(line), { sessionId: resolvedSessionId }); if (found?.metadata?.idempotencyKey === key) return { ...found, idempotent: true }; } catch {} }
     if (args.type === 'message' && !args.role) throw new Error('role is required for message entries');
-    const contentEnvelope = redactAndTruncateText(args.content || '', { maxChars: args.maxContentChars || 20_000 });
-    const resolvedVisibility = args.visibility || defaultVisibility({ type: args.type || 'message', role: args.role || null });
+    const resolvedType = args.type || 'message';
+    const resolvedMaxContentChars = args.maxContentChars ?? (resolvedType === 'message' ? Infinity : 20_000);
+    const contentEnvelope = redactAndTruncateText(args.content || '', { maxChars: resolvedMaxContentChars });
+    const resolvedVisibility = args.visibility || defaultVisibility({ type: resolvedType, role: args.role || null });
     const entry = normalizeTranscriptEntry({ id: randomUUID(), parentId: args.parentId || null, ts: (args.clock || nowIso)(), sessionId: resolvedSessionId, type: String(args.type || 'message'), role: args.role == null ? null : String(args.role), content: contentEnvelope.text, contentTruncated: contentEnvelope.truncated, runId: args.runId || null, traceDir: args.traceDir || null, visibility: resolvedVisibility, entersPrompt: args.entersPrompt ?? defaultEntersPrompt({ type: args.type || 'message', role: args.role || null, visibility: resolvedVisibility }), metadata: { ...(args.metadata || {}), idempotencyKey: key } }, { sessionId: resolvedSessionId });
     await fs.appendFile(sessionFile(rootDir, resolvedSessionId), jsonLine(entry), 'utf8'); await updateSessionMetadataAfterAppend({ rootDir, sessionId: resolvedSessionId, entry }); return { ...entry, idempotent: false };
   });

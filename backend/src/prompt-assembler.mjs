@@ -473,7 +473,9 @@ export async function assemblePrompt({
   const profileFilesLimit = limits.profileFilesChars ?? 50_000;
   const profileFilePerFileLimit = limits.profileFileChars ?? 50_000;
   const kernelLimit = limits.kernelChars ?? 4_000;
-  const taskLimit = limits.taskChars ?? 8_000;
+  // The current user message is atomic input, not optional context. Context
+  // preparation may compact older conversation or reject an over-budget
+  // request, but prompt assembly must never silently amputate this turn.
   const attachmentBudget = limits.attachmentChars ?? 32_000;
   const attachmentPerFileBudget = limits.attachmentPerFileChars ?? 12_000;
 
@@ -566,7 +568,7 @@ export async function assemblePrompt({
       omittedItems: omittedSkillIds,
       omittedChars: omittedSkillChars,
     }),
-    section('current-message', clampText(task, taskLimit)),
+    section('current-message', task),
   ];
   const sections = rawSections.filter((item) => item.text);
 
@@ -597,7 +599,7 @@ export async function assemblePrompt({
     ...conversationProviderMessages({
       priorSummary: renderPriorConversationSummary(conversation),
       recentMessages: conversation.recentMessages || [],
-      task: clampText(task, taskLimit),
+      task,
     }),
   ];
   const conversationSection = rawSections.find((item) => item.name === 'conversation');
