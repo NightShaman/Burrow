@@ -1,16 +1,13 @@
-const SECRET_ASSIGNMENT = /\b([A-Z0-9_]*(?:TOKEN|API[_-]?KEY|SECRET|PASSWORD|PASS|AUTH)[A-Z0-9_]*)\s*=\s*([^\s'\"]+)/gi;
-const AUTH_HEADER = /\b(authorization\s*[:=]\s*)(bearer\s+)?[^\s'\"]+/gi;
-const KEY_VALUE_EQUALS = /\b(api[_-]?key|token|secret|password|passwd)\s*[:=]\s*([^\s'\"]+)/gi;
-const KEY_VALUE_FLAG = /(?<![\w-])(--?(?:api[_-]?key|token|secret|password|passwd))\s+([^\s'\"]+)/gi;
-const PROVIDER_KEY_PREFIX = /\b(sk|xox[baprs]|gh[pousr])[-_]([A-Za-z0-9_-]{8,})\b/g;
-// An explicit wrapper covers opaque values whose format cannot safely be
-// recognized. Keep the wrapper out of every durable/logged projection while
-// leaving the raw current turn available to the model for this request.
+// Redaction is boundary-driven. Free-form prose is not a credential schema: words
+// such as "token" and "password" are ordinary conversation and must not cause
+// destructive rewriting. Secrets are removed when a producer marks them, when a
+// structured field is known to be sensitive, or when an exact protected value is
+// supplied by the credential/tool boundary.
 const SECRET_BLOCK = /<secret(?:\s+[^>]*)?>[\s\S]*?<\/secret>/gi;
+const SENSITIVE_FIELD = /^(?:token|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|secret|client[_-]?secret|password|passwd|credential|credentials|private[_-]?key|auth|authorization)$/i;
 
-function redactSecretAssignment(match, key) {
-  if (/^(?:output_tokens|max_output_tokens|context_tokens|estimated_tokens)$/i.test(String(key || ''))) return match;
-  return `${key}=[redacted]`;
+function isSensitiveField(key) {
+  return SENSITIVE_FIELD.test(String(key || ''));
 }
 
 export function redactProtectedText(value, protectedValues = []) {
@@ -21,25 +18,23 @@ export function redactProtectedText(value, protectedValues = []) {
   return text;
 }
 
+/**
+ * Redact only Burrow's explicit free-text sensitivity envelope. This function
+ * deliberately does not guess credentials from prose or token-looking syntax.
+ */
 export function redactText(value) {
-  return String(value ?? '')
-    .replace(SECRET_BLOCK, '<secret>[redacted]</secret>')
-    .replace(SECRET_ASSIGNMENT, redactSecretAssignment)
-    .replace(AUTH_HEADER, '$1$2[redacted]')
-    .replace(KEY_VALUE_EQUALS, '$1=[redacted]')
-    .replace(KEY_VALUE_FLAG, '$1 [redacted]')
-    .replace(PROVIDER_KEY_PREFIX, '$1-[redacted]');
+  return String(value ?? '').replace(SECRET_BLOCK, '<secret>[redacted]</secret>');
 }
 
-export function redactValue(value, { maxDepth = 12, maxItems = 64, maxKeys = 64 } = {}, depth = 0, seen = new WeakSet()) {
-  if (typeof value === 'string') return redactText(value);
+export function redactValue(value, { maxDepth = 12, maxItems = 64, maxKeys = 64, protectedValues = [] } = {}, depth = 0, seen = new WeakSet()) {
+  if (typeof value === 'string') return redactProtectedText(value, protectedValues);
   if (!value || typeof value !== 'object') return value;
   if (depth >= maxDepth || seen.has(value)) return '[redaction traversal truncated]';
   seen.add(value);
   if (Array.isArray(value)) {
     const result = [];
     const count = Math.min(value.length, maxItems);
-    for (let index = 0; index < count; index += 1) result.push(redactValue(value[index], { maxDepth, maxItems, maxKeys }, depth + 1, seen));
+    for (let index = 0; index < count; index += 1) result.push(redactValue(value[index], { maxDepth, maxItems, maxKeys, protectedValues }, depth + 1, seen));
     if (value.length > count) result.push(`[${value.length - count} items omitted]`);
     return result;
   }
@@ -49,10 +44,8 @@ export function redactValue(value, { maxDepth = 12, maxItems = 64, maxKeys = 64 
     if (!Object.hasOwn(value, key)) continue;
     if (count >= maxKeys) { result.__redactionTruncated = 'keys omitted'; break; }
     count += 1;
-    // Redact secret-bearing fields, not ordinary telemetry such as
-    // `estimatedTokens` or `contextTokens`.
-    if (/^(?:token|api[_-]?key|secret|password|passwd|auth|authorization)$/i.test(key)) result[key] = '[redacted]';
-    else result[key] = redactValue(value[key], { maxDepth, maxItems, maxKeys }, depth + 1, seen);
+    if (isSensitiveField(key)) result[key] = '[redacted]';
+    else result[key] = redactValue(value[key], { maxDepth, maxItems, maxKeys, protectedValues }, depth + 1, seen);
   }
   return result;
 }
@@ -67,6 +60,7 @@ export function boundedRedactedValue(value, {
   maxDepth = 8,
   maxItems = 40,
   maxKeys = 60,
+  protectedValues = [],
 } = {}) {
   const state = { remaining: Math.max(0, Number(maxChars) || 0), seen: new WeakSet() };
   const marker = (text) => {
@@ -78,7 +72,7 @@ export function boundedRedactedValue(value, {
     if (item === null || item === undefined || typeof item === 'boolean' || typeof item === 'number') return item;
     if (state.remaining <= 0) return '[metadata budget exhausted]';
     if (typeof item === 'string') {
-      const redacted = redactText(item);
+      const redacted = redactProtectedText(item, protectedValues);
       const limit = Math.max(0, Math.min(maxStringChars, state.remaining));
       const kept = redacted.slice(0, limit);
       state.remaining -= kept.length;
@@ -102,7 +96,7 @@ export function boundedRedactedValue(value, {
       if (count >= maxKeys || state.remaining <= 0) { omitted = true; break; }
       count += 1;
       const safeKey = String(key).slice(0, 256);
-      if (/^(?:token|api[_-]?key|secret|password|passwd|auth|authorization)$/i.test(safeKey)) result[safeKey] = '[redacted]';
+      if (isSensitiveField(safeKey)) result[safeKey] = '[redacted]';
       else {
         try { result[safeKey] = visit(item[key], depth + 1); }
         catch { result[safeKey] = '[metadata field unreadable]'; }
@@ -114,6 +108,13 @@ export function boundedRedactedValue(value, {
   return visit(value);
 }
 
+/** Redact a serialized structured payload without applying credential regexes to prose leaves. */
+export function redactStructuredJsonText(value, options = {}) {
+  const source = String(value ?? '');
+  try { return JSON.stringify(redactValue(JSON.parse(source), options)); }
+  catch { return redactProtectedText(source, options.protectedValues || []); }
+}
+
 export function truncateText(value, { maxChars = 100_000 } = {}) {
   const text = String(value ?? '');
   if (!Number.isFinite(maxChars) || maxChars < 0 || text.length <= maxChars) {
@@ -123,6 +124,6 @@ export function truncateText(value, { maxChars = 100_000 } = {}) {
 }
 
 export function redactAndTruncateText(value, options = {}) {
-  const redacted = redactText(value);
+  const redacted = redactProtectedText(value, options.protectedValues || []);
   return truncateText(redacted, options);
 }

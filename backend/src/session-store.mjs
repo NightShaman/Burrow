@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { channel } from 'node:diagnostics_channel';
 import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
-import { boundedRedactedValue, redactAndTruncateText } from './redaction.mjs';
+import { boundedRedactedValue, redactAndTruncateText, truncateText } from './redaction.mjs';
 import { normalizeSessionContextState } from './session-context-state.mjs';
 import { assessInterruptedRunRecovery } from './recovery-resume-policy.mjs';
 
@@ -462,7 +462,9 @@ export async function appendSessionEntry({ rootDir, sessionId, type = 'message',
   // existing bounded default for diagnostic receipts/events/tools; callers may
   // still opt into a narrower or wider diagnostic envelope explicitly.
   const resolvedMaxContentChars = maxContentChars ?? (type === 'message' ? Infinity : 20_000);
-  const contentEnvelope = redactAndTruncateText(content || '', { maxChars: resolvedMaxContentChars });
+  const contentEnvelope = type === 'message'
+    ? truncateText(content || '', { maxChars: resolvedMaxContentChars })
+    : redactAndTruncateText(content || '', { maxChars: resolvedMaxContentChars });
   const resolvedVisibility = visibility || defaultVisibility({ type, role });
   const entry = normalizeTranscriptEntry({
     id: randomUUID(), parentId, ts: clock(), sessionId: resolvedSessionId, type: String(type),
@@ -488,7 +490,9 @@ export async function appendSessionEntryIfAbsent({ idempotencyKey, ...args } = {
     if (args.type === 'message' && !args.role) throw new Error('role is required for message entries');
     const resolvedType = args.type || 'message';
     const resolvedMaxContentChars = args.maxContentChars ?? (resolvedType === 'message' ? Infinity : 20_000);
-    const contentEnvelope = redactAndTruncateText(args.content || '', { maxChars: resolvedMaxContentChars });
+    const contentEnvelope = resolvedType === 'message'
+      ? truncateText(args.content || '', { maxChars: resolvedMaxContentChars })
+      : redactAndTruncateText(args.content || '', { maxChars: resolvedMaxContentChars });
     const resolvedVisibility = args.visibility || defaultVisibility({ type: resolvedType, role: args.role || null });
     const entry = normalizeTranscriptEntry({ id: randomUUID(), parentId: args.parentId || null, ts: (args.clock || nowIso)(), sessionId: resolvedSessionId, type: String(args.type || 'message'), role: args.role == null ? null : String(args.role), content: contentEnvelope.text, contentTruncated: contentEnvelope.truncated, runId: args.runId || null, traceDir: args.traceDir || null, visibility: resolvedVisibility, entersPrompt: args.entersPrompt ?? defaultEntersPrompt({ type: args.type || 'message', role: args.role || null, visibility: resolvedVisibility }), metadata: { ...(args.metadata || {}), idempotencyKey: key } }, { sessionId: resolvedSessionId });
     await fs.appendFile(sessionFile(rootDir, resolvedSessionId), jsonLine(entry), 'utf8'); await updateSessionMetadataAfterAppend({ rootDir, sessionId: resolvedSessionId, entry }); return { ...entry, idempotent: false };

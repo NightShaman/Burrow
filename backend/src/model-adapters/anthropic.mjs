@@ -1,4 +1,4 @@
-import { redactText } from '../redaction.mjs';
+import { redactStructuredJsonText } from '../redaction.mjs';
 import { DEFAULT_MODEL_OUTPUT_TOKENS } from '../config.mjs';
 import { anthropicSupportsSamplingParameters } from '../anthropic-model-capabilities.mjs';
 import {
@@ -549,7 +549,7 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
           ? { ...block, ...('data' in block ? { data: '[redacted]' } : {}), ...('signature' in block ? { signature: '[redacted]' } : {}) }
           : block),
     })) };
-    const providerRequestArtifact = await traceLogger?.artifact?.(`provider-request-${requestId}.json`, redactText(JSON.stringify(diagnosticBody))) || null;
+    const providerRequestArtifact = await traceLogger?.artifact?.(`provider-request-${requestId}.json`, redactStructuredJsonText(JSON.stringify(diagnosticBody))) || null;
     const requestContextUsage = contextUsageFromRequest({ promptChars, bodyChars: serializedBody.length, imageCount, model, api: 'anthropic-messages', modelCall, clock });
     await onContextUsage?.(requestContextUsage);
     const stablePrefixHash = serializedMessageHash({ system: body.system || null, tools: body.tools || [] });

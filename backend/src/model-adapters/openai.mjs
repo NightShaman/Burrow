@@ -1,4 +1,4 @@
-import { redactText } from '../redaction.mjs';
+import { redactStructuredJsonText } from '../redaction.mjs';
 import {
   apiMode,
   isChatGptBackendBaseUrl,
@@ -123,7 +123,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       // Provider bodies contain the complete prompt, including the current operator
       // turn. Persist only a redacted debugger projection; the raw body is sent to
       // the provider but must not become a durable trace artifact.
-      const providerRequestArtifact = await traceLogger?.artifact?.(`provider-request-${requestId}.json`, redactText(serializedBody)) || null;
+      const providerRequestArtifact = await traceLogger?.artifact?.(`provider-request-${requestId}.json`, redactStructuredJsonText(serializedBody)) || null;
       const requestContextUsage = contextUsageFromRequest({
         promptChars: providerPromptChars,
         bodyChars: serializedBody.length,

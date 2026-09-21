@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { redactText } from './redaction.mjs';
 import { AgentRegistryStore } from './agent-registry.mjs';
 import { completeCurator, curatorRoot, readCuratorSelection } from './curator-runtime.mjs';
 import { openSettingsDatabase, settingsDatabasePath } from './settings-database.mjs';
@@ -77,8 +76,10 @@ export function appendTiddleResidue({ databasePath = null, agentId, scope, sessi
     const item = {
       ref: `session:${sessionId}:run:${runId}`,
       scope: text(scope), sessionId: text(sessionId), conversationId: text(conversationId) || text(sessionId), runId: text(runId), at,
-      // Residue persists beyond this turn, so it must never retain raw chat secrets.
-      message: bounded(redactText(message), 1200), answer: bounded(redactText(answerText), 1800),
+      // Residue is a bounded conversation projection, so preserve the user's and
+      // assistant's words exactly. Credential material must enter through typed
+      // protected tool fields rather than heuristic rewriting of ordinary prose.
+      message: bounded(message, 1200), answer: bounded(answerText, 1800),
       tools: (Array.isArray(toolResults) ? toolResults : []).filter((tool) => tool?.ok === true).slice(0, 8).map((tool) => ({ tool: bounded(tool.tool, 120), path: bounded(tool.filePath || tool.path, 240) || null, command: bounded(tool.command, 240) || null })),
     };
     const cutoff = iso(new Date(at).getTime() - LOOKBACK_MS);
