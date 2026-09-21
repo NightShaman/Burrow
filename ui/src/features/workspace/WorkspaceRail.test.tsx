@@ -19,7 +19,7 @@ const agent: Agent = {
   subagents: [{ id: 'child', name: 'Child', avatar: 'C', activity: 'Working', context: 3, stream: 'child' }],
 };
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); window.localStorage.clear(); });
 
 describe('AgentsPanel', () => {
   it('exposes agent selection and expansion as separate accessible controls', () => {
@@ -49,6 +49,23 @@ describe('AgentsPanel', () => {
     expect(child.getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(child);
     expect(onSelectSubagent).toHaveBeenCalledWith('smatchet', 'child');
+  });
+
+  it('renders compact view without sidebar configuration controls', () => {
+    const view = render(<AgentsPanel agents={[agent]} view="compact" order={[]} selectedStreamId="smatchet" expandedAgents={new Set()} onSelectAgent={vi.fn()} onToggleAgent={vi.fn()} onSelectSubagent={vi.fn()} />);
+    expect(view.container.querySelector('.context-usage')).toBeNull();
+    expect(screen.getByText('Smatchet')).toBeTruthy();
+    expect(screen.getByText('Idle')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Expand Smatchet' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Compact' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Arrange' })).toBeNull();
+  });
+
+  it('renders the Settings-defined agent order', () => {
+    const hatchet = { ...agent, id: 'hatchet', name: 'Hatchet' };
+    const fringe = { ...agent, id: 'fringe', name: 'Fringe' };
+    const view = render(<AgentsPanel agents={[agent, hatchet, fringe]} order={['hatchet', 'smatchet']} selectedStreamId="smatchet" expandedAgents={new Set()} onSelectAgent={vi.fn()} onToggleAgent={vi.fn()} onSelectSubagent={vi.fn()} />);
+    expect([...view.container.querySelectorAll('.agent-name b')].map((node) => node.textContent)).toEqual(['Hatchet', 'Smatchet', 'Fringe']);
   });
 });
 
