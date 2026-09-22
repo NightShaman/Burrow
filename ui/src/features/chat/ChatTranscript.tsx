@@ -1,4 +1,4 @@
-import { isValidElement, useLayoutEffect, useRef, useState } from 'react';
+import { isValidElement, memo, useLayoutEffect, useRef, useState } from 'react';
 import type { HTMLAttributes, ReactNode, SyntheticEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { markdownPlugins, MarkdownTable } from '../../app/markdownTables';
@@ -30,7 +30,7 @@ type ChatTranscriptProps = {
   runtimeChildActivities?: ToolActivity[];
 };
 
-export function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, a2aActivities = [], runtimeUserMessage = '', runtimeChildActivities = [] }: ChatTranscriptProps) {
+export const ChatTranscript = memo(function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, a2aActivities = [], runtimeUserMessage = '', runtimeChildActivities = [] }: ChatTranscriptProps) {
   const isSubagent = 'stream' in selected;
   const messages = turns.filter((turn) => turn.type === 'message' && turn.metadata?.visibility !== 'debug' && turn.metadata?.kind !== 'subagent-runtime-context' && turn.metadata?.kind !== 'subagent-task' && turn.content && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && isChatCommand(textFromChatValue(turn.content))));
   const activityByRun = new Map<string, ToolActivity>();
@@ -82,7 +82,7 @@ export function ChatTranscript({ selected, parent, operator, isNewSession, turns
       {error && <p className="chat-error" role="alert">{error}</p>}
     </>}
   </div>;
-}
+});
 
 function formatTime(value?: string) { if (!value) return 'Now'; const date = new Date(value); return Number.isNaN(date.getTime()) ? 'Now' : new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date); }
 
