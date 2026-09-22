@@ -83,7 +83,7 @@ function reviewAction(action = {}, { workspaceRoot = null, executionContext = nu
     return { index: action.index, tool: action.tool, status: blockers.length ? 'blocked' : 'allowed', risk, blockers: [...new Set(blockers)], warnings };
   }
 
-  if (action.tool === 'session_search' || action.tool === 'session_read_handoff' || action.tool === 'attachment_view' || action.tool === 'memory_working_search' || action.tool === 'memory_rolling_search' || action.tool === 'tasks_list') {
+  if (action.tool === 'session_search' || action.tool === 'session_read_handoff' || action.tool === 'attachment_view' || action.tool === 'memory_working_search' || action.tool === 'memory_rolling_search' || action.tool === 'tasks_list' || ['scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_job_runs'].includes(action.tool)) {
     risk.push('read-only');
     return {
       index: action.index,
@@ -95,7 +95,7 @@ function reviewAction(action = {}, { workspaceRoot = null, executionContext = nu
     };
   }
 
-  if (action.tool === 'memory_working_write' || action.tool === 'session_write_handoff' || action.tool === 'tasks_create' || action.tool === 'tasks_update' || action.tool === 'tasks_assign' || action.tool === 'tasks_delete' || action.tool === 'agent_update_tools_profile') {
+  if (action.tool === 'memory_working_write' || action.tool === 'session_write_handoff' || action.tool === 'tasks_create' || action.tool === 'tasks_update' || action.tool === 'tasks_assign' || action.tool === 'tasks_delete' || action.tool === 'agent_update_tools_profile' || ['scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_jobs_run_now'].includes(action.tool)) {
     risk.push(action.tool === 'agent_update_tools_profile' ? 'agent-profile-write' : 'working-memory-write');
     return {
       index: action.index,

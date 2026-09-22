@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-export const ALLOWED_TOOLS = new Set(['shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'attachment_view', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'files_write', 'files_patch', 'spawn_subagent', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call', 'list_skills', 'load_skill']);
+export const ALLOWED_TOOLS = new Set(['shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'attachment_view', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now', 'files_write', 'files_patch', 'spawn_subagent', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call', 'list_skills', 'load_skill']);
 
 const TARGET_KIND_ALIASES = new Map([
   ['filesystem', 'filesystem'],
@@ -107,12 +107,20 @@ function normalizeAction(action, index) {
     target: action?.target && typeof action.target === 'object' && !Array.isArray(action.target) ? action.target : null,
     recipientAgentId: action?.recipientAgentId ? String(action.recipientAgentId).trim() : null,
     targetSessionId: action?.targetSessionId ? String(action.targetSessionId).trim() : null,
+    scheduledSessionId: action?.sessionId ? String(action.sessionId).trim() : null,
     messageMode: action?.messageMode ? String(action.messageMode).trim() : 'request_reply',
     taskId: action?.taskId ? String(action.taskId) : null,
     skillId: action?.skillId || action?.id ? String(action.skillId || action.id).trim() : null,
     mcpProvider: action?.provider ? String(action.provider).trim() : null,
     mcpToolName: action?.mcpToolName ? String(action.mcpToolName).trim() : null,
     mcpArguments: action?.mcpArguments && typeof action.mcpArguments === 'object' && !Array.isArray(action.mcpArguments) ? action.mcpArguments : {},
+    jobId: action?.jobId ? String(action.jobId).trim() : null,
+    jobName: action?.name ? String(action.name) : null,
+    jobPrompt: action?.prompt ? String(action.prompt) : null,
+    cron: action?.cron ? String(action.cron) : null,
+    timezone: action?.timezone ? String(action.timezone) : null,
+    enabled: action?.enabled === undefined ? null : action.enabled,
+    modelConnectionId: action?.modelConnectionId === undefined ? undefined : action.modelConnectionId,
     errors,
   };
 
@@ -147,6 +155,13 @@ function normalizeAction(action, index) {
   if (tool === 'tasks_assign' && (!normalized.taskId || !normalized.assignedAgentId)) errors.push('taskId_and_assignedAgentId_required');
   if (tool === 'tasks_delete' && !normalized.taskId) errors.push('taskId_required');
   if (tool === 'agent_update_tools_profile' && normalized.profileToolsContent === null) errors.push('content_required');
+  if (['scheduled_jobs_read', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now'].includes(tool) && !normalized.jobId) errors.push('jobId_required');
+  if (tool === 'scheduled_jobs_create') {
+    if (!normalized.jobName?.trim()) errors.push('name_required');
+    if (!normalized.jobPrompt?.trim()) errors.push('prompt_required');
+    if (!normalized.cron?.trim()) errors.push('cron_required');
+    if (!normalized.timezone?.trim()) errors.push('timezone_required');
+  }
   if (tool === 'files_write' && normalized.content === null) errors.push('content_required');
   if (tool === 'files_patch' && !normalized.patch) errors.push('patch_required');
   if (tool === 'spawn_subagent') {
@@ -336,6 +351,13 @@ export function nativeToolSchemas({ includeMutations = true, includeWorkingMemor
         parameters: { type: 'object', additionalProperties: false, properties: { content: { type: 'string', description: 'Complete intended Markdown content for your TOOLS.md document.' }, reason: { type: 'string' } }, required: ['content'] },
       },
     },
+    { type: 'function', function: { name: 'scheduled_jobs_list', description: 'List cron jobs owned by this active agent in this Burrow runtime. This never lists another agent’s or a mod’s jobs.', parameters: { type: 'object', additionalProperties: false, properties: { enabled: { type: 'boolean' }, limit: { type: 'number', minimum: 1, maximum: 100 }, reason: { type: 'string' } } } } },
+    { type: 'function', function: { name: 'scheduled_jobs_read', description: 'Read one cron job owned by this active agent.', parameters: { type: 'object', additionalProperties: false, properties: { jobId: { type: 'string' }, reason: { type: 'string' } }, required: ['jobId'] } } },
+    { type: 'function', function: { name: 'scheduled_jobs_create', description: 'Create a cron job for this active agent in the current Burrow runtime. The session defaults to the current chat. Jobs default to disabled unless enabled is explicitly true.', parameters: { type: 'object', additionalProperties: false, properties: { name: { type: 'string' }, prompt: { type: 'string' }, cron: { type: 'string', description: 'Five-field cron expression.' }, timezone: { type: 'string', description: 'IANA timezone.' }, sessionId: { type: 'string', description: 'Optional session; defaults to the current session.' }, enabled: { type: 'boolean' }, modelConnectionId: { type: ['string','null'] }, model: { type: ['string','null'] }, reason: { type: 'string' } }, required: ['name','prompt','cron','timezone'] } } },
+    { type: 'function', function: { name: 'scheduled_jobs_update', description: 'Update one cron job owned by this active agent. Agent ownership cannot be changed.', parameters: { type: 'object', additionalProperties: false, properties: { jobId: { type: 'string' }, name: { type: 'string' }, prompt: { type: 'string' }, cron: { type: 'string' }, timezone: { type: 'string' }, sessionId: { type: 'string' }, enabled: { type: 'boolean' }, modelConnectionId: { type: ['string','null'] }, model: { type: ['string','null'] }, reason: { type: 'string' } }, required: ['jobId'] } } },
+    { type: 'function', function: { name: 'scheduled_jobs_delete', description: 'Permanently delete one cron job owned by this active agent.', parameters: { type: 'object', additionalProperties: false, properties: { jobId: { type: 'string' }, reason: { type: 'string' } }, required: ['jobId'] } } },
+    { type: 'function', function: { name: 'scheduled_job_runs', description: 'List recent runs for one cron job owned by this active agent.', parameters: { type: 'object', additionalProperties: false, properties: { jobId: { type: 'string' }, limit: { type: 'number', minimum: 1, maximum: 200 }, reason: { type: 'string' } }, required: ['jobId'] } } },
+    { type: 'function', function: { name: 'scheduled_jobs_run_now', description: 'Run one cron job owned by this active agent now. Returns after dispatch; inspect scheduled_job_runs for terminal status.', parameters: { type: 'object', additionalProperties: false, properties: { jobId: { type: 'string' }, reason: { type: 'string' } }, required: ['jobId'] } } },
     {
       type: 'function',
       function: {
@@ -408,7 +430,7 @@ export function nativeToolSchemas({ includeMutations = true, includeWorkingMemor
   return tools.filter((tool) => (includeMutations || !['files_write', 'files_edit', 'files_patch'].includes(tool.function?.name))
     && (includeWorkingMemory || !['memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_read_handoff', 'session_write_handoff'].includes(tool.function?.name))
     && (includeTaskBoard || !['tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete'].includes(tool.function?.name))
-    && (includeAgentProfile || tool.function?.name !== 'agent_update_tools_profile')
+    && (includeAgentProfile || !['agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now'].includes(tool.function?.name))
     && (includeAgentChat || tool.function?.name !== 'agent_send_message')
     && (includeMcpMenu || !['mcp_providers', 'mcp_capabilities', 'mcp_call', 'list_skills', 'load_skill'].includes(tool.function?.name)));
 }
@@ -439,6 +461,10 @@ export function actionFromNativeToolCall(call = {}, index = 0) {
   if (tool === 'tasks_assign') return normalizeNative({ tool, reason: args.reason, taskId: args.taskId, assignedAgentId: args.assignedAgentId });
   if (tool === 'tasks_delete') return normalizeNative({ tool, reason: args.reason, taskId: args.taskId });
   if (tool === 'agent_update_tools_profile') return normalizeNative({ tool, reason: args.reason, content: args.content });
+  if (tool === 'scheduled_jobs_list') return normalizeNative({ tool, reason: args.reason, enabled: args.enabled, limit: args.limit });
+  if (tool === 'scheduled_jobs_read' || tool === 'scheduled_jobs_delete' || tool === 'scheduled_jobs_run_now') return normalizeNative({ tool, reason: args.reason, jobId: args.jobId });
+  if (tool === 'scheduled_job_runs') return normalizeNative({ tool, reason: args.reason, jobId: args.jobId, limit: args.limit });
+  if (tool === 'scheduled_jobs_create' || tool === 'scheduled_jobs_update') return normalizeNative({ tool, reason: args.reason, jobId: args.jobId, name: args.name, prompt: args.prompt, cron: args.cron, timezone: args.timezone, sessionId: args.sessionId, enabled: args.enabled, modelConnectionId: args.modelConnectionId, model: args.model });
   if (tool === 'files_write') return normalizeNative({ tool, reason: args.reason, filePath: args.filePath, content: args.content });
   if (tool === 'files_patch') return normalizeNative({ tool, reason: args.reason, patch: args.patch });
   if (tool === 'agent_send_message') return normalizeNative({ tool, reason: args.reason, recipientAgentId: args.recipientAgentId, targetSessionId: args.targetSessionId, messageMode: args.messageMode, content: args.content });

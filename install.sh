@@ -255,6 +255,22 @@ if [ -z "$SOURCE_DIR" ]; then
   curl -fsSL "https://codeload.github.com/${REPOSITORY}/tar.gz/$assembly_sha" -o "$TMP_ROOT/burrow.tar.gz"
   tar -xzf "$TMP_ROOT/burrow.tar.gz" -C "$TMP_ROOT"
   SOURCE_DIR=$(find "$TMP_ROOT" -mindepth 1 -maxdepth 1 -type d -name "Burrow-*" | head -n 1)
+  [ -n "$SOURCE_DIR" ] && [ -x "$SOURCE_DIR/install.sh" ] || { echo "Burrow install: downloaded assembly has no executable installer." >&2; exit 1; }
+
+  # The installed launcher enters the installer from the previous release. Hand
+  # control to the downloaded release before applying migrations so an update
+  # uses the installer semantics shipped with the payload it is activating.
+  # Without this handoff, every installer migration takes effect one update late.
+  set -- --source-dir "$SOURCE_DIR" --dir "$INSTALL_DIR"
+  [ "$MODE" != headless ] || set -- "$@" --headless
+  [ "$INSTALL_DEPS" -ne 0 ] || set -- "$@" --no-install-dependencies
+  [ "$INSTALL_NODE" -ne 1 ] || set -- "$@" --install-node
+  [ -z "$LISTEN_HOST" ] || set -- "$@" --host "$LISTEN_HOST"
+  [ -z "$LISTEN_PORT" ] || set -- "$@" --port "$LISTEN_PORT"
+  [ "$VERBOSE" -ne 1 ] || set -- "$@" --verbose
+  verbose_log "handing update to incoming assembly installer"
+  trap - EXIT HUP INT TERM
+  exec "$SOURCE_DIR/install.sh" "$@"
 fi
 [ -n "$SOURCE_DIR" ] && [ -f "$SOURCE_DIR/backend/package.json" ] && [ -f "$SOURCE_DIR/ui/package.json" ] || { echo "Burrow install: source is not an assembled Burrow checkout: ${SOURCE_DIR:-unknown}" >&2; exit 1; }
 INSTALL_DIR=$(mkdir -p "$INSTALL_DIR" && cd "$INSTALL_DIR" && pwd)

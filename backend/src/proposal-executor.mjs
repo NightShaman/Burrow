@@ -9,6 +9,7 @@ import { editFileEnvelope, gitDiffEnvelope, gitStatusEnvelope, globEnvelope, lis
 import { executeSpawnSubagentTool } from './subagent-tool-executor.mjs';
 import { sendAgentMessage } from './agent-chat-tool.mjs';
 import { updateOwnToolsProfile } from './agent-profile-tool.mjs';
+import { createAgentScheduledJob, executeAgentScheduledJobTool } from './agent-scheduled-job-tool.mjs';
 import { executeContinuityHandoffWriteTool, executeRollingContinuitySearchTool, executeSessionHandoffReadTool, executeWorkingMemoryRecordTool, executeWorkingMemorySearchTool } from './memory-tool-executor.mjs';
 import { searchAgentSessionEvidence } from './session-search.mjs';
 import { executeTaskBoardCreateTool, executeTaskBoardDeleteTool, executeTaskBoardListTool, executeTaskBoardReassignTool, executeTaskBoardUpdateTool } from './task-board-tool-executor.mjs';
@@ -189,6 +190,21 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
       continue;
     }
     if (action.tool === 'files_edit') { toolResults.push(await executeFilesystem(action, { filePath: workspacePath(action.filePath, executionRoot, rootDir), oldText: action.oldText, newText: action.newText, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-edit`, reason: action.reason })); continue; }
+
+    if (action.tool === 'scheduled_jobs_create') {
+      const started = await traceLogger?.toolStart?.({ tool: action.tool, toolCallId: action.toolCallId || null });
+      const result = createAgentScheduledJob({ action, agentId, sessionId, databasePath: executionContext?.settingsDatabasePath });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, jobId: result.job?.id || null, error: result.error || null });
+      continue;
+    }
+    if (['scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now'].includes(action.tool)) {
+      const started = await traceLogger?.toolStart?.({ tool: action.tool, toolCallId: action.toolCallId || null, jobId: action.jobId || null });
+      const result = await executeAgentScheduledJobTool({ action, agentId, sessionId, databasePath: executionContext?.settingsDatabasePath, rootDir, resolveAgentRuntime });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, jobId: result.job?.id || action.jobId || null, error: result.error || null });
+      continue;
+    }
 
     if (action.tool === 'attachment_view') {
       const attachmentId = action.attachmentId;
