@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkBreaks from 'remark-breaks';
+import { markdownPlugins, MarkdownTable } from '../../app/markdownTables';
 import { textFromChatValue, type SessionTurn } from '../../app/api';
 import { archiveDate, archiveSessionDate, dreamText } from './archiveDerivations';
 import type { ArchiveDetail, ArchiveSession, ContinuityCardGroup, DreamGroup } from './archiveTypes';
@@ -141,7 +141,7 @@ export function ChatArchiveReader({ session, detail, loading, error, earlierLoad
           {earlierError ? <div><span>Earlier messages could not be loaded: {earlierError}</span> <button type="button" onClick={load}>Retry</button> <button type="button" onClick={onRestart}>Restart from latest</button></div> : null}
         </div>
         <div className="archive-reader-summary">{session.summary || 'A mysterious little shelf item.'}</div>
-        {turns.length ? turns.map((turn, index) => { const role = ['user', 'operator', 'human'].includes((turn.role || '').toLowerCase()) ? 'operator' : 'agent'; const text = textFromChatValue(turn.content); return <article className={`archive-turn ${role}`} key={`${turn.ts || 'turn'}-${index}`}><div className="archive-turn-meta"><strong>{role === 'operator' ? 'You' : session.agentName || 'Agent'}</strong><span>{formatTurnDate(turn.ts)}</span></div>{text ? <div className="archive-turn-body"><ReactMarkdown remarkPlugins={[remarkBreaks]}>{text}</ReactMarkdown></div> : null}</article>; }) : <p className="archive-reader-empty">This conversation has no readable chat turns.</p>}
+        {turns.length ? turns.map((turn, index) => { const role = ['user', 'operator', 'human'].includes((turn.role || '').toLowerCase()) ? 'operator' : 'agent'; const text = textFromChatValue(turn.content); return <article className={`archive-turn ${role}`} key={`${turn.ts || 'turn'}-${index}`}><div className="archive-turn-meta"><strong>{role === 'operator' ? 'You' : session.agentName || 'Agent'}</strong><span>{formatTurnDate(turn.ts)}</span></div>{text ? <div className="archive-turn-body"><ReactMarkdown remarkPlugins={markdownPlugins} components={{ table: MarkdownTable }}>{text}</ReactMarkdown></div> : null}</article>; }) : <p className="archive-reader-empty">This conversation has no readable chat turns.</p>}
       </div> : null}
     </div>
   </>;
@@ -155,7 +155,7 @@ export function DreamArchiveReader({ group, loading, error }: { group: DreamGrou
     <div className="archive-content-body archive-reader-body">
       {loading ? <LoadingState title="Opening the full dreams." detail="Gathering every remembered state." /> : null}
       {error ? <ErrorState title="Could not open these dreams." error={error} /> : null}
-      {!loading && !error ? <div className="archive-reader dream-archive-stack">{group.entries.map((entry) => <article className="archive-reader-summary dream-archive-entry" key={entry.id}><div className="archive-turn-meta"><strong>{entry.phase}</strong><span>{formatArchiveDate(entry.createdAt)}</span></div><ReactMarkdown remarkPlugins={[remarkBreaks]}>{dreamText(entry)}</ReactMarkdown><div className="dream-archive-entry-actions"><DreamCopyButton text={dreamMarkdown(entry)} /></div></article>)}</div> : null}
+      {!loading && !error ? <div className="archive-reader dream-archive-stack">{group.entries.map((entry) => <article className="archive-reader-summary dream-archive-entry" key={entry.id}><div className="archive-turn-meta"><strong>{entry.phase}</strong><span>{formatArchiveDate(entry.createdAt)}</span></div><ReactMarkdown remarkPlugins={markdownPlugins} components={{ table: MarkdownTable }}>{dreamText(entry)}</ReactMarkdown><div className="dream-archive-entry-actions"><DreamCopyButton text={dreamMarkdown(entry)} /></div></article>)}</div> : null}
     </div>
   </>;
 }

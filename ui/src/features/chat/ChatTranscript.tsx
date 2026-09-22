@@ -1,7 +1,7 @@
 import { isValidElement, useLayoutEffect, useRef, useState } from 'react';
 import type { HTMLAttributes, ReactNode, SyntheticEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkBreaks from 'remark-breaks';
+import { markdownPlugins, MarkdownTable } from '../../app/markdownTables';
 import { textFromChatValue, type ProgressEntry, type RunProgress, type SessionAttachment, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
 import type { Agent, Subagent } from '../../app/types';
 import { toolDisplayName } from '../../app/toolDisplayName';
@@ -127,10 +127,10 @@ function CodeBlock({ children, ...props }: HTMLAttributes<HTMLPreElement>) {
   return <div className="code-block"><button type="button" className="copy-code" onClick={copy} aria-label="Copy code block" title={label}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg><span aria-live="polite">{label}</span></button><pre {...props}>{children}</pre></div>;
 }
 
-const markdownComponents = { pre: CodeBlock };
+const markdownComponents = { pre: CodeBlock, table: MarkdownTable };
 
 function Markdown({ children }: { children: string }) {
-  return <ReactMarkdown remarkPlugins={[remarkBreaks]} components={markdownComponents}>{children}</ReactMarkdown>;
+  return <ReactMarkdown remarkPlugins={markdownPlugins} components={markdownComponents}>{children}</ReactMarkdown>;
 }
 
 function markdownText(value: unknown) {

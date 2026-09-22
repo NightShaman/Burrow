@@ -2,6 +2,7 @@
 @import './styles/rails.css';
 @import './styles/workspace.css';
 @import './features/chat/chat.css';
+@import './styles/markdown-tables.css';
 @import './features/chat/editor.css';
 @import './features/panels/panels.css';
 @import './styles/pages.css';

@@ -49,6 +49,22 @@ it('preserves safe Markdown and line breaks in actual child replies', () => {
   expect(container.querySelector('script')).toBeNull();
 });
 
+it('renders a fenced code block alongside a semantic GFM table without changing copy controls', () => {
+  const { container } = show([{ type: 'message', role: 'assistant', content: '| Mod owns | Core provides |\n|:---|---:|\n| Encrypted storage | Agent identity |\n\n```text\n| literal | code |\n```' }]);
+  const table = screen.getByRole('table');
+  expect(table.querySelectorAll('th')).toHaveLength(2);
+  expect(table.querySelector('tbody tr')?.textContent).toBe('Encrypted storageAgent identity');
+  expect(table.parentElement?.getAttribute('role')).toBe('region');
+  expect(table.parentElement?.tabIndex).toBe(0);
+  expect(container.querySelector('pre code')?.textContent).toContain('| literal | code |');
+  expect(screen.getByRole('button', { name: 'Copy code block' })).toBeTruthy();
+});
+
+it('renders tables in live assistant text as well as saved messages', () => {
+  render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[]} isLoading={false} error="" isSending activeRunId="run-1" liveProgress={[]} liveAnswer={'| A | B |\n|---|---|\n| one | two |'} />);
+  expect(screen.getByRole('table').querySelector('td')?.textContent).toBe('one');
+});
+
 it('copies only a fenced code block without its Markdown fence or surrounding message', async () => {
   const copied: string[] = [];
   const execCommand = vi.fn(() => {
