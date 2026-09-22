@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { DEFAULT_DREAM_PROMPT, PREVIOUS_DEFAULT_DREAM_PROMPT } from './dream-prompt-defaults.mjs';
 
 function now() { return new Date().toISOString(); }
 
@@ -590,6 +591,17 @@ DreamDiary is for the operator: readable narrative reflection, never prompt auth
   { version: 39, name: 'scheduled-job-model-overrides', body: `ALTER TABLE scheduled_jobs ADD COLUMN model_connection_id TEXT; ALTER TABLE scheduled_jobs ADD COLUMN model TEXT;`, apply(db) { const columns = db.prepare('PRAGMA table_info(scheduled_jobs)').all().map(row => row.name); if (!columns.length) return; if (!columns.includes('model_connection_id')) db.exec('ALTER TABLE scheduled_jobs ADD COLUMN model_connection_id TEXT'); if (!columns.includes('model')) db.exec('ALTER TABLE scheduled_jobs ADD COLUMN model TEXT'); } },
   { version: 40, name: 'scheduled-job-mod-ownership', body: `ALTER TABLE scheduled_jobs ADD COLUMN owner_mod_id TEXT; CREATE INDEX scheduled_jobs_owner_mod_idx ON scheduled_jobs(owner_mod_id,next_run_at);`, apply(db) { const columns = db.prepare('PRAGMA table_info(scheduled_jobs)').all().map(row => row.name); if (!columns.length) return; if (!columns.includes('owner_mod_id')) db.exec('ALTER TABLE scheduled_jobs ADD COLUMN owner_mod_id TEXT'); db.exec('CREATE INDEX IF NOT EXISTS scheduled_jobs_owner_mod_idx ON scheduled_jobs(owner_mod_id,next_run_at)'); } },
   { version: 41, name: 'mod-source-refresh-settings', body: `INSERT INTO settings_meta (key,value_json,updated_at) VALUES ('mod_source_refresh', '{"enabled":true,"intervalMs":21600000,"staleMs":900000}', CURRENT_TIMESTAMP) ON CONFLICT(key) DO NOTHING;`, apply(db) { if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='settings_meta'").get()) db.exec(this.body); } },
+  {
+    version: 42,
+    name: 'dream-settings-creative-default',
+    body: 'Replace only the exact previous Dream default with the concise editable creative prompt; preserve customized prompts.',
+    apply(db) {
+      const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='dream_settings'").get();
+      if (!table) return;
+      db.prepare('UPDATE dream_settings SET prompt=?, updated_at=? WHERE prompt=?')
+        .run(DEFAULT_DREAM_PROMPT, now(), PREVIOUS_DEFAULT_DREAM_PROMPT);
+    },
+  },
 ].map((migration) => Object.freeze({ ...migration, checksum: checksum(`${migration.version}:${migration.name}:${migration.body}`) })));
 
 function ensureDreamSettingsModelColumns(db) {
