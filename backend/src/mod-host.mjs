@@ -187,7 +187,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   const exited = new Promise((resolve) => { resolveExit = resolve; });
 
   const rejectPending = (error) => {
-    for (const entry of pending.values()) { clearTimeout(entry.timer); entry.reject(error); }
+    for (const entry of pending.values()) { clearTimeout(entry.timer); entry.abortSignal?.removeEventListener('abort', entry.cancel); entry.reject(error); }
     pending.clear();
   };
 
@@ -292,6 +292,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       clearTimeout(activationTimer);
       const routes = message.routes || [];
       routes.diagnosticsSupported = message.diagnostics === true;
+      routes.tools = message.tools;
       resolveActivation(routes);
       return;
     }
@@ -306,13 +307,14 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     if (!entry) return;
     pending.delete(message.requestId);
     clearTimeout(entry.timer);
+    entry.abortSignal?.removeEventListener('abort', entry.cancel);
     if (message.error) {
       const error = hostError('mod_route_failed');
       const status = Number(message.statusCode);
       error.statusCode = Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
       entry.reject(error);
     } else {
-      try { entry.resolve(entry.routeId?.startsWith('diagnostic-') ? validateJsonBody(message.result) : validateRouteResult(message.result)); }
+      try { entry.resolve(entry.routeId?.startsWith('diagnostic-') || entry.routeId?.startsWith('tool:') ? validateJsonBody(message.result) : validateRouteResult(message.result)); }
       catch { entry.reject(hostError('mod_route_response_invalid')); }
     }
   });
@@ -452,24 +454,37 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     });
   }
 
-  async function invoke(routeId, request) {
+  async function invoke(routeId, request, { abortSignal = null } = {}) {
+    if (abortSignal?.aborted) throw hostError('mod_tool_cancelled');
     if (stopped || closing || !child.connected) throw hostError('mod_host_unavailable', mod.id);
     const requestId = `${process.pid}-${Date.now()}-${++sequence}`;
     return new Promise((resolve, reject) => {
+      const cancel = () => {
+        if (!pending.has(requestId)) return;
+        pending.delete(requestId);
+        clearTimeout(timer);
+        abortSignal?.removeEventListener('abort', cancel);
+        child.send({ type: 'invoke-cancel', requestId }, () => {});
+        reject(hostError('mod_tool_cancelled'));
+      };
+      abortSignal?.addEventListener('abort', cancel, { once: true });
       const timer = setTimeout(() => {
         if (!pending.has(requestId)) return;
         pending.delete(requestId);
+        abortSignal?.removeEventListener('abort', cancel);
         const error = hostError('mod_route_timeout', mod.id);
         markUnavailable('mod_route_timeout');
         reject(error);
         rejectPending(hostError('mod_host_unavailable', mod.id));
         child.kill('SIGKILL');
       }, finiteTimeout(routeTimeoutMs, DEFAULT_MOD_ROUTE_TIMEOUT_MS));
-      pending.set(requestId, { resolve, reject, timer, routeId });
+      pending.set(requestId, { resolve, reject, timer, routeId, abortSignal, cancel });
+      if (abortSignal?.aborted) { cancel(); return; }
       child.send({ type: 'invoke', requestId, routeId, request }, (error) => {
         if (!error || !pending.has(requestId)) return;
         pending.delete(requestId);
         clearTimeout(timer);
+        abortSignal?.removeEventListener('abort', cancel);
         const failure = hostError('mod_host_send_failed');
         reject(failure);
         rejectPending(hostError('mod_host_unavailable', mod.id));
@@ -477,6 +492,10 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
         if (!stopped) child.kill('SIGKILL');
       });
     });
+  }
+
+  function invokeTool(name, argumentsValue, caller, options = {}) {
+    return invoke(`tool:${name}`, { arguments: argumentsValue, caller }, options);
   }
 
   function close() {
@@ -500,5 +519,5 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     return closePromise;
   }
 
-  return { child, activated, invoke, close, exited, pendingCount: () => pending.size, activeOperationCount: () => pending.size + activeCapabilities.size + pendingSystemProcess.size + pendingSystemFilesystem.size, pendingDiagnostics: () => [...activeCapabilities.values()].map(({ method, startedAt }) => ({ kind: "capability", operation: method, status: "pending", elapsedMs: Math.max(0, Date.now() - startedAt) })), pendingSystemProcessCount: () => pendingSystemProcess.size, pendingSystemFilesystemCount: () => pendingSystemFilesystem.size, controllerInstanceId };
+  return { child, activated, invoke, invokeTool, close, exited, pendingCount: () => pending.size, activeOperationCount: () => pending.size + activeCapabilities.size + pendingSystemProcess.size + pendingSystemFilesystem.size, pendingDiagnostics: () => [...activeCapabilities.values()].map(({ method, startedAt }) => ({ kind: "capability", operation: method, status: "pending", elapsedMs: Math.max(0, Date.now() - startedAt) })), pendingSystemProcessCount: () => pendingSystemProcess.size, pendingSystemFilesystemCount: () => pendingSystemFilesystem.size, controllerInstanceId };
 }

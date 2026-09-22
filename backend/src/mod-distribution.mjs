@@ -592,6 +592,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
         try {
           db.prepare('DELETE FROM mod_installations WHERE mod_id=?').run(id);
           db.prepare('DELETE FROM mod_lifecycle WHERE mod_id=?').run(id);
+          db.prepare("DELETE FROM mcp_connections WHERE id=? AND base_url=?").run(`mod.${id}`, `mod://${id}`);
           db.exec('COMMIT'); recordsDeleted = true;
         } catch (error) { db.exec('ROLLBACK'); throw error; }
         await durableJson(journalPath, { ...journal, phase: 'removing' });

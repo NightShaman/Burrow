@@ -1,3 +1,4 @@
+import { publishModTools, unpublishModTools } from './mod-agent-tools.mjs';
 import { createModCapabilities } from './mod-capabilities.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -194,6 +195,7 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
       try { await cleanup(); }
       catch (error) { logger.error?.(`Burrow mod ${mod.id} cleanup failed: ${String(error?.message || error)}`); }
     }
+    unpublishModTools(mod);
     closeModStore(mod, logger);
   }
 }
@@ -244,6 +246,7 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
           onUnavailable(code) {
             unregisterController?.();
             unregisterController = null;
+            unpublishModTools(mod);
             mod.status = 'failed';
             mod.error = code;
           },
@@ -251,6 +254,13 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
         const activation = await host.activated;
         const descriptions = activation;
         mod.diagnosticsSupported = activation.diagnosticsSupported;
+        if (!Array.isArray(activation.tools)) throw new Error(`mod_tool_description_invalid:${mod.id}`);
+        const names = new Set();
+        mod.tools = activation.tools.map((tool) => {
+          if (typeof tool?.name !== 'string' || !/^[A-Za-z0-9._-]+$/.test(tool.name) || names.has(tool.name) || typeof tool.description !== 'string' || !tool.description.trim() || tool.inputSchema?.type !== 'object') throw new Error(`mod_tool_description_invalid:${mod.id}`);
+          names.add(tool.name);
+          return { name: tool.name, description: tool.description, inputSchema: tool.inputSchema };
+        });
         if (!Array.isArray(descriptions)) throw new Error(`mod_route_description_invalid:${mod.id}`);
         const routeIds = new Set();
         const routeKeys = new Set();
@@ -269,6 +279,7 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
         });
       }
       Object.assign(mod, { routes, store, lifecycleCleanup: host ? () => host.close() : null, commitProviderReplacement, host, status: 'loaded' });
+      if (mod.status === 'loaded' && !replaceExecutionProviders) publishModTools(mod, databasePath);
       loaded.push(mod);
     } catch (error) {
       if (host) {

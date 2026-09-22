@@ -5,6 +5,8 @@ let sequence = 0;
 let stopping = false;
 let systemController = null;
 const handlers = new Map();
+const toolHandlers = new Map();
+const activeTools = new Map();
 let diagnosticHandlers = null;
 const pendingStore = new Map();
 const pendingCapabilities = new Map();
@@ -108,8 +110,18 @@ function registrar(modId) {
     handlers.set(routeId, handler);
     routes.push({ routeId, method, path: value === '/' ? '' : value.replace(/\/$/, '') });
   };
+  const tools = [];
+  let registrationOpen = true;
   return {
-    routes,
+    routes, tools, closeRegistration() { registrationOpen = false; },
+    toolsApi: Object.freeze({ register({ name, description, inputSchema, handler }) {
+      if (!registrationOpen || typeof name !== 'string' || !/^[A-Za-z0-9._-]+$/.test(name) || toolHandlers.has(name) || typeof description !== 'string' || !description.trim() || !inputSchema || typeof inputSchema !== 'object' || Array.isArray(inputSchema) || inputSchema.type !== 'object' || typeof handler !== 'function') throw new Error('mod_tool_registration_invalid');
+      // IPC catalog is JSON. Reject non-serializable schemas rather than advertising a different contract.
+      const schema = JSON.parse(JSON.stringify(inputSchema));
+      if (JSON.stringify(schema) !== JSON.stringify(inputSchema)) throw new Error('mod_tool_registration_invalid');
+      toolHandlers.set(name, handler);
+      tools.push({ name, description, inputSchema: schema });
+    } }),
     diagnostics: Object.freeze({ register(adapter) {
       if (diagnosticHandlers || !adapter || typeof adapter.listJobs !== "function" || typeof adapter.getJob !== "function") throw new Error("mod_diagnostics_invalid");
       diagnosticHandlers = { listJobs: adapter.listJobs, getJob: adapter.getJob };
@@ -142,6 +154,7 @@ async function activate(message) {
   const context = {
     id: modId,
     api: registration.api,
+    tools: registration.toolsApi,
     diagnostics: registration.diagnostics,
     settings: settingsApi(),
     secrets: secretsApi(),
@@ -172,14 +185,19 @@ async function activate(message) {
     });
   }
   const result = await module.activate(Object.freeze(context));
+  registration.closeRegistration();
   cleanup = typeof result === 'function' ? result : result && typeof result.close === 'function' ? () => result.close() : null;
-  send({ type: 'activated', routes: registration.routes, diagnostics: Boolean(diagnosticHandlers) });
+  send({ type: 'activated', routes: registration.routes, tools: registration.tools, diagnostics: Boolean(diagnosticHandlers) });
 }
 
 async function invoke(message) {
-  const handler = message.routeId === "diagnostic-list" ? diagnosticHandlers?.listJobs : message.routeId === "diagnostic-detail" ? diagnosticHandlers?.getJob : handlers.get(message.routeId);
+  const handler = message.routeId?.startsWith("tool:") ? toolHandlers.get(message.routeId.slice(5)) : message.routeId === "diagnostic-list" ? diagnosticHandlers?.listJobs : message.routeId === "diagnostic-detail" ? diagnosticHandlers?.getJob : handlers.get(message.routeId);
   if (!handler) throw new Error('mod_route_handler_not_found');
-  return handler(message.request);
+  if (!message.routeId?.startsWith('tool:')) return handler(message.request);
+  const controller = new AbortController();
+  activeTools.set(message.requestId, controller);
+  try { return await handler(message.request.arguments, Object.freeze({ ...message.request.caller, signal: controller.signal })); }
+  finally { activeTools.delete(message.requestId); }
 }
 
 async function shutdown() {
@@ -192,11 +210,14 @@ async function shutdown() {
   activeSystemProcesses.clear();
   for (const active of activeSystemFilesystems.values()) active.abort.abort();
   activeSystemFilesystems.clear();
+  for (const controller of activeTools.values()) controller.abort();
+  activeTools.clear();
   if (cleanup) await cleanup();
   cleanup = null;
 }
 
 process.on('message', async (message) => {
+  if (message?.type === 'invoke-cancel') { activeTools.get(message.requestId)?.abort(); return; }
   if (message?.type === 'system-controller-filesystem-cancel') {
     if (!validSystemMessage(message, 'system-controller-filesystem-cancel')) return;
     activeSystemFilesystems.get(message.requestId)?.abort.abort();

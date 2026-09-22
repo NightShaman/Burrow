@@ -18,9 +18,10 @@ import { readAttachmentArtifact } from './attachment-store.mjs';
 import { reviewProposalActions } from './action-safety.mjs';
 import { invokeMcpTool, publicMcpError, publicMcpFailureDetail } from './mcporter-adapter.mjs';
 import { grantedMcpTool, mcpCapabilitiesReceipt, mcpProvidersReceipt } from './mcp-menu.mjs';
-import { credentialProducer, protectMcpOutput, resolveProtectedBindings } from './protected-values.mjs';
+import { credentialProducer, protectMcpOutput, protectToolOutput, resolveProtectedBindings } from './protected-values.mjs';
 import { loadEffectiveSkillCatalog, loadSelectedSkillText, skillManifest, selectCatalogSkills } from './skill-catalog.mjs';
 import path from 'node:path';
+import { openSettingsDatabase } from './settings-database.mjs';
 
 function workspacePath(filePath, workspaceRoot, rootDir) {
   if (!filePath) return filePath;
@@ -280,8 +281,22 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
       let result;
       try {
         if (selected.error) throw new Error(selected.error);
-        const output = await invokeMcp(selected.connection, { apiKey: selected.connection.apiKey, environmentVariables: selected.connection.environmentVariables, toolName: action.mcpToolName, arguments: action.mcpArguments });
-        const protectedOutput = protectMcpOutput(output, { provider: selected.connection.name, toolName: action.mcpToolName, mcpArguments: action.mcpArguments, registry: executionContext?.protectedValues });
+        if (selected.connection.transport === 'mod') {
+          // Reviews and discovery are snapshots. A revoked grant must fail even
+          // when a queued action executes later in the same turn.
+          const db = openSettingsDatabase({ databasePath: selected.connection.databasePath });
+          try {
+            const current = db.prepare('SELECT enabled FROM agent_mcp_tools WHERE agent_id=? AND connection_id=? AND tool_name=?')
+              .get(agentId, selected.connection.id, action.mcpToolName);
+            if (!current?.enabled) throw new Error('mcp_tool_not_granted');
+          } finally { db.close(); }
+        }
+        const output = selected.connection.transport === 'mod'
+          ? await selected.connection.invoke(action.mcpToolName, action.mcpArguments, { context: { agentId, sessionId, conversationId, runId: executionContext?.parentRunId || null }, abortSignal })
+          : await invokeMcp(selected.connection, { apiKey: selected.connection.apiKey, environmentVariables: selected.connection.environmentVariables, toolName: action.mcpToolName, arguments: action.mcpArguments });
+        const protectedOutput = selected.connection.transport === 'mod'
+          ? protectToolOutput(output, { registry: executionContext?.protectedValues })
+          : protectMcpOutput(output, { provider: selected.connection.name, toolName: action.mcpToolName, mcpArguments: action.mcpArguments, registry: executionContext?.protectedValues });
         const withheld = protectedOutput.protection.status === 'withheld';
         result = {
           tool: 'mcp_call', ok: !withheld, provider: selected.connection.name, mcpToolName: action.mcpToolName, connectionId: selected.connection.id,
@@ -294,11 +309,11 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
         const sensitiveProducer = credentialProducer({ provider: selected.connection?.name || action.mcpProvider, toolName: action.mcpToolName, mcpArguments: action.mcpArguments });
         result = {
           tool: 'mcp_call', ok: false, provider: action.mcpProvider, mcpToolName: action.mcpToolName, connectionId: selected.connection?.id || null,
-          error: publicMcpError(error, 'mcp_tool_failed'),
+          error: selected.connection?.transport === 'mod' ? (error?.message === 'mcp_tool_not_granted' ? 'mcp_tool_not_granted' : 'mcp_tool_failed') : publicMcpError(error, 'mcp_tool_failed'),
           // Credential providers may place retrieved values in an isError text
           // payload. That payload has not crossed the protection adapter, so do
           // not project free-form diagnostics from it into model-visible state.
-          ...(sensitiveProducer ? {} : publicMcpFailureDetail(error, [selected.connection?.apiKey, ...Object.values(selected.connection?.environmentVariables || {})])),
+          ...(selected.connection?.transport === 'mod' || sensitiveProducer ? {} : publicMcpFailureDetail(error, [selected.connection?.apiKey, ...Object.values(selected.connection?.environmentVariables || {})])),
         };
       }
       toolResults.push(result);

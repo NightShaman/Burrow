@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { publishModTools } from '../src/mod-agent-tools.mjs';
 import { diagnosticMods, modJobs, pendingModOperations } from '../src/mod-diagnostics.mjs';
 import { releaseVersion } from '../src/release-version.mjs';
 import { createServer } from 'node:http';
@@ -3009,6 +3010,7 @@ async function transitionMod({ modId, enabled, installed, action }) {
     throw Object.assign(new Error('mod_busy'), { statusCode: 409 });
   }
   loadedMods = old ? loadedMods.map((entry) => entry.id === modId ? next : entry) : [...loadedMods, next];
+  if (action === 'update') publishModTools(next, modLoadOptions.databasePath);
   next.commitProviderReplacement?.();
   if (old) await cleanupMods([old]);
 }
