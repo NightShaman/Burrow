@@ -20,6 +20,7 @@ it('updates date context without unmounting and cleans up on identity change/unm
   mountArchive.mockReturnValue({ update, unmount });
   const view = render(<ModArchiveHost panel={panel} date="2026-09-23" />);
   await waitFor(() => expect(mountArchive).toHaveBeenCalledTimes(1));
+  expect(mountArchive.mock.calls[0][0].runtimeScope).toBe('local');
   view.rerender(<ModArchiveHost panel={panel} date="2026-09-22" />);
   await waitFor(() => expect(update).toHaveBeenCalledWith(expect.objectContaining({ date: '2026-09-22', modId: 'example' })));
   expect(mountArchive).toHaveBeenCalledTimes(1); expect(unmount).not.toHaveBeenCalled();

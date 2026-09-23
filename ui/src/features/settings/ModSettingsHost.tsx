@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import type { Agent } from '../../app/types';
-import { api } from '../../app/api';
+import { apiLocal } from '../../app/api';
 import { validateSettingsContribution, type SettingsContribution, type SettingsField, type SettingsAction, type SettingsContributionFactory } from './SettingsContribution';
 import { Field, SettingSection } from './SettingsPrimitives';
 
@@ -14,6 +14,7 @@ export type SettingsSurface = {
 };
 type ModSettingsContext = {
   modId: string;
+  runtimeScope: 'local';
   section: string;
   agents: readonly Agent[];
   primary: SettingsSurface;
@@ -117,7 +118,7 @@ function modApi(modId: string) {
   return <T = unknown>(path: string, init?: RequestInit): Promise<T> => {
     const normalized = path.startsWith('/') ? path : `/${path}`;
     if (normalized.includes('..')) return Promise.reject(new Error('Mod API paths cannot contain parent traversal.'));
-    return api<T>(`${prefix}${normalized}`, init);
+    return apiLocal<T>(`${prefix}${normalized}`, init);
   };
 }
 
@@ -162,6 +163,7 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
     let cleanup: (() => void) | undefined;
     const context: ModSettingsContext = {
       modId,
+      runtimeScope: 'local',
       section,
       agents: agentsRef.current,
       primary: primarySurface,
@@ -169,7 +171,7 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
       api: modApi(modId),
       refreshAgents: () => onAgentsChangedRef.current(),
       saveAgentExecutionEnvironment: async (agentId, executionEnvironment) => {
-        await api(`/api/agents/${encodeURIComponent(agentId)}`, {
+        await apiLocal(`/api/agents/${encodeURIComponent(agentId)}`, {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ executionEnvironment }),
@@ -191,7 +193,7 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
         await module?.handleSettingsAction?.(actionId, values);
         if (module?.createSettingsContribution) {
           try {
-            const { agents: currentAgents } = await api<{ agents: Agent[] }>('/api/agents');
+            const { agents: currentAgents } = await apiLocal<{ agents: Agent[] }>('/api/agents');
             const refreshed = validateSettingsContribution(await module.createSettingsContribution({ api: modApi(modId), agents: currentAgents }));
             void onAgentsChangedRef.current();
             if (!refreshed) throw new Error("Invalid settings response.");

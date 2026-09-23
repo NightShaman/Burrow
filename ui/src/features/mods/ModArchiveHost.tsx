@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { apiLocal as api } from '../../app/api';
 import type { ModArchive } from '../../app/modPanels';
 
-type ArchiveContext = { date: string; modId: string; root: HTMLElement; api: <T = unknown>(path: string, init?: RequestInit) => Promise<T> };
+type ArchiveContext = { date: string; modId: string; runtimeScope: 'local'; root: HTMLElement; api: <T = unknown>(path: string, init?: RequestInit) => Promise<T> };
 type Cleanup = void | (() => void) | { unmount?: () => void; update?: (context: ArchiveContext) => void };
 type ArchiveModule = { mountArchive?: (context: ArchiveContext) => Cleanup | Promise<Cleanup> };
 
@@ -28,7 +28,7 @@ export function ModArchiveHost({ panel, date }: { panel: ModArchive; date: strin
     void import(/* @vite-ignore */ url).then(async (module: ArchiveModule) => {
       if (disposed) return;
       if (typeof module.mountArchive !== 'function') throw new Error('The mod does not export mountArchive.');
-      const context: ArchiveContext = { date: dateRef.current, modId: panel.modId, root: node, api: <T,>(path: string, init?: RequestInit) => {
+      const context: ArchiveContext = { date: dateRef.current, modId: panel.modId, runtimeScope: 'local', root: node, api: <T,>(path: string, init?: RequestInit) => {
         const normalized = path.startsWith('/') ? path : `/${path}`;
         if (normalized.includes('..') || normalized.includes('#') || normalized.includes('\\') || /%2e|%2f|%5c/i.test(normalized.split('?')[0])) return Promise.reject(new Error('Invalid mod API path.'));
         return api<T>(`/api/mods/${panel.modId}${normalized}`, init);
