@@ -1404,7 +1404,7 @@ function authenticateApiToken(req, url) {
 
 async function authorizeRequest(req, res, url) {
   const apiToken = authenticateApiToken(req, url);
-  if (apiToken) { req.burrowApiToken = apiToken; return true; }
+  if (apiToken) { req.burrowApiToken = apiToken; req.burrowVerifiedAuth = Object.freeze({ enabled: ((await runtimeConfig()).ui?.authMode || 'none') !== 'none', authenticated: false }); return true; }
   if (bearerToken(req)) {
     sendJson(res, 403, { ok: false, error: 'api_token_forbidden' });
     return false;
@@ -1412,7 +1412,7 @@ async function authorizeRequest(req, res, url) {
   const runtime = await runtimeConfig();
   const auth = runtime.ui || {};
   const mode = auth.authMode || 'none';
-  if (mode === 'none') return true;
+  if (mode === 'none') { req.burrowVerifiedAuth = Object.freeze({ enabled: false, authenticated: false }); return true; }
   if (mode === 'trusted-proxy') {
     const address = remoteAddress(req);
     const allowed = auth.trustedProxy?.allowedProxies || [];
@@ -1425,6 +1425,7 @@ async function authorizeRequest(req, res, url) {
       sendJson(res, 401, { ok: false, error: 'unauthorized', auth: { required: true, mode, reason: 'missing_proxy_user' } });
       return false;
     }
+    req.burrowVerifiedAuth = Object.freeze({ enabled: true, authenticated: true });
     return true;
   }
   if (mode === 'basic') {
@@ -1435,6 +1436,7 @@ async function authorizeRequest(req, res, url) {
     const session = verifyBasicSessionCookie(parseCookieHeader(req.headers.cookie || '')[BASIC_SESSION_COOKIE], auth);
     if (session) {
       setBasicSessionCookie(res, auth);
+      req.burrowVerifiedAuth = Object.freeze({ enabled: true, authenticated: true });
       return true;
     }
     const credentials = basicCredentials(req);
@@ -1447,6 +1449,7 @@ async function authorizeRequest(req, res, url) {
       return false;
     }
     setBasicSessionCookie(res, auth);
+    req.burrowVerifiedAuth = Object.freeze({ enabled: true, authenticated: true });
     return true;
   }
   if (mode === 'oidc') {
@@ -1455,7 +1458,7 @@ async function authorizeRequest(req, res, url) {
       return false;
     }
     const session = oidcSessionFromRequest(req, runtime);
-    if (session) return true;
+    if (session) { req.burrowVerifiedAuth = Object.freeze({ enabled: true, authenticated: true }); return true; }
     if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {
       res.writeHead(302, { location: `/auth/oidc/login?returnTo=${encodeURIComponent(url.pathname + url.search)}` });
       res.end();

@@ -1,8 +1,9 @@
-import { isValidElement, memo, useLayoutEffect, useRef, useState } from 'react';
+import { isValidElement, memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { HTMLAttributes, ReactNode, SyntheticEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { markdownPlugins, MarkdownTable } from '../../app/markdownTables';
-import { textFromChatValue, type ProgressEntry, type RunProgress, type SessionAttachment, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
+import { fetchApiForTarget, textFromChatValue, type ProgressEntry, type RunProgress, type SessionAttachment, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
+import type { ApiTarget } from '../../app/apiTargets';
 import type { Agent, Subagent } from '../../app/types';
 import { toolDisplayName } from '../../app/toolDisplayName';
 
@@ -28,9 +29,11 @@ type ChatTranscriptProps = {
   a2aActivities?: import('../../app/api').ActiveA2AActivity[];
   runtimeUserMessage?: string;
   runtimeChildActivities?: ToolActivity[];
+  attachmentTarget?: ApiTarget;
+  attachmentAgentId?: string;
 };
 
-export const ChatTranscript = memo(function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, a2aActivities = [], runtimeUserMessage = '', runtimeChildActivities = [] }: ChatTranscriptProps) {
+export const ChatTranscript = memo(function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, a2aActivities = [], runtimeUserMessage = '', runtimeChildActivities = [], attachmentTarget, attachmentAgentId }: ChatTranscriptProps) {
   const isSubagent = 'stream' in selected;
   const messages = turns.filter((turn) => turn.type === 'message' && turn.metadata?.visibility !== 'debug' && turn.metadata?.kind !== 'subagent-runtime-context' && turn.metadata?.kind !== 'subagent-task' && turn.content && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && isChatCommand(textFromChatValue(turn.content))));
   const activityByRun = new Map<string, ToolActivity>();
@@ -74,7 +77,7 @@ export const ChatTranscript = memo(function ChatTranscript({ selected, parent, o
         const messageName = isAgentMessage ? `${senderName} → ${recipientName}` : selected.name;
         const persistedActivity = turn.metadata?.toolActivity;
         const isPersistedTerminalTurn = turn.role === 'assistant' && turn.runId === activeRunId && Boolean(turn.metadata?.progress || persistedActivity || turn.content);
-        return <ChatMessage key={`${turn.runId ?? 'turn'}-${index}`} side={turn.role === 'user' || (isAgentMessage && !fromCurrentAgent) ? 'operator' : 'agent'} name={turn.role === 'user' ? userName : isAgentMessage ? messageName : selected.name} avatar={turn.role === 'user' ? userAvatar : isAgentMessage && !fromCurrentAgent ? senderName.slice(0, 1).toUpperCase() : selected.avatar} time={formatTime(turn.ts)} text={textFromChatValue(turn.content)} activity={turn.role === 'assistant' ? (persistedActivity ?? (turn.runId === activeRunId ? activeActivity : activityByRun.get(turn.runId ?? ''))) : undefined} progress={turn.role === 'assistant' ? turn.metadata?.progress : undefined} streamedAnswer={turn.role === 'assistant' ? turn.metadata?.streamedAnswer : undefined} activityLive={turn.role === 'assistant' && turn.runId === activeRunId && !isPersistedTerminalTurn} attachments={turn.metadata?.attachments} />;
+        return <ChatMessage key={`${turn.runId ?? 'turn'}-${index}`} side={turn.role === 'user' || (isAgentMessage && !fromCurrentAgent) ? 'operator' : 'agent'} name={turn.role === 'user' ? userName : isAgentMessage ? messageName : selected.name} avatar={turn.role === 'user' ? userAvatar : isAgentMessage && !fromCurrentAgent ? senderName.slice(0, 1).toUpperCase() : selected.avatar} time={formatTime(turn.ts)} text={textFromChatValue(turn.content)} activity={turn.role === 'assistant' ? (persistedActivity ?? (turn.runId === activeRunId ? activeActivity : activityByRun.get(turn.runId ?? ''))) : undefined} progress={turn.role === 'assistant' ? turn.metadata?.progress : undefined} streamedAnswer={turn.role === 'assistant' ? turn.metadata?.streamedAnswer : undefined} activityLive={turn.role === 'assistant' && turn.runId === activeRunId && !isPersistedTerminalTurn} attachments={turn.metadata?.attachments} attachmentTarget={attachmentTarget} attachmentAgentId={attachmentAgentId ?? parent.id} />;
       })}
       {a2aActivities.length > 0 && <section className="a2a-activity-list" aria-label="Agent-to-agent activity">{a2aActivities.map((activity) => <A2AActivityCard key={activity.id} activity={activity} selectedName={selected.name} />)}</section>}
       {visibleRuntimeChildActivities.length > 0 && <section className="a2a-activity-list" aria-label="Minion activity">{visibleRuntimeChildActivities.map((activity) => <ToolActivityCard key={activity.runId} activity={activity} live={activity.status === 'running'} />)}</section>}
@@ -183,7 +186,32 @@ function parseModelError(text: string): ModelErrorDetails | null {
   return { overloaded: /overloaded|try again later|rate limit|temporar/i.test(message), message };
 }
 
-export function ChatMessage({ side, name, avatar, time, text, activity, progress, streamedAnswer, activityLive, attachments = [] }: { side: 'agent' | 'operator'; name: string; avatar: string; time: string; text: string; activity?: ToolActivity; progress?: RunProgress; streamedAnswer?: string; activityLive?: boolean; attachments?: SessionAttachment[] }) {
+function MessageAttachment({ attachment, target, agentId }: { attachment: SessionAttachment; target?: ApiTarget; agentId?: string }) {
+  const isImage = /^image\/(?:png|jpeg|gif|webp)$/i.test(attachment.type);
+  const path = attachment.artifactPath;
+  const [source, setSource] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!isImage || !path || !agentId) { setSource(null); setFailed(false); return; }
+    const controller = new AbortController();
+    let objectUrl: string | undefined;
+    setSource(null); setFailed(false);
+    const url = `/api/attachments/${encodeURIComponent(agentId)}/${path.split('/').map(encodeURIComponent).join('/')}`;
+    void fetchApiForTarget(target, url, { signal: controller.signal, headers: { accept: 'image/*' } }).then(async (response) => {
+      if (!response.ok) throw new Error('Attachment unavailable');
+      const blob = await response.blob();
+      if (!blob.type.startsWith('image/')) throw new Error('Not an image');
+      if (!controller.signal.aborted) { objectUrl = URL.createObjectURL(blob); setSource(objectUrl); }
+    }).catch(() => { if (!controller.signal.aborted) setFailed(true); });
+    return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [agentId, isImage, path, target?.baseUrl]);
+  const imageSource = isImage && !failed ? source ?? attachment.preview ?? null : null;
+  return imageSource
+    ? <figure className="message-attachment-image"><img src={imageSource} alt={attachment.name} loading="lazy" onError={() => setFailed(true)} /><figcaption>{attachment.name}</figcaption></figure>
+    : <span className="message-attachment" title={attachment.type}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m4 18 5.5-5.5 3.5 3.5 2.5-2.5 4.5 4.5" /></svg><span>{attachment.name}</span></span>;
+}
+
+export function ChatMessage({ side, name, avatar, time, text, activity, progress, streamedAnswer, activityLive, attachments = [], attachmentTarget, attachmentAgentId }: { side: 'agent' | 'operator'; name: string; avatar: string; time: string; text: string; activity?: ToolActivity; progress?: RunProgress; streamedAnswer?: string; activityLive?: boolean; attachments?: SessionAttachment[]; attachmentTarget?: ApiTarget; attachmentAgentId?: string }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const image = avatarSource(avatar);
   const modelError = side === 'agent' ? parseModelError(text) : null;
@@ -194,7 +222,7 @@ export function ChatMessage({ side, name, avatar, time, text, activity, progress
     window.setTimeout(() => setCopyState('idle'), 1500);
   };
   const copyLabel = copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : '';
-  return <article className={`message ${side}${modelError ? ' model-error-message' : ''}`}><div className="message-avatar" aria-label={`${name} avatar`}>{image ? <img src={image} alt="" /> : avatar}</div><div className="message-content"><small>{name.toUpperCase()} · {time.toUpperCase()}</small>{attachments.length ? <div className="message-attachments" aria-label={`${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`}>{attachments.map((attachment, index) => <span className="message-attachment" key={`${attachment.index ?? index}-${attachment.name}`} title={attachment.type}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m4 18 5.5-5.5 3.5 3.5 2.5-2.5 4.5 4.5" /></svg><span>{attachment.name}</span></span>)}</div> : null}{streamedAnswer ? <StreamedAnswerCard text={streamedAnswer} /> : null}{activity && <ToolActivityCard activity={activity} live={activityLive} />}{progress?.items?.length ? <ProgressCard items={progress.items} status={progress.status} /> : null}{modelError ? <div className="message-bubble model-error-card" role="alert"><div className="model-error-sigil" aria-hidden="true">⚠</div><div><strong>{modelError.overloaded ? 'The model servers are throwing goblets' : modelErrorTitle}</strong><p>{modelError.message}</p><span>The chat is fine. The upstream model is being stupid.</span></div></div> : text && <div className="message-bubble final-answer"><Markdown>{text}</Markdown></div>}{text && <button className="copy-message" onClick={copy} aria-label={`Copy ${name} message as Markdown`} title={copyState === 'copied' ? 'Copied Markdown' : copyState === 'failed' ? 'Copy failed' : 'Copy Markdown'}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg><span aria-live="polite">{copyLabel}</span></button>}</div></article>;
+  return <article className={`message ${side}${modelError ? ' model-error-message' : ''}`}><div className="message-avatar" aria-label={`${name} avatar`}>{image ? <img src={image} alt="" /> : avatar}</div><div className="message-content"><small>{name.toUpperCase()} · {time.toUpperCase()}</small>{attachments.length ? <div className="message-attachments" aria-label={`${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`}>{attachments.map((attachment, index) => <MessageAttachment key={`${attachment.index ?? index}-${attachment.name}`} attachment={attachment} target={attachmentTarget} agentId={attachmentAgentId} />)}</div> : null}{streamedAnswer ? <StreamedAnswerCard text={streamedAnswer} /> : null}{activity && <ToolActivityCard activity={activity} live={activityLive} />}{progress?.items?.length ? <ProgressCard items={progress.items} status={progress.status} /> : null}{modelError ? <div className="message-bubble model-error-card" role="alert"><div className="model-error-sigil" aria-hidden="true">⚠</div><div><strong>{modelError.overloaded ? 'The model servers are throwing goblets' : modelErrorTitle}</strong><p>{modelError.message}</p><span>The chat is fine. The upstream model is being stupid.</span></div></div> : text && <div className="message-bubble final-answer"><Markdown>{text}</Markdown></div>}{text && <button className="copy-message" onClick={copy} aria-label={`Copy ${name} message as Markdown`} title={copyState === 'copied' ? 'Copied Markdown' : copyState === 'failed' ? 'Copy failed' : 'Copy Markdown'}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg><span aria-live="polite">{copyLabel}</span></button>}</div></article>;
 }
 
 function agentDisplayName(value: string) {

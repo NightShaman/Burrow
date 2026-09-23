@@ -6,6 +6,7 @@ let stopping = false;
 let systemController = null;
 const handlers = new Map();
 const toolHandlers = new Map();
+const protectedResolvers = new Map();
 const activeTools = new Map();
 let diagnosticHandlers = null;
 const pendingStore = new Map();
@@ -114,12 +115,14 @@ function registrar(modId) {
   let registrationOpen = true;
   return {
     routes, tools, closeRegistration() { registrationOpen = false; },
-    toolsApi: Object.freeze({ register({ name, description, inputSchema, handler }) {
+    toolsApi: Object.freeze({ register({ name, description, inputSchema, handler, resolveProtectedReference }) {
       if (!registrationOpen || typeof name !== 'string' || !/^[A-Za-z0-9._-]+$/.test(name) || toolHandlers.has(name) || typeof description !== 'string' || !description.trim() || !inputSchema || typeof inputSchema !== 'object' || Array.isArray(inputSchema) || inputSchema.type !== 'object' || typeof handler !== 'function') throw new Error('mod_tool_registration_invalid');
       // IPC catalog is JSON. Reject non-serializable schemas rather than advertising a different contract.
       const schema = JSON.parse(JSON.stringify(inputSchema));
       if (JSON.stringify(schema) !== JSON.stringify(inputSchema)) throw new Error('mod_tool_registration_invalid');
+      if (resolveProtectedReference !== undefined && typeof resolveProtectedReference !== 'function') throw new Error('mod_tool_registration_invalid');
       toolHandlers.set(name, handler);
+      if (resolveProtectedReference) protectedResolvers.set(name, resolveProtectedReference);
       tools.push({ name, description, inputSchema: schema });
     } }),
     diagnostics: Object.freeze({ register(adapter) {
@@ -191,8 +194,9 @@ async function activate(message) {
 }
 
 async function invoke(message) {
-  const handler = message.routeId?.startsWith("tool:") ? toolHandlers.get(message.routeId.slice(5)) : message.routeId === "diagnostic-list" ? diagnosticHandlers?.listJobs : message.routeId === "diagnostic-detail" ? diagnosticHandlers?.getJob : handlers.get(message.routeId);
+  const handler = message.routeId?.startsWith("protected:") ? protectedResolvers.get(message.routeId.slice(10)) : message.routeId?.startsWith("tool:") ? toolHandlers.get(message.routeId.slice(5)) : message.routeId === "diagnostic-list" ? diagnosticHandlers?.listJobs : message.routeId === "diagnostic-detail" ? diagnosticHandlers?.getJob : handlers.get(message.routeId);
   if (!handler) throw new Error('mod_route_handler_not_found');
+  if (message.routeId?.startsWith('protected:')) return handler(message.request.reference, Object.freeze(message.request.caller));
   if (!message.routeId?.startsWith('tool:')) return handler(message.request);
   const controller = new AbortController();
   activeTools.set(message.requestId, controller);

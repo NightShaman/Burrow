@@ -234,6 +234,9 @@ export type SessionAttachment = {
   type: string;
   size?: number | null;
   encoding?: string;
+  artifactPath?: string;
+  /** In-memory preview for a send awaiting its persisted attachment path. */
+  preview?: string;
 };
 
 export type SessionTurn = {

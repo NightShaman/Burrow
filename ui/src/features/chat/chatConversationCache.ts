@@ -47,7 +47,12 @@ export function writeConversationCache(cache: ConversationCache, touchedKey?: st
   const now = Date.now();
   const next = { ...stored };
   Object.entries(cache).forEach(([key, turns]) => {
-    next[key] = { savedAt: key === touchedKey ? now : next[key]?.savedAt ?? now, turns };
+    // Optimistic image previews may be multi-megabyte data URLs. Keep them in
+    // memory for the send-to-artifact handoff, not in browser storage.
+    const storedTurns = turns.map((turn) => turn.metadata?.attachments?.some((item) => item.preview)
+      ? { ...turn, metadata: { ...turn.metadata, attachments: turn.metadata.attachments.map(({ preview: _preview, ...item }) => item) } }
+      : turn);
+    next[key] = { savedAt: key === touchedKey ? now : next[key]?.savedAt ?? now, turns: storedTurns };
   });
   const entries = Object.entries(next)
     .sort(([aKey, a], [bKey, b]) => b.savedAt - a.savedAt || aKey.localeCompare(bKey))

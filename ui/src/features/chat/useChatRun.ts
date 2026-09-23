@@ -75,7 +75,7 @@ export function useChatRun({ selectedAgentId, selected, selectedTarget = localAp
     setLiveProgressByRun((current) => ({ ...current, [targetKey]: [] }));
     setLiveAnswerByRun((current) => ({ ...current, [targetKey]: '' }));
     setAgentActivity(target.agentId, 'thinking'); session.clearError(); session.setDraft(''); session.clearAttachment(); session.leaveNewSessionForMessage();
-    session.appendTurn(target.agentId, target.sessionId, { type: 'message', role: 'user', content: message, ts: new Date().toISOString(), runId, ...(attachments.length ? { metadata: { attachments: attachments.map(({ name, type, size }, index) => ({ index, name, type, size, encoding: 'data-url' })) } } : {}) });
+    session.appendTurn(target.agentId, target.sessionId, { type: 'message', role: 'user', content: message, ts: new Date().toISOString(), runId, ...(attachments.length ? { metadata: { attachments: attachments.map(({ name, type, size }, index) => ({ index, name, type, size, encoding: 'data-url', ...(type.startsWith('image/') ? { preview: attachments[index].content } : {}) })) } } : {}) });
     let streamedAnswer = ''; let progressEntries: ProgressEntry[] = []; let toolSequence = 0; let frame = 0;
     const flushLiveText = () => { frame = 0; setLiveProgressByRun((current) => ({ ...current, [targetKey]: progressEntries })); setLiveAnswerByRun((current) => ({ ...current, [targetKey]: streamedAnswer })); };
     const scheduleLiveFlush = () => { if (!frame) frame = requestAnimationFrame(flushLiveText); };

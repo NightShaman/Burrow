@@ -44,6 +44,14 @@ describe('chat conversation cache', () => {
     expect(stored.value[touchedKey]).toEqual({ savedAt: 100, turns: [{ role: 'assistant', content: 'Fresh' }] });
   });
 
+  it('stores durable artifact metadata without caching large optimistic image data', () => {
+    const key = conversationCacheKey('hatchet', 'default');
+    const turn = { role: 'user', content: 'Image', metadata: { attachments: [{ name: 'memory.png', type: 'image/png', artifactPath: 'artifacts/attachments/memory.png', preview: 'data:image/png;base64,YQ==' }] } };
+    writeConversationCache({ [key]: [turn] }, key);
+    expect(readConversationCache()[key][0].metadata?.attachments).toEqual([{ name: 'memory.png', type: 'image/png', artifactPath: 'artifacts/attachments/memory.png' }]);
+    expect(turn.metadata.attachments[0].preview).toBe('data:image/png;base64,YQ==');
+  });
+
   it('treats storage write failures as a cache miss rather than a chat failure', () => {
     const storage: Storage = {
       length: 0,

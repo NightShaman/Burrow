@@ -75,7 +75,7 @@ export function Chat({ selected, parent, operator, draft, setDraft, attached, on
   }, [onSend, setDraft]);
 
   return <div className="chat-view">
-    <ChatTranscript selected={selected} parent={parent} operator={operator} isNewSession={isNewSession} turns={turns} isLoading={isLoading} error={error} isSending={isSending} activeRunId={activeRunId} activeToolActivity={activeToolActivity} liveProgress={liveProgress} liveAnswer={liveAnswer} a2aActivities={a2aActivities} runtimeUserMessage={runtimeUserMessage} runtimeChildActivities={runtimeChildActivities} />
+    <ChatTranscript selected={selected} parent={parent} operator={operator} isNewSession={isNewSession} turns={turns} isLoading={isLoading} error={error} isSending={isSending} activeRunId={activeRunId} activeToolActivity={activeToolActivity} liveProgress={liveProgress} liveAnswer={liveAnswer} a2aActivities={a2aActivities} runtimeUserMessage={runtimeUserMessage} runtimeChildActivities={runtimeChildActivities} attachmentTarget={apiTarget} attachmentAgentId={resourceAgentId ?? selected.id} />
     <ChatComposer draft={localDraft} setDraft={composerHistory.setDraft} attached={attached} onAttach={onAttach} onRemoveAttachment={onRemoveAttachment} disabled={isSending} onSend={sendLocalDraft} selectedAgentId={selectedAgentId} resourceAgentId={resourceAgentId} sessionId={sessionId} apiTarget={apiTarget} onCancel={onCancel} onKeyDown={composerHistory.onKeyDown} conversationTurns={turns} assistantName={selected.name} operatorName={operator.name} agentNames={new Map([[parent.id, parent.name], [selected.id, selected.name]])} placeholder={isNewSession ? `Message ${selected.name}…` : 'Message the active agent…'} />
   </div>;
 }

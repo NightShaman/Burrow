@@ -498,6 +498,10 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     return invoke(`tool:${name}`, { arguments: argumentsValue, caller }, options);
   }
 
+  function resolveProtectedReference(name, reference, caller) {
+    return invoke(`protected:${name}`, { reference, caller });
+  }
+
   function close() {
     if (closePromise) return closePromise;
     closing = true;
@@ -519,5 +523,5 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     return closePromise;
   }
 
-  return { child, activated, invoke, invokeTool, close, exited, pendingCount: () => pending.size, activeOperationCount: () => pending.size + activeCapabilities.size + pendingSystemProcess.size + pendingSystemFilesystem.size, pendingDiagnostics: () => [...activeCapabilities.values()].map(({ method, startedAt }) => ({ kind: "capability", operation: method, status: "pending", elapsedMs: Math.max(0, Date.now() - startedAt) })), pendingSystemProcessCount: () => pendingSystemProcess.size, pendingSystemFilesystemCount: () => pendingSystemFilesystem.size, controllerInstanceId };
+  return { child, activated, invoke, invokeTool, resolveProtectedReference, close, exited, pendingCount: () => pending.size, activeOperationCount: () => pending.size + activeCapabilities.size + pendingSystemProcess.size + pendingSystemFilesystem.size, pendingDiagnostics: () => [...activeCapabilities.values()].map(({ method, startedAt }) => ({ kind: "capability", operation: method, status: "pending", elapsedMs: Math.max(0, Date.now() - startedAt) })), pendingSystemProcessCount: () => pendingSystemProcess.size, pendingSystemFilesystemCount: () => pendingSystemFilesystem.size, controllerInstanceId };
 }

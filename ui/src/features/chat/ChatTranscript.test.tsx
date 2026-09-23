@@ -115,3 +115,41 @@ it('places spawn activity before subsequent progress in live and persisted assis
   rerender(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[{ type: 'message', role: 'assistant', content: 'Done', runId: 'run-1', metadata: { toolActivity: activity, progress } }]} isLoading={false} error="" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" />);
   expect(order()).toEqual(['spawn', 'progress']);
 });
+
+
+it('keeps an image visible while the send is pending, then loads the durable artifact after refresh', async () => {
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new Blob(['image bytes'], { type: 'image/png' }), { status: 200, headers: { 'content-type': 'image/png' } }));
+  const objectUrl = vi.fn(() => 'blob:stored-image');
+  const revoke = vi.fn();
+  const originalCreate = URL.createObjectURL;
+  const originalRevoke = URL.revokeObjectURL;
+  URL.createObjectURL = objectUrl;
+  URL.revokeObjectURL = revoke;
+  try {
+    const pending = message('What is this?', { attachments: [{ index: 0, name: 'memory.png', type: 'image/png', preview: 'data:image/png;base64,YQ==' }] });
+    const { rerender } = show([pending], parent);
+    expect(screen.getByRole('img', { name: 'memory.png' }).getAttribute('src')).toBe('data:image/png;base64,YQ==');
+    const persisted = message('What is this?', { attachments: [{ index: 0, name: 'memory.png', type: 'image/png', artifactPath: 'artifacts/attachments/2026-image.png' }] });
+    rerender(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[persisted]} isLoading={false} error="" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" attachmentAgentId="hatchet" />);
+    await waitFor(() => expect(screen.getByRole('img', { name: 'memory.png' }).getAttribute('src')).toBe('blob:stored-image'));
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/attachments/hatchet/artifacts/attachments/2026-image.png');
+    rerender(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[]} isLoading={false} error="" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" />);
+    expect(revoke).toHaveBeenCalledWith('blob:stored-image');
+  } finally {
+    fetchMock.mockRestore(); URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke;
+  }
+});
+
+it('keeps filename fallback for non-images and inaccessible images', async () => {
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 404 }));
+  try {
+    show([message('Files', { attachments: [
+      { name: 'notes.txt', type: 'text/plain', artifactPath: 'artifacts/attachments/notes.txt' },
+      { name: 'expired.png', type: 'image/png', artifactPath: 'artifacts/attachments/expired.png' },
+    ] })], parent);
+    await waitFor(() => expect(screen.getByText('expired.png')).toBeTruthy());
+    expect(screen.getByText('notes.txt')).toBeTruthy();
+    expect(screen.queryByRole('img', { name: 'expired.png' })).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  } finally { fetchMock.mockRestore(); }
+});

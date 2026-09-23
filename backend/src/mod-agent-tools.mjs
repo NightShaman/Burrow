@@ -46,7 +46,7 @@ export function modToolConnections(databasePath) {
     if (!key.startsWith(prefix)) return [];
     const id = key.slice(prefix.length);
     return activeModToolConnection(id, databasePath) === mod
-      ? [{ id, name: `Mod: ${mod.name}`, transport: 'mod', databasePath: scope(databasePath), enabled: true, tools: mod.tools, invoke: (name, args, caller) => {
+      ? [{ id, name: `Mod: ${mod.name}`, transport: 'mod', databasePath: scope(databasePath), enabled: true, tools: mod.tools, mod, resolveProtectedReference: (name, reference, caller) => mod.host.resolveProtectedReference(name, reference, caller), invoke: (name, args, caller) => {
         if (activeModToolConnection(id, databasePath) !== mod || !mod.tools.some((tool) => tool.name === name)) throw new Error('mcp_provider_not_available');
         return mod.host.invokeTool(name, args, caller.context, { abortSignal: caller.abortSignal });
       } }] : [];

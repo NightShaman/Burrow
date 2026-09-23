@@ -95,3 +95,10 @@ describe('chat turn reconciliation', () => {
     expect(reconcileSessionTurns(session, cached)).toEqual([]);
   });
 });
+
+
+it('keeps a pending image preview until the persisted artifact loads, without losing its durable path', () => {
+  const server = [turn('user', 'Look', 'run-image', '2026-08-26T10:00:00.000Z', { attachments: [{ index: 0, name: 'photo.png', type: 'image/png', artifactPath: 'artifacts/attachments/photo.png' }] })];
+  const pending = [turn('user', 'Look', 'run-image', '2026-08-26T10:00:00.000Z', { attachments: [{ index: 0, name: 'photo.png', type: 'image/png', preview: 'data:image/png;base64,YQ==' }] })];
+  expect(reconcileConversationTurns(server, pending)[0].metadata?.attachments).toEqual([{ index: 0, name: 'photo.png', type: 'image/png', artifactPath: 'artifacts/attachments/photo.png', preview: 'data:image/png;base64,YQ==' }]);
+});

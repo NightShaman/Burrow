@@ -18,7 +18,8 @@ import { readAttachmentArtifact } from './attachment-store.mjs';
 import { reviewProposalActions } from './action-safety.mjs';
 import { invokeMcpTool, publicMcpError, publicMcpFailureDetail } from './mcporter-adapter.mjs';
 import { grantedMcpTool, mcpCapabilitiesReceipt, mcpProvidersReceipt } from './mcp-menu.mjs';
-import { credentialProducer, protectMcpOutput, protectToolOutput, resolveProtectedBindings } from './protected-values.mjs';
+import { activeModToolConnection } from './mod-agent-tools.mjs';
+import { credentialProducer, protectMcpOutput, protectToolOutput, resolveManagedProtectedBindings } from './protected-values.mjs';
 import { loadEffectiveSkillCatalog, loadSelectedSkillText, skillManifest, selectCatalogSkills } from './skill-catalog.mjs';
 import path from 'node:path';
 import { openSettingsDatabase } from './settings-database.mjs';
@@ -106,7 +107,19 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
       // The authoritative backend resolves protected references. Remote values
       // are passed only to the authenticated process controller, never embedded
       // in command text or ordinary process environment fields.
-      const protectedInput = resolveProtectedBindings(action.protectedBindings, executionContext?.protectedValues);
+      const protectedInput = await resolveManagedProtectedBindings(action.protectedBindings, executionContext?.protectedValues, {
+        caller: { agentId, sessionId, conversationId: resolvedConversationId },
+        authorize: async (entry) => {
+          const mod = activeModToolConnection(entry.providerId, entry.databasePath);
+          if (!mod || mod !== entry.mod || !mod.tools.some((tool) => tool.name === entry.toolName)) return false;
+          const db = openSettingsDatabase({ databasePath: entry.databasePath });
+          try {
+            return Boolean(db.prepare('SELECT 1 FROM mcp_connections WHERE id=? AND enabled=1').get(entry.providerId) &&
+              db.prepare('SELECT 1 FROM agent_mcp_tools WHERE agent_id=? AND connection_id=? AND tool_name=? AND enabled=1')
+                .get(agentId, entry.providerId, entry.toolName));
+          } finally { db.close(); }
+        },
+      });
       if (protectedInput.errors.length) {
         const result = { tool: 'shell_exec', ok: false, command: action.command, cwd: action.cwd ? path.resolve(action.cwd) : executionRoot, error: protectedInput.errors.join(','), protectedBindings: protectedInput.bindings };
         toolResults.push(result);
@@ -295,7 +308,15 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
           ? await selected.connection.invoke(action.mcpToolName, action.mcpArguments, { context: { agentId, sessionId, conversationId, runId: executionContext?.parentRunId || null }, abortSignal })
           : await invokeMcp(selected.connection, { apiKey: selected.connection.apiKey, environmentVariables: selected.connection.environmentVariables, toolName: action.mcpToolName, arguments: action.mcpArguments });
         const protectedOutput = selected.connection.transport === 'mod'
-          ? protectToolOutput(output, { registry: executionContext?.protectedValues })
+          ? protectToolOutput(output, { registry: executionContext?.protectedValues,
+            managedIssuer: (declaration) => {
+              if (!agentId || !executionContext?.protectedValues || typeof selected.connection.resolveProtectedReference !== 'function') return null;
+              return { managed: true, reference: declaration.reference, version: declaration.version,
+                providerId: selected.connection.id, databasePath: selected.connection.databasePath,
+                toolName: action.mcpToolName, mod: selected.connection.mod,
+                caller: { agentId, sessionId, conversationId: resolvedConversationId },
+                resolve: (reference, caller) => selected.connection.resolveProtectedReference(action.mcpToolName, reference, caller) };
+            } })
           : protectMcpOutput(output, { provider: selected.connection.name, toolName: action.mcpToolName, mcpArguments: action.mcpArguments, registry: executionContext?.protectedValues });
         const withheld = protectedOutput.protection.status === 'withheld';
         result = {

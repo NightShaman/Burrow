@@ -366,7 +366,7 @@ export function createModRoute({ mods = [], getMods = null, readJsonBody, sendJs
     if (!route) { sendJson(res, 404, { ok: false, error: 'mod_route_not_found' }); return true; }
     try {
       const body = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) ? await readJsonBody(req) : null;
-      const result = await route.handler({ body, query: Object.fromEntries(url.searchParams), params, method: req.method, path: routePath, headers: serializableHeaders(req.headers) });
+      const result = await route.handler({ auth: Object.freeze({ enabled: req.burrowVerifiedAuth?.enabled === true, authenticated: req.burrowVerifiedAuth?.authenticated === true }), body, query: Object.fromEntries(url.searchParams), params, method: req.method, path: routePath, headers: Object.fromEntries(Object.entries(serializableHeaders(req.headers)).filter(([key]) => !['authorization', 'cookie', 'proxy-authorization', 'x-api-key'].includes(key.toLowerCase()))) });
       sendModResult(res, sendJson, result);
     } catch (error) {
       const code = String(error?.code || '');

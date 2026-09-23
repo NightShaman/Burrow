@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 
 const ENVELOPE_KEY = '$burrowSensitive';
+const MANAGED_KEY = '$burrowManaged';
 const SENSITIVE_TYPES = new Set(['credential', 'secret', 'token', 'password', 'private-key']);
 const text = (value) => String(value ?? '');
 
@@ -213,10 +214,27 @@ function credentialShape(value, producer) {
  * A malformed declaration withholds the complete response rather than risking
  * serialization of the declared value.
  */
-export function protectToolOutput(value, { registry = new Map(), implicitSensitivePaths = null, implicitType = 'credential' } = {}) {
+export function protectToolOutput(value, { registry = new Map(), implicitSensitivePaths = null, implicitType = 'credential', managedIssuer = null } = {}) {
   const protectedValues = [];
   let malformed = false;
   const visit = (item, path = '$') => {
+    if (isObject(item) && Object.hasOwn(item, MANAGED_KEY)) {
+      const declaration = item[MANAGED_KEY];
+      if (!managedIssuer || !isObject(declaration) || Object.keys(item).length !== 1 ||
+          !['credential', 'secret', 'token', 'password', 'private-key'].includes(declaration.type) ||
+          typeof declaration.reference !== 'string' || !declaration.reference ||
+          typeof declaration.version !== 'string' || !declaration.version ||
+          !Number.isSafeInteger(declaration.lifetimeMs) || declaration.lifetimeMs < 1 || !Number.isSafeInteger(Date.now() + declaration.lifetimeMs) ||
+          Object.keys(declaration).some((key) => !['type', 'reference', 'version', 'lifetimeMs'].includes(key))) {
+        malformed = true; return null;
+      }
+      const ref = refFor(registry);
+      const entry = managedIssuer(declaration);
+      if (!entry) { malformed = true; return null; }
+      registry.set(ref, { ...entry, type: declaration.type, expiresAt: Date.now() + declaration.lifetimeMs });
+      protectedValues.push({ ref, field: path, type: declaration.type });
+      return `[protected ${declaration.type}: ${ref}]`;
+    }
     const envelope = parseEnvelope(item);
     if (envelope?.malformed) { malformed = true; return null; }
     if (envelope) return protectedLeaf(envelope.value, { type: envelope.type, path, registry, protectedValues });
@@ -250,7 +268,7 @@ export function protectMcpOutput(value, { provider = 'tool', toolName = 'result'
   return { ...result, protection: { ...result.protection, ...(producer ? { producer } : {}), ...(normalized.wrappers.length ? { wrappers: normalized.wrappers } : {}) } };
 }
 
-export function resolveProtectedBindings(bindings, registry = new Map()) {
+export async function resolveManagedProtectedBindings(bindings, registry = new Map(), { caller = null, authorize = null } = {}) {
   if (!bindings || typeof bindings !== 'object' || Array.isArray(bindings)) return { env: {}, bindings: [], errors: [] };
   const env = {};
   const accepted = [];
@@ -260,6 +278,32 @@ export function resolveProtectedBindings(bindings, registry = new Map()) {
     if (typeof ref !== 'string' || !ref.startsWith('protected://')) { errors.push(`protected_binding_ref_invalid:${name}`); continue; }
     const entry = registry.get(ref);
     if (entry === undefined) { errors.push(`protected_binding_not_found:${name}`); continue; }
+    let value;
+    if (isObject(entry) && entry.managed === true) {
+      try {
+        if (!caller?.agentId || !entry.caller?.agentId ||
+            !['agentId', 'sessionId', 'conversationId'].every((key) => caller[key] === entry.caller[key]) ||
+            !Number.isFinite(entry.expiresAt) || Date.now() >= entry.expiresAt ||
+            typeof authorize !== 'function' || !(await authorize(entry, caller))) throw new Error('denied');
+        value = await entry.resolve(entry.reference, { ...caller, version: entry.version });
+        if (typeof value !== 'string') throw new Error('denied');
+      } catch { errors.push(`protected_binding_denied:${name}`); continue; }
+    } else value = isObject(entry) && Object.hasOwn(entry, 'value') ? entry.value : entry;
+    env[name] = text(value);
+    accepted.push({ name, ref, ...(isObject(entry) && entry.type ? { type: entry.type } : {}) });
+  }
+  return { env, bindings: accepted, errors };
+}
+
+// Historical synchronous contract for ordinary one-turn values.
+export function resolveProtectedBindings(bindings, registry = new Map()) {
+  if (!bindings || typeof bindings !== 'object' || Array.isArray(bindings)) return { env: {}, bindings: [], errors: [] };
+  const env = {}; const accepted = []; const errors = [];
+  for (const [name, ref] of Object.entries(bindings)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name)) { errors.push(`protected_binding_name_invalid:${name}`); continue; }
+    if (typeof ref !== 'string' || !ref.startsWith('protected://')) { errors.push(`protected_binding_ref_invalid:${name}`); continue; }
+    const entry = registry.get(ref);
+    if (entry === undefined || (isObject(entry) && entry.managed === true)) { errors.push(`protected_binding_not_found:${name}`); continue; }
     const value = isObject(entry) && Object.hasOwn(entry, 'value') ? entry.value : entry;
     env[name] = text(value);
     accepted.push({ name, ref, ...(isObject(entry) && entry.type ? { type: entry.type } : {}) });

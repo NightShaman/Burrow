@@ -38,7 +38,10 @@ export function reconcileConversationTurns(serverTurns: SessionTurn[], cachedTur
     const cached = turn.runId && turn.role ? cachedTurnsByRunAndRole.get(`${turn.runId}:${turn.role}`) : undefined;
     const streamedAnswer = turn.role === 'assistant' && !turn.metadata?.streamedAnswer ? cached?.metadata?.streamedAnswer : undefined;
     const progress = turn.role === 'assistant' && !turn.metadata?.progress ? cached?.metadata?.progress : undefined;
-    const attachments = !turn.metadata?.attachments?.length ? cached?.metadata?.attachments : undefined;
+    const attachments = !turn.metadata?.attachments?.length ? cached?.metadata?.attachments : turn.metadata.attachments.map((attachment, index) => {
+      const pending = cached?.metadata?.attachments?.find((item) => item.index === (attachment.index ?? index) && item.name === attachment.name);
+      return pending?.preview && attachment.type.startsWith('image/') ? { ...attachment, preview: pending.preview } : attachment;
+    });
     return streamedAnswer || progress || attachments
       ? { ...turn, metadata: { ...turn.metadata, ...(streamedAnswer ? { streamedAnswer } : {}), ...(progress ? { progress } : {}), ...(attachments ? { attachments } : {}) } }
       : turn;
