@@ -23,7 +23,7 @@ function normalizeTurn(value: unknown, index: number): GroupTurn {
   return {
     id: text(item.id) || `turn-${index}`,
     content: text(item.content) || text(item.message) || text(item.text),
-    createdAt: text(item.createdAt) || text(item.timestamp),
+    createdAt: text(item.ts) || text(item.createdAt) || text(item.timestamp),
     authorId,
     role: text(item.role) || text(metadata.role),
     authorName: text(provenance.agentName) || text(metadata.fromAgentName) || text(item.authorName) || text(item.agentName) || (text(item.role, 'Operator').toLowerCase() === 'user' ? 'You' : (authorId || 'Agent')),
@@ -48,9 +48,9 @@ function normalizeChannel(value: unknown): GroupChannel {
 }
 
 function timeLabel(value?: string) {
-  if (!value) return '';
+  if (!value) return 'Time unavailable';
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date);
+  return Number.isNaN(date.getTime()) ? 'Time unavailable' : new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date);
 }
 
 function avatarImage(value?: string) {
@@ -192,7 +192,7 @@ export function GroupChannelsPage({ channelId, target, agents, operator }: { cha
           const avatar = isOperator ? (operatorIdentity?.avatar || operator?.avatar || 'You') : (identityAvatars[turn.authorId || ''] || agent?.avatar || turn.authorName.slice(0, 1).toUpperCase());
           const activity = turn.metadata?.toolActivity as ToolActivity | undefined;
           const progress = turn.metadata?.progress as RunProgress | undefined;
-          return <ChatMessage key={turn.id} side={isOperator ? 'operator' : 'agent'} name={isOperator ? (operatorIdentity?.name || operator?.name || turn.authorName) : turn.authorName} avatar={avatar} time={timeLabel(turn.createdAt) || 'Now'} text={turn.content} activity={activity} progress={progress} activityLive={Boolean(activity && !turn.content)} attachments={Array.isArray(turn.metadata?.attachments) ? turn.metadata.attachments as never : []} />;
+          return <ChatMessage key={turn.id} side={isOperator ? 'operator' : 'agent'} name={isOperator ? (operatorIdentity?.name || operator?.name || turn.authorName) : turn.authorName} avatar={avatar} time={timeLabel(turn.createdAt)} text={turn.content} activity={activity} progress={progress} activityLive={Boolean(activity && !turn.content)} attachments={Array.isArray(turn.metadata?.attachments) ? turn.metadata.attachments as never : []} />;
         }) : <div className="group-empty"><h2>No messages yet</h2><p>Send a message to start the group chat.</p></div>}
       </div>
       <div className="group-composer">
