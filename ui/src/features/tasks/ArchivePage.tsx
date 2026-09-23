@@ -1,3 +1,5 @@
+import { loadModArchives, modsChangedEvent, type ModArchive } from '../../app/modPanels';
+import { ModArchiveHost } from '../mods/ModArchiveHost';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Agent } from '../../app/types';
 import { ArchiveRunsProof } from './ArchiveRunsProof';
@@ -22,6 +24,15 @@ function formatDreamGroupDay(value: string) {
 
 export function Archive({ agents, operatorName = 'Operator' }: { agents: Agent[]; operatorName?: string }) {
   const agentNames = useMemo(() => new Map(agents.map((agent) => [agent.id, agent.name])), [agents]);
+  const [modArchives, setModArchives] = useState<ModArchive[]>([]);
+  const [modId, setModId] = useState('');
+  const activeMod = modArchives.find((mod) => mod.modId === modId);
+  useEffect(() => {
+    let live = true;
+    const refresh = () => { void loadModArchives().then((mods) => { if (live) setModArchives(mods); }).catch(() => { if (live) setModArchives([]); }); };
+    refresh(); window.addEventListener(modsChangedEvent, refresh);
+    return () => { live = false; window.removeEventListener(modsChangedEvent, refresh); };
+  }, []);
   const [kind, setKind] = useState<ArchiveKind>('chat');
   const [selectedAgent, setSelectedAgent] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
@@ -216,20 +227,21 @@ export function Archive({ agents, operatorName = 'Operator' }: { agents: Agent[]
     <div className="page-view archive-page">
       <header className="archive-heading">
         <div><h1>Archive</h1><p>Conversations and small remembered things, organized for later.</p></div>
-        <div className="archive-heading-tools"><label className="archive-search"><span className="sr-only">Search archive</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={kind === 'chat' ? 'Search conversations' : kind === 'proof' ? 'Search proof runs' : 'Search dreams'} /></label><label className="archive-agent-filter"><span className="sr-only">Filter by agent</span><select value={selectedAgent} onChange={(event) => { setSelectedAgent(event.target.value); setSelectedDate(''); }}><option value="">All agents</option>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label></div>
+        <div className="archive-heading-tools" hidden={Boolean(activeMod)}><label className="archive-search"><span className="sr-only">Search archive</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={kind === 'chat' ? 'Search conversations' : kind === 'proof' ? 'Search proof runs' : 'Search dreams'} /></label><label className="archive-agent-filter"><span className="sr-only">Filter by agent</span><select value={selectedAgent} onChange={(event) => { setSelectedAgent(event.target.value); setSelectedDate(''); }}><option value="">All agents</option>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label></div>
       </header>
       <div className="archive-layout">
         <aside className="archive-sidebar" aria-label="Archive navigation">
-          <section><span className="archive-sidebar-label">Browse</span>{archiveKinds.map((item) => <button key={item.id} type="button" className={kind === item.id ? 'active' : ''} onClick={() => handleKindChange(item.id)}><span>{item.label}</span><span className="archive-count">{item.id === 'dreams' ? dreams.length : item.id === 'tiddle' ? tiddleCount ?? '—' : item.id === 'proof' ? 'Runs' : sessions.length}</span></button>)}</section>
+          <section><span className="archive-sidebar-label">Browse</span>{archiveKinds.map((item) => <button key={item.id} type="button" className={!activeMod && kind === item.id ? 'active' : ''} onClick={() => { setModId(''); handleKindChange(item.id); }}><span>{item.label}</span><span className="archive-count">{item.id === 'dreams' ? dreams.length : item.id === 'tiddle' ? tiddleCount ?? '—' : item.id === 'proof' ? 'Runs' : sessions.length}</span></button>)}</section>
+          <section><span className="archive-sidebar-label">MODS</span>{modArchives.map((mod) => <button key={mod.modId} type="button" className={activeMod?.modId === mod.modId ? 'active' : ''} onClick={() => setModId(mod.modId)}>{mod.name}</button>)}</section>
           <section className="archive-calendar" aria-label="Archive calendar">
             <div className="archive-calendar-heading"><span className="archive-sidebar-label">When</span><button type="button" className="archive-all-dates" onClick={() => setSelectedDate('')}>All dates</button></div>
             <div className="archive-calendar-nav"><button type="button" aria-label="Previous month" onClick={() => setCalendarMonth(monthKey(new Date(dateFromMonthKey(calendarMonth).getFullYear(), dateFromMonthKey(calendarMonth).getMonth() - 1, 1)))}>‹</button><strong>{calendarLabel}</strong><button type="button" aria-label="Next month" onClick={() => setCalendarMonth(monthKey(new Date(dateFromMonthKey(calendarMonth).getFullYear(), dateFromMonthKey(calendarMonth).getMonth() + 1, 1)))}>›</button></div>
             <div className="archive-calendar-weekdays" aria-hidden="true">{['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
-            <div className="archive-calendar-grid">{calendarDays.map((day, index) => day ? <button key={day.key} type="button" className={`${selectedDate === day.key ? 'active ' : ''}${day.hasData ? 'has-data' : 'empty'}`} disabled={!day.hasData} onClick={() => setSelectedDate(day.key)} aria-label={`${day.key}${day.hasData ? `, ${day.count} conversations` : ', no conversations'}`} aria-pressed={selectedDate === day.key}>{day.day}</button> : <span key={`blank-${index}`} aria-hidden="true" />)}</div>
+            <div className="archive-calendar-grid">{calendarDays.map((day, index) => day ? <button key={day.key} type="button" className={`${selectedDate === day.key ? 'active ' : ''}${day.hasData ? 'has-data' : 'empty'}`} disabled={!activeMod && !day.hasData} onClick={() => setSelectedDate(day.key)} aria-label={activeMod ? day.key : `${day.key}${day.hasData ? `, ${day.count} conversations` : ', no conversations'}`} aria-pressed={selectedDate === day.key}>{day.day}</button> : <span key={`blank-${index}`} aria-hidden="true" />)}</div>
           </section>
         </aside>
         <main className="archive-content">
-          {kind === 'chat' ? (
+          {activeMod ? <ModArchiveHost panel={activeMod} date={selectedDate} /> : kind === 'chat' ? (
             <div className="archive-split-view">
               <section className="archive-results-pane" aria-label="Archived conversations">
                 <div className="archive-pane-heading"><span className="eyebrow">Chat</span><strong>{visibleSessions.length} conversations</strong></div>

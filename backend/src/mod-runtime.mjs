@@ -25,7 +25,7 @@ function inside(root, relative) {
 }
 function manifestUi(id, root, value = {}) {
   const ui = {};
-  for (const slot of ['control', 'settings']) {
+  for (const slot of ['control', 'settings', 'archive']) {
     if (!value?.[slot]) continue;
     const relative = safeRelative(value[slot], `mod_ui_${slot}_invalid`);
     ui[slot] = { relative, filePath: inside(root, relative), url: `/api/mods/${encodeURIComponent(id)}/${relative.split('/').map(encodeURIComponent).join('/')}` };
@@ -309,7 +309,7 @@ export function modCatalog(mods = []) {
       ...(mod.status === 'failed' ? { error: mod.error || 'mod_failed' } : {}),
       ...(mod.status !== 'failed' && mod.manifest?.version ? { version: String(mod.manifest.version) } : {}),
       ...(active && Object.keys(mod.contributions || {}).length ? { contributions: { ...mod.contributions } } : {}),
-      ...(active && Object.keys(mod.ui || {}).length ? { ui: { ...(mod.ui.control ? { controlUrl: mod.ui.control.url } : {}), ...(mod.ui.settings ? { settingsUrl: mod.ui.settings.url } : {}) } } : {}),
+      ...(active && Object.keys(mod.ui || {}).length ? { ui: { ...(mod.ui.control ? { controlUrl: mod.ui.control.url } : {}), ...(mod.ui.settings ? { settingsUrl: mod.ui.settings.url } : {}), ...(mod.ui.archive ? { archiveUrl: mod.ui.archive.url } : {}) } } : {}),
     };
   });
 }
@@ -351,7 +351,7 @@ export function createModRoute({ mods = [], getMods = null, readJsonBody, sendJs
     const relative = (match[2] || '').split('/').filter(Boolean).map(decodeURIComponent).join('/');
     if (req.method === 'GET' && relative) {
       const filePath = inside(mod.root, relative);
-      const uiRoots = [...new Set([mod.ui.control?.filePath, mod.ui.settings?.filePath].filter(Boolean).map((entry) => path.dirname(entry)))];
+      const uiRoots = [...new Set([mod.ui.control?.filePath, mod.ui.settings?.filePath, mod.ui.archive?.filePath].filter(Boolean).map((entry) => path.dirname(entry)))];
       const isUiAsset = uiRoots.some((root) => { const rel = path.relative(root, filePath); return rel && !rel.startsWith('..') && !path.isAbsolute(rel); });
       if (isUiAsset) {
         try { await sendAsset(res, filePath); } catch (error) { if (error?.code === 'ENOENT') sendJson(res, 404, { ok: false, error: 'mod_asset_not_found' }); else throw error; }
