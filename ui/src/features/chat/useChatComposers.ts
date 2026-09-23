@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { apiForTarget, type SessionSummary } from '../../app/api';
 import { targetForResource, type ApiTarget } from '../../app/apiTargets';
@@ -14,11 +14,12 @@ type ChatComposerOptions = {
   selectSession: (sessionId: string) => void;
   reportError: (message: string) => void;
   clearError: () => void;
+  tabs: Tab[];
   setTabs: Dispatch<SetStateAction<Tab[]>>;
   setActiveTabId: Dispatch<SetStateAction<string>>;
 };
 
-export function useChatComposers({ selectedAgentId, activeRunId, sessions, targets, activeTarget, refreshSessions, selectSession, reportError, clearError, setTabs, setActiveTabId }: ChatComposerOptions) {
+export function useChatComposers({ selectedAgentId, activeRunId, sessions, targets, activeTarget, refreshSessions, selectSession, reportError, clearError, tabs, setTabs, setActiveTabId }: ChatComposerOptions) {
   const [isSessionOpen, setIsSessionOpen] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [sessionName, setSessionName] = useState('');
@@ -28,6 +29,45 @@ export function useChatComposers({ selectedAgentId, activeRunId, sessions, targe
   const [groupName, setGroupName] = useState('');
   const [groupAgentIds, setGroupAgentIds] = useState<string[]>([]);
   const [groupError, setGroupError] = useState('');
+  const [rooms, setRooms] = useState<Array<{ id: string; name: string; participantAgentIds: string[] }>>([]);
+  const [roomsTargetId, setRoomsTargetId] = useState('');
+  const [roomsLoading, setRoomsLoading] = useState(false);
+  const [roomsError, setRoomsError] = useState('');
+  const currentTargetId = useRef(activeTarget.id);
+  currentTargetId.current = activeTarget.id;
+  useEffect(() => {
+    if (!isGroupOpen) return;
+    let live = true;
+    setRoomsLoading(true);
+    setRoomsError('');
+    setRoomsTargetId('');
+    setRooms([]);
+    void apiForTarget<{ ok: boolean; channels: unknown }>(activeTarget, '/api/group-channels')
+      .then((response) => {
+        if (!live) return;
+        if (!Array.isArray(response.channels)) throw new Error('Invalid room list from server.');
+        setRooms(response.channels.flatMap((value: unknown) => {
+          if (!value || typeof value !== 'object') return [];
+          const room = value as Record<string, unknown>;
+          return typeof room.id === 'string' && room.id && typeof room.name === 'string'
+            ? [{ id: room.id, name: room.name, participantAgentIds: Array.isArray(room.participantAgentIds) ? room.participantAgentIds.filter((id): id is string => typeof id === 'string') : [] }]
+            : [];
+        }));
+        setRoomsTargetId(activeTarget.id);
+      })
+      .catch((error: Error) => { if (live) setRoomsError(`Could not load group chats: ${error.message}`); })
+      .finally(() => { if (live) setRoomsLoading(false); });
+    return () => { live = false; };
+  }, [activeTarget, isGroupOpen]);
+  const openExistingGroup = useCallback((room: { id: string; name: string }) => {
+    if (roomsTargetId !== activeTarget.id || !rooms.some((item) => item.id === room.id)) return;
+    const existing = tabs.find((tab) => tab.kind === 'group' && (tab.targetId ?? 'local') === activeTarget.id && tab.channelId === room.id);
+    const tabId = existing?.id ?? `group:${activeTarget.id}:${room.id}`;
+    if (!existing) setTabs((current) => current.some((tab) => tab.kind === 'group' && (tab.targetId ?? 'local') === activeTarget.id && tab.channelId === room.id)
+      ? current : [...current, { id: tabId, label: room.name, kind: 'group', channelId: room.id, targetId: activeTarget.id }]);
+    setActiveTabId(tabId);
+    setIsGroupOpen(false);
+  }, [activeTarget.id, rooms, roomsTargetId, setActiveTabId, setTabs, tabs]);
 
   const openSession = useCallback(() => {
     setSessionError('');
@@ -103,8 +143,9 @@ export function useChatComposers({ selectedAgentId, activeRunId, sessions, targe
       const channel = ('channel' in response ? response.channel : response) as { id?: string; name?: string } | undefined;
       if (!channel?.id) throw new Error('The server did not return a group chat id.');
       const tabId = `group:${activeTarget.id}:${channel.id}`;
-      setTabs((current) => current.some((tab) => tab.id === tabId) ? current : [...current, { id: tabId, label: channel.name || name, kind: 'group', channelId: channel.id, targetId: activeTarget.id }]);
-      setActiveTabId(tabId);
+      if (currentTargetId.current !== activeTarget.id) return;
+      setTabs((current) => current.some((tab) => tab.kind === 'group' && (tab.targetId ?? 'local') === activeTarget.id && tab.channelId === channel.id) ? current : [...current, { id: tabId, label: channel.name || name, kind: 'group', channelId: channel.id, targetId: activeTarget.id }]);
+      setActiveTabId(tabs.find((tab) => tab.kind === 'group' && (tab.targetId ?? 'local') === activeTarget.id && tab.channelId === channel.id)?.id ?? tabId);
       setIsGroupOpen(false);
       setGroupName('');
       setGroupAgentIds([]);
@@ -113,10 +154,10 @@ export function useChatComposers({ selectedAgentId, activeRunId, sessions, targe
     } finally {
       setIsCreatingGroup(false);
     }
-  }, [activeTarget, groupAgentIds, groupName, setActiveTabId, setTabs, targets]);
+  }, [activeTarget, groupAgentIds, groupName, setActiveTabId, setTabs, tabs, targets]);
 
   return {
     session: { isOpen: isSessionOpen, isCreating: isCreatingSession, name: sessionName, error: sessionError, open: openSession, close: closeSession, setName: changeSessionName, create: createSession },
-    group: { isOpen: isGroupOpen, isCreating: isCreatingGroup, name: groupName, setName: setGroupName, agentIds: groupAgentIds, error: groupError, open: openGroup, close: closeGroup, toggleAgent: toggleGroupAgent, create: createGroup },
+    group: { targetId: activeTarget.id, isOpen: isGroupOpen, isCreating: isCreatingGroup, name: groupName, setName: setGroupName, agentIds: groupAgentIds, error: groupError, rooms: roomsTargetId === activeTarget.id ? rooms : [], roomsLoading: roomsLoading || (isGroupOpen && roomsTargetId !== activeTarget.id && !roomsError), roomsError, openExisting: openExistingGroup, open: openGroup, close: closeGroup, toggleAgent: toggleGroupAgent, create: createGroup },
   };
 }

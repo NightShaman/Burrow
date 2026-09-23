@@ -118,7 +118,9 @@ it('places spawn activity before subsequent progress in live and persisted assis
 
 
 it('keeps an image visible while the send is pending, then loads the durable artifact after refresh', async () => {
-  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new Blob(['image bytes'], { type: 'image/png' }), { status: 200, headers: { 'content-type': 'image/png' } }));
+  // jsdom's Blob does not implement stream(), which Node's native Response
+  // requires when given a Blob body. Use bytes for the response fixture.
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new TextEncoder().encode('image bytes'), { status: 200, headers: { 'content-type': 'image/png' } }));
   const objectUrl = vi.fn(() => 'blob:stored-image');
   const revoke = vi.fn();
   const originalCreate = URL.createObjectURL;

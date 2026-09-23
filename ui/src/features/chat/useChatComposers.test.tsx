@@ -26,6 +26,7 @@ function renderComposers(overrides: Partial<Parameters<typeof useChatComposers>[
     selectSession: vi.fn(),
     reportError: vi.fn(),
     clearError: vi.fn(),
+    tabs: [],
     setTabs: vi.fn(),
     setActiveTabId: vi.fn(),
     ...overrides,
@@ -66,6 +67,61 @@ describe('useChatComposers', () => {
     expect(apiForTargetMock).not.toHaveBeenCalled();
   });
 
+
+  it('discovers server rooms, reopens a restored tab without duplication, and reloads after closing', async () => {
+    apiForTargetMock.mockResolvedValue({ ok: true, channels: [{ id: 'design', name: 'Design', participantAgentIds: ['smatchet', 'hatchet'] }] });
+    const existing = { id: 'group:node-1:design', label: 'Design', kind: 'group' as const, targetId: 'node-1', channelId: 'design' };
+    const { result, options, rerender } = renderComposers({ tabs: [existing] });
+    act(() => result.current.group.open());
+    await waitFor(() => expect(result.current.group.rooms).toHaveLength(1));
+    act(() => result.current.group.openExisting(result.current.group.rooms[0]));
+    expect(options.setTabs).not.toHaveBeenCalled();
+    expect(options.setActiveTabId).toHaveBeenCalledWith(existing.id);
+    act(() => result.current.group.open());
+    await waitFor(() => expect(apiForTargetMock).toHaveBeenCalledTimes(2));
+    // Closing a tab is a local view operation: the next fetch still discovers the server room.
+    rerender();
+    expect(result.current.group.rooms[0].id).toBe('design');
+  });
+
+  it('opens a server room in a fresh browser without saved tabs', async () => {
+    apiForTargetMock.mockResolvedValue({ ok: true, channels: [{ id: 'from-server', name: 'Saved room', participantAgentIds: [] }] });
+    const { result, options } = renderComposers();
+    act(() => result.current.group.open());
+    await waitFor(() => expect(result.current.group.rooms).toHaveLength(1));
+    act(() => result.current.group.openExisting(result.current.group.rooms[0]));
+    const updater = vi.mocked(options.setTabs).mock.calls[0][0] as (tabs: never[]) => Array<{ id: string; channelId?: string; targetId?: string }>;
+    expect(updater([])).toEqual([expect.objectContaining({ id: 'group:node-1:from-server', channelId: 'from-server', targetId: 'node-1' })]);
+    expect(options.setActiveTabId).toHaveBeenCalledWith('group:node-1:from-server');
+  });
+
+  it('does not expose old runtime rooms or accept stale responses after switching targets', async () => {
+    let resolveOld!: (value: unknown) => void;
+    apiForTargetMock.mockImplementation((target) => target?.baseUrl === targets[1].baseUrl
+      ? new Promise((resolve) => { resolveOld = resolve; })
+      : Promise.resolve({ ok: true, channels: [{ id: 'local-room', name: 'Local room', participantAgentIds: [] }] }));
+    const options: Parameters<typeof useChatComposers>[0] = {
+      selectedAgentId: 'node-1::smatchet', activeRunId: null, sessions: [], targets,
+      activeTarget: targets[1], refreshSessions: vi.fn(), selectSession: vi.fn(), reportError: vi.fn(), clearError: vi.fn(),
+      tabs: [], setTabs: vi.fn(), setActiveTabId: vi.fn(),
+    };
+    const { result, rerender } = renderHook((props) => useChatComposers(props), { initialProps: options });
+    act(() => result.current.group.open());
+    rerender({ ...options, activeTarget: targets[0] });
+    await waitFor(() => expect(result.current.group.rooms.map((room) => room.id)).toEqual(['local-room']));
+    await act(async () => resolveOld({ ok: true, channels: [{ id: 'old', name: 'Old', participantAgentIds: [] }] }));
+    expect(result.current.group.rooms.map((room) => room.id)).toEqual(['local-room']);
+    expect(apiForTargetMock).toHaveBeenCalledWith(targets[0], '/api/group-channels');
+  });
+
+  it('keeps a failed discovery distinct from an empty room inventory', async () => {
+    apiForTargetMock.mockRejectedValue(new Error('offline'));
+    const { result } = renderComposers();
+    act(() => result.current.group.open());
+    await waitFor(() => expect(result.current.group.roomsError).toContain('offline'));
+    expect(result.current.group.roomsLoading).toBe(false);
+    expect(result.current.group.rooms).toEqual([]);
+  });
   it('creates remote groups with backend resource IDs and target-qualified tabs', async () => {
     const setTabs = vi.fn();
     const setActiveTabId = vi.fn();
@@ -96,6 +152,6 @@ describe('useChatComposers', () => {
     await act(() => result.current.group.create());
 
     expect(result.current.group.error).toContain('selected runtime');
-    expect(apiForTargetMock).not.toHaveBeenCalled();
+    expect(apiForTargetMock).not.toHaveBeenCalledWith(targets[1], '/api/group-channels', expect.objectContaining({ method: 'POST' }));
   });
 });
