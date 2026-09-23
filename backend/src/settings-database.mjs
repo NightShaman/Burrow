@@ -49,6 +49,7 @@ export const SETTINGS_OWNERSHIP = Object.freeze([
   Object.freeze({ id: 'agent-profile-documents', authority: 'sqlite', storage: 'agent_profile_documents', surface: 'agent-profile-documents-api', migration: 'complete', notes: 'Per-agent virtual Markdown prompt documents: SOUL, RULES, ORIENTATION, PREFERENCES, TOOLS, and DreamMemory.' }),
   Object.freeze({ id: 'dream-diary', authority: 'sqlite', storage: 'dream_diary_entries', surface: 'dream-diary-store', migration: 'complete', notes: 'Per-agent operator-facing DreamDiary narrative entries; not loaded into agent prompt context.' }),
   Object.freeze({ id: 'dream-settings', authority: 'sqlite', storage: 'dream_settings', surface: 'dream-settings-api', migration: 'complete', notes: 'Operator-owned Dream enablement, schedule, timezone, and editable prompt.' }),
+  Object.freeze({ id: 'working-memory-retention', authority: 'sqlite', storage: 'settings_meta.working_memory_retention', surface: 'working-memory-retention-settings-store', migration: 'complete', notes: 'Default TTLs for local working memory and rolling continuity; explicit caller TTL/expiry remains a per-write override.' }),
   Object.freeze({ id: 'runtime-ui-context-settings', authority: 'service-environment', storage: 'service environment', surface: 'deployment', migration: 'complete', notes: 'Deployment paths and listener settings are service-environment owned.' }),
   Object.freeze({ id: 'workspace-registry', authority: 'runtime-files', storage: 'runtime/workspace state', surface: 'not-yet-defined', migration: 'deferred', notes: 'Do not migrate before workspace ownership and routing UX are defined.' }),
   Object.freeze({ id: 'task-board', authority: 'sqlite', storage: 'task_board_projects, task_board_tasks', surface: 'task-board-api', migration: 'complete', notes: 'Projects, task status, agent assignment, execution receipts, and board metadata.' }),
@@ -600,6 +601,49 @@ DreamDiary is for the operator: readable narrative reflection, never prompt auth
       if (!table) return;
       db.prepare('UPDATE dream_settings SET prompt=?, updated_at=? WHERE prompt=?')
         .run(DEFAULT_DREAM_PROMPT, now(), PREVIOUS_DEFAULT_DREAM_PROMPT);
+    },
+  },
+  {
+    version: 43,
+    name: 'working-memory-90-day-retention',
+    body: 'Create the SQLite retention policy default and extend only currently retained active working-memory records and rolling cards to 90 days from their last material update, without shortening later expiries.',
+    apply(db) {
+      const timestamp = now();
+      const settingsMetaTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='settings_meta'").get();
+      if (settingsMetaTable) {
+        db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?)
+          ON CONFLICT(key) DO NOTHING`)
+          .run('working_memory_retention', JSON.stringify({ version: 1, workingMemoryTtlDays: 90, rollingContinuityTtlDays: 90 }), timestamp);
+      }
+
+      const workingTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='working_memory'").get();
+      if (workingTable) {
+        db.prepare(`UPDATE working_memory
+          SET expires_at=strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+90 days')
+          WHERE state='active' AND expires_at>=? AND expires_at<strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+90 days')`)
+          .run(timestamp);
+      }
+
+      const rows = settingsMetaTable
+        ? db.prepare("SELECT key,value_json FROM settings_meta WHERE key LIKE 'rolling-continuity:%'").all()
+        : [];
+      const update = settingsMetaTable ? db.prepare('UPDATE settings_meta SET value_json=?,updated_at=? WHERE key=?') : null;
+      for (const row of rows) {
+        let value;
+        try { value = JSON.parse(row.value_json); } catch { continue; }
+        if (!Array.isArray(value?.cards)) continue;
+        let changed = false;
+        const cards = value.cards.map((card) => {
+          if (!card || typeof card !== 'object' || (card.expiresAt && card.expiresAt < timestamp)) return card;
+          const seenAt = Date.parse(card.lastSeen || '');
+          if (!Number.isFinite(seenAt)) return card;
+          const retainedUntil = new Date(seenAt + 90 * 86_400_000).toISOString();
+          if (card.expiresAt && card.expiresAt >= retainedUntil) return card;
+          changed = true;
+          return { ...card, expiresAt: retainedUntil };
+        });
+        if (changed) update.run(JSON.stringify({ ...value, cards }), timestamp, row.key);
+      }
     },
   },
 ].map((migration) => Object.freeze({ ...migration, checksum: checksum(`${migration.version}:${migration.name}:${migration.body}`) })));

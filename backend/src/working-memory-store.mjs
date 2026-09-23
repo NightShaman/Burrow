@@ -1,13 +1,12 @@
-import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { settingsDatabasePath } from './model-settings-store.mjs';
+import { openSettingsDatabase, settingsDatabasePath } from './settings-database.mjs';
+import { readWorkingMemoryRetention } from './working-memory-retention-settings.mjs';
 
 const KINDS = new Set(['decision', 'finding', 'blocker', 'handoff', 'task']);
 const STATES = new Set(['active', 'resolved', 'superseded']);
-const DEFAULT_TTL_DAYS = 30;
-const DEFAULT_ROLLING_CONTINUITY_TTL_DAYS = 30;
+const DEFAULT_TTL_DAYS = 90;
 const MAX_COMPACT_CONTENT_CHARS = 2_400;
 
 function now() { return new Date().toISOString(); }
@@ -99,9 +98,9 @@ export class WorkingMemoryStore {
   constructor({ databasePath } = {}) {
     this.databasePath = databasePath || settingsDatabasePath();
     mkdirSync(path.dirname(this.databasePath), { recursive: true, mode: 0o700 });
-    this.db = new DatabaseSync(this.databasePath);
-    chmodSync(this.databasePath, 0o600);
+    this.db = openSettingsDatabase({ databasePath: this.databasePath });
     initialize(this.db);
+    this.retention = readWorkingMemoryRetention({ db: this.db });
   }
   close() { this.db.close(); }
   record(input = {}) {
@@ -116,7 +115,7 @@ export class WorkingMemoryStore {
     // Recall never reaches this method. A no-op write also cannot quietly turn
     // into a retention refresh; expiry changes require a material event change
     // or an explicit pin transition.
-    const expiresAt = material ? (input.expiresAt || expiry(input.ttlDays)) : existing.expires_at;
+    const expiresAt = material ? (input.expiresAt || expiry(input.ttlDays ?? this.retention.workingMemoryTtlDays)) : existing.expires_at;
     this.db.prepare(`INSERT INTO working_memory (id,agent_id,session_id,conversation_id,project,kind,state,title,content,source_refs,pinned,created_at,updated_at,expires_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id, conversation_id=excluded.conversation_id, project=excluded.project, kind=excluded.kind, state=excluded.state, title=excluded.title, content=excluded.content, source_refs=excluded.source_refs, pinned=excluded.pinned, updated_at=excluded.updated_at, expires_at=excluded.expires_at`)
@@ -231,7 +230,7 @@ export class WorkingMemoryStore {
       .all(match, agentId, project || null, project || null, now(), includeInactive ? 1 : 0, Math.max(1, Math.min(10, Number(limit) || 5)));
     return rows.map((row) => ({ ...publicRow(row), score: Number(row.score) }));
   }
-  upsertRollingContinuityCard({ agentId, project, title, content, sourceRefs = [], evidence = 'conversation', reason = null, ttlDays = DEFAULT_ROLLING_CONTINUITY_TTL_DAYS } = {}) {
+  upsertRollingContinuityCard({ agentId, project, title, content, sourceRefs = [], evidence = 'conversation', reason = null, ttlDays } = {}) {
     if (!text(agentId) || !text(project) || !text(title)) throw new Error('rolling_continuity_scope_required');
     const key = `rolling-continuity:${text(agentId)}:${text(project)}`;
     const row = this.db.prepare('SELECT value_json FROM settings_meta WHERE key=?').get(key);
@@ -260,7 +259,7 @@ export class WorkingMemoryStore {
       recentRefs: refs,
       evidence: bounded(evidence || existing?.evidence || 'conversation', 80),
       reason: bounded(reason, 360) || null,
-      expiresAt: expiry(ttlDays),
+      expiresAt: expiry(ttlDays ?? this.retention.rollingContinuityTtlDays),
     };
     const nextCards = [card, ...cards.filter((item) => item.id !== cardId && (!item.expiresAt || item.expiresAt >= timestamp))].slice(0, 100);
     const next = { version: 1, agentId: text(agentId), project: text(project), cards: nextCards, updatedAt: timestamp };
