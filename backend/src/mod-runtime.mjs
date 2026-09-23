@@ -7,6 +7,8 @@ import { ModSettingsStore, modSecretsApi, modSettingsApi } from './mod-settings-
 import { startModHost } from './mod-host.mjs';
 import { openSettingsDatabase } from './settings-database.mjs';
 
+// Reserved for mod-owned persistent data; never a discoverable/installable mod.
+export const MOD_DATA_DIRECTORY = 'mod-data';
 const MOD_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MIME = Object.freeze({ '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' });
 
@@ -110,7 +112,7 @@ export async function discoverMods({ runtimeRoot = process.env.BURROW_RUNTIME_RO
   const mods = [];
   const seen = new Map();
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+    if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === MOD_DATA_DIRECTORY) continue;
     const root = path.join(modsRoot, entry.name);
     let manifest = null;
     let manifestId = '';

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { execFile, spawn } from 'node:child_process';
-import { discoverMods } from './mod-runtime.mjs';
+import { discoverMods, MOD_DATA_DIRECTORY } from './mod-runtime.mjs';
 import { openSettingsDatabase } from './settings-database.mjs';
 import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
 
@@ -162,7 +162,7 @@ async function prepareRepository(url, credential, { archivePath = null, archiveR
     try { manifest = JSON.parse((await context.run(['--git-dir', repo, 'show', `${tag}:burrow.mod.json`], { maxBuffer: 1024 * 1024 })).stdout); }
     catch { throw new Error('mod_source_manifest_invalid'); }
     const modId = String(manifest?.id || '').trim(); const modName = String(manifest?.name || '').trim();
-    if (!MOD_ID.test(modId) || !modName) throw new Error('mod_source_manifest_invalid');
+    if ((modId === MOD_DATA_DIRECTORY || !MOD_ID.test(modId)) || !modName) throw new Error('mod_source_manifest_invalid');
     if (manifest.version != null && (!VERSION.test(String(manifest.version)) || compareVersions(manifest.version, tag) !== 0)) throw new Error('mod_source_manifest_version_mismatch');
     if (archivePath) {
       await context.run(['--git-dir', repo, 'archive', '--format=tar.gz', `--prefix=${modId}/`, `--output=${archivePath}`, tag]);
@@ -264,7 +264,7 @@ async function findPreparedMod(extractRoot) {
   if (found.length !== 1) throw new Error(found.length ? 'mod_archive_multiple_manifests' : 'mod_archive_manifest_missing');
   const manifest = JSON.parse(await fs.readFile(path.join(found[0], 'burrow.mod.json'), 'utf8'));
   const id = String(manifest?.id || '').trim();
-  if (!MOD_ID.test(id) || !String(manifest?.name || '').trim()) throw new Error('mod_manifest_invalid');
+  if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id)) || !String(manifest?.name || '').trim()) throw new Error('mod_manifest_invalid');
   return { root: found[0], manifest, id, name: String(manifest.name).trim() };
 }
 
@@ -335,7 +335,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       const journalPath = path.join(recoveryRoot, name);
       const journal = JSON.parse(await fs.readFile(journalPath, 'utf8'));
       const expectedTarget = path.join(modsRoot, journal.modId || '');
-      if (journal.operation !== 'uninstall' || !MOD_ID.test(journal.modId) || journal.target !== expectedTarget || !journal.quarantine.startsWith(`${expectedTarget}.uninstall-`) || journal.recovery !== `${journal.quarantine}.recovery`) throw new Error('mod_uninstall_recovery_journal_invalid');
+      if (journal.operation !== 'uninstall' || (journal.modId === MOD_DATA_DIRECTORY || !MOD_ID.test(journal.modId)) || journal.target !== expectedTarget || !journal.quarantine.startsWith(`${expectedTarget}.uninstall-`) || journal.recovery !== `${journal.quarantine}.recovery`) throw new Error('mod_uninstall_recovery_journal_invalid');
       if (journal.committed) {
         await cleanupPath(journal.quarantine, { recursive: true, force: true });
         await cleanupPath(journal.recovery, { recursive: true, force: true });
@@ -490,7 +490,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
     await ready; const db = openSettingsDatabase({ databasePath }); try { const removed = db.prepare('DELETE FROM mod_sources WHERE id=?').run(String(id)).changes > 0; return { ok: removed, removed }; } finally { db.close(); } }
   async function install(modId, requestedVersion = null) {
     await ready;
-    const id = String(modId || '').trim(); if (!MOD_ID.test(id)) throw new Error('mod_id_invalid');
+    const id = String(modId || '').trim(); if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id))) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
     locks.add(id); const db = openSettingsDatabase({ databasePath }); let scratch;
     try {
@@ -534,7 +534,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
   }
   async function setEnabled(modId, enabled) {
     await ready;
-    const id = String(modId || '').trim(); if (!MOD_ID.test(id)) throw new Error('mod_id_invalid');
+    const id = String(modId || '').trim(); if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id))) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
     locks.add(id); const db = openSettingsDatabase({ databasePath });
     try {
@@ -556,7 +556,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
   }
   async function uninstall(modId) {
     await ready;
-    const id = String(modId || '').trim(); if (!MOD_ID.test(id)) throw new Error('mod_id_invalid');
+    const id = String(modId || '').trim(); if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id))) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
     locks.add(id); const db = openSettingsDatabase({ databasePath });
     try {
