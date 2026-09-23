@@ -259,9 +259,9 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
         if (!Array.isArray(activation.tools)) throw new Error(`mod_tool_description_invalid:${mod.id}`);
         const names = new Set();
         mod.tools = activation.tools.map((tool) => {
-          if (typeof tool?.name !== 'string' || !/^[A-Za-z0-9._-]+$/.test(tool.name) || names.has(tool.name) || typeof tool.description !== 'string' || !tool.description.trim() || tool.inputSchema?.type !== 'object') throw new Error(`mod_tool_description_invalid:${mod.id}`);
+          if (typeof tool?.name !== 'string' || !/^[A-Za-z0-9._-]+$/.test(tool.name) || names.has(tool.name) || typeof tool.description !== 'string' || !tool.description.trim() || tool.inputSchema?.type !== 'object' || !['grant-required', 'mod-authorized'].includes(tool.availability)) throw new Error(`mod_tool_description_invalid:${mod.id}`);
           names.add(tool.name);
-          return { name: tool.name, description: tool.description, inputSchema: tool.inputSchema };
+          return { name: tool.name, description: tool.description, inputSchema: tool.inputSchema, availability: tool.availability };
         });
         if (!Array.isArray(descriptions)) throw new Error(`mod_route_description_invalid:${mod.id}`);
         const routeIds = new Set();

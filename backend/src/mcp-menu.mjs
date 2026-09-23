@@ -24,6 +24,12 @@ export function isGrantedMcpTool(grants, connectionId, toolName) {
   return grants instanceof Map && grants.has(keyFor(connectionId, toolName));
 }
 
+// Only live mod providers may delegate per-record authorization to their handler.
+export function toolAvailable(connection, tool, grants) {
+  return (connection?.transport === 'mod' && tool?.availability === 'mod-authorized')
+    || isGrantedMcpTool(grants, connection?.id, tool?.name);
+}
+
 export function mcpProvidersReceipt({ connections, grants, agentId } = {}) {
   if (!(connections instanceof Map)) return { tool: 'mcp_providers', ok: true, providers: [], resultCount: 0 };
   const providers = [...connections.values()]
@@ -31,7 +37,7 @@ export function mcpProvidersReceipt({ connections, grants, agentId } = {}) {
     .slice(0, 50)
     .map((connection) => {
       const catalog = Array.isArray(connection.tools) ? connection.tools : [];
-      const grantedToolCount = catalog.filter((tool) => isGrantedMcpTool(grants, connection.id, tool.name)).length;
+      const grantedToolCount = catalog.filter((tool) => toolAvailable(connection, tool, grants)).length;
       return {
         id: connection.id,
         name: bounded(connection.name, 120),
@@ -58,7 +64,7 @@ export function mcpCapabilitiesReceipt({ connections, grants, provider, query = 
     name: bounded(tool.name, 240),
     description: publicDescription(tool.description),
     inputSchema: tool.inputSchema && typeof tool.inputSchema === 'object' && !Array.isArray(tool.inputSchema) ? tool.inputSchema : { type: 'object', properties: {} },
-    granted: isGrantedMcpTool(grants, connection.id, tool.name),
+    granted: toolAvailable(connection, tool, grants),
   }));
   const nextCursor = start + tools.length < catalog.length ? String(start + tools.length) : null;
   return { tool: 'mcp_capabilities', ok: true, provider: { id: connection.id, name: connection.name }, query: normalizedQuery || null, tools, resultCount: tools.length, totalCount: catalog.length, nextCursor };
@@ -70,7 +76,7 @@ export function grantedMcpTool({ connections, grants, provider, toolName } = {})
   if (!connection || !connection.enabled) return { error: 'mcp_provider_not_available', connection: null, tool: null };
   const tool = (connection.tools || []).find((item) => item.name === name) || null;
   if (!tool) return { error: 'mcp_tool_not_found', connection, tool: null };
-  if (!isGrantedMcpTool(grants, connection.id, name)) return { error: 'mcp_tool_not_granted', connection, tool };
+  if (!toolAvailable(connection, tool, grants)) return { error: 'mcp_tool_not_granted', connection, tool };
   return { error: null, connection, tool };
 }
 

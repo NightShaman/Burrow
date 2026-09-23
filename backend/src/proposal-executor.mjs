@@ -115,8 +115,9 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
           const db = openSettingsDatabase({ databasePath: entry.databasePath });
           try {
             return Boolean(db.prepare('SELECT 1 FROM mcp_connections WHERE id=? AND enabled=1').get(entry.providerId) &&
-              db.prepare('SELECT 1 FROM agent_mcp_tools WHERE agent_id=? AND connection_id=? AND tool_name=? AND enabled=1')
-                .get(agentId, entry.providerId, entry.toolName));
+              (mod.tools.find((tool) => tool.name === entry.toolName)?.availability === 'mod-authorized' ||
+                db.prepare('SELECT 1 FROM agent_mcp_tools WHERE agent_id=? AND connection_id=? AND tool_name=? AND enabled=1')
+                  .get(agentId, entry.providerId, entry.toolName)));
           } finally { db.close(); }
         },
       });
@@ -299,9 +300,12 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
           // when a queued action executes later in the same turn.
           const db = openSettingsDatabase({ databasePath: selected.connection.databasePath });
           try {
+            const liveMod = activeModToolConnection(selected.connection.id, selected.connection.databasePath);
+            if (!liveMod || liveMod !== selected.connection.mod || !liveMod.tools.some((tool) => tool.name === action.mcpToolName) ||
+                !db.prepare('SELECT 1 FROM mcp_connections WHERE id=? AND enabled=1').get(selected.connection.id)) throw new Error('mcp_provider_not_available');
             const current = db.prepare('SELECT enabled FROM agent_mcp_tools WHERE agent_id=? AND connection_id=? AND tool_name=?')
               .get(agentId, selected.connection.id, action.mcpToolName);
-            if (!current?.enabled) throw new Error('mcp_tool_not_granted');
+            if (liveMod.tools.find((tool) => tool.name === action.mcpToolName)?.availability !== 'mod-authorized' && !current?.enabled) throw new Error('mcp_tool_not_granted');
           } finally { db.close(); }
         }
         const output = selected.connection.transport === 'mod'

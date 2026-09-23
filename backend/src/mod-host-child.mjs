@@ -115,15 +115,16 @@ function registrar(modId) {
   let registrationOpen = true;
   return {
     routes, tools, closeRegistration() { registrationOpen = false; },
-    toolsApi: Object.freeze({ register({ name, description, inputSchema, handler, resolveProtectedReference }) {
+    toolsApi: Object.freeze({ register({ name, description, inputSchema, handler, resolveProtectedReference, availability = 'grant-required' }) {
       if (!registrationOpen || typeof name !== 'string' || !/^[A-Za-z0-9._-]+$/.test(name) || toolHandlers.has(name) || typeof description !== 'string' || !description.trim() || !inputSchema || typeof inputSchema !== 'object' || Array.isArray(inputSchema) || inputSchema.type !== 'object' || typeof handler !== 'function') throw new Error('mod_tool_registration_invalid');
       // IPC catalog is JSON. Reject non-serializable schemas rather than advertising a different contract.
       const schema = JSON.parse(JSON.stringify(inputSchema));
       if (JSON.stringify(schema) !== JSON.stringify(inputSchema)) throw new Error('mod_tool_registration_invalid');
       if (resolveProtectedReference !== undefined && typeof resolveProtectedReference !== 'function') throw new Error('mod_tool_registration_invalid');
+      if (!['grant-required', 'mod-authorized'].includes(availability)) throw new Error('mod_tool_registration_invalid');
       toolHandlers.set(name, handler);
       if (resolveProtectedReference) protectedResolvers.set(name, resolveProtectedReference);
-      tools.push({ name, description, inputSchema: schema });
+      tools.push({ name, description, inputSchema: schema, availability });
     } }),
     diagnostics: Object.freeze({ register(adapter) {
       if (diagnosticHandlers || !adapter || typeof adapter.listJobs !== "function" || typeof adapter.getJob !== "function") throw new Error("mod_diagnostics_invalid");

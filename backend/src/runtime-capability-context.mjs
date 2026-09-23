@@ -12,7 +12,9 @@ export function loadRuntimeMcpCapabilities({ databasePath, agentId } = {}) {
     for (const connection of mcpStore.list()) {
       if (connection.enabled && !String(connection.id).startsWith('mod.') && !String(connection.baseUrl || '').startsWith('mod://')) mcpConnections.set(connection.id, { ...connection, apiKey: mcpStore.apiKey(connection.id), environmentVariables: mcpStore.secretEnvironment(connection.id) });
     }
-    for (const connection of modToolConnections(databasePath)) mcpConnections.set(connection.id, connection);
+    for (const connection of modToolConnections(databasePath)) {
+      if (mcpStore.get(connection.id)?.enabled) mcpConnections.set(connection.id, connection);
+    }
     for (const grant of mcpStore.agentTools(agentId).filter((item) => item.enabled)) {
       const connection = mcpConnections.get(grant.connectionId);
       if (connection) mcpTools.set(`${grant.connectionId}:${grant.toolName}`, { ...grant, connection, apiKey: connection.apiKey });
