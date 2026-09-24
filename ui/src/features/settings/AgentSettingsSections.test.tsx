@@ -75,10 +75,29 @@ describe('agent settings sections', () => {
     apiMock.mockResolvedValue({ jobs: [{ id: 'job-1', agentId: 'smatchet', name: 'Briefing', prompt: 'Prepare it.', cron: '0 9 * * *', timezone: 'UTC', enabled: true, modelConnectionId: 'removed', model: 'gone' }] });
     render(<ConfirmProvider><AgentSchedules agentId="smatchet" targets={targets} savedProviders={[]} /></ConfirmProvider>);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Briefing.*0 9/ }));
     expect(screen.getByRole('alert').textContent).toContain('will not silently fall back');
     expect((screen.getByRole('combobox', { name: /Model/ }) as HTMLSelectElement).value).toBe(JSON.stringify(['removed', 'gone']));
     expect(screen.getByRole('button', { name: 'Save job' }).getAttribute('disabled')).not.toBeNull();
+  });
+
+  it('opens a saved cron job from the overflow inventory without printing its prompt', async () => {
+    apiMock.mockResolvedValue({ jobs: [{ id: 'job-1', agentId: 'smatchet', name: 'Briefing', prompt: 'A very private long prompt', cron: '0 9 * * *', timezone: 'UTC', enabled: true }] });
+    const overflow = document.createElement('div');
+    document.body.appendChild(overflow);
+    try {
+      render(<ConfirmProvider><AgentSchedules agentId="smatchet" targets={targets} savedProviders={[]} overflowTarget={overflow} /></ConfirmProvider>);
+      const selector = await screen.findByRole('button', { name: /Briefing.*0 9/ });
+      expect(overflow.contains(selector)).toBe(true);
+      expect(overflow.textContent).not.toContain('A very private long prompt');
+      expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+      fireEvent.click(selector);
+      expect((screen.getByLabelText('Prompt') as HTMLTextAreaElement).value).toBe('A very private long prompt');
+      expect(selector.getAttribute('aria-pressed')).toBe('true');
+      expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Briefing');
+      expect(document.activeElement).toBe(screen.getByLabelText('Name'));
+      expect(screen.getByRole('button', { name: 'Save job' })).toBeTruthy();
+    } finally { overflow.remove(); }
   });
 
   it('offers Run now for mod-owned jobs without exposing edit or delete and reports scheduler refusal', async () => {
@@ -89,9 +108,47 @@ describe('agent settings sections', () => {
     expect(await screen.findByText('Managed by lore-master')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Daily lore.*Managed by/ }));
+    expect((screen.getByLabelText('Prompt') as HTMLTextAreaElement).value).toBe('Collect');
+    expect((screen.getByLabelText('Prompt') as HTMLTextAreaElement).readOnly).toBe(true);
+    expect(document.activeElement).toBe(screen.getByLabelText('Name'));
+    expect(screen.queryByRole('button', { name: 'Save job' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Back to new job' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Delete job' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Run now' }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('scheduled_job_owner_inactive'));
     expect(apiMock.mock.calls.some(([, path, init]) => path === '/api/scheduled-jobs/owned-1/trigger' && init?.method === 'POST')).toBe(true);
+  });
+
+  it('confirms deletion beside Back to new job and clears selected managed details only after success', async () => {
+    const job = { id: 'managed-1', ownerModId: 'lore-master', agentId: 'smatchet', name: 'Daily lore', prompt: 'Collect', cron: '0 9 * * *', timezone: 'UTC', enabled: true };
+    const deletion = deferred<object>();
+    apiMock.mockImplementation((_target, _path, init) => init?.method === 'DELETE' ? deletion.promise : Promise.resolve({ jobs: [job] }));
+    render(<ConfirmProvider><AgentSchedules agentId="smatchet" targets={targets} savedProviders={[]} /></ConfirmProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: /Daily lore.*Managed by/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete job' }));
+    expect(screen.getByRole('alertdialog').textContent).toContain('the mod may create it again');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(apiMock.mock.calls.some(([, , init]) => init?.method === 'DELETE')).toBe(false);
+    expect(screen.getByLabelText('Name')).toHaveProperty('value', 'Daily lore');
+    fireEvent.click(screen.getByRole('button', { name: 'Delete job' }));
+    fireEvent.click(screen.getByRole('alertdialog').querySelector('.danger') as HTMLButtonElement);
+    await waitFor(() => expect(apiMock.mock.calls.some(([, path, init]) => path === '/api/scheduled-jobs/managed-1' && init?.method === 'DELETE')).toBe(true));
+    expect(screen.getByLabelText('Name')).toHaveProperty('value', 'Daily lore');
+    await act(async () => { deletion.resolve({ ok: true }); });
+    expect(screen.getByRole('button', { name: 'Add job' })).toBeTruthy();
+    expect(screen.queryByText('Managed by lore-master')).toBeNull();
+  });
+
+  it('keeps selected managed details and reports an error when delete fails', async () => {
+    const job = { id: 'managed-1', ownerModId: 'lore-master', agentId: 'smatchet', name: 'Daily lore', prompt: 'Collect', cron: '0 9 * * *', timezone: 'UTC', enabled: true };
+    apiMock.mockImplementation((_target, _path, init) => init?.method === 'DELETE' ? Promise.reject(new Error('Access denied')) : Promise.resolve({ jobs: [job] }));
+    render(<ConfirmProvider><AgentSchedules agentId="smatchet" targets={targets} savedProviders={[]} /></ConfirmProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: /Daily lore.*Managed by/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete job' }));
+    fireEvent.click(screen.getByRole('alertdialog').querySelector('.danger') as HTMLButtonElement);
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Access denied'));
+    expect(screen.getByLabelText('Name')).toHaveProperty('value', 'Daily lore');
   });
 
   it('reports accepted dispatch without claiming the cron run completed', async () => {

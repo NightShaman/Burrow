@@ -36,7 +36,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
   const [agentSection, setAgentSection] = useState<'details' | 'profile-documents' | 'mcp-tools' | 'cron-jobs' | 'dreams'>('details');
   const [generalSection, setGeneralSection] = useState<'operator-profile' | 'execution-boundaries' | 'trace-retention' | 'export' | 'rail-panels' | 'tiddle-signal' | 'appearance'>('operator-profile');
   const [connectionSection, setConnectionSection] = useState<'authentication' | 'model-providers' | 'mcp-servers' | 'api-tokens'>('authentication');
-  const [modsSection, setModsSection] = useState<'installed' | 'sources'>('installed');
+  const [modsSection, setModsSection] = useState<'installed' | 'sources' | 'automatic-checks'>('installed');
   const [selectedRailPanel, setSelectedRailPanel] = useState<PanelId | null>(null);
   const [modNavigationColumn, setModNavigationColumn] = useState<HTMLElement | null>(null);
   const [targetContributions, setTargetContributions] = useState<ApiTargetContribution[]>([]);
@@ -122,13 +122,14 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
           {([
             ['installed', 'Installed mods'],
             ['sources', 'Mod sources'],
+            ['automatic-checks', 'Automatic source checks'],
           ] as const).map(([id, label]) => <button type="button" className={modsSection === id ? 'active' : ''} aria-current={modsSection === id ? 'page' : undefined} onClick={() => setModsSection(id)} key={id}>{label}</button>)}
         </nav>}
         {selectedContribution?.settingsUrl ? <div ref={setModNavigationColumn} /> : selectedModSettings ? <nav className="settings-prototype-section-items" aria-label={`${selectedModSettings.navigation.title} settings sections`}><button type="button" className="active" aria-current="page">{selectedModSettings.navigation.title}</button></nav> : selectedContribution && <span>Extension settings</span>}
       </section>
       <section className="settings-blank-column settings-prototype-configuration">
         {tab === 'general' && generalSection === 'operator-profile' && <OperatorProfile onSaved={onOperatorProfileChanged} />}
-        {tab === 'general' && generalSection === 'execution-boundaries' && <ExecutionBoundaries />}
+        {tab === 'general' && generalSection === 'execution-boundaries' && <ExecutionBoundaries overflowTarget={overflowColumn} />}
         {tab === 'general' && generalSection === 'trace-retention' && <RetentionSettings />}
         {tab === 'general' && generalSection === 'export' && <ExportSettings />}
         {tab === 'general' && generalSection === 'rail-panels' && <SettingSection title="Rail Panels"><div className="field-pair compact-fields"><RailPanelSettings side="Left" layout={leftRailLayout} setLayout={setLeftRailLayout} singlePanel={leftSinglePanel} setSinglePanel={setLeftSinglePanel} topPanel={leftTopPanel} setTopPanel={setLeftTopPanel} bottomPanel={leftBottomPanel} setBottomPanel={setLeftBottomPanel} onPanelSelected={setSelectedRailPanel} /><RailPanelSettings side="Right" layout={rightRailLayout} setLayout={setRightRailLayout} singlePanel={rightSinglePanel} setSinglePanel={setRightSinglePanel} topPanel={rightTopPanel} setTopPanel={setRightTopPanel} bottomPanel={rightBottomPanel} setBottomPanel={setRightBottomPanel} onPanelSelected={setSelectedRailPanel} /></div></SettingSection>}

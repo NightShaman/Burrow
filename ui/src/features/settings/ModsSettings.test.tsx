@@ -38,7 +38,9 @@ describe('ModsSettings layout contract', () => {
     expect(screen.queryByRole('button', { name: 'Refresh catalog' })).toBeNull();
     expect(overflow.getAttribute('aria-label')).toBeNull();
     expect(overflow.querySelector('[aria-label="Mod catalog"]')?.textContent).toContain('Beta');
-    fireEvent.click(screen.getAllByRole('button', { name: 'Manage' })[1]);
+    expect(screen.queryByRole('button', { name: 'Manage' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Manage Beta' }));
+    expect(screen.getByRole('button', { name: 'Manage Beta' }).getAttribute('aria-pressed')).toBe('true');
     expect(container.textContent).toContain('Beta');
     overflow.remove();
   });
@@ -108,7 +110,7 @@ describe('Git mod sources', () => {
   it('edits automatic checks in friendly units and saves exact milliseconds', async () => {
     loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [], sourceRefresh: { enabled: true, intervalMs: 21_600_000, staleMs: 900_000, refreshing: false, failures: 0 } });
     saveRefreshMock.mockResolvedValue({ enabled: false, intervalMs: 5_400_000, staleMs: 90_000 });
-    render(<ModsSettings section="sources" />);
+    render(<ModsSettings section="automatic-checks" />);
     const enabled = await screen.findByRole('checkbox', { name: 'Enable background source checks' });
     expect((screen.getByLabelText('Check every') as HTMLInputElement).value).toBe('6');
     expect((screen.getByLabelText('Check interval unit') as HTMLSelectElement).value).toBe('hours');
@@ -125,7 +127,7 @@ describe('Git mod sources', () => {
     loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
     loadRefreshMock.mockResolvedValue({ enabled: true, intervalMs: 1_234, staleMs: 5_678 });
     saveRefreshMock.mockRejectedValue(new Error('refresh settings unavailable'));
-    render(<ModsSettings section="sources" />);
+    render(<ModsSettings section="automatic-checks" />);
     await screen.findByRole('button', { name: 'Save automatic checks' });
     expect((screen.getByLabelText('Check every') as HTMLInputElement).value).toBe('1234');
     expect((screen.getByLabelText('Check interval unit') as HTMLSelectElement).value).toBe('milliseconds');
@@ -135,13 +137,50 @@ describe('Git mod sources', () => {
 
   it('rejects durations that do not resolve to positive safe integer milliseconds', async () => {
     loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
-    render(<ModsSettings section="sources" />);
+    render(<ModsSettings section="automatic-checks" />);
     await screen.findByRole('button', { name: 'Save automatic checks' });
     fireEvent.change(screen.getByLabelText('Check every')!, { target: { value: '0.0001' } });
     fireEvent.change(screen.getByLabelText('Check interval unit'), { target: { value: 'seconds' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save automatic checks' }));
     expect(screen.getByRole('alert').textContent).toContain('positive whole durations');
     expect(saveRefreshMock).not.toHaveBeenCalled();
+  });
+
+  it('selects an existing source into column 3, allows recheck and credential replacement without exposing existing secrets', async () => {
+    const url = 'https://git.example.com/existing.git';
+    loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [{ id: 'existing', url, status: 'ready' }] });
+    vi.mocked(management.modManagementAction).mockResolvedValue({ ok: true });
+    const overflow = document.createElement('section');
+    document.body.appendChild(overflow);
+    const { container, unmount } = render(<ModsSettings section="sources" overflowTarget={overflow} />);
+    await screen.findByRole('button', { name: `Edit ${url}` });
+    fireEvent.click(screen.getByRole('button', { name: `Edit ${url}` }));
+    expect(container.textContent).toContain('Selected mod source');
+    const sourceUrl = screen.getByLabelText('Git repository URL') as HTMLInputElement;
+    expect(sourceUrl.value).toBe(url);
+    expect(sourceUrl.readOnly).toBe(true);
+    const secret = screen.getByLabelText('Password or access token (optional)') as HTMLInputElement;
+    expect(secret.value).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: 'Update source' }));
+    await waitFor(() => expect(management.modManagementAction).toHaveBeenCalledWith('/api/mod-management/sources', { method: 'POST', body: JSON.stringify({ url }) }));
+    expect(screen.queryByRole('button', { name: 'Save automatic checks' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'New source' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: `Edit ${url}` }));
+    expect(sourceUrl.value).toBe('');
+    expect(screen.getByRole('button', { name: 'Add source' })).toBeTruthy();
+    unmount(); overflow.remove();
+  });
+
+  it('keeps automatic source checks separate from source editing and inventory', async () => {
+    loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [{ id: 'x', url: 'https://git.example.com/x.git' }] });
+    const overflow = document.createElement('section'); document.body.appendChild(overflow);
+    const { container, unmount } = render(<ModsSettings section="automatic-checks" overflowTarget={overflow} />);
+    await screen.findByRole('button', { name: 'Save automatic checks' });
+    expect(container.textContent).toContain('Automatic source checks');
+    expect(container.querySelector('[aria-label="Configured mod sources"]')).toBeNull();
+    expect(overflow.textContent).not.toContain('git.example.com');
+    expect(screen.queryByRole('button', { name: 'Add source' })).toBeNull();
+    unmount(); overflow.remove();
   });
 
   it('submits a public Git URL without auth and clears on success', async () => {

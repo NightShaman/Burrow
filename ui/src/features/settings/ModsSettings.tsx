@@ -5,7 +5,7 @@ import { apiTargetsChangedEvent, modContributionsChangedEvent } from '../../app/
 import { Field } from './SettingsPrimitives';
 import { defaultSourceRefresh, isModBusyError, loadModManagement, loadSourceRefreshConfig, modLifecyclePath, modManagementAction, saveSourceRefreshConfig, type ModRecord, type ModSource, type NormalizedModManagement, type SourceRefreshConfig } from './modManagementApi';
 
-type ModsSection = 'installed' | 'sources';
+type ModsSection = 'installed' | 'sources' | 'automatic-checks';
 type Props = { section?: ModsSection; overflowTarget?: HTMLElement | null };
 
 function formatCheckedTime(value: string) {
@@ -45,6 +45,7 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   const [state, setState] = useState<NormalizedModManagement>({ mods: [], sources: [], restartRequired: false, sourceRefresh: defaultSourceRefresh });
   const [selectedModId, setSelectedModId] = useState<string | null>(null);
   const [sourceUrl, setSourceUrl] = useState('');
+  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
   const [sourceUsername, setSourceUsername] = useState('');
   const sourceSecretRef = useRef<HTMLInputElement>(null);
   // Do not retain the secret in React state or browser storage. Wipe the DOM field on unmount.
@@ -85,12 +86,14 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
     }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
-  useEffect(() => { if (section === 'sources') void loadRefreshConfiguration(); }, [section, loadRefreshConfiguration]);
+  useEffect(() => { if (section === 'automatic-checks') void loadRefreshConfiguration(); }, [section, loadRefreshConfiguration]);
 
   useEffect(() => {
     if (!state.mods.some((mod) => mod.id === selectedModId)) setSelectedModId(state.mods[0]?.id ?? null);
   }, [state.mods, selectedModId]);
   const selectedMod = state.mods.find((mod) => mod.id === selectedModId) ?? null;
+  const selectedSource = state.sources.find((source) => source.id === selectedSourceId) ?? null;
+  useEffect(() => { if (selectedSourceId && !selectedSource) setSelectedSourceId(null); }, [selectedSourceId, selectedSource]);
   const sourceRefresh = state.sourceRefresh ?? defaultSourceRefresh;
 
   const run = async (key: string, path: string, init?: RequestInit, onSubmitted?: () => void) => {
@@ -143,7 +146,7 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
     void run(mod.id, modLifecyclePath(mod.id, action), { method: 'POST' });
   };
   const addSource = async () => {
-    const url = sourceUrl.trim();
+    const url = selectedSource?.url ?? sourceUrl.trim();
     if (!url) return;
     const username = sourceUsername.trim();
     const secret = sourceSecretRef.current?.value ?? '';
@@ -171,7 +174,7 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
       discoveryError = true;
     }
     if (submitted) {
-      setSourceUrl('');
+      if (!selectedSource) setSourceUrl('');
       setSourceUsername('');
       if (sourceSecretRef.current) sourceSecretRef.current.value = '';
     }
@@ -196,8 +199,7 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   const modInventoryContents = state.mods.length === 0
     ? <p className="settings-empty">No mods found. Add a source in Mod sources.</p>
     : <div className="memory-connection-list">{state.mods.map((mod) => <article className="memory-connection" key={mod.id}>
-      <div><strong>{mod.name}{mod.system && <span className="mod-system-badge">System</span>}</strong><small>{mod.status === 'installed' ? (mod.enabled ? 'Installed · Enabled' : 'Installed · Disabled') : 'Available'}{mod.version ? ` · Installed ${mod.version}` : ''}{mod.runningVersion ? ` · Running ${mod.runningVersion}` : ''}</small></div>
-      <div className="memory-connection-actions"><button type="button" className="secondary memory-edit" aria-pressed={mod.id === selectedModId} disabled={busy !== null} onClick={() => setSelectedModId(mod.id)}>Manage</button></div>
+      <button type="button" className="memory-connection-select" aria-label={`Manage ${mod.name}`} aria-pressed={mod.id === selectedModId} disabled={busy !== null} onClick={() => setSelectedModId(mod.id)}><strong>{mod.name}{mod.system && <span className="mod-system-badge">System</span>}</strong><small>{mod.status === 'installed' ? (mod.enabled ? 'Installed · Enabled' : 'Installed · Disabled') : 'Available'}{mod.version ? ` · Installed ${mod.version}` : ''}{mod.runningVersion ? ` · Running ${mod.runningVersion}` : ''}</small></button>
     </article>)}</div>;
   const modInventory = overflowTarget
     ? <div className="settings-overflow-content memory-saved" aria-label="Mod catalog">{modInventoryContents}</div>
@@ -222,20 +224,12 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
 
   const sourceInventoryContents = state.sources.length === 0
     ? <p className="settings-empty">No custom sources configured.</p>
-    : <div className="memory-connection-list">{state.sources.map((source: ModSource) => <article className="memory-connection" key={source.id}><div><strong>{source.url}</strong><small>{source.status || 'Unknown'}{source.lastCheckedAt ? ` · Checked ${formatCheckedTime(source.lastCheckedAt)}` : ''}{source.error ? ` · ${source.error}` : ''}</small></div><div className="memory-connection-actions"><button className="danger memory-edit" type="button" disabled={busy !== null} onClick={() => void run(source.id, `/api/mod-management/sources/${encodeURIComponent(source.id)}`, { method: 'DELETE' })}>Remove</button></div></article>)}</div>;
+    : <div className="memory-connection-list">{state.sources.map((source: ModSource) => <article className="memory-connection" key={source.id}><button type="button" className="memory-connection-select" aria-label={`Edit ${source.url}`} aria-pressed={source.id === selectedSourceId} onClick={() => { const selecting = selectedSourceId !== source.id; setSelectedSourceId(selecting ? source.id : null); setSourceUrl(selecting ? source.url : ''); setSourceUsername(''); if (sourceSecretRef.current) sourceSecretRef.current.value = ''; }}><strong>{source.url}</strong><small>{source.status || 'Unknown'}{source.lastCheckedAt ? ` · Checked ${formatCheckedTime(source.lastCheckedAt)}` : ''}{source.error ? ` · ${source.error}` : ''}</small></button><div className="memory-connection-actions"><button className="danger memory-edit" type="button" disabled={busy !== null} onClick={() => void run(source.id, `/api/mod-management/sources/${encodeURIComponent(source.id)}`, { method: 'DELETE' }, () => { if (source.id === selectedSourceId) { setSelectedSourceId(null); setSourceUrl(''); setSourceUsername(''); if (sourceSecretRef.current) sourceSecretRef.current.value = ''; } })}>Remove</button></div></article>)}</div>;
   const sourceInventory = overflowTarget
     ? <div className="settings-overflow-content memory-saved" aria-label="Configured mod sources">{sourceInventoryContents}</div>
     : <details className="memory-saved saved-accordion" open><summary><h3>Configured sources</h3><span>{state.sources.length}</span></summary>{sourceInventoryContents}</details>;
-  const sourceConfiguration = <section className="setting-section mod-source-configuration" aria-labelledby="mod-sources-heading">
-    <h2 id="mod-sources-heading">Mod sources</h2>
-    <p className="settings-description">Add a Git repository URL (HTTP(S), ssh://, or scp-style SSH). Core discovers version-tagged releases containing burrow.mod.json.</p>
-    <p className="settings-help" role="status">{sourceRefresh.refreshing
-      ? 'Checking configured sources now…'
-      : sourceRefresh.enabled
-        ? `Background source checks are active${sourceRefresh.intervalMs ? ` · every ${formatDuration(sourceRefresh.intervalMs)}` : ''}${sourceRefresh.failures ? ` · ${sourceRefresh.failures} consecutive failed refresh${sourceRefresh.failures === 1 ? '' : 'es'}` : ''}.`
-        : 'Background source checks are disabled.'}</p>
-    <div className="settings-subsection" aria-labelledby="source-refresh-settings-heading">
-      <h3 id="source-refresh-settings-heading">Automatic source checks</h3>
+  const automaticChecks = <section className="setting-section mod-source-configuration" aria-labelledby="source-refresh-settings-heading">
+      <h2 id="source-refresh-settings-heading">Automatic source checks</h2>
       {refreshConfigError && <p className="settings-request-error" role="alert">{refreshConfigError}</p>}
       {refreshConfig ? <>
         <label className="agent-enabled"><input type="checkbox" checked={refreshEnabled} disabled={busy !== null} onChange={(event) => setRefreshEnabled(event.target.checked)} /><span>Enable background source checks</span></label>
@@ -246,21 +240,29 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
         <p className="settings-help">Durations are saved exactly in milliseconds. Decimal values are accepted only when they resolve to a whole millisecond.</p>
         <div className="model-actions"><button className="primary" type="button" disabled={busy !== null} onClick={() => void saveRefreshConfiguration()}>{busy === 'source-refresh-settings' ? 'Saving…' : 'Save automatic checks'}</button></div>
       </> : <div className="model-actions"><button className="secondary" type="button" disabled={busy !== null} onClick={() => void loadRefreshConfiguration()}>Retry settings</button></div>}
-    </div>
-    <Field label="Git repository URL"><input value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://git.example.com/team/mod.git" /></Field>
+  </section>;
+  const sourceConfiguration = <section className="setting-section mod-source-configuration" aria-labelledby="mod-sources-heading">
+    <h2 id="mod-sources-heading">{selectedSource ? 'Selected mod source' : 'Mod sources'}</h2>
+    <p className="settings-description">{selectedSource ? 'Recheck this source or replace its HTTPS credentials. The repository URL cannot be changed in place; remove it and add a new source to change the URL.' : 'Add a Git repository URL (HTTP(S), ssh://, or scp-style SSH). Core discovers version-tagged releases containing burrow.mod.json.'}</p>
+    <p className="settings-help" role="status">{sourceRefresh.refreshing
+      ? 'Checking configured sources now…'
+      : sourceRefresh.enabled
+        ? `Background source checks are active${sourceRefresh.intervalMs ? ` · every ${formatDuration(sourceRefresh.intervalMs)}` : ''}${sourceRefresh.failures ? ` · ${sourceRefresh.failures} consecutive failed refresh${sourceRefresh.failures === 1 ? '' : 'es'}` : ''}.`
+        : 'Background source checks are disabled.'}</p>
+    <Field label="Git repository URL"><input value={selectedSource?.url ?? sourceUrl} readOnly={!!selectedSource} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://git.example.com/team/mod.git" /></Field>
     <Field label="Private repository username (optional)"><input value={sourceUsername} onChange={(event) => setSourceUsername(event.target.value)} autoComplete="off" /></Field>
     <Field label="Password or access token (optional)"><input ref={sourceSecretRef} type="password" autoComplete="new-password" /></Field>
     <p className="settings-help">Public repositories need only a URL. Credentials are for HTTPS Git repositories only and are stored encrypted by Core, not shown here again. For SSH, configure keys and host trust on the Core service account.</p>
-    <div className="model-actions"><button className="secondary" type="button" disabled={busy !== null} onClick={() => void run('refresh', '/api/mod-management/refresh', { method: 'POST' })}>{busy === 'refresh' ? 'Refreshing…' : 'Refresh sources'}</button><button className="primary" type="button" disabled={!sourceUrl.trim() || busy !== null} onClick={() => void addSource()}>{busy === 'source' ? 'Adding…' : 'Add source'}</button></div>
+    <div className="model-actions"><button className="secondary" type="button" disabled={busy !== null} onClick={() => void run('refresh', '/api/mod-management/refresh', { method: 'POST' })}>{busy === 'refresh' ? 'Refreshing…' : 'Refresh sources'}</button><button className="primary" type="button" disabled={(!selectedSource && !sourceUrl.trim()) || busy !== null} onClick={() => void addSource()}>{busy === 'source' ? (selectedSource ? 'Updating…' : 'Adding…') : selectedSource ? 'Update source' : 'Add source'}</button></div>
   </section>;
 
-  const primary = section === 'installed' ? modConfiguration : sourceConfiguration;
-  const supporting = section === 'installed' ? modInventory : sourceInventory;
+  const primary = section === 'installed' ? modConfiguration : section === 'sources' ? sourceConfiguration : automaticChecks;
+  const supporting = section === 'installed' ? modInventory : section === 'sources' ? sourceInventory : null;
   return <div className="mod-management-settings">
     {error && <p className="settings-request-error" role="alert">{error}</p>}
     {state.restartRequired && <p className="settings-auth-warning mod-restart-notice" role="status"><strong>Restart required.</strong> This Core reported that the latest mod change still needs a restart.</p>}
     {primary}
     {!overflowTarget && supporting}
-    {overflowTarget && createPortal(supporting, overflowTarget)}
+    {overflowTarget && supporting && createPortal(supporting, overflowTarget)}
   </div>;
 }

@@ -42,12 +42,24 @@ describe('Model connection views', () => {
     const onDelete = vi.fn();
     render(<SavedProviders providers={[provider]} open onOpenChange={vi.fn()} onEdit={onEdit} onDelete={onDelete} />);
 
-    expect(screen.getByText('Auth: OAuth configured')).toBeTruthy();
-    expect(screen.getByText('Source: browser')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(screen.getByText('OAuth configured')).toBeTruthy();
+    expect(screen.queryByText('Source: browser')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /OpenAI.*OpenAI Responses.*1 model/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete OpenAI' }));
     expect(onEdit).toHaveBeenCalledWith(provider);
     expect(onDelete).toHaveBeenCalledWith(provider);
+  });
+
+  it('selects an expanded provider without a separate Edit action or verbose model list', () => {
+    const provider = { id: 'openai', provider: 'OpenAI', apiType: 'openai-responses', url: 'https://example.test', apiKey: '', models: ['gpt-test'] };
+    const onEdit = vi.fn();
+    render(<SavedProviders providers={[provider]} open onOpenChange={vi.fn()} onEdit={onEdit} onDelete={vi.fn()} selectedId="openai" expanded />);
+    const selector = screen.getByRole('button', { name: /OpenAI.*OpenAI Responses.*1 model/ });
+    expect(selector.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(screen.queryByText('gpt-test')).toBeNull();
+    fireEvent.click(selector);
+    expect(onEdit).toHaveBeenCalledWith(provider);
   });
 
   it('normalizes known and unknown OAuth statuses for display', () => {

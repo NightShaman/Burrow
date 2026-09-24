@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../../app/api';
 import { Field, SettingSection } from './SettingsPrimitives';
 
@@ -35,8 +36,9 @@ export const executionBoundariesApi = {
   },
 };
 
-export function ExecutionBoundaries() {
+export function ExecutionBoundaries({ overflowTarget }: { overflowTarget?: HTMLElement | null } = {}) {
   const [hardBlocks, setHardBlocks] = useState<ExecutionBoundary[]>([]);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [status, setStatus] = useState<'loading' | 'idle' | 'saving'>('loading');
   const [error, setError] = useState('');
 
@@ -71,31 +73,41 @@ export function ExecutionBoundaries() {
     }
   };
 
-  return <SettingSection title="Execution boundaries">
+  const selected = selectedIndex === null ? null : hardBlocks[selectedIndex] ?? null;
+  const inventory = <div className="settings-overflow-content memory-saved">
+    <SettingSection title="Saved rules">
+      {status === 'loading' ? <p className="settings-empty">Loading rules…</p> : hardBlocks.length === 0 ? <p className="settings-empty">No hard blocks are configured.</p> :
+        <div className="memory-connection-list">{hardBlocks.map((rule, index) => <article className="memory-connection" key={index}>
+          <button type="button" className="boundary-inventory-select" aria-pressed={selectedIndex === index} onClick={() => setSelectedIndex(index)}>
+            <strong>{rule.id || 'New boundary'}</strong><small>{rule.type} · {rule.pattern || 'No pattern'} · {rule.enabled ? 'Enabled' : 'Disabled'}</small>
+          </button>
+        </article>)}</div>}
+    </SettingSection>
+  </div>;
+
+  return <><SettingSection title="Execution boundaries">
     <p className="settings-section-description">Hard blocks are enforced immediately before tool execution. Matching path or command operations cannot proceed.</p>
-    <div className="boundary-rules">
-      {hardBlocks.map((rule, index) => <article className="boundary-rule" key={`${rule.id}-${index}`}>
-        <div className="boundary-rule-heading">
-          <label className="boundary-enabled"><input type="checkbox" checked={rule.enabled} onChange={(event) => update(index, { enabled: event.target.checked })} /> Enabled</label>
-          <button className="boundary-remove" type="button" onClick={() => setHardBlocks((rules) => rules.filter((_, ruleIndex) => ruleIndex !== index))} aria-label={`Remove ${rule.id || 'boundary'}`}>Remove</button>
-        </div>
-        <div className="field-pair compact-fields">
-          <Field label="Rule ID"><input value={rule.id} onChange={(event) => update(index, { id: event.target.value })} placeholder="backup-readonly" /></Field>
-          <Field label="Target type"><select value={rule.type} onChange={(event) => update(index, { type: event.target.value as ExecutionBoundary['type'], match: event.target.value === 'command' ? 'regex' : 'glob' })}><option value="path">Path</option><option value="command">Command</option></select></Field>
-        </div>
-        <Field label="Pattern"><input value={rule.pattern} onChange={(event) => update(index, { pattern: event.target.value })} placeholder={rule.type === 'path' ? '/mnt/backup/**' : 'rm\\s'} /></Field>
-        <div className="field-pair compact-fields">
-          <Field label="Match"><select value={rule.match} onChange={(event) => update(index, { match: event.target.value as ExecutionBoundary['match'] })}>{boundaryMatches.map((match) => <option key={match} value={match}>{match}</option>)}</select></Field>
-          <Field label="Reason"><input value={rule.reason ?? ''} onChange={(event) => update(index, { reason: event.target.value })} placeholder="Optional" /></Field>
-        </div>
-        <fieldset className="boundary-operations"><legend>Block operations</legend>{boundaryOperations.map((operation) => <label key={operation}><input type="checkbox" checked={rule.operations.includes(operation)} onChange={() => toggleOperation(index, operation)} /> {operation}</label>)}</fieldset>
-      </article>)}
-      {hardBlocks.length === 0 && <p className="boundary-empty">No hard blocks are configured.</p>}
-    </div>
+    {selected && selectedIndex !== null ? <div className="boundary-rules"><div className="boundary-rule">
+      <div className="boundary-rule-heading">
+        <label className="boundary-enabled"><input type="checkbox" checked={selected.enabled} onChange={(event) => update(selectedIndex, { enabled: event.target.checked })} /> Enabled</label>
+        <button className="boundary-remove" type="button" onClick={() => { setHardBlocks((rules) => rules.filter((_, index) => index !== selectedIndex)); setSelectedIndex(null); }} aria-label={`Remove ${selected.id || 'boundary'}`}>Remove</button>
+      </div>
+      <div className="field-pair compact-fields">
+        <Field label="Rule ID"><input value={selected.id} onChange={(event) => update(selectedIndex, { id: event.target.value })} placeholder="backup-readonly" /></Field>
+        <Field label="Target type"><select value={selected.type} onChange={(event) => update(selectedIndex, { type: event.target.value as ExecutionBoundary['type'], match: event.target.value === 'command' ? 'regex' : 'glob' })}><option value="path">Path</option><option value="command">Command</option></select></Field>
+      </div>
+      <Field label="Pattern"><input value={selected.pattern} onChange={(event) => update(selectedIndex, { pattern: event.target.value })} placeholder={selected.type === 'path' ? '/mnt/backup/**' : 'rm\\s'} /></Field>
+      <div className="field-pair compact-fields">
+        <Field label="Match"><select value={selected.match} onChange={(event) => update(selectedIndex, { match: event.target.value as ExecutionBoundary['match'] })}>{boundaryMatches.map((match) => <option key={match} value={match}>{match}</option>)}</select></Field>
+        <Field label="Reason"><input value={selected.reason ?? ''} onChange={(event) => update(selectedIndex, { reason: event.target.value })} placeholder="Optional" /></Field>
+      </div>
+      <fieldset className="boundary-operations"><legend>Block operations</legend>{boundaryOperations.map((operation) => <label key={operation}><input type="checkbox" checked={selected.operations.includes(operation)} onChange={() => toggleOperation(selectedIndex, operation)} /> {operation}</label>)}</fieldset>
+    </div></div> : <p className="settings-empty">Select a saved rule or add a hard block.</p>}
     <div className="boundary-actions">
-      <button className="secondary" type="button" onClick={() => setHardBlocks((rules) => [...rules, newBoundary()])} disabled={status === 'loading'}>Add hard block</button>
+      <button className="secondary" type="button" onClick={() => { setHardBlocks((rules) => { setSelectedIndex(rules.length); return [...rules, newBoundary()]; }); }} disabled={status !== 'idle'}>Add hard block</button>
       <button className="primary" type="button" onClick={() => void save()} disabled={status !== 'idle'}>{status === 'saving' ? 'Saving…' : 'Save boundaries'}</button>
     </div>
     {error && <p className="settings-request-error" role="alert">{error}</p>}
-  </SettingSection>;
+    {!overflowTarget && inventory}
+  </SettingSection>{overflowTarget && createPortal(inventory, overflowTarget)}</>;
 }

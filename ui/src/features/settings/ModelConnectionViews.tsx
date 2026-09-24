@@ -50,19 +50,17 @@ type SavedProvidersProps = {
   onEdit: (provider: SavedProvider) => void;
   onDelete: (provider: SavedProvider) => void;
   expanded?: boolean;
+  selectedId?: string | null;
 };
 
-export function SavedProviders({ providers, open, onOpenChange, onEdit, onDelete, expanded = false }: SavedProvidersProps) {
+export function SavedProviders({ providers, open, onOpenChange, onEdit, onDelete, expanded = false, selectedId }: SavedProvidersProps) {
   const contents = providers.length === 0 ? <p className="settings-empty">No providers saved yet.</p> : <div className="provider-list">{providers.map((item) => <article className="provider-card" key={item.id}>
-      <div>
+      <button className="provider-card-select" type="button" onClick={() => onEdit(item)} aria-pressed={selectedId === item.id}>
         <strong>{item.provider}</strong>
-        <small>{modelConnectionApiTypes.find((type) => type.value === item.apiType)?.label ?? item.apiType} · {item.url}</small>
-        {(item.oauthConfigured || item.auth?.type === 'oauth') && <small>Auth: OAuth configured</small>}
-        {(item.authSource || item.auth?.source) && <small>Source: {item.authSource || item.auth?.source}</small>}
-        {(item.expiresAt || item.auth?.expiresAt) && <small>Expires: {new Date((item.expiresAt || item.auth?.expiresAt) as string).toLocaleString()}</small>}
-      </div>
-      <div className="provider-models">{item.models.map((model) => <span key={model}>{model}</span>)}</div>
-      <div className="card-actions"><button className="secondary" onClick={() => onEdit(item)}>Edit</button><button className="danger" onClick={() => onDelete(item)}>Delete</button></div>
+        <small>{modelConnectionApiTypes.find((type) => type.value === item.apiType)?.label ?? item.apiType} · {item.models.length} {item.models.length === 1 ? 'model' : 'models'}</small>
+        {(item.oauthConfigured || item.auth?.type === 'oauth') && <small>OAuth configured</small>}
+      </button>
+      <button className="danger" type="button" onClick={() => onDelete(item)} aria-label={`Delete ${item.provider}`}>Delete</button>
     </article>)}</div>;
   if (expanded) return <div className="settings-overflow-content model-saved">{contents}</div>;
   return <details className="model-saved saved-accordion" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}>

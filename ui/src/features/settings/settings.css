@@ -123,7 +123,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .agent-profile{margin-bottom:10px}.agent-profile-actions{grid-template-columns:minmax(0,1fr) auto auto;gap:9px}.agent-profile-actions .agent-enabled{display:flex;gap:7px;align-items:center;min-height:34px;margin:0;white-space:nowrap}.agent-detail-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;padding-top:10px;border-top:1px solid var(--line-soft)}.agent-detail-footer span{color:var(--muted);font-family:var(--mono,monospace);font-size:11px}
 @media(max-width:620px){.agent-add-fields,.agent-profile-actions{grid-template-columns:1fr}.agent-add-fields .primary,.agent-profile-actions .primary{width:100%}.agent-detail-footer{align-items:stretch;flex-direction:column}.agent-detail-footer .danger{width:100%}}
 
-.memory-connections{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;gap:18px}.memory-connections .setting-section{margin-top:12px}.settings-description{margin:0 0 16px;color:var(--muted);font-size:12px;line-height:1.45}.memory-connection-list{display:grid;gap:8px}.memory-connection{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:var(--panel)}.memory-connection strong,.memory-connection small{display:block}.memory-connection small{margin-top:3px;color:var(--muted);font-size:11px;overflow-wrap:anywhere}.memory-connection-actions,.memory-form-actions{display:flex;align-items:center;gap:7px;flex:0 0 auto}.memory-edit{min-height:28px;padding:4px 9px}.memory-delete{display:grid;place-items:center;width:28px;height:28px;flex:0 0 auto;padding:0;border:0;border-radius:5px;background:transparent;color:var(--muted);font-size:20px;line-height:1}.memory-delete:hover{background:var(--danger);color:var(--text-strong)}
+.memory-connections{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;gap:18px}.memory-connections .setting-section{margin-top:12px}.settings-description{margin:0 0 16px;color:var(--muted);font-size:12px;line-height:1.45}.memory-connection-list{display:grid;gap:8px}.memory-connection{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:var(--panel)}.memory-connection-select{display:block;flex:1;min-width:0;align-self:stretch;padding:0;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit}.memory-connection-select:hover strong{text-decoration:underline}.memory-connection-select:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}.memory-connection-select:disabled{cursor:default}.memory-connection strong,.memory-connection small{display:block}.memory-connection small{margin-top:3px;color:var(--muted);font-size:11px;overflow-wrap:anywhere}.memory-connection-actions,.memory-form-actions{display:flex;align-items:center;gap:7px;flex:0 0 auto}.memory-edit{min-height:28px;padding:4px 9px}.memory-delete{display:grid;place-items:center;width:28px;height:28px;flex:0 0 auto;padding:0;border:0;border-radius:5px;background:transparent;color:var(--muted);font-size:20px;line-height:1}.memory-delete:hover{background:var(--danger);color:var(--text-strong)}
 
 /* Keep memory connections in one compact card. */
 .memory-key-action{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:8px}.memory-key-action .field{margin-bottom:0}.memory-key-action .primary{min-height:34px;white-space:nowrap}
@@ -147,6 +147,10 @@ button:disabled{cursor:not-allowed;opacity:.45}
 @media(max-width:900px){.agent-settings-middle{grid-column:auto}}
 
 .mcp-args-hint{margin-top:8px}.settings-view textarea{width:100%;min-height:72px;resize:vertical;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--surface-input);color:var(--text);font:inherit;line-height:1.4}
+.settings-prototype-configuration .mcp-arguments{display:block;width:100%;min-width:0;min-height:92px;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface-input);color:var(--text);font:inherit;line-height:1.45;resize:vertical}
+.settings-prototype-configuration .mcp-arguments::placeholder{color:var(--muted);opacity:1}
+.settings-prototype-configuration .mcp-arguments:hover{border-color:var(--accent-border)}
+.settings-prototype-configuration .mcp-arguments:focus{border-color:var(--accent);outline:0;background:var(--surface-raised);box-shadow:0 0 0 3px var(--accent-subtle)}
 
 /* MCP stdio secrets are application controls, not browser-default input soup. */
 .mcp-environment{display:grid;gap:9px;margin-top:14px;padding:12px;border:1px solid var(--line-soft);border-radius:8px;background:var(--surface-sunken)}
@@ -233,7 +237,6 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .mcp-environment{display:grid;gap:8px;margin-top:14px}.mcp-environment-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.mcp-environment-heading strong{font-size:12px}.mcp-environment-heading .secondary{padding:5px 8px;font-size:11px}.mcp-environment-row{display:grid;grid-template-columns:minmax(120px,1fr) minmax(160px,1.5fr) auto;gap:8px;align-items:center}.mcp-environment-row input{min-width:0}@media(max-width:620px){.mcp-environment-row{grid-template-columns:1fr auto}.mcp-environment-row input:first-child{grid-column:1/-1}}
 
 /* MCP diagnostics are backend-redacted operator feedback, never tool payloads. */
-.mcp-diagnostic{display:grid;gap:3px;margin:8px 0 0;padding:8px 10px;border:1px solid var(--line-soft);border-radius:6px;background:var(--surface-sunken);color:var(--muted);font-size:11px;line-height:1.4;overflow-wrap:anywhere}.mcp-diagnostic strong{color:var(--text);font-size:11px}.mcp-diagnostic.ok{border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}.mcp-diagnostic.ok strong{color:var(--ok)}.mcp-diagnostic.error{border-color:var(--danger-border)}.mcp-diagnostic.error strong{color:var(--danger)}
 
 /* Settings polish: preserve the configuration context and keep long-form saves in reach. */
 .settings-heading{position:relative;display:flex;align-items:end;justify-content:space-between;min-height:58px;margin:2px 0 12px;padding:0 2px 12px;border-bottom:1px solid var(--line-soft)}
@@ -710,3 +713,19 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .settings-overflow-content .dream-cycle-activity{margin-top:0;padding-top:0;border-top:0}
 
 .agent-sidebar-order{margin-top:18px}.agent-sidebar-order .field-label{display:block;color:var(--text-strong);font-size:12px;font-weight:700}.agent-sidebar-order>.hint{margin:5px 0 10px}.agent-sidebar-order-list{display:grid;gap:6px}.agent-sidebar-order-list>div{display:grid;grid-template-columns:18px 30px minmax(0,1fr);align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--surface-raised);color:var(--text-strong);cursor:grab}.agent-sidebar-order-list>div:active{cursor:grabbing}.agent-sidebar-order-list>div.dragging{opacity:.45}.agent-sidebar-order-list>div.drop-target{border-color:var(--accent);box-shadow:inset 3px 0 var(--accent)}.agent-sidebar-order-list .avatar{display:grid;place-items:center;width:30px;height:30px;overflow:hidden;border-radius:7px;background:var(--accent-muted);color:var(--accent-text);font-size:11px;font-weight:800}.agent-sidebar-order-list .avatar img{width:100%;height:100%;object-fit:cover}.agent-sidebar-order-handle{color:var(--muted);font-size:17px;line-height:1}
+
+/* Execution boundaries inventory selects the editor without nesting an interactive card. */
+.boundary-inventory-select{display:block;min-width:0;width:100%;padding:0;border:0;background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer;overflow-wrap:anywhere}.boundary-inventory-select:hover strong{text-decoration:underline}.boundary-inventory-select:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:2px}.boundary-inventory-select strong,.boundary-inventory-select small{overflow-wrap:anywhere}
+/* Compact selectors for saved cron jobs and model providers. */
+.schedule-card{align-items:center;min-width:0}
+.schedule-card-details{min-width:0;flex:1}
+.schedule-card-select,.provider-card-select{display:block;width:100%;min-width:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.schedule-card-select:hover strong,.provider-card-select:hover strong{text-decoration:underline}
+.schedule-card-select:focus-visible,.provider-card-select:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:2px}
+.schedule-card-summary strong,.schedule-card-summary small,.schedule-card-select strong,.schedule-card-select small,.provider-card-select strong,.provider-card-select small{display:block}
+.schedule-card-details small,.provider-card-select small{margin-top:3px;color:var(--muted);font-size:11px;overflow-wrap:anywhere}
+.schedule-card-actions{display:flex;align-items:center;gap:7px;flex:0 0 auto}
+.schedule-card-actions button{white-space:nowrap}
+.model-saved .provider-card{display:flex;align-items:center;gap:10px;padding:9px 11px;min-width:0}
+.model-saved .provider-card-select{flex:1}
+.model-saved .provider-card > .danger{flex:0 0 auto}

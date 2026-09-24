@@ -63,11 +63,13 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
           open={editor.savedProvidersOpen}
           onOpenChange={editor.setSavedProvidersOpen}
           onEdit={editor.editProvider}
+          selectedId={editor.editingId}
           onDelete={(item) => void editor.deleteProvider(item)}
         />}
       </SettingSection>
     </div>
     {mcpConnections}
-    {overflowTarget && createPortal(<SavedProviders providers={savedProviders} open={editor.savedProvidersOpen} onOpenChange={editor.setSavedProvidersOpen} onEdit={editor.editProvider} onDelete={(item) => void editor.deleteProvider(item)} expanded />, overflowTarget)}
+    {overflowTarget && createPortal(<SavedProviders providers={savedProviders} open={editor.savedProvidersOpen} onOpenChange={editor.setSavedProvidersOpen} onEdit={editor.editProvider}
+          selectedId={editor.editingId} onDelete={(item) => void editor.deleteProvider(item)} expanded />, overflowTarget)}
   </div>;
 }
