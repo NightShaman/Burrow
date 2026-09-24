@@ -22,3 +22,13 @@
 @media (prefers-reduced-motion:reduce){.streamed-answer-chevron{transition:none}}
 
 .message-attachment-image{display:flex;flex-direction:column;gap:4px;margin:0;max-width:min(320px,100%);padding:5px;border:1px solid var(--accent-border);border-radius:8px;background:var(--accent-subtle);color:var(--text)}.message-attachment-image img{display:block;width:auto;max-width:100%;max-height:240px;object-fit:contain;border-radius:5px}.message-attachment-image figcaption{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:11px}
+
+/* The picker opens above the composer, without changing its height or the transcript scroll. */
+.emoji-control{position:relative;display:inline-flex}
+.emoji-trigger{display:grid;place-items:center;width:28px;height:28px;min-height:28px;padding:0;border:1px solid var(--line);border-radius:6px;background:var(--surface-raised);color:var(--text);font-size:20px;line-height:1;cursor:pointer}
+.emoji-trigger:hover,.emoji-trigger[aria-expanded="true"]{border-color:var(--accent-border);background:var(--surface-hover)}
+.emoji-trigger:focus-visible,.emoji-picker :is(button,input):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.emoji-control #chat-emoji-picker{position:absolute;z-index:30;right:0;bottom:calc(100% + 10px);width:min(340px,calc(100vw - 32px))}
+.emoji-picker-loading{padding:20px;border:1px solid var(--line);border-radius:9px;background:var(--panel-2);color:var(--muted);box-shadow:0 12px 28px rgb(0 0 0 / 35%)}
+.emoji-picker .EmojiPickerReact{--epr-dark-bg-color:var(--panel-2);--epr-dark-category-label-bg-color:var(--panel-2);--epr-dark-search-input-bg-color:var(--surface-input);--epr-dark-search-input-bg-color-active:var(--surface-input);--epr-dark-category-icon-active-color:var(--accent);--epr-dark-category-icon-inactive-color:var(--muted);--epr-dark-hover-bg-color:var(--accent-subtle);--epr-dark-focus-bg-color:var(--accent-subtle);--epr-dark-picker-border-color:var(--line);--epr-dark-text-color:var(--text);--epr-dark-highlight-color:var(--text);border:1px solid var(--line);box-shadow:0 12px 28px rgb(0 0 0 / 35%);font-family:inherit}
+.emoji-picker .EmojiPickerReact input{font:inherit;color:var(--text)}

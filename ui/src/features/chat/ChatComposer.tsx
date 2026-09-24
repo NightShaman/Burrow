@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent } from 'react';
 import { apiForTarget, textFromChatValue, type ChatAttachment, type SessionTurn } from '../../app/api';
 import type { ApiTarget } from '../../app/apiTargets';
+const EmojiPicker = lazy(() => import('./EmojiPicker').then(({ EmojiPicker }) => ({ default: EmojiPicker })));
 
 type ProjectOption = { id: string; name: string; description?: string };
 
@@ -73,6 +74,36 @@ export function ChatComposer({
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectError, setProjectError] = useState('');
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const emojiArea = useRef<HTMLDivElement>(null);
+  const messageInput = useRef<HTMLTextAreaElement>(null);
+  const selection = useRef({ start: 0, end: 0 });
+  const pendingCaret = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (pendingCaret.current === null) return;
+    messageInput.current?.focus();
+    messageInput.current?.setSelectionRange(pendingCaret.current, pendingCaret.current);
+    pendingCaret.current = null;
+  }, [draft]);
+  useEffect(() => {
+    if (!emojiOpen) return;
+    const outside = (event: PointerEvent) => { if (!emojiArea.current?.contains(event.target as Node)) setEmojiOpen(false); };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [emojiOpen]);
+  const chooseEmoji = (emoji: string) => {
+    const { start, end } = selection.current;
+    const caret = start + emoji.length;
+    pendingCaret.current = caret;
+    setDraft(draft.slice(0, start) + emoji + draft.slice(end));
+    selection.current = { start: caret, end: caret };
+    setEmojiOpen(false);
+  };
+  const rememberSelection = () => { const input = messageInput.current; if (input) selection.current = { start: input.selectionStart, end: input.selectionEnd }; };
+  const closeEmojiOnEscape = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault(); event.stopPropagation(); setEmojiOpen(false); messageInput.current?.focus();
+  };
   const query = commandQuery(draft.trim());
   const commandMatches = query === null ? [] : CHAT_COMMANDS.filter((command) => command.name.startsWith(query));
   const projectQuery = projectContextQuery(draft);
@@ -155,9 +186,13 @@ export function ChatComposer({
         </div>
       )}
       <div className="composer">
-        <textarea id="chat-message" name="message" aria-label="Message" value={draft} onChange={(event) => setDraft(event.target.value)} onPaste={pasteImages} onKeyDown={(event) => { onKeyDown?.(event); if (event.defaultPrevented) return; if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={placeholder} />
+        <textarea ref={messageInput} onSelect={rememberSelection} onClick={rememberSelection} id="chat-message" name="message" aria-label="Message" value={draft} onChange={(event) => setDraft(event.target.value)} onPaste={pasteImages} onKeyDown={(event) => { onKeyDown?.(event); if (event.defaultPrevented) return; if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={placeholder} />
         <div className="compose-footer"><div className="compose-actions">
           <button className="copy-conversation" onClick={() => void copyConversation()} disabled={!conversationTurns.some((turn) => textFromChatValue(turn.content).trim())} aria-label={copyState === 'copied' ? 'Conversation copied' : 'Copy conversation'} title={copyState === 'copied' ? 'Conversation copied' : copyState === 'failed' ? 'Copy failed' : 'Copy conversation'}>{copyState === 'copied' ? '✓' : '⧉'}</button>
+          <div className="emoji-control" ref={emojiArea} onKeyDown={closeEmojiOnEscape}>
+            <button className="emoji-trigger" type="button" aria-label="Insert emoji" aria-expanded={emojiOpen} aria-controls="chat-emoji-picker" title="Insert emoji" onClick={() => { rememberSelection(); setEmojiOpen((open) => !open); }}>☺</button>
+            {emojiOpen && <div id="chat-emoji-picker"><Suspense fallback={<div className="emoji-picker-loading" role="status">Loading emoji…</div>}><EmojiPicker onChoose={chooseEmoji} /></Suspense></div>}
+          </div>
           <label className="attach" aria-label="Attach image or document" title="Attach image or document"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20.5 11.5-8.7 8.7a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7L9 17.4a2 2 0 0 1-2.8-2.8l8.2-8.2" /></svg><input id="chat-attachments" name="attachments" type="file" multiple accept="image/*,text/*,.txt,.md,.markdown,.json,.csv,.xml,.html,.css,.js,.ts,.tsx,.jsx,.py,.rb,.go,.rs,.java,.c,.cpp,.h,.yaml,.yml,.rtf" onChange={chooseFiles} /></label>
           {disabled && onCancel ? <button className="send stop" onClick={onCancel} aria-label="Stop response" title="Stop response">■</button> : <button className="send" onMouseDown={(event) => event.preventDefault()} onClick={submit} disabled={!canSend} aria-label="Send message" title="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 9-18 9 4-9-4-9Z" /><path d="M7 12h14" /></svg></button>}
         </div></div>
