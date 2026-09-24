@@ -55,7 +55,18 @@ function input(value = {}) {
   if (args.some((item) => item.length > 2_000)) throw new Error('mcp_args_invalid');
   return { name, transport, lifecycle, baseUrl: transport === 'http' ? baseUrl : '', command: transport === 'stdio' ? command : null, args: transport === 'stdio' ? args : [], enabled: value.enabled !== false, tools: tools(value.tools), environmentVariables: environmentVariables(value) };
 }
-function publicConnection(row, environmentVariables = []) { return row && { id: row.id, name: row.name, transport: row.connection_kind || row.transport, baseUrl: (row.connection_kind || row.transport) === 'http' ? row.base_url : null, command: row.command || null, args: parseJson(row.args_json, []), lifecycle: row.lifecycle || 'ephemeral', enabled: Boolean(row.enabled), tools: tools(parseJson(row.tools_json)), apiKeyConfigured: Boolean(row.secret_id), environmentVariables, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function publicConnection(row, environmentVariables = []) {
+  if (!row) return null;
+  const modManaged = row.id.startsWith('mod.') && row.base_url?.startsWith('mod://');
+  const transport = modManaged ? 'mod' : row.connection_kind || row.transport;
+  const catalog = tools(parseJson(row.tools_json));
+  if (modManaged) {
+    const rawTools = parseJson(row.tools_json);
+    const availability = new Map((Array.isArray(rawTools) ? rawTools : []).map((tool) => [tool?.name, tool?.availability]));
+    for (const tool of catalog) tool.availability = availability.get(tool.name) === 'mod-authorized' ? 'mod-authorized' : 'grant-required';
+  }
+  return { id: row.id, name: row.name, transport, baseUrl: transport === 'http' ? row.base_url : null, command: row.command || null, args: parseJson(row.args_json, []), lifecycle: row.lifecycle || 'ephemeral', enabled: Boolean(row.enabled), tools: catalog, apiKeyConfigured: Boolean(row.secret_id), environmentVariables, createdAt: row.created_at, updatedAt: row.updated_at };
+}
 
 export class McpSettingsStore {
   constructor({ databasePath, key } = {}) { this.databasePath = databasePath || settingsDatabasePath(); this.key = key || settingsKeyFromEnvironment(); this.db = openSettingsDatabase({ databasePath: this.databasePath }); }

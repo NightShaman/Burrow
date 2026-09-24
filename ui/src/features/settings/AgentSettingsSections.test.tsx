@@ -273,6 +273,37 @@ describe('agent settings sections', () => {
     expect(screen.getByRole('button', { name: 'Save dream settings' })).toBeTruthy();
   });
 
+  it('omits mod-authorized tools while preserving grant-required tools from a mixed mod server', async () => {
+    apiMock.mockImplementation((_target, path, init) => {
+      if (path.endsWith('/mcp-tools') && init?.method === 'PUT') return Promise.resolve({});
+      if (path.endsWith('/mcp-tools')) return Promise.resolve({ tools: [
+        { connectionId: 'mod.lore', toolName: 'search', enabled: true },
+        { connectionId: 'mod.only', toolName: 'private', enabled: true },
+        { connectionId: 'mod.lore', toolName: 'write', enabled: true },
+      ] });
+      return Promise.resolve({ connections: [{ id: 'mod.lore', name: 'Lore', transport: 'mod', baseUrl: null, command: null, args: [], enabled: true, apiKeyConfigured: false, tools: [
+        { name: 'search', availability: 'mod-authorized' },
+        { name: 'write', availability: 'grant-required', description: 'Write lore' },
+      ] }, { id: 'mod.only', name: 'GSS', transport: 'mod', baseUrl: null, command: null, args: [], enabled: true, apiKeyConfigured: false, tools: [
+        { name: 'private', availability: 'mod-authorized' },
+      ] }] });
+    });
+    render(<ConfirmProvider><AgentMcpTools agentId="smatchet" targets={targets} /></ConfirmProvider>);
+    expect(await screen.findByText('write')).toBeTruthy();
+    expect(screen.queryByText('search')).toBeNull();
+    expect(screen.queryByText('GSS')).toBeNull();
+    expect(screen.queryByText('mod.only')).toBeNull();
+    expect(screen.getByText(/1 mod-authorized tool is omitted/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save MCP tools' }));
+    await waitFor(() => expect(apiMock.mock.calls.some(([, path, init]) => path.endsWith('/mcp-tools') && init?.method === 'PUT')).toBe(true));
+    const [, , init] = apiMock.mock.calls.find(([, path, request]) => path.endsWith('/mcp-tools') && request?.method === 'PUT')!;
+    expect(JSON.parse(init?.body as string)).toEqual({ tools: [
+      { connectionId: 'mod.lore', toolName: 'search', enabled: true },
+      { connectionId: 'mod.only', toolName: 'private', enabled: true },
+      { connectionId: 'mod.lore', toolName: 'write', enabled: true },
+    ] });
+  });
+
   it.each([
     ['profile documents', (agentId: string) => <AgentProfileDocuments agentId={agentId} targets={targets} />],
     ['dream settings', (agentId: string) => <AgentDreams agentId={agentId} targets={targets} savedProviders={[]} />],
