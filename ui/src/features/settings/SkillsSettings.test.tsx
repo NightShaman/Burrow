@@ -10,7 +10,7 @@ const mocked = vi.mocked(apiForTarget);
 const targets: ApiTarget[] = [{ id: 'local', name: 'Local', baseUrl: '', enabled: true }, { id: 'remote', name: 'Remote', baseUrl: 'https://example.test', enabled: true }];
 const agents = [{ id: 'remote::agent', name: 'Agent' }] as Agent[];
 const skill = { id: 'review', name: 'Review', description: 'Review changes', content: '# Review', lifecycle: 'available', global: false, source: 'sqlite', version: 'sha256:123' };
-const grants = { assignedSkillIds: [], globalSkillIds: [], effectiveSkills: [{ id: 'files', name: 'Files', description: 'Asset backed', lifecycle: 'available', available: true, sourcePath: '/skills/files/SKILL.md', ownership: { scope: 'agent', agentId: 'agent' } }] };
+const grants = { assignedSkillIds: [], globalSkillIds: [] };
 afterEach(() => { cleanup(); mocked.mockReset(); });
 
 describe('shared Skills settings', () => {
@@ -30,21 +30,20 @@ describe('shared Skills settings', () => {
     unmount(); configuration.remove(); overflow.remove();
   });
 
-  it('shows effective filesystem skills without assignment or edit controls', async () => {
+  it('does not load or display filesystem-backed skills', async () => {
     mocked.mockImplementation(async (_target, path) => (path === '/api/settings/skills' ? { skills: [skill] } : grants) as never);
     const overflow = document.createElement('div'); document.body.append(overflow);
     const { unmount } = render(<SkillsSettings agentView agents={agents} agentId={agents[0].id} targets={targets} overflowTarget={overflow} />);
-    await screen.findByText('Asset backed');
-    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
-    expect(within(overflow).getByText('/skills/files/SKILL.md')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /Save skill|Delete skill/ })).toBeNull();
+    await screen.findByText('Review');
+    expect(screen.queryByText(/Asset backed|SKILL\.md/i)).toBeNull();
+    expect(overflow.childElementCount).toBe(0);
     unmount(); overflow.remove();
   });
 
   it('imports complete text for review without saving automatically', async () => {
     mocked.mockImplementation(async (_target, path, init) => {
       if (init?.method) return {} as never;
-      return (path === '/api/settings/skills' ? { skills: [] } : { ...grants, effectiveSkills: [] }) as never;
+      return (path === '/api/settings/skills' ? { skills: [] } : grants) as never;
     });
     const configuration = document.createElement('div'); document.body.append(configuration);
     const content = '# Imported\n' + 'complete content '.repeat(300);
@@ -68,7 +67,7 @@ describe('shared Skills settings', () => {
   });
 
   it('rejects unsupported imports and reports file read errors', async () => {
-    mocked.mockImplementation(async (_target, path) => (path === '/api/settings/skills' ? { skills: [] } : { ...grants, effectiveSkills: [] }) as never);
+    mocked.mockImplementation(async (_target, path) => (path === '/api/settings/skills' ? { skills: [] } : grants) as never);
     const configuration = document.createElement('div'); document.body.append(configuration);
     const { unmount } = render(<SkillsSettings agents={agents} agentId={agents[0].id} targets={targets} configurationTarget={configuration} />);
     const input = await within(configuration).findByLabelText('Import text skill');
@@ -84,7 +83,7 @@ describe('shared Skills settings', () => {
   it('creates a global text skill with complete content', async () => {
     mocked.mockImplementation(async (_target, path, init) => {
       if (init?.method) return {} as never;
-      return (path === '/api/settings/skills' ? { skills: [] } : { ...grants, effectiveSkills: [] }) as never;
+      return (path === '/api/settings/skills' ? { skills: [] } : grants) as never;
     });
     const configuration = document.createElement('div'); document.body.append(configuration);
     const longContent = '# Shared\n' + 'full text '.repeat(200);

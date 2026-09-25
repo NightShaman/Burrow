@@ -1,13 +1,12 @@
 import { createPortal } from 'react-dom';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { apiForTarget } from '../../app/api';
 import { targetForResource, type ApiTarget } from '../../app/apiTargets';
 import type { Agent } from '../../app/types';
 import { Field, SettingSection } from './SettingsPrimitives';
 
 type Skill = { id: string; name: string; description: string; content: string; lifecycle: string; global: boolean; source: 'sqlite'; version: string };
-type Manifest = { id: string; name: string; description: string; sourcePath?: string; path?: string; ownership?: { scope?: string; storage?: string } | null; lifecycle: string; available: boolean };
-type Grants = { assignedSkillIds: string[]; globalSkillIds: string[]; effectiveSkills: Manifest[] };
+type Grants = { assignedSkillIds: string[]; globalSkillIds: string[] };
 type Draft = { id: string; name: string; description: string; content: string; lifecycle: string; global: boolean };
 const empty: Draft = { id: '', name: '', description: '', content: '', lifecycle: 'available', global: false };
 const body = (value: unknown, method = 'PUT'): RequestInit => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) });
@@ -27,12 +26,6 @@ export function SkillsSettings({ agents, agentId, targets, configurationTarget, 
   const importInputRef = useRef<HTMLInputElement>(null);
   const selectedAgent = agents.find(agent => agent.id === agentId) ?? agents[0];
   const selectedGrants = selectedAgent ? assignments[selectedAgent.id] : undefined;
-  const effectiveFilesystem = useMemo(() => {
-    const byId = new Map<string, Manifest>();
-    Object.values(assignments).flatMap(item => item.effectiveSkills).filter(skill => skill.ownership?.scope !== 'sqlite' && !skills.some(item => item.id === skill.id)).forEach(skill => byId.set(skill.id, skill));
-    return [...byId.values()];
-  }, [assignments, skills]);
-
   useEffect(() => {
     const controller = new AbortController();
     setLoaded(false); setError('');
@@ -46,13 +39,12 @@ export function SkillsSettings({ agents, agentId, targets, configurationTarget, 
     ]).then(([catalog, rows]) => {
       if (controller.signal.aborted) return;
       setSkills(catalog.skills); setAssignments(Object.fromEntries(rows)); setLoaded(true);
-      setSelectedId(current => current && (catalog.skills.some(skill => skill.id === current) || rows.some(([, grants]) => grants.effectiveSkills.some(skill => skill.id === current && skill.ownership?.scope !== 'sqlite'))) ? current : null);
+      setSelectedId(current => current && catalog.skills.some(skill => skill.id === current) ? current : null);
     }).catch(cause => { if (!controller.signal.aborted) { setError(cause instanceof Error ? cause.message : 'Could not load skills.'); setLoaded(true); } });
     return () => controller.abort();
   }, [owner.target.id, owner.resourceId, agents, targets, revision]);
 
   const selected = skills.find(skill => skill.id === selectedId);
-  const filesystem = effectiveFilesystem.find(skill => skill.id === selectedId);
   useEffect(() => { setDraft(selected ? { id: selected.id, name: selected.name, description: selected.description, content: selected.content, lifecycle: selected.lifecycle, global: selected.global } : empty); }, [selected]);
   const act = async (operation: () => Promise<unknown>) => { setBusy(true); setError(''); try { await operation(); setRevision(value => value + 1); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save skills.'); } finally { setBusy(false); } };
   const save = () => act(async () => {
@@ -89,7 +81,7 @@ export function SkillsSettings({ agents, agentId, targets, configurationTarget, 
     }
   };
 
-  const editor = filesystem ? <SettingSection title={filesystem.name}><p className="hint">Filesystem / asset skill · read-only. Edit its SKILL.md and assets at the source.</p><p>{filesystem.description}</p><p className="hint">{filesystem.sourcePath ?? filesystem.path}</p></SettingSection> : <SettingSection title={selected ? `Edit ${selected.name}` : 'Create text skill'}>
+  const editor = <SettingSection title={selected ? `Edit ${selected.name}` : 'Create text skill'}>
     <p className="hint">Database text skills have one shared copy. Filesystem and asset skills remain read-only.</p>
     {!selected && <div className="skill-import"><span className="skill-import-label">Import text skill</span><input ref={importInputRef} className="skill-import-input" type="file" aria-label="Import text skill" accept=".md,.markdown,.txt,text/markdown,text/plain" disabled={busy} onChange={event => { void importText(event.target.files?.[0]); event.target.value = ''; }} /><div className="skill-import-control"><button type="button" className="secondary skill-import-trigger" disabled={busy} onClick={() => importInputRef.current?.click()}>Choose text file</button><span className={importedFileName ? 'skill-import-name selected' : 'skill-import-name'} aria-live="polite">{importedFileName || 'No file selected'}</span></div><small>Markdown or plain text · .md, .markdown, .txt. Loads the complete file for review; nothing is saved until you create the skill.</small></div>}
     <div className="skill-fields">
@@ -104,12 +96,11 @@ export function SkillsSettings({ agents, agentId, targets, configurationTarget, 
   </SettingSection>;
 
   const libraryAssignments = <SettingSection title="Assignments"><p className="hint">Assign the selected database skill globally or to specific agents. These are assignments, not separate copies.</p>{!selected ? <p className="hint">Select a database skill to manage assignments.</p> : selected.global ? <p><strong>Global</strong><br /><small>Available to every agent.</small></p> : agents.length ? agents.map(agent => <label className="skill-check" key={agent.id}><input type="checkbox" checked={assignments[agent.id]?.assignedSkillIds.includes(selected.id) ?? false} disabled={busy} onChange={() => toggleAssignment(agent, selected.id)} /> {agent.name}</label>) : <p className="hint">No agents configured.</p>}</SettingSection>;
-  const agentAssignments = <SettingSection title={`${selectedAgent?.name ?? 'Agent'} skills`}><p className="hint">Direct assignments supplement global skills. Filesystem and asset-backed skills are shown in the effective catalog but are not editable here.</p>{!selectedGrants ? <p className="hint">Loading assignments…</p> : <><h3>Database skills</h3>{skills.length ? skills.map(skill => <label className="skill-check" key={skill.id}><input type="checkbox" checked={selectedGrants.assignedSkillIds.includes(skill.id)} disabled={busy || selectedGrants.globalSkillIds.includes(skill.id)} onChange={() => selectedAgent && toggleAssignment(selectedAgent, skill.id)} /> {skill.name} {selectedGrants.globalSkillIds.includes(skill.id) && <small>(global)</small>}</label>) : <p className="hint">No database text skills.</p>}<h3>Effective catalog</h3>{selectedGrants.effectiveSkills.length ? <ul className="skill-effective">{selectedGrants.effectiveSkills.map(skill => <li key={skill.id}><strong>{skill.name}</strong><small> {skill.id} · {skill.ownership?.scope === 'sqlite' ? 'database' : skill.ownership?.scope ?? 'filesystem'} · {skill.lifecycle}</small><p>{skill.description}</p></li>)}</ul> : <p className="hint">No effective skills.</p>}</>}</SettingSection>;
+  const agentAssignments = <SettingSection title={`${selectedAgent?.name ?? 'Agent'} skills`}><p className="hint">Direct assignments supplement global skills. Filesystem and asset-backed skills are managed outside Settings.</p>{!selectedGrants ? <p className="hint">Loading assignments…</p> : <><h3>Database skills</h3>{skills.length ? skills.map(skill => <label className="skill-check" key={skill.id}><input type="checkbox" checked={selectedGrants.assignedSkillIds.includes(skill.id)} disabled={busy || selectedGrants.globalSkillIds.includes(skill.id)} onChange={() => selectedAgent && toggleAssignment(selectedAgent, skill.id)} /> {skill.name} {selectedGrants.globalSkillIds.includes(skill.id) && <small>(global)</small>}</label>) : <p className="hint">No database text skills.</p>}</>}</SettingSection>;
 
   return <>
-    {!agentView && <nav className="settings-prototype-section-items skill-library" aria-label="Skills library"><button type="button" className={!selectedId ? 'active' : ''} onClick={() => setSelectedId(null)}>New text skill</button>{skills.map(skill => <button type="button" key={skill.id} className={selectedId === skill.id ? 'active' : ''} onClick={() => setSelectedId(skill.id)}>{skill.name}<small>{skill.id}{skill.global ? ' · global' : ''}</small></button>)}{effectiveFilesystem.map(skill => <button type="button" key={`filesystem:${skill.id}`} className={selectedId === skill.id ? 'active' : ''} onClick={() => setSelectedId(skill.id)}>{skill.name}<small>{skill.id} · filesystem · read-only</small></button>)}</nav>}
+    {!agentView && <nav className="settings-prototype-section-items skill-library" aria-label="Skills library"><button type="button" className={!selectedId ? 'active' : ''} onClick={() => setSelectedId(null)}>New text skill</button>{skills.map(skill => <button type="button" key={skill.id} className={selectedId === skill.id ? 'active' : ''} onClick={() => setSelectedId(skill.id)}>{skill.name}<small>{skill.id}{skill.global ? ' · global' : ''}</small></button>)}</nav>}
     {error && <p className="settings-error" role="alert">{error}</p>}{!loaded && <p className="hint">Loading skills…</p>}
     {loaded && (agentView ? agentAssignments : <>{configurationTarget && createPortal(editor, configurationTarget)}{overflowTarget && createPortal(libraryAssignments, overflowTarget)}</>)}
-    {agentView && selectedGrants && overflowTarget && createPortal(<SettingSection title="Read-only sources">{selectedGrants.effectiveSkills.filter(skill => skill.ownership?.scope !== 'sqlite').length ? selectedGrants.effectiveSkills.filter(skill => skill.ownership?.scope !== 'sqlite').map(skill => <p key={skill.id}><strong>{skill.name}</strong><br /><small>{skill.sourcePath ?? skill.path ?? skill.id}</small></p>) : <p className="hint">No filesystem or asset skills are currently effective.</p>}</SettingSection>, overflowTarget)}
   </>;
 }
