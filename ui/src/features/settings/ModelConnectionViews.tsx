@@ -51,10 +51,10 @@ export function ModelCapabilityEditor({ model, onToggleModelInput, onSetModelInp
   return <div className="model-capability-editor">
     <div className="model-detail-heading"><div><span className="settings-kicker">Model capabilities</span><h3>{model.displayName ?? model.id}</h3><code>{model.id}</code></div><span className="model-detail-state">{model.manual ? 'Manual model' : 'Discovered model'}</span></div>
     <CapabilityGroup title="Input" discovered={model.discoveredInput} auto={inputAuto} onAutoChange={(enabled) => onSetModelInputAuto(model.id, enabled)}>
-      {(['text', 'image'] as const).map((value) => <label key={value}><input type="checkbox" checked={inputValues.includes(value)} disabled={inputAuto} onChange={() => onToggleModelInput(model.id, value)} /><span>{value}</span></label>)}
+      {(['text', 'image'] as const).map((value) => <label key={value}><input type="checkbox" aria-label={`Input ${value}`} checked={inputValues.includes(value)} disabled={inputAuto} onChange={() => onToggleModelInput(model.id, value)} /><span>{value}</span></label>)}
     </CapabilityGroup>
     <CapabilityGroup title="Output" discovered={model.discoveredOutput} auto={outputAuto} onAutoChange={(enabled) => onSetModelOutputAuto(model.id, enabled)}>
-      {(['text', 'audio', 'image', 'video', 'file'] as const).map((value) => <label key={value}><input type="checkbox" checked={outputValues.includes(value)} disabled={outputAuto} onChange={() => onToggleModelOutput(model.id, value)} /><span>{value}</span></label>)}
+      {(['text', 'audio', 'image', 'video', 'file'] as const).map((value) => <label key={value}><input type="checkbox" aria-label={`Output ${value}`} checked={outputValues.includes(value)} disabled={outputAuto} onChange={() => onToggleModelOutput(model.id, value)} /><span>{value}</span></label>)}
     </CapabilityGroup>
     <p className="model-capability-note">Auto uses discovered capabilities when available. Unknown means no capability metadata was returned.</p>
     {capabilityProvenanceLabel(model.capabilityProvenance) && <p className="model-capability-provenance" aria-label="Capability provenance">Source: {capabilityProvenanceLabel(model.capabilityProvenance)}</p>}

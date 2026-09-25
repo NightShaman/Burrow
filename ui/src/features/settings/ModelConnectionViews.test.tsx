@@ -1,3 +1,4 @@
+import React from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { RuntimeModel } from '../../app/api';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -39,6 +40,47 @@ describe('Model connection views', () => {
     expect(screen.getByText('Discovered: text, image')).toBeTruthy();
     expect(screen.getByText('Unknown')).toBeTruthy();
     expect(screen.getByText('Source: models.dev · match OpenAI / gpt-4o · snapshot 9/26/2026')).toBeTruthy();
+  });
+
+  it('keeps manual output capability checkboxes interactive and delegates toggles', () => {
+    const onToggleModelOutput = vi.fn();
+    const model: RuntimeModel = {
+      id: 'text-model',
+      acceptedOutput: ['text'],
+      acceptedOutputOverride: ['text'],
+    };
+    render(<ModelCapabilityEditor model={model} onToggleModelInput={vi.fn()} onSetModelInputAuto={vi.fn()} onToggleModelOutput={onToggleModelOutput} onSetModelOutputAuto={vi.fn()} />);
+
+    const audio = screen.getByRole('checkbox', { name: 'Output audio' });
+    expect(audio.hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('checkbox', { name: 'Output text' }).hasAttribute('checked')).toBe(true);
+    fireEvent.click(audio);
+    expect(onToggleModelOutput).toHaveBeenCalledWith('text-model', 'audio');
+  });
+
+  it('renders output manual changes when the editor state updates', () => {
+    function Harness() {
+      const [model, setModel] = React.useState<RuntimeModel>({ id: 'text-model', acceptedOutput: ['text'], acceptedOutputOverride: ['text'] });
+      return <ModelCapabilityEditor
+        model={model}
+        onToggleModelInput={vi.fn()}
+        onSetModelInputAuto={vi.fn()}
+        onToggleModelOutput={(_, output) => setModel((current) => {
+          const acceptedOutput = current.acceptedOutput ?? [];
+          const next = acceptedOutput.includes(output) ? acceptedOutput.filter((value) => value !== output) : [...acceptedOutput, output];
+          return { ...current, acceptedOutput: next, acceptedOutputOverride: next };
+        })}
+        onSetModelOutputAuto={vi.fn()}
+      />;
+    }
+    render(<Harness />);
+    const audio = screen.getByRole('checkbox', { name: 'Output audio' }) as HTMLInputElement;
+    const text = screen.getByRole('checkbox', { name: 'Output text' }) as HTMLInputElement;
+    expect(text.checked).toBe(true);
+    fireEvent.click(audio);
+    expect(audio.checked).toBe(true);
+    fireEvent.click(text);
+    expect(text.checked).toBe(false);
   });
 
   it('renders saved authentication details and delegates provider actions', () => {

@@ -155,7 +155,7 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     if (model.id !== id) return model;
     const acceptedOutput = model.acceptedOutput ?? model.discoveredOutput ?? ['text'];
     const acceptedOutputOverride = acceptedOutput.includes(output) ? acceptedOutput.filter((type) => type !== output) : [...acceptedOutput, output];
-    return { ...model, acceptedOutput, acceptedOutputOverride };
+    return { ...model, acceptedOutput: acceptedOutputOverride, acceptedOutputOverride };
   }));
 
   const setModelOutputAuto = (id: string, enabled: boolean) => setAvailableModels((all) => all.map((model) => {
