@@ -1577,6 +1577,17 @@ function modelInputForPlainTurn({ promptText, promptMessages = null, attachments
   return { prompt: imageFallbackPrompt(promptText, images), messages: null, imageCount: images.length, images, vision: false, fallback: true };
 }
 
+function currentUserGenerationInstruction(message = '', promptMessages = null) {
+  if (String(message || '').trim()) return String(message).trim();
+  const messages = Array.isArray(promptMessages) ? promptMessages : [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role !== 'user') continue;
+    const content = messageTextContent(messages[index].content).trim();
+    if (content) return content;
+  }
+  throw new Error('current user generation instruction is required');
+}
+
 function modelInputForFollowupPrompt(promptText, baseModelInput = null) {
   // Compatibility follow-ups still describe a bounded evidence window in prose,
   // but they must not discard the canonical role-structured request that led to
@@ -1666,10 +1677,21 @@ export async function runPlainModelTurn({
   };
   const promptEvidenceResults = [];
   const completedToolCallHistory = [];
+  let outputOnlyArtifact = false;
   try {
     const adapter = modelAdapter || createModelAdapter({ config: modelConfig || {} });
-    const toolArgs = enableChatToolLoop ? { tools: continuationToolSchemas(), toolChoice: 'auto' } : {};
-    modelInput = modelInputForPlainTurn({ promptText: prompt.text, promptMessages: prompt.modelMessages, attachments, modelConfig, modelAdapter: adapter });
+    outputOnlyArtifact = ['image', 'audio'].includes(adapter.outputKind);
+    // Output-only generators are not conversational agents. Their paid request
+    // receives only the current user instruction plus adapter-owned generation
+    // options: never the assembled SOUL/profile/skill/memory/history prompt,
+    // tools, planner context, attachments, or a follow-up model turn.
+    if (outputOnlyArtifact) {
+      modelInput = { prompt: currentUserGenerationInstruction(message, prompt.modelMessages), messages: null, imageCount: 0, images: [], vision: false, fallback: false };
+      chatToolLoop.enabled = false;
+    } else {
+      modelInput = modelInputForPlainTurn({ promptText: prompt.text, promptMessages: prompt.modelMessages, attachments, modelConfig, modelAdapter: adapter });
+    }
+    const toolArgs = enableChatToolLoop && !outputOnlyArtifact ? { tools: continuationToolSchemas(), toolChoice: 'auto' } : {};
     if (abortSignal?.aborted) throw abortSignal.reason || new Error('agent_stopped');
     await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-before-model-call', {
       iteration: 0,
@@ -1694,7 +1716,7 @@ export async function runPlainModelTurn({
         }
       : null;
     modelCall += 1;
-    model = await adapter.complete({ prompt: modelInput.prompt || (modelInput.vision ? undefined : prompt.text), messages: modelInput.messages || undefined, traceLogger, signal: abortSignal || undefined, ...(emitTextDelta ? { onTextDelta: emitTextDelta } : {}), ...(emitThoughtDelta ? { onThoughtDelta: emitThoughtDelta } : {}), ...(emitContextUsage ? { onContextUsage: emitContextUsage, modelCall } : {}), ...toolArgs });
+    model = await adapter.complete({ prompt: modelInput.prompt || (modelInput.vision ? undefined : prompt.text), messages: modelInput.messages || undefined, traceLogger, signal: abortSignal || undefined, ...(!outputOnlyArtifact && emitTextDelta ? { onTextDelta: emitTextDelta } : {}), ...(!outputOnlyArtifact && emitThoughtDelta ? { onThoughtDelta: emitThoughtDelta } : {}), ...(!outputOnlyArtifact && emitContextUsage ? { onContextUsage: emitContextUsage, modelCall } : {}), ...toolArgs });
     nativeTranscript = modelInput.messages || [{ role: 'user', content: modelInput.prompt || prompt.text }];
     await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-after-model-response', {
       iteration: 0,
@@ -1709,7 +1731,7 @@ export async function runPlainModelTurn({
     let pendingLoopWarning = null;
     const observedEvidence = new Set();
     const semanticInspectionHistory = new Map();
-    while (enableChatToolLoop && hasNativeToolCalls(model) && (!stopOnNoProgress || !toolLoopNoProgress)) {
+    while (enableChatToolLoop && !outputOnlyArtifact && hasNativeToolCalls(model) && (!stopOnNoProgress || !toolLoopNoProgress)) {
       const loopVerdict = exactRepeatVerdict(model.choice.toolCalls, completedToolCallHistory, { loopWarningThreshold, loopBlockThreshold });
       if (loopVerdict?.action === 'block') {
         terminalLoopVerdict = loopVerdict;

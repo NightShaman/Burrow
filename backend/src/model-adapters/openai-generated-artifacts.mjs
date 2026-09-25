@@ -54,6 +54,7 @@ function promptFrom(options = {}) {
   if (text(options.prompt)) return text(options.prompt);
   const messages = Array.isArray(options.messages) ? options.messages : [];
   for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role !== 'user') continue;
     const content = messages[index]?.content;
     if (typeof content === 'string' && text(content)) return text(content);
     if (Array.isArray(content)) {
@@ -61,7 +62,21 @@ function promptFrom(options = {}) {
       if (joined) return joined;
     }
   }
-  throw new Error('prompt or messages are required');
+  throw new Error('current user generation instruction is required');
+}
+
+const ARTIFACT_OPTION_KEYS = Object.freeze({
+  image: Object.freeze(['background', 'moderation', 'n', 'output_compression', 'output_format', 'quality', 'response_format', 'size', 'style', 'user']),
+  audio: Object.freeze(['instructions', 'response_format', 'speed', 'stream_format', 'voice']),
+});
+
+function supportedArtifactOptions(kind, value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(ARTIFACT_OPTION_KEYS[kind]
+    .filter((key) => value[key] !== undefined)
+    // The runtime owns routing and the current instruction. Configured options
+    // may tune generation, but can never replace model/prompt/input.
+    .map((key) => [key, value[key]]));
 }
 
 function imageMime(bytes, fallback = '') {
@@ -122,7 +137,7 @@ export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = 
     const requestId = idFactory();
     const prompt = promptFrom(options);
     const headers = requestHeaders(config);
-    const artifactOptions = config.generatedArtifactOptions && typeof config.generatedArtifactOptions === 'object' ? config.generatedArtifactOptions : {};
+    const artifactOptions = supportedArtifactOptions(kind, config.generatedArtifactOptions);
     const body = kind === 'image'
       ? { model, prompt, n: 1, ...artifactOptions }
       : { model, input: prompt, voice: 'alloy', response_format: 'mp3', ...artifactOptions };
