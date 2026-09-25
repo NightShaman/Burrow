@@ -759,10 +759,21 @@ async function modelsDevSnapshot({ store, db, fetchImpl = fetch, signal, nowMs =
   }
 }
 
+function modelsDevProviderIdentity({ provider = '', apiType = '', baseUrl = '', auth = {} } = {}) {
+  const type = normalize(apiType).toLowerCase();
+  let hostname = '';
+  try { hostname = new URL(normalize(baseUrl)).hostname.toLowerCase(); } catch {}
+  if (type === 'anthropic-messages') return 'anthropic';
+  if (hostname.endsWith('.openai.azure.com') || hostname.endsWith('.services.ai.azure.com')) return 'azure';
+  if (hostname === 'api.openai.com' || hostname === 'chatgpt.com' || openAiLikeProvider(auth.provider)) return 'openai';
+  return normalize(provider);
+}
+
 export async function discoverModels({ baseUrl, provider = '', useModelsDev = false, apiType = 'openai-responses', apiKey, auth = {}, fetchImpl = fetch, catalogFetchImpl = fetchImpl, catalogUrl = MODELS_DEV_CATALOG_URL, catalogTtlMs = MODELS_DEV_CATALOG_CACHE_TTL_MS, signal = undefined, store = null, db = null, codexClientVersion = undefined, nowMs = Date.now() } = {}) {
-  const catalogSnapshot = useModelsDev && provider ? await modelsDevSnapshot({ store, db, fetchImpl: catalogFetchImpl, signal, nowMs, catalogUrl, ttlMs: catalogTtlMs }) : null;
+  const catalogProvider = modelsDevProviderIdentity({ provider, apiType, baseUrl, auth });
+  const catalogSnapshot = useModelsDev && catalogProvider ? await modelsDevSnapshot({ store, db, fetchImpl: catalogFetchImpl, signal, nowMs, catalogUrl, ttlMs: catalogTtlMs }) : null;
   const enrich = (models) => catalogSnapshot?.catalog
-    ? enrichFromModelsDev(models, catalogSnapshot.catalog, { provider, snapshotAt: catalogSnapshot.snapshotAt })
+    ? enrichFromModelsDev(models, catalogSnapshot.catalog, { provider: catalogProvider, snapshotAt: catalogSnapshot.snapshotAt })
     : models;
   if (isChatGptBackendUrl(baseUrl) && openAiLikeProvider(auth.provider || 'OpenAI')) {
     const target = store || db;
