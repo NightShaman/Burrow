@@ -13,7 +13,7 @@ describe('Model connection views', () => {
     const onDeleteManualModel = vi.fn();
     const onAddManualModel = vi.fn();
     render(<ModelResults
-      models={[{ id: 'vision-model', displayName: 'Vision Model', selected: true, manual: true, acceptedInput: ['text'], acceptedInputOverride: ['text'] }]}
+      models={[{ id: 'vision-model', displayName: 'Vision Model', selected: true, manual: true, acceptedInput: ['text'], acceptedInputOverride: ['text'], acceptedOutputOverride: ['text'], acceptedOutput: ['text'] }]}
       manualModel="new-model"
       onManualModelChange={vi.fn()}
       onAddManualModel={onAddManualModel}
@@ -21,6 +21,8 @@ describe('Model connection views', () => {
       onToggleModel={onToggleModel}
       onToggleModelInput={onToggleModelInput}
       onSetModelInputAuto={onSetModelInputAuto}
+      onToggleModelOutput={vi.fn()}
+      onSetModelOutputAuto={vi.fn()}
     />);
 
     fireEvent.click(screen.getByLabelText('Vision Model'));

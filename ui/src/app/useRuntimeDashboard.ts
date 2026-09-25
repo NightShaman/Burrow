@@ -100,6 +100,8 @@ const asSavedProvider = (connection: ModelConnection): SavedProvider => ({
   modelContextWindows: Object.fromEntries(connection.models.flatMap((model) => Number.isFinite(model.contextWindow) && Number(model.contextWindow) > 0 ? [[model.id, Number(model.contextWindow)]] : [])),
   modelDiscoveredInputs: Object.fromEntries(connection.models.flatMap((model) => model.discoveredInput ? [[model.id, model.discoveredInput]] : [])),
   modelInputOverrides: Object.fromEntries(connection.models.flatMap((model) => model.acceptedInputOverride ? [[model.id, model.acceptedInputOverride]] : [])),
+  modelDiscoveredOutputs: Object.fromEntries(connection.models.flatMap((model) => model.discoveredOutput ? [[model.id, model.discoveredOutput]] : [])),
+  modelOutputOverrides: Object.fromEntries(connection.models.flatMap((model) => model.acceptedOutputOverride ? [[model.id, model.acceptedOutputOverride]] : [])),
 });
 
 export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProviders, reportError, target }: RuntimeDashboardOptions) {

@@ -88,8 +88,25 @@ function assertConnection(input = {}) {
   return { provider, apiType, baseUrl, acceptedInput };
 }
 
+const MODEL_INPUT_CAPABILITIES = Object.freeze(['text', 'image', 'audio', 'video', 'file']);
+const MODEL_OUTPUT_CAPABILITIES = Object.freeze(['text', 'audio', 'image', 'video', 'file']);
+
 function normalizedInput(value) {
   return [...new Set((Array.isArray(value) ? value : []).map(normalize).filter((type) => ['text', 'image'].includes(type)))];
+}
+
+function normalizedOutput(value) {
+  return [...new Set((Array.isArray(value) ? value : []).map(normalize).filter((type) => MODEL_OUTPUT_CAPABILITIES.includes(type)))];
+}
+
+function capabilityValues(model = {}, metadata = {}, capabilities = {}, names = []) {
+  return names.flatMap((name) => [model[name], metadata[name], capabilities[name]]).find(Array.isArray) || null;
+}
+
+function discoveredOutput(model = {}, metadata = {}, capabilities = {}) {
+  const modalities = capabilityValues(model, metadata, capabilities, ['output_modalities', 'outputModalities', 'outputs', 'outputCapabilities']);
+  if (!modalities) return null;
+  return normalizedOutput(modalities);
 }
 
 function discoveredInput(model = {}, metadata = {}, capabilities = {}) {
@@ -112,6 +129,9 @@ function safeModelMetadata(model = {}, { provider = '', apiType = '' } = {}) {
   const override = model.acceptedInputOverride ?? model.accepted_input_override;
   const suppliedDiscovered = Array.isArray(model.discoveredInput) ? normalizedInput(model.discoveredInput) : null;
   const discovered = suppliedDiscovered ?? discoveredInput(model, metadata, capabilities);
+  const suppliedOutput = Array.isArray(model.discoveredOutput) ? normalizedOutput(model.discoveredOutput) : null;
+  const discoveredOutputs = suppliedOutput ?? discoveredOutput(model, metadata, capabilities);
+  const outputOverride = model.acceptedOutputOverride ?? model.accepted_output_override;
   const displayName = normalize(model.displayName ?? model.display_name ?? model.label ?? model.name ?? metadata.display_name ?? metadata.displayName);
   const supportedReasoningLevels = Array.isArray(model.reasoningEfforts)
     ? model.reasoningEfforts
@@ -139,7 +159,9 @@ function safeModelMetadata(model = {}, { provider = '', apiType = '' } = {}) {
     ...(Number.isFinite(Number(model.contextWindow ?? model.context_window ?? metadata.context_window ?? metadata.contextWindow ?? capabilities.context_length)) ? { contextWindow: Number(model.contextWindow ?? model.context_window ?? metadata.context_window ?? metadata.contextWindow ?? capabilities.context_length) } : {}),
     ...(outputTokens ? { outputTokens } : {}),
     ...(discovered ? { discoveredInput: discovered } : {}),
+    ...(discoveredOutputs ? { discoveredOutput: discoveredOutputs } : {}),
     ...(Array.isArray(override) ? { acceptedInputOverride: normalizedInput(override) } : {}),
+    ...(Array.isArray(outputOverride) ? { acceptedOutputOverride: normalizedOutput(outputOverride) } : {}),
   };
 }
 
@@ -149,12 +171,14 @@ function normalizeModels(models = [], { provider = '', apiType = '' } = {}) {
     const input = typeof model === 'string' ? { id: model } : (model || {});
     const metadata = safeModelMetadata(input, { provider, apiType });
     const acceptedInput = metadata.acceptedInputOverride ?? metadata.discoveredInput;
+    const acceptedOutput = metadata.acceptedOutputOverride ?? metadata.discoveredOutput;
     return {
       id: normalize(input.id),
       selected: typeof model === 'string' ? true : input.selected !== false,
       manual: Boolean(typeof model === 'object' && input.manual),
       ...metadata,
       ...(acceptedInput ? { acceptedInput } : {}),
+      ...(acceptedOutput ? { acceptedOutput } : {}),
     };
   }).filter((model) => model.id && !ids.has(model.id) && (ids.add(model.id), true));
 }

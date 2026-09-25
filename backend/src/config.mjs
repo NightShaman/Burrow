@@ -130,7 +130,7 @@ export async function resolveModelConfig(args = {}) {
     supportsVision: (model.acceptedInput ?? connection.acceptedInput ?? []).includes('image'),
     vision: (model.acceptedInput ?? connection.acceptedInput ?? []).includes('image'),
     multimodal: (model.acceptedInput ?? connection.acceptedInput ?? []).includes('image'),
-    capabilities: { images: (model.acceptedInput ?? connection.acceptedInput ?? []).includes('image'), vision: (model.acceptedInput ?? connection.acceptedInput ?? []).includes('image') },
+    capabilities: { images: (model.acceptedInput ?? connection.acceptedInput ?? []).includes('image'), vision: (model.acceptedInput ?? connection.acceptedInput ?? []).includes('image'), outputs: model.acceptedOutput ?? model.discoveredOutput ?? [] },
     extra,
     connectionId: connection.id,
     availableModels: selectedModels(connection),

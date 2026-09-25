@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api, apiForTarget, apiUrl, fetchApi, setActiveApiTarget } from './api';
+import { api, apiForTarget, apiUrl, fetchApi, generatedArtifactPath, setActiveApiTarget } from './api';
 import { localApiTarget } from './apiTargets';
 import { clearBasicCredentials, setBasicCredentials } from './auth';
 
@@ -33,6 +33,10 @@ describe('API requests', () => {
     expect(new Headers(init.headers).get('authorization')).toBe('Basic Z29ibGluOnNlY3JldA==');
     expect(new Headers(init.headers).get('accept')).toBe('application/x-ndjson');
     expect(new Headers(init.headers).get('content-type')).toBe('application/json');
+  });
+
+  it('encodes generated artifact route parameters without exposing reference path segments', () => {
+    expect(generatedArtifactPath('agent / one', 'generated/audio take #1.wav')).toBe('/api/generated-artifacts/agent%20%2F%20one/generated%2Faudio%20take%20%231.wav');
   });
 
   it('keeps local API paths relative and routes remote paths to their owner', async () => {

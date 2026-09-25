@@ -15,6 +15,7 @@ import { inspectRuntimeObject, runtimeHeapStage } from './runtime-heap-diagnosti
 import { normalizeProviderMessages } from './provider-messages.mjs';
 import { serializeContinuationEvidence } from './continuation-evidence.mjs';
 import { prepareNativeToolContinuation } from './native-continuation-preparation.mjs';
+import { adapterOutputArtifactsFromResult } from './model-output-artifacts.mjs';
 
 const DEFAULT_INSPECTION_FILES = [
   'package.json',
@@ -1948,6 +1949,14 @@ export async function runPlainModelTurn({
   }
 
   const proposal = model ? parseActionProposal(model.choice?.text ?? '') : null;
+  // Keep source bytes/file handles on this ephemeral internal field only. They
+  // are persisted by the plain-chat finalizer before any session serialization.
+  const generatedArtifactSources = adapterOutputArtifactsFromResult(model);
+  if (model && typeof model === 'object') {
+    delete model.outputArtifacts;
+    delete model.output_artifacts;
+  }
+  const outputArtifacts = [];
   const skipped = allSkippedChatTools(chatToolLoop);
   const answerText = proposal?.answerText ?? null;
   const runtime = createRuntimeTurnResult({
@@ -1955,10 +1964,10 @@ export async function runPlainModelTurn({
     blocker: model?.ok ? null : (model?.error || 'model_failed'),
     evidence: chatToolLoop.toolResults,
     sideChannels: [{ type: 'receipt', content: { modelOk: model?.ok ?? null, proposedActions: proposal?.actions?.length ?? 0, chatToolCalls: chatToolLoop.iterations.reduce((sum, item) => sum + item.toolCalls.length, 0), executedChatTools: chatToolLoop.toolResults.length, terminal: chatToolLoop.terminal } }],
-    metadata: { calledModel: true, modelUsage: model?.usage ?? null, attachments: { images: modelInput.imageCount || 0, visionUsed: Boolean(modelInput.vision), visionFallback: Boolean(modelInput.fallback) }, chatToolLoop: { enabled: chatToolLoop.enabled, iterations: chatToolLoop.iterations.length, toolResults: chatToolLoop.toolResults.length, noProgress: Boolean(chatToolLoop.noProgress), loopWarnings: chatToolLoop.loopWarnings.length, terminal: chatToolLoop.terminal, semanticInspectionStalls: chatToolLoop.semanticInspectionStalls.length, omittedPromptEvidenceResults: chatToolLoop.omittedPromptEvidenceResults || 0 } },
+    metadata: { calledModel: true, modelUsage: model?.usage ?? null, ...(outputArtifacts.length ? { outputArtifacts } : {}), attachments: { images: modelInput.imageCount || 0, visionUsed: Boolean(modelInput.vision), visionFallback: Boolean(modelInput.fallback) }, chatToolLoop: { enabled: chatToolLoop.enabled, iterations: chatToolLoop.iterations.length, toolResults: chatToolLoop.toolResults.length, noProgress: Boolean(chatToolLoop.noProgress), loopWarnings: chatToolLoop.loopWarnings.length, terminal: chatToolLoop.terminal, semanticInspectionStalls: chatToolLoop.semanticInspectionStalls.length, omittedPromptEvidenceResults: chatToolLoop.omittedPromptEvidenceResults || 0 } },
   });
 
-  return { model, proposal, answerText, chatToolLoop, contextUsage: peakContextUsage || model?.contextUsage || null, runtime };
+  return { model, proposal, answerText, outputArtifacts, generatedArtifactSources, chatToolLoop, contextUsage: peakContextUsage || model?.contextUsage || null, runtime };
 }
 
 export const __test__ = Object.freeze({

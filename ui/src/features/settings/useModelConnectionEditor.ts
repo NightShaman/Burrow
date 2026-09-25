@@ -146,6 +146,20 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     return { ...model, acceptedInput: acceptedInputOverride, acceptedInputOverride };
   }));
 
+  const toggleModelOutput = (id: string, output: 'text' | 'audio' | 'image' | 'video' | 'file') => setAvailableModels((all) => all.map((model) => {
+    if (model.id !== id) return model;
+    const acceptedOutput = model.acceptedOutput ?? model.discoveredOutput ?? ['text'];
+    const acceptedOutputOverride = acceptedOutput.includes(output) ? acceptedOutput.filter((type) => type !== output) : [...acceptedOutput, output];
+    return { ...model, acceptedOutput, acceptedOutputOverride };
+  }));
+
+  const setModelOutputAuto = (id: string, enabled: boolean) => setAvailableModels((all) => all.map((model) => {
+    if (model.id !== id) return model;
+    if (enabled) return { ...model, acceptedOutput: model.discoveredOutput ?? ['text'], acceptedOutputOverride: undefined };
+    const acceptedOutput = model.acceptedOutput ?? model.discoveredOutput ?? ['text'];
+    return { ...model, acceptedOutput, acceptedOutputOverride: acceptedOutput };
+  }));
+
   const setModelInputAuto = (id: string, enabled: boolean) => setAvailableModels((all) => all.map((model) => {
     if (model.id !== id) return model;
     if (enabled) return { ...model, acceptedInput: model.discoveredInput ?? ['text'], acceptedInputOverride: undefined };
@@ -185,6 +199,9 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
         discoveredInput,
         acceptedInputOverride,
         acceptedInput: acceptedInputOverride ?? discoveredInput ?? ['text'],
+        discoveredOutput: item.modelDiscoveredOutputs?.[id],
+        acceptedOutputOverride: item.modelOutputOverrides?.[id],
+        acceptedOutput: item.modelOutputOverrides?.[id] ?? item.modelDiscoveredOutputs?.[id] ?? ['text'],
       };
     }));
     setConnected(true);
@@ -245,6 +262,8 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     toggleModel,
     toggleModelInput,
     setModelInputAuto,
+    toggleModelOutput,
+    setModelOutputAuto,
     addManualModel,
     deleteManualModel,
     editProvider,

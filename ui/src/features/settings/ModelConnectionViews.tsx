@@ -16,9 +16,11 @@ type ModelResultsProps = {
   onToggleModel: (id: string) => void;
   onToggleModelInput: (id: string, input: 'text' | 'image') => void;
   onSetModelInputAuto: (id: string, enabled: boolean) => void;
+  onToggleModelOutput: (id: string, output: 'text' | 'audio' | 'image' | 'video' | 'file') => void;
+  onSetModelOutputAuto: (id: string, enabled: boolean) => void;
 };
 
-export function ModelResults({ models, manualModel, onManualModelChange, onAddManualModel, onDeleteManualModel, onToggleModel, onToggleModelInput, onSetModelInputAuto }: ModelResultsProps) {
+export function ModelResults({ models, manualModel, onManualModelChange, onAddManualModel, onDeleteManualModel, onToggleModel, onToggleModelInput, onSetModelInputAuto, onToggleModelOutput, onSetModelOutputAuto }: ModelResultsProps) {
   return <div className={`model-results${models.length === 0 ? ' model-results-empty' : ''}`}>
     {models.length === 0 && <div className="model-empty-state"><strong>No models were discovered.</strong><span>Add a model ID manually to continue.</span></div>}
     <div className="model-options">{models.map((model) => {
@@ -31,6 +33,10 @@ export function ModelResults({ models, manualModel, onManualModelChange, onAddMa
             <label><input type="checkbox" checked={(model.acceptedInput ?? ['text']).includes('text')} onChange={() => onToggleModelInput(model.id, 'text')} /><span>Text</span></label>
             <label><input type="checkbox" checked={(model.acceptedInput ?? ['text']).includes('image')} onChange={() => onToggleModelInput(model.id, 'image')} /><span>Image</span></label>
           </div>}
+        </fieldset>
+        <fieldset className="model-capabilities" aria-label={`Output capabilities for ${label}`}>
+          <label className="model-capability-auto"><input type="checkbox" checked={!model.acceptedOutputOverride} onChange={(event) => onSetModelOutputAuto(model.id, event.target.checked)} /><span>Output auto</span></label>
+          {model.acceptedOutputOverride && <div className="model-capability-manual">{(['text', 'audio', 'image', 'video', 'file'] as const).map((output) => <label key={output}><input type="checkbox" checked={(model.acceptedOutput ?? ['text']).includes(output)} onChange={() => onToggleModelOutput(model.id, output)} /><span>{output}</span></label>)}</div>}
         </fieldset>
         {model.manual && <button type="button" className="model-delete" onClick={() => onDeleteManualModel(model.id)} aria-label={`Delete manually added model ${model.id}`} title="Delete model">×</button>}
       </div>;

@@ -5,6 +5,7 @@ import { boundedRedactedValue } from './redaction.mjs';
 import { completionEvidence } from './completion-addendum.mjs';
 import { deriveRunEvidence, persistRunEvidence } from './run-evidence.mjs';
 import { buildExecutionDigest } from './execution-digest.mjs';
+import { persistGeneratedArtifact } from './generated-artifact-store.mjs';
 
 const PERSISTED_CHAT_LOOP_ITERATIONS = 96;
 
@@ -122,6 +123,18 @@ export function chatToolActivity(loop = null, runId = null) {
   };
 }
 
+export function assistantTurnMetadata({ subjectScope = null, decision, proposal = null, outputArtifacts = [], compactLoop, acceptanceChecklist, integrityViolation = null } = {}) {
+  return {
+    ...(subjectScope ? { subjectScope } : {}),
+    decision,
+    proposedActions: proposal?.actions?.length ?? 0,
+    ...(outputArtifacts.length ? { outputArtifacts } : {}),
+    chatToolLoop: compactLoop,
+    acceptanceChecklist,
+    ...(integrityViolation ? { terminalIntegrity: integrityViolation } : {}),
+  };
+}
+
 export function enforcePlainChatTerminalIntegrity({ modelOk = false, answerText = '', chatToolLoop = null } = {}) {
   const rawAnswer = typeof answerText === 'string' ? answerText : String(answerText || '');
   if (!modelOk) return { decision: 'model_failed', answerText: rawAnswer, integrityViolation: null };
@@ -235,8 +248,26 @@ export async function finalizePlainChatRuntimeResult({
   executionContext = null,
   subjectScope = null,
 } = {}) {
-  const { model, proposal, answerText, chatToolLoop, contextUsage } = modelTurn || {};
+  const { model, proposal, answerText, generatedArtifactSources = [], chatToolLoop, contextUsage } = modelTurn || {};
   validateRuntimeInvariantsBeforeSideEffects({ runtimeTurn, canonicalTurnEnvelope, chatToolLoop });
+
+  // Persistence is all-or-error and precedes assistant-turn storage. Never
+  // serialize adapter sources: only returned normalized metadata with a runtime
+  // storageReference is allowed into conversation metadata.
+  const outputArtifacts = [];
+  for (const artifact of generatedArtifactSources) {
+    try {
+      outputArtifacts.push(await persistGeneratedArtifact({
+        agentWorkspaceRoot: workspaceRoot,
+        metadata: artifact.metadata,
+        ...(artifact.bytes ? { bytes: artifact.bytes } : { localSource: artifact.localSource }),
+      }));
+    } catch (error) {
+      throw new Error(`generated_artifact_persistence_failed: ${error?.message || error}`, { cause: error });
+    }
+  }
+  if (modelTurn) modelTurn.outputArtifacts = outputArtifacts;
+
 
   const acceptanceChecklist = { required: false, status: 'not_required', complete: false, requirements: [], evidence: { mutationCount: 0, diffMutationEvidenceCount: 0, validationReceiptCount: 0 } };
   const terminalIntegrity = model
@@ -258,7 +289,7 @@ export async function finalizePlainChatRuntimeResult({
       content: finalAnswerText,
       runId: logger.runId,
       traceDir: logger.traceDir,
-      metadata: { ...(subjectScope ? { subjectScope } : {}), decision, proposedActions: proposal?.actions?.length ?? 0, chatToolLoop: compactLoop, acceptanceChecklist, ...(terminalIntegrity.integrityViolation ? { terminalIntegrity: terminalIntegrity.integrityViolation } : {}) },
+      metadata: assistantTurnMetadata({ subjectScope, decision, proposal, outputArtifacts, compactLoop, acceptanceChecklist, integrityViolation: terminalIntegrity.integrityViolation }),
     });
   }
   if (model && !model.ok) {

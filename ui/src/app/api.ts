@@ -113,6 +113,9 @@ export type RuntimeModel = {
   contextWindow?: number;
   manual?: boolean;
   acceptedInput?: ('text' | 'image')[];
+  acceptedOutput?: ('text' | 'audio' | 'image' | 'video' | 'file')[];
+  discoveredOutput?: ('text' | 'audio' | 'image' | 'video' | 'file')[];
+  acceptedOutputOverride?: ('text' | 'audio' | 'image' | 'video' | 'file')[];
   inputCapabilityOverrides?: Partial<Record<'text' | 'image', 'auto' | 'enabled' | 'disabled'>>;
   discoveredInput?: ('text' | 'image')[];
   acceptedInputOverride?: ('text' | 'image')[];
@@ -239,6 +242,21 @@ export type SessionAttachment = {
   preview?: string;
 };
 
+export type GeneratedArtifact = {
+  contractVersion?: number;
+  kind: 'audio' | 'image' | 'video' | 'file' | string;
+  mimeType?: string;
+  name?: string;
+  sizeBytes?: number;
+  storageReference?: string;
+  provenance?: {
+    provider?: string;
+    model?: string;
+    requestId?: string;
+    responseId?: string;
+  };
+};
+
 export type SessionTurn = {
   type?: string;
   role?: string | null;
@@ -248,6 +266,7 @@ export type SessionTurn = {
   metadata?: {
     toolActivity?: ToolActivity;
     attachments?: SessionAttachment[];
+    outputArtifacts?: GeneratedArtifact[];
     progress?: RunProgress;
     streamedAnswer?: string;
     kind?: string;
@@ -310,6 +329,10 @@ export function createRequestHeaders(headers: HeadersInit = {}, defaultAccept = 
   const authHeader = getBasicAuthHeader();
   if (authHeader && !requestHeaders.has('authorization')) requestHeaders.set('authorization', authHeader);
   return requestHeaders;
+}
+
+export function generatedArtifactPath(agentId: string, storageReference: string): string {
+  return `/api/generated-artifacts/${encodeURIComponent(agentId)}/${encodeURIComponent(storageReference)}`;
 }
 
 export function apiUrl(target: Pick<ApiTarget, 'baseUrl'> | undefined, path: string): string {

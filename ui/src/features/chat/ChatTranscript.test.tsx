@@ -117,6 +117,47 @@ it('places spawn activity before subsequent progress in live and persisted assis
 });
 
 
+it('renders generated artifact metadata and downloads through the encoded runtime route', async () => {
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new TextEncoder().encode('audio bytes'), { status: 200, headers: { 'content-type': 'audio/wav' } }));
+  const objectUrl = vi.fn(() => 'blob:generated-audio');
+  const revoke = vi.fn();
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const originalCreate = URL.createObjectURL;
+  const originalRevoke = URL.revokeObjectURL;
+  URL.createObjectURL = objectUrl;
+  URL.revokeObjectURL = revoke;
+  try {
+    render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[{ type: 'message', role: 'assistant', content: 'Created it.', metadata: { outputArtifacts: [{ kind: 'audio', mimeType: 'audio/wav', name: 'forest song.wav', sizeBytes: 1536, storageReference: 'generated/audio take #1.wav', provenance: { provider: 'example', model: 'music-1' } }] } }]} isLoading={false} error="" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" attachmentAgentId="hatchet / one" />);
+    expect(screen.getByText('forest song.wav')).toBeTruthy();
+    expect(screen.getByText('audio · audio/wav · 1.5 KB')).toBeTruthy();
+    expect(screen.getByText('Created by example · music-1')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/generated-artifacts/hatchet%20%2F%20one/generated%2Faudio%20take%20%231.wav');
+    await waitFor(() => expect(click).toHaveBeenCalled());
+    expect(revoke).toHaveBeenCalledWith('blob:generated-audio');
+  } finally {
+    fetchMock.mockRestore(); click.mockRestore(); URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke;
+  }
+});
+
+it('shows artifact metadata without fabricating a download when storage reference is absent', () => {
+  show([{ type: 'message', role: 'assistant', content: 'Metadata only.', metadata: { outputArtifacts: [{ kind: 'image', mimeType: 'image/png', name: 'concept.png' }] } }], parent);
+  const action = screen.getByRole('button', { name: 'Download unavailable' });
+  expect(action.hasAttribute('disabled')).toBe(true);
+  expect(document.querySelector('.generated-artifact a')).toBeNull();
+});
+
+it('reports failed artifact downloads and allows retry', async () => {
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 404 }));
+  try {
+    render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[{ type: 'message', role: 'assistant', content: 'Created it.', metadata: { outputArtifacts: [{ kind: 'file', name: 'report.pdf', storageReference: 'generated/report.pdf' }] } }]} isLoading={false} error="" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" attachmentAgentId="hatchet" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Retry download' })).toBeTruthy());
+    expect(screen.getByText('Download failed')).toBeTruthy();
+  } finally { fetchMock.mockRestore(); }
+});
+
 it('keeps an image visible while the send is pending, then loads the durable artifact after refresh', async () => {
   // jsdom's Blob does not implement stream(), which Node's native Response
   // requires when given a Blob body. Use bytes for the response fixture.

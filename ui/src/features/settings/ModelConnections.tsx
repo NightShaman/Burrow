@@ -57,6 +57,8 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
           onToggleModel={editor.toggleModel}
           onToggleModelInput={editor.toggleModelInput}
           onSetModelInputAuto={editor.setModelInputAuto}
+          onToggleModelOutput={editor.toggleModelOutput}
+          onSetModelOutputAuto={editor.setModelOutputAuto}
         />}
         {!overflowTarget && <SavedProviders
           providers={savedProviders}

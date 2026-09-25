@@ -58,6 +58,7 @@ import { consolidateDreamMemory } from '../src/dream-memory-consolidator.mjs';
 import { createDreamCycleScheduler, latestDreamCycleReceipts, reconcileInterruptedDreamCycles, runDreamCycle } from '../src/dream-cycle-runner.mjs';
 import { createTiddleScheduler, listTiddleCards, tiddleHistory, tiddleStatus } from '../src/tiddle-continuity.mjs';
 import { cleanupAgentAttachments, createAttachmentCleanupScheduler, deleteAttachmentArtifact, listSessionAttachments, resolveAttachmentArtifact } from '../src/attachment-store.mjs';
+import { resolveGeneratedArtifact } from '../src/generated-artifact-store.mjs';
 import { TaskBoardStore, TASK_PRIORITIES, TASK_STATUSES } from '../src/task-board-store.mjs';
 import { ScheduledJobStore } from '../src/scheduled-job-store.mjs';
 import { createScheduledJobScheduler } from '../src/scheduled-job-scheduler.mjs';
@@ -3127,6 +3128,16 @@ const server = createServer(async (req, res) => {
       const sessionId = url.searchParams.get('sessionId') || 'default';
       const turns = await readSessionTurns({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId, limit: 500, includeHistory: true });
       return sendJson(res, 200, { ok: true, agentId: agentRuntime.agentId, sessionId, attachments: await listSessionAttachments({ agentWorkspaceRoot: agentRuntime.agentWorkspaceRoot, sessionTurns: turns, sessionId, limit: url.searchParams.get('limit') || 200 }) });
+    }
+    if (req.method === 'GET' && url.pathname.startsWith('/api/generated-artifacts/')) {
+      const parts = url.pathname.slice('/api/generated-artifacts/'.length).split('/').map(decodeURIComponent);
+      const [agentId, ...referenceParts] = parts;
+      const storageReference = referenceParts.join('/');
+      if (!agentId || !storageReference) return sendJson(res, 400, { ok: false, error: 'artifact_target_required' });
+      const agentRuntime = await resolveAgentRuntime(agentId);
+      const artifact = await resolveGeneratedArtifact({ agentWorkspaceRoot: agentRuntime.agentWorkspaceRoot, storageReference });
+      if (!artifact) return sendJson(res, 404, { ok: false, error: 'artifact_not_found' });
+      return sendStaticFile(res, artifact.filePath, { downloadName: artifact.name });
     }
     if (url.pathname.startsWith('/api/attachments/')) {
       const parts = url.pathname.slice('/api/attachments/'.length).split('/').map(decodeURIComponent);

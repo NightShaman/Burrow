@@ -28,6 +28,8 @@ const savedProviderFromConnection = (connection: OpenAiOAuthConnection): SavedPr
   modelContextWindows: Object.fromEntries(models.filter((model) => model.contextWindow).map((model) => [model.id, model.contextWindow!])),
   modelDiscoveredInputs: Object.fromEntries(models.filter((model) => model.discoveredInput?.length).map((model) => [model.id, model.discoveredInput!])),
   modelInputOverrides: Object.fromEntries(models.filter((model) => model.acceptedInputOverride?.length).map((model) => [model.id, model.acceptedInputOverride!])),
+  modelDiscoveredOutputs: Object.fromEntries(models.filter((model) => model.discoveredOutput?.length).map((model) => [model.id, model.discoveredOutput!])),
+  modelOutputOverrides: Object.fromEntries(models.filter((model) => model.acceptedOutputOverride?.length).map((model) => [model.id, model.acceptedOutputOverride!])),
  };
 };
 
