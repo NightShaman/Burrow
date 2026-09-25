@@ -111,6 +111,9 @@ export type RuntimeModel = {
   reasoningEfforts?: string[];
   defaultReasoningEffort?: string;
   contextWindow?: number;
+  discoveredContextWindow?: number;
+  contextWindowOverride?: number;
+  contextWindowMode?: 'auto' | 'manual';
   manual?: boolean;
   acceptedInput?: ('text' | 'image')[];
   acceptedOutput?: ('text' | 'audio' | 'image' | 'video' | 'file')[];

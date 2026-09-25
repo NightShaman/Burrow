@@ -43,13 +43,14 @@ export function ModelResults({ models, manualModel, selectedModelId, onSelectMod
   </div>;
 }
 
-export function ModelCapabilityEditor({ model, onToggleModelInput, onSetModelInputAuto, onToggleModelOutput, onSetModelOutputAuto }: { model: RuntimeModel; onToggleModelInput: (id: string, input: 'text' | 'image') => void; onSetModelInputAuto: (id: string, enabled: boolean) => void; onToggleModelOutput: (id: string, output: 'text' | 'audio' | 'image' | 'video' | 'file') => void; onSetModelOutputAuto: (id: string, enabled: boolean) => void }) {
+export function ModelCapabilityEditor({ model, onToggleModelInput, onSetModelInputAuto, onToggleModelOutput, onSetModelOutputAuto, onSetModelContextAuto, onSetModelContextOverride }: { model: RuntimeModel; onToggleModelInput: (id: string, input: 'text' | 'image') => void; onSetModelInputAuto: (id: string, enabled: boolean) => void; onToggleModelOutput: (id: string, output: 'text' | 'audio' | 'image' | 'video' | 'file') => void; onSetModelOutputAuto: (id: string, enabled: boolean) => void; onSetModelContextAuto?: (id: string, enabled: boolean) => void; onSetModelContextOverride?: (id: string, value: number | undefined) => void }) {
   const inputAuto = !model.acceptedInputOverride;
   const outputAuto = !model.acceptedOutputOverride;
   const inputValues = model.acceptedInput ?? ['text'];
   const outputValues = model.acceptedOutput ?? ['text'];
   return <div className="model-capability-editor">
     <div className="model-detail-heading"><div><span className="settings-kicker">Model capabilities</span><h3>{model.displayName ?? model.id}</h3><code>{model.id}</code></div><span className="model-detail-state">{model.manual ? 'Manual model' : 'Discovered model'}</span></div>
+    <ContextWindowEditor model={model} onAutoChange={(enabled) => onSetModelContextAuto?.(model.id, enabled)} onOverrideChange={(value) => onSetModelContextOverride?.(model.id, value)} />
     <CapabilityGroup title="Input" discovered={model.discoveredInput} auto={inputAuto} onAutoChange={(enabled) => onSetModelInputAuto(model.id, enabled)}>
       {(['text', 'image'] as const).map((value) => <label key={value}><input type="checkbox" aria-label={`Input ${value}`} checked={inputValues.includes(value)} disabled={inputAuto} onChange={() => onToggleModelInput(model.id, value)} /><span>{value}</span></label>)}
     </CapabilityGroup>
@@ -59,6 +60,11 @@ export function ModelCapabilityEditor({ model, onToggleModelInput, onSetModelInp
     <p className="model-capability-note">Auto uses discovered capabilities when available. Unknown means no capability metadata was returned.</p>
     {capabilityProvenanceLabel(model.capabilityProvenance) && <p className="model-capability-provenance" aria-label="Capability provenance">Source: {capabilityProvenanceLabel(model.capabilityProvenance)}</p>}
   </div>;
+}
+
+function ContextWindowEditor({ model, onAutoChange, onOverrideChange }: { model: RuntimeModel; onAutoChange: (enabled: boolean) => void; onOverrideChange: (value: number | undefined) => void }) {
+  const auto = model.contextWindowMode !== 'manual' && model.contextWindowOverride == null;
+  return <fieldset className="model-capability-group model-context-window"><legend>Context window</legend><div className="model-capability-mode"><label className="model-capability-auto"><input type="radio" name="context-window-mode" checked={auto} onChange={() => onAutoChange(true)} /><span>Auto</span></label><label className="model-capability-auto"><input type="radio" name="context-window-mode" checked={!auto} onChange={() => onAutoChange(false)} /><span>Manual</span></label><span className="model-capability-discovered">{model.discoveredContextWindow ? `Discovered: ${model.discoveredContextWindow.toLocaleString()} tokens` : 'Unknown'}</span></div><label className="context-window-input" htmlFor="context-window-override">Manual token limit<input id="context-window-override" type="number" min="1" step="1" value={model.contextWindowOverride ?? ''} disabled={auto} placeholder="Positive token count" onChange={(event) => { const next = Number(event.target.value); onOverrideChange(Number.isInteger(next) && next > 0 ? next : undefined); }} /></label><p className="model-capability-note">Auto uses the discovered context window when available.{model.capabilityProvenance ? ' Provenance is shown below.' : ''}</p></fieldset>;
 }
 
 function CapabilityGroup({ title, discovered, auto, onAutoChange, children }: { title: string; discovered?: string[]; auto: boolean; onAutoChange: (enabled: boolean) => void; children: ReactNode }) {

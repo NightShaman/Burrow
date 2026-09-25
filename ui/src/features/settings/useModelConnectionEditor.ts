@@ -165,6 +165,17 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     return { ...model, acceptedOutput, acceptedOutputOverride: acceptedOutput };
   }));
 
+  const setModelContextAuto = (id: string, enabled: boolean) => setAvailableModels((all) => all.map((model) => {
+    if (model.id !== id) return model;
+    if (enabled) return { ...model, contextWindow: model.discoveredContextWindow, contextWindowOverride: undefined, contextWindowMode: 'auto' };
+    const value = model.contextWindowOverride ?? model.contextWindow ?? model.discoveredContextWindow;
+    return { ...model, contextWindow: value, contextWindowMode: 'manual', ...(value ? { contextWindowOverride: value } : { contextWindowOverride: undefined }) };
+  }));
+
+  const setModelContextOverride = (id: string, value: number | undefined) => setAvailableModels((all) => all.map((model) => model.id === id
+    ? { ...model, contextWindow: value, contextWindowOverride: value, contextWindowMode: 'manual' }
+    : model));
+
   const setModelInputAuto = (id: string, enabled: boolean) => setAvailableModels((all) => all.map((model) => {
     if (model.id !== id) return model;
     if (enabled) return { ...model, acceptedInput: model.discoveredInput ?? ['text'], acceptedInputOverride: undefined };
@@ -201,6 +212,8 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
         reasoningEfforts: item.modelEfforts?.[id],
         defaultReasoningEffort: item.defaultEfforts?.[id],
         contextWindow: item.modelContextWindows?.[id],
+        discoveredContextWindow: item.modelDiscoveredContextWindows?.[id],
+        contextWindowOverride: item.modelContextWindowOverrides?.[id],
         discoveredInput,
         acceptedInputOverride,
         acceptedInput: acceptedInputOverride ?? discoveredInput ?? ['text'],
@@ -269,6 +282,8 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     toggleModel,
     toggleModelInput,
     setModelInputAuto,
+    setModelContextAuto,
+    setModelContextOverride,
     toggleModelOutput,
     setModelOutputAuto,
     addManualModel,

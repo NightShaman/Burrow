@@ -38,8 +38,21 @@ describe('Model connection views', () => {
     const model: RuntimeModel = { id: 'vision-model', displayName: 'Vision Model', discoveredInput: ['text', 'image'], acceptedInput: ['text', 'image'], acceptedOutput: ['text'], capabilityProvenance: { source: 'models.dev', snapshotAt: '2026-09-26T12:00:00.000Z', matchedProvider: 'OpenAI', matchedModel: 'gpt-4o' } };
     render(<ModelCapabilityEditor model={model} onToggleModelInput={vi.fn()} onSetModelInputAuto={vi.fn()} onToggleModelOutput={vi.fn()} onSetModelOutputAuto={vi.fn()} />);
     expect(screen.getByText('Discovered: text, image')).toBeTruthy();
-    expect(screen.getByText('Unknown')).toBeTruthy();
+    expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0);
     expect(screen.getByText('Source: models.dev · match OpenAI / gpt-4o · snapshot 9/26/2026')).toBeTruthy();
+  });
+
+  it('supports discovered context windows and positive manual overrides', () => {
+    const onAuto = vi.fn();
+    const onOverride = vi.fn();
+    const model: RuntimeModel = { id: 'context-model', discoveredContextWindow: 128000, contextWindow: 128000, capabilityProvenance: { source: 'models.dev' } };
+    render(<ModelCapabilityEditor model={model} onToggleModelInput={vi.fn()} onSetModelInputAuto={vi.fn()} onToggleModelOutput={vi.fn()} onSetModelOutputAuto={vi.fn()} onSetModelContextAuto={onAuto} onSetModelContextOverride={onOverride} />);
+    expect(screen.getByText('Discovered: 128,000 tokens')).toBeTruthy();
+    fireEvent.click(screen.getAllByRole('radio', { name: 'Manual' })[0]);
+    expect(onAuto).toHaveBeenCalledWith('context-model', false);
+    const input = screen.getByLabelText('Manual token limit') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '64000' } });
+    expect(onOverride).toHaveBeenCalledWith('context-model', 64000);
   });
 
   it('keeps manual output capability checkboxes interactive and delegates toggles', () => {

@@ -95,7 +95,12 @@ const MODEL_INPUT_CAPABILITIES = Object.freeze(['text', 'image', 'audio', 'video
 const MODEL_OUTPUT_CAPABILITIES = Object.freeze(['text', 'audio', 'image', 'video', 'file']);
 
 function normalizedInput(value) {
-  return [...new Set((Array.isArray(value) ? value : []).map(normalize).filter((type) => ['text', 'image'].includes(type)))];
+  return [...new Set((Array.isArray(value) ? value : []).map(normalize).filter((type) => MODEL_INPUT_CAPABILITIES.includes(type)))];
+}
+
+function normalizedCatalogModalities(value, { input = false } = {}) {
+  const normalized = (Array.isArray(value) ? value : []).map((type) => normalize(type) === 'pdf' ? 'file' : normalize(type));
+  return input ? normalizedInput(normalized) : normalizedOutput(normalized);
 }
 
 function normalizedOutput(value) {
@@ -163,6 +168,12 @@ function safeModelMetadata(model = {}, { provider = '', apiType = '' } = {}) {
   const knownCapabilities = knownModelCapabilities({ provider, apiType, modelId: model.id });
   const supportsTemperatureValue = model.supportsTemperature ?? model.supports_temperature ?? metadata.supportsTemperature ?? metadata.supports_temperature ?? capabilities.supportsTemperature ?? capabilities.supports_temperature ?? knownCapabilities.supportsTemperature;
   const outputTokens = positiveInteger(model.outputTokens ?? model.output_tokens ?? model.maxOutputTokens ?? model.max_output_tokens ?? metadata.output_tokens ?? metadata.outputTokens ?? metadata.max_output_tokens ?? metadata.maxOutputTokens ?? capabilities.output_tokens ?? capabilities.outputTokens ?? capabilities.max_output_tokens ?? capabilities.maxOutputTokens);
+  const suppliedDiscoveredContextWindow = positiveInteger(model.discoveredContextWindow ?? model.discovered_context_window);
+  const providerContextWindow = positiveInteger(model.context_window ?? metadata.context_window ?? metadata.contextWindow ?? capabilities.context_length);
+  const legacyContextWindow = positiveInteger(model.contextWindow);
+  const contextWindowOverride = positiveInteger(model.contextWindowOverride ?? model.context_window_override);
+  const discoveredContextWindow = suppliedDiscoveredContextWindow ?? providerContextWindow ?? (!contextWindowOverride ? legacyContextWindow : null);
+  const contextWindow = contextWindowOverride ?? discoveredContextWindow;
   const capabilityProvenance = normalizeCapabilityProvenance(model.capabilityProvenance);
   return {
     ...(displayName ? { displayName } : {}),
@@ -170,7 +181,9 @@ function safeModelMetadata(model = {}, { provider = '', apiType = '' } = {}) {
     ...(reasoningEfforts.length ? { reasoningEfforts } : {}),
     ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
     ...(typeof supportsTemperatureValue === 'boolean' ? { supportsTemperature: supportsTemperatureValue } : {}),
-    ...(Number.isFinite(Number(model.contextWindow ?? model.context_window ?? metadata.context_window ?? metadata.contextWindow ?? capabilities.context_length)) ? { contextWindow: Number(model.contextWindow ?? model.context_window ?? metadata.context_window ?? metadata.contextWindow ?? capabilities.context_length) } : {}),
+    ...(discoveredContextWindow ? { discoveredContextWindow } : {}),
+    ...(contextWindowOverride ? { contextWindowOverride } : {}),
+    ...(contextWindow ? { contextWindow } : {}),
     ...(outputTokens ? { outputTokens } : {}),
     ...(discovered ? { discoveredInput: discovered } : {}),
     ...(discoveredOutputs ? { discoveredOutput: discoveredOutputs } : {}),
@@ -456,7 +469,7 @@ export class ModelSettingsStore {
     const models = submittedModels.map((model) => {
       const prior = existingById.get(model.id);
       if (!prior || model.manual || prior.manual) return model;
-      return { ...prior, ...model, contextWindow: model.contextWindow ?? prior.contextWindow };
+      return normalizeModels([{ ...prior, ...model }], { provider: connection.provider, apiType: connection.apiType })[0];
     });
     const acceptedInput = connection.acceptedInput;
     const save = () => {
@@ -702,10 +715,10 @@ function enrichFromModelsDev(models, catalog, { provider, snapshotAt } = {}) {
     const catalogMetadata = safeModelMetadata({
       id: model.id,
       displayName: match.name,
-      contextWindow: match.context_window ?? match.contextWindow ?? limit.context,
+      discoveredContextWindow: match.context_window ?? match.contextWindow ?? limit.context,
       outputTokens: match.max_output_tokens ?? match.outputTokens ?? limit.output,
-      discoveredInput: modalities.input,
-      discoveredOutput: modalities.output,
+      discoveredInput: normalizedCatalogModalities(modalities.input, { input: true }),
+      discoveredOutput: normalizedCatalogModalities(modalities.output),
     });
     // Provider responses are authoritative. The catalog only fills absent fields;
     // explicit operator overrides remain on the provider-normalized model.

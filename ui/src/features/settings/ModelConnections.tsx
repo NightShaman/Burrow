@@ -23,6 +23,8 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
     onSetModelInputAuto={editor.setModelInputAuto}
     onToggleModelOutput={editor.toggleModelOutput}
     onSetModelOutputAuto={editor.setModelOutputAuto}
+    onSetModelContextAuto={editor.setModelContextAuto}
+    onSetModelContextOverride={editor.setModelContextOverride}
   /> : <div className="model-detail-empty"><strong>Select a model to edit capabilities</strong><span>Model cards stay compact here; capability controls appear in the detail column.</span></div>;
 
   return <div className="connections-stack">
