@@ -27,13 +27,14 @@ import { SystemStatsRail } from './SystemStatsRail';
 import { ModSettingsHost } from './ModSettingsHost';
 import { ModsSettings } from './ModsSettings';
 import { AgentSidebarSettings } from './AgentSidebarSettings';
+import { SkillsSettings } from './SkillsSettings';
 
 const settingsUtilityPanelStorageKey = 'hc.settingsUtilityPanelOpen';
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
 
 export function Settings({ tab, setTab, agents, selected, targets, savedProviders, onModelConnectionsChanged, onAgentsChanged, onOperatorProfileChanged, onFirstRunComplete, leftTopPanel, setLeftTopPanel, leftBottomPanel, setLeftBottomPanel, rightTopPanel, setRightTopPanel, rightBottomPanel, setRightBottomPanel, leftSinglePanel, setLeftSinglePanel, rightSinglePanel, setRightSinglePanel, leftRailLayout, setLeftRailLayout, rightRailLayout, setRightRailLayout, theme, setTheme, agentRailPreferences, setAgentRailPreferences, previewFirstRun = false }: { tab: SettingsTab; setTab: (t: SettingsTab) => void; agents: Agent[]; selected: Agent; targets: ApiTarget[]; savedProviders: SavedProvider[]; onModelConnectionsChanged: () => Promise<void>; onAgentsChanged: () => Promise<void>; onOperatorProfileChanged: (profile: { name: string; avatar: string }) => void; onFirstRunComplete: () => void; leftTopPanel: PanelId; setLeftTopPanel: (id: PanelId) => void; leftBottomPanel: PanelId; setLeftBottomPanel: (id: PanelId) => void; rightTopPanel: PanelId; setRightTopPanel: (id: PanelId) => void; rightBottomPanel: PanelId; setRightBottomPanel: (id: PanelId) => void; leftSinglePanel: PanelId; setLeftSinglePanel: (id: PanelId) => void; rightSinglePanel: PanelId; setRightSinglePanel: (id: PanelId) => void; leftRailLayout: typeof railLayouts[number]; setLeftRailLayout: (layout: typeof railLayouts[number]) => void; rightRailLayout: typeof railLayouts[number]; setRightRailLayout: (layout: typeof railLayouts[number]) => void; theme: Theme; setTheme: (theme: Theme) => void; agentRailPreferences: AgentRailPreferences; setAgentRailPreferences: (next: AgentRailPreferences | ((current: AgentRailPreferences) => AgentRailPreferences)) => void; previewFirstRun?: boolean }) {
   const [settingsAgentId, setSettingsAgentId] = useState(selected.id);
-  const [agentSection, setAgentSection] = useState<'details' | 'profile-documents' | 'mcp-tools' | 'cron-jobs' | 'dreams'>('details');
+  const [agentSection, setAgentSection] = useState<'details' | 'profile-documents' | 'mcp-tools' | 'cron-jobs' | 'dreams' | 'skills'>('details');
   const [generalSection, setGeneralSection] = useState<'operator-profile' | 'execution-boundaries' | 'trace-retention' | 'export' | 'rail-panels' | 'tiddle-signal' | 'appearance'>('operator-profile');
   const [connectionSection, setConnectionSection] = useState<'authentication' | 'model-providers' | 'mcp-servers' | 'api-tokens'>('authentication');
   const [modsSection, setModsSection] = useState<'installed' | 'sources' | 'automatic-checks'>('installed');
@@ -42,6 +43,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
   const [targetContributions, setTargetContributions] = useState<ApiTargetContribution[]>([]);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [overflowColumn, setOverflowColumn] = useState<HTMLElement | null>(null);
+  const [configurationColumn, setConfigurationColumn] = useState<HTMLElement | null>(null);
   const [utilityPanelOpen, setUtilityPanelOpen] = useState(() => readStoredValue({
     key: settingsUtilityPanelStorageKey,
     version: 1,
@@ -78,7 +80,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
     : undefined;
   const selectedModSettings: ModSettingsContribution | undefined = selectedContribution?.settings?.find((item) => item.id === nativeSettingMatch?.[2]) ?? selectedContribution?.settings?.[0];
   const heading = selectedModSettings?.navigation.title ?? selectedContribution?.name ?? tab[0].toUpperCase() + tab.slice(1);
-  const builtInTabs = ['general', 'agents', 'connections', 'mods'] as SettingsTab[];
+  const builtInTabs = ['general', 'agents', 'skills', 'connections', 'mods'] as SettingsTab[];
   return <>
     <main className={`settings-blank-slate${tab === 'agents' ? ' has-agent-selector' : ''}${utilityPanelOpen ? ' has-utility-panel' : ''}`} aria-label="Settings layout prototype">
       <nav className="settings-blank-column settings-prototype-menu" aria-label="Settings sections">
@@ -108,8 +110,10 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
             ['mcp-tools', 'MCP tools'],
             ['cron-jobs', 'Cron jobs'],
             ['dreams', 'Dreams'],
+            ['skills', 'Skills'],
           ] as const).map(([id, label]) => <button type="button" className={agentSection === id ? 'active' : ''} aria-current={agentSection === id ? 'page' : undefined} onClick={() => setAgentSection(id)} key={id}>{label}</button>)}
         </nav>}
+        {tab === 'skills' && <SkillsSettings agents={agents} agentId={settingsSelected.id} targets={targets} configurationTarget={configurationColumn} overflowTarget={overflowColumn} />}
         {tab === 'connections' && <nav className="settings-prototype-section-items" aria-label="Connection settings sections">
           {([
             ['authentication', 'Authentication'],
@@ -127,7 +131,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
         </nav>}
         {selectedContribution?.settingsUrl ? <div ref={setModNavigationColumn} /> : selectedModSettings ? <nav className="settings-prototype-section-items" aria-label={`${selectedModSettings.navigation.title} settings sections`}><button type="button" className="active" aria-current="page">{selectedModSettings.navigation.title}</button></nav> : selectedContribution && <span>Extension settings</span>}
       </section>
-      <section className="settings-blank-column settings-prototype-configuration">
+      <section className="settings-blank-column settings-prototype-configuration" ref={setConfigurationColumn}>
         {tab === 'general' && generalSection === 'operator-profile' && <OperatorProfile onSaved={onOperatorProfileChanged} />}
         {tab === 'general' && generalSection === 'execution-boundaries' && <ExecutionBoundaries overflowTarget={overflowColumn} />}
         {tab === 'general' && generalSection === 'trace-retention' && <RetentionSettings />}
@@ -135,7 +139,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
         {tab === 'general' && generalSection === 'rail-panels' && <SettingSection title="Rail Panels"><div className="field-pair compact-fields"><RailPanelSettings side="Left" layout={leftRailLayout} setLayout={setLeftRailLayout} singlePanel={leftSinglePanel} setSinglePanel={setLeftSinglePanel} topPanel={leftTopPanel} setTopPanel={setLeftTopPanel} bottomPanel={leftBottomPanel} setBottomPanel={setLeftBottomPanel} onPanelSelected={setSelectedRailPanel} /><RailPanelSettings side="Right" layout={rightRailLayout} setLayout={setRightRailLayout} singlePanel={rightSinglePanel} setSinglePanel={setRightSinglePanel} topPanel={rightTopPanel} setTopPanel={setRightTopPanel} bottomPanel={rightBottomPanel} setBottomPanel={setRightBottomPanel} onPanelSelected={setSelectedRailPanel} /></div></SettingSection>}
         {tab === 'general' && generalSection === 'tiddle-signal' && <CuratorSettings savedProviders={savedProviders} />}
         {tab === 'general' && generalSection === 'appearance' && <SettingSection title="Appearance"><fieldset className="theme-picker"><legend>Theme</legend><div>{themes.map((option) => <button type="button" className={theme === option ? 'active' : ''} onClick={() => setTheme(option)} aria-pressed={theme === option} key={option}><i className={`theme-swatch ${option}`} aria-hidden="true" /><span><b>{themeDetails[option].label}</b><small>{themeDetails[option].description}</small></span></button>)}</div></fieldset></SettingSection>}
-        {tab === 'agents' && (agents.length === 0 ? <SettingSection title="Agent setup"><p className="hint">No agents configured yet. Create your first agent to unlock the rest of the agent settings.</p></SettingSection> : agentSection === 'mcp-tools' ? <AgentMcpTools agentId={settingsSelected.id} targets={targets} overflowTarget={overflowColumn} /> : <AgentSettings selected={settingsSelected} targets={targets} savedProviders={savedProviders} onAgentsChanged={onAgentsChanged} section={agentSection} overflowTarget={overflowColumn} />)}
+        {tab === 'agents' && (agents.length === 0 ? <SettingSection title="Agent setup"><p className="hint">No agents configured yet. Create your first agent to unlock the rest of the agent settings.</p></SettingSection> : agentSection === 'skills' ? <SkillsSettings agentView agents={agents} agentId={settingsSelected.id} targets={targets} overflowTarget={overflowColumn} /> : agentSection === 'mcp-tools' ? <AgentMcpTools agentId={settingsSelected.id} targets={targets} overflowTarget={overflowColumn} /> : <AgentSettings selected={settingsSelected} targets={targets} savedProviders={savedProviders} onAgentsChanged={onAgentsChanged} section={agentSection} overflowTarget={overflowColumn} />)}
         {tab === 'connections' && connectionSection === 'authentication' && <AuthenticationSettings />}
         {tab === 'connections' && connectionSection === 'model-providers' && <ModelConnections savedProviders={savedProviders} onModelConnectionsChanged={onModelConnectionsChanged} mcpConnections={null} overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'mcp-servers' && <McpConnections overflowTarget={overflowColumn} />}

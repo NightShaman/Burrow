@@ -1,11 +1,25 @@
-export function createSettingsRoutes({ readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, archiveSummaryModelSelection, saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection, setupStatus, completeSetup } = {}) {
+export function createSettingsRoutes({ readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, archiveSummaryModelSelection, saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection, setupStatus, completeSetup, listSkills, createSkill, getSkill, updateSkill, deleteSkill, agentSkills, saveAgentSkills } = {}) {
   const resultResponse = (res, result, success = 200) => {
     sendJson(res, result.ok ? success : (result.status || 500), result);
     return true;
   };
+  const invoke = async (operation) => { try { return await operation(); } catch (error) { return { ok: false, status: error.statusCode || 500, error: error.statusCode ? error.message : 'skill_settings_failed' }; } };
   return async function handleSettingsRoute({ req, res, url } = {}) {
     if (req.method === 'GET' && url.pathname === '/api/setup/status') { sendJson(res, 200, await setupStatus()); return true; }
     if (req.method === 'POST' && url.pathname === '/api/setup/complete') return resultResponse(res, await completeSetup(await readJsonBody(req)));
+    if (req.method === 'GET' && url.pathname === '/api/settings/skills') { sendJson(res, 200, await listSkills()); return true; }
+    if (req.method === 'POST' && url.pathname === '/api/settings/skills') return resultResponse(res, await invoke(async () => createSkill(await readJsonBody(req))), 201);
+    if (url.pathname.startsWith('/api/settings/skills/')) {
+      const id = decodeURIComponent(url.pathname.slice('/api/settings/skills/'.length));
+      if (req.method === 'GET') return resultResponse(res, await invoke(() => getSkill(id)));
+      if (req.method === 'PATCH') return resultResponse(res, await invoke(async () => updateSkill(id, await readJsonBody(req))));
+      if (req.method === 'DELETE') return resultResponse(res, await invoke(() => deleteSkill(id)));
+    }
+    if (url.pathname.startsWith('/api/agents/') && url.pathname.endsWith('/skills')) {
+      const agentId = decodeURIComponent(url.pathname.slice('/api/agents/'.length, -'/skills'.length));
+      if (req.method === 'GET') return resultResponse(res, await invoke(() => agentSkills(agentId)));
+      if (req.method === 'PUT') return resultResponse(res, await invoke(async () => saveAgentSkills(agentId, await readJsonBody(req))));
+    }
     if (req.method === 'GET' && url.pathname === '/api/settings/model-connections') { sendJson(res, 200, await modelConnections()); return true; }
     if (req.method === 'GET' && url.pathname === '/api/settings/model-connections/claude-cli-credential') { sendJson(res, 200, await claudeCliCredentialStatus()); return true; }
     if (req.method === 'POST' && url.pathname === '/api/settings/model-connections/import-claude-cli-credential') { return resultResponse(res, await importClaudeCliCredential(await readJsonBody(req))); }

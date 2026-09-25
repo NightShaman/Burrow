@@ -56,6 +56,7 @@ export const SETTINGS_OWNERSHIP = Object.freeze([
   Object.freeze({ id: 'scheduled-jobs', authority: 'sqlite', storage: 'scheduled_jobs, scheduled_job_runs', surface: 'scheduled-jobs-api', migration: 'complete', notes: 'Operator-owned and host-bound mod-owned agent schedules with durable dispatch/result receipts.' }),
   Object.freeze({ id: 'mcp-connections', authority: 'sqlite', storage: 'mcp_connections, mcp_connection_secrets, agent_mcp_tools', surface: 'agent-mcp-settings-api', migration: 'complete', notes: 'HTTP MCP connection records, encrypted API keys, discovered tool metadata, and per-agent tool grants.' }),
   Object.freeze({ id: 'execution-boundaries', authority: 'sqlite', storage: 'settings_meta.execution_boundaries', surface: 'execution-boundaries-settings-api', migration: 'complete', notes: 'Operator-owned hard blocks enforced at concrete tool execution boundaries.' }),
+  Object.freeze({ id: 'text-skills', authority: 'hybrid', storage: 'skills, skill_global_assignments, agent_skill_assignments plus workspace skill directories', surface: 'skills-settings-api', migration: 'complete', notes: 'Centrally-authored text skills live in SQLite. Filesystem skills and their adjacent assets remain filesystem-backed; an agent filesystem skill safely shadows a colliding global or assigned SQLite ID.' }),
   Object.freeze({ id: 'mods', authority: 'sqlite', storage: 'mod_settings, mod_secrets', surface: 'mod-runtime', migration: 'complete', notes: 'Namespaced mod settings and settings-key-encrypted secrets; mod packages never own Burrow database tables directly.' }),
 ]);
 
@@ -645,6 +646,23 @@ DreamDiary is for the operator: readable narrative reflection, never prompt auth
         if (changed) update.run(JSON.stringify({ ...value, cards }), timestamp, row.key);
       }
     },
+  },
+  {
+    version: 44,
+    name: 'shared-text-skills',
+    body: `CREATE TABLE IF NOT EXISTS skills (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL, lifecycle TEXT NOT NULL DEFAULT 'available' CHECK(lifecycle IN ('available','experimental','deprecated','disabled')),
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS skill_global_assignments (
+      skill_id TEXT PRIMARY KEY REFERENCES skills(id) ON DELETE CASCADE, created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS agent_skill_assignments (
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE, skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE, created_at TEXT NOT NULL,
+      PRIMARY KEY(agent_id,skill_id)
+    );
+    CREATE INDEX IF NOT EXISTS agent_skill_assignments_agent_idx ON agent_skill_assignments(agent_id);`,
   },
 ].map((migration) => Object.freeze({ ...migration, checksum: checksum(`${migration.version}:${migration.name}:${migration.body}`) })));
 

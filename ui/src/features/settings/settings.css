@@ -1,4 +1,5 @@
 /* Settings surfaces */
+.skill-import{display:grid;gap:6px;margin:12px 0;padding:11px;border:1px solid var(--line-soft);border-radius:8px;background:var(--surface-sunken)}.skill-import-label{color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}.skill-import-input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}.skill-import-control{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:9px}.skill-import-trigger{min-height:34px;white-space:nowrap}.skill-import-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px}.skill-import-name.selected{color:var(--text);font-weight:700}.skill-import small{color:var(--muted);font-size:11px;line-height:1.4}.skill-import-trigger:focus-visible{outline:2px solid var(--accent);outline-offset:2px}@media(max-width:520px){.skill-import-control{grid-template-columns:1fr}.skill-import-trigger{width:100%}}
 .import-complete{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:14px;padding:12px 14px;border:1px solid color-mix(in srgb,var(--accent) 28%,var(--line));border-radius:9px;background:linear-gradient(100deg,color-mix(in srgb,var(--accent) 10%,var(--surface-raised)),var(--surface-raised));animation:import-complete-in .28s ease both}.import-complete strong,.import-complete span{display:block}.import-complete strong{color:var(--text-strong)}.import-complete span{margin-top:3px;color:var(--muted);font-size:12px}.import-refresh{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}.import-refresh-icon{margin:0!important;color:var(--accent)!important;font-size:16px!important;animation:import-refresh-spin .8s linear infinite}.import-refresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}@keyframes import-complete-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}@keyframes import-refresh-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.import-complete{animation:none}.import-refresh-icon{animation:none}}
 
 .import-panel{display:grid;gap:14px;margin-top:22px;padding:16px;border:1px solid var(--line);border-radius:10px;background:color-mix(in srgb,var(--surface-sunken) 52%,var(--surface-raised));box-shadow:inset 0 1px 0 color-mix(in srgb,var(--text) 4%,transparent)}.import-panel-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.import-panel-heading h3{margin:0;color:var(--text-strong);font-size:14px}.import-panel-heading .settings-help{margin:4px 0 0}.import-step{flex:0 0 auto;padding:4px 8px;border:1px solid var(--accent-border);border-radius:999px;background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--accent);font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}.import-panel .field{margin:0}.import-panel .setting-actions{margin-top:2px;padding-top:12px;border-top:1px solid var(--line-soft)}.import-panel .file-picker{min-height:48px;padding:7px;border:1px dashed var(--line);border-radius:8px;background:var(--surface-input)}.import-panel .file-picker:focus-within{border-color:var(--accent-border);background:color-mix(in srgb,var(--accent) 4%,var(--surface-input))}.import-panel .file-picker-button{min-height:34px}.import-panel .file-picker-name{font-size:12px}.settings-view{grid-template-columns:180px repeat(3,minmax(0,1fr));gap:18px}
@@ -729,3 +730,19 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .model-saved .provider-card{display:flex;align-items:center;gap:10px;padding:9px 11px;min-width:0}
 .model-saved .provider-card-select{flex:1}
 .model-saved .provider-card > .danger{flex:0 0 auto}
+
+/* Shared skills in the four-column Settings frame. */
+.skill-library{overflow:auto;min-height:0;align-content:start}
+.skill-library button small{display:block;margin-top:3px;color:var(--muted);font-size:11px;font-weight:400}
+.skill-fields{display:grid;gap:12px;min-width:0}
+.skill-fields .field{display:grid;gap:6px;min-width:0}
+.skill-fields input:not([type=checkbox]),.skill-fields select,.skill-fields textarea{width:100%;box-sizing:border-box;padding:9px;border:1px solid var(--line);border-radius:6px;background:var(--surface-input);color:var(--text);font:inherit}
+.skill-fields textarea{resize:vertical;font-family:monospace;line-height:1.5}
+.skill-check{display:flex;align-items:center;gap:8px;margin:8px 0;color:var(--text);font-size:13px}
+.skill-actions{display:flex;gap:8px;flex-wrap:wrap}
+.skill-actions button{padding:8px 12px;border:1px solid var(--line);border-radius:6px;background:var(--surface-raised);color:var(--text);cursor:pointer}
+.skill-effective{padding-left:20px;overflow-wrap:anywhere}
+.skill-effective li{margin:12px 0}
+.skill-effective small{color:var(--muted)}
+.skill-effective p{margin:3px 0}
+.settings-prototype-overflow>.setting-section{min-width:0;overflow-wrap:anywhere}

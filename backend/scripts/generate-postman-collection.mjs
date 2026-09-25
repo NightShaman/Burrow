@@ -96,6 +96,15 @@ const collection = {
       req('List Tiddle warm cards', 'GET', '/api/tiddle/cards', { query: [['agentId', '{{agentId}}'], ['scope', ''], ['limit', '100']] }),
       req('Read Tiddle Signal history', 'GET', '/api/tiddle/history', { query: [['agentId', '{{agentId}}'], ['cardId', ''], ['since', ''], ['limit', '100']] }),
     ]),
+    folder('Settings / Skills', [
+      req('List text skills', 'GET', '/api/settings/skills'),
+      req('Create text skill', 'POST', '/api/settings/skills', { body: { id: 'review', name: 'Review', description: 'Review instructions', content: '# Review\n', global: false } }),
+      req('Read text skill', 'GET', '/api/settings/skills/{{skillId}}'),
+      req('Update text skill', 'PATCH', '/api/settings/skills/{{skillId}}', { body: { content: '# Updated review\n' } }),
+      req('Delete text skill', 'DELETE', '/api/settings/skills/{{skillId}}'),
+      req('Get agent skills', 'GET', '/api/agents/{{agentId}}/skills'),
+      req('Replace agent skills', 'PUT', '/api/agents/{{agentId}}/skills', { body: { skillIds: ['{{skillId}}'] } }),
+    ]),
     folder('Settings / Model Connections', [
       req('List model connections', 'GET', '/api/settings/model-connections'),
       req('Discover models', 'POST', '/api/settings/model-connections/discover', { body: { id: '{{connectionId}}', provider: 'Anthropic', apiType: 'anthropic-messages', baseUrl: 'https://api.anthropic.com' } }),

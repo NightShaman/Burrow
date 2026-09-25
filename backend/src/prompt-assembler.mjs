@@ -168,7 +168,7 @@ function renderAvailableCapabilities(skills = []) {
   if (!available.length) return '';
   return [
     'Available capabilities. The runtime advertises these; you decide whether to load a skill. Use list_skills for the catalog or load_skill(id) for full instructions. Loading is read-only and records the exact version in the trace.',
-    ...available.slice(0, 40).map((skill) => `- ${skill.id}${skill.description ? ` — ${skill.description}` : ''}${skill.version ? ` [${skill.version}]` : ''}`),
+    ...available.map((skill) => `- ${skill.id}${skill.description ? ` — ${skill.description}` : ''}${skill.version ? ` [${skill.version}]` : ''}`),
   ].join('\n');
 }
 
@@ -512,6 +512,9 @@ export async function assemblePrompt({
     ownership: skill.ownership || null,
     version: skill.version || null,
     lifecycle: skill.missing ? 'missing' : skill.lifecycle || 'available',
+    contentTruncated: skill.contentTruncated === true,
+    sourceChars: Number.isFinite(skill.sourceChars) ? skill.sourceChars : null,
+    sourceBytes: Number.isFinite(skill.sourceBytes) ? skill.sourceBytes : null,
     loaded: loadedSkillIds.includes(skill.id),
     selectionSource: skill.selection?.source || null,
     reasons: skill.reasons || [],

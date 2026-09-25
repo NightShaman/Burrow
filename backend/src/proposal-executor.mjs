@@ -249,7 +249,7 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
 
     if (action.tool === 'list_skills' || action.tool === 'load_skill') {
       const skillsWorkspace = executionContext?.agentWorkspaceRoot ? path.dirname(executionContext.agentWorkspaceRoot) : executionRoot;
-      const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: skillsWorkspace, agentId: agentId || executionContext?.agentId || 'hatchet', agentRuntime: executionContext?.agentRuntime || null });
+      const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: skillsWorkspace, agentId: agentId || executionContext?.agentId || 'hatchet', agentRuntime: executionContext?.agentRuntime || null, databasePath: executionContext?.settingsDatabasePath || null });
       const started = await traceLogger?.toolStart?.({ tool: action.tool, skillId: action.skillId || null, catalogCount: catalog.availableSkills.length });
       let result;
       if (action.tool === 'list_skills') {
@@ -258,7 +258,7 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
         const choice = selectCatalogSkills({ catalog: catalog.skills, ids: [action.skillId], source: 'agent-requested' });
         if (!choice.selected.length) result = { tool: 'load_skill', ok: false, skillId: action.skillId, error: choice.rejected[0]?.reason || 'skill_not_found' };
         else {
-          const loaded = await loadSelectedSkillText(skillsWorkspace, choice.selected, { maxTotalChars: 64_000, maxPerSkillChars: 64_000 });
+          const loaded = await loadSelectedSkillText(skillsWorkspace, choice.selected);
           const skill = loaded[0];
           result = skill.missing ? { tool: 'load_skill', ok: false, skillId: action.skillId, error: skill.error || 'skill_source_missing' } : { tool: 'load_skill', ok: true, skill: { ...skillManifest(skill), version: skill.version, content: skill.content, contentTruncated: skill.contentTruncated } };
         }

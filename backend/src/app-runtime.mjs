@@ -245,6 +245,7 @@ async function runAskChatUnserialized({
     agentId: runtimeState.agentId,
     agentRuntime,
     overrides: scopedSkillsConfig,
+    databasePath: runtimeState.settingsDatabasePath,
   });
   const preliminaryTurnPlan = await planTurnWithModel({
     message,

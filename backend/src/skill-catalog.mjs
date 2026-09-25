@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { SkillSettingsStore } from './skill-settings-store.mjs';
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -11,7 +12,7 @@ function unique(values) {
 }
 
 function sha256(text) {
-  return `sha256:${createHash('sha256').update(String(text || '')).digest('hex').slice(0, 16)}`;
+  return `sha256:${createHash('sha256').update(String(text ?? ''), 'utf8').digest('hex')}`;
 }
 
 function normalizeId(value = '') {
@@ -119,7 +120,7 @@ function compactSkill(skill) {
  * Build an agent's effective skill catalog from ownership only.
  * Agent-owned entries shadow shared entries with the same id.
  */
-export async function loadEffectiveSkillCatalog({ workspaceRoot, agentId, agentRuntime = null, overrides = {} } = {}) {
+export async function loadEffectiveSkillCatalog({ workspaceRoot, agentId, agentRuntime = null, overrides = {}, databasePath = null } = {}) {
   const runtimeAgentId = agentRuntime?.agentId == null ? null : normalizeId(agentRuntime.agentId);
   const runtimeAgentWorkspace = agentRuntime?.agentWorkspaceRoot ? path.resolve(agentRuntime.agentWorkspaceRoot) : null;
   const runtimeSkillsRoot = agentRuntime?.skillsRoot ? path.resolve(agentRuntime.skillsRoot) : null;
@@ -134,7 +135,22 @@ export async function loadEffectiveSkillCatalog({ workspaceRoot, agentId, agentR
     loadOwnedSkillRoot({ skillsRoot: globalRoot, owner: { scope: 'global', agentId: null }, overrides }),
     loadOwnedSkillRoot({ skillsRoot: agentRoot, owner: { scope: 'agent', agentId: resolvedAgentId }, overrides }),
   ]);
-  const effective = new Map(globalSkills.map((skill) => [skill.id, skill]));
+  let databaseSkills = [];
+  if (databasePath) {
+    const store = new SkillSettingsStore({ databasePath });
+    try {
+      databaseSkills = store.effective(resolvedAgentId).map((skill) => ({
+        ...skill, priority: 0, path: null, sourcePath: null, absolutePath: null,
+        sourceExists: true, owner: { scope: skill.global ? 'global' : 'agent', agentId: skill.global ? null : resolvedAgentId },
+        ownership: { scope: 'sqlite', agentId: skill.global ? null : resolvedAgentId, storage: 'settings.sqlite' },
+        portability: { memoryIndexable: true, memoryStoresBody: false },
+      }));
+    } finally { store.close(); }
+  }
+  // Collision order is explicit: assigned SQLite text < shared filesystem < agent filesystem.
+  // This preserves asset-capable filesystem defaults and, most importantly, local agent overrides.
+  const effective = new Map(databaseSkills.map((skill) => [skill.id, skill]));
+  for (const skill of globalSkills) effective.set(skill.id, skill);
   for (const skill of agentSkills) effective.set(skill.id, skill);
   const skills = [...effective.values()].sort((a, b) => String(a.id).localeCompare(String(b.id)));
   return {
@@ -172,6 +188,7 @@ export function selectCatalogSkills({ catalog = [], ids = [], source = 'model-se
     }
     selected.push({
       ...compactSkill(skill),
+      ...(skill.source === 'sqlite' ? { source: 'sqlite', skillContent: skill.content } : {}),
       selection: {
         source,
         owner: skill.owner || null,
@@ -244,34 +261,20 @@ export function compareMemorySkillIndex({ memoryEntries = [], filesystemSkills =
   });
 }
 
-export async function loadSelectedSkillText(rootDir, selected, { maxTotalChars = 64_000, maxPerSkillChars = 32_000 } = {}) {
+export async function loadSelectedSkillText(rootDir, selected, { maxTotalChars = Infinity, maxPerSkillChars = Infinity } = {}) {
   const out = [];
-  let remaining = Math.max(0, Number(maxTotalChars) || 0);
+  let remaining = Number.isFinite(maxTotalChars) ? Math.max(0, Number(maxTotalChars)) : Infinity;
   for (const item of asArray(selected)) {
-    const skillPath = item.absolutePath || path.resolve(rootDir, item.path || item.sourcePath || '');
-    let handle = null;
     try {
-      handle = await fs.open(skillPath, 'r');
-      const { size } = await handle.stat();
-      const requested = Math.max(0, Math.min(size, remaining, maxPerSkillChars));
-      const buffer = Buffer.allocUnsafe(requested);
-      if (requested) await handle.read(buffer, 0, requested, 0);
-      const content = buffer.toString('utf8');
+      const fullContent = item.source === 'sqlite' ? String(item.skillContent ?? item.content ?? '') : await fs.readFile(item.absolutePath || path.resolve(rootDir, item.path || item.sourcePath || ''), 'utf8');
+      const sourceBytes = Buffer.byteLength(fullContent, 'utf8');
+      const allowed = Math.min(fullContent.length, remaining, Number.isFinite(maxPerSkillChars) ? Math.max(0, Number(maxPerSkillChars)) : Infinity);
+      const content = fullContent.slice(0, allowed);
       remaining -= content.length;
-      out.push({
-        ...item,
-        absolutePath: skillPath,
-        sourceExists: true,
-        content,
-        contentTruncated: size > requested,
-        sourceBytes: size,
-        version: item.version || sha256(content),
-      });
+      out.push({ ...item, content, contentTruncated: content.length < fullContent.length, sourceChars: fullContent.length, sourceBytes, version: sha256(fullContent) });
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
-      out.push({ ...item, absolutePath: skillPath, sourceExists: false, missing: true, error: 'skill_source_missing', content: '' });
-    } finally {
-      await handle?.close();
+      out.push({ ...item, sourceExists: false, missing: true, error: 'skill_source_missing', content: '' });
     }
   }
   return out;
