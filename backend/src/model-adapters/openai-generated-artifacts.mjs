@@ -21,7 +21,12 @@ function endpoint(baseUrl, resourcePath) {
 }
 
 function azureHost(baseUrl) {
-  try { return /(?:^|\.)openai\.azure\.com$/i.test(new URL(baseUrl).hostname); } catch { return false; }
+  try {
+    const hostname = new URL(baseUrl).hostname.toLowerCase();
+    return hostname.endsWith('.openai.azure.com') || hostname.endsWith('.services.ai.azure.com');
+  } catch {
+    return false;
+  }
 }
 
 function requestHeaders(config = {}) {
