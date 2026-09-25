@@ -1,41 +1,44 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import type { RuntimeModel } from '../../app/api';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ModelResults, SavedProviders } from './ModelConnectionViews';
+import { ModelCapabilityEditor, ModelResults, SavedProviders } from './ModelConnectionViews';
 import { claudeLoginStatusLabel, openAiLoginStatusLabel } from './ModelConnectionOAuthDialog';
 
 afterEach(cleanup);
 
 describe('Model connection views', () => {
-  it('renders model capabilities and delegates editor actions', () => {
+  it('keeps model cards compact and delegates selection actions', () => {
     const onToggleModel = vi.fn();
-    const onToggleModelInput = vi.fn();
-    const onSetModelInputAuto = vi.fn();
+    const onSelectModel = vi.fn();
     const onDeleteManualModel = vi.fn();
     const onAddManualModel = vi.fn();
     render(<ModelResults
-      models={[{ id: 'vision-model', displayName: 'Vision Model', selected: true, manual: true, acceptedInput: ['text'], acceptedInputOverride: ['text'], acceptedOutputOverride: ['text'], acceptedOutput: ['text'] }]}
+      models={[{ id: 'vision-model', displayName: 'Vision Model', selected: true, manual: true, discoveredInput: ['text', 'image'], discoveredOutput: ['text'] }]}
       manualModel="new-model"
       onManualModelChange={vi.fn()}
       onAddManualModel={onAddManualModel}
       onDeleteManualModel={onDeleteManualModel}
       onToggleModel={onToggleModel}
-      onToggleModelInput={onToggleModelInput}
-      onSetModelInputAuto={onSetModelInputAuto}
-      onToggleModelOutput={vi.fn()}
-      onSetModelOutputAuto={vi.fn()}
+      onSelectModel={onSelectModel}
     />);
 
-    fireEvent.click(screen.getByLabelText('Vision Model'));
-    fireEvent.click(screen.getByLabelText('Auto'));
-    fireEvent.click(screen.getByLabelText('Image'));
+    fireEvent.click(screen.getByRole('button', { name: /Vision Model/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Use Vision Model' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete manually added model vision-model' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add model' }));
 
+    expect(onSelectModel).toHaveBeenCalledWith('vision-model');
     expect(onToggleModel).toHaveBeenCalledWith('vision-model');
-    expect(onSetModelInputAuto).toHaveBeenCalledWith('vision-model', true);
-    expect(onToggleModelInput).toHaveBeenCalledWith('vision-model', 'image');
     expect(onDeleteManualModel).toHaveBeenCalledWith('vision-model');
     expect(onAddManualModel).toHaveBeenCalledOnce();
+  });
+
+  it('shows discovered capabilities and unknown fallback in the detail editor', () => {
+    const model: RuntimeModel = { id: 'vision-model', displayName: 'Vision Model', discoveredInput: ['text', 'image'], acceptedInput: ['text', 'image'], acceptedOutput: ['text'], capabilityProvenance: { source: 'models.dev', snapshotAt: '2026-09-26T12:00:00.000Z', matchedProvider: 'OpenAI', matchedModel: 'gpt-4o' } };
+    render(<ModelCapabilityEditor model={model} onToggleModelInput={vi.fn()} onSetModelInputAuto={vi.fn()} onToggleModelOutput={vi.fn()} onSetModelOutputAuto={vi.fn()} />);
+    expect(screen.getByText('Discovered: text, image')).toBeTruthy();
+    expect(screen.getByText('Unknown')).toBeTruthy();
+    expect(screen.getByText('Source: models.dev · match OpenAI / gpt-4o · snapshot 9/26/2026')).toBeTruthy();
   });
 
   it('renders saved authentication details and delegates provider actions', () => {

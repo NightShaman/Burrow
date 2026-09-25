@@ -747,7 +747,7 @@ async function discoverModelConnection(body = {}) {
     const apiKey = String(body.apiKey || '').trim() || (auth?.token ? String(auth.token).trim() : '') || (auth?.apiKey ? String(auth.apiKey).trim() : '') || (auth?.accessToken ? String(auth.accessToken).trim() : '') || (existing ? store.apiKey(existing.id) : null);
     const hasCredential = Boolean(apiKey || auth?.token || auth?.apiKey || auth?.accessToken);
     if (!hasCredential) return { ok: false, status: 400, error: 'api_key_required' };
-    const discovered = await discoverModels({ baseUrl, apiType, apiKey, auth, store, signal: AbortSignal.timeout(15_000) });
+    const discovered = await discoverModels({ baseUrl, provider: body.provider || existing?.provider || auth?.provider, useModelsDev: true, apiType, apiKey, auth, store, signal: AbortSignal.timeout(15_000) });
     return { ok: true, models: mergeDiscoveredModels(discovered, priorModels), discovery: { status: discovered.length ? 'discovered' : 'manual_only', count: discovered.length } };
   } catch (error) {
     return { ok: true, models: mergeDiscoveredModels([], priorModels), discovery: { status: 'manual_only', count: 0, error: String(error?.message || error) } };

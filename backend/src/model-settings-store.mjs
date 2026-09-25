@@ -64,6 +64,9 @@ export const CODEX_CLIENT_VERSION_FLOOR = '0.145.0';
 export const CODEX_CLIENT_VERSION_CACHE_TTL_MS = 24 * 60 * 60_000;
 const NPM_CODEX_LATEST_URL = 'https://registry.npmjs.org/@openai%2Fcodex/latest';
 const GITHUB_CODEX_LATEST_URL = 'https://api.github.com/repos/openai/codex/releases/latest';
+const MODELS_DEV_CATALOG_META_KEY = 'models_dev_catalog';
+export const MODELS_DEV_CATALOG_URL = 'https://models.dev/catalog.json';
+export const MODELS_DEV_CATALOG_CACHE_TTL_MS = 24 * 60 * 60_000;
 
 const oauthRefreshes = new Map();
 
@@ -123,6 +126,15 @@ function knownModelCapabilities({ provider = '', apiType = '', modelId = '' } = 
   return {};
 }
 
+function normalizeCapabilityProvenance(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const source = normalize(value.source);
+  const snapshotAt = normalize(value.snapshotAt);
+  const matchedProvider = normalize(value.matchedProvider);
+  const matchedModel = normalize(value.matchedModel);
+  return source && snapshotAt && matchedProvider && matchedModel ? { source, snapshotAt, matchedProvider, matchedModel } : null;
+}
+
 function safeModelMetadata(model = {}, { provider = '', apiType = '' } = {}) {
   const metadata = model?.metadata && typeof model.metadata === 'object' ? model.metadata : {};
   const capabilities = model?.capabilities && typeof model.capabilities === 'object' ? model.capabilities : {};
@@ -151,8 +163,10 @@ function safeModelMetadata(model = {}, { provider = '', apiType = '' } = {}) {
   const knownCapabilities = knownModelCapabilities({ provider, apiType, modelId: model.id });
   const supportsTemperatureValue = model.supportsTemperature ?? model.supports_temperature ?? metadata.supportsTemperature ?? metadata.supports_temperature ?? capabilities.supportsTemperature ?? capabilities.supports_temperature ?? knownCapabilities.supportsTemperature;
   const outputTokens = positiveInteger(model.outputTokens ?? model.output_tokens ?? model.maxOutputTokens ?? model.max_output_tokens ?? metadata.output_tokens ?? metadata.outputTokens ?? metadata.max_output_tokens ?? metadata.maxOutputTokens ?? capabilities.output_tokens ?? capabilities.outputTokens ?? capabilities.max_output_tokens ?? capabilities.maxOutputTokens);
+  const capabilityProvenance = normalizeCapabilityProvenance(model.capabilityProvenance);
   return {
     ...(displayName ? { displayName } : {}),
+    ...(capabilityProvenance ? { capabilityProvenance } : {}),
     ...(reasoningEfforts.length ? { reasoningEfforts } : {}),
     ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
     ...(typeof supportsTemperatureValue === 'boolean' ? { supportsTemperature: supportsTemperatureValue } : {}),
@@ -652,7 +666,86 @@ export function resolveCodexClientVersion({ store, db, nowMs = Date.now(), refre
   return refreshCodexClientVersionCache({ store, db, fetchImpl, signal, nowMs }).then((next) => ({ version: codexClientVersionFromCache(next), cache: next, refreshed: true }));
 }
 
-export async function discoverModels({ baseUrl, apiType = 'openai-responses', apiKey, auth = {}, fetchImpl = fetch, signal = undefined, store = null, db = null, codexClientVersion = undefined, nowMs = Date.now() } = {}) {
+function catalogProviders(catalog) {
+  const root = catalog?.providers && typeof catalog.providers === 'object' ? catalog.providers : catalog;
+  return Object.entries(root && typeof root === 'object' && !Array.isArray(root) ? root : {}).map(([key, value]) => ({ key, ...(value || {}) }));
+}
+
+function exactCatalogProvider(catalog, provider) {
+  const requested = normalize(provider);
+  if (!requested) return null;
+  return catalogProviders(catalog).find((item) => requested === normalize(item.id || item.key)
+    || requested === normalize(item.name)
+    || (item.canonicalId !== undefined && requested === normalize(item.canonicalId))) || null;
+}
+
+function catalogModels(provider = {}) {
+  const values = provider.models;
+  if (Array.isArray(values)) return values;
+  return Object.entries(values && typeof values === 'object' ? values : {}).map(([key, value]) => ({ key, ...(value || {}) }));
+}
+
+function enrichFromModelsDev(models, catalog, { provider, snapshotAt } = {}) {
+  const matchProvider = exactCatalogProvider(catalog, provider);
+  if (!matchProvider) return models;
+  const byId = new Map(catalogModels(matchProvider).map((model) => [normalize(model.id || model.key), model]).filter(([id]) => id));
+  return models.map((model) => {
+    const match = byId.get(model.id);
+    if (!match) return model;
+    const modalities = match.modalities && typeof match.modalities === 'object' ? match.modalities : {};
+    const limit = match.limit && typeof match.limit === 'object' ? match.limit : {};
+    const catalogMetadata = safeModelMetadata({
+      id: model.id,
+      displayName: match.name,
+      contextWindow: match.context_window ?? match.contextWindow ?? limit.context,
+      outputTokens: match.max_output_tokens ?? match.outputTokens ?? limit.output,
+      discoveredInput: modalities.input,
+      discoveredOutput: modalities.output,
+    });
+    // Provider responses are authoritative. The catalog only fills absent fields;
+    // explicit operator overrides remain on the provider-normalized model.
+    return {
+      ...catalogMetadata,
+      ...model,
+      capabilityProvenance: { source: 'models.dev', snapshotAt, matchedProvider: normalize(matchProvider.id || matchProvider.key), matchedModel: normalize(match.id || match.key) },
+    };
+  });
+}
+
+async function modelsDevSnapshot({ store, db, fetchImpl = fetch, signal, nowMs = Date.now(), catalogUrl = MODELS_DEV_CATALOG_URL, ttlMs = MODELS_DEV_CATALOG_CACHE_TTL_MS } = {}) {
+  const target = store?.db || store || db;
+  const cached = target ? safeCacheRecord(getSettingsMeta(target, MODELS_DEV_CATALOG_META_KEY)) : {};
+  const checked = Date.parse(cached.lastCheckedAt || '');
+  if (cached.catalog && Number.isFinite(checked) && nowMs - checked < Math.max(1, Number(ttlMs) || MODELS_DEV_CATALOG_CACHE_TTL_MS)) return cached;
+  try {
+    const headers = { accept: 'application/json', 'user-agent': 'Burrow/models-dev-catalog' };
+    if (cached.etag) headers['if-none-match'] = cached.etag;
+    const response = await fetchImpl(catalogUrl, { headers, signal });
+    const checkedAt = new Date(nowMs).toISOString();
+    let next;
+    if (response.status === 304 && cached.catalog) next = { ...cached, lastCheckedAt: checkedAt, lastError: null };
+    else {
+      const body = await response.json().catch(() => null);
+      if (!response.ok || !body || typeof body !== 'object') throw new Error(`models_dev_catalog_failed:${response.status}`);
+      next = { catalog: body, etag: response.headers.get('etag') || null, snapshotAt: checkedAt, lastCheckedAt: checkedAt, lastError: null };
+    }
+    if (target) setSettingsMeta(target, MODELS_DEV_CATALOG_META_KEY, next, { clock: () => checkedAt });
+    return next;
+  } catch (error) {
+    if (cached.catalog) {
+      const next = { ...cached, lastCheckedAt: new Date(nowMs).toISOString(), lastError: String(error?.message || error) };
+      if (target) setSettingsMeta(target, MODELS_DEV_CATALOG_META_KEY, next);
+      return next;
+    }
+    return null;
+  }
+}
+
+export async function discoverModels({ baseUrl, provider = '', useModelsDev = false, apiType = 'openai-responses', apiKey, auth = {}, fetchImpl = fetch, catalogFetchImpl = fetchImpl, catalogUrl = MODELS_DEV_CATALOG_URL, catalogTtlMs = MODELS_DEV_CATALOG_CACHE_TTL_MS, signal = undefined, store = null, db = null, codexClientVersion = undefined, nowMs = Date.now() } = {}) {
+  const catalogSnapshot = useModelsDev && provider ? await modelsDevSnapshot({ store, db, fetchImpl: catalogFetchImpl, signal, nowMs, catalogUrl, ttlMs: catalogTtlMs }) : null;
+  const enrich = (models) => catalogSnapshot?.catalog
+    ? enrichFromModelsDev(models, catalogSnapshot.catalog, { provider, snapshotAt: catalogSnapshot.snapshotAt })
+    : models;
   if (isChatGptBackendUrl(baseUrl) && openAiLikeProvider(auth.provider || 'OpenAI')) {
     const target = store || db;
     const initial = parseSemver(codexClientVersion)?.raw || (await resolveCodexClientVersion({ store, db, nowMs, refresh: false })).version;
@@ -666,7 +759,7 @@ export async function discoverModels({ baseUrl, apiType = 'openai-responses', ap
       const models = normalizeCodexCatalogModels(body);
       const minimumObservedModelVersion = observedMinimumClientVersion(body);
       if (target) writeCodexClientVersionCache(target, { lastGoodCatalogVersion: version, minimumObservedModelVersion, lastCatalogAt: new Date(nowMs).toISOString(), lastCatalogCount: models.length }, { nowMs });
-      return models;
+      return enrich(models);
     }
     throw lastError || new Error('model_discovery_failed');
   }
@@ -677,6 +770,6 @@ export async function discoverModels({ baseUrl, apiType = 'openai-responses', ap
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(`model_discovery_failed:${response.status}`);
       const data = Array.isArray(body.data) ? body.data : Array.isArray(body.models) ? body.models : [];
-      return normalizeModels(data.map((model) => ({ ...model, id: model?.id, selected: false, manual: false })));
+      return enrich(normalizeModels(data.map((model) => ({ ...model, id: model?.id, selected: false, manual: false }))));
     });
 }

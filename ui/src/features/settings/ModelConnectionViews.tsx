@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { RuntimeModel } from '../../app/api';
 import type { SavedProvider } from '../../app/types';
 
@@ -10,36 +11,29 @@ export const modelConnectionApiTypes = [
 type ModelResultsProps = {
   models: RuntimeModel[];
   manualModel: string;
+  selectedModelId?: string | null;
+  onSelectModel?: (id: string) => void;
   onManualModelChange: (value: string) => void;
   onAddManualModel: () => void;
   onDeleteManualModel: (id: string) => void;
   onToggleModel: (id: string) => void;
-  onToggleModelInput: (id: string, input: 'text' | 'image') => void;
-  onSetModelInputAuto: (id: string, enabled: boolean) => void;
-  onToggleModelOutput: (id: string, output: 'text' | 'audio' | 'image' | 'video' | 'file') => void;
-  onSetModelOutputAuto: (id: string, enabled: boolean) => void;
 };
 
-export function ModelResults({ models, manualModel, onManualModelChange, onAddManualModel, onDeleteManualModel, onToggleModel, onToggleModelInput, onSetModelInputAuto, onToggleModelOutput, onSetModelOutputAuto }: ModelResultsProps) {
+const capabilityLabel = (values: string[] | undefined) => values?.length ? values.join(', ') : 'Unknown';
+
+export function ModelResults({ models, manualModel, selectedModelId, onSelectModel, onManualModelChange, onAddManualModel, onDeleteManualModel, onToggleModel }: ModelResultsProps) {
   return <div className={`model-results${models.length === 0 ? ' model-results-empty' : ''}`}>
     {models.length === 0 && <div className="model-empty-state"><strong>No models were discovered.</strong><span>Add a model ID manually to continue.</span></div>}
     <div className="model-options">{models.map((model) => {
       const label = model.displayName ?? model.id;
-      return <div className="model-option" key={model.id}>
-        <label className="model-selection"><input type="checkbox" checked={model.selected !== false} onChange={() => onToggleModel(model.id)} /><span>{label}</span></label>
-        <fieldset className="model-capabilities" aria-label={`Capabilities for ${label}`}>
-          <label className="model-capability-auto"><input type="checkbox" checked={!model.acceptedInputOverride} onChange={(event) => onSetModelInputAuto(model.id, event.target.checked)} /><span>Auto</span></label>
-          {model.acceptedInputOverride && <div className="model-capability-manual">
-            <label><input type="checkbox" checked={(model.acceptedInput ?? ['text']).includes('text')} onChange={() => onToggleModelInput(model.id, 'text')} /><span>Text</span></label>
-            <label><input type="checkbox" checked={(model.acceptedInput ?? ['text']).includes('image')} onChange={() => onToggleModelInput(model.id, 'image')} /><span>Image</span></label>
-          </div>}
-        </fieldset>
-        <fieldset className="model-capabilities" aria-label={`Output capabilities for ${label}`}>
-          <label className="model-capability-auto"><input type="checkbox" checked={!model.acceptedOutputOverride} onChange={(event) => onSetModelOutputAuto(model.id, event.target.checked)} /><span>Output auto</span></label>
-          {model.acceptedOutputOverride && <div className="model-capability-manual">{(['text', 'audio', 'image', 'video', 'file'] as const).map((output) => <label key={output}><input type="checkbox" checked={(model.acceptedOutput ?? ['text']).includes(output)} onChange={() => onToggleModelOutput(model.id, output)} /><span>{output}</span></label>)}</div>}
-        </fieldset>
+      return <article className={`model-option${selectedModelId === model.id ? ' selected' : ''}`} key={model.id}>
+        <input className="model-option-check" type="checkbox" checked={model.selected !== false} onChange={() => onToggleModel(model.id)} aria-label={`Use ${label}`} />
+        <button className="model-option-select" type="button" onClick={() => onSelectModel?.(model.id)} aria-pressed={selectedModelId === model.id}>
+          <strong>{label}</strong><small>{model.id}</small>
+        </button>
+        <div className="model-option-summary"><span>{capabilityLabel(model.discoveredInput ?? model.acceptedInput)}</span><span>{capabilityLabel(model.discoveredOutput ?? model.acceptedOutput)}</span></div>
         {model.manual && <button type="button" className="model-delete" onClick={() => onDeleteManualModel(model.id)} aria-label={`Delete manually added model ${model.id}`} title="Delete model">×</button>}
-      </div>;
+      </article>;
     })}</div>
     <div className="manual-model">
       <label htmlFor="manual-model-id">Model ID</label>
@@ -49,28 +43,42 @@ export function ModelResults({ models, manualModel, onManualModelChange, onAddMa
   </div>;
 }
 
-type SavedProvidersProps = {
-  providers: SavedProvider[];
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onEdit: (provider: SavedProvider) => void;
-  onDelete: (provider: SavedProvider) => void;
-  expanded?: boolean;
-  selectedId?: string | null;
-};
-
-export function SavedProviders({ providers, open, onOpenChange, onEdit, onDelete, expanded = false, selectedId }: SavedProvidersProps) {
-  const contents = providers.length === 0 ? <p className="settings-empty">No providers saved yet.</p> : <div className="provider-list">{providers.map((item) => <article className="provider-card" key={item.id}>
-      <button className="provider-card-select" type="button" onClick={() => onEdit(item)} aria-pressed={selectedId === item.id}>
-        <strong>{item.provider}</strong>
-        <small>{modelConnectionApiTypes.find((type) => type.value === item.apiType)?.label ?? item.apiType} · {item.models.length} {item.models.length === 1 ? 'model' : 'models'}</small>
-        {(item.oauthConfigured || item.auth?.type === 'oauth') && <small>OAuth configured</small>}
-      </button>
-      <button className="danger" type="button" onClick={() => onDelete(item)} aria-label={`Delete ${item.provider}`}>Delete</button>
-    </article>)}</div>;
-  if (expanded) return <div className="settings-overflow-content model-saved">{contents}</div>;
-  return <details className="model-saved saved-accordion" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}>
-    <summary><h3>Saved providers</h3><span>{providers.length}</span></summary>
-    {contents}
-  </details>;
+export function ModelCapabilityEditor({ model, onToggleModelInput, onSetModelInputAuto, onToggleModelOutput, onSetModelOutputAuto }: { model: RuntimeModel; onToggleModelInput: (id: string, input: 'text' | 'image') => void; onSetModelInputAuto: (id: string, enabled: boolean) => void; onToggleModelOutput: (id: string, output: 'text' | 'audio' | 'image' | 'video' | 'file') => void; onSetModelOutputAuto: (id: string, enabled: boolean) => void }) {
+  const inputAuto = !model.acceptedInputOverride;
+  const outputAuto = !model.acceptedOutputOverride;
+  const inputValues = model.acceptedInput ?? ['text'];
+  const outputValues = model.acceptedOutput ?? ['text'];
+  return <div className="model-capability-editor">
+    <div className="model-detail-heading"><div><span className="settings-kicker">Model capabilities</span><h3>{model.displayName ?? model.id}</h3><code>{model.id}</code></div><span className="model-detail-state">{model.manual ? 'Manual model' : 'Discovered model'}</span></div>
+    <CapabilityGroup title="Input" discovered={model.discoveredInput} auto={inputAuto} onAutoChange={(enabled) => onSetModelInputAuto(model.id, enabled)}>
+      {(['text', 'image'] as const).map((value) => <label key={value}><input type="checkbox" checked={inputValues.includes(value)} disabled={inputAuto} onChange={() => onToggleModelInput(model.id, value)} /><span>{value}</span></label>)}
+    </CapabilityGroup>
+    <CapabilityGroup title="Output" discovered={model.discoveredOutput} auto={outputAuto} onAutoChange={(enabled) => onSetModelOutputAuto(model.id, enabled)}>
+      {(['text', 'audio', 'image', 'video', 'file'] as const).map((value) => <label key={value}><input type="checkbox" checked={outputValues.includes(value)} disabled={outputAuto} onChange={() => onToggleModelOutput(model.id, value)} /><span>{value}</span></label>)}
+    </CapabilityGroup>
+    <p className="model-capability-note">Auto uses discovered capabilities when available. Unknown means no capability metadata was returned.</p>
+    {capabilityProvenanceLabel(model.capabilityProvenance) && <p className="model-capability-provenance" aria-label="Capability provenance">Source: {capabilityProvenanceLabel(model.capabilityProvenance)}</p>}
+  </div>;
 }
+
+function CapabilityGroup({ title, discovered, auto, onAutoChange, children }: { title: string; discovered?: string[]; auto: boolean; onAutoChange: (enabled: boolean) => void; children: ReactNode }) {
+  return <fieldset className="model-capability-group"><legend>{title}</legend><div className="model-capability-mode"><label className="model-capability-auto"><input type="radio" name={`${title}-capability-mode`} checked={auto} onChange={() => onAutoChange(true)} /><span>Auto</span></label><label className="model-capability-auto"><input type="radio" name={`${title}-capability-mode`} checked={!auto} onChange={() => onAutoChange(false)} /><span>Manual</span></label><span className="model-capability-discovered">{discovered?.length ? `Discovered: ${discovered.join(', ')}` : 'Unknown'}</span></div><div className="model-capability-manual">{children}</div></fieldset>;
+}
+
+function capabilityProvenanceLabel(provenance: RuntimeModel['capabilityProvenance']) {
+  if (!provenance) return null;
+  const source = provenance.source?.trim();
+  const match = [provenance.matchedProvider, provenance.matchedModel].filter(Boolean).join(' / ');
+  const snapshot = provenance.snapshotAt ? new Date(provenance.snapshotAt).toLocaleDateString() : '';
+  const details = [source, match && `match ${match}`, snapshot && `snapshot ${snapshot}`].filter(Boolean);
+  return details.length ? details.join(' · ') : null;
+}
+
+type SavedProvidersProps = { providers: SavedProvider[]; open: boolean; onOpenChange: (open: boolean) => void; onEdit: (provider: SavedProvider) => void; onDelete: (provider: SavedProvider) => void; expanded?: boolean; selectedId?: string | null };
+export function SavedProviders({ providers, open, onOpenChange, onEdit, onDelete, expanded = false, selectedId }: SavedProvidersProps) {
+  const contents = providers.length === 0 ? <p className="settings-empty">No providers saved yet.</p> : <div className="provider-list">{providers.map((item) => <article className="provider-card" key={item.id}><button className="provider-card-select" type="button" onClick={() => onEdit(item)} aria-pressed={selectedId === item.id}><strong>{item.provider}</strong><small>{modelConnectionApiTypes.find((type) => type.value === item.apiType)?.label ?? item.apiType} · {item.models.length} {item.models.length === 1 ? 'model' : 'models'}</small>{(item.oauthConfigured || item.auth?.type === 'oauth') && <small>OAuth configured</small>}</button><button className="danger" type="button" onClick={() => onDelete(item)} aria-label={`Delete ${item.provider}`}>Delete</button></article>)}</div>;
+  if (expanded) return <div className="settings-overflow-content model-saved">{contents}</div>;
+  return <details className="model-saved saved-accordion" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}><summary><h3>Saved providers</h3><span>{providers.length}</span></summary>{contents}</details>;
+}
+
+export { capabilityLabel };

@@ -119,6 +119,12 @@ export type RuntimeModel = {
   inputCapabilityOverrides?: Partial<Record<'text' | 'image', 'auto' | 'enabled' | 'disabled'>>;
   discoveredInput?: ('text' | 'image')[];
   acceptedInputOverride?: ('text' | 'image')[];
+  capabilityProvenance?: {
+    source?: string | null;
+    snapshotAt?: string | null;
+    matchedProvider?: string | null;
+    matchedModel?: string | null;
+  } | null;
 };
 
 export type AnthropicUsageWindow = { key: string; usedPercent: number; resetAt?: string | null };

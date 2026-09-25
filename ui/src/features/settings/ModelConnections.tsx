@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { SavedProvider } from '../../app/types';
 import { ModelConnectionOAuthDialog } from './ModelConnectionOAuthDialog';
-import { ModelResults, SavedProviders, modelConnectionApiTypes } from './ModelConnectionViews';
+import { ModelCapabilityEditor, ModelResults, SavedProviders, modelConnectionApiTypes } from './ModelConnectionViews';
 import { Field, SettingSection } from './SettingsPrimitives';
 import { useModelConnectionEditor } from './useModelConnectionEditor';
 
@@ -15,6 +15,15 @@ type Props = {
 
 export function ModelConnections({ savedProviders, onModelConnectionsChanged, mcpConnections, overflowTarget }: Props) {
   const editor = useModelConnectionEditor({ onModelConnectionsChanged });
+  const selectedModel = editor.availableModels.find((model) => model.id === editor.selectedModelId) ?? null;
+
+  const modelDetail = selectedModel ? <ModelCapabilityEditor
+    model={selectedModel}
+    onToggleModelInput={editor.toggleModelInput}
+    onSetModelInputAuto={editor.setModelInputAuto}
+    onToggleModelOutput={editor.toggleModelOutput}
+    onSetModelOutputAuto={editor.setModelOutputAuto}
+  /> : <div className="model-detail-empty"><strong>Select a model to edit capabilities</strong><span>Model cards stay compact here; capability controls appear in the detail column.</span></div>;
 
   return <div className="connections-stack">
     <div className="connections-models-column">
@@ -54,11 +63,9 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
           onManualModelChange={editor.setManualModel}
           onAddManualModel={editor.addManualModel}
           onDeleteManualModel={editor.deleteManualModel}
+          selectedModelId={editor.selectedModelId}
+          onSelectModel={editor.setSelectedModelId}
           onToggleModel={editor.toggleModel}
-          onToggleModelInput={editor.toggleModelInput}
-          onSetModelInputAuto={editor.setModelInputAuto}
-          onToggleModelOutput={editor.toggleModelOutput}
-          onSetModelOutputAuto={editor.setModelOutputAuto}
         />}
         {!overflowTarget && <SavedProviders
           providers={savedProviders}
@@ -71,7 +78,7 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
       </SettingSection>
     </div>
     {mcpConnections}
-    {overflowTarget && createPortal(<SavedProviders providers={savedProviders} open={editor.savedProvidersOpen} onOpenChange={editor.setSavedProvidersOpen} onEdit={editor.editProvider}
-          selectedId={editor.editingId} onDelete={(item) => void editor.deleteProvider(item)} expanded />, overflowTarget)}
+    {overflowTarget && createPortal(<div className="settings-overflow-content model-detail-surface"><SettingSection title="Model details">{modelDetail}</SettingSection><SavedProviders providers={savedProviders} open={editor.savedProvidersOpen} onOpenChange={editor.setSavedProvidersOpen} onEdit={editor.editProvider}
+          selectedId={editor.editingId} onDelete={(item) => void editor.deleteProvider(item)} expanded /></div>, overflowTarget)}
   </div>;
 }

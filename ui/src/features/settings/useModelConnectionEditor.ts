@@ -24,6 +24,7 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
   const [apiKey, setApiKey] = useState('');
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [availableModels, setAvailableModels] = useState<RuntimeModel[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [manualModel, setManualModel] = useState('');
   const [connected, setConnected] = useState(false);
   const [savedProvidersOpen, setSavedProvidersOpen] = useState(false);
@@ -39,6 +40,7 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     setApiKey('');
     setApiKeyConfigured(false);
     setAvailableModels([]);
+    setSelectedModelId(null);
     setManualModel('');
     setConnected(false);
     setRequestError('');
@@ -60,6 +62,7 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
         models: availableModels,
       });
       setAvailableModels(result.models);
+      setSelectedModelId(result.models[0]?.id ?? null);
       setConnected(true);
       return result.models;
     } catch (error) {
@@ -108,7 +111,9 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     setUrl(connection.baseUrl ?? 'https://chatgpt.com/backend-api');
     setApiKey('');
     setApiKeyConfigured(Boolean(connection.apiKeyConfigured || connection.authConfigured));
-    setAvailableModels(selectedRuntimeModels(connection.models).map((model) => ({ ...model, selected: true })));
+    const models = selectedRuntimeModels(connection.models).map((model) => ({ ...model, selected: true }));
+    setAvailableModels(models);
+    setSelectedModelId(models[0]?.id ?? null);
     setConnected(Boolean(connection.authConfigured || connection.apiKeyConfigured));
   };
 
@@ -185,7 +190,7 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     setUrl(item.url);
     setApiKey('');
     setApiKeyConfigured(item.apiKeyConfigured === true);
-    setAvailableModels(item.models.map((id) => {
+    const models = item.models.map((id) => {
       const discoveredInput = item.modelDiscoveredInputs?.[id];
       const acceptedInputOverride = item.modelInputOverrides?.[id];
       return {
@@ -203,7 +208,9 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
         acceptedOutputOverride: item.modelOutputOverrides?.[id],
         acceptedOutput: item.modelOutputOverrides?.[id] ?? item.modelDiscoveredOutputs?.[id] ?? ['text'],
       };
-    }));
+    });
+    setAvailableModels(models);
+    setSelectedModelId(models[0]?.id ?? null);
     setConnected(true);
     setRequestError('');
     resetClaudeLogin();
@@ -266,6 +273,8 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     setModelOutputAuto,
     addManualModel,
     deleteManualModel,
+    selectedModelId,
+    setSelectedModelId,
     editProvider,
     deleteProvider,
     openOpenAiOAuth,
