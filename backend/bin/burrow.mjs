@@ -336,7 +336,7 @@ async function main() {
     if (args.context_threshold) process.env.BURROW_CONTEXT_THRESHOLD = args.context_threshold;
     const loaded = await loadBurrowConfig({ rootDir });
     const runtimeState = resolveRuntimeStateConfig({ rootDir, args, loadedConfig: loaded.config });
-    await ensureDefaultGlobalWorkspace({ installDir: rootDir, workspaceRoot: runtimeState.workspaceRoot });
+    await ensureDefaultGlobalWorkspace({ installDir: rootDir, workspaceRoot: runtimeState.workspaceRoot, databasePath: runtimeState.settingsDatabasePath });
     await import('../scripts/burrow-ui.mjs');
     return;
   }

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { ensureDefaultGlobalWorkspace } from '../src/runtime-workspace-defaults.mjs';
 import { publishModTools } from '../src/mod-agent-tools.mjs';
 import { diagnosticMods, modJobs, pendingModOperations } from '../src/mod-diagnostics.mjs';
 import { releaseVersion } from '../src/release-version.mjs';
@@ -3196,6 +3197,10 @@ server.once('error', (error) => {
 
 server.on('clientError', (error, socket) => { void serverLogger.event('client_error', { code: error?.code || null, error: String(error?.message || error), remoteAddress: socket?.remoteAddress || null }); socket?.destroy(); });
 server.on('connection', (socket) => { socket.once('error', (error) => { void serverLogger.event('socket_error', { code: error?.code || null, error: String(error?.message || error), remoteAddress: socket.remoteAddress || null }); }); });
+// Direct server/Docker startup must publish bundled skills just like the installer.
+const bundledSkillRuntime = await runtimeConfig();
+await ensureDefaultGlobalWorkspace({ installDir: projectRoot, workspaceRoot: bundledSkillRuntime.runtimeState.workspaceRoot, databasePath: settingsDatabasePath() });
+
 server.listen(port, host, async () => {
   await serverLogger.event('listener_started', { host, port, pid: process.pid, version: releaseVersion });
   reconcileInterruptedDreamCycles({ databasePath: settingsDatabasePath() });
