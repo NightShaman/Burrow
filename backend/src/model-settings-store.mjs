@@ -685,12 +685,17 @@ function catalogModels(provider = {}) {
   return Object.entries(values && typeof values === 'object' ? values : {}).map(([key, value]) => ({ key, ...(value || {}) }));
 }
 
+function azureModelCatalogId(modelId) {
+  return normalize(modelId).replace(/-(?:19|20)\d{2}(?:-\d{2}-\d{2}|\d{4})$/, '');
+}
+
 function enrichFromModelsDev(models, catalog, { provider, snapshotAt } = {}) {
   const matchProvider = exactCatalogProvider(catalog, provider);
   if (!matchProvider) return models;
   const byId = new Map(catalogModels(matchProvider).map((model) => [normalize(model.id || model.key), model]).filter(([id]) => id));
+  const azure = normalize(matchProvider.id || matchProvider.key) === 'azure';
   return models.map((model) => {
-    const match = byId.get(model.id);
+    const match = byId.get(model.id) || (azure ? byId.get(azureModelCatalogId(model.id)) : null);
     if (!match) return model;
     const modalities = match.modalities && typeof match.modalities === 'object' ? match.modalities : {};
     const limit = match.limit && typeof match.limit === 'object' ? match.limit : {};
