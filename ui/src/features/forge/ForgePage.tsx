@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../app/api';
 import type { Agent } from '../../app/types';
 import './forge.css';
@@ -23,17 +23,32 @@ export function Forge({ agents, selectedAgentId, sessionId }: { agents: Agent[];
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [selectedJobId, setSelectedJobId] = useState('');
+  const loadSequence = useRef(0);
+  const activeAgentRef = useRef(selectedAgentId);
+  const idempotencyRef = useRef<{ signature: string; key: string } | null>(null);
+
+  useEffect(() => {
+    activeAgentRef.current = selectedAgentId;
+    idempotencyRef.current = null;
+    setSelectedJobId('');
+  }, [selectedAgentId]);
 
   const load = async () => {
     if (!selectedAgentId) return;
+    const sequence = ++loadSequence.current;
     setLoading(true); setError('');
     try {
       const [catalog, history] = await Promise.all([
         api<ForgeCatalog>('/api/forge/catalog'),
         api<{ jobs: Job[] }>(`/api/forge/jobs?agentId=${encodeURIComponent(selectedAgentId)}`),
       ]);
+      if (sequence !== loadSequence.current || activeAgentRef.current !== selectedAgentId) return;
       setCatalog(catalog); setModels(catalog.models ?? []); setJobs(history.jobs ?? []);
-    } catch (e) { setError(`Could not load Forge: ${(e as Error).message}`); } finally { setLoading(false); }
+    } catch (e) {
+      if (sequence === loadSequence.current && activeAgentRef.current === selectedAgentId) setError(`Could not load Forge: ${(e as Error).message}`);
+    } finally {
+      if (sequence === loadSequence.current && activeAgentRef.current === selectedAgentId) setLoading(false);
+    }
   };
   useEffect(() => { void load(); }, [selectedAgentId]);
   const modeModels = useMemo(() => models.filter((m) => m.kind === mode), [models, mode]);
@@ -44,8 +59,16 @@ export function Forge({ agents, selectedAgentId, sessionId }: { agents: Agent[];
   useEffect(() => {
     const active = jobs.some((job) => job.status === 'queued' || job.status === 'running');
     if (!active || !selectedAgentId) return;
-    const timer = window.setInterval(() => { void api<{ jobs: Job[] }>(`/api/forge/jobs?agentId=${encodeURIComponent(selectedAgentId)}`).then((result) => setJobs(result.jobs ?? [])).catch(() => {}); }, 1500);
-    return () => window.clearInterval(timer);
+    let cancelled = false;
+    const agentAtStart = selectedAgentId;
+    const timer = window.setInterval(() => {
+      void api<{ jobs: Job[] }>(`/api/forge/jobs?agentId=${encodeURIComponent(agentAtStart)}`)
+        .then((result) => {
+          if (!cancelled && activeAgentRef.current === agentAtStart) setJobs(result.jobs ?? []);
+        })
+        .catch(() => {});
+    }, 1500);
+    return () => { cancelled = true; window.clearInterval(timer); };
   }, [jobs, selectedAgentId]);
   const selectedJob = jobs.find((job) => job.id === selectedJobId) ?? jobs[0];
   const submit = async () => {
@@ -53,8 +76,13 @@ export function Forge({ agents, selectedAgentId, sessionId }: { agents: Agent[];
     if (!model || !prompt.trim() || !selectedAgentId) return;
     setBusy(true); setError(''); setNotice('');
     try {
-      const result = await api<{ job: Job }>('/api/forge/jobs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: selectedAgentId, connectionId: model.connectionId, modelId: model.modelId, prompt: prompt.trim(), idempotencyKey: newKey() }) });
+      const requestSignature = `${selectedAgentId}\u0000${model.connectionId}\u0000${model.modelId}\u0000${prompt.trim()}`;
+      const existing = idempotencyRef.current;
+      const idempotencyKey = existing?.signature === requestSignature ? existing.key : newKey();
+      idempotencyRef.current = { signature: requestSignature, key: idempotencyKey };
+      const result = await api<{ job: Job }>('/api/forge/jobs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: selectedAgentId, connectionId: model.connectionId, modelId: model.modelId, prompt: prompt.trim(), idempotencyKey }) });
       setJobs((current) => [result.job, ...current.filter((job) => job.id !== result.job.id)]); setSelectedJobId(result.job.id); setPrompt(''); setNotice('Forge job accepted.');
+      idempotencyRef.current = null;
     } catch (e) { setError(`Could not start generation: ${(e as Error).message}`); } finally { setBusy(false); }
   };
   const attach = async (artifact: Artifact) => {
