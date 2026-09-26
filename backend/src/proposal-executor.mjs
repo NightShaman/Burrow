@@ -282,7 +282,7 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
       let result;
       try {
         const args = action.tool === 'forge_create_job'
-          ? { connectionId: action.forgeConnectionId, modelId: action.forgeModelId, prompt: action.forgePrompt, idempotencyKey: action.forgeIdempotencyKey }
+          ? { mode: action.forgeMode, connectionId: action.forgeConnectionId || action.connectionId, modelId: action.forgeModelId || action.modelId, prompt: action.forgePrompt || action.prompt, idempotencyKey: action.forgeIdempotencyKey || action.idempotencyKey }
           : action.tool === 'forge_inspect_job' ? { jobId: action.jobId }
           : action.tool === 'forge_attach_artifact' ? { jobId: action.jobId, artifactId: action.artifactId } : {};
         result = await executeForgeTool(action.tool, args, { agentId, sessionId: sessionId || executionContext?.sessionId, conversationId: resolvedConversationId });

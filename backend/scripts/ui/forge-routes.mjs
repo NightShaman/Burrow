@@ -5,6 +5,8 @@ export function createForgeRoutes({ store, readJsonBody, sendJson }) {
     try {
       const forge = store();
       if (req.method === 'GET' && url.pathname === '/api/forge/catalog') sendJson(res, 200, forge.catalog());
+      else if (req.method === 'GET' && url.pathname === '/api/forge/selections') sendJson(res, 200, { ok: true, selections: forge.selections() });
+      else if (req.method === 'PUT' && url.pathname === '/api/forge/selections') sendJson(res, 200, { ok: true, selections: forge.setSelection(await readJsonBody(req)) });
       else if (req.method === 'GET' && url.pathname === '/api/forge/jobs') sendJson(res, 200, { ok: true, jobs: await forge.list() });
       else if (req.method === 'POST' && url.pathname === '/api/forge/jobs') { const result = await forge.create(await readJsonBody(req)); sendJson(res, result.replayed ? 200 : 202, { ok: true, ...result }); }
       else {

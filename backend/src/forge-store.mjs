@@ -28,7 +28,7 @@ export function forgeCatalog(connections) {
 export class ForgeStore {
   constructor({ databasePath, resolveAgent, resolveOperator, runtimeRoot, connections, resolveConfig, adapterFactory = createOpenAIGeneratedArtifactAdapter, googleAdapterFactory = createGoogleLyriaAdapter }) {
     this.db = new DatabaseSync(databasePath);
-    this.db.exec(`PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS forge_jobs (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, idem TEXT NOT NULL, request TEXT NOT NULL, record TEXT NOT NULL);`);
+    this.db.exec(`PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS forge_jobs (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, idem TEXT NOT NULL, request TEXT NOT NULL, record TEXT NOT NULL); CREATE TABLE IF NOT EXISTS forge_selections (mode TEXT PRIMARY KEY, connection_id TEXT NOT NULL, model_id TEXT NOT NULL, updated_at TEXT NOT NULL);`);
     // Older databases used (agent_id, idem) as the key. Ownership is now operator-wide;
     // remove that constraint so duplicate historical keys remain readable during migration.
     const indexed = this.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='forge_jobs'").get()?.sql || '';
@@ -51,6 +51,31 @@ export class ForgeStore {
   }
   save(job) { job.updatedAt = now(); this.db.prepare('UPDATE forge_jobs SET record=? WHERE id=?').run(JSON.stringify(job), job.id); }
   catalog() { return forgeCatalog(this.connections()); }
+  selections() {
+    const out = {};
+    for (const row of this.db.prepare('SELECT mode,connection_id,model_id FROM forge_selections').all()) out[row.mode] = { connectionId: row.connection_id, modelId: row.model_id };
+    return out;
+  }
+  setSelection(body) {
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(k => !['mode','connectionId','modelId'].includes(k)) || !['mode','connectionId','modelId'].every(k => typeof body[k] === 'string' && body[k].trim())) fail('forge_request_invalid');
+    if (!['image','music','speech','video'].includes(body.mode)) fail('forge_request_invalid');
+    const catalog = this.catalog();
+    const row = catalog.models.find(m => m.connectionId === body.connectionId && m.modelId === body.modelId && ((body.mode === 'image' && m.kind === 'image') || (body.mode === 'video' && m.kind === 'video') || (body.mode === 'music' && m.kind === 'audio' && catalog.music.models?.some(x => x.connectionId === m.connectionId && x.modelId === m.modelId)) || (body.mode === 'speech' && m.kind === 'audio' && !catalog.music.models?.some(x => x.connectionId === m.connectionId && x.modelId === m.modelId))) && m.available);
+    if (!row) fail('forge_model_unavailable', 409);
+    this.db.prepare('INSERT INTO forge_selections(mode,connection_id,model_id,updated_at) VALUES(?,?,?,?) ON CONFLICT(mode) DO UPDATE SET connection_id=excluded.connection_id,model_id=excluded.model_id,updated_at=excluded.updated_at').run(body.mode, body.connectionId, body.modelId, now());
+    return this.selections();
+  }
+  selectionMatches(mode, row, catalog = this.catalog()) {
+    return row?.available && ((mode === 'image' && row.kind === 'image') || (mode === 'video' && row.kind === 'video') || (mode === 'music' && catalog.music.models?.some(x => x.connectionId === row.connectionId && x.modelId === row.modelId)) || (mode === 'speech' && row.kind === 'audio' && !catalog.music.models?.some(x => x.connectionId === row.connectionId && x.modelId === row.modelId)));
+  }
+  resolveSelection(mode) {
+    const selection = this.selections()[mode];
+    if (!selection) fail('forge_selection_missing', 409);
+    const catalog = this.catalog();
+    const row = catalog.models.find(m => m.connectionId === selection.connectionId && m.modelId === selection.modelId);
+    if (!this.selectionMatches(mode, row, catalog)) fail('forge_model_unavailable', 409);
+    return selection;
+  }
   async owner() {
     const owner = await this.resolveOperator();
     if (!owner || !owner.agentWorkspaceRoot) fail('forge_owner_unavailable', 503);
@@ -75,18 +100,30 @@ export class ForgeStore {
     if (!body || typeof body !== 'object' || Array.isArray(body)) fail('forge_request_invalid');
     if ('attachments' in body || 'sourceAttachments' in body) fail('source_attachments_unsupported');
     if ('options' in body) fail('generation_options_unsupported');
-    const keys = ['connectionId', 'modelId', 'prompt', 'idempotencyKey'];
-    if (Object.keys(body).some(k => !keys.includes(k)) || keys.some(k => typeof body[k] !== 'string' || !body[k].trim())) fail('forge_request_invalid');
+    const keys = ['mode', 'connectionId', 'modelId', 'prompt', 'idempotencyKey'];
+    if (Object.keys(body).some(k => !keys.includes(k)) || ['prompt','idempotencyKey'].some(k => typeof body[k] !== 'string' || !body[k].trim())) fail('forge_request_invalid');
+    if (body.mode !== undefined && body.mode !== null && (typeof body.mode !== 'string' || !['image','music','speech','video'].includes(body.mode))) fail('forge_request_invalid');
+    const explicitSelection = body.connectionId !== undefined || body.modelId !== undefined;
+    if (explicitSelection && (typeof body.connectionId !== 'string' || typeof body.modelId !== 'string' || !body.connectionId.trim() || !body.modelId.trim())) fail('forge_request_invalid');
+    if (!explicitSelection && (body.mode === undefined || body.mode === null)) fail('forge_selection_missing', 409);
+    const catalog = this.catalog();
+    const selected = explicitSelection ? { connectionId: body.connectionId, modelId: body.modelId } : this.selections()[body.mode];
+    if (!selected) fail('forge_selection_missing', 409);
+    if (typeof selected.connectionId !== 'string' || typeof selected.modelId !== 'string' || !selected.connectionId.trim() || !selected.modelId.trim()) fail('forge_request_invalid');
+    const selectedModel = catalog.models.find(m => m.connectionId === selected.connectionId && m.modelId === selected.modelId);
+    if (explicitSelection && body.mode !== undefined && body.mode !== null && !this.selectionMatches(body.mode, selectedModel, catalog)) fail('forge_model_unavailable', 409);
     const owner = await this.owner();
-    const request = JSON.stringify(keys.map(k => body[k]));
+    const requestBody = { mode: body.mode ?? null, connectionId: selected.connectionId, modelId: selected.modelId, prompt: body.prompt, idempotencyKey: body.idempotencyKey };
+    const requestIdentity = { ...requestBody, implicitSelection: !explicitSelection };
+    const request = JSON.stringify(requestIdentity);
     // Migration can leave duplicate historical keys. A matching request is replayable;
     // any differing request conflicts, regardless of which legacy agent supplied it.
-    const existingRows = this.db.prepare('SELECT request, record FROM forge_jobs WHERE idem=? ORDER BY rowid').all(body.idempotencyKey);
-    const existing = existingRows.find(row => row.request === request) || existingRows[0];
-    if (existing) { if (existing.request !== request) fail('idempotency_conflict', 409); return { job: this.public(JSON.parse(existing.record)), replayed: true }; }
-    const model = this.catalog().models.find(m => m.connectionId === body.connectionId && m.modelId === body.modelId && m.available);
+    const existingRows = this.db.prepare('SELECT request, record FROM forge_jobs WHERE idem=? ORDER BY rowid').all(requestBody.idempotencyKey);
+    const existing = existingRows.find(row => row.request === request) || existingRows.find(row => { try { const prior = JSON.parse(row.record); const legacy = JSON.parse(row.request); return (!explicitSelection && prior.implicitSelection === true && prior.mode === body.mode && prior.prompt === body.prompt) || (explicitSelection && Array.isArray(legacy) && legacy[0] === selected.connectionId && legacy[1] === selected.modelId && legacy[2] === body.prompt && legacy[3] === body.idempotencyKey); } catch { return false; } }) || existingRows[0];
+    if (existing) { let same = existing.request === request; if (!same) { try { const prior = JSON.parse(existing.record); const legacy = JSON.parse(existing.request); same = (!explicitSelection && prior.implicitSelection === true && prior.mode === body.mode && prior.prompt === body.prompt) || (explicitSelection && Array.isArray(legacy) && legacy[0] === selected.connectionId && legacy[1] === selected.modelId && legacy[2] === body.prompt && legacy[3] === body.idempotencyKey); } catch {} } if (!same) fail('idempotency_conflict', 409); return { job: this.public(JSON.parse(existing.record)), replayed: true }; }
+    const model = this.catalog().models.find(m => m.connectionId === selected.connectionId && m.modelId === selected.modelId && m.available);
     if (!model) fail('forge_model_unavailable', 409);
-    const job = { id: randomUUID(), ...body, kind: model.kind, status: 'queued', createdAt: now(), updatedAt: now(), error: null, artifacts: [] };
+    const job = { id: randomUUID(), ...requestBody, implicitSelection: !explicitSelection, kind: model.kind, status: 'queued', createdAt: now(), updatedAt: now(), error: null, artifacts: [] };
     this.db.prepare('INSERT INTO forge_jobs VALUES (?,?,?,?,?)').run(job.id, '__operator__', job.idempotencyKey, request, JSON.stringify(job));
     const task = new Promise(resolve => setImmediate(resolve)).then(() => this.run(job, owner)).finally(() => this.pending.delete(task));
     this.pending.add(task);
