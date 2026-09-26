@@ -332,7 +332,7 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
   verbose_log "installing pinned mcporter integration $MCPORTER_VERSION"
   npm install --prefix "$STAGING/integrations/mcporter" --omit=dev --no-package-lock --no-save --no-audit --no-fund --loglevel=error "mcporter@$MCPORTER_VERSION"
   update_log "staging Claude Code integration..."
-  verbose_log "installing pinned Claude Code integration $CLAUDE_CODE_VERSION; no executable probe will run"
+  verbose_log "installing Claude Code integration $CLAUDE_CODE_VERSION; no executable probe will run"
   cat > "$STAGING/integrations/claude-code/package.json" <<PACKAGE
 {
   "private": true,
@@ -341,7 +341,7 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
 }
 PACKAGE
   npm install --prefix "$STAGING/integrations/claude-code" --omit=dev --no-package-lock --ignore-scripts=false --no-audit --no-fund --loglevel=error
-  # Installing the pinned package is sufficient update-time validation. Running
+  # Installing the requested package is sufficient update-time validation. Running
   # `claude --version` can initialize external/runtime state and hang despite a
   # successful install, needlessly blocking activation of an otherwise valid
   # Burrow payload. The runtime invokes Claude only when that integration is

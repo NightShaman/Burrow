@@ -1,7 +1,10 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 const integrationManifest = JSON.parse(await fs.readFile(new URL('./runtime-integrations.json', import.meta.url), 'utf8'));
 
@@ -30,23 +33,37 @@ async function executableWorks(root, executable) {
   } catch { return false; }
 }
 
-export async function ensureIntegration(spec, { integrationsRoot, runCommand = run, logger = console } = {}) {
+async function resolveVersion(spec, resolvePackageVersion) {
+  if (spec.version !== 'latest') return spec.version;
+  const resolved = String(await resolvePackageVersion(spec.packageName, spec.version)).trim();
+  if (!resolved || resolved === 'latest') throw new Error(`integration_version_resolution_failed:${spec.id}`);
+  return resolved;
+}
+
+async function npmPackageVersion(packageName, tag) {
+  const { stdout } = await execFileAsync('npm', ['view', `${packageName}@${tag}`, 'version', '--json'], { encoding: 'utf8' });
+  const parsed = JSON.parse(stdout);
+  return Array.isArray(parsed) ? parsed.at(-1) : parsed;
+}
+
+export async function ensureIntegration(spec, { integrationsRoot, runCommand = run, resolvePackageVersion = npmPackageVersion, logger = console } = {}) {
   const destination = path.join(integrationsRoot, spec.id);
-  if (await installedVersion(destination, spec.packageName) === spec.version && await executableWorks(destination, spec.executable)) {
-    logger.log?.(`Burrow integration ${spec.id}@${spec.version} is ready.`);
-    return { id: spec.id, version: spec.version, changed: false, root: destination };
+  const version = await resolveVersion(spec, resolvePackageVersion);
+  if (await installedVersion(destination, spec.packageName) === version && await executableWorks(destination, spec.executable)) {
+    logger.log?.(`Burrow integration ${spec.id}@${version} is ready.`);
+    return { id: spec.id, version, changed: false, root: destination };
   }
 
   await fs.mkdir(integrationsRoot, { recursive: true });
   const staging = await fs.mkdtemp(path.join(integrationsRoot, `.${spec.id}-staging-`));
   const previous = path.join(integrationsRoot, `.${spec.id}-previous`);
   try {
-    logger.log?.(`Installing Burrow integration ${spec.id}@${spec.version}...`);
-    const manifest = { private: true, dependencies: { [spec.packageName]: spec.version } };
-    if (spec.packageName === '@anthropic-ai/claude-code') manifest.allowScripts = { [`${spec.packageName}@${spec.version}`]: true };
+    logger.log?.(`Installing Burrow integration ${spec.id}@${version}...`);
+    const manifest = { private: true, dependencies: { [spec.packageName]: version } };
+    if (spec.packageName === '@anthropic-ai/claude-code') manifest.allowScripts = { [`${spec.packageName}@${version}`]: true };
     await fs.writeFile(path.join(staging, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
     await runCommand('npm', ['install', '--omit=dev', '--no-package-lock', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: staging });
-    if (await installedVersion(staging, spec.packageName) !== spec.version || !(await executableWorks(staging, spec.executable))) throw new Error(`integration_verification_failed:${spec.id}`);
+    if (await installedVersion(staging, spec.packageName) !== version || !(await executableWorks(staging, spec.executable))) throw new Error(`integration_verification_failed:${spec.id}`);
     await fs.rm(previous, { recursive: true, force: true });
     const exists = await fs.stat(destination).then(() => true).catch(() => false);
     if (exists) await fs.rename(destination, previous);
@@ -56,15 +73,15 @@ export async function ensureIntegration(spec, { integrationsRoot, runCommand = r
       throw error;
     }
     await fs.rm(previous, { recursive: true, force: true });
-    return { id: spec.id, version: spec.version, changed: true, root: destination };
+    return { id: spec.id, version, changed: true, root: destination };
   } finally { await fs.rm(staging, { recursive: true, force: true }).catch(() => {}); }
 }
 
-export async function ensureRuntimeIntegrations({ runtimeRoot = process.env.BURROW_RUNTIME_ROOT, integrations = INTEGRATIONS, runCommand, logger = console } = {}) {
+export async function ensureRuntimeIntegrations({ runtimeRoot = process.env.BURROW_RUNTIME_ROOT, integrations = INTEGRATIONS, runCommand, resolvePackageVersion, logger = console } = {}) {
   if (!runtimeRoot) throw new Error('burrow_runtime_root_required');
   const integrationsRoot = path.join(path.resolve(runtimeRoot), 'integrations');
   const results = [];
-  for (const spec of integrations) results.push(await ensureIntegration(spec, { integrationsRoot, runCommand, logger }));
+  for (const spec of integrations) results.push(await ensureIntegration(spec, { integrationsRoot, runCommand, resolvePackageVersion, logger }));
   return results;
 }
 
