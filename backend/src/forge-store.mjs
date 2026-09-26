@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { promises as fs } from 'node:fs';
 import { createOpenAIGeneratedArtifactAdapter, generatedArtifactKind } from './model-adapters/openai-generated-artifacts.mjs';
+import { createGoogleLyriaAdapter, googleLyriaSupported } from './model-adapters/google-lyria.mjs';
 import { persistGeneratedArtifact, resolveGeneratedArtifact } from './generated-artifact-store.mjs';
 import { persistChatAttachments } from './attachment-store.mjs';
 import { readSessionMetadata, appendSessionTurnIfAbsent } from './session-store.mjs';
@@ -11,17 +12,21 @@ const now = () => new Date().toISOString();
 export function forgeCatalog(connections) {
   const models = connections.flatMap(c => (c.models || []).filter(m => m.selected !== false).flatMap(m => {
     const outputs = m.acceptedOutput ?? m.discoveredOutput ?? [];
-    const kind = outputs.includes('video') ? 'video' : generatedArtifactKind({ capabilities: { outputs } });
+    const google = googleLyriaSupported({ ...c, model: m.id });
+    const effectiveOutputs = google && m.acceptedOutputOverride === undefined && m.acceptedOutput === undefined && !outputs.length ? ['audio'] : outputs;
+    const kind = effectiveOutputs.includes('video') ? 'video' : generatedArtifactKind({ capabilities: { outputs: effectiveOutputs } });
     if (!kind) return [];
-    const available = kind !== 'video' && /^openai-/.test(c.apiType);
+    const available = kind !== 'video' && ( /^openai-/.test(c.apiType) || (kind === 'audio' && google) );
     return [{ connectionId: c.id, modelId: m.id, label: m.name || m.id, kind, available, unavailableReason: available ? null : kind === 'video' ? 'video_provider_contract_unavailable' : 'provider_contract_unavailable', controls: [] }];
   }));
-  return { ok: true, models, music: { available: false, reason: 'music_model_not_configured' }, sourceAttachments: { available: false, reason: 'source_attachments_unsupported' }, video: { available: false, reason: 'video_provider_contract_unavailable' } };
+  const musicModels = models.filter(m => m.kind === 'audio' && m.available && googleLyriaSupported({ ...connections.find(c => c.id === m.connectionId), model: m.modelId }));
+  const music = musicModels.length ? { available: true, reason: null, models: musicModels } : { available: false, reason: 'music_model_not_configured' };
+  return { ok: true, models, music, sourceAttachments: { available: false, reason: 'source_attachments_unsupported' }, video: { available: false, reason: 'video_provider_contract_unavailable' } };
 }
 
 /** One instance per server. SQLite claims are committed before any paid dispatch. */
 export class ForgeStore {
-  constructor({ databasePath, resolveAgent, resolveOperator, runtimeRoot, connections, resolveConfig, adapterFactory = createOpenAIGeneratedArtifactAdapter }) {
+  constructor({ databasePath, resolveAgent, resolveOperator, runtimeRoot, connections, resolveConfig, adapterFactory = createOpenAIGeneratedArtifactAdapter, googleAdapterFactory = createGoogleLyriaAdapter }) {
     this.db = new DatabaseSync(databasePath);
     this.db.exec(`PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS forge_jobs (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, idem TEXT NOT NULL, request TEXT NOT NULL, record TEXT NOT NULL);`);
     // Older databases used (agent_id, idem) as the key. Ownership is now operator-wide;
@@ -30,7 +35,7 @@ export class ForgeStore {
     if (/UNIQUE\s*\(\s*agent_id\s*,\s*idem/i.test(indexed)) {
       this.db.exec(`BEGIN IMMEDIATE; ALTER TABLE forge_jobs RENAME TO forge_jobs_legacy; CREATE TABLE forge_jobs (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, idem TEXT NOT NULL, request TEXT NOT NULL, record TEXT NOT NULL); INSERT INTO forge_jobs SELECT id,agent_id,idem,request,record FROM forge_jobs_legacy; DROP TABLE forge_jobs_legacy; COMMIT;`);
     }
-    this.resolveAgent = resolveAgent; this.resolveOperator = resolveOperator || (async () => ({ operatorId: 'default', agentWorkspaceRoot: runtimeRoot })); this.runtimeRoot = runtimeRoot; this.connections = connections; this.resolveConfig = resolveConfig; this.adapterFactory = adapterFactory;
+    this.resolveAgent = resolveAgent; this.googleAdapterFactory = googleAdapterFactory; this.resolveOperator = resolveOperator || (async () => ({ operatorId: 'default', agentWorkspaceRoot: runtimeRoot })); this.runtimeRoot = runtimeRoot; this.connections = connections; this.resolveConfig = resolveConfig; this.adapterFactory = adapterFactory;
     for (const row of this.db.prepare('SELECT id,agent_id,record FROM forge_jobs').all()) {
       const job = JSON.parse(row.record);
       // Preserve the historical source root permanently; new output is runtime-owned.
@@ -91,8 +96,10 @@ export class ForgeStore {
     try {
       job.status = 'running'; this.save(job);
       const config = await this.resolveConfig(job.connectionId, job.modelId);
-      if (!config || generatedArtifactKind(config) !== job.kind || !/^openai-/.test(config.api)) throw new Error('unavailable');
-      const result = await this.adapterFactory({ config }).complete({ prompt: job.prompt });
+      const google = job.kind === 'audio' && googleLyriaSupported(config);
+      if (!config || (!google && (generatedArtifactKind(config) !== job.kind || !/^openai-/.test(config.api)))) throw new Error('unavailable');
+      const adapter = google ? this.googleAdapterFactory({ config }) : this.adapterFactory({ config });
+      const result = await adapter.complete({ prompt: job.prompt });
       if (!result.ok || !result.outputArtifacts?.length) throw new Error('generation failed');
       for (const artifact of result.outputArtifacts) {
         const stored = await persistGeneratedArtifact({ agentWorkspaceRoot: this.runtimeRoot || owner.agentWorkspaceRoot, metadata: artifact, bytes: artifact.source?.bytes });

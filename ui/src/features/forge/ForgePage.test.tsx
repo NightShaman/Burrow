@@ -8,7 +8,7 @@ const fetchApiMock = vi.hoisted(() => vi.fn());
 vi.mock('../../app/api', () => ({ api: apiMock, fetchApi: fetchApiMock }));
 
 const agent = { id: 'agent-a', name: 'Smatchet' } as Agent;
-const catalog = { music: { available: false, reason: 'music_model_not_configured' }, models: [{ connectionId: 'c1', modelId: 'image-1', label: 'Image One', kind: 'image', available: true, controls: [] }, { connectionId: 'c2', modelId: 'video-1', label: 'Video One', kind: 'video', available: false, unavailableReason: 'video_disabled', controls: [] }], video: { available: false, reason: 'video_disabled' }, sourceAttachments: { available: false, reason: 'unsupported' } };
+const catalog = { music: { available: false, reason: 'music_model_not_configured', models: [] }, models: [{ connectionId: 'c1', modelId: 'image-1', label: 'Image One', kind: 'image', available: true, controls: [] }, { connectionId: 'c2', modelId: 'video-1', label: 'Video One', kind: 'video', available: false, unavailableReason: 'video_disabled', controls: [] }], video: { available: false, reason: 'video_disabled' }, sourceAttachments: { available: false, reason: 'unsupported' } };
 
 function renderForge(initialJobs: unknown[] = []) {
   apiMock.mockImplementation((path: string, init?: RequestInit) => {
@@ -38,6 +38,27 @@ describe('Forge workspace', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Music/ }));
     expect(screen.getByText('No music model configured')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Generate Music' })).toBeNull();
+  });
+
+
+  it('selects Lyria music models separately from Speech and submits music generation', async () => {
+    const musicCatalog = { ...catalog, music: { available: true, reason: null, models: [{ connectionId: 'g1', modelId: 'lyria', label: 'Lyria', kind: 'audio', available: true, controls: [] }] }, models: [...catalog.models, { connectionId: 's1', modelId: 'speech', label: 'Speech', kind: 'audio', available: true, controls: [] }] };
+    apiMock.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/forge/catalog') return Promise.resolve(musicCatalog);
+      if (init?.method === 'POST') return Promise.resolve({ job: { id: 'music-1', connectionId: 'g1', modelId: 'lyria', kind: 'music', prompt: 'a bright synth line', status: 'queued', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', artifacts: [] } });
+      if (path === '/api/forge/jobs') return Promise.resolve({ jobs: [] });
+      return Promise.resolve({});
+    });
+    render(<Forge selectedAgentId="agent-a" sessionId="session-1" />);
+    await screen.findByRole('option', { name: 'Image One' });
+    fireEvent.click(screen.getByRole('tab', { name: /Music/ }));
+    expect(screen.getByRole('option', { name: 'Lyria' })).toBeTruthy();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), { target: { value: 'a bright synth line' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Music' }));
+    await waitFor(() => expect(screen.getByText('Forge job accepted.')).toBeTruthy());
+    fireEvent.click(screen.getByRole('tab', { name: /Speech/ }));
+    expect(screen.queryByRole('option', { name: 'Lyria' })).toBeNull();
+    expect(screen.getByRole('option', { name: 'Speech' })).toBeTruthy();
   });
 
   it('submits prompt-only generation and shows accepted job', async () => {
