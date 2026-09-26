@@ -78,7 +78,8 @@ function subagentFinishToolSchema() {
 }
 
 function subagentToolSchemas({ includeFinish = true } = {}) {
-  const tools = nativeToolSchemas();
+  // Isolated child processes do not own the server Forge dispatcher.
+  const tools = nativeToolSchemas({ includeForge: false });
   return includeFinish ? [...tools, subagentFinishToolSchema()] : tools;
 }
 

@@ -76,6 +76,11 @@ function reviewAction(action = {}, { workspaceRoot = null, executionContext = nu
     return { index: action.index, tool: action.tool, status: blockers.length ? 'blocked' : 'allowed', risk, blockers: [...new Set(blockers)], warnings };
   }
 
+  if (['forge_catalog', 'forge_list_jobs', 'forge_inspect_job', 'forge_create_job', 'forge_attach_artifact'].includes(action.tool)) {
+    risk.push(action.tool === 'forge_create_job' ? 'paid-generation' : action.tool === 'forge_attach_artifact' ? 'conversation-attachment' : 'read-only');
+    return { index: action.index, tool: action.tool, status: blockers.length ? 'blocked' : 'allowed', risk, blockers: [...new Set(blockers)], warnings };
+  }
+
   if (action.tool === 'mcp_call') {
     const grant = grantedMcpTool({ connections: executionContext?.mcpConnections, grants: executionContext?.mcpTools, provider: action.mcpProvider, toolName: action.mcpToolName });
     risk.push('external-mcp');

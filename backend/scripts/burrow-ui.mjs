@@ -78,6 +78,7 @@ import { createExportRoutes } from './ui/export-routes.mjs';
 import { createTaskBoardRoutes } from './ui/task-board-routes.mjs';
 import { createWorkbenchRoutes } from './ui/workbench-routes.mjs';
 import { ForgeStore } from '../src/forge-store.mjs';
+import { configureForgeStoreFactory } from '../src/forge-agent-tools.mjs';
 import { createForgeRoutes } from './ui/forge-routes.mjs';
 import { createDreamRoutes } from './ui/dream-routes.mjs';
 import { createSettingsRoutes } from './ui/settings-routes.mjs';
@@ -2979,7 +2980,12 @@ const exportRoute = createExportRoutes({ readJsonBody, sendJson, exportCatalog, 
 const taskBoardRoute = createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundaryBody, withTaskBoard, taskStatuses: TASK_STATUSES, taskPriorities: TASK_PRIORITIES, executeBoardTask });
 const workbenchRoute = createWorkbenchRoutes({ readJsonBody, sendJson, selectedAgentRuntime, dataRootForAgent, listWorkItemSummaries, createWorkbenchItem, readWorkItem, runWorkbenchItemStep, continueWorkbenchItem, archiveWorkbenchItem, workbenchPlan, workbenchRun });
 let forgeStoreInstance;
-const forgeRoute = createForgeRoutes({ store: () => forgeStoreInstance ||= new ForgeStore({ databasePath: settingsDatabasePath(), resolveAgent: resolveAgentRuntime, resolveOperator: async () => ({ operatorId: 'operator', agentWorkspaceRoot: runtimeRoot }), runtimeRoot, connections: () => modelsStore().list(), resolveConfig: (connectionId, modelId) => resolveModelConfig({ settingsDb: settingsDatabasePath(), modelConnectionId: connectionId, model: modelId }) }), readJsonBody, sendJson, sendStaticFile });
+const forgeStoreFactory = () => {
+  if (!forgeStoreInstance) forgeStoreInstance = new ForgeStore({ databasePath: settingsDatabasePath(), resolveAgent: resolveAgentRuntime, resolveOperator: async () => ({ operatorId: 'operator', agentWorkspaceRoot: runtimeRoot }), runtimeRoot, connections: () => modelsStore().list(), resolveConfig: (connectionId, modelId) => resolveModelConfig({ settingsDb: settingsDatabasePath(), modelConnectionId: connectionId, model: modelId }) });
+  return forgeStoreInstance;
+};
+configureForgeStoreFactory(forgeStoreFactory);
+const forgeRoute = createForgeRoutes({ store: forgeStoreFactory, readJsonBody, sendJson, sendStaticFile });
 const dreamRoute = createDreamRoutes({ readJsonBody, sendJson, agentDreamSettings, agentDreamDiary, agentDreamMemoryConsolidate, agentDreamCycle });
 const skillStoreCall = (operation) => { const store = new SkillSettingsStore({ databasePath: settingsDatabasePath() }); try { return operation(store); } finally { store.close(); } };
 const skillApi = {

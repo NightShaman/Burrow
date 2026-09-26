@@ -19,6 +19,7 @@ import { reviewProposalActions } from './action-safety.mjs';
 import { invokeMcpTool, publicMcpError, publicMcpFailureDetail } from './mcporter-adapter.mjs';
 import { grantedMcpTool, mcpCapabilitiesReceipt, mcpProvidersReceipt } from './mcp-menu.mjs';
 import { activeModToolConnection } from './mod-agent-tools.mjs';
+import { executeForgeTool, forgeFailure } from './forge-agent-tools.mjs';
 import { credentialProducer, protectMcpOutput, protectToolOutput, resolveManagedProtectedBindings } from './protected-values.mjs';
 import { loadEffectiveSkillCatalog, loadSelectedSkillText, skillManifest, selectCatalogSkills } from './skill-catalog.mjs';
 import path from 'node:path';
@@ -274,6 +275,19 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
         skills: action.tool === 'list_skills' ? result.skills.map(({ id, name, description, lifecycle, available, owner, ownership }) => ({ id, name, description, lifecycle, available, owner, ownership: ownership ? { scope: ownership.scope, agentId: ownership.agentId } : null })) : undefined,
         error: result.error || null,
       });
+      continue;
+    }
+
+    if (action.tool && action.tool.startsWith('forge_')) {
+      let result;
+      try {
+        const args = action.tool === 'forge_create_job'
+          ? { connectionId: action.forgeConnectionId, modelId: action.forgeModelId, prompt: action.forgePrompt, idempotencyKey: action.forgeIdempotencyKey }
+          : action.tool === 'forge_inspect_job' ? { jobId: action.jobId }
+          : action.tool === 'forge_attach_artifact' ? { jobId: action.jobId, artifactId: action.artifactId } : {};
+        result = await executeForgeTool(action.tool, args, { agentId, sessionId: sessionId || executionContext?.sessionId, conversationId: resolvedConversationId });
+      } catch (error) { result = forgeFailure(error); }
+      toolResults.push({ tool: action.tool, ...result });
       continue;
     }
 

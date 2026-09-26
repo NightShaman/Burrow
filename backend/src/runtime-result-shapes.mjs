@@ -113,6 +113,12 @@ export function summarizeToolResults(toolResults = []) {
     } : {}),
     command: toolResult.command ? compactText(toolResult.command, RECEIPT_TEXT_LIMITS.command) : null,
     attachmentId: typeof toolResult.attachmentId === 'string' ? compactText(toolResult.attachmentId, 500) : undefined,
+    ...(toolResult.tool?.startsWith('forge_') ? {
+      jobId: toolResult.job?.id || undefined,
+      jobStatus: toolResult.job?.status || undefined,
+      replayed: typeof toolResult.replayed === 'boolean' ? toolResult.replayed : undefined,
+      attachedArtifactId: toolResult.attachment?.id || undefined,
+    } : {}),
     reason: toolResult.reason ? compactText(toolResult.reason, 500) : null,
     filePath: toolResult.filePath || null,
     path: toolResult.path || undefined,

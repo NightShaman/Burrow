@@ -1,6 +1,7 @@
 import path from 'node:path';
+import { forgeToolSchemas } from './forge-agent-tools.mjs';
 
-export const ALLOWED_TOOLS = new Set(['shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'attachment_view', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now', 'files_write', 'files_patch', 'spawn_subagent', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call', 'list_skills', 'load_skill']);
+export const ALLOWED_TOOLS = new Set(['shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'attachment_view', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now', 'files_write', 'files_patch', 'spawn_subagent', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call', 'forge_catalog', 'forge_create_job', 'forge_list_jobs', 'forge_inspect_job', 'forge_attach_artifact', 'list_skills', 'load_skill']);
 
 const TARGET_KIND_ALIASES = new Map([
   ['filesystem', 'filesystem'],
@@ -115,6 +116,11 @@ function normalizeAction(action, index) {
     mcpToolName: action?.mcpToolName ? String(action.mcpToolName).trim() : null,
     mcpArguments: action?.mcpArguments && typeof action.mcpArguments === 'object' && !Array.isArray(action.mcpArguments) ? action.mcpArguments : {},
     jobId: action?.jobId ? String(action.jobId).trim() : null,
+    artifactId: action?.artifactId ? String(action.artifactId).trim() : null,
+    forgeConnectionId: action?.connectionId ? String(action.connectionId).trim() : null,
+    forgeModelId: action?.modelId ? String(action.modelId).trim() : null,
+    forgePrompt: action?.prompt === undefined ? null : String(action.prompt),
+    forgeIdempotencyKey: action?.idempotencyKey ? String(action.idempotencyKey).trim() : null,
     jobName: action?.name ? String(action.name) : null,
     jobPrompt: action?.prompt ? String(action.prompt) : null,
     cron: action?.cron ? String(action.cron) : null,
@@ -211,8 +217,10 @@ export function parseActionProposal(text) {
 }
 
 // First-class spawn_subagent is the sole child-work surface.
-export function nativeToolSchemas({ includeMutations = true, includeWorkingMemory = false, includeBrainMemory = false, includeAgentProfile = false, includeAgentChat = false, includeTaskBoard = false, includeDelegateWork = false, includeMcpMenu = false } = {}) {
+export function nativeToolSchemas({ includeForge = true, includeMutations = true, includeWorkingMemory = false, includeBrainMemory = false, includeAgentProfile = false, includeAgentChat = false, includeTaskBoard = false, includeDelegateWork = false, includeMcpMenu = false } = {}) {
   const tools = [
+    ...(includeForge ? forgeToolSchemas : []),
+
     {
       type: 'function',
       function: {
@@ -427,7 +435,8 @@ export function nativeToolSchemas({ includeMutations = true, includeWorkingMemor
     },
 
   ];
-  return tools.filter((tool) => (includeMutations || !['files_write', 'files_edit', 'files_patch'].includes(tool.function?.name))
+  return tools.filter((tool) => (includeForge || !['forge_catalog','forge_create_job','forge_list_jobs','forge_inspect_job','forge_attach_artifact'].includes(tool.function?.name))
+    && (includeMutations || !['files_write', 'files_edit', 'files_patch'].includes(tool.function?.name))
     && (includeWorkingMemory || !['memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_read_handoff', 'session_write_handoff'].includes(tool.function?.name))
     && (includeTaskBoard || !['tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete'].includes(tool.function?.name))
     && (includeAgentProfile || !['agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now'].includes(tool.function?.name))
@@ -468,6 +477,10 @@ export function actionFromNativeToolCall(call = {}, index = 0) {
   if (tool === 'files_write') return normalizeNative({ tool, reason: args.reason, filePath: args.filePath, content: args.content });
   if (tool === 'files_patch') return normalizeNative({ tool, reason: args.reason, patch: args.patch });
   if (tool === 'agent_send_message') return normalizeNative({ tool, reason: args.reason, recipientAgentId: args.recipientAgentId, targetSessionId: args.targetSessionId, messageMode: args.messageMode, content: args.content });
+  if (tool === 'forge_catalog' || tool === 'forge_list_jobs') return normalizeNative({ tool, reason: args.reason });
+  if (tool === 'forge_create_job') return normalizeNative({ tool, reason: args.reason, connectionId: args.connectionId, modelId: args.modelId, prompt: args.prompt, idempotencyKey: args.idempotencyKey });
+  if (tool === 'forge_inspect_job') return normalizeNative({ tool, reason: args.reason, jobId: args.jobId });
+  if (tool === 'forge_attach_artifact') return normalizeNative({ tool, reason: args.reason, jobId: args.jobId, artifactId: args.artifactId });
   if (tool === 'mcp_providers') return normalizeNative({ tool, reason: args.reason });
   if (tool === 'mcp_capabilities') return normalizeNative({ tool, reason: args.reason, provider: args.provider, query: args.query, cursor: args.cursor, limit: args.limit });
   if (tool === 'mcp_call') return normalizeNative({ tool, reason: args.reason, provider: args.provider, mcpToolName: args.mcpToolName, mcpArguments: args.mcpArguments });
