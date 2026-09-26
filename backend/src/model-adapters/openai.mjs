@@ -90,6 +90,13 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
           ...(config.extra || {}),
           ...(streaming ? { stream: true } : {}),
         };
+    // ChatGPT's account/Codex backend is not the public Responses API.
+    // It rejects output limits, including explicit caller or extra values.
+    if (chatGptBackend) {
+      delete body.max_output_tokens;
+      delete body.max_tokens;
+      delete body.max_completion_tokens;
+    }
     const providerMessages = mode === 'openai-responses' ? body.input : body.messages;
     const stablePrefixMessage = Array.isArray(providerMessages)
       ? providerMessages.find((message) => message?.role === 'system') || providerMessages[0]

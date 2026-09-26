@@ -118,9 +118,12 @@ export async function resolveModelConfig(args = {}) {
     temperature,
     contextWindow: model.contextWindow ?? undefined,
     contextTokens: resolveEffectiveModelContextTokens({ contextTokens: model.contextTokens, contextWindow: model.contextWindow, provider: connection.provider, api: connection.apiType }) ?? undefined,
-    ...(args.max_tokens !== undefined || args.maxTokens !== undefined || args.output_tokens !== undefined || args.outputTokens !== undefined || model.outputTokens !== undefined || model.maxOutputTokens !== undefined || model.maxTokens !== undefined ? {
-      outputTokens: resolveEffectiveModelOutputTokens({ explicit: args.max_tokens ?? args.maxTokens ?? args.output_tokens ?? args.outputTokens, outputTokens: model.outputTokens, maxOutputTokens: model.maxOutputTokens, maxTokens: model.maxTokens }),
-      maxTokens: resolveEffectiveModelOutputTokens({ explicit: args.max_tokens ?? args.maxTokens ?? args.output_tokens ?? args.outputTokens, outputTokens: model.outputTokens, maxOutputTokens: model.maxOutputTokens, maxTokens: model.maxTokens }),
+    // Catalog capacity is metadata, not a requested generation limit.
+    ...(positiveInteger(model.outputTokens ?? model.maxOutputTokens) ? {
+      outputTokens: positiveInteger(model.outputTokens ?? model.maxOutputTokens),
+    } : {}),
+    ...(positiveInteger(args.max_tokens ?? args.maxTokens ?? args.output_tokens ?? args.outputTokens ?? model.maxTokens) ? {
+      maxTokens: positiveInteger(args.max_tokens ?? args.maxTokens ?? args.output_tokens ?? args.outputTokens ?? model.maxTokens),
     } : {}),
     reasoningEfforts: model.reasoningEfforts ?? undefined,
     defaultReasoningEffort: model.defaultReasoningEffort ?? undefined,

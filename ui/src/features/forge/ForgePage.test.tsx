@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Agent } from '../../app/types';
-import { Forge } from './ForgePage';
+import { composeMusicPrompt, Forge } from './ForgePage';
 
 const apiMock = vi.hoisted(() => vi.fn());
 const fetchApiMock = vi.hoisted(() => vi.fn());
@@ -53,12 +53,36 @@ describe('Forge workspace', () => {
     await screen.findByRole('option', { name: 'Image One' });
     fireEvent.click(screen.getByRole('tab', { name: /Music/ }));
     expect(screen.getByRole('option', { name: 'Lyria' })).toBeTruthy();
-    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), { target: { value: 'a bright synth line' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Musical direction' }), { target: { value: 'a bright synth line' } });
     fireEvent.click(screen.getByRole('button', { name: 'Generate Music' }));
     await waitFor(() => expect(screen.getByText('Forge job accepted.')).toBeTruthy());
     fireEvent.click(screen.getByRole('tab', { name: /Speech/ }));
     expect(screen.queryByRole('option', { name: 'Lyria' })).toBeNull();
     expect(screen.getByRole('option', { name: 'Speech' })).toBeTruthy();
+  });
+
+  it('composes optional music lyrics into the submitted prompt and keeps empty lyrics unchanged', async () => {
+    expect(composeMusicPrompt(' bright synth line ', '')).toBe('bright synth line');
+    expect(composeMusicPrompt('bright synth line', 'verse one')).toContain('--- Supplied lyrics');
+    const musicCatalog = { ...catalog, music: { available: true, reason: null, models: [{ connectionId: 'g1', modelId: 'lyria', label: 'Lyria', kind: 'audio', available: true, controls: [] }] } };
+    apiMock.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/forge/catalog') return Promise.resolve(musicCatalog);
+      if (init?.method === 'POST') return Promise.resolve({ job: { id: 'music-lyrics', connectionId: 'g1', modelId: 'lyria', kind: 'music', prompt: 'dreamy synth pop', status: 'queued', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', artifacts: [] } });
+      if (path === '/api/forge/jobs') return Promise.resolve({ jobs: [] });
+      return Promise.resolve({});
+    });
+    render(<Forge selectedAgentId="agent-a" sessionId="session-1" />);
+    await screen.findByRole('option', { name: 'Image One' });
+    fireEvent.click(screen.getByRole('tab', { name: /Music/ }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Musical direction' }), { target: { value: 'dreamy synth pop' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Lyrics' }), { target: { value: 'Shine through the night' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Music' }));
+    await waitFor(() => expect(screen.getByText('Forge job accepted.')).toBeTruthy());
+    const request = apiMock.mock.calls.find(([path, init]) => path === '/api/forge/jobs' && init?.method === 'POST');
+    expect(request).toBeTruthy();
+    const body = JSON.parse(request![1].body as string);
+    expect(body.prompt).toContain('Shine through the night');
+    expect(body.idempotencyKey).toBeTruthy();
   });
 
   it('submits prompt-only generation and shows accepted job', async () => {
