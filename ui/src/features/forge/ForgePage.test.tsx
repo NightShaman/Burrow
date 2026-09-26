@@ -23,6 +23,60 @@ function renderForge(initialJobs: unknown[] = []) {
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe('Forge workspace', () => {
+  it('restores per-mode selections, saves only explicit changes, and retains work across agents and remounts', async () => {
+    const second = { ...catalog.models[0], modelId: 'image-2', label: 'Image Two' };
+    const speech = { ...second, modelId: 'voice', kind: 'audio', label: 'Voice' };
+    let selections = { image: { connectionId: 'c1', modelId: 'image-2' }, speech: { connectionId: 'c1', modelId: 'voice' } };
+    let finishSave: (() => void) | undefined;
+    apiMock.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.endsWith('/catalog')) return Promise.resolve({ ...catalog, models: [...catalog.models, second, speech] });
+      if (path.endsWith('/selections')) {
+        if (init?.method === 'PUT') return new Promise((resolve) => { finishSave = () => {
+          const { mode, ...selection } = JSON.parse(init.body as string);
+          selections = { ...selections, [mode]: selection };
+          resolve({ selections });
+        }; });
+        return Promise.resolve({ selections });
+      }
+      return Promise.resolve({ jobs: [] });
+    });
+    const view = render(<Forge selectedAgentId="a" sessionId="s" />);
+    const select = await screen.findByRole('combobox', { name: 'Forge model' }) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe(JSON.stringify(['c1', 'image-2'])));
+    expect(apiMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), { target: { value: 'keep my draft' } });
+    fireEvent.change(select, { target: { value: JSON.stringify(['c1', 'image-1']) } });
+    expect(select.disabled).toBe(true);
+    fireEvent.click(screen.getByRole('tab', { name: /Speech/ }));
+    expect(select.value).toBe(JSON.stringify(['c1', 'voice']));
+    finishSave!();
+    await waitFor(() => expect(select.disabled).toBe(false));
+    view.rerender(<Forge selectedAgentId="b" sessionId="s2" />);
+    fireEvent.click(screen.getByRole('tab', { name: /Image/ }));
+    expect(select.value).toBe(JSON.stringify(['c1', 'image-1']));
+    expect((screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).value).toBe('keep my draft');
+    view.unmount();
+    render(<Forge selectedAgentId="b" sessionId="s2" />);
+    await waitFor(() => expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(JSON.stringify(['c1', 'image-1'])));
+  });
+
+  it('does not fall back from an unavailable saved model and reports failed saves', async () => {
+    apiMock.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.endsWith('/catalog')) return Promise.resolve(catalog);
+      if (path.endsWith('/selections')) return init?.method === 'PUT'
+        ? Promise.reject(new Error('offline'))
+        : Promise.resolve({ selections: { image: { connectionId: 'gone', modelId: 'missing' } } });
+      return Promise.resolve({ jobs: [] });
+    });
+    render(<Forge selectedAgentId="a" sessionId="s" />);
+    await screen.findByText(/Saved model unavailable/);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), { target: { value: 'castle' } });
+    expect((screen.getByRole('button', { name: 'Generate Image' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: JSON.stringify(['c1', 'image-1']) } });
+    await screen.findByText(/Could not save model selection: offline/);
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(JSON.stringify(['gone', 'missing']));
+  });
+
   it('keeps modes in the header and long history alongside the studio', async () => {
     const jobs = Array.from({ length: 30 }, (_, i) => ({ id: `layout-${i}`, kind: 'music', prompt: 'Long music direction '.repeat(20), status: 'succeeded', createdAt: '2026-09-26T12:00:00Z', artifacts: [] }));
     renderForge(jobs);

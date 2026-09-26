@@ -9,6 +9,10 @@ type Artifact = { id: string; kind: string; name: string; mimeType: string; size
 type Job = { id: string; connectionId: string; modelId: string; kind: 'image' | 'audio' | 'video' | 'music'; prompt: string; status: 'queued' | 'running' | 'succeeded' | 'failed' | 'interrupted'; createdAt: string; updatedAt: string; error?: string | null; artifacts: Artifact[] };
 
 const modeLabels = { image: 'Image', video: 'Video', audio: 'Speech', music: 'Music' } as const;
+type SelectionMode = 'image' | 'video' | 'speech' | 'music';
+type ModelSelection = { connectionId: string; modelId: string };
+type Selections = Partial<Record<SelectionMode, ModelSelection>>;
+const modelKey = (model: ModelSelection) => JSON.stringify([model.connectionId, model.modelId]);
 const newKey = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 export function composeMusicPrompt(direction: string, lyrics: string): string {
@@ -67,7 +71,10 @@ export function Forge({ selectedAgentId, sessionId }: { agents?: Agent[]; select
   const [models, setModels] = useState<ForgeModel[]>([]);
   const [catalog, setCatalog] = useState<ForgeCatalog | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [selectedModel, setSelectedModel] = useState('');
+  const [selections, setSelections] = useState<Selections>({});
+  const [selectionSaving, setSelectionSaving] = useState(false);
+  const selectionSavingRef = useRef(false);
+  const [selectionError, setSelectionError] = useState('');
   const [prompt, setPrompt] = useState('');
   const [lyrics, setLyrics] = useState('');
   const [loading, setLoading] = useState(true);
@@ -85,11 +92,13 @@ export function Forge({ selectedAgentId, sessionId }: { agents?: Agent[]; select
     const sequence = ++loadSequence.current;
     setLoading(true); setError('');
     try {
-      const [catalog, history] = await Promise.all([
+      const [catalog, history, saved] = await Promise.all([
         api<ForgeCatalog>('/api/forge/catalog'),
         api<{ jobs: Job[] }>('/api/forge/jobs'),
+        api<{ selections: Selections }>('/api/forge/selections'),
       ]);
       if (sequence !== loadSequence.current) return;
+      setSelections(saved.selections ?? {});
       setCatalog(catalog); setModels(catalog.models ?? []); setJobs(history.jobs ?? []);
     } catch (e) {
       if (sequence === loadSequence.current) setError(`Could not load Forge: ${(e as Error).message}`);
@@ -97,7 +106,7 @@ export function Forge({ selectedAgentId, sessionId }: { agents?: Agent[]; select
       if (sequence === loadSequence.current) setLoading(false);
     }
   };
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); return () => { ++loadSequence.current; }; }, []);
   const modeModels = useMemo(() => {
     if (mode === 'music') return catalog?.music?.models ?? [];
     if (mode === 'audio') {
@@ -109,7 +118,33 @@ export function Forge({ selectedAgentId, sessionId }: { agents?: Agent[]; select
   const availableModels = useMemo(() => modeModels.filter((m) => m.available), [modeModels]);
   const unavailableModels = useMemo(() => modeModels.filter((m) => !m.available), [modeModels]);
   const modeUnavailableReason = mode === 'video' ? catalog?.video?.reason : mode === 'music' ? catalog?.music?.reason : unavailableModels[0]?.unavailableReason;
-  useEffect(() => { if (!availableModels.some((m) => `${m.connectionId}:${m.modelId}` === selectedModel)) setSelectedModel(availableModels[0] ? `${availableModels[0].connectionId}:${availableModels[0].modelId}` : ''); }, [availableModels, selectedModel]);
+  const selectionMode: SelectionMode = mode === 'audio' ? 'speech' : mode;
+  const savedSelection = selections[selectionMode];
+  const selectedModel = savedSelection ? modelKey(savedSelection) : availableModels[0] ? modelKey(availableModels[0]) : '';
+  const selectedAvailable = availableModels.some((model) => modelKey(model) === selectedModel);
+  const savedUnavailableReason = savedSelection && !selectedAvailable
+    ? modeModels.find((model) => modelKey(model) === selectedModel)?.unavailableReason ?? 'This saved model is no longer in the catalog. Choose another model.'
+    : '';
+  const saveSelection = async (key: string) => {
+    if (loading || selectionSavingRef.current) return;
+    const model = availableModels.find((item) => modelKey(item) === key);
+    if (!model) return;
+    selectionSavingRef.current = true;
+    setSelectionSaving(true); setSelectionError('');
+    const sequence = loadSequence.current;
+    try {
+      const result = await api<{ selections: Selections }>('/api/forge/selections', {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mode: selectionMode, connectionId: model.connectionId, modelId: model.modelId }),
+      });
+      if (sequence === loadSequence.current) setSelections(result.selections);
+    } catch (e) {
+      if (sequence === loadSequence.current) setSelectionError(`Could not save model selection: ${(e as Error).message}. Your previous selection is unchanged; choose again to retry.`);
+    } finally {
+      selectionSavingRef.current = false;
+      if (sequence === loadSequence.current) setSelectionSaving(false);
+    }
+  };
   useEffect(() => {
     const active = jobs.some((job) => job.status === 'queued' || job.status === 'running');
     if (!active) return;
@@ -125,9 +160,9 @@ export function Forge({ selectedAgentId, sessionId }: { agents?: Agent[]; select
   }, [jobs]);
   const selectedJob = jobs.find((job) => job.id === selectedJobId) ?? jobs[0];
   const submit = async () => {
-    const model = availableModels.find((item) => `${item.connectionId}:${item.modelId}` === selectedModel);
+    const model = availableModels.find((item) => modelKey(item) === selectedModel);
     const submittedPrompt = mode === 'music' ? composeMusicPrompt(prompt, lyrics) : prompt.trim();
-    if (!model || !submittedPrompt) return;
+    if (loading || selectionSavingRef.current || !model || !submittedPrompt) return;
     setBusy(true); setError(''); setNotice('');
     try {
       const requestSignature = `${model.connectionId}\u0000${model.modelId}\u0000${submittedPrompt}`;
@@ -147,9 +182,9 @@ export function Forge({ selectedAgentId, sessionId }: { agents?: Agent[]; select
   return <main className="forge-page">
     <header className="forge-heading"><div><h1>The Phantasm Forge</h1><p>Manufacture sights, sounds, and moving lies.</p></div>
     <div className="forge-modes" role="tablist" aria-label="Forge modes">{(['image', 'video', 'audio', 'music'] as const).map((item) => <button key={item} role="tab" aria-selected={mode === item} className={mode === item ? 'active' : ''} onClick={() => setMode(item)}>{item === 'image' ? '▧' : item === 'video' ? '◉' : item === 'audio' ? '◌' : '♫'}<span>{modeLabels[item]}</span></button>)}</div></header>
-    <div className="forge-grid"><section className="forge-studio"><div className="forge-panel-head"><div><span className="eyebrow">CREATE</span><h2>{modeLabels[mode]} generation</h2></div><span className="forge-badge">{availableModels.length} model{availableModels.length === 1 ? '' : 's'}</span></div><label className="forge-field"><span>Model</span><select aria-label="Forge model" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} disabled={!availableModels.length}>{availableModels.map((model) => <option key={`${model.connectionId}:${model.modelId}`} value={`${model.connectionId}:${model.modelId}`}>{model.label}</option>)}</select></label><label className="forge-field forge-prompt"><span>{mode === 'music' ? 'Musical direction' : 'Prompt'}</span><textarea aria-label={mode === 'audio' ? 'Script' : mode === 'music' ? 'Musical direction' : 'Prompt'} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={mode === 'audio' ? 'Enter the words to speak…' : mode === 'music' ? 'Describe the music to create…' : `Describe the ${mode} to manufacture…`} /><small>{mode === 'audio' ? 'Verbatim script' : mode === 'music' ? 'Style, mood, tempo, and arrangement guidance' : 'Prompt'}</small></label>{mode === 'music' && <label className="forge-field forge-prompt"><span>Lyrics <em>(optional)</em></span><textarea aria-label="Lyrics" value={lyrics} onChange={(event) => setLyrics(event.target.value)} placeholder="Add words for the song…" /><small>Lyrics are supplied as guidance and are not guaranteed verbatim.</small></label>}<div className="forge-actions">{(mode !== 'music' || availableModels.length > 0) && <button className="forge-primary" type="button" onClick={() => void submit()} disabled={busy || !selectedModel || !prompt.trim()}>{busy ? 'Starting…' : `Generate ${modeLabels[mode]}`}</button>}{notice && <span className="forge-notice" role="status">{notice}</span>}</div>{error && <p className="forge-error" role="alert">{error}</p>}{!loading && !availableModels.length && <div className="forge-empty"><strong>{mode === 'video' ? 'Video generation is unavailable' : mode === 'music' ? 'No music model configured' : `No ${modeLabels[mode].toLowerCase()} models available`}</strong><span>{modeUnavailableReason ?? (mode === 'video' ? 'This release does not have a video provider contract.' : mode === 'music' ? 'Music generation is not configured.' : 'Configure a compatible model connection to use this mode.')}</span></div>}
+    <div className="forge-grid"><section className="forge-studio"><div className="forge-panel-head"><div><span className="eyebrow">CREATE</span><h2>{modeLabels[mode]} generation</h2></div><span className="forge-badge">{availableModels.length} model{availableModels.length === 1 ? '' : 's'}</span></div><label className="forge-field"><span>Model</span><select aria-label="Forge model" value={selectedModel} onChange={(event) => void saveSelection(event.target.value)} disabled={loading || selectionSaving || !availableModels.length}>{savedSelection && !selectedAvailable && <option value={selectedModel}>{savedSelection.modelId} (unavailable)</option>}{availableModels.map((model) => <option key={`${model.connectionId}:${model.modelId}`} value={modelKey(model)}>{model.label}</option>)}</select></label>{savedUnavailableReason && <p className="forge-error" role="alert">Saved model unavailable: {savedUnavailableReason}</p>}{selectionSaving && <p role="status">Saving model selection…</p>}{selectionError && <p className="forge-error" role="alert">{selectionError}</p>}<label className="forge-field forge-prompt"><span>{mode === 'music' ? 'Musical direction' : 'Prompt'}</span><textarea aria-label={mode === 'audio' ? 'Script' : mode === 'music' ? 'Musical direction' : 'Prompt'} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={mode === 'audio' ? 'Enter the words to speak…' : mode === 'music' ? 'Describe the music to create…' : `Describe the ${mode} to manufacture…`} /><small>{mode === 'audio' ? 'Verbatim script' : mode === 'music' ? 'Style, mood, tempo, and arrangement guidance' : 'Prompt'}</small></label>{mode === 'music' && <label className="forge-field forge-prompt"><span>Lyrics <em>(optional)</em></span><textarea aria-label="Lyrics" value={lyrics} onChange={(event) => setLyrics(event.target.value)} placeholder="Add words for the song…" /><small>Lyrics are supplied as guidance and are not guaranteed verbatim.</small></label>}<div className="forge-actions">{(mode !== 'music' || availableModels.length > 0) && <button className="forge-primary" type="button" onClick={() => void submit()} disabled={loading || selectionSaving || busy || !selectedAvailable || !prompt.trim()}>{busy ? 'Starting…' : `Generate ${modeLabels[mode]}`}</button>}{notice && <span className="forge-notice" role="status">{notice}</span>}</div>{error && <p className="forge-error" role="alert">{error}</p>}{!loading && !availableModels.length && <div className="forge-empty"><strong>{mode === 'video' ? 'Video generation is unavailable' : mode === 'music' ? 'No music model configured' : `No ${modeLabels[mode].toLowerCase()} models available`}</strong><span>{modeUnavailableReason ?? (mode === 'video' ? 'This release does not have a video provider contract.' : mode === 'music' ? 'Music generation is not configured.' : 'Configure a compatible model connection to use this mode.')}</span></div>}
       {mode === 'video' && catalog?.sourceAttachments && <p className="forge-capability-note">Source attachments: unavailable — {catalog.sourceAttachments.reason ?? 'not supported by this release.'}</p>}</section><section className="forge-preview"><div className="forge-panel-head"><div><span className="eyebrow">OUTPUT</span><h2>{selectedJob ? modeLabels[selectedJob.kind] : 'Preview'}</h2></div>{selectedJob && <span className={`forge-status ${selectedJob.status}`}>{selectedJob.status}</span>}</div>{selectedJob?.artifacts?.length ? <div className="forge-artifacts">{selectedJob.artifacts.map((artifact) => <article className="forge-artifact" key={artifact.id}>{artifact.previewUrl ? <ArtifactMedia artifact={artifact} /> : <div className="forge-file">{artifact.name}</div>}<footer><strong>{artifact.name}</strong><div>{artifact.downloadUrl && <ArtifactDownload artifact={artifact} />}<button type="button" onClick={() => void attach(artifact)} disabled={!sessionId}>Attach to conversation</button></div></footer></article>)}</div> : <div className="forge-placeholder"><span aria-hidden="true">✦</span><strong>{selectedJob ? selectedJob.status === 'failed' ? 'Generation failed' : selectedJob.status === 'interrupted' ? 'Generation interrupted' : 'Preparing your artifact…' : 'Your creation will appear here'}</strong><small>{selectedJob?.error ?? 'Forge uses the full workspace for the work, and keeps the result close at hand.'}</small></div>}</section>
-    <section className="forge-history"><div className="forge-panel-head"><div><span className="eyebrow">HISTORY</span><h2>Recent creations</h2></div><button type="button" onClick={() => void load()}>Refresh</button></div>{jobs.length ? <div className="forge-jobs">{jobs.map((job) => <button type="button" key={job.id} className={selectedJob?.id === job.id ? 'selected' : ''} onClick={() => setSelectedJobId(job.id)}><span className={`forge-status ${job.status}`}>{job.status}</span><strong>{modeLabels[job.kind]}</strong><span>{job.prompt}</span><time>{new Date(job.createdAt).toLocaleString()}</time></button>)}</div> : <p className="forge-muted">No creations yet.</p>}</section>
+    <section className="forge-history"><div className="forge-panel-head"><div><span className="eyebrow">HISTORY</span><h2>Recent creations</h2></div><button type="button" disabled={loading || selectionSaving} onClick={() => void load()}>Refresh</button></div>{jobs.length ? <div className="forge-jobs">{jobs.map((job) => <button type="button" key={job.id} className={selectedJob?.id === job.id ? 'selected' : ''} onClick={() => setSelectedJobId(job.id)}><span className={`forge-status ${job.status}`}>{job.status}</span><strong>{modeLabels[job.kind]}</strong><span>{job.prompt}</span><time>{new Date(job.createdAt).toLocaleString()}</time></button>)}</div> : <p className="forge-muted">No creations yet.</p>}</section>
     </div>
   </main>;
 }
