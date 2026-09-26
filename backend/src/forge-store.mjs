@@ -16,56 +16,73 @@ export function forgeCatalog(connections) {
     const available = kind !== 'video' && /^openai-/.test(c.apiType);
     return [{ connectionId: c.id, modelId: m.id, label: m.name || m.id, kind, available, unavailableReason: available ? null : kind === 'video' ? 'video_provider_contract_unavailable' : 'provider_contract_unavailable', controls: [] }];
   }));
-  return { ok: true, models, sourceAttachments: { available: false, reason: 'source_attachments_unsupported' }, video: { available: false, reason: 'video_provider_contract_unavailable' } };
+  return { ok: true, models, music: { available: false, reason: 'music_model_not_configured' }, sourceAttachments: { available: false, reason: 'source_attachments_unsupported' }, video: { available: false, reason: 'video_provider_contract_unavailable' } };
 }
 
 /** One instance per server. SQLite claims are committed before any paid dispatch. */
 export class ForgeStore {
-  constructor({ databasePath, resolveAgent, connections, resolveConfig, adapterFactory = createOpenAIGeneratedArtifactAdapter }) {
+  constructor({ databasePath, resolveAgent, resolveOperator, runtimeRoot, connections, resolveConfig, adapterFactory = createOpenAIGeneratedArtifactAdapter }) {
     this.db = new DatabaseSync(databasePath);
-    this.db.exec(`PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS forge_jobs (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, idem TEXT NOT NULL, request TEXT NOT NULL, record TEXT NOT NULL, UNIQUE(agent_id,idem));`);
-    this.resolveAgent = resolveAgent; this.connections = connections; this.resolveConfig = resolveConfig; this.adapterFactory = adapterFactory;
-    for (const row of this.db.prepare('SELECT record FROM forge_jobs').all()) {
+    this.db.exec(`PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS forge_jobs (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, idem TEXT NOT NULL, request TEXT NOT NULL, record TEXT NOT NULL);`);
+    // Older databases used (agent_id, idem) as the key. Ownership is now operator-wide;
+    // remove that constraint so duplicate historical keys remain readable during migration.
+    const indexed = this.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='forge_jobs'").get()?.sql || '';
+    if (/UNIQUE\s*\(\s*agent_id\s*,\s*idem/i.test(indexed)) {
+      this.db.exec(`BEGIN IMMEDIATE; ALTER TABLE forge_jobs RENAME TO forge_jobs_legacy; CREATE TABLE forge_jobs (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, idem TEXT NOT NULL, request TEXT NOT NULL, record TEXT NOT NULL); INSERT INTO forge_jobs SELECT id,agent_id,idem,request,record FROM forge_jobs_legacy; DROP TABLE forge_jobs_legacy; COMMIT;`);
+    }
+    this.resolveAgent = resolveAgent; this.resolveOperator = resolveOperator || (async () => ({ operatorId: 'default', agentWorkspaceRoot: runtimeRoot })); this.runtimeRoot = runtimeRoot; this.connections = connections; this.resolveConfig = resolveConfig; this.adapterFactory = adapterFactory;
+    for (const row of this.db.prepare('SELECT id,agent_id,record FROM forge_jobs').all()) {
       const job = JSON.parse(row.record);
+      // Preserve the historical source root permanently; new output is runtime-owned.
+      if (row.agent_id !== '__operator__' || job.agentId) {
+        if (!job.legacySourceAgentId) job.legacySourceAgentId = job.agentId || row.agent_id;
+        delete job.agentId;
+        delete job.legacyAgentId;
+        this.db.prepare("UPDATE forge_jobs SET agent_id='__operator__', record=? WHERE id=?").run(JSON.stringify(job), row.id);
+      }
       if (['queued', 'running'].includes(job.status)) { job.status = 'interrupted'; job.error = 'generation_interrupted'; this.save(job); }
     }
     this.pending = new Set();
   }
   save(job) { job.updatedAt = now(); this.db.prepare('UPDATE forge_jobs SET record=? WHERE id=?').run(JSON.stringify(job), job.id); }
   catalog() { return forgeCatalog(this.connections()); }
-  async owner(agentId) {
-    if (typeof agentId !== 'string' || !agentId.trim()) fail('agent_id_required');
-    const owner = await this.resolveAgent(agentId);
-    if (!owner || owner.agentId !== agentId) fail('forge_job_not_found', 404);
+  async owner() {
+    const owner = await this.resolveOperator();
+    if (!owner || !owner.agentWorkspaceRoot) fail('forge_owner_unavailable', 503);
     return owner;
   }
   public(job) {
-    return { ...job, artifacts: job.artifacts.map(({ storageReference, ...a }) => {
-      const url = `/api/forge/jobs/${job.id}/artifacts/${a.id}?agentId=${encodeURIComponent(job.agentId)}`;
-      return { ...a, previewUrl: url, downloadUrl: `${url}&download=1` };
+    const { storageReference, agentId, legacyAgentId, legacySourceAgentId, ...safeJob } = job;
+    return { ...safeJob, artifacts: job.artifacts.map(({ storageReference: ref, ...a }) => {
+      const url = `/api/forge/jobs/${job.id}/artifacts/${a.id}`;
+      return { ...a, previewUrl: url, downloadUrl: `${url}?download=1` };
     }) };
   }
-  get(agentId, id) {
-    const row = this.db.prepare('SELECT record FROM forge_jobs WHERE id=? AND agent_id=?').get(id, agentId);
+  get(id) {
+    const row = this.db.prepare('SELECT record FROM forge_jobs WHERE id=?').get(id);
     if (!row) fail('forge_job_not_found', 404);
-    return JSON.parse(row.record);
+    const job = JSON.parse(row.record);
+    if (job.agentId && !job.legacySourceAgentId) job.legacySourceAgentId = job.agentId;
+    return job;
   }
-  async list(agentId) { await this.owner(agentId); return this.db.prepare('SELECT record FROM forge_jobs WHERE agent_id=? ORDER BY rowid DESC').all(agentId).map(r => this.public(JSON.parse(r.record))); }
+  async list() { await this.owner(); return this.db.prepare('SELECT record FROM forge_jobs ORDER BY rowid DESC').all().map(r => this.public(JSON.parse(r.record))); }
   async create(body) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) fail('forge_request_invalid');
     if ('attachments' in body || 'sourceAttachments' in body) fail('source_attachments_unsupported');
     if ('options' in body) fail('generation_options_unsupported');
-    const keys = ['agentId', 'connectionId', 'modelId', 'prompt', 'idempotencyKey'];
+    const keys = ['connectionId', 'modelId', 'prompt', 'idempotencyKey'];
     if (Object.keys(body).some(k => !keys.includes(k)) || keys.some(k => typeof body[k] !== 'string' || !body[k].trim())) fail('forge_request_invalid');
-    const owner = await this.owner(body.agentId);
+    const owner = await this.owner();
     const request = JSON.stringify(keys.map(k => body[k]));
-    const existing = this.db.prepare('SELECT request, record FROM forge_jobs WHERE agent_id=? AND idem=?').get(body.agentId, body.idempotencyKey);
+    // Migration can leave duplicate historical keys. A matching request is replayable;
+    // any differing request conflicts, regardless of which legacy agent supplied it.
+    const existingRows = this.db.prepare('SELECT request, record FROM forge_jobs WHERE idem=? ORDER BY rowid').all(body.idempotencyKey);
+    const existing = existingRows.find(row => row.request === request) || existingRows[0];
     if (existing) { if (existing.request !== request) fail('idempotency_conflict', 409); return { job: this.public(JSON.parse(existing.record)), replayed: true }; }
     const model = this.catalog().models.find(m => m.connectionId === body.connectionId && m.modelId === body.modelId && m.available);
     if (!model) fail('forge_model_unavailable', 409);
     const job = { id: randomUUID(), ...body, kind: model.kind, status: 'queued', createdAt: now(), updatedAt: now(), error: null, artifacts: [] };
-    // No await between uniqueness check and insert; concurrent requests cannot both dispatch.
-    this.db.prepare('INSERT INTO forge_jobs VALUES (?,?,?,?,?)').run(job.id, job.agentId, job.idempotencyKey, request, JSON.stringify(job));
+    this.db.prepare('INSERT INTO forge_jobs VALUES (?,?,?,?,?)').run(job.id, '__operator__', job.idempotencyKey, request, JSON.stringify(job));
     const task = new Promise(resolve => setImmediate(resolve)).then(() => this.run(job, owner)).finally(() => this.pending.delete(task));
     this.pending.add(task);
     return { job: this.public(job), replayed: false };
@@ -78,7 +95,7 @@ export class ForgeStore {
       const result = await this.adapterFactory({ config }).complete({ prompt: job.prompt });
       if (!result.ok || !result.outputArtifacts?.length) throw new Error('generation failed');
       for (const artifact of result.outputArtifacts) {
-        const stored = await persistGeneratedArtifact({ agentWorkspaceRoot: owner.agentWorkspaceRoot, metadata: artifact, bytes: artifact.source?.bytes });
+        const stored = await persistGeneratedArtifact({ agentWorkspaceRoot: this.runtimeRoot || owner.agentWorkspaceRoot, metadata: artifact, bytes: artifact.source?.bytes });
         job.artifacts.push({ id: randomUUID(), kind: stored.kind, name: stored.name, mimeType: stored.mimeType, sizeBytes: stored.sizeBytes, storageReference: stored.storageReference });
       }
       job.status = 'succeeded'; this.save(job);
@@ -87,7 +104,7 @@ export class ForgeStore {
       const retained = [];
       for (const artifact of job.artifacts) {
         try {
-          const resolved = await resolveGeneratedArtifact({ agentWorkspaceRoot: owner.agentWorkspaceRoot, storageReference: artifact.storageReference });
+          const resolved = await resolveGeneratedArtifact({ agentWorkspaceRoot: job.legacySourceAgentId ? (await this.resolveAgent(job.legacySourceAgentId)).agentWorkspaceRoot : (this.runtimeRoot || owner.agentWorkspaceRoot), storageReference: artifact.storageReference });
           if (resolved) await fs.rm(resolved.filePath, { force: true });
         } catch {
           // Keep a durable reference if the filesystem refuses cleanup, rather than orphaning it.
@@ -98,19 +115,22 @@ export class ForgeStore {
       job.status = 'failed'; job.error = 'generation_failed'; this.save(job);
     }
   }
-  async artifact(agentId, id, artifactId) {
-    const owner = await this.owner(agentId); const job = this.get(agentId, id);
+  async artifact(id, artifactId) {
+    const job = this.get(id); const owner = job.legacySourceAgentId ? await this.resolveAgent(job.legacySourceAgentId) : await this.owner();
+    if (!owner?.agentWorkspaceRoot) fail('forge_artifact_not_found', 404);
     const artifact = job.artifacts.find(a => a.id === artifactId);
     if (!artifact) fail('forge_artifact_not_found', 404);
-    const resolved = await resolveGeneratedArtifact({ agentWorkspaceRoot: owner.agentWorkspaceRoot, storageReference: artifact.storageReference });
+    const resolved = await resolveGeneratedArtifact({ agentWorkspaceRoot: job.legacySourceAgentId ? (await this.resolveAgent(job.legacySourceAgentId)).agentWorkspaceRoot : (this.runtimeRoot || owner.agentWorkspaceRoot), storageReference: artifact.storageReference });
     if (!resolved) fail('forge_artifact_not_found', 404);
     return { owner, job, artifact, resolved };
   }
   async attach(id, body) {
     if (!body || Object.keys(body).some(k => !['agentId','sessionId','artifactId'].includes(k)) || ['agentId','sessionId','artifactId'].some(k => typeof body[k] !== 'string' || !body[k]) || (!/^[A-Za-z0-9._-]{1,120}$/.test(body.sessionId) || ['.', '..'].includes(body.sessionId) || body.sessionId.startsWith('-') || body.sessionId.endsWith('-'))) fail('forge_request_invalid');
-    const { owner, job, artifact, resolved } = await this.artifact(body.agentId, id, body.artifactId);
+    const destination = await this.resolveAgent(body.agentId);
+    if (!destination?.agentWorkspaceRoot || destination.agentId !== body.agentId) fail('session_not_found', 404);
+    const { job, artifact, resolved } = await this.artifact(id, body.artifactId);
     if (job.status !== 'succeeded') fail('forge_job_not_succeeded', 409);
-    const rootDir = owner.agentWorkspaceRoot;
+    const rootDir = destination.agentWorkspaceRoot;
     if (!await readSessionMetadata({ rootDir, sessionId: body.sessionId })) fail('session_not_found', 404);
     const entry = await appendSessionTurnIfAbsent({ rootDir, sessionId: body.sessionId, role: 'user', content: '',
       // Persist only after the session's locked idempotency check; attachment storage is timestamp-based.
