@@ -97,7 +97,7 @@ describe('Forge workspace', () => {
 
   it('uses authenticated transport for artifact previews and downloads', async () => {
     const job = { id: 'job-2', connectionId: 'c1', modelId: 'image-1', kind: 'image', prompt: 'castle', status: 'succeeded', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', artifacts: [{ id: 'artifact-1', kind: 'image', name: 'castle.png', mimeType: 'image/png', sizeBytes: 10, previewUrl: '/protected/preview', downloadUrl: '/protected/download' }] };
-    fetchApiMock.mockResolvedValue(new Response(new Blob(['x'], { type: 'image/png' }), { status: 200 }));
+    fetchApiMock.mockResolvedValue(new Response(new Uint8Array([120]), { status: 200, headers: { 'content-type': 'image/png' } }));
     renderForge([job]);
     await screen.findByText('castle.png');
     await waitFor(() => expect(fetchApiMock).toHaveBeenCalled());
