@@ -77,6 +77,8 @@ import { buildExport, decodeExport, exportCatalog, normalizeImportRequest } from
 import { createExportRoutes } from './ui/export-routes.mjs';
 import { createTaskBoardRoutes } from './ui/task-board-routes.mjs';
 import { createWorkbenchRoutes } from './ui/workbench-routes.mjs';
+import { ForgeStore } from '../src/forge-store.mjs';
+import { createForgeRoutes } from './ui/forge-routes.mjs';
 import { createDreamRoutes } from './ui/dream-routes.mjs';
 import { createSettingsRoutes } from './ui/settings-routes.mjs';
 import { createAgentRoutes } from './ui/agent-routes.mjs';
@@ -2976,6 +2978,8 @@ async function currentActiveChatRunSummaries({ agentId = null, sessionId = null 
 const exportRoute = createExportRoutes({ readJsonBody, sendJson, exportCatalog, normalizeImportRequest, decodeExport, buildExport, exportSnapshot, importPreview, applyImport });
 const taskBoardRoute = createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundaryBody, withTaskBoard, taskStatuses: TASK_STATUSES, taskPriorities: TASK_PRIORITIES, executeBoardTask });
 const workbenchRoute = createWorkbenchRoutes({ readJsonBody, sendJson, selectedAgentRuntime, dataRootForAgent, listWorkItemSummaries, createWorkbenchItem, readWorkItem, runWorkbenchItemStep, continueWorkbenchItem, archiveWorkbenchItem, workbenchPlan, workbenchRun });
+let forgeStoreInstance;
+const forgeRoute = createForgeRoutes({ store: () => forgeStoreInstance ||= new ForgeStore({ databasePath: settingsDatabasePath(), resolveAgent: resolveAgentRuntime, connections: () => modelsStore().list(), resolveConfig: (connectionId, modelId) => resolveModelConfig({ settingsDb: settingsDatabasePath(), modelConnectionId: connectionId, model: modelId }) }), readJsonBody, sendJson, sendStaticFile });
 const dreamRoute = createDreamRoutes({ readJsonBody, sendJson, agentDreamSettings, agentDreamDiary, agentDreamMemoryConsolidate, agentDreamCycle });
 const skillStoreCall = (operation) => { const store = new SkillSettingsStore({ databasePath: settingsDatabasePath() }); try { return operation(store); } finally { store.close(); } };
 const skillApi = {
@@ -3063,6 +3067,7 @@ const server = createServer(async (req, res) => {
     if (await authRoute({ req, res, url, origin })) return;
     if (req.method === 'GET' && url.pathname === '/health') return sendJson(res, 200, await runtimeStatus(url.searchParams.get('agentId')));
     if (!(await authorizeRequest(req, res, url))) return;
+    if (await forgeRoute({ req, res, url })) return;
     if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {
       if (await serveV18Asset(url, res)) return;
       return sendJson(res, 404, { ok: false, error: 'ui_artifact_not_found' });

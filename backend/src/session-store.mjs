@@ -485,7 +485,7 @@ export async function appendSessionEntryIfAbsent({ idempotencyKey, ...args } = {
   if (!rootDir || !args.sessionId) throw new Error(!rootDir ? 'rootDir is required' : 'sessionId is required');
   await fs.mkdir(sessionDir(rootDir, resolvedSessionId), { recursive: true });
   return withSessionAppendLock(rootDir, resolvedSessionId, async () => {
-    const lines = await readTailJsonLines(sessionFile(rootDir, resolvedSessionId), 2_000).catch((error) => error?.code === 'ENOENT' ? [] : Promise.reject(error));
+    const lines = (await fs.readFile(sessionFile(rootDir, resolvedSessionId), 'utf8').catch((error) => error?.code === 'ENOENT' ? '' : Promise.reject(error))).split('\n');
     for (const line of lines) { try { const found = normalizeTranscriptEntry(JSON.parse(line), { sessionId: resolvedSessionId }); if (found?.metadata?.idempotencyKey === key) return { ...found, idempotent: true }; } catch {} }
     if (args.type === 'message' && !args.role) throw new Error('role is required for message entries');
     const resolvedType = args.type || 'message';
@@ -494,7 +494,7 @@ export async function appendSessionEntryIfAbsent({ idempotencyKey, ...args } = {
       ? truncateText(args.content || '', { maxChars: resolvedMaxContentChars })
       : redactAndTruncateText(args.content || '', { maxChars: resolvedMaxContentChars });
     const resolvedVisibility = args.visibility || defaultVisibility({ type: resolvedType, role: args.role || null });
-    const entry = normalizeTranscriptEntry({ id: randomUUID(), parentId: args.parentId || null, ts: (args.clock || nowIso)(), sessionId: resolvedSessionId, type: String(args.type || 'message'), role: args.role == null ? null : String(args.role), content: contentEnvelope.text, contentTruncated: contentEnvelope.truncated, runId: args.runId || null, traceDir: args.traceDir || null, visibility: resolvedVisibility, entersPrompt: args.entersPrompt ?? defaultEntersPrompt({ type: args.type || 'message', role: args.role || null, visibility: resolvedVisibility }), metadata: { ...(args.metadata || {}), idempotencyKey: key } }, { sessionId: resolvedSessionId });
+    const entry = normalizeTranscriptEntry({ id: randomUUID(), parentId: args.parentId || null, ts: (args.clock || nowIso)(), sessionId: resolvedSessionId, type: String(args.type || 'message'), role: args.role == null ? null : String(args.role), content: contentEnvelope.text, contentTruncated: contentEnvelope.truncated, runId: args.runId || null, traceDir: args.traceDir || null, visibility: resolvedVisibility, entersPrompt: args.entersPrompt ?? defaultEntersPrompt({ type: args.type || 'message', role: args.role || null, visibility: resolvedVisibility }), metadata: { ...((typeof args.metadata === 'function' ? await args.metadata() : args.metadata) || {}), idempotencyKey: key } }, { sessionId: resolvedSessionId });
     await fs.appendFile(sessionFile(rootDir, resolvedSessionId), jsonLine(entry), 'utf8'); await updateSessionMetadataAfterAppend({ rootDir, sessionId: resolvedSessionId, entry }); return { ...entry, idempotent: false };
   });
 }

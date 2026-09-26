@@ -223,6 +223,14 @@ const collection = {
       req('Plan workbench turn', 'POST', '/api/workbench', { body: { agentId: '{{agentId}}', message: 'Plan this change.', workspaceRoot: '/path/to/workspace' } }),
       req('Run workbench step', 'POST', '/api/workbench/run', { body: { agentId: '{{agentId}}', step: 'inspect', message: 'Inspect.' } }),
     ]),
+    folder('Forge', [
+      req('Forge catalog', 'GET', '/api/forge/catalog'),
+      req('Forge history', 'GET', '/api/forge/jobs', { query: [['agentId', '{{agentId}}']] }),
+      req('Generate media (paid)', 'POST', '/api/forge/jobs', { body: { agentId: '{{agentId}}', connectionId: '{{connectionId}}', modelId: '{{modelId}}', prompt: 'A quiet garden', idempotencyKey: 'replace-with-unique-request-key' } }),
+      req('Forge job', 'GET', '/api/forge/jobs/{{forgeJobId}}', { query: [['agentId', '{{agentId}}']] }),
+      req('Forge artifact', 'GET', '/api/forge/jobs/{{forgeJobId}}/artifacts/{{forgeArtifactId}}', { query: [['agentId', '{{agentId}}'], ['download', '1']] }),
+      req('Attach Forge artifact', 'POST', '/api/forge/jobs/{{forgeJobId}}/attach', { body: { agentId: '{{agentId}}', sessionId: '{{sessionId}}', artifactId: '{{forgeArtifactId}}' } }),
+    ]),
     folder('Group Channels', [
       req('List group channels', 'GET', '/api/group-channels'),
       req('Create group channel', 'POST', '/api/group-channels', { body: { name: 'Room', participantAgentIds: ['hatchet', 'smatchet'] } }),
