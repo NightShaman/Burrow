@@ -374,7 +374,16 @@ function mergeDiscoveredModels(discovered = [], existing = []) {
   const merged = [];
   for (const model of discovered) {
     const priorModel = prior.get(model.id);
-    merged.push({ ...model, selected: priorModel?.selected === true, manual: false });
+    // Discovery refreshes provider/catalog metadata, but it must not erase
+    // explicit operator overrides. Those overrides are the authority when a
+    // provider's /models response omits output modalities (as Azure Foundry
+    // currently does for image and speech deployments).
+    const operatorOverrides = priorModel ? {
+      ...(Array.isArray(priorModel.acceptedInputOverride) ? { acceptedInputOverride: priorModel.acceptedInputOverride } : {}),
+      ...(Array.isArray(priorModel.acceptedOutputOverride) ? { acceptedOutputOverride: priorModel.acceptedOutputOverride } : {}),
+      ...(priorModel.contextWindowOverride !== undefined ? { contextWindowOverride: priorModel.contextWindowOverride } : {}),
+    } : {};
+    merged.push({ ...model, ...operatorOverrides, selected: priorModel?.selected === true, manual: false });
     prior.delete(model.id);
   }
   for (const model of prior.values()) merged.push({ ...model, selected: model.selected !== false, manual: Boolean(model.manual) });
