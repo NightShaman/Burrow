@@ -31,7 +31,13 @@ function azureHost(baseUrl) {
 
 function requestHeaders(config = {}) {
   const token = text(config.apiKey);
-  const isAzureApiKey = azureHost(config.baseUrl || config.apiBaseUrl || config.url) && config.auth?.type === 'api_key';
+  const authType = text(config.auth?.type).toLowerCase();
+  const explicitBearer = ['oauth', 'token', 'bearer_token'].includes(authType);
+  // Azure OpenAI and Foundry use api-key for stored API keys. Older/direct
+  // adapter callers may not carry the structured auth preview, so the Azure
+  // hostname is the stable protocol boundary unless auth explicitly says the
+  // credential is a bearer token.
+  const isAzureApiKey = azureHost(config.baseUrl || config.apiBaseUrl || config.url) && !explicitBearer;
   return {
     'content-type': 'application/json',
     ...(token ? (isAzureApiKey ? { 'api-key': token } : { authorization: `Bearer ${token}` }) : {}),
