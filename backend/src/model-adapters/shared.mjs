@@ -312,6 +312,19 @@ function nativeToolReceipt(result = {}) {
     receipt.totalMatches = Number.isFinite(result.totalMatches) ? result.totalMatches : result.results.length;
     receipt.results = result.results;
   }
+  // Forge already returns public catalog/job/attachment records. Preserve the
+  // declared payload through the final provider wire boundary, not only the
+  // durable receipt summary. Provider-budget preparation owns any projection.
+  const forgeFields = {
+    forge_catalog: ['models', 'music', 'video', 'sourceAttachments'],
+    forge_create_job: ['job', 'replayed'],
+    forge_list_jobs: ['jobs'],
+    forge_inspect_job: ['job'],
+    forge_attach_artifact: ['attachment'],
+  };
+  for (const key of forgeFields[result?.tool] || []) {
+    if (result[key] !== undefined) receipt[key] = result[key];
+  }
   // Explicit handoff reads must deliver their body, not just a success flag.
   // The store bounds records; provider-budget preparation owns any projection.
   if (result?.tool === 'session_read_handoff') receipt.handoff = result.handoff ?? null;
