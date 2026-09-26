@@ -23,6 +23,17 @@ function renderForge(initialJobs: unknown[] = []) {
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe('Forge workspace', () => {
+  it('keeps modes in the header and long history alongside the studio', async () => {
+    const jobs = Array.from({ length: 30 }, (_, i) => ({ id: `layout-${i}`, kind: 'music', prompt: 'Long music direction '.repeat(20), status: 'succeeded', createdAt: '2026-09-26T12:00:00Z', artifacts: [] }));
+    renderForge(jobs);
+    await screen.findByRole('option', { name: 'Image One' });
+    fireEvent.click(screen.getByRole('tab', { name: /Music/ }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Lyrics' }), { target: { value: 'Long lyrics\n'.repeat(100) } });
+    expect(screen.getByRole('tablist').closest('header')).toBeTruthy();
+    expect(screen.queryByText('FORGE')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Recent creations' }).closest('.forge-history')?.parentElement?.className).toBe('forge-grid');
+  });
+
   it('switches modes and keeps unavailable video honest', async () => {
     renderForge();
     await screen.findByRole('option', { name: 'Image One' });
