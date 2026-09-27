@@ -256,6 +256,9 @@ export function summarizeToolResults(toolResults = []) {
       ? { ok: toolResult.gate.ok ?? null, blockers: compactList(toolResult.gate.blockers), workerProfile: toolResult.gate.workerProfile || null, mergePolicy: toolResult.gate.mergePolicy || null }
       : undefined,
     truncated: toolResult.truncated === true || undefined,
+    entryBudgetExhausted: toolResult.entryBudgetExhausted === true || undefined,
+    depthTruncated: toolResult.depthTruncated === true || undefined,
+    incomplete: toolResult.incomplete === true || undefined,
     stdoutTruncated: toolResult.stdoutTruncated === true || undefined,
     stderrTruncated: toolResult.stderrTruncated === true || undefined,
     verificationCheck: toolResult.verificationCheck === true || undefined,

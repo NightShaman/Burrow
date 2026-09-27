@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readProviderError } from '../forge-diagnostics.mjs';
 
 const text = (v) => typeof v === 'string' ? v.trim() : '';
 const supportedModels = new Set(['lyria-3-clip-preview', 'lyria-3.5', 'lyria-3-pro-preview']);
@@ -17,12 +18,6 @@ function endpoint(baseUrl) {
   const base = (text(baseUrl) || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '');
   return /\/v1beta(?:\/openai)?$/i.test(base) ? `${base.replace(/\/openai$/i, '')}/interactions` : `${base}/v1beta/interactions`;
 }
-function errorDetails(body, secret, status, requestId = null) {
-  let value = body; let code = null;
-  try { const parsed = JSON.parse(body); value = parsed?.error?.message || parsed?.message || body; code = parsed?.error?.status || parsed?.error?.code || parsed?.status || parsed?.code || null; } catch {}
-  const redact = v => String(v ?? '').trim().split(secret || '\0').join('[redacted]');
-  return { message: redact(value || `HTTP ${status}`), ...(code ? { code: redact(code) } : {}), ...(status ? { httpStatus: status } : {}), ...(requestId ? { requestId } : {}) };
-}
 function audioData(data) {
   const steps = Array.isArray(data?.steps) ? data.steps : [];
   for (const step of steps) for (const content of (Array.isArray(step?.content) ? step.content : [])) {
@@ -40,7 +35,12 @@ export function createGoogleLyriaAdapter({ config = {}, fetchImpl = globalThis.f
     const body = { model, input: text(prompt) };
     const headers = { 'content-type': 'application/json', 'x-goog-api-key': text(config.apiKey) };
     const response = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(body), ...(signal ? { signal } : {}) });
-    if (!response.ok) { const details = errorDetails(await response.text(), config.apiKey, response.status, text(response.headers?.get?.('x-request-id')) || requestId); return { ok: false, requestId, provider: 'google', api: 'google-interactions', model, status: response.status, outputArtifacts: [], error: details.message, errorDetails: details }; }
+    if (!response.ok) {
+      const bounded = await readProviderError(response, [config.apiKey]);
+      const providerRequestId = text(response.headers?.get?.('x-request-id'));
+      const details = { ...bounded, httpStatus: response.status, ...(providerRequestId ? { requestId: providerRequestId } : {}) };
+      return { ok: false, requestId, provider: 'google', api: 'google-interactions', model, status: response.status, outputArtifacts: [], error: details.message, errorDetails: details };
+    }
     let data; try { data = await response.json(); } catch { return { ok: false, requestId, provider: 'google', api: 'google-interactions', model, status: response.status, outputArtifacts: [], error: 'Google returned invalid JSON' }; }
     const encoded = audioData(data);
     if (!encoded || !/^[A-Za-z0-9+/]+=*$/.test(encoded)) return { ok: false, requestId, provider: 'google', api: 'google-interactions', model, status: response.status, outputArtifacts: [], error: 'Google returned no audio data' };

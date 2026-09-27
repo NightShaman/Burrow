@@ -1,16 +1,12 @@
+import { apiMode, isChatGptBackendBaseUrl, responsesUrl, completionUrl } from './openai-transport.mjs';
+import { toolNames, responseApiTool, messagesToResponsesInput, readResponseSseBounded, normalizeResponseChoice, normalizeChoice, compactResponseCompletion, mergeStreamToolCall } from './openai-transport.mjs';
 import { redactStructuredJsonText } from '../redaction.mjs';
 import { googleCompatibleWireModel } from './google-wire.mjs';
 import {
-  apiMode,
-  isChatGptBackendBaseUrl,
-  responsesUrl,
-  completionUrl,
-  toolNames,
-  responseApiTool,
+  readResponseTextBounded,
   toolOutputText,
   toolOutputContent,
   attachmentViewUserMessage,
-  messagesToResponsesInput,
   chatToolContinuationMessages,
   buildProviderMessageManifest,
   messageContentChars,
@@ -18,13 +14,9 @@ import {
   contextUsageFromRequest,
   contextUsageFromResponse,
   redactHeaders,
-  readResponseSseBounded,
-  readResponseTextBounded,
-  normalizeResponseChoice,
-  normalizeChoice,
   boundedText,
   randomUUID,
-} from './shared.mjs';
+} from './adapter-primitives.mjs';
 
 export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = globalThis.fetch, clock = () => new Date().toISOString(), idFactory = randomUUID } = {}) {
   if (!fetchImpl) throw new Error('fetch implementation is required');

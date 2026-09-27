@@ -13,7 +13,7 @@ function priority(result = {}) {
 
 function collectionReceipt(label, value) {
   const items = Array.isArray(value) ? value : [];
-  return { [`${label}Returned`]: items.length, [`${label}TruncatedAtTool`]: null };
+  return { [`${label}Returned`]: items.length };
 }
 
 function projection(result = {}) {
@@ -24,9 +24,9 @@ function projection(result = {}) {
     return { ...base, path: result.filePath || null, coverage: { start: offsetBytes, end: offsetBytes + returnedBytes, bytes: result.bytes ?? returnedBytes, returnedBytes, truncated: Boolean(result.truncated), nextOffsetBytes: result.nextOffsetBytes ?? null }, contentHash: result.contentHash || null };
   }
   if (result.tool === 'shell_exec' || result.tool === 'git_status' || result.tool === 'git_diff') return { ...base, command: result.command || null, exitCode: result.exitCode ?? null, durationMs: result.durationMs ?? null, stdoutBytes: Buffer.byteLength(text(result.stdout)), stderrBytes: Buffer.byteLength(text(result.stderr)) };
-  if (result.tool === 'files_search') return { ...base, path: result.dirPath || null, query: result.query || null, ...collectionReceipt('matches', result.matches), resultFingerprint: result.resultFingerprint || null, toolTruncated: Boolean(result.truncated) };
-  if (result.tool === 'files_list') return { ...base, path: result.dirPath || null, ...collectionReceipt('entries', result.entries), resultFingerprint: result.resultFingerprint || null, toolTruncated: Boolean(result.truncated) };
-  if (result.tool === 'files_find') return { ...base, path: result.dirPath || null, pattern: result.pattern || null, ...collectionReceipt('paths', result.paths), resultFingerprint: result.resultFingerprint || null, toolTruncated: Boolean(result.truncated) };
+  if (result.tool === 'files_search') return { ...base, path: result.dirPath || null, query: result.query || null, ...collectionReceipt('matches', result.matches), resultFingerprint: result.resultFingerprint || null, toolTruncated: Boolean(result.truncated), toolIncomplete: Boolean(result.incomplete), toolWarnings: Array.isArray(result.warnings) ? result.warnings : [] };
+  if (result.tool === 'files_list') return { ...base, path: result.dirPath || null, ...collectionReceipt('entries', result.entries), resultFingerprint: result.resultFingerprint || null, toolTruncated: Boolean(result.truncated), toolIncomplete: Boolean(result.incomplete), toolWarnings: Array.isArray(result.warnings) ? result.warnings : [] };
+  if (result.tool === 'files_find') return { ...base, path: result.dirPath || null, pattern: result.pattern || null, ...collectionReceipt('paths', result.paths), resultFingerprint: result.resultFingerprint || null, toolTruncated: Boolean(result.truncated), toolIncomplete: Boolean(result.incomplete), toolWarnings: Array.isArray(result.warnings) ? result.warnings : [] };
   if (mutation(result)) return { ...base, filePath: result.filePath || null, touchedFiles: result.touchedFiles || result.changedFiles || [] };
   if (result.tool === 'spawn_subagent') return { ...base, id: result.id || null, status: result.status || null, childSessionId: result.childSessionId || null, blockers: result.blockers || [], warnings: result.warnings || [] };
   // Skill discovery is decision-critical evidence: include every compact card in

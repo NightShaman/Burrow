@@ -68,10 +68,20 @@ async function finish({ logger, tool, activityId, result }) {
 
 async function walk(root, { maxDepth = 4, maxEntries = DEFAULT_MAX_ENTRIES, includeHidden = false } = {}) {
   const entries = [];
-  let truncated = false;
+  let entryBudgetExhausted = false;
+  let depthTruncated = false;
   const warnings = [];
+  async function hasVisibleChildren(dir) {
+    try {
+      const children = await fs.readdir(dir, { withFileTypes: true });
+      return children.some((child) => includeHidden || (!child.name.startsWith('.') && child.name !== 'node_modules'));
+    } catch (error) {
+      warnings.push(`unreadable_directory:${path.relative(root, dir) || '.'}:${error?.code || 'error'}`);
+      return true;
+    }
+  }
   async function visit(dir, depth) {
-    if (entries.length >= maxEntries) { truncated = true; return; }
+    if (entries.length >= maxEntries) { entryBudgetExhausted = true; return; }
     let children;
     try { children = await fs.readdir(dir, { withFileTypes: true }); } catch (error) {
       warnings.push(`unreadable_directory:${path.relative(root, dir) || '.'}:${error?.code || 'error'}`);
@@ -79,16 +89,19 @@ async function walk(root, { maxDepth = 4, maxEntries = DEFAULT_MAX_ENTRIES, incl
     }
     for (const child of children.sort((a, b) => a.name.localeCompare(b.name))) {
       if (!includeHidden && (child.name.startsWith('.') || child.name === 'node_modules')) continue;
-      if (entries.length >= maxEntries) { truncated = true; return; }
+      if (entries.length >= maxEntries) { entryBudgetExhausted = true; return; }
       const absolutePath = path.join(dir, child.name);
       const relativePath = path.relative(root, absolutePath) || '.';
       entries.push({ path: relativePath, type: child.isDirectory() ? 'directory' : child.isSymbolicLink() ? 'symlink' : child.isFile() ? 'file' : 'other' });
-      if (child.isDirectory() && depth < maxDepth) await visit(absolutePath, depth + 1);
-      if (truncated) return;
+      if (child.isDirectory()) {
+        if (depth < maxDepth) await visit(absolutePath, depth + 1);
+        else if (await hasVisibleChildren(absolutePath)) depthTruncated = true;
+      }
+      if (entryBudgetExhausted) return;
     }
   }
   await visit(root, 0);
-  return { entries, truncated, warnings };
+  return { entries, truncated: entryBudgetExhausted || depthTruncated, entryBudgetExhausted, depthTruncated, incomplete: warnings.length > 0, warnings };
 }
 
 export async function listFilesEnvelope({ dirPath, workspaceRoot, maxDepth, maxEntries, includeHidden = false, traceLogger, rootDir, runId, artifactPrefix, reason = null } = {}) {
@@ -99,9 +112,9 @@ export async function listFilesEnvelope({ dirPath, workspaceRoot, maxDepth, maxE
     if (!stat.isDirectory()) throw new Error('not_a_directory');
     const listing = await walk(root, { maxDepth: bounded(maxDepth, 4, 16), maxEntries: bounded(maxEntries, DEFAULT_MAX_ENTRIES, 2_000), includeHidden: Boolean(includeHidden) });
     const contentPath = await context.logger.artifact(`${context.prefix}-listing.json`, JSON.stringify(listing.entries, null, 2));
-    return finish({ logger: context.logger, tool: 'files_list', activityId: context.activityId, result: { tool: 'files_list', ok: true, dirPath: root, reason, entries: listing.entries, resultFingerprint: resultFingerprint({ entries: listing.entries, truncated: listing.truncated, warnings: listing.warnings }), truncated: listing.truncated, warnings: listing.warnings, error: null, artifacts: { contentPath }, trace: { dirPath: root, entries: listing.entries.length, truncated: listing.truncated, warnings: listing.warnings } } });
+    return finish({ logger: context.logger, tool: 'files_list', activityId: context.activityId, result: { tool: 'files_list', ok: true, dirPath: root, reason, entries: listing.entries, resultFingerprint: resultFingerprint({ entries: listing.entries, truncated: listing.truncated, incomplete: listing.incomplete, warnings: listing.warnings }), truncated: listing.truncated, entryBudgetExhausted: listing.entryBudgetExhausted, depthTruncated: listing.depthTruncated, incomplete: listing.incomplete, warnings: listing.warnings, error: null, artifacts: { contentPath }, trace: { dirPath: root, entries: listing.entries.length, truncated: listing.truncated, warnings: listing.warnings } } });
   } catch (error) {
-    return finish({ logger: context.logger, tool: 'files_list', activityId: context.activityId, result: { tool: 'files_list', ok: false, dirPath: root, reason, entries: [], truncated: false, error: String(error?.message || error), artifacts: {}, trace: { dirPath: root } } });
+    return finish({ logger: context.logger, tool: 'files_list', activityId: context.activityId, result: { tool: 'files_list', ok: false, dirPath: root, reason, entries: [], truncated: false, incomplete: true, error: String(error?.message || error), artifacts: {}, trace: { dirPath: root } } });
   }
 }
 
@@ -116,9 +129,9 @@ export async function globEnvelope({ pattern, dirPath, workspaceRoot, maxDepth, 
     const paths = matchedEntries.slice(0, limit).map((entry) => entry.path);
     const truncated = listing.truncated || matchedEntries.length > limit;
     const contentPath = await context.logger.artifact(`${context.prefix}-paths.json`, JSON.stringify(paths, null, 2));
-    return finish({ logger: context.logger, tool: 'files_find', activityId: context.activityId, result: { tool: 'files_find', ok: true, dirPath: root, pattern: String(pattern || '*'), reason, paths, resultFingerprint: resultFingerprint({ paths, truncated, warnings: listing.warnings }), truncated, warnings: listing.warnings, error: null, artifacts: { contentPath }, trace: { dirPath: root, count: paths.length, truncated, warnings: listing.warnings } } });
+    return finish({ logger: context.logger, tool: 'files_find', activityId: context.activityId, result: { tool: 'files_find', ok: true, dirPath: root, pattern: String(pattern || '*'), reason, paths, resultFingerprint: resultFingerprint({ paths, truncated, incomplete: listing.incomplete, warnings: listing.warnings }), truncated, entryBudgetExhausted: listing.entryBudgetExhausted || matchedEntries.length > limit, depthTruncated: listing.depthTruncated, incomplete: listing.incomplete, warnings: listing.warnings, error: null, artifacts: { contentPath }, trace: { dirPath: root, count: paths.length, truncated, warnings: listing.warnings } } });
   } catch (error) {
-    return finish({ logger: context.logger, tool: 'files_find', activityId: context.activityId, result: { tool: 'files_find', ok: false, dirPath: root, pattern: String(pattern || '*'), reason, paths: [], truncated: false, error: String(error?.message || error), artifacts: {}, trace: { dirPath: root } } });
+    return finish({ logger: context.logger, tool: 'files_find', activityId: context.activityId, result: { tool: 'files_find', ok: false, dirPath: root, pattern: String(pattern || '*'), reason, paths: [], truncated: false, incomplete: true, error: String(error?.message || error), artifacts: {}, trace: { dirPath: root } } });
   }
 }
 
@@ -160,9 +173,9 @@ export async function searchFilesEnvelope({ query, dirPath, workspaceRoot, maxDe
     }
     const contentPath = await context.logger.artifact(`${context.prefix}-matches.json`, JSON.stringify(matches, null, 2));
     const truncated = listing.truncated || scanTruncated || matches.length >= limit;
-    return finish({ logger: context.logger, tool: 'files_search', activityId: context.activityId, result: { tool: 'files_search', ok: true, dirPath: root, query: String(query), reason, matches, resultFingerprint: resultFingerprint({ matches, truncated, warnings: listing.warnings }), truncated, warnings: listing.warnings, error: null, artifacts: { contentPath }, trace: { dirPath: root, matches: matches.length, scannedBytes, truncated, warnings: listing.warnings } } });
+    return finish({ logger: context.logger, tool: 'files_search', activityId: context.activityId, result: { tool: 'files_search', ok: true, dirPath: root, query: String(query), reason, matches, resultFingerprint: resultFingerprint({ matches, truncated, incomplete: listing.incomplete, warnings: listing.warnings }), truncated, incomplete: listing.incomplete, warnings: listing.warnings, error: null, artifacts: { contentPath }, trace: { dirPath: root, matches: matches.length, scannedBytes, truncated, warnings: listing.warnings } } });
   } catch (error) {
-    return finish({ logger: context.logger, tool: 'files_search', activityId: context.activityId, result: { tool: 'files_search', ok: false, dirPath: root, query: String(query || ''), reason, matches: [], truncated: false, error: String(error?.message || error), artifacts: {}, trace: { dirPath: root } } });
+    return finish({ logger: context.logger, tool: 'files_search', activityId: context.activityId, result: { tool: 'files_search', ok: false, dirPath: root, query: String(query || ''), reason, matches: [], truncated: false, incomplete: true, error: String(error?.message || error), artifacts: {}, trace: { dirPath: root } } });
   }
 }
 

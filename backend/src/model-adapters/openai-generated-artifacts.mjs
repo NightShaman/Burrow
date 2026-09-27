@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { redactHeaders } from './shared.mjs';
+import { redactHeaders } from './adapter-primitives.mjs';
 import { googleCompatibleWireModel } from './google-wire.mjs';
+import { readProviderError } from '../forge-diagnostics.mjs';
 
 const AUDIO_FORMATS = Object.freeze({
   mp3: { mimeType: 'audio/mpeg', extension: 'mp3' },
@@ -53,12 +54,9 @@ function safeError(value, secrets = []) {
 }
 
 async function providerError(response, secrets = []) {
-  const body = await response.text();
-  let parsed = {};
-  try { parsed = body ? JSON.parse(body) : {}; } catch {}
-  const message = parsed?.error?.message || parsed?.message || body;
-  const code = parsed?.error?.code || parsed?.code || null;
-  return { httpStatus: response.status, requestId: response.headers?.get?.('x-request-id') || response.headers?.get?.('apim-request-id') || null, message: safeError(message || `HTTP ${response.status}`, secrets), code: typeof code === 'string' ? safeError(code, secrets) : null };
+  const bounded = await readProviderError(response, secrets);
+  return { ...bounded, httpStatus: response.status,
+    requestId: response.headers?.get?.('x-request-id') || response.headers?.get?.('apim-request-id') || null };
 }
 
 function promptFrom(options = {}) {

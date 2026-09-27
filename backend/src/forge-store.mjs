@@ -6,27 +6,10 @@ import { createGoogleLyriaAdapter, googleLyriaSupported } from './model-adapters
 import { persistGeneratedArtifact, resolveGeneratedArtifact } from './generated-artifact-store.mjs';
 import { persistChatAttachments } from './attachment-store.mjs';
 import { readSessionMetadata, appendSessionTurnIfAbsent } from './session-store.mjs';
+import { diagnostic } from './forge-diagnostics.mjs';
 
 const fail = (error, statusCode = 400) => { throw Object.assign(new Error(error), { statusCode }); };
 const now = () => new Date().toISOString();
-function configSecrets(config) {
-  const out = [];
-  const visit = value => { if (!value || typeof value !== 'object') return; for (const [key, item] of Object.entries(value)) { if (/(api[-_]?key|bearer|token|secret|password|credential|authorization)/i.test(key) && typeof item === 'string') out.push(item); else if (item && typeof item === 'object') visit(item); } };
-  visit(config); return out.filter(Boolean);
-}
-function sanitizeDiagnostic(value, secrets = []) {
-  let text = String(value ?? '');
-  for (const secret of [...new Set(secrets)].sort((a, b) => b.length - a.length)) text = text.split(secret).join('[redacted]');
-  return text.replace(/\bBearer\s+[^\s,;]+/ig, 'Bearer [redacted]').replace(/(?:\/[^\s/:]+){2,}/g, '[redacted-path]').replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)[^\s,;]+/ig, '$1[redacted]')
-    .replace(/((?:api[-_]?key|token|secret|password|credential)\s*[:=]\s*)[^\s,;&]+/ig, '$1[redacted]')
-    .replace(/([?&](?:api[-_]?key|token|signature|sig|credential|access_token|x-amz-[^=]*)=)[^&#\s]+/ig, '$1[redacted]')
-    .replace(/(https?:\/\/[^\s/?#]+)(\/[^\s?#]*)/ig, '$1/[redacted-path]');
-}
-function diagnostic(error, stage, config = {}, fallback = 'generation failed') {
-  const details = error?.errorDetails || {};
-  const message = sanitizeDiagnostic(details.message || error?.message || fallback, configSecrets(config));
-  return { stage: details.stage || stage, message, ...((details.code || error?.code || error?.cause?.code) ? { code: sanitizeDiagnostic(details.code || error.code || error.cause.code, configSecrets(config)) } : {}), ...(details.httpStatus ? { httpStatus: details.httpStatus } : {}), ...(details.requestId ? { requestId: sanitizeDiagnostic(details.requestId, configSecrets(config)) } : {}) };
-}
 export function forgeCatalog(connections) {
   const models = connections.flatMap(c => (c.models || []).filter(m => m.selected !== false).flatMap(m => {
     const outputs = m.acceptedOutput ?? m.discoveredOutput ?? [];

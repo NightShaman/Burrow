@@ -1,9 +1,8 @@
+import { CLAUDE_CODE_VERSION, CLAUDE_CODE_BILLING_SYSTEM_BLOCK } from './anthropic-transport.mjs';
 import { redactStructuredJsonText } from '../redaction.mjs';
 import { DEFAULT_MODEL_OUTPUT_TOKENS } from '../config.mjs';
 import { anthropicSupportsSamplingParameters } from '../anthropic-model-capabilities.mjs';
 import {
-  CLAUDE_CODE_VERSION,
-  CLAUDE_CODE_BILLING_SYSTEM_BLOCK,
   DEFAULT_MAX_RESPONSE_BYTES,
   MAX_MODEL_TEXT_CHARS,
   boundedText,
@@ -20,7 +19,7 @@ import {
   attachmentViewUserMessage,
   trimSlash,
   readResponseTextBounded,
-} from './shared.mjs';
+} from './adapter-primitives.mjs';
 
 function anthropicUrl(config = {}) {
   const baseUrl = trimSlash(config.baseUrl || config.apiBaseUrl || config.url || 'https://api.anthropic.com');

@@ -5,7 +5,7 @@
 // protocol rounds into the same provider budget used for normal prompt
 // preparation, carrying displaced rounds as receipt-backed evidence. It does
 // not apply an independent round, dialogue, or character policy.
-import { chatToolContinuationMessages, messageContentChars, pruneProviderToolResults } from './model-adapters/shared.mjs';
+import { chatToolContinuationMessages, messageContentChars, pruneProviderToolResults } from './model-adapters/adapter-primitives.mjs';
 import { inspectAssembledPromptBudget } from './prompt-budget.mjs';
 
 function transcriptChars(messages = []) {
