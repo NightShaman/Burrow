@@ -32,6 +32,11 @@
 .forge-empty strong,.forge-placeholder strong{color:var(--text-strong)}
 .forge-placeholder span{font-size:50px;color:var(--accent);opacity:.7}
 .forge-placeholder small{max-width:360px;line-height:1.5}
+.forge-failure-details{max-width:min(100%,520px);text-align:left;overflow-wrap:anywhere}
+.forge-failure-details p{margin:0 0 10px;line-height:1.5;color:var(--text-strong)}
+.forge-failure-details dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;margin:0;font-size:11px;line-height:1.4}
+.forge-failure-details dt{color:var(--muted)}
+.forge-failure-details dd{margin:0;color:var(--text-strong)}
 .forge-artifacts{display:grid;gap:16px;padding:20px;overflow:visible}
 .forge-artifact{overflow:hidden;border:1px solid var(--line);border-radius:9px;background:var(--surface-input)}
 .forge-artifact img,.forge-artifact video{display:block;width:100%;max-height:380px;object-fit:contain;background:#090a0d}

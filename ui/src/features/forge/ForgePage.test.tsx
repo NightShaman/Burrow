@@ -150,6 +150,25 @@ describe('Forge workspace', () => {
     expect(body.idempotencyKey).toBeTruthy();
   });
 
+  it('shows structured failure diagnostics without serializing raw objects or truncating messages', async () => {
+    const longMessage = `Request rejected: Bearer abc123 api_key=secret-value ${'diagnostic '.repeat(80)}`;
+    const failed = { id: 'failed-diagnostic', connectionId: 'c1', modelId: 'image-1', kind: 'image', prompt: 'castle', status: 'failed', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', error: 'provider_request_failed', errorDetails: { stage: 'provider', message: longMessage, code: 'invalid_request', httpStatus: 422, requestId: 'req-42', raw: { token: 'must-not-render' } }, artifacts: [] };
+    renderForge([failed]);
+    await screen.findByText('Generation failed');
+    const renderedMessage = screen.getByLabelText('Failure details').querySelector('p')?.textContent ?? '';
+    expect(renderedMessage).toBe(`Request rejected: Bearer [redacted] api_key=[redacted] ${'diagnostic '.repeat(80)}`);
+    expect(screen.getByText('Stage').parentElement?.textContent).toContain('provider');
+    expect(screen.getByText('Code').parentElement?.textContent).toContain('invalid_request');
+    expect(screen.getByText('HTTP').parentElement?.textContent).toContain('422');
+    expect(screen.getByText('Request ID').parentElement?.textContent).toContain('req-42');
+    expect(screen.queryByText(/must-not-render|raw/)).toBeNull();
+  });
+
+  it('keeps older failed jobs useful when structured details are absent', async () => {
+    renderForge([{ id: 'legacy-failure', connectionId: 'c1', modelId: 'image-1', kind: 'image', prompt: 'castle', status: 'failed', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', error: 'legacy_provider_error', artifacts: [] }]);
+    expect(await screen.findByText('legacy_provider_error')).toBeTruthy();
+  });
+
   it('submits prompt-only generation and shows accepted job', async () => {
     renderForge();
     const prompt = await screen.findByRole('textbox', { name: 'Prompt' });
