@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { redactHeaders } from './shared.mjs';
+import { googleCompatibleWireModel } from './google-wire.mjs';
 
 const AUDIO_FORMATS = Object.freeze({
   mp3: { mimeType: 'audio/mpeg', extension: 'mp3' },
@@ -138,6 +139,7 @@ export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = 
   const kind = generatedArtifactKind(config);
   if (!kind) throw new Error('generated artifact output capability is required');
   const model = text(config.model);
+  const wireModel = googleCompatibleWireModel(config);
   if (!model) throw new Error('model is required');
   const provider = text(config.provider || config.providerName) || 'openai-compatible';
   const baseUrl = config.baseUrl || config.apiBaseUrl || config.url;
@@ -149,8 +151,8 @@ export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = 
     const headers = requestHeaders(config);
     const artifactOptions = supportedArtifactOptions(kind, config.generatedArtifactOptions);
     const body = kind === 'image'
-      ? { model, prompt, n: 1, ...artifactOptions }
-      : { model, input: prompt, voice: 'alloy', response_format: 'mp3', ...artifactOptions };
+      ? { model: wireModel, prompt, n: 1, ...artifactOptions }
+      : { model: wireModel, input: prompt, voice: 'alloy', response_format: 'mp3', ...artifactOptions };
     await traceRequest(options.traceLogger, { requestId, provider, model, url, headers, body, clock });
     const response = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(body), ...(options.signal ? { signal: options.signal } : {}) });
     if (!response.ok) {

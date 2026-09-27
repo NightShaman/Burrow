@@ -1,3 +1,4 @@
+import { isGoogleOpenAICompatible } from './google-wire.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -119,7 +120,7 @@ function completionUrl(config = {}) {
   if (isChatGptBackendBaseUrl(baseUrl)) return codexResponsesUrl(baseUrl);
   if (config.chatCompletionsPath) return `${baseUrl}/${String(config.chatCompletionsPath).replace(/^\/+/, '')}`;
   if (baseUrl.endsWith('/chat/completions')) return baseUrl;
-  if (baseUrl.endsWith('/v1')) return `${baseUrl}/chat/completions`;
+  if (baseUrl.endsWith('/v1') || (isGoogleOpenAICompatible(config) && baseUrl.endsWith('/openai'))) return `${baseUrl}/chat/completions`;
   return `${baseUrl}/v1/chat/completions`;
 }
 
@@ -129,7 +130,7 @@ function responsesUrl(config = {}) {
   if (isChatGptBackendBaseUrl(baseUrl)) return codexResponsesUrl(baseUrl);
   if (config.responsesPath) return `${baseUrl}/${String(config.responsesPath).replace(/^\/+/, '')}`;
   if (baseUrl.endsWith('/responses')) return baseUrl;
-  if (baseUrl.endsWith('/v1')) return `${baseUrl}/responses`;
+  if (baseUrl.endsWith('/v1') || (isGoogleOpenAICompatible(config) && baseUrl.endsWith('/openai'))) return `${baseUrl}/responses`;
   return `${baseUrl}/v1/responses`;
 }
 

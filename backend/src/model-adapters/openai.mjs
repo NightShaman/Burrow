@@ -1,4 +1,5 @@
 import { redactStructuredJsonText } from '../redaction.mjs';
+import { googleCompatibleWireModel } from './google-wire.mjs';
 import {
   apiMode,
   isChatGptBackendBaseUrl,
@@ -31,6 +32,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
   const chatGptBackend = isChatGptBackendBaseUrl(config.baseUrl || config.apiBaseUrl || config.url);
   const url = mode === 'openai-responses' ? responsesUrl(config) : completionUrl(config);
   const model = config.model;
+  const wireModel = googleCompatibleWireModel(config);
   if (!model) throw new Error('model is required');
 
   const imageCountFor = (messages = []) => (Array.isArray(messages) ? messages : []).reduce((count, message) => count + (Array.isArray(message?.content) ? message.content.filter((part) => part?.type === 'image_url' || part?.type === 'input_image' || part?.image_url || part?.input_image).length : 0), 0);
@@ -71,7 +73,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       : null;
     const body = mode === 'openai-responses'
       ? {
-          model,
+          model: wireModel,
           input: isToolContinuation ? continuationInput : messagesToResponsesInput(messages, prompt),
           ...(!chatGptBackend && isToolContinuation && toolContinuation.previousResponseId ? { previous_response_id: toolContinuation.previousResponseId } : {}),
           ...(chatGptBackend || config.supportsTemperature === false ? {} : { temperature }),
@@ -82,7 +84,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
           ...(streaming ? { stream: true } : {}),
         }
       : {
-          model,
+          model: wireModel,
           messages: continuationMessages || resolvedMessages,
           ...(config.supportsTemperature === false ? {} : { temperature }),
           ...(resolvedTools ? { tools: resolvedTools, tool_choice: toolChoice } : {}),
