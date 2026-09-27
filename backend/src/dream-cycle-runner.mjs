@@ -8,6 +8,7 @@ import { DreamSettingsStore } from './dream-settings-store.mjs';
 import { inspectAssembledPromptBudget } from './prompt-budget.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
 import { nextCronOccurrence } from './scheduled-job-store.mjs';
+import { reconciledDreamCycleState } from './dream-cycle-state.mjs';
 import { openSettingsDatabase, settingsDatabasePath, withSettingsTransaction } from './settings-database.mjs';
 import { WorkingMemoryStore } from './working-memory-store.mjs';
 import { listSessionRecords, readChatMessages } from './session-store.mjs';
@@ -350,15 +351,7 @@ function phaseInput({ phase, items, limit = DEFAULT_LIMIT }) {
   return items.slice(0, Math.max(1, Math.min(12, Number(limit) || DEFAULT_LIMIT)));
 }
 
-function reconciledDreamCycleState({ agentId, settings, current = {}, at }) {
-  const enabled = settings?.enabled === true || settings?.enabled === 1;
-  const cron = settings?.cron || settings?.cron_expression || '0 4 * * *';
-  const timezone = settings?.timezone || 'UTC';
-  const scheduleChanged = current.enabled !== enabled || current.cron !== cron || current.timezone !== timezone;
-  const nextRunAt = !enabled ? null
-    : scheduleChanged || !current.nextRunAt ? nextCronOccurrence(cron, timezone, new Date(at)) : current.nextRunAt;
-  return { version: 1, agentId, enabled, cron, timezone, nextRunAt, lastRunAt: current.lastRunAt || null, updatedAt: at };
-}
+
 
 export function ensureDreamCycleState({ agentId, settings, databasePath = null, at = now() } = {}) {
   const id = text(agentId);
