@@ -1,6 +1,6 @@
 {
   "name": "burrow",
-  "version": "2026.09.27.8",
+  "version": "2026.09.27.9",
   "private": true,
   "type": "module",
   "bin": {
@@ -37,10 +37,12 @@
     "runtime:retention": "node bin/burrow.mjs retention --root .",
     "runtime:retention:json": "node bin/burrow.mjs retention --root . --json",
     "runtime:restore:rehearsal": "node scripts/runtime-restore-rehearsal.mjs",
-    "runtime:restore:rehearsal:json": "node scripts/runtime-restore-rehearsal.mjs --json"
+    "runtime:restore:rehearsal:json": "node scripts/runtime-restore-rehearsal.mjs --json",
+    "postgres:lifecycle:rehearsal": "BURROW_POSTGRES_LIFECYCLE_REHEARSAL=1 node scripts/postgres-lifecycle-rehearsal.mjs"
   },
   "dependencies": {
-    "jose": "^6.2.8"
+    "jose": "^6.2.8",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@redocly/openapi-core": "^2.46.1",
