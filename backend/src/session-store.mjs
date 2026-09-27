@@ -107,7 +107,7 @@ function retainedChatMetadata(metadata = {}) {
   // Successor transcripts preserve conversational provenance, not bulky
   // finalizer/debug receipts from the archived generation.
   const projected = {};
-  for (const key of ['decision', 'canonicalExecution', 'executionDigest', 'toolResultCount', 'iteration', 'tool', 'callId', 'ok', 'toolCalls', 'normalizedResult', 'subjectScope', 'fromAgentId', 'fromAgentName', 'toAgentId', 'messageMode', 'sourceSessionId', 'targetSessionId', 'contextState']) {
+  for (const key of ['attachments', 'decision', 'canonicalExecution', 'executionDigest', 'toolResultCount', 'iteration', 'tool', 'callId', 'ok', 'toolCalls', 'normalizedResult', 'subjectScope', 'fromAgentId', 'fromAgentName', 'toAgentId', 'messageMode', 'sourceSessionId', 'targetSessionId', 'contextState']) {
     if (metadata?.[key] !== undefined) projected[key] = metadata[key];
   }
   return redactedMetadata(projected);
@@ -126,7 +126,8 @@ function normalizeTranscriptEntry(entry = {}, { sessionId = null } = {}) {
 }
 function isChatMessage(entry) {
   return entry?.type === 'message' && ['user', 'assistant', 'agent'].includes(String(entry?.role || ''))
-    && entry?.visibility === 'chat' && entry?.entersPrompt === true && String(entry?.content || '').trim();
+    && entry?.visibility === 'chat' && entry?.entersPrompt === true
+    && Boolean(String(entry?.content || '').trim() || (Array.isArray(entry?.metadata?.attachments) && entry.metadata.attachments.length));
 }
 
 function normalizedArchiveTitleText(value = '') { return String(value || '').replace(/[`*_#[\]()>|]/g, ' ').replace(/\s+/g, ' ').trim(); }
