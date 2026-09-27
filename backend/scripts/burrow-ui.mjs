@@ -2041,9 +2041,28 @@ async function sessionActivities({ sessionId, turns } = {}) {
   return activities;
 }
 
+function compactAttachmentMetadata(attachment = {}, index = 0) {
+  if (!attachment || typeof attachment !== 'object') return null;
+  const projected = {
+    index,
+    name: String(attachment.name || `attachment-${index + 1}`),
+    type: String(attachment.type || attachment.mimeType || 'application/octet-stream'),
+    size: attachment.size ?? null,
+    encoding: String(attachment.encoding || 'utf8'),
+  };
+  for (const key of ['artifactPath', 'storedAt']) {
+    if (attachment[key] !== undefined && attachment[key] !== null) projected[key] = attachment[key];
+  }
+  return projected;
+}
+
 function compactChatTurn(turn = {}) {
   const metadata = {};
   if (turn.metadata?.toolActivity) metadata.toolActivity = turn.metadata.toolActivity;
+  if (Array.isArray(turn.metadata?.attachments)) {
+    const attachments = turn.metadata.attachments.map(compactAttachmentMetadata).filter(Boolean);
+    if (attachments.length) metadata.attachments = attachments;
+  }
   for (const key of ['fromAgentName', 'fromAgentId', 'messageMode', 'direction']) {
     if (turn.metadata?.[key] !== undefined) metadata[key] = turn.metadata[key];
   }
