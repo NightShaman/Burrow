@@ -100,4 +100,5 @@ export function profileFilesFromDocuments(documents = [], { agentId: owningAgent
   return { profileDir: 'sqlite:agent_profile_documents', files, chars: files.reduce((total, file) => total + file.chars, 0) };
 }
 
-export const __agentProfileStore = Object.freeze({ MAX_DOCUMENT_CHARS });
+export { agentId, kind, markdown };
+export const __agentProfileStore = Object.freeze({ MAX_DOCUMENT_CHARS, agentId, kind, markdown });
