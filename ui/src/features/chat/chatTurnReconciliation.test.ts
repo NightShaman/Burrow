@@ -102,3 +102,13 @@ it('keeps a pending image preview until the persisted artifact loads, without lo
   const pending = [turn('user', 'Look', 'run-image', '2026-08-26T10:00:00.000Z', { attachments: [{ index: 0, name: 'photo.png', type: 'image/png', preview: 'data:image/png;base64,YQ==' }] })];
   expect(reconcileConversationTurns(server, pending)[0].metadata?.attachments).toEqual([{ index: 0, name: 'photo.png', type: 'image/png', artifactPath: 'artifacts/attachments/photo.png', preview: 'data:image/png;base64,YQ==' }]);
 });
+
+it('preserves attachment-only Forge turns without duplicating them through terminal refresh and reload', () => {
+  const attached: SessionTurn = { type: 'message', role: 'user', content: '', metadata: { attachments: [{ name: 'forge.png', type: 'image/png', artifactPath: 'artifacts/attachments/forge.png' }] } };
+  const session: ChatSession = { id: 'default', turns: [attached, turn('assistant', 'Done', 'run-1', '2026-09-27T01:00:00Z')] };
+  const completed = reconcileSessionTurns(session, [turn('assistant', 'Done', 'run-1', '2026-09-27T01:00:00Z')]);
+  expect(completed).toHaveLength(2);
+  expect(completed[0].metadata?.attachments).toEqual(attached.metadata?.attachments);
+  expect(reconcileSessionTurns(session, completed)).toEqual(completed);
+  expect(reconcileSessionTurns(session, [])).toEqual(completed);
+});

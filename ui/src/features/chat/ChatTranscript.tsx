@@ -35,7 +35,7 @@ type ChatTranscriptProps = {
 
 export const ChatTranscript = memo(function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, a2aActivities = [], runtimeUserMessage = '', runtimeChildActivities = [], attachmentTarget, attachmentAgentId }: ChatTranscriptProps) {
   const isSubagent = 'stream' in selected;
-  const messages = turns.filter((turn) => turn.type === 'message' && turn.metadata?.visibility !== 'debug' && turn.metadata?.kind !== 'subagent-runtime-context' && turn.metadata?.kind !== 'subagent-task' && turn.content && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && isChatCommand(textFromChatValue(turn.content))));
+  const messages = turns.filter((turn) => turn.type === 'message' && turn.metadata?.visibility !== 'debug' && turn.metadata?.kind !== 'subagent-runtime-context' && turn.metadata?.kind !== 'subagent-task' && (turn.content || turn.metadata?.attachments?.length || turn.metadata?.outputArtifacts?.length) && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && isChatCommand(textFromChatValue(turn.content))));
   const activityByRun = new Map<string, ToolActivity>();
   for (const turn of turns) {
     const activity = turn.metadata?.toolActivity;
@@ -191,6 +191,22 @@ function MessageAttachment({ attachment, target, agentId }: { attachment: Sessio
   const path = attachment.artifactPath;
   const [source, setSource] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'failed'>('idle');
+  const url = path && agentId ? `/api/attachments/${encodeURIComponent(agentId)}/${path.split('/').map(encodeURIComponent).join('/')}` : null;
+  const download = async () => {
+    if (!url || downloadState === 'downloading') return;
+    setDownloadState('downloading');
+    try {
+      const response = await fetchApiForTarget(target, url);
+      if (!response.ok) throw new Error('Attachment unavailable');
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = objectUrl; link.download = attachment.name;
+      document.body.append(link); link.click(); link.remove();
+      URL.revokeObjectURL(objectUrl);
+      setDownloadState('idle');
+    } catch { setDownloadState('failed'); }
+  };
   useEffect(() => {
     if (!isImage || !path || !agentId) { setSource(null); setFailed(false); return; }
     const controller = new AbortController();
@@ -206,9 +222,12 @@ function MessageAttachment({ attachment, target, agentId }: { attachment: Sessio
     return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [agentId, isImage, path, target?.baseUrl]);
   const imageSource = isImage && !failed ? source ?? attachment.preview ?? null : null;
-  return imageSource
+  return <div className="message-attachment-card">{imageSource
     ? <figure className="message-attachment-image"><img src={imageSource} alt={attachment.name} loading="lazy" onError={() => setFailed(true)} /><figcaption>{attachment.name}</figcaption></figure>
-    : <span className="message-attachment" title={attachment.type}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m4 18 5.5-5.5 3.5 3.5 2.5-2.5 4.5 4.5" /></svg><span>{attachment.name}</span></span>;
+    : <span className="message-attachment" title={attachment.type}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m4 18 5.5-5.5 3.5 3.5 2.5-2.5 4.5 4.5" /></svg><span>{attachment.name}</span></span>}
+    {url && <button type="button" onClick={download} disabled={downloadState === 'downloading'} aria-label={`Download ${attachment.name}`}>{downloadState === 'downloading' ? 'Downloading…' : downloadState === 'failed' ? 'Retry download' : 'Download'}</button>}
+    {downloadState === 'failed' && <span role="status">Download failed</span>}
+  </div>;
 }
 
 function formatArtifactSize(value?: number) {

@@ -196,3 +196,29 @@ it('keeps filename fallback for non-images and inaccessible images', async () =>
     expect(fetchMock).toHaveBeenCalledTimes(1);
   } finally { fetchMock.mockRestore(); }
 });
+
+it('renders empty Forge attachment turns after completion and refresh, with authenticated download', async () => {
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(new Uint8Array([1, 2]), { headers: { 'content-type': 'image/png' } }));
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const originalCreate = URL.createObjectURL;
+  const originalRevoke = URL.revokeObjectURL;
+  URL.createObjectURL = vi.fn(() => 'blob:forge'); URL.revokeObjectURL = vi.fn();
+  try {
+    const attached = message('', { attachments: [{ name: 'Forge image.png', type: 'image/png', artifactPath: 'artifacts/attachments/forge image.png' }] });
+    const props = { selected: parent, parent, operator: { name: 'Rob', avatar: 'R' }, isNewSession: false, isLoading: false, error: '', activeRunId: '', liveProgress: [], liveAnswer: '', attachmentAgentId: 'hatchet' };
+    const { rerender } = render(<ChatTranscript {...props} turns={[]} isSending />);
+    rerender(<ChatTranscript {...props} turns={[attached, { type: 'message', role: 'assistant', content: 'Done' }]} isSending={false} />);
+    await waitFor(() => expect(screen.getByRole('img', { name: 'Forge image.png' }).getAttribute('src')).toBe('blob:forge'));
+    fireEvent.click(screen.getByRole('button', { name: 'Download Forge image.png' }));
+    await waitFor(() => expect(click).toHaveBeenCalledOnce());
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/attachments/hatchet/artifacts/attachments/forge%20image.png');
+    rerender(<ChatTranscript {...props} turns={[{ ...attached }]} isSending={false} />);
+    expect(screen.getAllByRole('img', { name: 'Forge image.png' })).toHaveLength(1);
+  } finally { fetchMock.mockRestore(); click.mockRestore(); URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke; }
+});
+
+it('still hides debug attachment turns and truly empty messages', () => {
+  show([message(''), message('', { visibility: 'debug', attachments: [{ name: 'secret.png', type: 'image/png' }] })], parent);
+  expect(screen.queryByText('secret.png')).toBeNull();
+  expect(document.querySelector('.message')).toBeNull();
+});
