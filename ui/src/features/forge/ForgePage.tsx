@@ -6,7 +6,7 @@ import './forge.css';
 type ForgeModel = { connectionId: string; modelId: string; label: string; kind: 'image' | 'audio' | 'video'; available: boolean; unavailableReason?: string | null; controls: string[] };
 type ForgeCatalog = { models: ForgeModel[]; music?: { available: boolean; reason?: string | null; models?: ForgeModel[] }; sourceAttachments?: { available: boolean; reason?: string | null }; video?: { available: boolean; reason?: string | null } };
 type Artifact = { id: string; kind: string; name: string; mimeType: string; sizeBytes: number; previewUrl?: string | null; downloadUrl?: string | null };
-type ForgeErrorDetails = { stage: string; message: string; code?: string; httpStatus?: number; requestId?: string };
+type ForgeErrorDetails = { stage: string; message: string; code?: string; httpStatus?: number; requestId?: string; truncated?: boolean; observedBytes?: number; maxBytes?: number };
 type Job = { id: string; connectionId: string; modelId: string; kind: 'image' | 'audio' | 'video' | 'music'; prompt: string; status: 'queued' | 'running' | 'succeeded' | 'failed' | 'interrupted'; createdAt: string; updatedAt: string; error?: string | null; errorDetails?: ForgeErrorDetails | null; artifacts: Artifact[] };
 
 function safeDiagnosticText(value: unknown): string {
@@ -32,6 +32,7 @@ function FailureDetails({ job }: { job: Job }) {
       {httpStatus && <><dt>HTTP</dt><dd>{httpStatus}</dd></>}
       {requestId && <><dt>Request ID</dt><dd>{requestId}</dd></>}
     </dl>
+    {details.truncated === true && <p className="forge-diagnostic-truncated">Provider error response truncated at ingestion{Number.isFinite(details.maxBytes) ? ` (budget: ${details.maxBytes} bytes` : ''}{Number.isFinite(details.observedBytes) ? `${Number.isFinite(details.maxBytes) ? '; ' : ' ('}at least ${details.observedBytes} bytes read` : ''}{Number.isFinite(details.maxBytes) || Number.isFinite(details.observedBytes) ? ')' : ''}.</p>}
   </div>;
 }
 

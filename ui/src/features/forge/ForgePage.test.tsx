@@ -164,6 +164,14 @@ describe('Forge workspace', () => {
     expect(screen.queryByText(/must-not-render|raw/)).toBeNull();
   });
 
+  it('explains provider error truncation at ingestion and labels observed bytes as a lower bound', async () => {
+    const failed = { id: 'truncated-diagnostic', connectionId: 'c1', modelId: 'image-1', kind: 'image', prompt: 'castle', status: 'failed', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', error: 'provider_request_failed', errorDetails: { stage: 'provider', message: 'Provider rejected request.', truncated: true, observedBytes: 8192, maxBytes: 8192 }, artifacts: [] };
+    renderForge([failed]);
+    const notice = await screen.findByText('Provider error response truncated at ingestion (budget: 8192 bytes; at least 8192 bytes read).');
+    expect(notice).toBeTruthy();
+    expect(screen.getByLabelText('Failure details').querySelector('p')?.textContent).toBe('Provider rejected request.');
+  });
+
   it('keeps older failed jobs useful when structured details are absent', async () => {
     renderForge([{ id: 'legacy-failure', connectionId: 'c1', modelId: 'image-1', kind: 'image', prompt: 'castle', status: 'failed', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', error: 'legacy_provider_error', artifacts: [] }]);
     expect(await screen.findByText('legacy_provider_error')).toBeTruthy();
