@@ -154,4 +154,5 @@ export function agentRuntimeContext({ runtimeState, agent } = {}) {
   };
 }
 
+export { assertAgent, executionEnvironment };
 export const __agentRegistry = Object.freeze({ DEFAULT_CAPABILITIES, assertAgent, bootstrapSampleIdentitiesEnabled });
