@@ -9,6 +9,24 @@ import { readSessionMetadata, appendSessionTurnIfAbsent } from './session-store.
 
 const fail = (error, statusCode = 400) => { throw Object.assign(new Error(error), { statusCode }); };
 const now = () => new Date().toISOString();
+function configSecrets(config) {
+  const out = [];
+  const visit = value => { if (!value || typeof value !== 'object') return; for (const [key, item] of Object.entries(value)) { if (/(api[-_]?key|bearer|token|secret|password|credential|authorization)/i.test(key) && typeof item === 'string') out.push(item); else if (item && typeof item === 'object') visit(item); } };
+  visit(config); return out.filter(Boolean);
+}
+function sanitizeDiagnostic(value, secrets = []) {
+  let text = String(value ?? '');
+  for (const secret of [...new Set(secrets)].sort((a, b) => b.length - a.length)) text = text.split(secret).join('[redacted]');
+  return text.replace(/\bBearer\s+[^\s,;]+/ig, 'Bearer [redacted]').replace(/(?:\/[^\s/:]+){2,}/g, '[redacted-path]').replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)[^\s,;]+/ig, '$1[redacted]')
+    .replace(/((?:api[-_]?key|token|secret|password|credential)\s*[:=]\s*)[^\s,;&]+/ig, '$1[redacted]')
+    .replace(/([?&](?:api[-_]?key|token|signature|sig|credential|access_token|x-amz-[^=]*)=)[^&#\s]+/ig, '$1[redacted]')
+    .replace(/(https?:\/\/[^\s/?#]+)(\/[^\s?#]*)/ig, '$1/[redacted-path]');
+}
+function diagnostic(error, stage, config = {}, fallback = 'generation failed') {
+  const details = error?.errorDetails || {};
+  const message = sanitizeDiagnostic(details.message || error?.message || fallback, configSecrets(config));
+  return { stage: details.stage || stage, message, ...((details.code || error?.code || error?.cause?.code) ? { code: sanitizeDiagnostic(details.code || error.code || error.cause.code, configSecrets(config)) } : {}), ...(details.httpStatus ? { httpStatus: details.httpStatus } : {}), ...(details.requestId ? { requestId: sanitizeDiagnostic(details.requestId, configSecrets(config)) } : {}) };
+}
 export function forgeCatalog(connections) {
   const models = connections.flatMap(c => (c.models || []).filter(m => m.selected !== false).flatMap(m => {
     const outputs = m.acceptedOutput ?? m.discoveredOutput ?? [];
@@ -130,20 +148,26 @@ export class ForgeStore {
     return { job: this.public(job), replayed: false };
   }
   async run(job, owner) {
+    let stage = 'configuration';
+    let config;
     try {
       job.status = 'running'; this.save(job);
-      const config = await this.resolveConfig(job.connectionId, job.modelId);
+      config = await this.resolveConfig(job.connectionId, job.modelId);
       const google = job.kind === 'audio' && googleLyriaSupported(config);
       if (!config || (!google && (generatedArtifactKind(config) !== job.kind || !/^openai-/.test(config.api)))) throw new Error('unavailable');
       const adapter = google ? this.googleAdapterFactory({ config }) : this.adapterFactory({ config });
+      stage = 'provider';
       const result = await adapter.complete({ prompt: job.prompt });
-      if (!result.ok || !result.outputArtifacts?.length) throw new Error('generation failed');
+      if (!result.ok || !result.outputArtifacts?.length) {
+        throw Object.assign(new Error(result.error || 'Provider returned no artifacts'), {errorDetails: {...result.errorDetails, message: result.errorDetails?.message || result.error || 'Provider returned no artifacts', httpStatus: result.errorDetails?.httpStatus || result.status}});
+      }
+      stage = 'artifact_storage';
       for (const artifact of result.outputArtifacts) {
         const stored = await persistGeneratedArtifact({ agentWorkspaceRoot: this.runtimeRoot || owner.agentWorkspaceRoot, metadata: artifact, bytes: artifact.source?.bytes });
         job.artifacts.push({ id: randomUUID(), kind: stored.kind, name: stored.name, mimeType: stored.mimeType, sizeBytes: stored.sizeBytes, storageReference: stored.storageReference });
       }
       job.status = 'succeeded'; this.save(job);
-    } catch {
+    } catch (error) {
       // A multi-artifact response is atomic: do not retain earlier files if a later write fails.
       const retained = [];
       for (const artifact of job.artifacts) {
@@ -156,7 +180,9 @@ export class ForgeStore {
         }
       }
       job.artifacts = retained;
-      job.status = 'failed'; job.error = 'generation_failed'; this.save(job);
+      job.status = 'failed'; job.error = 'generation_failed';
+      job.errorDetails = diagnostic(error, stage, config);
+      this.save(job);
     }
   }
   async artifact(id, artifactId) {

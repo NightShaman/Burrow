@@ -48,17 +48,16 @@ function requestHeaders(config = {}) {
 function safeError(value, secrets = []) {
   let result = text(value) || 'provider request failed';
   for (const secret of secrets.map(text).filter(Boolean)) result = result.split(secret).join('[redacted]');
-  return result.slice(0, 500);
+  return result;
 }
 
 async function providerError(response, secrets = []) {
   const body = await response.text();
-  let message = body;
-  try {
-    const parsed = body ? JSON.parse(body) : {};
-    message = parsed?.error?.message || parsed?.message || body;
-  } catch {}
-  return safeError(message || `HTTP ${response.status}`, secrets);
+  let parsed = {};
+  try { parsed = body ? JSON.parse(body) : {}; } catch {}
+  const message = parsed?.error?.message || parsed?.message || body;
+  const code = parsed?.error?.code || parsed?.code || null;
+  return { httpStatus: response.status, requestId: response.headers?.get?.('x-request-id') || response.headers?.get?.('apim-request-id') || null, message: safeError(message || `HTTP ${response.status}`, secrets), code: typeof code === 'string' ? safeError(code, secrets) : null };
 }
 
 function promptFrom(options = {}) {
@@ -117,7 +116,7 @@ async function imageBytes(item, { fetchImpl, signal, secrets }) {
   // Provider asset URLs are fetched without model credentials. Signed URLs carry
   // their own authorization and must never inherit an API key or bearer token.
   const response = await fetchImpl(parsed.href, { method: 'GET', ...(signal ? { signal } : {}) });
-  if (!response.ok) throw new Error(`image URL retrieval failed: ${await providerError(response, secrets)}`);
+  if (!response.ok) { const failure = await providerError(response, secrets); throw Object.assign(new Error(`image URL retrieval failed: ${failure.message}`), { errorDetails: { ...failure, stage: 'artifact_retrieval' } }); }
   return { bytes: Buffer.from(await response.arrayBuffer()), contentType: response.headers?.get?.('content-type') || '' };
 }
 
@@ -155,9 +154,10 @@ export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = 
     await traceRequest(options.traceLogger, { requestId, provider, model, url, headers, body, clock });
     const response = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(body), ...(options.signal ? { signal: options.signal } : {}) });
     if (!response.ok) {
-      const error = await providerError(response, [config.apiKey]);
-      await options.traceLogger?.model?.({ stage: 'model-response', requestId, provider, api: 'openai-generated-artifact', model, status: response.status, ok: false, error, ts: clock() });
-      return { ok: false, requestId, provider, api: 'openai-generated-artifact', model, status: response.status, choice: null, outputArtifacts: [], error };
+      const providerErrorDetails = await providerError(response, [config.apiKey]);
+      const error = providerErrorDetails.message;
+      await options.traceLogger?.model?.({ stage: 'model-response', requestId, provider, api: 'openai-generated-artifact', model, status: response.status, ok: false, error, errorDetails: providerErrorDetails, ts: clock() });
+      return { ok: false, requestId, provider, api: 'openai-generated-artifact', model, status: response.status, choice: null, outputArtifacts: [], error, errorDetails: providerErrorDetails };
     }
 
     let outputArtifacts;
