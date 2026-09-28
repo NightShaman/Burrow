@@ -3,7 +3,9 @@ import { closePostgresPool, withPostgresTransaction } from './postgres-foundatio
 import {
   assertConnection, canonicalizeOauthConnection, decrypt, encrypt, normalizeAuth,
   publicConnection, secretPreview, normalizeModels, normalizeReasoningEffort, normalizeTemperature, assertIdentity,
+  refreshAnthropicOauth, discoverModels,
 } from './model-settings-store.mjs';
+import { refreshOpenAiOAuth } from './openai-oauth-login.mjs';
 
 export const POSTGRES_MODEL_SETTINGS_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS chat_identities (
@@ -26,6 +28,9 @@ CREATE TABLE IF NOT EXISTS model_auth_previews (
   connection_id TEXT PRIMARY KEY REFERENCES model_connections(id) ON DELETE CASCADE,
   value_json TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS model_settings_cache (
+  cache_key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS agent_model_selections (
   agent_id TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
   connection_id TEXT NOT NULL REFERENCES model_connections(id) ON DELETE RESTRICT,
@@ -39,6 +44,8 @@ const AUTH = 'providerAuth';
 const API_KEY = 'apiKey';
 const CONNECTION_WRITE_LOCK = 'burrow-model-settings-connection-write';
 const IDENTITY_WRITE_LOCK = 'burrow-model-settings-identity-write';
+const oauthRefreshes = new WeakMap();
+const refreshMapFor = (pool) => { let map = oauthRefreshes.get(pool); if (!map) { map = new Map(); oauthRefreshes.set(pool, map); } return map; };
 const json = (value, fallback = {}) => { try { return JSON.parse(value); } catch { return fallback; } };
 
 export class PostgresModelSettingsStore {
@@ -78,6 +85,15 @@ export class PostgresModelSettingsStore {
   async get(id) { const r = await this.pool.query(`${this.selectSql('WHERE c.id=$1')}`, [id]); return publicConnection(r.rows[0]); }
   async secret(id, name) { const r = await this.pool.query('SELECT * FROM model_connection_secrets WHERE connection_id=$1 AND name=$2', [id, name]); return r.rows[0] ? decrypt(this.key, r.rows[0]) : null; }
   async apiKey(id) { return this.secret(id, API_KEY); }
+  async cacheGet(key) {
+    const result = await this.pool.query('SELECT value_json FROM model_settings_cache WHERE cache_key=$1', [String(key)]);
+    return result.rows[0] ? json(result.rows[0].value_json, {}) : {};
+  }
+  async cacheSet(key, value, timestamp = this.clock()) {
+    await this.pool.query(`INSERT INTO model_settings_cache(cache_key,value_json,updated_at) VALUES($1,$2,$3)
+      ON CONFLICT(cache_key) DO UPDATE SET value_json=EXCLUDED.value_json,updated_at=EXCLUDED.updated_at`, [String(key), JSON.stringify(value ?? {}), timestamp]);
+    return value ?? {};
+  }
   async auth(id) { const structured = await this.secret(id, AUTH); if (structured) return json(structured, null); const key = await this.apiKey(id); if (!key) return null; const c = await this.get(id); return { type: 'api_key', provider: c?.provider || null, source: 'legacy-api-key', apiKey: key }; }
   async authWithClient(client, id, provider = null) { const structured = await client.query('SELECT * FROM model_connection_secrets WHERE connection_id=$1 AND name=$2', [id, AUTH]); if (structured.rows[0]) return json(decrypt(this.key, structured.rows[0]), null); const legacy = await client.query('SELECT * FROM model_connection_secrets WHERE connection_id=$1 AND name=$2', [id, API_KEY]); if (!legacy.rows[0]) return null; return { type: 'api_key', provider, source: 'legacy-api-key', apiKey: decrypt(this.key, legacy.rows[0]) }; }
   async saveSecret(client, connectionId, name, value, timestamp) {
@@ -155,12 +171,52 @@ export class PostgresModelSettingsStore {
     });
   }
 
-  async persistAuth(id, auth, timestamp = this.clock()) { return withPostgresTransaction(this.pool, async (client) => {
+  async resolveAuth(id, { fetchImpl = fetch, nowMs = Date.now() } = {}) {
+    const connection = await this.get(id);
+    if (!connection) throw new Error('model_connection_not_found');
+    let auth = await this.auth(id);
+    if (!auth) throw new Error('model_connection_auth_required');
+    if (auth.type === 'oauth' && Number(auth.expiresAt) <= nowMs + 60_000) {
+      const refreshKey = `${id}:${auth.refreshToken || ''}`;
+      const refreshes = refreshMapFor(this.pool);
+      let refresh = refreshes.get(refreshKey);
+      if (!refresh) {
+        refresh = (async () => {
+          const provider = auth.provider || connection.provider;
+          const refreshed = /openai/i.test(provider)
+            ? await refreshOpenAiOAuth(auth, { fetchImpl, nowMs })
+            : /anthropic|claude/i.test(provider)
+              ? await refreshAnthropicOauth(auth, { fetchImpl, nowMs })
+              : (() => { throw new Error('model_auth_refresh_provider_unsupported'); })();
+          return this.persistAuth(id, refreshed, this.clock(), auth.refreshToken || null, auth);
+        })();
+        refreshes.set(refreshKey, refresh);
+      }
+      try { auth = await refresh; } finally { if (refreshes.get(refreshKey) === refresh) refreshes.delete(refreshKey); }
+    }
+    const token = auth.type === 'oauth' ? auth.accessToken : auth.type === 'api_key' ? auth.apiKey : auth.token;
+    if (!token) throw new Error('model_connection_auth_required');
+    return { type: auth.type || 'api_key', provider: auth.provider || connection.provider, source: auth.source || null, token, expiresAt: auth.expiresAt || null };
+  }
+  async discoverModels(options = {}) {
+    const connection = await this.get(options.id || options.connectionId);
+    if (!connection) throw new Error('model_connection_not_found');
+    const auth = options.auth || await this.auth(connection.id) || {};
+    const token = options.apiKey || auth.apiKey || auth.accessToken || auth.token;
+    return discoverModels({ ...options, baseUrl: options.baseUrl || connection.baseUrl, provider: options.provider || connection.provider, apiType: options.apiType || connection.apiType, auth, apiKey: token, fetchImpl: options.fetchImpl || fetch, catalogFetchImpl: options.catalogFetchImpl || options.fetchImpl || fetch, store: options.store || this });
+  }
+
+  async persistAuth(id, auth, timestamp = this.clock(), expectedRefreshToken = undefined, expectedAuth = undefined) { return withPostgresTransaction(this.pool, async (client) => {
     const row = await client.query('SELECT provider,api_type,base_url FROM model_connections WHERE id=$1 FOR UPDATE', [id]);
     const current = row.rows[0];
-    const canonical = current ? canonicalizeOauthConnection({ provider: current.provider, apiType: current.api_type, baseUrl: current.base_url }, auth) : null;
-    if (current && canonical.apiType !== current.api_type) await client.query('UPDATE model_connections SET api_type=$1, updated_at=$2 WHERE id=$3', [canonical.apiType, timestamp, id]);
-    await this.writeAuth(client, id, auth, current?.provider || auth.provider, timestamp, false);
+    if (!current) throw new Error('model_connection_not_found');
+    if (expectedRefreshToken !== undefined) {
+      const stored = await this.authWithClient(client, id, current.provider);
+      if (stored?.refreshToken !== expectedRefreshToken || (expectedAuth && JSON.stringify(stored) !== JSON.stringify(expectedAuth))) return stored || auth;
+    }
+    const canonical = canonicalizeOauthConnection({ provider: current.provider, apiType: current.api_type, baseUrl: current.base_url }, auth);
+    if (canonical.apiType !== current.api_type) await client.query('UPDATE model_connections SET api_type=$1, updated_at=$2 WHERE id=$3', [canonical.apiType, timestamp, id]);
+    await this.writeAuth(client, id, auth, current.provider || auth.provider, timestamp, false);
     return auth;
   }); }
   async remove(id) { return withPostgresTransaction(this.pool, async (client) => {

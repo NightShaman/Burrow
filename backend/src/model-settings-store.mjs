@@ -47,6 +47,18 @@ function writeCodexClientVersionCache(storeOrDb, patch = {}, { nowMs = Date.now(
   setSettingsMeta(db, CODEX_CLIENT_VERSION_META_KEY, next, { clock: () => new Date(nowMs).toISOString() });
   return next;
 }
+async function readCodexClientVersionCacheAsync(target) {
+  return typeof target?.cacheGet === 'function' ? safeCacheRecord(await target.cacheGet(CODEX_CLIENT_VERSION_META_KEY)) : readCodexClientVersionCache(target);
+}
+async function writeCodexClientVersionCacheAsync(target, patch = {}, { nowMs = Date.now() } = {}) {
+  if (typeof target?.cacheSet === 'function') {
+    const previous = await readCodexClientVersionCacheAsync(target);
+    const next = { ...previous, ...patch, updatedAt: new Date(nowMs).toISOString() };
+    await target.cacheSet(CODEX_CLIENT_VERSION_META_KEY, next, new Date(nowMs).toISOString());
+    return next;
+  }
+  return writeCodexClientVersionCache(target, patch, { nowMs });
+}
 function codexClientVersionFromCache(cache = {}) {
   return parseSemver(cache.currentVersion)?.raw || parseSemver(cache.lastGoodCatalogVersion)?.raw || CODEX_CLIENT_VERSION_FLOOR;
 }
@@ -372,7 +384,7 @@ export function canonicalizeOauthConnection(connection, auth) {
   return { ...connection, apiType: 'openai-responses' };
 }
 
-async function refreshAnthropicOauth(auth = {}, { fetchImpl = fetch, nowMs = Date.now() } = {}) {
+export async function refreshAnthropicOauth(auth = {}, { fetchImpl = fetch, nowMs = Date.now() } = {}) {
   const refreshToken = normalize(auth.refreshToken);
   if (!refreshToken) throw new Error('model_auth_refresh_token_required');
   const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: ANTHROPIC_OAUTH_CLIENT_ID });
@@ -666,17 +678,18 @@ export async function refreshCodexClientVersionCache({ store, db, fetchImpl = fe
   for (const [source, url] of attempts) {
     try {
       const version = await fetchCodexVersionFromUrl(url, { fetchImpl, signal, source });
-      return writeCodexClientVersionCache(target, { currentVersion: version, source, lastCheckedAt: new Date(nowMs).toISOString(), lastError: null }, { nowMs });
+      return writeCodexClientVersionCacheAsync(target, { currentVersion: version, source, lastCheckedAt: new Date(nowMs).toISOString(), lastError: null }, { nowMs });
     } catch (error) { lastError = error; }
   }
-  return writeCodexClientVersionCache(target, { lastCheckedAt: new Date(nowMs).toISOString(), lastError: String(lastError?.message || lastError || 'codex_client_version_refresh_failed') }, { nowMs });
+  return writeCodexClientVersionCacheAsync(target, { lastCheckedAt: new Date(nowMs).toISOString(), lastError: String(lastError?.message || lastError || 'codex_client_version_refresh_failed') }, { nowMs });
 }
 
-export function resolveCodexClientVersion({ store, db, nowMs = Date.now(), refresh = false, fetchImpl = fetch, signal = undefined } = {}) {
+export async function resolveCodexClientVersion({ store, db, nowMs = Date.now(), refresh = false, fetchImpl = fetch, signal = undefined } = {}) {
   const target = store || db;
-  const cache = readCodexClientVersionCache(target);
-  if (!refresh || codexClientVersionCacheFresh(cache, nowMs)) return Promise.resolve({ version: codexClientVersionFromCache(cache), cache, refreshed: false });
-  return refreshCodexClientVersionCache({ store, db, fetchImpl, signal, nowMs }).then((next) => ({ version: codexClientVersionFromCache(next), cache: next, refreshed: true }));
+  const cache = await readCodexClientVersionCacheAsync(target);
+  if (!refresh || codexClientVersionCacheFresh(cache, nowMs)) return { version: codexClientVersionFromCache(cache), cache, refreshed: false };
+  const next = await refreshCodexClientVersionCache({ store, db, fetchImpl, signal, nowMs });
+  return { version: codexClientVersionFromCache(next), cache: next, refreshed: true };
 }
 
 function catalogProviders(catalog) {
@@ -730,9 +743,22 @@ function enrichFromModelsDev(models, catalog, { provider, snapshotAt } = {}) {
   });
 }
 
+async function cacheGetAsync(target, key) {
+  if (!target) return {};
+  if (typeof target.cacheGet === 'function') return safeCacheRecord(await target.cacheGet(key));
+  const db = target?.db || target;
+  return safeCacheRecord(getSettingsMeta(db, key));
+}
+async function cacheSetAsync(target, key, value, nowMs) {
+  if (!target) return value;
+  if (typeof target.cacheSet === 'function') { await target.cacheSet(key, value, new Date(nowMs).toISOString()); return value; }
+  const db = target?.db || target;
+  setSettingsMeta(db, key, value, { clock: () => new Date(nowMs).toISOString() });
+  return value;
+}
 async function modelsDevSnapshot({ store, db, fetchImpl = fetch, signal, nowMs = Date.now(), catalogUrl = MODELS_DEV_CATALOG_URL, ttlMs = MODELS_DEV_CATALOG_CACHE_TTL_MS } = {}) {
-  const target = store?.db || store || db;
-  const cached = target ? safeCacheRecord(getSettingsMeta(target, MODELS_DEV_CATALOG_META_KEY)) : {};
+  const target = store || db;
+  const cached = safeCacheRecord(await cacheGetAsync(target, MODELS_DEV_CATALOG_META_KEY));
   const checked = Date.parse(cached.lastCheckedAt || '');
   if (cached.catalog && Number.isFinite(checked) && nowMs - checked < Math.max(1, Number(ttlMs) || MODELS_DEV_CATALOG_CACHE_TTL_MS)) return cached;
   try {
@@ -747,12 +773,12 @@ async function modelsDevSnapshot({ store, db, fetchImpl = fetch, signal, nowMs =
       if (!response.ok || !body || typeof body !== 'object') throw new Error(`models_dev_catalog_failed:${response.status}`);
       next = { catalog: body, etag: response.headers.get('etag') || null, snapshotAt: checkedAt, lastCheckedAt: checkedAt, lastError: null };
     }
-    if (target) setSettingsMeta(target, MODELS_DEV_CATALOG_META_KEY, next, { clock: () => checkedAt });
+    if (target) await cacheSetAsync(target, MODELS_DEV_CATALOG_META_KEY, next, nowMs);
     return next;
   } catch (error) {
     if (cached.catalog) {
       const next = { ...cached, lastCheckedAt: new Date(nowMs).toISOString(), lastError: String(error?.message || error) };
-      if (target) setSettingsMeta(target, MODELS_DEV_CATALOG_META_KEY, next);
+      if (target) await cacheSetAsync(target, MODELS_DEV_CATALOG_META_KEY, next, nowMs);
       return next;
     }
     return null;
@@ -779,7 +805,8 @@ export async function discoverModels({ baseUrl, provider = '', useModelsDev = fa
     const target = store || db;
     const initial = parseSemver(codexClientVersion)?.raw || (await resolveCodexClientVersion({ store, db, nowMs, refresh: false })).version;
     const headers = chatGptCodexCatalogHeaders({ apiKey, auth });
-    const versions = [...new Set([initial, readCodexClientVersionCache(target).lastGoodCatalogVersion, CODEX_CLIENT_VERSION_FLOOR].map((value) => parseSemver(value)?.raw).filter(Boolean))];
+    const versionCache = await readCodexClientVersionCacheAsync(target);
+    const versions = [...new Set([initial, versionCache.lastGoodCatalogVersion, CODEX_CLIENT_VERSION_FLOOR].map((value) => parseSemver(value)?.raw).filter(Boolean))];
     let lastError = null;
     for (const version of versions) {
       const response = await fetchImpl(chatGptCodexModelsUrl(baseUrl, version), { headers, signal });
@@ -787,7 +814,7 @@ export async function discoverModels({ baseUrl, provider = '', useModelsDev = fa
       if (!response.ok) { lastError = new Error(`model_discovery_failed:${response.status}`); continue; }
       const models = normalizeCodexCatalogModels(body);
       const minimumObservedModelVersion = observedMinimumClientVersion(body);
-      if (target) writeCodexClientVersionCache(target, { lastGoodCatalogVersion: version, minimumObservedModelVersion, lastCatalogAt: new Date(nowMs).toISOString(), lastCatalogCount: models.length }, { nowMs });
+      if (target) await writeCodexClientVersionCacheAsync(target, { lastGoodCatalogVersion: version, minimumObservedModelVersion, lastCatalogAt: new Date(nowMs).toISOString(), lastCatalogCount: models.length }, { nowMs });
       return enrich(models);
     }
     throw lastError || new Error('model_discovery_failed');
