@@ -37,8 +37,7 @@ export async function discoverPostgresSources({ env = process.env } = {}) {
     const ids = new Set(db.prepare('SELECT id FROM agents').all().map(row => row.id));
     for (const c of conversations) if (!ids.has(c.agentId)) throw new Error(`postgres_discovery_unknown_agent:${c.agentId}`);
   } finally { db.close(); }
-  if (auxiliary.length > 1) throw new Error('postgres_discovery_multiple_auxiliary_sources_require_manifest');
-  return { migrationId: 'burrow-postgres-cutover-v1', settings: { path: settings }, conversations: conversations.sort((a,b) => a.agentId.localeCompare(b.agentId)), ...(auxiliary.length ? { auxiliary: { path: auxiliary[0] } } : {}) };
+  return { migrationId: 'burrow-postgres-cutover-v1', settings: { path: settings }, conversations: conversations.sort((a,b) => a.agentId.localeCompare(b.agentId)), ...(auxiliary.length ? { auxiliary: auxiliary.sort().map(path => ({ path })) } : {}) };
 }
 
 /** Start, initialize schema, and atomically import before the caller can launch a server. */

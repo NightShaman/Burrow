@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { importSettingsDatabase } from './postgres-settings-import.mjs';
-import { importAuxiliaryDatabase } from './postgres-auxiliary-import.mjs';
 import { importConversationSessions } from './postgres-conversation-import.mjs';
 import { withPostgresTransaction, postgresTransactionContext } from './postgres-foundation.mjs';
 
@@ -50,15 +49,17 @@ function normalize(input) {
   if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('settings_source_required');
   const out = [{ name: 'settings', path: text(settings.path || settings.databasePath, 'settings_path'), kind: 'settings' }];
   const auxiliary = input.auxiliary || (input.forge || input.continuity ? { forge: input.forge, continuity: input.continuity } : null);
-  if (auxiliary !== null) {
+  for (const item of auxiliary === null ? [] : Array.isArray(auxiliary) ? auxiliary : [auxiliary]) {
+    const auxiliary = item;
     if (!auxiliary || typeof auxiliary !== 'object' || Array.isArray(auxiliary)) throw new Error('invalid_auxiliary_source');
     for (const key of Object.keys(auxiliary)) if (!['path','databasePath','forge','continuity'].includes(key)) throw new Error(`unknown_auxiliary_field:${key}`);
     const p = auxiliary.path || auxiliary.databasePath;
     if (p) out.push({ name: 'auxiliary', path: text(p, 'auxiliary_path'), kind: 'auxiliary' });
     else {
+      const previousLength = out.length;
       if (auxiliary.forge) out.push({ name: 'forge', path: text(auxiliary.forge.path || auxiliary.forge.databasePath, 'forge_path'), kind: 'auxiliary' });
       if (auxiliary.continuity) out.push({ name: 'continuity', path: text(auxiliary.continuity.path || auxiliary.continuity.databasePath, 'continuity_path'), kind: 'auxiliary' });
-      if (out.length === 1) throw new Error('auxiliary_path_required');
+      if (out.length === previousLength) throw new Error('auxiliary_path_required');
     }
   }
   if (!Array.isArray(input.conversations)) throw new Error('conversations_manifest_required');
@@ -84,9 +85,8 @@ export async function runPostgresCutover(pool, manifestInput) {
     }
     const facade = postgresTransactionContext(client);
     const result = {};
-    result.settings = await importSettingsDatabase(facade, manifest.settings.path || manifest.settings.databasePath);
-    result.auxiliary = [];
-    for (const source of manifest.sources.filter(s => s.kind === 'auxiliary')) result.auxiliary.push(await importAuxiliaryDatabase(facade, source.path));
+    result.settings = await importSettingsDatabase(facade, manifest.settings.path || manifest.settings.databasePath, { auxiliarySources: manifest.sources.filter(s => s.kind === 'auxiliary').map(s => s.path) });
+    result.auxiliary = result.settings.auxiliary ? [result.settings.auxiliary] : [];
     result.conversations = [];
     for (const conversation of manifest.conversations) result.conversations.push(await importConversationSessions(facade, conversation));
     const after = await fingerprint([...manifest.sources, ...manifest.conversations.map(c => ({ name: `conversation:${c.agentId}`, path: path.join(c.rootDir, 'sessions') }))]);

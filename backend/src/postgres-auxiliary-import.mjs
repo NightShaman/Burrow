@@ -99,10 +99,53 @@ async function insertAndVerify(client, table, columns, values, sourceRows) {
   }
 }
 
-/** Import Forge and continuity-handoff SQLite tables into an empty PostgreSQL auxiliary store. */
-export async function importAuxiliaryDatabase(pool, databasePath, { selectedTables = null } = {}) {
+// Compare source values before lossy migration transforms (lease stripping and
+// interruption). Different source records must never become silent duplicates.
+function equivalentSource(table, left, right) {
+  return SOURCE_TABLES.get(table).every(column => {
+    if (['request', 'record', 'source_refs'].includes(column)) {
+      return isDeepStrictEqual(json(left[column], table, column), json(right[column], table, column));
+    }
+    return left[column] === right[column];
+  });
+}
+
+function mergeSources(paths, selectedTables) {
+  const merged = {};
+  for (const item of paths) {
+    const databasePath = typeof item === 'string' ? item : item.path;
+    const tables = typeof item === 'string' ? selectedTables : item.selectedTables ?? selectedTables;
+    let source;
+    try { source = readSource(databasePath, tables); }
+    catch (error) { throw new Error(`auxiliary_source_error:${JSON.stringify(databasePath)}:${error.message}`, { cause: error }); }
+    for (const [table, rows] of Object.entries(source)) {
+      const identities = merged[table] ||= new Map();
+      // The current schemas key jobs/handoffs by id and selections by mode.
+      // Forge idem and continuity (agent_id, session_id) are NOT unique: retain
+      // distinct ids even when they share these lookup keys.
+      const identityColumn = SOURCE_TABLES.get(table)[0];
+      for (const row of rows) {
+        const identity = row[identityColumn];
+        const previous = identities.get(identity);
+        if (previous) {
+          if (!equivalentSource(table, previous.row, row)) {
+            throw new Error(`auxiliary_source_conflict:${table}:${identityColumn}=${JSON.stringify(identity)}:sources=${JSON.stringify([previous.path, databasePath])}`);
+          }
+        } else identities.set(identity, { row, path: databasePath });
+      }
+    }
+  }
+  return Object.fromEntries(Object.entries(merged).map(([table, entries]) => [table, [...entries.values()].map(entry => entry.row)]));
+}
+
+/** Read and merge all SQLite sources before atomically importing into empty tables. */
+export async function importAuxiliaryDatabases(pool, paths, { selectedTables = null } = {}) {
   if (!pool?.connect) throw new Error('postgres_pool_required');
-  const source = readSource(databasePath, selectedTables);
+  if (!Array.isArray(paths)) throw new Error('auxiliary_source_paths_required');
+  const source = mergeSources(paths, selectedTables);
+  const jobs = (source.forge_jobs || []).map(forgeJob);
+  const selections = (source.forge_selections || []).map(row => [row.mode, row.connection_id, row.model_id, row.updated_at]);
+  const handoffs = (source.continuity_handoffs || []).map(row => [row.id, row.agent_id, row.session_id, row.run_id, row.source, row.title, row.content, json(row.source_refs, 'continuity_handoffs', 'source_refs'), row.evidence_summary, row.created_at, row.updated_at, row.expires_at]);
   return withPostgresTransaction(pool, async client => {
     for (const [table, columns] of [['forge_jobs', FORGE_JOB_COLUMNS], ['forge_selections', FORGE_SELECTION_COLUMNS], ['continuity_handoffs', HANDOFF_COLUMNS]]) {
       if (!source[table]) continue;
@@ -110,14 +153,16 @@ export async function importAuxiliaryDatabase(pool, databasePath, { selectedTabl
       await targetLayout(client, table, columns);
       await assertEmpty(client, table);
     }
-    const jobs = (source.forge_jobs || []).map(forgeJob);
-    const selections = (source.forge_selections || []).map(row => [row.mode, row.connection_id, row.model_id, row.updated_at]);
-    const handoffs = (source.continuity_handoffs || []).map(row => [row.id, row.agent_id, row.session_id, row.run_id, row.source, row.title, row.content, json(row.source_refs, 'continuity_handoffs', 'source_refs'), row.evidence_summary, row.created_at, row.updated_at, row.expires_at]);
-    if(source.forge_jobs) await insertAndVerify(client, 'forge_jobs', FORGE_JOB_COLUMNS, jobs, source.forge_jobs);
-    if(source.forge_selections) await insertAndVerify(client, 'forge_selections', FORGE_SELECTION_COLUMNS, selections, source.forge_selections);
-    if(source.continuity_handoffs) await insertAndVerify(client, 'continuity_handoffs', HANDOFF_COLUMNS, handoffs, source.continuity_handoffs);
+    if (source.forge_jobs) await insertAndVerify(client, 'forge_jobs', FORGE_JOB_COLUMNS, jobs, source.forge_jobs);
+    if (source.forge_selections) await insertAndVerify(client, 'forge_selections', FORGE_SELECTION_COLUMNS, selections, source.forge_selections);
+    if (source.continuity_handoffs) await insertAndVerify(client, 'continuity_handoffs', HANDOFF_COLUMNS, handoffs, source.continuity_handoffs);
     return { forgeJobs: jobs.length, forgeSelections: selections.length, continuityHandoffs: handoffs.length };
   });
+}
+
+/** Backwards-compatible single-source API, including settings' selected tables. */
+export async function importAuxiliaryDatabase(pool, databasePath, options = {}) {
+  return importAuxiliaryDatabases(pool, [databasePath], options);
 }
 
 export const importForgeAndContinuityDatabase = importAuxiliaryDatabase;

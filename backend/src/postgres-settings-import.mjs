@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { DEFAULT_RETENTION_POLICY } from './retention-settings.mjs';
 import { DatabaseSync } from 'node:sqlite';
-import { importAuxiliaryDatabase } from './postgres-auxiliary-import.mjs';
+import { importAuxiliaryDatabases } from './postgres-auxiliary-import.mjs';
 import { withPostgresTransaction, postgresTransactionContext } from './postgres-foundation.mjs';
 
 // This is the exact current SQLite settings contract (30 tables).
@@ -40,7 +40,7 @@ function equal(a, b, type) {
 }
 
 /** Import a complete SQLite settings database into an empty PostgreSQL application database. */
-export async function importSettingsDatabase(pool, databasePath) {
+export async function importSettingsDatabase(pool, databasePath, { auxiliarySources = [] } = {}) {
   if (!pool?.connect) throw new Error('postgres_pool_required');
   const {tables: source, hasForge} = readSource(databasePath);
   return withPostgresTransaction(pool, async client => {
@@ -120,8 +120,9 @@ export async function importSettingsDatabase(pool, databasePath) {
       if (row.key.startsWith('model_auth_preview:')) await insert('model_auth_previews', { connection_id:row.key.slice('model_auth_preview:'.length), value_json:row.value_json, updated_at:row.updated_at });
       if (['openai_codex_client_version','models_dev_catalog'].includes(row.key)) await insert('model_settings_cache', { cache_key:row.key, value_json:row.value_json, updated_at:row.updated_at });
     }
-    const forge = hasForge ? await importAuxiliaryDatabase(postgresTransactionContext(client), databasePath, { selectedTables: ['forge_jobs','forge_selections'] }) : null;
-    return Object.freeze({ tablesImported:source.length, rowsImported, ...(forge ? {forge} : {}) });
+    const sources = [...(hasForge ? [{ path: databasePath, selectedTables: ['forge_jobs','forge_selections'] }] : []), ...auxiliarySources];
+    const auxiliary = sources.length ? await importAuxiliaryDatabases(postgresTransactionContext(client), sources) : null;
+    return Object.freeze({ tablesImported:source.length, rowsImported, ...(hasForge ? {forge: auxiliary} : {}), ...(auxiliarySources.length ? {auxiliary} : {}) });
   });
 }
 export const SETTINGS_IMPORT_TABLE_COLUMNS=TABLE_COLUMNS;
