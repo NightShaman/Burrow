@@ -1,6 +1,7 @@
 import { migrationChecksum, migrationLockKey, withPostgresTransaction } from './postgres-foundation.mjs';
+import { POSTGRES_APPLICATION_SCHEMA_MANIFEST } from './postgres-application-schema.mjs';
 
-export const POSTGRES_MIGRATIONS = Object.freeze([]);
+export const POSTGRES_MIGRATIONS = POSTGRES_APPLICATION_SCHEMA_MANIFEST;
 
 const LEDGER_SQL = `
   CREATE TABLE IF NOT EXISTS burrow_schema_migrations (
