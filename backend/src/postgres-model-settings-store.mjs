@@ -44,8 +44,7 @@ const AUTH = 'providerAuth';
 const API_KEY = 'apiKey';
 const CONNECTION_WRITE_LOCK = 'burrow-model-settings-connection-write';
 const IDENTITY_WRITE_LOCK = 'burrow-model-settings-identity-write';
-const oauthRefreshes = new WeakMap();
-const refreshMapFor = (pool) => { let map = oauthRefreshes.get(pool); if (!map) { map = new Map(); oauthRefreshes.set(pool, map); } return map; };
+const OAUTH_REFRESH_LOCK = 'burrow-model-settings-oauth-refresh';
 const json = (value, fallback = {}) => { try { return JSON.parse(value); } catch { return fallback; } };
 
 export class PostgresModelSettingsStore {
@@ -177,22 +176,49 @@ export class PostgresModelSettingsStore {
     let auth = await this.auth(id);
     if (!auth) throw new Error('model_connection_auth_required');
     if (auth.type === 'oauth' && Number(auth.expiresAt) <= nowMs + 60_000) {
-      const refreshKey = `${id}:${auth.refreshToken || ''}`;
-      const refreshes = refreshMapFor(this.pool);
-      let refresh = refreshes.get(refreshKey);
-      if (!refresh) {
-        refresh = (async () => {
-          const provider = auth.provider || connection.provider;
+      // The lock is session-scoped and held on the same pinned client used for
+      // the re-read/write. This avoids a max=1 pool deadlock and lets ordinary
+      // operator writes proceed until the short persistence transaction.
+      const client = await this.pool.connect();
+      let locked = false;
+      try {
+        await client.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [`${OAUTH_REFRESH_LOCK}:${id}`]);
+        locked = true;
+        const current = await client.query(`${this.selectSql('WHERE c.id=$1')}`, [id]);
+        if (!current.rows[0]) throw new Error('model_connection_not_found');
+        const currentConnection = publicConnection(current.rows[0]);
+        auth = await this.authWithClient(client, id, currentConnection.provider);
+        if (!auth) throw new Error('model_connection_auth_required');
+        if (auth.type === 'oauth' && Number(auth.expiresAt) <= nowMs + 60_000) {
+          const provider = auth.provider || currentConnection.provider;
           const refreshed = /openai/i.test(provider)
             ? await refreshOpenAiOAuth(auth, { fetchImpl, nowMs })
             : /anthropic|claude/i.test(provider)
               ? await refreshAnthropicOauth(auth, { fetchImpl, nowMs })
               : (() => { throw new Error('model_auth_refresh_provider_unsupported'); })();
-          return this.persistAuth(id, refreshed, this.clock(), auth.refreshToken || null, auth);
-        })();
-        refreshes.set(refreshKey, refresh);
+          await client.query('BEGIN');
+          try {
+            auth = await this.persistAuthOnClient(client, id, refreshed, this.clock(), auth.refreshToken || null, auth);
+            await client.query('COMMIT');
+          } catch (error) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw error;
+          }
+        }
+      } finally {
+        if (locked) {
+          try {
+            await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [`${OAUTH_REFRESH_LOCK}:${id}`]);
+          } catch (error) {
+            // An unlock failure means the session may still hold the advisory
+            // lock. Destroy it rather than returning a potentially locked
+            // client to the pool.
+            client.release(error);
+            throw error;
+          }
+        }
+        client.release();
       }
-      try { auth = await refresh; } finally { if (refreshes.get(refreshKey) === refresh) refreshes.delete(refreshKey); }
     }
     const token = auth.type === 'oauth' ? auth.accessToken : auth.type === 'api_key' ? auth.apiKey : auth.token;
     if (!token) throw new Error('model_connection_auth_required');
@@ -206,7 +232,7 @@ export class PostgresModelSettingsStore {
     return discoverModels({ ...options, baseUrl: options.baseUrl || connection.baseUrl, provider: options.provider || connection.provider, apiType: options.apiType || connection.apiType, auth, apiKey: token, fetchImpl: options.fetchImpl || fetch, catalogFetchImpl: options.catalogFetchImpl || options.fetchImpl || fetch, store: options.store || this });
   }
 
-  async persistAuth(id, auth, timestamp = this.clock(), expectedRefreshToken = undefined, expectedAuth = undefined) { return withPostgresTransaction(this.pool, async (client) => {
+  async persistAuthOnClient(client, id, auth, timestamp = this.clock(), expectedRefreshToken = undefined, expectedAuth = undefined) {
     const row = await client.query('SELECT provider,api_type,base_url FROM model_connections WHERE id=$1 FOR UPDATE', [id]);
     const current = row.rows[0];
     if (!current) throw new Error('model_connection_not_found');
@@ -218,7 +244,10 @@ export class PostgresModelSettingsStore {
     if (canonical.apiType !== current.api_type) await client.query('UPDATE model_connections SET api_type=$1, updated_at=$2 WHERE id=$3', [canonical.apiType, timestamp, id]);
     await this.writeAuth(client, id, auth, current.provider || auth.provider, timestamp, false);
     return auth;
-  }); }
+  }
+  async persistAuth(id, auth, timestamp = this.clock(), expectedRefreshToken = undefined, expectedAuth = undefined) {
+    return withPostgresTransaction(this.pool, (client) => this.persistAuthOnClient(client, id, auth, timestamp, expectedRefreshToken, expectedAuth));
+  }
   async remove(id) { return withPostgresTransaction(this.pool, async (client) => {
     const connectionId = String(id ?? '').trim();
     const locked = await client.query('SELECT id FROM model_connections WHERE id=$1 FOR UPDATE', [connectionId]);
