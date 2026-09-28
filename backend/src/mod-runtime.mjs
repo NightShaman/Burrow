@@ -3,7 +3,7 @@ import { createModCapabilities } from './mod-capabilities.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ModSettingsStore, modSecretsApi, modSettingsApi } from './mod-settings-store.mjs';
+import { ModSettingsStore } from './mod-settings-store.mjs';
 import { startModHost } from './mod-host.mjs';
 import { openSettingsDatabase } from './settings-database.mjs';
 
@@ -181,11 +181,11 @@ function modCleanupHandle(value) {
   return null;
 }
 
-function closeModStore(mod, logger) {
+async function closeModStore(mod, logger) {
   const store = mod.store;
   mod.store = null;
   if (!store) return;
-  try { store.close(); }
+  try { await store.close?.(); }
   catch (error) { logger.error?.(`Burrow mod ${mod.id} store cleanup failed: ${String(error?.message || error)}`); }
 }
 
@@ -198,20 +198,20 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
       catch (error) { logger.error?.(`Burrow mod ${mod.id} cleanup failed: ${String(error?.message || error)}`); }
     }
     unpublishModTools(mod);
-    closeModStore(mod, logger);
+    await closeModStore(mod, logger);
   }
 }
 
-export async function loadMods({ runtimeRoot, databasePath, logger = console, executionProviders = null, replaceExecutionProviders = false, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null, onlyModIds = null } = {}) {
+export async function loadMods({ runtimeRoot, databasePath, logger = console, executionProviders = null, replaceExecutionProviders = false, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null, stores = null, onlyModIds = null, modStoreFactory = null, disabledModIds = null, modCatalogWriter = null } = {}) {
   const discoveredAll = await discoverMods({ runtimeRoot });
   const selectedIds = onlyModIds ? new Set(onlyModIds) : null;
   const discovered = selectedIds ? discoveredAll.filter((mod) => selectedIds.has(mod.id)) : discoveredAll;
-  const lifecycleDb = openSettingsDatabase({ databasePath });
   let disabled;
-  try {
-    disabled = new Set(lifecycleDb.prepare('SELECT mod_id FROM mod_lifecycle WHERE enabled=0').all().map((row) => row.mod_id));
-  } finally {
-    lifecycleDb.close();
+  if (disabledModIds) disabled = new Set(await disabledModIds());
+  else {
+    const lifecycleDb = openSettingsDatabase({ databasePath });
+    try { disabled = new Set(lifecycleDb.prepare('SELECT mod_id FROM mod_lifecycle WHERE enabled=0').all().map(row => row.mod_id)); }
+    finally { lifecycleDb.close(); }
   }
   const loaded = [];
   for (const mod of discovered) {
@@ -233,9 +233,9 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
         const systemCapability = requestedSystem ? declaredCapabilities[0] || null : null;
         if (requestedSystem && !systemCapability) throw new Error(`system_mod_capability_required:${mod.id}`);
         let unregisterController = null;
-        store = new ModSettingsStore({ modId: mod.id, databasePath });
+        store = modStoreFactory ? await modStoreFactory(mod.id, { databasePath }) : new ModSettingsStore({ modId: mod.id, databasePath });
         host = startModHost({
-          mod, store, logger, systemCapability, capabilities: resolveAgentRuntime ? createModCapabilities({ databasePath, resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl: capabilityFetch, ownerModId: mod.id, scheduledJobScheduler }) : null, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs,
+          mod, store, logger, systemCapability, capabilities: resolveAgentRuntime ? createModCapabilities({ databasePath, resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl: capabilityFetch, ownerModId: mod.id, scheduledJobScheduler, stores }) : null, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs,
           onSystemControllerReady(controllerProxy) {
             if (!systemCapability || !executionProviders) return;
             unregisterController = executionProviders.register(mod.id, controllerProxy, { replace: replaceExecutionProviders });
@@ -281,7 +281,7 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
         });
       }
       Object.assign(mod, { routes, store, lifecycleCleanup: host ? () => host.close() : null, commitProviderReplacement, host, status: 'loaded' });
-      if (mod.status === 'loaded' && !replaceExecutionProviders) publishModTools(mod, databasePath);
+      if (mod.status === 'loaded' && !replaceExecutionProviders) await publishModTools(mod, databasePath, modCatalogWriter);
       loaded.push(mod);
     } catch (error) {
       if (host) {
@@ -289,7 +289,7 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
         catch (cleanupError) { logger.error?.(`Burrow mod ${mod.id} cleanup failed: ${String(cleanupError?.message || cleanupError)}`); }
       }
       if (store) {
-        try { store.close(); }
+        try { await store.close(); }
         catch (cleanupError) { logger.error?.(`Burrow mod ${mod.id} store cleanup failed: ${String(cleanupError?.message || cleanupError)}`); }
       }
       logger.error?.(`Burrow mod ${mod.id} failed: ${String(error?.message || error)}`);

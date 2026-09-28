@@ -19,7 +19,7 @@ export function createExportRoutes({ readJsonBody, sendJson, exportCatalog, norm
     if (req.method === 'POST' && (url.pathname === '/api/export/import/preview' || url.pathname === '/api/export/import')) {
       const request = normalizeImportRequest(await readJsonBody(req));
       const decoded = await decodeExport(request.binary, { password: request.password });
-      const preview = importPreview(decoded, request.conflictPolicy);
+      const preview = await importPreview(decoded, request.conflictPolicy);
       if (url.pathname.endsWith('/preview')) {
         sendJson(res, 200, preview);
         return true;

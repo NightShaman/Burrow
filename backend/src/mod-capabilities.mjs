@@ -72,10 +72,11 @@ function summarizedRun(run) {
 }
 
 // Only this core-side service has access to SQLite secrets and provider credentials.
-export function createModCapabilities({ databasePath, resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null } = {}) {
+export function createModCapabilities({ databasePath, resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null, stores = null } = {}) {
   if (typeof resolveAgentRuntime !== 'function') throw new Error('mod_agent_resolver_required');
-  const withStore = (Store, fn) => { const store = new Store({ databasePath }); try { return fn(store); } finally { store.close(); } };
-  const withJobs = (fn) => withStore(ScheduledJobStore, fn);
+  const injected = stores || {};
+  const withStore = async (key, Store, fn) => { const store = injected[key]; if (store) return fn(store); const owned = new Store({ databasePath }); try { return await fn(owned); } finally { await owned.close?.(); } };
+  const withJobs = (fn) => withStore('scheduledJobs', ScheduledJobStore, fn);
   const schedulerOwner = () => { if (typeof ownerModId !== 'string' || !ownerModId) throw new Error('mod_scheduler_owner_unavailable'); return ownerModId; };
   const ownedJob = (store, jobId) => store.getOwnedJob(schedulerOwner(), bounded(jobId, 96));
   function page(input = {}, max = 100) { const value = plain(input); const limit = count(value.limit, 50, max); let offset = 0; if (value.cursor !== undefined && value.cursor !== null) { let cursor; try { cursor = JSON.parse(Buffer.from(bounded(value.cursor, 512), 'base64url').toString('utf8')); } catch { invalid(); } if (cursor?.ownerModId !== schedulerOwner() || !Number.isSafeInteger(cursor.offset) || cursor.offset < 1) invalid(); offset = cursor.offset; } return { value, limit, offset }; }
@@ -93,7 +94,7 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
   }
   async function agentRoot(id) {
     bounded(id, 96);
-    const agent = withStore(AgentRegistryStore, (store) => store.get(id));
+    const agent = await withStore('agents', AgentRegistryStore, (store) => store.get(id));
     if (!agent) throw new Error('agent_not_found');
     if (!agent.enabled && typeof resolveAgentWorkspaceRoot !== 'function') throw new Error('agent_disabled');
     const root = agent.enabled ? (await resolveAgentRuntime(id)).agentWorkspaceRoot : await resolveAgentWorkspaceRoot(id);
@@ -113,49 +114,49 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
       const { value, limit, offset } = page(input);
       if (!Number.isSafeInteger(offset) || offset < 0) invalid();
       if (value.enabled !== undefined && typeof value.enabled !== 'boolean') invalid();
-      const jobs = withJobs((store) => store.listJobs({ ownerModId: schedulerOwner(), enabled: value.enabled ?? null, limit: limit + 1, offset }));
+      const jobs = await withJobs((store) => store.listJobs({ ownerModId: schedulerOwner(), enabled: value.enabled ?? null, limit: limit + 1, offset }));
       return budgetPage('jobs', jobs, { offset, limit });
     },
     async readScheduledJob(input) {
-      const value = plain(input); const job = withJobs((store) => ownedJob(store, value.jobId));
+      const value = plain(input); const job = await withJobs((store) => ownedJob(store, value.jobId));
       if (!job) throw new Error('scheduled_job_not_found'); return job;
     },
     async createScheduledJob(input) {
       const value = plain(input);
       if ('ownerModId' in value || 'id' in value) invalid();
-      return withJobs((store) => store.createJob(value, { ownerModId: schedulerOwner() }));
+      return await withJobs((store) => store.createJob(value, { ownerModId: schedulerOwner() }));
     },
     async updateScheduledJob(input) {
       const value = plain(input); const jobId = bounded(value.jobId, 96); const patch = plain(value.patch);
       if ('ownerModId' in patch || 'id' in patch) invalid();
-      const job = withJobs((store) => store.updateJob(jobId, patch, { ownerModId: schedulerOwner() }));
+      const job = await withJobs((store) => store.updateJob(jobId, patch, { ownerModId: schedulerOwner() }));
       if (!job) throw new Error('scheduled_job_not_found'); return job;
     },
     async deleteScheduledJob(input) {
-      const value = plain(input); const job = withJobs((store) => store.deleteJob(value.jobId, { ownerModId: schedulerOwner() }));
+      const value = plain(input); const job = await withJobs((store) => store.deleteJob(value.jobId, { ownerModId: schedulerOwner() }));
       if (!job) throw new Error('scheduled_job_not_found'); return job;
     },
     async listScheduledJobRuns(input) {
       const { value, limit, offset } = page(input, 100); const jobId = bounded(value.jobId, 96);
       if (!Number.isSafeInteger(offset) || offset < 0) invalid();
-      const exists = withJobs((store) => ownedJob(store, jobId)); if (!exists) throw new Error('scheduled_job_not_found');
-      const runs = withJobs((store) => store.listRuns(jobId, { ownerModId: schedulerOwner(), limit: limit + 1, offset }));
+      const exists = await withJobs((store) => ownedJob(store, jobId)); if (!exists) throw new Error('scheduled_job_not_found');
+      const runs = await withJobs((store) => store.listRuns(jobId, { ownerModId: schedulerOwner(), limit: limit + 1, offset }));
       return budgetPage('runs', runs, { offset, limit, transform: (run) => resultBytes({ runs: [run], hasMore: true, nextCursor: cursor(offset + 1) }) <= SCHEDULER_PAGE_MAX_BYTES ? run : summarizedRun(run) });
     },
     async triggerScheduledJob(input) {
       const value = plain(input); const jobId = bounded(value.jobId, 96);
-      if (!withJobs((store) => ownedJob(store, jobId))) throw new Error('scheduled_job_not_found');
+      if (!(await withJobs((store) => ownedJob(store, jobId)))) throw new Error('scheduled_job_not_found');
       if (!scheduledJobScheduler) throw new Error('scheduled_job_scheduler_unavailable');
       return scheduledJobScheduler.trigger(jobId, { ownerModId: schedulerOwner() });
     },
     async listAgents() {
-      return withStore(AgentRegistryStore, (store) => store.list().map(({ id, name, enabled }) => ({ id, name, enabled })));
+      return await withStore('agents', AgentRegistryStore, async (store) => (await store.list()).map(({ id, name, enabled }) => ({ id, name, enabled })));
     },
     async getOperatorIdentity() {
       // Deliberately project only public display identity. Avatars and the rest of
       // the settings/profile surface are not mod capabilities.
-      return withStore(ModelSettingsStore, (store) => {
-        const operator = store.identities().operator;
+      return await withStore('models', ModelSettingsStore, async (store) => {
+        const operator = (await store.identities()).operator;
         return { id: operator.id, name: operator.name || null };
       });
     },
@@ -215,9 +216,18 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
       return page;
     },
     async listModels() {
-      return withStore(ModelSettingsStore, (store) => store.list().flatMap((connection) => (connection.models || [])
-        .filter((model) => model.selected !== false && store.hasAuth(connection.id))
-        .map((model) => ({ connectionId: connection.id, model: model.id, provider: connection.provider, ...(Number(model.contextWindow) > 0 ? { contextWindow: Number(model.contextWindow) } : {}) }))));
+      return withStore('models', ModelSettingsStore, async (store) => {
+        const out = [];
+        for (const connection of await store.list()) {
+          if (!(await store.hasAuth(connection.id))) continue;
+          for (const model of connection.models || []) {
+            if (model.selected === false) continue;
+            out.push({ connectionId: connection.id, model: model.id, provider: connection.provider,
+              ...(Number(model.contextWindow) > 0 ? { contextWindow: Number(model.contextWindow) } : {}) });
+          }
+        }
+        return out;
+      });
     },
     async generateText(input, { signal } = {}) {
       const { connectionId, model, prompt, maxTokens } = plain(input);
@@ -225,7 +235,7 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
       if (typeof prompt !== 'string' || !prompt) invalid();
       const tokens = positiveSafeInteger(maxTokens);
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
-      const config = await resolveModelConfig({ modelConnectionId: connectionId, model, settingsDb: databasePath, fetchImpl });
+      const config = await resolveModelConfig({ modelConnectionId: connectionId, model, settingsDb: databasePath, fetchImpl, modelSettings: injected.models });
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
       let result;
       try {

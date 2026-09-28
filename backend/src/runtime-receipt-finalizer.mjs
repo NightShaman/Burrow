@@ -19,6 +19,8 @@ export function validateCompletedRuntimeInvariantsBeforeSideEffects(invariantInp
 }
 
 export async function appendValidatedRuntimeReceipt({
+  stores = null,
+  agentId = 'hatchet',
   sessionRoot = null,
   dataRoot = null,
   sessionId,
@@ -30,6 +32,8 @@ export async function appendValidatedRuntimeReceipt({
   const invariantValidation = validateTurnInvariants(invariantInput || {});
   assertNoHardTurnInvariantViolations(invariantValidation);
   await appendRuntimeReceipt({
+    stores,
+    agentId,
     sessionRoot,
     dataRoot,
     sessionId,

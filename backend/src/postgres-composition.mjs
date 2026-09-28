@@ -1,3 +1,5 @@
+import { createPostgresModDistributionRepository } from './postgres-mod-distribution-repository.mjs';
+import { postgresModStoreFactory, disabledPostgresMods, publishPostgresModCatalog } from './postgres-mod-store.mjs';
 import { createPostgresPool, closePostgresPool } from './postgres-foundation.mjs';
 import { PostgresAgentRegistryStore } from './postgres-agent-registry.mjs';
 import { PostgresAgentProfileStore } from './postgres-agent-profile-store.mjs';
@@ -14,6 +16,9 @@ import { PostgresWorkingMemoryStore } from './postgres-working-memory-store.mjs'
 import { PostgresApiTokenStore } from './postgres-api-token-store.mjs';
 import { PostgresSkillSettingsStore } from './postgres-skill-settings-store.mjs';
 import PostgresSetupStateStore, { POSTGRES_SETUP_STATE_SCHEMA_SQL } from './postgres-setup-state-store.mjs';
+import PostgresSettingsMetadataStore from './postgres-settings-metadata-store.mjs';
+import { PostgresSessionStore } from './postgres-session-store.mjs';
+import PostgresUiAuthSecretStore from './postgres-ui-auth-secret-store.mjs';
 import PostgresRetentionSettingsStore, { POSTGRES_RETENTION_SETTINGS_SCHEMA_SQL } from './postgres-retention-settings-store.mjs';
 import PostgresWorkingMemoryRetentionSettingsStore, { POSTGRES_WORKING_MEMORY_RETENTION_SCHEMA_SQL } from './postgres-working-memory-retention-settings-store.mjs';
 
@@ -62,16 +67,24 @@ export async function createPostgresApplication({
     setupState: new PostgresSetupStateStore({ ...common, ...(clock ? { clock } : {}) }),
     retentionSettings: new PostgresRetentionSettingsStore({ ...common, ...(clock ? { clock } : {}) }),
     workingMemoryRetention,
+    uiAuthSecrets: new PostgresUiAuthSecretStore({ ...common, key: encryptionKey, ...(clock ? { clock } : {}) }),
+    metadata: new PostgresSettingsMetadataStore({ ...common, ...(clock ? { clock } : {}) }),
+    conversations: new PostgresSessionStore({ ...common, ...(clock ? { clock } : {}) }),
     };
     await stores.forge.init();
     let closed = false;
     return Object.freeze({
+    modDistributionRepositoryFactory: () => createPostgresModDistributionRepository({ pool: sharedPool }),
+    modStoreFactory: postgresModStoreFactory({ pool: sharedPool, key: encryptionKey }),
+    disabledModIds: () => disabledPostgresMods(sharedPool),
+    modCatalogWriter: mod => publishPostgresModCatalog(sharedPool, mod),
     pool: sharedPool,
     ownsPool: ownedPool,
     stores: Object.freeze(stores),
     async close() {
       if (closed) return;
       closed = true;
+      await stores.conversations.close();
       if (ownedPool) await closePostgresPool(sharedPool);
     },
     });

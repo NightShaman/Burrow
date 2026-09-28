@@ -1,16 +1,18 @@
 import { recallPriorSessionEvidence } from './session-recall.mjs';
 import { readRunEvidenceAcrossSessions, readRunEvidenceWithDiagnostics, renderRunEvidence, selectRunEvidence } from './run-evidence.mjs';
 
-export async function prepareRuntimeSupportContext({ rootDir, sessionRoot, dataRoot, runtimeState, agentRuntime, resolvedSessionId, message, priorSession, continuityScope, explicitContinuityRequested, route, runtimeConfig, logger } = {}) {
+export async function prepareRuntimeSupportContext({ stores = null, rootDir, sessionRoot, dataRoot, runtimeState, agentRuntime, resolvedSessionId, message, priorSession, continuityScope, explicitContinuityRequested, route, runtimeConfig, logger } = {}) {
   const sessionRecall = await recallPriorSessionEvidence({
+    conversationStore: stores?.conversations,
+    agentId: runtimeState.agentId,
     rootDir: agentRuntime?.agentWorkspaceRoot || sessionRoot,
     additionalRootDirs: [runtimeState.agentDataRoot || dataRoot].filter(Boolean),
     sessionId: resolvedSessionId,
     message,
     priorSession,
   });
-  const runEvidenceRead = await readRunEvidenceWithDiagnostics({ rootDir: sessionRoot, sessionId: resolvedSessionId });
-  const runEvidenceAcrossSessions = await readRunEvidenceAcrossSessions({ rootDir: sessionRoot, sessionId: resolvedSessionId });
+  const runEvidenceRead = await readRunEvidenceWithDiagnostics({ rootDir: sessionRoot, sessionId: resolvedSessionId, conversationStore:stores?.conversations,agentId:runtimeState.agentId });
+  const runEvidenceAcrossSessions = await readRunEvidenceAcrossSessions({ rootDir: sessionRoot, sessionId: resolvedSessionId, conversationStore:stores?.conversations,agentId:runtimeState.agentId });
   const runEvidenceSelection = selectRunEvidence(runEvidenceAcrossSessions.records, {
     message,
     sessionId: resolvedSessionId,

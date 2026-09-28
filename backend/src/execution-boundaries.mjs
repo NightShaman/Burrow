@@ -70,7 +70,8 @@ export function validateExecutionBoundaries(input = {}) {
   return { ok: errors.length === 0, errors, boundaries: { version: 1, hardBlocks } };
 }
 
-export function readExecutionBoundaries({ databasePath = null } = {}) {
+export function readExecutionBoundaries({ databasePath = null, metadataStore = null } = {}) {
+  if (metadataStore) return metadataStore.get(EXECUTION_BOUNDARIES_META_KEY).then(value => { const checked = validateExecutionBoundaries(value || emptyExecutionBoundaries()); return checked.ok ? checked.boundaries : emptyExecutionBoundaries(); });
   const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
   try {
     const stored = getSettingsMeta(db, EXECUTION_BOUNDARIES_META_KEY);
@@ -79,9 +80,10 @@ export function readExecutionBoundaries({ databasePath = null } = {}) {
   } finally { db.close(); }
 }
 
-export function saveExecutionBoundaries(input = {}, { databasePath = null } = {}) {
+export function saveExecutionBoundaries(input = {}, { databasePath = null, metadataStore = null } = {}) {
   const checked = validateExecutionBoundaries(input);
   if (!checked.ok) return { ok: false, status: 400, errors: checked.errors, boundaries: checked.boundaries };
+  if (metadataStore) return metadataStore.set(EXECUTION_BOUNDARIES_META_KEY, checked.boundaries).then(() => ({ ok: true, boundaries: checked.boundaries, validation: { ok: true, errors: [] } }));
   const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
   try {
     setSettingsMeta(db, EXECUTION_BOUNDARIES_META_KEY, checked.boundaries);

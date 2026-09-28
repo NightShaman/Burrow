@@ -203,7 +203,7 @@ export async function importClaudeCodeLoginCredential({ id, persistAuth } = {}) 
   if (session.status !== 'authorized') return { ok: false, status: 409, error: `claude_code_login_${session.status}` };
   if (typeof persistAuth !== 'function') return { ok: false, status: 500, error: 'claude_code_login_persist_unavailable' };
   const auth = claudeCredentialAuthPayload({ homeDir: session.homeDir, allowKeychainPrompt: false });
-  const connection = persistAuth({ ...auth, source: 'claude-code-login' });
+  const connection = await persistAuth({ ...auth, source: 'claude-code-login' });
   settle(session, { status: 'imported', connection, credential: detectClaudeCliCredential({ homeDir: session.homeDir, allowKeychainPrompt: false }) });
   await cleanupSessionScratchAwait(session);
   return { ok: true, login: publicSession(session), connection };

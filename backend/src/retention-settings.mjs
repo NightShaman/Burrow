@@ -24,14 +24,16 @@ export function normalizeRetentionPolicy(input = {}, current = DEFAULT_RETENTION
   return { version: 1, enabled, traceMaxAgeDays, traceMaxBytes, intervalMinutes };
 }
 
-export function readRetentionPolicy({ databasePath = null } = {}) {
+export function readRetentionPolicy({ databasePath = null, store = null } = {}) {
+  if (store) return store.readPolicy();
   const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
   try { return normalizeRetentionPolicy(getSettingsMeta(db, RETENTION_SETTINGS_META_KEY) || {}, DEFAULT_RETENTION_POLICY); }
   catch { return { ...DEFAULT_RETENTION_POLICY }; }
   finally { db.close(); }
 }
 
-export function saveRetentionPolicy(input = {}, { databasePath = null } = {}) {
+export function saveRetentionPolicy(input = {}, { databasePath = null, store = null } = {}) {
+  if (store) return store.savePolicy(input);
   const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
   try {
     const current = normalizeRetentionPolicy(getSettingsMeta(db, RETENTION_SETTINGS_META_KEY) || {}, DEFAULT_RETENTION_POLICY);
@@ -41,13 +43,15 @@ export function saveRetentionPolicy(input = {}, { databasePath = null } = {}) {
   } finally { db.close(); }
 }
 
-export function readRetentionPolicyState({ databasePath = null } = {}) {
+export function readRetentionPolicyState({ databasePath = null, store = null } = {}) {
+  if (store) return store.readState();
   const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
   try { return getSettingsMeta(db, RETENTION_STATE_META_KEY) || { lastRunAt: null, lastResult: null, lastError: null, nextRunAt: null }; }
   finally { db.close(); }
 }
 
-export function writeRetentionPolicyState(state, { databasePath = null } = {}) {
+export function writeRetentionPolicyState(state, { databasePath = null, store = null } = {}) {
+  if (store) return store.writeState(state);
   const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
   try { return setSettingsMeta(db, RETENTION_STATE_META_KEY, state); }
   finally { db.close(); }

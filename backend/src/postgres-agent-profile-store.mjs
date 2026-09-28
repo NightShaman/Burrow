@@ -73,6 +73,28 @@ export class PostgresAgentProfileStore {
       return rows.rows.map(document);
     });
   }
+  /** Run a preference document plus learning metadata/audit mutation under the profile-write lock. */
+  async atomicPreferenceUpdate(agent, { markdown: content, stateKey, state, auditKey, audit, at, decide }) {
+    const id = agentId(agent);
+    const normalized = markdown(content);
+    return withPostgresTransaction(this.pool, async (client) => {
+      const found = await client.query('SELECT id FROM agents WHERE id=$1 FOR UPDATE', [id]);
+      if (!found.rows[0]) throw new Error('agent_not_found');
+      const profileResult = await client.query('SELECT kind,markdown,created_at,updated_at FROM agent_profile_documents WHERE agent_id=$1 AND kind=$2 FOR UPDATE', [id, 'PREFERENCES']);
+      const current = document(profileResult.rows[0]);
+      const readMeta = async (key) => { const result = await client.query('SELECT value_json FROM settings_meta WHERE key=$1 FOR UPDATE', [key]); try { return JSON.parse(result.rows[0]?.value_json || 'null'); } catch { return null; } };
+      for (const key of [stateKey, auditKey].sort()) await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`settings-meta:${key}`]);
+      const priorState = await readMeta(stateKey);
+      const priorAudit = await readMeta(auditKey);
+      const decision = decide?.({ current, priorState }) || { apply: true };
+      if (!decision.apply) return decision.result || { applied: false, reason: decision.reason };
+      const result = await client.query(`INSERT INTO agent_profile_documents (agent_id,kind,markdown,created_at,updated_at) VALUES ($1,$2,$3,$4,$4) ON CONFLICT (agent_id,kind) DO UPDATE SET markdown=EXCLUDED.markdown,updated_at=EXCLUDED.updated_at RETURNING kind,markdown,created_at,updated_at`, [id, 'PREFERENCES', normalized, at]);
+      const writeMeta = (key, value) => client.query(`INSERT INTO settings_meta(key,value_json,updated_at) VALUES($1,$2,$3) ON CONFLICT(key) DO UPDATE SET value_json=EXCLUDED.value_json,updated_at=EXCLUDED.updated_at`, [key, JSON.stringify(value), at]);
+      const nextAudit = audit(priorAudit, current);
+      await writeMeta(stateKey, state); await writeMeta(auditKey, nextAudit);
+      return { applied: true, entry: nextAudit.entries[0], state };
+    });
+  }
   async replacePreferences(agent, value) { return this.replaceSingle(agent, 'PREFERENCES', value); }
   async replaceTools(agent, value) { return this.replaceSingle(agent, 'TOOLS', value); }
   async replaceDreamMemory(agent, value) { return this.replaceSingle(agent, 'DREAM_MEMORY', value); }

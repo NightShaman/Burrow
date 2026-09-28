@@ -1,0 +1,42 @@
+#!/usr/bin/env node
+// Run ONLY inside a disposable image with a new empty /data volume; never production.
+import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { openSettingsDatabase } from '../src/settings-database.mjs';
+import { preparePostgresStartup } from '../src/postgres-startup.mjs';
+import { createPostgresPool, postgresConfig } from '../src/postgres-foundation.mjs';
+if (process.env.BURROW_POSTGRES_STARTUP_REHEARSAL !== '1' || process.env.BURROW_RUNTIME_ROOT !== '/data') throw new Error('disposable_rehearsal_opt_in_required');
+assert.deepEqual(await fs.readdir('/data'), [], 'requires an empty disposable volume');
+await fs.mkdir('/data/config');
+const key=Buffer.alloc(32,7).toString('base64');await fs.writeFile('/data/config/settings.key',key,{mode:0o600});
+const db=openSettingsDatabase({databasePath:'/data/config/settings.sqlite'});const at='2026-01-01T00:00:00Z';
+db.prepare('INSERT INTO agents(id,name,enabled,available_capabilities,created_at,updated_at) VALUES(?,?,?,?,?,?)').run('sample','Sample',1,'[]',at,at);db.close();
+await fs.mkdir('/data/workspace/sample/sessions/default',{recursive:true});
+await fs.writeFile('/data/workspace/sample/sessions/default/session.meta.json', JSON.stringify({createdAt:at}));
+const file='/data/workspace/sample/sessions/default/session.jsonl';
+await fs.writeFile(file,JSON.stringify({id:'seed',ts:at,role:'user',content:'Disposable legacy sample',metadata:{attachments:[{artifactPath:'artifacts/sample.png'}]}})+'\n');
+const source=await fs.readFile('/data/config/settings.sqlite');
+assert.equal(process.env.BURROW_POSTGRES_LIFECYCLE,'managed','image must default to managed');
+const env={...process.env};
+let handle=await preparePostgresStartup({env});let pool=createPostgresPool({config:postgresConfig(handle.env)});
+assert.equal((await pool.query('SELECT count(*) FROM agents')).rows[0].count,'1');
+assert.equal((await pool.query('SELECT entry FROM conversation_entries')).rows[0].entry.content,'Disposable legacy sample');
+await pool.end();await handle.close();
+handle=await preparePostgresStartup({env});assert.equal(handle.result.repeated,true);
+pool=createPostgresPool({config:postgresConfig(handle.env)});
+assert.equal((await pool.query('SELECT count(*) FROM conversation_entries')).rows[0].count,'1');
+const pgEnv={...process.env,PGHOST:handle.env.BURROW_POSTGRES_HOST,PGUSER:handle.env.BURROW_POSTGRES_USER,PGDATABASE:'postgres'};
+execFileSync('pg_dump',['-Fc','-f','/data/rehearsal.dump'],{env:pgEnv});
+execFileSync('createdb',['rehearsal_restore'],{env:pgEnv});
+execFileSync('pg_restore',['--exit-on-error','-d','rehearsal_restore','/data/rehearsal.dump'],{env:pgEnv});
+const restored=createPostgresPool({config:{...postgresConfig(handle.env),database:'rehearsal_restore'}});
+assert.equal((await restored.query('SELECT count(*) FROM conversation_entries')).rows[0].count,'1');
+assert.equal((await restored.query('SELECT count(*) FROM burrow_migration_receipts')).rows[0].count,'1');
+await restored.end();await pool.end();await handle.close();
+assert.deepEqual(await fs.readFile('/data/config/settings.sqlite'),source);
+assert.equal(await fs.readFile('/data/config/settings.key','utf8'),key);
+// Deliberate source drift must fail closed and shut down the managed server.
+await fs.appendFile(file,'\n');
+await assert.rejects(preparePostgresStartup({env}),/source_changed/);
+console.log('PASS: managed startup, legacy settings/conversation migration, restart receipt, pg_dump/restore, source/key preservation, drift fail-closed');

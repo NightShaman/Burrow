@@ -1,4 +1,6 @@
+import { appendRuntimeSessionContextState } from './runtime-session-writer.mjs';
 import { appendSessionEntry, appendSessionContextState } from './session-store.mjs';
+import { conversationAuthority } from './conversation-authority.mjs';
 import { createExecutionPolicyEvidence } from './execution-policy-evidence.mjs';
 import { compactExecution } from './runtime-result-shapes.mjs';
 
@@ -259,12 +261,12 @@ function runtimeContextStates({ receipt = {}, sessionId, logger } = {}) {
   return states;
 }
 
-export async function appendRuntimeReceipt({ sessionRoot, dataRoot = null, sessionId, logger, receipt, subjectScope = null } = {}) {
+export async function appendRuntimeReceipt({ stores = null, agentId = 'hatchet', sessionRoot, dataRoot = null, sessionId, logger, receipt, subjectScope = null } = {}) {
   const rootDir = sessionRoot || dataRoot;
   if (!rootDir || !sessionId || !receipt) return null;
   const receiptRef = compactPersistedReceipt({ receipt, logger });
-  const receiptEntry = await appendSessionEntry({
-    rootDir,
+  const authority = stores?.conversations ? conversationAuthority({ store: stores.conversations, agentId, rootDir }) : null;
+  const receiptEntry = await (authority ? authority.append({
     sessionId,
     type: 'receipt',
     role: null,
@@ -272,11 +274,14 @@ export async function appendRuntimeReceipt({ sessionRoot, dataRoot = null, sessi
     runId: receiptRef.runId,
     traceDir: receiptRef.traceDir,
     metadata: { ...(subjectScope ? { subjectScope } : {}), receiptRef, authorityEvidence: receipt.authorityEvidence || null },
-  });
+    visibility: 'debug', entersPrompt: false,
+  }) : appendSessionEntry({
+    rootDir, sessionId, type: 'receipt', role: null, content: `Runtime receipt: ${receiptRef.decision || 'completed'}${receiptRef.runId ? ` (${receiptRef.runId})` : ''}`, runId: receiptRef.runId, traceDir: receiptRef.traceDir, metadata: { ...(subjectScope ? { subjectScope } : {}), receiptRef, authorityEvidence: receipt.authorityEvidence || null },
+  }));
   // Only runtime-structured facts are derived here. Operator instructions,
   // decisions, and pins require an explicit caller-created context-state record.
   for (const state of runtimeContextStates({ receipt, sessionId, logger })) {
-    await appendSessionContextState({ rootDir, sessionId, runId: receiptRef.runId, traceDir: receiptRef.traceDir, state });
+    await appendRuntimeSessionContextState({ sessionRoot: rootDir, stores, agentId, sessionId, runId: receiptRef.runId, traceDir: receiptRef.traceDir, state });
   }
   return receiptEntry;
 }

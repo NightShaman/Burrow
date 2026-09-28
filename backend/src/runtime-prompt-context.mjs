@@ -11,13 +11,14 @@ function runtimeHostContext(executionEnvironment = null) {
   return { agentHost: os.hostname(), selectedHost };
 }
 
-export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext } = {}) {
+export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores = null, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext } = {}) {
   const groupSupport = groupChannelContext?.channelId && Array.isArray(groupChannelContext.turns) ? { groupChannel: groupChannelContext } : {};
   const contextBuild = await buildContextForTurn({
     rootDir,
     dataRoot: sessionRoot,
     sessionId: resolvedSessionId,
     preparedContext,
+    contextOptions: { stores, agentId: runtimeState.agentId },
     kernel: plainChatKernel({ agentName: agentRuntime?.agent?.name || agentRuntime?.agentId || runtimeState.agentId }),
     selectedSkills: route.promptPlan.selectedSkills,
     promptSkills: route.promptPlan.promptSkills,
@@ -33,7 +34,7 @@ export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolv
     limits: { rawRecentChars: preparedContext.turnContext?.limits?.rawRecentChars, recentDialogueChars: preparedContext.turnContext?.limits?.rawRecentChars, priorSummaryChars: preparedContext.turnContext?.limits?.priorSummaryChars },
     modelConfig,
     tools: executionContext.toolSchemas,
-    promptPressure: { rootDir: sessionRoot, dataRoot: sessionRoot, agentRuntime, contextConfig: runtimeConfig.contextConfig, support: { selectedSkills: route.promptPlan.promptSkills.map((skill) => skill.id), sessionRecall, runEvidence }, logger, agentWorkspaceRoot: runtimeState.agentWorkspaceRoot, agentDataRoot: runtimeState.agentDataRoot, cacheRoot: runtimeState.cacheRoot, tools: executionContext.toolSchemas },
+    promptPressure: { stores, agentId: runtimeState.agentId, rootDir: sessionRoot, dataRoot: sessionRoot, agentRuntime, contextConfig: runtimeConfig.contextConfig, support: { selectedSkills: route.promptPlan.promptSkills.map((skill) => skill.id), sessionRecall, runEvidence }, logger, agentWorkspaceRoot: runtimeState.agentWorkspaceRoot, agentDataRoot: runtimeState.agentDataRoot, cacheRoot: runtimeState.cacheRoot, tools: executionContext.toolSchemas },
   });
   const turnContext = contextBuild.turnContext;
   const conversationContext = contextBuild.conversationContext;

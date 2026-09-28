@@ -1,4 +1,5 @@
-import { readSessionEntries, rotateCompactedTranscript, summarizeSessionTurns } from './session-store.mjs';
+import { conversationAuthority } from './conversation-authority.mjs';
+import { readSessionEntries, summarizeSessionTurns } from './session-store.mjs';
 import { planContextCompression } from './context-compression.mjs';
 import { contextStatesFromTranscript, renderContextStates } from './session-context-state.mjs';
 
@@ -161,7 +162,7 @@ function tokenTargetToCharBudget(tokens, fallback = 6000) {
   return Number.isFinite(number) && number > 0 ? Math.ceil(number * 4) : fallback;
 }
 
-export async function appendCompressionSummary({ rootDir, sessionId = 'default', transcript = [], plan, text = null, maxChars = 6000 } = {}) {
+export async function appendCompressionSummary({ rootDir, sessionId = 'default', transcript = [], plan, text = null, maxChars = 6000, conversation = null } = {}) {
   const previousSummary = compressionSummariesFromTranscript(transcript).at(-1)?.text || '';
   const sourceMessages = (plan.sourceEntryIds || []).length
     ? transcript.filter((entry) => (plan.sourceEntryIds || []).includes(entry?.id) && isCompressionEntry(entry))
@@ -177,12 +178,14 @@ export async function appendCompressionSummary({ rootDir, sessionId = 'default',
   // They remain in the active transcript even when their surrounding chat is
   // summarized for provider context.
   const tailEntries = transcript.filter((entry) => String(entry?.type || '') === 'context_state' || isCanonicalExecutionEntry(entry) || !sourceIds.has(entry?.id));
-  const rotation = await rotateCompactedTranscript({ rootDir, sessionId, summary, tailEntries });
+  const authority = conversation || conversationAuthority({ rootDir });
+  const rotation = await authority.compact(sessionId, { summary, tailEntries });
   return { entry: rotation.summaryEntry, summary, rotation };
 }
 
-export async function runSessionCompression({ rootDir, sessionId = 'default', config = {}, contextBudget = null, maxChars = null, logger = null } = {}) {
-  const transcript = await readSessionEntries({ rootDir, sessionId, limit: 0 });
+export async function runSessionCompression({ rootDir, sessionId = 'default', config = {}, contextBudget = null, maxChars = null, logger = null, stores = null, agentId = 'hatchet', conversation = null } = {}) {
+  const authority = conversation || conversationAuthority({ store: stores?.conversations || null, agentId, rootDir });
+  const transcript = await authority.entriesAll(sessionId);
   const existingSummaries = compressionSummariesFromTranscript(transcript);
   // The active successor already contains the current semantic summary. Only
   // its unsummarized chat tail is eligible for the next rotation.
@@ -200,7 +203,7 @@ export async function runSessionCompression({ rootDir, sessionId = 'default', co
     await logger?.event?.('context-compression-skip', result);
     return result;
   }
-  const { entry, summary, rotation } = await appendCompressionSummary({ rootDir, sessionId, transcript, plan, maxChars: maxChars ?? tokenTargetToCharBudget(config.summaryTargetTokens, 6000) });
+  const { entry, summary, rotation } = await appendCompressionSummary({ rootDir, sessionId, transcript, plan, maxChars: maxChars ?? tokenTargetToCharBudget(config.summaryTargetTokens, 6000), conversation: authority });
   const completed = { ...result, compressed: true, entryId: entry.id, summary, rotation: { archiveName: rotation.archiveName, retainedCount: rotation.retainedCount } };
   await logger?.event?.('context-compression', { compressed: true, entryId: entry.id, summary: { ...summary, text: undefined } });
   return completed;

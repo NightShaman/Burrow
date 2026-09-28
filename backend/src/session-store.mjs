@@ -112,7 +112,7 @@ function retainedChatMetadata(metadata = {}) {
   }
   return redactedMetadata(projected);
 }
-function normalizeTranscriptEntry(entry = {}, { sessionId = null } = {}) {
+export function normalizeTranscriptEntry(entry = {}, { sessionId = null } = {}) {
   const type = entry.type || 'message';
   const role = entry.role ?? null;
   const visibility = entry.visibility || defaultVisibility({ type, role });
@@ -453,12 +453,10 @@ async function withSessionAppendLock(rootDir, sessionId, operation) {
   return current.finally(() => { if (sessionAppendQueues.get(key) === current) sessionAppendQueues.delete(key); });
 }
 
-export async function appendSessionEntry({ rootDir, sessionId, type = 'message', role = null, content, runId = null, traceDir = null, metadata = {}, visibility = null, entersPrompt = undefined, parentId = null, clock = nowIso, maxContentChars } = {}) {
-  if (!rootDir) throw new Error('rootDir is required');
+export function buildSessionEntry({ sessionId, type = 'message', role = null, content, runId = null, traceDir = null, metadata = {}, visibility = null, entersPrompt = undefined, parentId = null, clock = nowIso, maxContentChars } = {}) {
   if (!sessionId) throw new Error('sessionId is required');
   if (type === 'message' && !role) throw new Error('role is required for message entries');
   const resolvedSessionId = safeId(sessionId);
-  await fs.mkdir(sessionDir(rootDir, resolvedSessionId), { recursive: true });
   // Chat messages are durable conversation and must survive intact. Keep the
   // existing bounded default for diagnostic receipts/events/tools; callers may
   // still opt into a narrower or wider diagnostic envelope explicitly.
@@ -473,6 +471,14 @@ export async function appendSessionEntry({ rootDir, sessionId, type = 'message',
     contentTruncated: contentEnvelope.truncated, runId, traceDir, visibility: resolvedVisibility,
     entersPrompt: entersPrompt ?? defaultEntersPrompt({ type, role, visibility: resolvedVisibility }), metadata,
   }, { sessionId: resolvedSessionId });
+  return entry;
+}
+
+export async function appendSessionEntry({ rootDir, ...args } = {}) {
+  if (!rootDir) throw new Error('rootDir is required');
+  const entry = buildSessionEntry(args);
+  const resolvedSessionId = entry.sessionId;
+  await fs.mkdir(sessionDir(rootDir, resolvedSessionId), { recursive: true });
   return withSessionAppendLock(rootDir, resolvedSessionId, async () => {
     await fs.appendFile(sessionFile(rootDir, resolvedSessionId), jsonLine(entry), 'utf8');
     await updateSessionMetadataAfterAppend({ rootDir, sessionId: resolvedSessionId, entry });
@@ -807,12 +813,14 @@ export async function readArchiveConversationPage({ rootDir, sessionId, archiveI
 }
 
 // Planner state is structured turn metadata, not a prose-history window.
-export async function readSessionPendingActions({ rootDir, sessionId } = {}) {
-  const entries = await readSessionTurns({ rootDir, sessionId, limit: 0 });
+export function projectPendingActions(entries = []) {
   return entries.flatMap((entry) => {
     const pending = [entry?.metadata?.pendingAction, ...(entry?.metadata?.pendingActions || [])].filter(Boolean);
     return pending.map((action) => ({ ...action, turnId: entry.id || null, role: entry.role || null }));
   });
+}
+export async function readSessionPendingActions({ rootDir, sessionId } = {}) {
+  return projectPendingActions(await readSessionTurns({ rootDir, sessionId, limit: 0 }));
 }
 async function readFiltered({ rootDir, sessionId, limit, predicate, includeHistory = false, includeResetHistory = false }) {
   const entries = await readSessionTurns({ rootDir, sessionId, limit: limit > 0 ? Math.max(limit * 4, 100) : 0, includeHistory, includeResetHistory });
@@ -954,6 +962,8 @@ export async function archiveSession({ rootDir, sessionId, archived = true, cloc
   const metadata = await writeSessionMetadata({ rootDir, sessionId: id, extra: { archived: Boolean(archived), archivedAt: archived ? clock() : null, ...(archived ? { archiveTitle, archiveTitleSource: 'derived', archiveSummary: null, archiveSummaryStatus: 'not_configured', archiveSummarizedAt: null } : {}) } });
   return { ok: true, sessionId: id, archived: Boolean(archived), metadata };
 }
+
+export { isChatMessage };
 
 export const __test__ = { safeId, sessionDir, sessionFile, sessionMetaFile, deriveArchiveTitle, summarizeSessionTurns, normalizeTranscriptEntry, isChatMessage, readJsonLines, readTailJsonLines, retainedChatMetadata, classifySession, SESSION_TAIL_READ_MAX_BYTES };
 

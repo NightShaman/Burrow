@@ -30,12 +30,13 @@ async function bundledSkillKind(skillRoot) {
   return assets.length === 0 ? 'text' : 'asset';
 }
 
-async function syncBundledTextSkill({ skillRoot, skillId, databasePath }) {
+async function syncBundledTextSkill({ skillRoot, skillId, databasePath, skillStore = null }) {
   const content = await fs.readFile(path.join(skillRoot, 'SKILL.md'), 'utf8');
   const metadata = frontmatterMetadata(content);
-  const store = new SkillSettingsStore({ databasePath });
+  const store = skillStore || new SkillSettingsStore({ databasePath });
+  const ownsStore = !skillStore;
   try {
-    const existing = store.get(skillId);
+    const existing = await store.get(skillId);
     const shipped = {
       id: skillId,
       name: metadata.name || skillId,
@@ -48,10 +49,10 @@ async function syncBundledTextSkill({ skillRoot, skillId, databasePath }) {
       // Shipped IDs are release-owned. Preserve operator availability/assignments,
       // but publish the complete current release text and metadata.
       if (existing.content === content && existing.name === shipped.name && existing.description === shipped.description) return false;
-      store.update(skillId, { name: shipped.name, description: shipped.description, content });
-    } else store.create(shipped);
+      await store.update(skillId, { name: shipped.name, description: shipped.description, content });
+    } else await store.create(shipped);
     return true;
-  } finally { store.close(); }
+  } finally { if (ownsStore) await store.close?.(); }
 }
 
 /**
@@ -60,7 +61,7 @@ async function syncBundledTextSkill({ skillRoot, skillId, databasePath }) {
  * release-owned; operator-created IDs and assignments are untouched. Asset-bearing
  * packages retain their existing filesystem lifecycle.
  */
-export async function ensureDefaultGlobalWorkspace({ installDir, workspaceRoot, defaultsRoot, databasePath } = {}) {
+export async function ensureDefaultGlobalWorkspace({ installDir, workspaceRoot, defaultsRoot, databasePath, skillStore = null } = {}) {
   const root = path.resolve(installDir || '');
   const workspace = path.resolve(workspaceRoot || path.join(root, 'workspace'));
   const globalRoot = path.join(workspace, 'global');
@@ -82,7 +83,7 @@ export async function ensureDefaultGlobalWorkspace({ installDir, workspaceRoot, 
     const sourceSkill = path.join(source, entry.name);
     if (!(await exists(path.join(sourceSkill, 'SKILL.md')))) continue;
     if (await bundledSkillKind(sourceSkill) === 'text') {
-      if (await syncBundledTextSkill({ skillRoot: sourceSkill, skillId: entry.name, databasePath: resolvedDatabasePath })) seededDatabaseSkills.push(entry.name);
+      if (await syncBundledTextSkill({ skillRoot: sourceSkill, skillId: entry.name, databasePath: resolvedDatabasePath, skillStore })) seededDatabaseSkills.push(entry.name);
       // Retire the old shipped text copy only after SQLite synchronization succeeds.
       // Asset packages and agent-local overrides are not part of this release sync.
       const legacyRoot = path.join(skillsRoot, entry.name);

@@ -13,14 +13,14 @@ export function createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundary
         const agentId = url.searchParams.get('agentId');
         const sessionId = url.searchParams.get('sessionId') || 'default';
         if (!agentId) sendJson(res, 400, { ok: false, error: 'agent_id_required' });
-        else sendJson(res, 200, await withTaskBoard((store) => ({ ok: true, project: store.getConversationProject({ agentId, sessionId }) })));
+        else sendJson(res, 200, await withTaskBoard(async (store) => ({ ok: true, project: await store.getConversationProject({ agentId, sessionId }) })));
         return true;
       }
       if (req.method === 'PUT') {
         const body = await readJsonBody(req);
         if (!body.agentId) sendJson(res, 400, { ok: false, error: 'agent_id_required' });
         else if (!body.projectId) sendJson(res, 400, { ok: false, error: 'project_id_required' });
-        else sendJson(res, 200, await withTaskBoard((store) => ({ ok: true, project: store.setConversationProject({ agentId: body.agentId, sessionId: body.sessionId || 'default', projectId: body.projectId }) })));
+        else sendJson(res, 200, await withTaskBoard(async (store) => ({ ok: true, project: await store.setConversationProject({ agentId: body.agentId, sessionId: body.sessionId || 'default', projectId: body.projectId }) })));
         return true;
       }
       if (req.method === 'DELETE') {
@@ -28,37 +28,37 @@ export function createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundary
         const sessionId = url.searchParams.get('sessionId') || 'default';
         if (!agentId) sendJson(res, 400, { ok: false, error: 'agent_id_required' });
         else {
-          await withTaskBoard((store) => store.clearConversationProject({ agentId, sessionId }));
+          await withTaskBoard(async (store) => await store.clearConversationProject({ agentId, sessionId }));
           sendJson(res, 200, { ok: true, project: null });
         }
         return true;
       }
     }
     if (req.method === 'GET' && url.pathname === '/api/task-board/projects') {
-      sendJson(res, 200, await withTaskBoard((store) => ({ ok: true, projects: store.listProjects() })));
+      sendJson(res, 200, await withTaskBoard(async (store) => ({ ok: true, projects: await store.listProjects() })));
       return true;
     }
     if (req.method === 'POST' && url.pathname === '/api/task-board/projects') {
       const body = validateBoundaryBody('project-create', await readJsonBody(req));
-      sendJson(res, 201, await withTaskBoard((store) => ({ ok: true, project: store.createProject(body) })));
+      sendJson(res, 201, await withTaskBoard(async (store) => ({ ok: true, project: await store.createProject(body) })));
       return true;
     }
     if (url.pathname.startsWith('/api/task-board/projects/')) {
       const projectId = decodeURIComponent(url.pathname.slice('/api/task-board/projects/'.length));
       if (req.method === 'PATCH') {
         const body = await readJsonBody(req);
-        const project = await withTaskBoard((store) => store.updateProject(projectId, body));
+        const project = await withTaskBoard(async (store) => await store.updateProject(projectId, body));
         sendJson(res, project ? 200 : 404, project ? { ok: true, project } : { ok: false, error: 'project_not_found' });
         return true;
       }
       if (req.method === 'DELETE') {
-        const project = await withTaskBoard((store) => store.deleteProject(projectId));
+        const project = await withTaskBoard(async (store) => await store.deleteProject(projectId));
         sendJson(res, project ? 200 : 404, project ? { ok: true, project } : { ok: false, error: 'project_not_found' });
         return true;
       }
     }
     if (req.method === 'GET' && url.pathname === '/api/task-board/tasks') {
-      sendJson(res, 200, await withTaskBoard((store) => ({ ok: true, tasks: store.listTasks({
+      sendJson(res, 200, await withTaskBoard(async (store) => ({ ok: true, tasks: await store.listTasks({
         projectId: url.searchParams.get('projectId'),
         status: url.searchParams.get('status'),
         priority: url.searchParams.get('priority'),
@@ -68,7 +68,7 @@ export function createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundary
     }
     if (req.method === 'POST' && url.pathname === '/api/task-board/tasks') {
       const body = validateBoundaryBody('task-create', await readJsonBody(req));
-      sendJson(res, 201, await withTaskBoard((store) => ({ ok: true, task: store.createTask(body) })));
+      sendJson(res, 201, await withTaskBoard(async (store) => ({ ok: true, task: await store.createTask(body) })));
       return true;
     }
     if (url.pathname.startsWith('/api/task-board/tasks/')) {
@@ -81,17 +81,17 @@ export function createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundary
       }
       if (req.method === 'PATCH' && !action) {
         const body = await readJsonBody(req);
-        const task = await withTaskBoard((store) => store.updateTask(taskId, body));
+        const task = await withTaskBoard(async (store) => await store.updateTask(taskId, body));
         sendJson(res, task ? 200 : 404, task ? { ok: true, task } : { ok: false, error: 'task_not_found' });
         return true;
       }
       if (req.method === 'DELETE' && !action) {
-        const task = await withTaskBoard((store) => store.deleteTask(taskId));
+        const task = await withTaskBoard(async (store) => await store.deleteTask(taskId));
         sendJson(res, task ? 200 : 404, task ? { ok: true, task } : { ok: false, error: 'task_not_found' });
         return true;
       }
       if (req.method === 'GET' && !action) {
-        const task = await withTaskBoard((store) => store.getTask(taskId));
+        const task = await withTaskBoard(async (store) => await store.getTask(taskId));
         sendJson(res, task ? 200 : 404, task ? { ok: true, task } : { ok: false, error: 'task_not_found' });
         return true;
       }

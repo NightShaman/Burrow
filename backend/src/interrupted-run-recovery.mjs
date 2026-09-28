@@ -1,3 +1,4 @@
+import { postgresContinuity } from './postgres-continuity.mjs';
 import { recordInterruptedRun } from './session-store.mjs';
 
 function boundedText(value, limit = 2_000) {
@@ -10,12 +11,13 @@ function boundedText(value, limit = 2_000) {
  * Records are deliberately compact: the next same-session run reconciles these
  * facts against the durable transcript, workspace, and receipts before acting.
  */
-export async function recordActiveRunInterruptions({ activeRuns, resolveAgentRuntime, reason = 'service_shutdown' } = {}) {
+export async function recordActiveRunInterruptions({ stores = null, activeRuns, resolveAgentRuntime, reason = 'service_shutdown' } = {}) {
   const records = activeRuns instanceof Map ? [...activeRuns.values()] : Array.isArray(activeRuns) ? activeRuns : [];
   const settled = await Promise.allSettled(records.map(async (record) => {
     if (!record?.agentId || !record?.sessionId || !record?.runId) return null;
     const runtime = await resolveAgentRuntime(record.agentId);
-    const manifest = await recordInterruptedRun({
+    const authority=stores?.conversations ? postgresContinuity({store:stores.conversations,agentId:record.agentId}):null;
+    const manifest = await (authority ? authority.interrupt.bind(authority) : recordInterruptedRun)({
       rootDir: runtime.agentWorkspaceRoot,
       sessionId: record.sessionId,
       runId: record.runId,

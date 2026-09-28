@@ -1,3 +1,5 @@
+import { PostgresSessionStore } from './postgres-session-store.mjs';
+import { buildSessionEntry } from './session-store.mjs';
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import {
@@ -529,34 +531,29 @@ export class PostgresForgeStore {
       body.artifactId,
     );
     if (job.status !== "succeeded") fail("forge_job_not_succeeded", 409);
-    if (
-      !(await readSessionMetadata({
-        rootDir: destination.agentWorkspaceRoot,
-        sessionId: body.sessionId,
-      }))
-    )
-      fail("session_not_found", 404);
-    const entry = await appendSessionTurnIfAbsent({
-      rootDir: destination.agentWorkspaceRoot,
-      sessionId: body.sessionId,
-      role: "user",
-      content: "",
-      metadata: async () => {
-        const bytes = await fs.readFile(resolved.filePath);
-        const [stored] = await persistChatAttachments({
-          agentWorkspaceRoot: destination.agentWorkspaceRoot,
-          attachments: [
-            {
-              name: artifact.name,
-              type: artifact.mimeType,
-              content: `data:${artifact.mimeType};base64,${bytes.toString("base64")}`,
-            },
-          ],
-        });
-        const { content, ...metadata } = stored;
-        return { attachments: [metadata] };
-      },
-      idempotencyKey: `forge:${job.id}:${artifact.id}`,
+    const conversations = new PostgresSessionStore({ pool: this.pool });
+    const scope = { agentId: body.agentId, sessionId: body.sessionId };
+    if (!(await conversations.getMetadata(scope))) fail("session_not_found", 404);
+    // Serialize delivery by job/destination. Retries reuse both the existing turn
+    // and its attachment file, not merely the underlying generated artifact.
+    const key = `forge:${job.id}:${artifact.id}`;
+    const entry = await withPostgresTransaction(this.pool, async client => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`forge-delivery:${body.agentId}:${body.sessionId}:${key}`]);
+      const prior = await client.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND idempotency_key=$3', [body.agentId,body.sessionId,key]);
+      if (prior.rows[0]) return prior.rows[0].entry;
+      const bytes = await fs.readFile(resolved.filePath);
+      const [stored] = await persistChatAttachments({ agentWorkspaceRoot: destination.agentWorkspaceRoot, attachments: [{ name: artifact.name, type: artifact.mimeType, content: `data:${artifact.mimeType};base64,${bytes.toString('base64')}` }] });
+      const { content, ...metadata } = stored;
+      const value = buildSessionEntry({sessionId:body.sessionId,type:'message',role:'user',content:'',metadata:{attachments:[metadata],idempotencyKey:key}});
+      try {
+        await client.query('SELECT 1 FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE',[body.agentId,body.sessionId]);
+        await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at) VALUES($1,$2,$3,$4,$5::jsonb,$6)',[body.agentId,body.sessionId,value.id,key,JSON.stringify(value),value.ts]);
+        await client.query('UPDATE conversation_sessions SET updated_at=$3 WHERE agent_id=$1 AND session_id=$2',[body.agentId,body.sessionId,value.ts]);
+      } catch(error) {
+        await fs.unlink(path.join(destination.agentWorkspaceRoot,metadata.artifactPath)).catch(()=>{});
+        throw error;
+      }
+      return value;
     });
     const a = entry.metadata.attachments[0];
     return { id: a.artifactPath, ...a, sessionId: body.sessionId };

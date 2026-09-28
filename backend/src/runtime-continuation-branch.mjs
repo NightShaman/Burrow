@@ -7,6 +7,8 @@ import { finalizeContinuationRuntimeResult } from './runtime-continuation-finali
 
 export async function runContinuationBranch({
   rootDir,
+  stores = null,
+  agentId = 'hatchet',
   sessionRoot,
   dataRoot,
   logger,
@@ -59,7 +61,7 @@ export async function runContinuationBranch({
     const workbenchStatus = buildWorkbenchStatus({ decision: 'blocked', session, actionRoute, workflow: workbenchWorkflow({ session, actionRoute, workspaceRoot: resolvedWorkingRoot }), backgroundWork, blockers: backgroundWork.blockers, warnings: session.warnings || [], runId: logger.runId, traceDir: logger.traceDir });
     return commitTerminalResult({
       branch: 'missing_work_item',
-      finalize: () => finalizeBlockedRuntimeResult({ sessionRoot, dataRoot, logger, command, sessionId, priorSession, selectedSkills, intent, session, workbenchStatus, debug: { actionRoute, continuationPlan, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, subagents, compatibilityReads: compatibilityObserver.reads }, backgroundWork, blockedReason: 'work_item_not_found', blockers: backgroundWork.blockers, content, userTurn: null, assistantTurn: { role: 'assistant', content, metadata: { decision: 'blocked', backgroundWork } }, subjectScope: verifiedSubjectScope }),
+      finalize: () => finalizeBlockedRuntimeResult({ stores, agentId, sessionRoot, dataRoot, logger, command, sessionId, priorSession, selectedSkills, intent, session, workbenchStatus, debug: { actionRoute, continuationPlan, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, subagents, compatibilityReads: compatibilityObserver.reads }, backgroundWork, blockedReason: 'work_item_not_found', blockers: backgroundWork.blockers, content, userTurn: null, assistantTurn: { role: 'assistant', content, metadata: { decision: 'blocked', backgroundWork } }, subjectScope: verifiedSubjectScope }),
     });
   }
 
@@ -86,7 +88,7 @@ export async function runContinuationBranch({
     }
     return commitTerminalResult({
       branch: 'continuation',
-      finalize: () => finalizeContinuationRuntimeResult({ sessionRoot, dataRoot, logger, command, message, sessionId, priorSession, selectedSkills, intent, session, activeWorkItem, continuationPlan, step, eligibility, continuedResult, subagents, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, executionContext, subjectScope: verifiedSubjectScope }),
+      finalize: () => finalizeContinuationRuntimeResult({ stores, agentId, sessionRoot, dataRoot, logger, command, message, sessionId, priorSession, selectedSkills, intent, session, activeWorkItem, continuationPlan, step, eligibility, continuedResult, subagents, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, executionContext, subjectScope: verifiedSubjectScope }),
     });
   }
   return null;

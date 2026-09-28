@@ -104,3 +104,28 @@ export function validatePreferenceAdjudication({ proposal, signals = [] } = {}) 
   if (!/^\s*#\s+(?:PREFERENCES|Operator Preferences)\s*$/imu.test(proposal.markdown)) return { ok: false, reason: 'preferences_markdown_heading_required' };
   return { ok: true, disposition: 'replace', signals: selected };
 }
+
+/** Async PG-compatible metadata adapter. atomicUpdate(key, updater, at) must lock/update in one transaction. */
+function requireAsyncStores(agentId, metadataStore) { if (!text(agentId)) throw new Error('preference_agent_required'); if (!metadataStore?.atomicUpdate || !metadataStore?.get) throw new Error('preference_metadata_store_required'); }
+export async function appendPreferenceSignalAsync({ agentId, signal, metadataStore, at = new Date().toISOString() } = {}) { const id = text(agentId); const normalized = normalizePreferenceSignal(signal, { sourceRefs: signal?.sourceRefs, at }); if (!id || !normalized) return null; requireAsyncStores(id, metadataStore); await metadataStore.atomicUpdate(signalKey(id), (current) => ({ version: 1, agentId: id, signals: [normalized, ...(Array.isArray(current?.signals) ? current.signals : [])].slice(0, MAX_SIGNALS), updatedAt: at }), at); return normalized; }
+export async function preferenceSignalsAsync({ agentId, metadataStore, since = null, limit = 100 } = {}) { const id = text(agentId); requireAsyncStores(id, metadataStore); const value = await metadataStore.get(signalKey(id)); return (Array.isArray(value?.signals) ? value.signals : []).filter((s) => !text(since) || s.observedAt > since).slice(0, Math.max(1, Math.min(240, Number(limit) || 100))); }
+export async function preferenceLearningStateAsync({ agentId, metadataStore } = {}) { const id = text(agentId); requireAsyncStores(id, metadataStore); return (await metadataStore.get(stateKey(id))) || { version: 1, agentId: id, lastAutomatedAt: null, lastSignalAt: null }; }
+
+
+/** PostgreSQL implementation: profile, learning state, and audit share one transaction and profile lock. */
+export async function applyPreferenceUpdateAsync({ agentId, markdown, sourceSignals = [], profileStore, at = new Date().toISOString() } = {}) {
+  const id = text(agentId); const document = typeof markdown === 'string' ? markdown.trim() : '';
+  if (!id || !document || !profileStore?.atomicPreferenceUpdate) throw new Error('preference_update_invalid');
+  const stateKeyName = stateKey(id); const auditKeyName = auditKey(id);
+  const newestSignalAt = sourceSignals.map((item) => item.observedAt).sort().at(-1) || null;
+  return profileStore.atomicPreferenceUpdate(id, {
+    markdown: document, stateKey: stateKeyName, auditKey: auditKeyName, at,
+    state: { version: 1, agentId: id, lastAutomatedAt: at, lastSignalAt: newestSignalAt },
+    decide: ({ current, priorState }) => {
+      if (!newestSignalAt || (current?.updatedAt && ((priorState?.lastAutomatedAt && current.updatedAt > priorState.lastAutomatedAt) || (!priorState?.lastAutomatedAt && current.updatedAt > newestSignalAt)))) return { apply: false, reason: 'operator_baseline_newer' };
+      if (current?.markdown === document) return { apply: false, reason: 'unchanged' };
+      return { apply: true };
+    },
+    audit: (prior, current) => ({ version: 1, agentId: id, entries: [{ id: `preference-audit:${randomUUID()}`, at, actor: 'dream', disposition: 'updated', sourceSignalIds: sourceSignals.map((item) => item.id), previousMarkdown: current?.markdown || '', nextMarkdown: document }, ...(prior?.entries || [])].slice(0, MAX_AUDIT), updatedAt: at }),
+  });
+}

@@ -9,7 +9,8 @@ export const modToolConnectionId = (id) => `mod.${id}`;
 // Catalog and grant storage are the existing MCP connection and agent_mcp_tools
 // tables. A mod connection is not a network MCP endpoint; only this live host
 // registry can route calls to it.
-export function publishModTools(mod, databasePath) {
+export function publishModTools(mod, databasePath, catalogWriter = null) {
+  if (catalogWriter) return publishAsync(mod, databasePath, catalogWriter);
   if (!mod.server) return;
   const id = modToolConnectionId(mod.id);
   const key = providerKey(databasePath, id);
@@ -51,4 +52,13 @@ export function modToolConnections(databasePath) {
         return mod.host.invokeTool(name, args, caller.context, { abortSignal: caller.abortSignal });
       } }] : [];
   });
+}
+
+async function publishAsync(mod, databasePath, catalogWriter) {
+  if (!mod.server) return;
+  const id = modToolConnectionId(mod.id);
+  await catalogWriter(mod);
+  const key = providerKey(databasePath, id);
+  if (mod.tools?.length) { providers.set(key, mod); mod.toolDatabasePath = scope(databasePath); }
+  else providers.delete(key);
 }

@@ -1,6 +1,6 @@
 import { readRetentionPolicy, readRetentionPolicyState, retentionPolicyFailureState, retentionPolicySuccessState, writeRetentionPolicyState } from './retention-settings.mjs';
 
-export function createRetentionScheduler({ databasePath = null, runCleanup, intervalMs = 60_000, clock = () => new Date() } = {}) {
+export function createRetentionScheduler({ databasePath = null, store = null, runCleanup, intervalMs = 60_000, clock = () => new Date() } = {}) {
   if (typeof runCleanup !== 'function') throw new Error('retention_scheduler_cleanup_required');
   let timer = null;
   let ticking = false;
@@ -10,8 +10,8 @@ export function createRetentionScheduler({ databasePath = null, runCleanup, inte
     let policy = null;
     let state = null;
     try {
-      policy = readRetentionPolicy({ databasePath });
-      state = readRetentionPolicyState({ databasePath });
+      policy = await readRetentionPolicy({ databasePath, store });
+      state = await readRetentionPolicyState({ databasePath, store });
       const now = clock();
       const nowMs = now.getTime();
       const dueAt = state.nextRunAt ? Date.parse(state.nextRunAt) : null;
@@ -22,14 +22,14 @@ export function createRetentionScheduler({ databasePath = null, runCleanup, inte
       if (result?.skipped && result?.reason === 'already_running') return { ok: true, skipped: true, reason: 'already_running', policy, state, result };
       const completedAt = clock();
       const next = retentionPolicySuccessState({ policy, result, at: completedAt, previous: state });
-      writeRetentionPolicyState(next, { databasePath });
+      await writeRetentionPolicyState(next, { databasePath, store });
       return { ok: true, skipped: false, policy, state: next, result };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (policy && state) {
         try {
           const next = retentionPolicyFailureState({ policy, error, at: clock(), previous: state });
-          writeRetentionPolicyState(next, { databasePath });
+          await writeRetentionPolicyState(next, { databasePath, store });
           return { ok: false, skipped: false, policy, state: next, error: next.lastError };
         } catch {}
       }

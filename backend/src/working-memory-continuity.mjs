@@ -61,6 +61,16 @@ export function loadWorkingContinuity({ databasePath = null, agentId = null, con
   } finally { if (!store && workingStore) workingStore.close(); }
 }
 
+/** Async store boundary; the synchronous compatibility API remains available to SQLite callers. */
+export async function loadWorkingContinuityAsync(options = {}) {
+  if (!options.store) return loadWorkingContinuity(options);
+  const { store, agentId = null, continuityScope = null, project = null, ...limits } = options;
+  const scope = normalizeContinuityScope(continuityScope ?? project);
+  if (!scope || !text(agentId)) return selectWorkingContinuity({ records: [], agentId, continuityScope: scope, ...limits });
+  const records = await store.list({ agentId, project: scope, includeInactive: false, limit: DEFAULT_WORKING_CONTINUITY_RECORD_LIMIT });
+  return selectWorkingContinuity({ records, agentId, continuityScope: scope, ...limits });
+}
+
 export function projectHandoffsIntoWorkingContinuity({ continuity = null, handoffs = [], agentId = null, continuityScope = null } = {}) {
   const scope = normalizeContinuityScope(continuity?.scope ?? continuityScope);
   const base = continuity && typeof continuity === 'object'

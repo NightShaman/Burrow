@@ -5,7 +5,7 @@ export function createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody
   };
   return async function handleAgentRoute({ req, res, url } = {}) {
     if (req.method === 'GET' && url.pathname === '/api/agents') {
-      sendJson(res, 200, { ok: true, agents: agentsStore().list({ includeDisabled: url.searchParams.get('includeDisabled') !== 'false' }) });
+      sendJson(res, 200, { ok: true, agents: await agentsStore().list({ includeDisabled: url.searchParams.get('includeDisabled') !== 'false' }) });
       return true;
     }
     if (req.method === 'POST' && url.pathname === '/api/agents') return resultResponse(res, await createAgent(validateBoundaryBody('agent-create', await readJsonBody(req))), 201);

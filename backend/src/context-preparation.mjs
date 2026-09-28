@@ -2,7 +2,7 @@ import { buildTurnContext, conversationContextFromEngine, inspectContextEngineRe
 import { runSessionCompression } from './session-compression.mjs';
 import { inspectAssembledPromptBudget } from './prompt-budget.mjs';
 import { normalizeContextCompressionConfig } from './context-compression.mjs';
-import { readSessionEntries } from './session-store.mjs';
+import { conversationAuthority } from './conversation-authority.mjs';
 
 
 function uncoveredHistoryDetails(turnContext = {}) {
@@ -68,7 +68,7 @@ export function activeConversationLimits({ modelConfig = null, contextConfig = {
   };
 }
 
-function turnContextOptions({ rootDir, dataRoot, agentRuntime, sessionId, contextConfig, modelConfig, support, transcript, agentWorkspaceRoot, agentDataRoot, cacheRoot }) {
+function turnContextOptions({ rootDir, dataRoot, agentRuntime, sessionId, contextConfig, modelConfig, support, transcript, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId }) {
   return {
     rootDir,
     ...(Array.isArray(transcript) ? { transcript } : {}),
@@ -80,6 +80,8 @@ function turnContextOptions({ rootDir, dataRoot, agentRuntime, sessionId, contex
     agentWorkspaceRoot,
     agentDataRoot,
     cacheRoot,
+    stores,
+    agentId,
   };
 }
 
@@ -98,6 +100,8 @@ export async function prepareSessionTurnContext({
   agentDataRoot = null,
   cacheRoot = null,
   compressionRunner = runSessionCompression,
+  stores = null,
+  agentId = agentRuntime?.agentId || 'hatchet',
 } = {}) {
   const support = { memoryStage, selectedSkills };
   // Build and inspect against one resolved transcript. Otherwise the inspector
@@ -110,8 +114,8 @@ export async function prepareSessionTurnContext({
     && (transcript.length > 0 || !dataRoot);
   const resolvedTranscript = useSuppliedTranscript
     ? transcript
-    : await readSessionEntries({ rootDir: dataRoot, sessionId, limit: 0 });
-  const options = turnContextOptions({ rootDir, dataRoot, agentRuntime, sessionId, contextConfig, modelConfig, support, transcript: resolvedTranscript, agentWorkspaceRoot, agentDataRoot, cacheRoot });
+    : await conversationAuthority({ store: stores?.conversations || null, agentId, rootDir: dataRoot }).entriesAll(sessionId);
+  const options = turnContextOptions({ rootDir, dataRoot, agentRuntime, sessionId, contextConfig, modelConfig, support, transcript: resolvedTranscript, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId });
   let turnContext = await buildTurnContext(options);
   const preCompressionInspection = inspectContextEngineResult({
     sessionId,
@@ -122,7 +126,7 @@ export async function prepareSessionTurnContext({
   });
   let compressionResult = null;
   try {
-    compressionResult = await compressionRunner({ rootDir: dataRoot, sessionId, config: contextConfig, contextBudget: preCompressionInspection.contextBudget, logger });
+    compressionResult = await compressionRunner({ rootDir: dataRoot, sessionId, config: contextConfig, contextBudget: preCompressionInspection.contextBudget, logger, stores, agentId });
   } catch (error) {
     compressionResult = { ok: false, compressed: false, reason: 'compression_failed', error: error?.message || String(error) };
     await logger?.event?.('context-compression-failed', compressionResult);
@@ -132,7 +136,7 @@ export async function prepareSessionTurnContext({
   if (compressionResult.compressed) {
     turnContext = await buildTurnContext(turnContextOptions({
       rootDir, dataRoot, agentRuntime, sessionId, contextConfig, modelConfig, support,
-      transcript: null, agentWorkspaceRoot, agentDataRoot, cacheRoot,
+      transcript: null, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId,
     }));
   }
   throwCompressionUnavailable({ compressionResult, turnContext });
@@ -162,6 +166,8 @@ export async function compressContextForPromptPressure({
   agentWorkspaceRoot = null,
   agentDataRoot = null,
   cacheRoot = null,
+  stores = null,
+  agentId = agentRuntime?.agentId || 'hatchet',
 } = {}) {
   const promptInspection = inspectAssembledPromptBudget({ prompt, modelConfig, tools });
   const compression = normalizeContextCompressionConfig(contextConfig);
@@ -171,7 +177,7 @@ export async function compressContextForPromptPressure({
   if (!shouldCompress) return { compressed: false, reason: 'prompt_pressure_ok', promptInspection };
   let compressionResult = null;
   try {
-    compressionResult = await runSessionCompression({ rootDir: dataRoot, sessionId, config: contextConfig, contextBudget: promptInspection, logger });
+    compressionResult = await runSessionCompression({ rootDir: dataRoot, sessionId, config: contextConfig, contextBudget: promptInspection, logger, stores, agentId });
   } catch (error) {
     return { compressed: false, reason: 'compression_failed', error: error?.message || String(error), promptInspection };
   }

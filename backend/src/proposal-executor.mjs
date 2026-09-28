@@ -42,7 +42,7 @@ function withExecutionProvenance(result, target, executionContext, toolCallId) {
   };
 }
 
-export async function executeReviewedProposalActions({ actions = [], reviews = [], workspaceRoot = null, rootDir = null, dataRoot = null, sessionId = null, conversationId = null, agentId = null, agentRuntime = null, resolveAgentRuntime = null, runAgentReply = null, workingMemoryStore = null, executionPolicy = null, modelConfig = null, traceLogger = null, artifactPrefix = null, observedToolResults = [], executionContext = null, abortSignal = null, invokeMcp = invokeMcpTool } = {}) {
+export async function executeReviewedProposalActions({ conversationStore = null, actions = [], reviews = [], workspaceRoot = null, rootDir = null, dataRoot = null, sessionId = null, conversationId = null, agentId = null, agentRuntime = null, resolveAgentRuntime = null, runAgentReply = null, workingMemoryStore = null, executionPolicy = null, modelConfig = null, traceLogger = null, artifactPrefix = null, observedToolResults = [], executionContext = null, abortSignal = null, invokeMcp = invokeMcpTool } = {}) {
   agentId = agentId || executionContext?.agentId || null;
   const resolvedConversationId = conversationId || executionContext?.conversationId || null;
   // Agent home is the normal-chat default. Explicit internal/delegated
@@ -363,10 +363,11 @@ export async function executeReviewedProposalActions({ actions = [], reviews = [
     if (action.tool === 'session_search') {
       const started = await traceLogger?.toolStart?.({ tool: 'session_search', query: action.query, scope: action.sessionScope });
       const result = await searchAgentSessionEvidence({
+        conversationStore: conversationStore || executionContext?.conversationStore,
         rootDir: executionContext?.agentWorkspaceRoot || rootDir,
         additionalRootDirs: [dataRoot || executionContext?.dataRoot].filter(Boolean),
         dataRoot: executionContext?.agentDataRoot || dataRoot,
-        agentId,
+        agentId: agentId || executionContext?.agentId,
         sessionId: sessionId || executionContext?.sessionId || 'default',
         query: action.query,
         scope: action.sessionScope,

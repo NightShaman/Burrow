@@ -89,19 +89,49 @@ async function resolveSqliteModel(connectionId, modelId, args = {}) {
   } finally { store.close(); }
 }
 
-/** Models are selected only by an enabled SQLite connection/model pair. */
+// Runtime servers may inject the async PostgreSQL stores. Once a model store is
+// supplied, never open SQLite as a compatibility fallback: an empty injected
+// store is authoritative and must report its own absence/errors.
+async function resolveInjectedModel(connectionId, modelId, args = {}) {
+  const store = args.modelSettings || args.stores?.models || args.runtimeStores?.models;
+  if (!store) return null;
+  const connection = await store.get(connectionId);
+  if (!connection) throw new Error('model_connection_not_found');
+  const model = selectedModels(connection).find((item) => item.id === modelId);
+  if (!model) throw new Error('model_not_enabled_for_connection');
+  const auth = await store.resolveAuth(connection.id, { fetchImpl: args.fetchImpl ?? fetch });
+  const token = auth?.token ?? auth?.apiKey ?? auth?.accessToken;
+  return { connection, model, auth: { ...auth, token } };
+}
+
+function hasInjectedModelStore(args = {}) {
+  return Boolean(args.modelSettings || args.stores?.models || args.runtimeStores?.models);
+}
+
+async function resolveModelSelection(args, agentId) {
+  const injected = args.modelSettings || args.stores?.models || args.runtimeStores?.models;
+  if (!injected || !agentId) return null;
+  return injected.modelSelection(agentId);
+}
+
+/** Models are selected only by an enabled authoritative connection/model pair. */
 export async function resolveModelConfig(args = {}) {
   let connectionId = text(args.model_connection_id ?? args.modelConnectionId);
   let modelId = text(args.model ?? args.model_id ?? args.modelId);
   let agentSelection = null;
-  if (text(args.agent_id ?? args.agentId) && (process.env.BURROW_SETTINGS_KEY || explicitSettingsKey(args))) {
-    const store = new ModelSettingsStore({ databasePath: args.settings_db ?? args.settingsDb, key: explicitSettingsKey(args) });
-    try { agentSelection = store.modelSelection(text(args.agent_id ?? args.agentId)); } finally { store.close(); }
+  if (text(args.agent_id ?? args.agentId)) {
+    if (hasInjectedModelStore(args)) agentSelection = await resolveModelSelection(args, text(args.agent_id ?? args.agentId));
+    else if (process.env.BURROW_SETTINGS_KEY || explicitSettingsKey(args)) {
+      const store = new ModelSettingsStore({ databasePath: args.settings_db ?? args.settingsDb, key: explicitSettingsKey(args) });
+      try { agentSelection = store.modelSelection(text(args.agent_id ?? args.agentId)); } finally { store.close(); }
+    }
     connectionId = connectionId || agentSelection?.connectionId || '';
     modelId = modelId || agentSelection?.model || '';
   }
   if (!connectionId || !modelId) return null;
-  const { connection, model, auth } = await resolveSqliteModel(connectionId, modelId, args);
+  const { connection, model, auth } = hasInjectedModelStore(args)
+    ? await resolveInjectedModel(connectionId, modelId, args)
+    : await resolveSqliteModel(connectionId, modelId, args);
   const reasoningEffort = normalizeModelReasoningEffort(args.model_reasoning_effort ?? args.reasoning_effort ?? agentSelection?.reasoningEffort ?? 'off');
   const suppliedTemperature = args.temperature ?? args.model_temperature;
   const temperature = suppliedTemperature === undefined || suppliedTemperature === null || suppliedTemperature === '' ? (agentSelection?.temperature ?? 0.2) : Number(suppliedTemperature);
@@ -175,7 +205,14 @@ function readUiAuthSettings(databasePath) {
 }
 
 export async function resolveUiConfig(args = {}) {
-  const settings = readUiAuthSettings(args.settings_database_path ?? args.settingsDatabasePath ?? env('BURROW_SETTINGS_DB'));
+  const metadata = args.settingsMetadata || args.stores?.metadata || args.runtimeStores?.metadata;
+  const secrets = args.uiAuthSecrets || args.stores?.uiAuthSecrets || args.runtimeStores?.uiAuthSecrets;
+  const settings = metadata
+    ? { ...((await metadata.get('ui_auth')) || {}) }
+    : readUiAuthSettings(args.settings_database_path ?? args.settingsDatabasePath ?? env('BURROW_SETTINGS_DB'));
+  if (settings.oidc && typeof settings.oidc === 'object' && !settings.oidc.clientSecret && secrets) {
+    settings.oidc = { ...settings.oidc, clientSecret: await secrets.get() };
+  }
   const envMode = env('BURROW_UI_AUTH_MODE');
   const mode = text(args.ui_auth_mode ?? envMode ?? settings.mode ?? 'none').toLowerCase();
   const allowedModes = new Set(['none', 'trusted-proxy', 'basic', 'oidc']);
@@ -185,7 +222,7 @@ export async function resolveUiConfig(args = {}) {
     port: args.ui_port ?? env('BURROW_UI_PORT', '42817'),
     authMode: mode,
     authEnabled: mode !== 'none',
-    authSource: args.ui_auth_mode || envMode ? 'environment' : (settings.mode ? 'sqlite' : 'default'),
+    authSource: args.ui_auth_mode || envMode ? 'environment' : (settings.mode ? (metadata ? 'database' : 'sqlite') : 'default'),
     trustedProxy: {
       allowedProxies: splitCsv(args.ui_auth_allowed_proxies ?? env('BURROW_UI_AUTH_ALLOWED_PROXIES') ?? settings.trustedProxy?.allowedProxies?.join?.(',') ?? settings.trustedProxy?.allowedProxy ?? '127.0.0.1,::1'),
       userHeader: text(args.ui_auth_user_header ?? env('BURROW_UI_AUTH_USER_HEADER') ?? settings.trustedProxy?.userHeader ?? 'x-forwarded-user').toLowerCase() || 'x-forwarded-user',

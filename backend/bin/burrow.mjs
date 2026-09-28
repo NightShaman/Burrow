@@ -14,7 +14,7 @@ import { runExec } from '../src/harness/exec.mjs';
 import { createOpenAICompatibleModelAdapter } from '../src/model-adapter.mjs';
 import { loadRuntimeConfig, runAskChat } from '../src/app-runtime.mjs';
 import { runRetentionCleanup } from '../src/retention.mjs';
-import { searchSessionEvidence } from '../src/session-search.mjs';
+import { runCliSessionSearch } from '../src/cli-session-search.mjs';
 import { translateBlockers } from '../src/workbench-status.mjs';
 import { WorkingMemoryStore } from '../src/working-memory-store.mjs';
 import { consolidateDreamMemory } from '../src/dream-memory-consolidator.mjs';
@@ -336,21 +336,13 @@ async function main() {
     if (args.context_threshold) process.env.BURROW_CONTEXT_THRESHOLD = args.context_threshold;
     const loaded = await loadBurrowConfig({ rootDir });
     const runtimeState = resolveRuntimeStateConfig({ rootDir, args, loadedConfig: loaded.config });
-    await ensureDefaultGlobalWorkspace({ installDir: rootDir, workspaceRoot: runtimeState.workspaceRoot, databasePath: runtimeState.settingsDatabasePath });
+    if (process.env.BURROW_UI_POSTGRES !== '1') await ensureDefaultGlobalWorkspace({ installDir: rootDir, workspaceRoot: runtimeState.workspaceRoot, databasePath: runtimeState.settingsDatabasePath });
     await import('../scripts/burrow-ui.mjs');
     return;
   }
 
   if (command === 'session-search') {
-    const runtimeConfig = await loadRuntimeConfig({ rootDir, args });
-    const result = await searchSessionEvidence({
-      rootDir: args.data_root || runtimeConfig.runtimeState.dataRoot,
-      sessionId: args.session_id || 'default',
-      query: args.query || args.message || args._.join(' '),
-      role: args.role || 'any',
-      sourceId: args.source_id || null,
-      limit: args.limit || 50,
-    });
+    const result = await runCliSessionSearch({ rootDir, args });
     if (args.json) return console.log(JSON.stringify(result, null, 2));
     if (!result.results.length) return console.log('No session evidence found.');
     for (const entry of result.results) {

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { execFile, spawn } from 'node:child_process';
 import { discoverMods, MOD_DATA_DIRECTORY } from './mod-runtime.mjs';
-import { openSettingsDatabase } from './settings-database.mjs';
+import { createModDistributionRepository } from './mod-distribution-repository.mjs';
 import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -292,11 +292,6 @@ async function swapMod(target, prepared) {
   };
 }
 
-function sourceRows(db) { return db.prepare('SELECT id,url,provider,mod_id,mod_name,latest_version,archive_url,status,error,last_checked_at FROM mod_sources ORDER BY created_at').all(); }
-function installationRows(db) { return new Map(db.prepare('SELECT mod_id,source_id,version,archive_sha256,installed_at,updated_at FROM mod_installations').all().map((row) => [row.mod_id, row])); }
-function lifecycleRows(db) { return new Map(db.prepare('SELECT mod_id,enabled,created_at,updated_at FROM mod_lifecycle').all().map((row) => [row.mod_id, row])); }
-
-
 async function durableJson(filePath, value) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const temporary = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
@@ -313,7 +308,7 @@ async function removeDurably(filePath) {
   try { await directory.sync(); } finally { await directory.close(); }
 }
 
-export function createModDistribution({ runtimeRoot, databasePath, restart = null, onLifecycleChange = null, logger = console, settingsKey = null, archiveResources = {}, removePath = fs.rm, renamePath = fs.rename, copyPath = fs.cp, cleanupPath = fs.rm, repositoryPreparation = prepareRepository } = {}) {
+export function createModDistribution({ runtimeRoot, databasePath, restart = null, onLifecycleChange = null, logger = console, settingsKey = null, archiveResources = {}, removePath = fs.rm, renamePath = fs.rename, copyPath = fs.cp, cleanupPath = fs.rm, repositoryPreparation = prepareRepository, repositoryFactory = createModDistributionRepository } = {}) {
   if (!runtimeRoot || !databasePath) throw new Error('mod_distribution_configuration_required');
   const modsRoot = path.join(runtimeRoot, 'mods');
   const archivePolicy = {
@@ -351,13 +346,10 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       }
       await cleanupPath(journal.quarantine, { recursive: true, force: true });
       await cleanupPath(journal.recovery, { recursive: true, force: true });
-      const recoveryDb = openSettingsDatabase({ databasePath });
+      const recoveryDb = await repositoryFactory({ databasePath });
       try {
-        recoveryDb.exec('BEGIN IMMEDIATE');
-        if (journal.installation) recoveryDb.prepare('INSERT OR REPLACE INTO mod_installations (mod_id,source_id,version,archive_sha256,installed_at,updated_at) VALUES (?,?,?,?,?,?)').run(journal.installation.mod_id, journal.installation.source_id, journal.installation.version, journal.installation.archive_sha256, journal.installation.installed_at, journal.installation.updated_at);
-        if (journal.lifecycle) recoveryDb.prepare('INSERT OR REPLACE INTO mod_lifecycle (mod_id,enabled,created_at,updated_at) VALUES (?,?,?,?)').run(journal.lifecycle.mod_id, journal.lifecycle.enabled, journal.lifecycle.created_at, journal.lifecycle.updated_at);
-        recoveryDb.exec('COMMIT');
-      } catch (error) { recoveryDb.exec('ROLLBACK'); throw error; } finally { recoveryDb.close(); }
+        await recoveryDb.transaction((tx) => tx.restoreMetadata(journal));
+      } finally { await recoveryDb.close(); }
       await onLifecycleChange?.({ modId: journal.modId, enabled: journal.lifecycle?.enabled === 1, installed: true, action: 'uninstall-recovery' });
       await removeDurably(journalPath);
     }
@@ -368,8 +360,8 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
   // rejected promise, but startup failures cannot become transient unhandled
   // rejections before the server reaches its explicit readiness await.
   void ready.catch(() => {});
-  function refreshSettings(db) {
-    const row = db.prepare("SELECT value_json FROM settings_meta WHERE key='mod_source_refresh'").get();
+  async function refreshSettings(db) {
+    const row = await db.refreshSettings();
     try { return validateModSourceRefreshConfig(JSON.parse(row?.value_json || '{}'), { partial: true }); }
     catch { return { ...DEFAULT_SOURCE_REFRESH }; }
   }
@@ -380,61 +372,60 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
     pollTimer = setTimeout(() => {
       pollTimer = null;
       if (wait > MAX_TIMER_DELAY_MS) { armPoll(wait - MAX_TIMER_DELAY_MS); return; }
-      void refresh().catch((error) => logger.error?.(`Burrow mod source refresh failed: ${String(error?.message || error)}`)).finally(() => schedulePoll());
+      void refresh().catch((error) => logger.error?.(`Burrow mod source refresh failed: ${String(error?.message || error)}`)).finally(() => schedulePoll()).catch((error) => logger.error?.(`Burrow mod source polling failed: ${String(error?.message || error)}`));
     }, delay);
     pollTimer.unref?.();
   }
-  function schedulePoll(delay = null) {
+  async function schedulePoll(delay = null) {
     clearPoll();
     if (closed) return;
-    const db = openSettingsDatabase({ databasePath });
+    const db = await repositoryFactory({ databasePath });
     let settings;
-    try { settings = refreshSettings(db); } finally { db.close(); }
+    try { settings = await refreshSettings(db); } finally { await db.close(); }
     if (!settings.enabled) return;
     const multiplier = 2 ** Math.min(failureCount, 52);
     const backedOff = Math.min(settings.intervalMs * multiplier, settings.maxBackoffMs);
     const wait = delay ?? (Number.isSafeInteger(backedOff) ? backedOff : settings.maxBackoffMs);
-    armPoll(wait);
+    if (!closed) armPoll(wait);
   }
-  function sourceRefreshConfig() {
-    const db = openSettingsDatabase({ databasePath });
-    try { return { ok: true, sourceRefresh: refreshSettings(db) }; } finally { db.close(); }
+  async function sourceRefreshConfig() {
+    const db = await repositoryFactory({ databasePath });
+    try { return { ok: true, sourceRefresh: await refreshSettings(db) }; } finally { await db.close(); }
   }
-  function saveSourceRefreshConfig(value) {
-    const db = openSettingsDatabase({ databasePath });
+  async function saveSourceRefreshConfig(value) {
+    const db = await repositoryFactory({ databasePath });
     try {
-      const config = validateModSourceRefreshConfig(value, { base: refreshSettings(db) });
-      db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES ('mod_source_refresh',?,?)
-        ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at`).run(JSON.stringify(config), now());
-      schedulePoll();
+      const config = validateModSourceRefreshConfig(value, { base: await refreshSettings(db) });
+      await db.saveRefreshSettings(config, now());
+      await schedulePoll();
       return { ok: true, sourceRefresh: config };
-    } finally { db.close(); }
+    } finally { await db.close(); }
   }
-  function sourceCredential(db, id) {
-    const row = db.prepare('SELECT ciphertext,nonce,auth_tag FROM mod_source_secrets WHERE source_id=?').get(id);
+  async function sourceCredential(db, id) {
+    const row = await db.sourceCredential(id);
     if (!row) return null;
     return openCredential(settingsKey || settingsKeyFromEnvironment(), id, row);
   }
   async function refreshSource(db, row) {
     const checkedAt = now();
     try {
-      const inspected = await repositoryPreparation(row.url, sourceCredential(db, row.id));
-      db.prepare("UPDATE mod_sources SET mod_id=?,mod_name=?,latest_version=?,archive_url=?,status='ready',error=NULL,last_checked_at=?,updated_at=? WHERE id=?").run(inspected.modId, inspected.modName, inspected.latestVersion, inspected.archiveUrl, checkedAt, checkedAt, row.id);
+      const inspected = await repositoryPreparation(row.url, await sourceCredential(db, row.id));
+      await db.updateSourceReady({ ...inspected, id: row.id }, checkedAt);
       return { ...row, ...inspected, status: 'ready', error: null };
     } catch (error) {
       const message = String(error?.message || error);
-      db.prepare("UPDATE mod_sources SET status='failed',error=?,last_checked_at=?,updated_at=? WHERE id=?").run(message, checkedAt, checkedAt, row.id);
+      await db.updateSourceFailed(row.id, message, checkedAt);
       return { ...row, status: 'failed', error: message };
     }
   }
   async function list() {
     await ready;
-    const db = openSettingsDatabase({ databasePath });
+    const db = await repositoryFactory({ databasePath });
     try {
       const discovered = await discoverMods({ runtimeRoot, logger });
-      const installed = installationRows(db);
-      const lifecycle = lifecycleRows(db);
-      const sources = sourceRows(db);
+      const installed = new Map((await db.installationRows()).map((row) => [row.mod_id, row]));
+      const lifecycle = new Map((await db.lifecycleRows()).map((row) => [row.mod_id, row]));
+      const sources = await db.sourceRows();
       const sourceByMod = new Map(sources.filter((row) => row.mod_id).map((row) => [row.mod_id, row]));
       const mods = discovered.map((mod) => {
         const record = installed.get(mod.id); const source = sourceByMod.get(mod.id) || (record?.source_id ? sources.find((item) => item.id === record.source_id) : null);
@@ -444,41 +435,38 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
         return { id: mod.id, name: mod.name, version, status: mod.status === 'failed' ? 'failed' : 'installed', enabled, system: mod.manifest?.system === true, source: source?.url, latestVersion, updateAvailable: Boolean(version && latestVersion && VERSION.test(version) && VERSION.test(latestVersion) && compareVersions(latestVersion, version) > 0), canInstall: source?.status === 'ready', ...(source?.error ? { reason: source.error } : {}) };
       });
       for (const source of sources) if (source.mod_id && !mods.some((mod) => mod.id === source.mod_id)) mods.push({ id: source.mod_id, name: source.mod_name || source.mod_id, status: 'available', source: source.url, latestVersion: source.latest_version || undefined, canInstall: source.status === 'ready', ...(source.error ? { reason: source.error } : {}) });
-      const refreshConfig = refreshSettings(db);
+      const refreshConfig = await refreshSettings(db);
       const stale = sources.some((row) => !row.last_checked_at || Date.now() - Date.parse(row.last_checked_at) >= refreshConfig.staleMs);
       if (refreshConfig.enabled && stale && !refreshPromise) queueMicrotask(() => { void refresh(); });
       return { ok: true, restartRequired: false, sourceRefresh: { enabled: Boolean(refreshConfig.enabled), intervalMs: refreshConfig.intervalMs, staleMs: refreshConfig.staleMs, concurrency: refreshConfig.concurrency, maxBackoffMs: refreshConfig.maxBackoffMs, refreshing: Boolean(refreshPromise), failures: failureCount }, mods, sources: sources.map((row) => ({ id: row.id, url: row.url, status: row.status, ...(row.error ? { error: row.error } : {}), ...(row.last_checked_at ? { lastCheckedAt: row.last_checked_at } : {}) })) };
-    } finally { db.close(); }
+    } finally { await db.close(); }
   }
   async function addSource(urlValue, authValue = null) {
     await ready;
-    const url = normalizeModSourceUrl(urlValue); const id = sourceId(url); const timestamp = now(); const auth = credentialInput(authValue); const db = openSettingsDatabase({ databasePath });
+    const url = normalizeModSourceUrl(urlValue); const id = sourceId(url); const timestamp = now(); const auth = credentialInput(authValue); const db = await repositoryFactory({ databasePath });
     try {
-      db.prepare(`INSERT INTO mod_sources (id,url,provider,status,created_at,updated_at) VALUES (?,?,?,'pending',?,?) ON CONFLICT(url) DO NOTHING`).run(id, url, 'git', timestamp, timestamp);
-      const row = db.prepare('SELECT * FROM mod_sources WHERE url=?').get(url);
+      const row = await db.ensureSource(id, url, timestamp);
       if (auth) {
         const encrypted = sealCredential(settingsKey || settingsKeyFromEnvironment(), row.id, auth);
-        db.prepare(`INSERT INTO mod_source_secrets (source_id,ciphertext,nonce,auth_tag,created_at,updated_at) VALUES (?,?,?,?,?,?)
-          ON CONFLICT(source_id) DO UPDATE SET ciphertext=excluded.ciphertext,nonce=excluded.nonce,auth_tag=excluded.auth_tag,updated_at=excluded.updated_at`)
-          .run(row.id, encrypted.ciphertext, encrypted.nonce, encrypted.authTag, timestamp, timestamp);
+        await db.saveCredential(row, encrypted, timestamp);
       }
 
       const refreshed = await refreshSource(db, row);
       return { ok: refreshed.status === 'ready', source: refreshed, ...(refreshed.error ? { error: refreshed.error } : {}) };
-    } finally { db.close(); }
+    } finally { await db.close(); }
   }
   async function refresh() {
     await ready;
     if (refreshPromise) return refreshPromise;
     refreshPromise = (async () => {
-      const db = openSettingsDatabase({ databasePath });
+      const db = await repositoryFactory({ databasePath });
       let rows; let settings;
-      try { rows = sourceRows(db); settings = refreshSettings(db); } finally { db.close(); }
+      try { rows = await db.sourceRows(); settings = await refreshSettings(db); } finally { await db.close(); }
       let failed = false; let cursor = 0;
       await Promise.all(Array.from({ length: Math.min(settings.concurrency, rows.length) }, async () => {
         while (cursor < rows.length) {
-          const row = rows[cursor++]; const workerDb = openSettingsDatabase({ databasePath });
-          try { const result = await refreshSource(workerDb, row); failed ||= result.status === 'failed'; } finally { workerDb.close(); }
+          const row = rows[cursor++]; const workerDb = await repositoryFactory({ databasePath });
+          try { const result = await refreshSource(workerDb, row); failed ||= result.status === 'failed'; } finally { await workerDb.close(); }
         }
       }));
       failureCount = failed ? failureCount + 1 : 0;
@@ -487,18 +475,18 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
     try { return await refreshPromise; } finally { refreshPromise = null; }
   }
   async function removeSource(id) {
-    await ready; const db = openSettingsDatabase({ databasePath }); try { const removed = db.prepare('DELETE FROM mod_sources WHERE id=?').run(String(id)).changes > 0; return { ok: removed, removed }; } finally { db.close(); } }
+    await ready; const db = await repositoryFactory({ databasePath }); try { const removed = (await db.removeSource(String(id))).changes > 0; return { ok: removed, removed }; } finally { await db.close(); } }
   async function install(modId, requestedVersion = null) {
     await ready;
     const id = String(modId || '').trim(); if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id))) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
-    locks.add(id); const db = openSettingsDatabase({ databasePath }); let scratch;
+    locks.add(id); const db = await repositoryFactory({ databasePath }); let scratch;
     try {
-      let source = db.prepare('SELECT * FROM mod_sources WHERE mod_id=? LIMIT 1').get(id);
+      let source = await db.sourceByMod(id);
       if (!source) throw new Error('mod_source_not_resolved');
       scratch = await fs.mkdtemp(path.join(runtimeRoot, `.mod-staging-${process.pid}-`));
       const archive = path.join(scratch, 'mod.tar.gz'); const extract = path.join(scratch, 'extract');
-      const inspected = await repositoryPreparation(source.url, sourceCredential(db, source.id), { archivePath: archive, archiveReserve: { root: scratch, reserveBytes: archivePolicy.reserveBytes, checkIntervalMs: archivePolicy.checkIntervalMs } });
+      const inspected = await repositoryPreparation(source.url, await sourceCredential(db, source.id), { archivePath: archive, archiveReserve: { root: scratch, reserveBytes: archivePolicy.reserveBytes, checkIntervalMs: archivePolicy.checkIntervalMs } });
       if (inspected.modId !== id) throw new Error('mod_manifest_id_mismatch');
       const version = inspected.latestVersion;
       if (requestedVersion && compareVersions(requestedVersion, version) !== 0) throw new Error('mod_version_unavailable');
@@ -509,8 +497,8 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       const prepared = await findPreparedMod(extract);
       if (prepared.id !== id && source.mod_id) throw new Error('mod_manifest_id_mismatch');
       const target = path.join(modsRoot, prepared.id); const digest = await archiveSha256(archive);
-      const wasInstalled = Boolean(db.prepare('SELECT 1 AS present FROM mod_installations WHERE mod_id=?').get(prepared.id));
-      const enabled = db.prepare('SELECT enabled FROM mod_lifecycle WHERE mod_id=?').get(prepared.id)?.enabled === 1;
+      const wasInstalled = Boolean(await db.installationExists(prepared.id));
+      const enabled = (await db.lifecycle(prepared.id))?.enabled === 1;
       // Reject already-active work before touching the files used by the live
       // registry. transitionMod checks again after candidate activation to close
       // the race with work that starts during staging.
@@ -524,49 +512,43 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
         throw error;
       }
       const timestamp = now();
-      db.prepare('UPDATE mod_sources SET mod_id=?,mod_name=?,latest_version=?,status=\'ready\',error=NULL,updated_at=? WHERE id=?').run(prepared.id, prepared.name, version, timestamp, source.id);
-      db.prepare(`INSERT INTO mod_installations (mod_id,source_id,version,archive_sha256,installed_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(mod_id) DO UPDATE SET source_id=excluded.source_id,version=excluded.version,archive_sha256=excluded.archive_sha256,installed_at=excluded.installed_at,updated_at=excluded.updated_at`).run(prepared.id, source.id, version, digest, timestamp, timestamp);
-      db.prepare(`INSERT INTO mod_lifecycle (mod_id,enabled,created_at,updated_at) VALUES (?,0,?,?)
-        ON CONFLICT(mod_id) DO NOTHING`).run(prepared.id, timestamp, timestamp);
+      await db.transaction((tx) => tx.saveInstallation(source, prepared, version, digest, timestamp));
       restart?.();
       return { ok: true, modId: prepared.id, version, archiveSha256: digest, restartRequired: Boolean(restart) };
-    } finally { db.close(); if (scratch) await fs.rm(scratch, { recursive: true, force: true }); locks.delete(id); }
+    } finally { await db.close(); if (scratch) await fs.rm(scratch, { recursive: true, force: true }); locks.delete(id); }
   }
   async function setEnabled(modId, enabled) {
     await ready;
     const id = String(modId || '').trim(); if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id))) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
-    locks.add(id); const db = openSettingsDatabase({ databasePath });
+    locks.add(id); const db = await repositoryFactory({ databasePath });
     try {
       const discovered = await discoverMods({ runtimeRoot, logger });
       if (!discovered.some((entry) => entry.id === id)) throw Object.assign(new Error('mod_not_found'), { statusCode: 404 });
       const timestamp = now();
-      const previous = db.prepare('SELECT enabled FROM mod_lifecycle WHERE mod_id=?').get(id);
-      db.prepare(`INSERT INTO mod_lifecycle (mod_id,enabled,created_at,updated_at) VALUES (?,?,?,?)
-        ON CONFLICT(mod_id) DO UPDATE SET enabled=excluded.enabled,updated_at=excluded.updated_at`).run(id, enabled ? 1 : 0, timestamp, timestamp);
+      const previous = await db.previousLifecycle(id);
+      await db.setLifecycle(id, enabled, timestamp);
       try { await onLifecycleChange?.({ modId: id, enabled: Boolean(enabled), installed: true, action: enabled ? 'enable' : 'disable' }); }
       catch (error) {
-        if (previous) db.prepare('UPDATE mod_lifecycle SET enabled=?,updated_at=? WHERE mod_id=?').run(previous.enabled, timestamp, id);
-        else db.prepare('DELETE FROM mod_lifecycle WHERE mod_id=?').run(id);
+        await db.restoreLifecycle(id, previous, timestamp);
         throw error;
       }
       restart?.();
       return { ok: true, modId: id, enabled: Boolean(enabled), restartRequired: Boolean(restart) };
-    } finally { db.close(); locks.delete(id); }
+    } finally { await db.close(); locks.delete(id); }
   }
   async function uninstall(modId) {
     await ready;
     const id = String(modId || '').trim(); if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id))) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
-    locks.add(id); const db = openSettingsDatabase({ databasePath });
+    locks.add(id); const db = await repositoryFactory({ databasePath });
     try {
       const discovered = await discoverMods({ runtimeRoot, logger });
       const mod = discovered.find((entry) => entry.id === id);
       if (!mod) throw Object.assign(new Error('mod_not_found'), { statusCode: 404 });
       if (mod.manifest?.system === true) throw Object.assign(new Error('system_mod_uninstall_forbidden'), { statusCode: 409 });
       const target = path.join(modsRoot, id); const quarantine = `${target}.uninstall-${crypto.randomUUID()}`; const recovery = `${quarantine}.recovery`;
-      const installation = db.prepare('SELECT mod_id,source_id,version,archive_sha256,installed_at,updated_at FROM mod_installations WHERE mod_id=?').get(id);
-      const lifecycle = db.prepare('SELECT mod_id,enabled,created_at,updated_at FROM mod_lifecycle WHERE mod_id=?').get(id);
+      const { installation, lifecycle } = await db.uninstallMetadata(id);
       const journalPath = path.join(recoveryRoot, `uninstall-${id}-${crypto.randomUUID()}.json`);
       const journal = { version: 1, operation: 'uninstall', modId: id, target, quarantine, recovery, installation, lifecycle, phase: 'journaled', committed: false };
       await durableJson(journalPath, journal);
@@ -588,13 +570,8 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       try {
         await onLifecycleChange?.({ modId: id, enabled: false, installed: false, action: 'uninstall' });
         runtimeRemoved = true;
-        db.exec('BEGIN IMMEDIATE');
-        try {
-          db.prepare('DELETE FROM mod_installations WHERE mod_id=?').run(id);
-          db.prepare('DELETE FROM mod_lifecycle WHERE mod_id=?').run(id);
-          db.prepare("DELETE FROM mcp_connections WHERE id=? AND base_url=?").run(`mod.${id}`, `mod://${id}`);
-          db.exec('COMMIT'); recordsDeleted = true;
-        } catch (error) { db.exec('ROLLBACK'); throw error; }
+        await db.transaction((tx) => tx.removeMetadata(id));
+        recordsDeleted = true;
         await durableJson(journalPath, { ...journal, phase: 'removing' });
         await removePath(quarantine, { recursive: true, force: true });
         await durableJson(journalPath, { ...journal, phase: 'committed', committed: true });
@@ -611,12 +588,8 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
           await renamePath(recovery, target);
         } catch (recoveryError) { error.filesystemRecoveryError = recoveryError; }
         if (recordsDeleted) {
-          db.exec('BEGIN IMMEDIATE');
-          try {
-            if (installation) db.prepare('INSERT OR REPLACE INTO mod_installations (mod_id,source_id,version,archive_sha256,installed_at,updated_at) VALUES (?,?,?,?,?,?)').run(installation.mod_id, installation.source_id, installation.version, installation.archive_sha256, installation.installed_at, installation.updated_at);
-            if (lifecycle) db.prepare('INSERT OR REPLACE INTO mod_lifecycle (mod_id,enabled,created_at,updated_at) VALUES (?,?,?,?)').run(lifecycle.mod_id, lifecycle.enabled, lifecycle.created_at, lifecycle.updated_at);
-            db.exec('COMMIT');
-          } catch (recoveryError) { db.exec('ROLLBACK'); error.databaseRecoveryError = recoveryError; }
+          try { await db.transaction((tx) => tx.restoreMetadata({ installation, lifecycle })); }
+          catch (recoveryError) { error.databaseRecoveryError = recoveryError; }
         }
         if (runtimeRemoved) {
           try { await onLifecycleChange?.({ modId: id, enabled: lifecycle?.enabled === 1, installed: true, action: 'uninstall-recovery' }); }
@@ -629,17 +602,18 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       }
       restart?.();
       return { ok: true, modId: id, uninstalled: true, settingsPreserved: true, restartRequired: Boolean(restart) };
-    } finally { db.close(); locks.delete(id); }
+    } finally { await db.close(); locks.delete(id); }
   }
-  schedulePoll();
-  return { ready, list, sourceRefreshConfig, saveSourceRefreshConfig, addSource, refresh, removeSource, install, enable: (id) => setEnabled(id, true), disable: (id) => setEnabled(id, false), uninstall, async close() { closed = true; clearPoll(); try { await ready; await refreshPromise; } catch {} } };
+  const pollingReady = ready.then(() => schedulePoll());
+  void pollingReady.catch((error) => logger.error?.(`Burrow mod source polling failed: ${String(error?.message || error)}`));
+  return { ready, list, sourceRefreshConfig, saveSourceRefreshConfig, addSource, refresh, removeSource, install, enable: (id) => setEnabled(id, true), disable: (id) => setEnabled(id, false), uninstall, async close() { closed = true; clearPoll(); try { await ready; await pollingReady; await refreshPromise; } catch {} } };
 }
 
 export function createModManagementRoute({ distribution, readJsonBody, sendJson } = {}) {
   return async ({ req, res, url } = {}) => {
     if (url.pathname === '/api/mod-management' && req.method === 'GET') { sendJson(res, 200, await distribution.list()); return true; }
-    if (url.pathname === '/api/mod-management/source-refresh' && req.method === 'GET') { sendJson(res, 200, distribution.sourceRefreshConfig()); return true; }
-    if (url.pathname === '/api/mod-management/source-refresh' && req.method === 'PUT') { const body = await readJsonBody(req); sendJson(res, 200, distribution.saveSourceRefreshConfig(body)); return true; }
+    if (url.pathname === '/api/mod-management/source-refresh' && req.method === 'GET') { sendJson(res, 200, await distribution.sourceRefreshConfig()); return true; }
+    if (url.pathname === '/api/mod-management/source-refresh' && req.method === 'PUT') { const body = await readJsonBody(req); sendJson(res, 200, await distribution.saveSourceRefreshConfig(body)); return true; }
     if (url.pathname === '/api/mod-management/sources' && req.method === 'POST') { const body = await readJsonBody(req); const result = await distribution.addSource(body.url, body.auth || body.credentials || (body.token ? { token: body.token, username: body.username } : null)); sendJson(res, result.ok ? 201 : 502, result); return true; }
     if (url.pathname === '/api/mod-management/refresh' && req.method === 'POST') { sendJson(res, 200, await distribution.refresh()); return true; }
     let match = url.pathname.match(/^\/api\/mod-management\/sources\/([^/]+)$/);

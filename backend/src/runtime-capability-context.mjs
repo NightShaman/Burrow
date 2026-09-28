@@ -3,32 +3,41 @@ import { McpSettingsStore } from './mcp-settings-store.mjs';
 import { nativeToolSchemas } from './action-proposal.mjs';
 import { createExecutionContext } from './execution-context.mjs';
 
-export function loadRuntimeMcpCapabilities({ databasePath, agentId } = {}) {
+export async function loadRuntimeMcpCapabilities({ databasePath, agentId, stores = null } = {}) {
   const mcpTools = new Map();
   const mcpConnections = new Map();
-  if (!process.env.BURROW_SETTINGS_KEY) return { mcpTools, mcpConnections };
-  const mcpStore = new McpSettingsStore({ databasePath });
+  const mcpStore = stores?.mcp || (process.env.BURROW_SETTINGS_KEY ? new McpSettingsStore({ databasePath }) : null);
+  if (!mcpStore) return { mcpTools, mcpConnections };
   try {
-    for (const connection of mcpStore.list()) {
-      if (connection.enabled && !String(connection.id).startsWith('mod.') && !String(connection.baseUrl || '').startsWith('mod://')) mcpConnections.set(connection.id, { ...connection, apiKey: mcpStore.apiKey(connection.id), environmentVariables: mcpStore.secretEnvironment(connection.id) });
+    const connections = await mcpStore.list();
+    for (const connection of connections) {
+      if (!connection.enabled) continue;
+      const isMod = String(connection.id).startsWith('mod.') || String(connection.baseUrl || '').startsWith('mod://');
+      if (isMod) continue; // Only the live host registry can authorize mod invocation.
+      const enriched = { ...connection, apiKey: await mcpStore.apiKey(connection.id), environmentVariables: await mcpStore.secretEnvironment(connection.id) };
+      mcpConnections.set(connection.id, enriched);
     }
+    // The live host registry supplies invocation for mod tools. Its catalog is
+    // layered over the persisted catalog, never used to replace it wholesale.
     for (const connection of modToolConnections(databasePath)) {
-      if (mcpStore.get(connection.id)?.enabled) mcpConnections.set(connection.id, connection);
+      const persisted = await mcpStore.get(connection.id);
+      if (persisted?.enabled) mcpConnections.set(connection.id, { ...persisted, ...connection });
     }
-    for (const grant of mcpStore.agentTools(agentId).filter((item) => item.enabled)) {
+    for (const grant of (await mcpStore.agentTools(agentId)).filter((item) => item.enabled)) {
       const connection = mcpConnections.get(grant.connectionId);
       if (connection) mcpTools.set(`${grant.connectionId}:${grant.toolName}`, { ...grant, connection, apiKey: connection.apiKey });
     }
   } finally {
-    mcpStore.close();
+    if (!stores?.mcp) await mcpStore.close?.();
   }
   return { mcpTools, mcpConnections };
 }
 
-export function createRuntimeExecutionContext({ runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId = null } = {}) {
+export function createRuntimeExecutionContext({ stores = null, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId = null } = {}) {
   const includeAgentChat = Boolean(agentRuntime && typeof resolveAgentRuntime === 'function');
   const includeTaskBoard = Boolean(runtimeState.agentId);
   return createExecutionContext({
+    conversationStore: stores?.conversations,
     sessionId: resolvedSessionId,
     conversationId,
     continuityScope,

@@ -74,6 +74,7 @@ function workItemActivityContent(backgroundWork = {}) {
 }
 
 export async function finalizeWorkLoopRuntimeResult({
+  stores = null, agentId = 'hatchet',
   sessionRoot,
   dataRoot,
   logger,
@@ -112,7 +113,7 @@ export async function finalizeWorkLoopRuntimeResult({
     traceDir: workResult.traceDir,
   });
   const assistantMetadata = withRecentFileReferents({ ...(subjectScope ? { subjectScope } : {}), decision: workResult.decision, workRunId: workResult.runId, proposedActions: workResult.proposedActions?.length ?? 0, executedActions: workResult.proposalExecution?.executed ?? 0, verification: workResult.verification }, recentFiles);
-  await appendRuntimeSessionTurn({ sessionRoot, sessionId, role: 'assistant', content, runId: logger.runId, traceDir: logger.traceDir, metadata: assistantMetadata });
+  await appendRuntimeSessionTurn({ stores, agentId, sessionRoot, sessionId, role: 'assistant', content, runId: logger.runId, traceDir: logger.traceDir, metadata: assistantMetadata });
   const observedKind = observedKindFromWorkResult(workResult);
   let updatedTrackedWorkItem = trackedWorkItem;
   let updatedTrackedBackgroundWork = trackedBackgroundWork;
@@ -138,6 +139,7 @@ export async function finalizeWorkLoopRuntimeResult({
   });
   const workbenchStatus = null;
   await appendValidatedRuntimeReceipt({
+    stores, agentId,
     sessionRoot,
     dataRoot,
     sessionId,

@@ -120,7 +120,7 @@ function compactSkill(skill) {
  * Build an agent's effective skill catalog from ownership only.
  * Agent-owned entries shadow shared entries with the same id.
  */
-export async function loadEffectiveSkillCatalog({ workspaceRoot, agentId, agentRuntime = null, overrides = {}, databasePath = null } = {}) {
+export async function loadEffectiveSkillCatalog({ workspaceRoot, agentId, agentRuntime = null, overrides = {}, databasePath = null, skillStore = null } = {}) {
   const runtimeAgentId = agentRuntime?.agentId == null ? null : normalizeId(agentRuntime.agentId);
   const runtimeAgentWorkspace = agentRuntime?.agentWorkspaceRoot ? path.resolve(agentRuntime.agentWorkspaceRoot) : null;
   const runtimeSkillsRoot = agentRuntime?.skillsRoot ? path.resolve(agentRuntime.skillsRoot) : null;
@@ -136,16 +136,17 @@ export async function loadEffectiveSkillCatalog({ workspaceRoot, agentId, agentR
     loadOwnedSkillRoot({ skillsRoot: agentRoot, owner: { scope: 'agent', agentId: resolvedAgentId }, overrides }),
   ]);
   let databaseSkills = [];
-  if (databasePath) {
-    const store = new SkillSettingsStore({ databasePath });
+  if (databasePath || skillStore) {
+    const store = skillStore || new SkillSettingsStore({ databasePath });
+    const ownsStore = !skillStore;
     try {
-      databaseSkills = store.effective(resolvedAgentId).map((skill) => ({
+      databaseSkills = (await store.effective(resolvedAgentId)).map((skill) => ({
         ...skill, priority: 0, path: null, sourcePath: null, absolutePath: null,
         sourceExists: true, owner: { scope: skill.global ? 'global' : 'agent', agentId: skill.global ? null : resolvedAgentId },
         ownership: { scope: 'sqlite', agentId: skill.global ? null : resolvedAgentId, storage: 'settings.sqlite' },
         portability: { memoryIndexable: true, memoryStoresBody: false },
       }));
-    } finally { store.close(); }
+    } finally { if (ownsStore) await store.close?.(); }
   }
   // Collision order is explicit: assigned SQLite text < shared filesystem < agent filesystem.
   // This preserves asset-capable filesystem defaults and, most importantly, local agent overrides.

@@ -55,3 +55,15 @@ export function consolidateDreamMemory({ agentId, databasePath = null, limit = D
     profileStore.close();
   }
 }
+
+/** Async PG path. Stores are mandatory so this path can never silently touch SQLite. */
+export async function consolidateDreamMemoryAsync({ agentId, workingMemoryStore, profileStore, limit = DEFAULT_LIMIT, generatedAt = new Date().toISOString(), items = null } = {}) {
+  const id = text(agentId); if (!id) throw new Error('dream_memory_agent_required');
+  if (!workingMemoryStore || !profileStore) throw new Error('dream_memory_stores_required');
+  await profileStore.ensure(id);
+  const candidateItems = Array.isArray(items) ? items : (await workingMemoryStore.list({ agentId: id, includeInactive: false, limit: Math.max(1, Math.min(100, Number(limit) || DEFAULT_LIMIT)) })).filter((item) => String(item?.id || '').startsWith('dream-'));
+  const boundedItems = candidateItems.filter((item) => item?.kind !== 'session-window' && !String(item?.id || '').startsWith('session-window-')).slice(0, Math.max(1, Math.min(50, Number(limit) || DEFAULT_LIMIT)));
+  const markdown = renderDreamMemoryDocument(boundedItems, { generatedAt });
+  const document = await profileStore.replaceDreamMemory(id, markdown);
+  return { ok: true, agentId: id, itemCount: boundedItems.length, document, markdown };
+}

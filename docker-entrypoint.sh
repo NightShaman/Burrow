@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-key_file="${BURROW_SETTINGS_KEY_FILE:-/data/config/settings.key}"
+key_file="${BURROW_SETTINGS_KEY_FILE:-${BURROW_RUNTIME_ROOT:-/data}/config/settings.key}"
 supplied_key="${BURROW_SETTINGS_KEY:-}"
 
 if [ -n "$supplied_key" ] && [ "$supplied_key" != "***" ]; then
@@ -21,6 +21,10 @@ if [ -n "$supplied_key" ] && [ "$supplied_key" != "***" ]; then
 elif [ -s "$key_file" ]; then
   BURROW_SETTINGS_KEY="$(cat "$key_file")"
 else
+  if [ -s "${BURROW_SETTINGS_DB:-${BURROW_RUNTIME_ROOT:-/data}/config/settings.sqlite}" ]; then
+    echo "Existing settings database has no persisted settings key; restore its key before startup." >&2
+    exit 1
+  fi
   mkdir -p "$(dirname "$key_file")"
   BURROW_SETTINGS_KEY="$(node -e "process.stdout.write(require(\"node:crypto\").randomBytes(32).toString(\"base64\"))")"
   umask 077
@@ -37,4 +41,12 @@ export BURROW_MCPORTER_ROOT="${BURROW_MCPORTER_ROOT:-${BURROW_RUNTIME_ROOT}/inte
 export BURROW_MCPORTER_BIN="${BURROW_MCPORTER_BIN:-${BURROW_MCPORTER_ROOT}/node_modules/.bin/mcporter}"
 export BURROW_CLAUDE_BIN="${BURROW_CLAUDE_BIN:-${BURROW_RUNTIME_ROOT}/integrations/claude-code/node_modules/.bin/claude}"
 
+mode="${BURROW_POSTGRES_LIFECYCLE:-${BURROW_POSTGRES_MODE:-disabled}}"
+if [ "$mode" = "managed" ] || [ "$mode" = "external" ]; then
+  exec node /opt/burrow/deploy/docker/postgres-supervisor.mjs "$@"
+fi
+if [ "$mode" != "disabled" ]; then
+  echo "Unsupported PostgreSQL lifecycle mode" >&2
+  exit 1
+fi
 exec "$@"

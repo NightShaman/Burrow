@@ -40,10 +40,10 @@ export function sessionRecallPlan({ message = '', sessionId = 'default', priorSe
   };
 }
 
-export async function recallPriorSessionEvidence({ rootDir, additionalRootDirs = [], sessionId = 'default', message = '', priorSession = null, limit = 6 } = {}) {
+export async function recallPriorSessionEvidence({ conversationStore = null, agentId = null, rootDir, additionalRootDirs = [], sessionId = 'default', message = '', priorSession = null, limit = 6 } = {}) {
   const plan = sessionRecallPlan({ message, sessionId, priorSession });
   if (!plan.shouldRecall) return { ...plan, used: false, count: 0, results: [] };
-  const result = await searchAgentSessionEvidence({ rootDir, additionalRootDirs, sessionId, query: plan.query, scope: plan.scope, limit });
+  const result = await searchAgentSessionEvidence({ conversationStore, agentId, rootDir, additionalRootDirs, sessionId, query: plan.query, scope: plan.scope, limit });
   return {
     ...plan,
     used: result.count > 0,

@@ -50,7 +50,10 @@ export class PostgresDreamCycleReceiptStore {
       const agent = await lockAgent(client, id);
       if (!agent.rows[0]) throw new Error('agent_not_found');
       const existing = readState((await readLockedState(client, id)).rows[0]);
-      const state = reconciledDreamCycleState({ agentId: id, settings, current: existing || {}, at });
+      // Completion must reconcile against settings changed while the model ran,
+      // not the snapshot captured when the run started.
+      const configured = (await client.query('SELECT enabled,cron_expression,timezone FROM dream_settings WHERE agent_id=$1', [id])).rows[0] || settings;
+      const state = { ...reconciledDreamCycleState({ agentId: id, settings: configured, current: existing || {}, at }), lastRunAt: settings.lastRunAt || existing?.lastRunAt || null };
       await upsertState(client, state, at);
       return state;
     });

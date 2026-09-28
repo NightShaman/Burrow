@@ -1,3 +1,4 @@
+import { postgresContinuity } from './postgres-continuity.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { routeRequest } from './request-router.mjs';
@@ -25,7 +26,7 @@ import { appendRuntimeSessionTurn } from './runtime-session-writer.mjs';
 import { prepareRuntimePromptContext } from './runtime-prompt-context.mjs';
 import { subagentVisibilitySummary, listSubagentRecords } from './subagent-store.mjs';
 import { applyWorkingContextEvents } from './working-context.mjs';
-import { appendTiddleResidue } from './tiddle-continuity.mjs';
+import { appendTiddleResidueAsync } from './tiddle-continuity.mjs';
 import { persistChatAttachments } from './attachment-store.mjs';
 
 import { createExecutionContext, resolveExecutionTarget } from './execution-context.mjs';
@@ -128,7 +129,7 @@ async function runAskChatUnserialized({
   if (!message) throw new Error('message is required');
 
   const { normalizedArgs, attachments } = normalizeRuntimeTurnInput({ args, workspaceRoot, target, action, noCallModel, callModel, agentRuntime });
-  const runtimeConfig = await loadRuntimeConfig({ rootDir, args: normalizedArgs });
+  const runtimeConfig = await loadRuntimeConfig({ rootDir, args: normalizedArgs, stores });
   const { defaults, modelConfig, executionBoundaries, runtimeState: loadedRuntimeState, skillsConfig } = runtimeConfig
   const agentContextConfig = agentRuntime?.contextConfig || agentRuntime?.agent?.contextConfig || {};
   const runtimeState = agentRuntime ? {
@@ -162,10 +163,12 @@ async function runAskChatUnserialized({
   // unrelated CLI/test turns into one apparent runaway trace.
   const resolvedRunId = runId || normalizedArgs.run_id || defaults.runId || createFallbackRunId();
   const resolvedSessionId = sessionId || normalizedArgs.session_id || normalizedArgs.run_id || 'default';
-  const continuity = await claimSessionContinuityHead({
+  const continuityAuthority = stores?.conversations ? postgresContinuity({store:stores.conversations,agentId:runtimeState.agentId}) : null;
+  const continuity = await (continuityAuthority ? continuityAuthority.claim.bind(continuityAuthority) : claimSessionContinuityHead)({
     rootDir: sessionRoot,
     sessionId: resolvedSessionId,
     runId: resolvedRunId,
+    objective: message,
     // An internally delivered agent message is persisted first so it enters
     // the recipient prompt. Its source run is trusted, bounded provenance—not
     // an ambiguous interrupted foreign turn.
@@ -211,7 +214,7 @@ async function runAskChatUnserialized({
     sessionId: resolvedSessionId,
   });
   const logger = createTraceLogger({ rootDir: traceRoot, runId: resolvedRunId, sessionId: resolvedSessionId, onRecord: onTraceRecord });
-  const commitTerminalResult = createTerminalCommitter({ rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, testHooks });
+  const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, testHooks });
   const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, inboundEntryId }) => {
     const nestedRunId = `${resolvedRunId}-reply-${recipientRuntime.agentId}`;
     const lifecycle = typeof registerNestedAgentRun === 'function'
@@ -230,6 +233,7 @@ async function runAskChatUnserialized({
         resolveAgentRuntime,
         incomingAgentMessage: { senderAgentId, sourceSessionId, sourceRunId, inboundEntryId },
         registerNestedAgentRun,
+        stores,
         onTraceRecord: lifecycle?.onTraceRecord || null,
         onModelTextDelta: lifecycle?.onModelTextDelta || null,
         onModelThoughtDelta: lifecycle?.onModelThoughtDelta || null,
@@ -241,14 +245,15 @@ async function runAskChatUnserialized({
       lifecycle?.finish?.();
     }
   };
-  const { mcpTools, mcpConnections } = loadRuntimeMcpCapabilities({ databasePath: runtimeState.settingsDatabasePath, agentId: runtimeState.agentId });
-  const executionContext = createRuntimeExecutionContext({ runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId });
+  const { mcpTools, mcpConnections } = await loadRuntimeMcpCapabilities({ databasePath: runtimeState.settingsDatabasePath, agentId: runtimeState.agentId, stores });
+  const executionContext = createRuntimeExecutionContext({ stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId });
   const effectiveSkillCatalog = await loadEffectiveSkillCatalog({
     workspaceRoot: runtimeState.workspaceRoot,
     agentId: runtimeState.agentId,
     agentRuntime,
     overrides: scopedSkillsConfig,
     databasePath: runtimeState.settingsDatabasePath,
+    skillStore: stores?.skills || null,
   });
   const preliminaryTurnPlan = await planTurnWithModel({
     message,
@@ -302,7 +307,7 @@ async function runAskChatUnserialized({
   const workItemContext = await prepareRuntimeWorkItemContext({ dataRoot, legacyDataRoot, compatibilityObserver, resolvedSessionId, resolvedRunId, normalizedArgs: { ...normalizedArgs, message }, resolvedWorkingRoot, route, session });
   const { shouldAutoTrack, requestedItemId, explicitContinue, activeWorkItem, trackedWorkItem, trackedWorkCreated, trackedBackgroundWork, intent } = workItemContext;
   const explicitContinuityRequested = Boolean(compatibilityScope || normalizedArgs.continuity_scope || normalizedArgs.continuityScope || normalizedArgs.working_project || normalizedArgs.workingProject);
-  const supportContext = await prepareRuntimeSupportContext({ rootDir, sessionRoot, dataRoot, runtimeState, agentRuntime, resolvedSessionId, message, priorSession, continuityScope, explicitContinuityRequested, route, runtimeConfig, logger });
+  const supportContext = await prepareRuntimeSupportContext({ stores, rootDir, sessionRoot, dataRoot, runtimeState, agentRuntime, resolvedSessionId, message, priorSession, continuityScope, explicitContinuityRequested, route, runtimeConfig, logger });
   const { sessionRecall, runEvidence, contextSupport } = supportContext;
   const preparedContext = await prepareContextForTurn({
     rootDir: sessionRoot,
@@ -316,6 +321,8 @@ async function runAskChatUnserialized({
     agentWorkspaceRoot: runtimeState.agentWorkspaceRoot,
     agentDataRoot: runtimeState.agentDataRoot,
     cacheRoot: runtimeState.cacheRoot,
+    stores,
+    agentId: runtimeState.agentId,
   });
   const { compressionResult, preCompressionInspection } = preparedContext;
   const executionPolicy = createExecutionPolicy({
@@ -347,7 +354,7 @@ async function runAskChatUnserialized({
       ? buildContinuationPlan({ item: activeWorkItem, requestedItemId, sessionId: resolvedSessionId, args: normalizedArgs, workspaceFiles })
       : null;
     await appendRuntimeSessionTurn({
-      sessionRoot,
+      sessionRoot, stores, agentId: runtimeState.agentId,
       sessionId: resolvedSessionId,
       role: 'user',
       content: message,
@@ -361,21 +368,21 @@ async function runAskChatUnserialized({
     await testHooks?.afterUserTurnPersisted?.({ sessionId: resolvedSessionId, runId: resolvedRunId });
   }
 
-  const continuationResult = await runContinuationBranch({ rootDir, sessionRoot, dataRoot, logger, command, message, sessionId: resolvedSessionId, conversationId, priorSession, route, selectedSkills: route.skills.selected.map((skill) => skill.id), intent, session, activeWorkItem, requestedItemId, explicitContinue, normalizedArgs, workspaceFiles, resolvedWorkingRoot, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, executionContext, subagents, verifiedSubjectScope, commitTerminalResult, compatibilityObserver, runWorkbenchStepOverride: testHooks?.runWorkbenchStep });
+  const continuationResult = await runContinuationBranch({ rootDir, stores, agentId: runtimeState.agentId, sessionRoot, dataRoot, logger, command, message, sessionId: resolvedSessionId, conversationId, priorSession, route, selectedSkills: route.skills.selected.map((skill) => skill.id), intent, session, activeWorkItem, requestedItemId, explicitContinue, normalizedArgs, workspaceFiles, resolvedWorkingRoot, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, executionContext, subagents, verifiedSubjectScope, commitTerminalResult, compatibilityObserver, runWorkbenchStepOverride: testHooks?.runWorkbenchStep });
   if (continuationResult) return continuationResult;
 
   const shouldCallModel = normalizedArgs.call_model || !normalizedArgs.no_call_model;
   const modelTask = incomingAgentMessage
     ? `[Agent message from ${incomingAgentMessage.senderAgentId || 'another agent'}]: ${message}`
     : message;
-  const promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext });
+  const promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext });
   const { turnContext, conversationContext, prompt, finalPromptInspection, contextCompression } = promptContext;
   if (finalPromptInspection.pressure === 'blocked') {
     const content = 'I could not safely fit the final prompt inside the configured model context window after compression. I should not call the model with an over-budget prompt.';
     return commitTerminalResult({
       branch: 'prompt_context_over_budget',
       finalize: () => finalizeBlockedRuntimeResult({
-        sessionRoot,
+        sessionRoot, stores, agentId: runtimeState.agentId,
         dataRoot,
         logger,
         command,
@@ -398,9 +405,9 @@ async function runAskChatUnserialized({
     });
   }
 
-  const modelExecution = await runRuntimeModelExecution({ runtimeTurn, prompt, message, shouldCallModel, modelConfig, logger, resolvedWorkingRoot, rootDir, dataRoot, resolvedSessionId, conversationId, runtimeConfig, executionPolicy, executionContext, normalizedArgs, attachments: turnAttachments, sessionRoot, resolvedRunId, continuity, initialWorkingContext, onTextDelta: onModelTextDelta, onThoughtDelta: onModelThoughtDelta, onContextUsage: onModelContextUsage, command, json });
+  const modelExecution = await runRuntimeModelExecution({ continuityAuthority, runtimeTurn, prompt, message, shouldCallModel, modelConfig, logger, resolvedWorkingRoot, rootDir, dataRoot, resolvedSessionId, conversationId, runtimeConfig, executionPolicy, executionContext, normalizedArgs, attachments: turnAttachments, sessionRoot, resolvedRunId, continuity, initialWorkingContext, onTextDelta: onModelTextDelta, onThoughtDelta: onModelThoughtDelta, onContextUsage: onModelContextUsage, command, json });
   if (modelExecution.superseded) {
-    await recordInterruptedRun({
+    await (continuityAuthority ? continuityAuthority.interrupt.bind(continuityAuthority) : recordInterruptedRun)({
       rootDir: sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation,
       reason: 'superseded_by_newer_session_run', objective: message, traceRef: logger.traceDir,
       lastCompletedStep: 'Model execution completed after session ownership changed; terminal result was not persisted.',
@@ -409,12 +416,12 @@ async function runAskChatUnserialized({
     return modelExecution.result;
   }
   const { modelTurn, finalWorkingContext } = modelExecution;
-  const result = await persistPlainChatResult({ sessionRoot, dataRoot, logger, command, message, sessionId: resolvedSessionId, priorSession, route, selectedSkills: route.skills.selected.map((skill) => skill.id), prompt, contextEngine: turnContext, contextCompression, intent, session, workspaceRoot: resolvedWorkingRoot, subjectScope: verifiedSubjectScope, backgroundWork: trackedBackgroundWork, modelTurn, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, subagents, structuredSubagents, extraEyesReview, fileDeicticResolution: deicticFiles, finalWorkingContext, commitTerminalResult });
+  const result = await persistPlainChatResult({ stores, agentId: runtimeState.agentId, sessionRoot, dataRoot, logger, command, message, sessionId: resolvedSessionId, priorSession, route, selectedSkills: route.skills.selected.map((skill) => skill.id), prompt, contextEngine: turnContext, contextCompression, intent, session, workspaceRoot: resolvedWorkingRoot, subjectScope: verifiedSubjectScope, backgroundWork: trackedBackgroundWork, modelTurn, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, subagents, structuredSubagents, extraEyesReview, fileDeicticResolution: deicticFiles, finalWorkingContext, commitTerminalResult });
   if (result?.ok && result.decision === 'answered' && result.answerText) {
     // Tiddle residue is advisory and must never turn a completed chat response
     // into a failure. The periodic pass owns semantic reconciliation later.
     try {
-      const residue = appendTiddleResidue({ databasePath: runtimeState.settingsDatabasePath, agentId: runtimeState.agentId, scope: continuityScope, sessionId: resolvedSessionId, conversationId: conversationId || resolvedSessionId, runId: logger.runId, message, answerText: result.answerText, toolResults: result?.proposalExecution?.tools || [] });
+      const residue = await appendTiddleResidueAsync({ metadataStore: stores?.metadata, databasePath: runtimeState.settingsDatabasePath, agentId: runtimeState.agentId, scope: continuityScope, sessionId: resolvedSessionId, conversationId: conversationId || resolvedSessionId, runId: logger.runId, message, answerText: result.answerText, toolResults: result?.proposalExecution?.tools || [] });
       await logger.event('tiddle-residue-recorded', { rollingContinuity: true, residue: residue ? { ref: residue.ref, scope: residue.scope } : null });
     } catch (error) {
       await logger.event('tiddle-residue-recorded', { rollingContinuity: true, error: String(error?.message || error) });

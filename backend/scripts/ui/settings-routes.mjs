@@ -62,7 +62,7 @@ export function createSettingsRoutes({ readJsonBody, sendJson, modelConnections,
     }
     if (req.method === 'POST' && url.pathname === '/api/settings/model-connections/discover') return resultResponse(res, await discoverModelConnection(await readJsonBody(req)));
     if (req.method === 'POST' && url.pathname === '/api/settings/model-connections') return resultResponse(res, await saveModelConnection(await readJsonBody(req)));
-    if (req.method === 'DELETE' && url.pathname.startsWith('/api/settings/model-connections/')) { const id = decodeURIComponent(url.pathname.slice('/api/settings/model-connections/'.length)); sendJson(res, 200, { ok: removeModelConnection(id) }); return true; }
+    if (req.method === 'DELETE' && url.pathname.startsWith('/api/settings/model-connections/')) { const id = decodeURIComponent(url.pathname.slice('/api/settings/model-connections/'.length)); sendJson(res, 200, { ok: await removeModelConnection(id) }); return true; }
     return false;
   };
 }

@@ -9,11 +9,13 @@ function boundedResult(result = {}) {
   };
 }
 
-export function createScheduledJobScheduler({ storeFactory, resolveAgentRuntime, rootDir, executeTurn = runChatTurnFromBody, intervalMs = 30_000, activeOwnerModIds = () => [], clock = () => new Date().toISOString() } = {}) {
+export function createScheduledJobScheduler({ storeFactory, closeStore: closeStoreOverride, resolveAgentRuntime, rootDir, executeTurn = runChatTurnFromBody, intervalMs = 30_000, activeOwnerModIds = () => [], clock = () => new Date().toISOString() } = {}) {
   if (typeof storeFactory !== 'function' || typeof resolveAgentRuntime !== 'function') throw new Error('scheduled_job_scheduler_dependencies_required');
   const active = new Map();
   const availableOwners = () => { const owners = activeOwnerModIds(); return Array.isArray(owners) ? owners : []; };
   const ownerAvailable = (job) => !job.ownerModId || availableOwners().includes(job.ownerModId);
+  const openStore = () => Promise.resolve(storeFactory());
+  const closeStore = async (store) => { if (typeof closeStoreOverride === 'function') return closeStoreOverride(store); await store.close(); };
   let timer = null;
   let ticking = false;
 
@@ -24,8 +26,8 @@ export function createScheduledJobScheduler({ storeFactory, resolveAgentRuntime,
     active.set(run.id, record);
     try {
       if (!ownerAvailable(job)) throw new Error('scheduled_job_owner_inactive');
-      const validationStore = storeFactory();
-      try { validationStore.validateModel(job); } finally { validationStore.close(); }
+      const validationStore = await openStore();
+      try { await validationStore.validateModel(job); } finally { await closeStore(validationStore); }
       if (!ownerAvailable(job)) throw new Error('scheduled_job_owner_inactive');
       const agentRuntime = await resolveAgentRuntime(job.agentId);
       if (!ownerAvailable(job)) throw new Error('scheduled_job_owner_inactive');
@@ -35,11 +37,11 @@ export function createScheduledJobScheduler({ storeFactory, resolveAgentRuntime,
         agentRuntime,
         resolveAgentRuntime,
       });
-      const store = storeFactory();
-      try { store.completeRun(run.id, { runId: result.runId || runId, dispatchedAt: record.startedAt, traceDir: result.traceDir || null, decision: result.decision || null, ok: Boolean(result.ok), error: result.ok ? null : (result.error || null), result: boundedResult(result) }); } finally { store.close(); }
+      const store = await openStore();
+      try { await store.completeRun(run.id, { runId: result.runId || runId, dispatchedAt: record.startedAt, traceDir: result.traceDir || null, decision: result.decision || null, ok: Boolean(result.ok), error: result.ok ? null : (result.error || null), result: boundedResult(result) }); } finally { await closeStore(store); }
     } catch (error) {
-      const store = storeFactory();
-      try { store.completeRun(run.id, { runId, dispatchedAt: record.startedAt, status: controller.signal.aborted ? 'cancelled' : 'failed', ok: false, error: String(error?.message || error), result: { answerText: null, blockers: [String(error?.message || error)], verification: null, completionEvidence: null } }); } finally { store.close(); }
+      const store = await openStore();
+      try { await store.completeRun(run.id, { runId, dispatchedAt: record.startedAt, status: controller.signal.aborted ? 'cancelled' : 'failed', ok: false, error: String(error?.message || error), result: { answerText: null, blockers: [String(error?.message || error)], verification: null, completionEvidence: null } }); } finally { await closeStore(store); }
     } finally { active.delete(run.id); }
   }
 
@@ -47,25 +49,26 @@ export function createScheduledJobScheduler({ storeFactory, resolveAgentRuntime,
     if (ticking) return [];
     ticking = true;
     try {
-      const store = storeFactory();
+      const store = await openStore();
       let claims;
-      try { claims = store.claimDueJobs({ at: clock(), activeOwnerModIds: availableOwners() }); } finally { store.close(); }
+      try { claims = await store.claimDueJobs({ at: clock(), activeOwnerModIds: availableOwners() }); } finally { await closeStore(store); }
       for (const claim of claims) if (claim.run.status === 'running') void dispatch(claim.job, claim.run);
       return claims;
     } finally { ticking = false; }
   }
 
   async function trigger(jobId, { ownerModId = undefined } = {}) {
-    const store = storeFactory();
+    const store = await openStore();
     let job; let run;
     try {
-      job = ownerModId === undefined ? store.getJob(jobId) : store.getOwnedJob(ownerModId, jobId);
+      job = ownerModId === undefined ? await store.getJob(jobId) : await store.getOwnedJob(ownerModId, jobId);
       if (!job) return { ok: false, error: 'scheduled_job_not_found' };
       if (!ownerAvailable(job)) return { ok: false, error: 'scheduled_job_owner_inactive' };
-      const activeRun = store.listRuns(job.id, { limit: 1 }).find((item) => item.status === 'running');
+      const runs = await store.listRuns(job.id, { limit: 1 });
+      const activeRun = runs.find((item) => item.status === 'running');
       if (activeRun) return { ok: false, error: 'scheduled_job_already_running', job, run: activeRun };
-      run = store.createManualRun(job.id, { at: clock() });
-    } finally { store.close(); }
+      run = await store.createManualRun(job.id, { at: clock() });
+    } finally { await closeStore(store); }
     void dispatch(job, run);
     return { ok: true, job, run };
   }

@@ -46,6 +46,7 @@ export async function resolveExecutionTarget(targetRequest = null, { filesystemB
  * workflow, or inferred-intent decisions.
  */
 export function createExecutionContext({
+  conversationStore = null,
   sessionId,
   conversationId = null,
   continuityScope = null,
@@ -112,6 +113,7 @@ export function createExecutionContext({
     processExecutionRouter: typeof processExecutionRouter === 'function' ? processExecutionRouter : null,
     parentRunId: parentRunId == null ? null : String(parentRunId),
   };
+  Object.defineProperty(context, 'conversationStore', { value: conversationStore, enumerable: false });
   return freeze(context);
 }
 

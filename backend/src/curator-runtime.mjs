@@ -80,18 +80,25 @@ export function normalizeCuratorSelection(input = {}, { root = curatorRoot() } =
   };
   throw new Error('curator_selection_kind_invalid');
 }
-export function readCuratorSelection({ databasePath, root } = {}) {
+export function readCuratorSelection({ databasePath, root, stores } = {}) {
+  if (stores?.metadata) return readCuratorSelectionAsync({ stores, root });
   const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
   try { const value = getSettingsMeta(db, CURATOR_SETTINGS_KEY); return value ? normalizeCuratorSelection(value, { root: root || curatorRoot() }) : null; }
   finally { db.close(); }
 }
-export function saveCuratorSelection(input = {}, { databasePath, root } = {}) {
+export async function readCuratorSelectionAsync({ stores, root } = {}) {
+  if (!stores?.metadata?.get) throw new Error('curator_metadata_store_required');
+  const value = await stores.metadata.get(CURATOR_SETTINGS_KEY);
+  return value ? normalizeCuratorSelection(value, { root: root || curatorRoot() }) : null;
+}
+export function saveCuratorSelection(input = {}, { databasePath, root, stores } = {}) {
+  if (stores?.metadata) { const selection = normalizeCuratorSelection(input, { root: root || curatorRoot() }); return stores.metadata.set(CURATOR_SETTINGS_KEY, selection).then(() => selection); }
   const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
   try { const selection = normalizeCuratorSelection(input, { root: root || curatorRoot() }); setSettingsMeta(db, CURATOR_SETTINGS_KEY, selection); return selection; }
   finally { db.close(); }
 }
-export async function curatorRuntimeStatus({ databasePath, root = curatorRoot() } = {}) {
-  const selection = readCuratorSelection({ databasePath, root });
+export async function curatorRuntimeStatus({ databasePath, stores, root = curatorRoot() } = {}) {
+  const selection = await readCuratorSelection({ databasePath, root, stores });
   if (!selection) return { configured: false, selection: null, root, available: false, reason: 'curator_selection_required' };
   if (selection.kind === 'external') return { configured: true, selection, root, available: true, implementation: 'model-connection' };
   const modelPath = localModelPath(root, selection.modelPath);
@@ -113,11 +120,11 @@ async function completeLocal({ selection, root, prompt, jsonSchema = CURATOR_JSO
     return { choice: { text: String(content || '') }, provider: CURATOR_LOCAL_BACKEND, model: selection.modelPath };
   } finally { await grammar?.dispose?.(); await context?.dispose?.(); await model?.dispose?.(); await llama?.dispose?.(); }
 }
-export async function completeCurator({ selection, databasePath, root = curatorRoot(), prompt, jsonSchema = null, traceLogger = null } = {}) {
+export async function completeCurator({ selection, databasePath, stores = null, root = curatorRoot(), prompt, jsonSchema = null, traceLogger = null } = {}) {
   if (!selection) throw new Error('curator_selection_required');
   if (selection.kind === 'external') {
-    if (!databasePath) throw new Error('curator_settings_database_required');
-    const config = await resolveModelConfig({ modelConnectionId: selection.connectionId, model: selection.model, settingsDb: databasePath });
+    if (!databasePath && !stores) throw new Error('curator_settings_database_required');
+    const config = await resolveModelConfig({ modelConnectionId: selection.connectionId, model: selection.model, settingsDb: databasePath, stores });
     if (!config) throw new Error('curator_external_model_unavailable');
     const result = await createModelAdapter({ config: { ...config, reasoningEffort: 'off', temperature: temperature(selection.temperature) } }).complete({ messages: [{ role: 'user', content: prompt }], traceLogger });
     if (!result?.ok) throw new Error(result?.error || 'curator_external_completion_failed');

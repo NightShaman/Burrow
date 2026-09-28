@@ -1,6 +1,7 @@
 import { appendRuntimeSessionTurn } from './runtime-session-writer.mjs';
 
 export async function finalizeBlockedRuntimeResult({
+  stores = null, agentId = 'hatchet',
   sessionRoot,
   dataRoot,
   logger,
@@ -25,7 +26,7 @@ export async function finalizeBlockedRuntimeResult({
 } = {}) {
   if (userTurn?.role && userTurn?.content) {
     await appendRuntimeSessionTurn({
-      sessionRoot,
+      stores, agentId, sessionRoot,
       sessionId,
       role: userTurn.role,
       content: userTurn.content,
@@ -36,7 +37,7 @@ export async function finalizeBlockedRuntimeResult({
   }
   if (assistantTurn?.role && assistantTurn?.content) {
     await appendRuntimeSessionTurn({
-      sessionRoot,
+      stores, agentId, sessionRoot,
       sessionId,
       role: assistantTurn.role,
       content: assistantTurn.content,

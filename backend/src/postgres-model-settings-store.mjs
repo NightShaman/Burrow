@@ -94,6 +94,7 @@ export class PostgresModelSettingsStore {
     return value ?? {};
   }
   async auth(id) { const structured = await this.secret(id, AUTH); if (structured) return json(structured, null); const key = await this.apiKey(id); if (!key) return null; const c = await this.get(id); return { type: 'api_key', provider: c?.provider || null, source: 'legacy-api-key', apiKey: key }; }
+  async hasAuth(id) { return Boolean(await this.auth(id)); }
   async authWithClient(client, id, provider = null) { const structured = await client.query('SELECT * FROM model_connection_secrets WHERE connection_id=$1 AND name=$2', [id, AUTH]); if (structured.rows[0]) return json(decrypt(this.key, structured.rows[0]), null); const legacy = await client.query('SELECT * FROM model_connection_secrets WHERE connection_id=$1 AND name=$2', [id, API_KEY]); if (!legacy.rows[0]) return null; return { type: 'api_key', provider, source: 'legacy-api-key', apiKey: decrypt(this.key, legacy.rows[0]) }; }
   async saveSecret(client, connectionId, name, value, timestamp) {
     const old = await client.query('SELECT id FROM model_connection_secrets WHERE connection_id=$1 AND name=$2 FOR UPDATE', [connectionId, name]);

@@ -763,6 +763,10 @@ export function setSettingsMeta(db, key, value, { clock = now } = {}) {
   return value;
 }
 
+/** Backend-neutral async facade used by server consumers during the staged PostgreSQL migration. */
+export async function getSettingsMetaAsync(db, key) { return getSettingsMeta(db, key); }
+export async function setSettingsMetaAsync(db, key, value, options = {}) { return setSettingsMeta(db, key, value, options); }
+
 /**
  * Safe inspection/export foundation. This inventory deliberately excludes
  * ciphertext and plaintext secrets. It is not a backup or a generic import

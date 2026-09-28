@@ -1,7 +1,7 @@
 import { buildConversationContext } from './conversation-context.mjs';
 import { AGENT_PROFILE_KINDS, AgentProfileStore, profileFilesFromDocuments } from './agent-profile-store.mjs';
 import { assertContextBoundary } from './context-boundary.mjs';
-import { readSessionEntries } from './session-store.mjs';
+import { conversationAuthority } from './conversation-authority.mjs';
 import { compressionSummariesFromTranscript } from './session-compression.mjs';
 import { planContextCompression } from './context-compression.mjs';
 import {
@@ -74,6 +74,8 @@ export async function buildTurnContext({
   agentWorkspaceRoot = null,
   agentDataRoot = null,
   cacheRoot = null,
+  stores = null,
+  agentId = 'hatchet',
 } = {}) {
   assertContextBoundary({ rootDir, dataRoot, agentWorkspaceRoot, agentDataRoot, cacheRoot });
   const resolvedTranscript = Array.isArray(transcript)
@@ -81,16 +83,16 @@ export async function buildTurnContext({
     // Read the complete active transcript so the token-derived context budget
     // can choose the useful window. Rotated compacted/reset history remains
     // excluded here; explicit history/search paths own that data.
-    : await readSessionEntries({ rootDir: dataRoot, sessionId, limit: 0 });
+    : await conversationAuthority({ store: stores?.conversations || null, agentId, rootDir: dataRoot }).entriesAll(sessionId);
   let profileFiles = null;
   if (includeProfileFiles && agentRuntime?.agentId && agentRuntime?.settingsDatabasePath) {
-    const store = new AgentProfileStore({ databasePath: agentRuntime.settingsDatabasePath });
+    const store = stores?.profiles || new AgentProfileStore({ databasePath: agentRuntime.settingsDatabasePath });
     try {
-      const documents = store.list(agentRuntime.agentId);
+      const documents = await store.list(agentRuntime.agentId);
       profileFiles = documents.length === AGENT_PROFILE_KINDS.length
         ? profileFilesFromDocuments(documents, { agentId: agentRuntime.agentId })
         : { profileDir: 'sqlite:agent_profile_documents', files: [{ id: 'profile-unavailable', name: 'PROFILE_UNAVAILABLE.md', path: `sqlite:agent_profile_documents/${agentRuntime.agentId}`, content: 'Agent profile documents are unavailable. Do not borrow another agent profile; report this configuration blocker if it affects the task.', chars: 125 }], chars: 125 };
-    } finally { store.close(); }
+    } finally { if (!stores?.profiles) store.close(); }
   }
   const context = buildContextEngineResult({
     transcript: resolvedTranscript,
@@ -300,10 +302,10 @@ export function inspectContextEngineResult({ sessionId = 'default', context, tra
   };
 }
 
-export async function inspectSessionContext({ rootDir, dataRoot = rootDir, sessionId = 'default', limits = {}, includeProfileFiles = false, agentRuntime = null, contextWindow = null, contextTokens = null, agentWorkspaceRoot = null, agentDataRoot = null, cacheRoot = null } = {}) {
+export async function inspectSessionContext({ rootDir, dataRoot = rootDir, sessionId = 'default', limits = {}, includeProfileFiles = false, agentRuntime = null, contextWindow = null, contextTokens = null, agentWorkspaceRoot = null, agentDataRoot = null, cacheRoot = null, stores = null, conversationStore = stores?.conversations || null, agentId = agentRuntime?.agentId || 'hatchet' } = {}) {
   assertContextBoundary({ rootDir, dataRoot, agentWorkspaceRoot, agentDataRoot, cacheRoot });
-  const transcript = await readSessionEntries({ rootDir: dataRoot, sessionId, limit: 0 });
-  const context = await buildTurnContext({ rootDir, dataRoot, sessionId, transcript, limits, includeProfileFiles, agentRuntime, agentWorkspaceRoot, agentDataRoot, cacheRoot });
+  const transcript = await conversationAuthority({ store: conversationStore, agentId, rootDir: dataRoot }).entriesAll(sessionId);
+  const context = await buildTurnContext({ rootDir, dataRoot, sessionId, transcript, limits, includeProfileFiles, agentRuntime, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId });
   return inspectContextEngineResult({ sessionId, context, transcript, contextWindow, contextTokens });
 }
 
@@ -331,10 +333,10 @@ function compactCompressionSummary(summary = {}) {
 
 // A deliberately small projection for status bars and agent cards. Unlike the
 // inspection endpoint it contains no transcript, prompt text, or provider body.
-export async function inspectSessionContextStatus({ rootDir, dataRoot = rootDir, sessionId = 'default', limits = {}, contextConfig = {}, contextWindow = null, contextTokens = null, liveContext = null, agentRuntime = null, agentWorkspaceRoot = null, agentDataRoot = null, cacheRoot = null } = {}) {
+export async function inspectSessionContextStatus({ rootDir, dataRoot = rootDir, sessionId = 'default', limits = {}, contextConfig = {}, contextWindow = null, contextTokens = null, liveContext = null, agentRuntime = null, agentWorkspaceRoot = null, agentDataRoot = null, cacheRoot = null, stores = null, conversationStore = stores?.conversations || null, agentId = agentRuntime?.agentId || 'hatchet' } = {}) {
   assertContextBoundary({ rootDir, dataRoot, agentWorkspaceRoot, agentDataRoot, cacheRoot });
-  const transcript = await readSessionEntries({ rootDir: dataRoot, sessionId, limit: 0 });
-  const context = await buildTurnContext({ rootDir, dataRoot, sessionId, transcript, limits, includeProfileFiles: false, agentRuntime, agentWorkspaceRoot, agentDataRoot, cacheRoot });
+  const transcript = await conversationAuthority({ store: conversationStore, agentId, rootDir: dataRoot }).entriesAll(sessionId);
+  const context = await buildTurnContext({ rootDir, dataRoot, sessionId, transcript, limits, includeProfileFiles: false, agentRuntime, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId });
   const inspection = inspectContextEngineResult({ sessionId, context, transcript, contextWindow, contextTokens });
   const budget = inspection.contextBudget || {};
   const summaries = compressionSummariesFromTranscript(transcript);

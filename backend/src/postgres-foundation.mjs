@@ -32,8 +32,31 @@ export function createPostgresPool({ config = postgresConfig(), PoolClass = Pool
   return new PoolClass(config);
 }
 
-/** Run all statements on one checked-out client; never use pool.query in a transaction. */
+const transactionClients = new WeakMap();
+let savepointSequence = 0;
+/** Explicit borrowed transaction context; nested operations cannot commit the owner. */
+export function postgresTransactionContext(client) {
+  if (!client?.query) throw new TypeError('postgres_transaction_client_required');
+  const context = Object.freeze({ connect: async () => client });
+  transactionClients.set(context, client);
+  return context;
+}
+
+/** Run statements on one checked-out client; nested contexts use savepoints. */
 export async function withPostgresTransaction(pool, work) {
+  if (transactionClients.has(pool)) {
+    const client = transactionClients.get(pool);
+    const name = `burrow_nested_${++savepointSequence}`;
+    await client.query(`SAVEPOINT ${name}`);
+    try {
+      const result = await work(client);
+      await client.query(`RELEASE SAVEPOINT ${name}`);
+      return result;
+    } catch (error) {
+      try { await client.query(`ROLLBACK TO SAVEPOINT ${name}`); await client.query(`RELEASE SAVEPOINT ${name}`); } catch { /* outer transaction owns cleanup */ }
+      throw error;
+    }
+  }
   const client = await pool.connect();
   let discard = false;
   try {
@@ -47,7 +70,7 @@ export async function withPostgresTransaction(pool, work) {
       throw error;
     }
   } finally {
-    // A failed rollback leaves the session state unknowable; do not return it to the pool.
+    // Failed rollback makes session state unknowable; discard rather than reuse.
     client.release(discard);
   }
 }

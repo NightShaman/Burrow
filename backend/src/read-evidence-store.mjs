@@ -8,17 +8,19 @@ function evidencePath(rootDir, sessionId) { return path.join(path.resolve(rootDi
 // ReadEvidence is active-session evidence, deliberately separate from bounded
 // session metadata. Its merge path bounds persistence; prompt assembly applies
 // the additional per-request injection budget.
-export async function writeSessionReadEvidence({ rootDir, sessionId, evidence = [] } = {}) {
+export async function writeSessionReadEvidence({ rootDir, sessionId, evidence = [], conversationStore = null, agentId } = {}) {
   if (!rootDir || !sessionId) return [];
   const retained = mergeReadEvidence(evidence, []);
+  if (conversationStore) { await conversationStore.patchMetadata({agentId,sessionId,metadata:{readEvidence:retained}}); return retained; }
   const filePath = evidencePath(rootDir, sessionId);
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, `${JSON.stringify(retained)}\n`, 'utf8');
   return retained;
 }
 
-export async function readSessionReadEvidence({ rootDir, sessionId } = {}) {
+export async function readSessionReadEvidence({ rootDir, sessionId, conversationStore = null, agentId } = {}) {
   if (!rootDir || !sessionId) return [];
+  if (conversationStore) return (await conversationStore.getMetadata({agentId,sessionId}))?.readEvidence || [];
   try {
     const parsed = JSON.parse(await fs.readFile(evidencePath(rootDir, sessionId), 'utf8'));
     return Array.isArray(parsed) ? parsed : [];

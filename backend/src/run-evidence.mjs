@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { conversationAuthority } from './conversation-authority.mjs';
 import { listSessionRecords, readSessionEntries } from './session-store.mjs';
 
 const MAX_ITEMS = 12;
@@ -31,8 +32,9 @@ function retainedEvidence(records, now = Date.now()) {
   }
   return [...deduped.values()].slice(-MAX_PERSISTED_RECORDS);
 }
-export async function persistRunEvidence({ rootDir, sessionId, record } = {}) {
+export async function persistRunEvidence({ rootDir, sessionId, record, conversationStore = null, agentId } = {}) {
   if (!rootDir || !sessionId || !record) throw new Error('run_evidence_persistence_invalid');
+  if (conversationStore) { const metadata = await conversationStore.updateMetadata({agentId,sessionId,update:current=>({...current,runEvidence:retainedEvidence([...(current.runEvidence || []),record])})}); return {filePath:null,recordCount:metadata.runEvidence.length,deduplicatedCount:Math.max(0,metadata.runEvidence.length-1)}; }
   const filePath = evidenceFile(rootDir, sessionId);
   const records = retainedEvidence([...(await readEvidenceFile(rootDir, sessionId)), record]);
   await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
@@ -247,9 +249,9 @@ export function selectRunEvidence(records = [], { message = '', targets = [], se
   return { selected, selectedDetails, omittedDetails, omittedCount: omitted, candidateCount: scored.length, chars: used, reason: selected.length ? 'relevant' : 'no_matching_evidence' };
 }
 
-export async function readRunEvidenceWithDiagnostics({ rootDir, sessionId = 'default', limit = 24 } = {}) {
-  const entries = await readSessionEntries({ rootDir, sessionId, limit: 0 });
-  const dedicated = await readEvidenceFile(rootDir, sessionId);
+export async function readRunEvidenceWithDiagnostics({ rootDir, sessionId = 'default', limit = 24, conversationStore = null, agentId } = {}) {
+  const entries = conversationStore ? await conversationAuthority({store:conversationStore,agentId}).entriesAll(sessionId) : await readSessionEntries({ rootDir, sessionId, limit: 0 });
+  const dedicated = conversationStore ? (await conversationStore.getMetadata({agentId,sessionId}))?.runEvidence || [] : await readEvidenceFile(rootDir, sessionId);
   const legacy = list(entries).filter((entry) => entry?.type === 'evidence' && entry?.metadata?.runEvidence).map((entry) => compactRunEvidence(entry.metadata.runEvidence));
   const retained = retainedEvidence([...legacy, ...dedicated]).reverse();
   return {
@@ -259,19 +261,19 @@ export async function readRunEvidenceWithDiagnostics({ rootDir, sessionId = 'def
       rootDir: rootDir || null, sessionId: sessionId || null, entryCount: entries.length,
       evidenceEntryCount: legacy.length, dedicatedEntryCount: dedicated.length,
       retainedCount: retained.length, deduplicatedCount: Math.max(0, legacy.length + dedicated.length - retained.length),
-      maxRecords: MAX_PERSISTED_RECORDS, maxAgeDays: 14, dedicatedStore: evidenceFile(rootDir, sessionId),
+      maxRecords: MAX_PERSISTED_RECORDS, maxAgeDays: 14, dedicatedStore: conversationStore ? 'postgres' : evidenceFile(rootDir, sessionId),
     },
   };
 }
 
-export async function readRunEvidenceAcrossSessions({ rootDir, sessionId = 'default', limit = 64 } = {}) {
-  const sessions = await listSessionRecords({ rootDir, includeArchived: false, limit: 500 });
-  const ids = unique([sessionId, ...sessions.map((item) => item.id)], 512);
+export async function readRunEvidenceAcrossSessions({ rootDir, sessionId = 'default', limit = 64, conversationStore = null, agentId } = {}) {
+  const sessions = conversationStore ? await conversationStore.listSessions({agentId,includeArchived:false}) : await listSessionRecords({ rootDir, includeArchived: false, limit: 500 });
+  const ids = unique([sessionId, ...sessions.map((item) => item.sessionId || item.id)], 512);
   const records = [];
   let legacyCount = 0;
   let dedicatedCount = 0;
   for (const id of ids) {
-    const result = await readRunEvidenceWithDiagnostics({ rootDir, sessionId: id, limit });
+    const result = await readRunEvidenceWithDiagnostics({ rootDir, sessionId: id, limit, conversationStore, agentId });
     records.push(...result.records);
     legacyCount += result.diagnostics.evidenceEntryCount;
     dedicatedCount += result.diagnostics.dedicatedEntryCount;

@@ -87,9 +87,10 @@ export function applyWorkingContextEvents(context = null, events = []) {
   return next;
 }
 
-export async function persistSessionWorkingContext({ rootDir, sessionId, workingContext } = {}) {
+export async function persistSessionWorkingContext({ rootDir, sessionId, workingContext, conversationStore = null, agentId } = {}) {
   const normalized = normalizeWorkingContext(workingContext);
   if (!rootDir || !sessionId) return normalized;
+  if (conversationStore) { const {readEvidence = [], ...context}=normalized; await conversationStore.patchMetadata({agentId,sessionId,metadata:{workingContext:context,readEvidence}}); return normalized; }
   // Keep bounded active-session evidence outside session metadata's defensive
   // graph budget. The metadata ledger carries only routing/reference state.
   await writeSessionReadEvidence({ rootDir, sessionId, evidence: normalized.readEvidence || [] });

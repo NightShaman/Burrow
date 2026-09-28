@@ -1,6 +1,38 @@
+import { conversationAuthority } from './conversation-authority.mjs';
 import { listSessionRecords, readSessionEntries } from './session-store.mjs';
 import { compressionSummariesFromTranscript } from './session-compression.mjs';
 import { listContinuityHandoffs } from './continuity-handoff-store.mjs';
+
+// PostgreSQL owns both live entries and archive evidence when injected. Never
+// supplement an empty/failed authority read from workspace JSONL exports.
+async function evidenceTranscript({ conversationStore, agentId, rootDir, sessionId, includeResetHistory = false }) {
+  if (!conversationStore) return readSessionEntries({ rootDir, sessionId, limit: 0, includeHistory: true, includeResetHistory });
+  const authority = conversationAuthority({ store: conversationStore, agentId });
+  const [active, archives, metadata] = await Promise.all([
+    authority.entriesAll(sessionId),
+    conversationStore.listArchives({ agentId, sessionId, limit: null }),
+    authority.metadata(sessionId),
+  ]);
+  const resetGeneration = Math.max(-1, ...archives.filter((archive) => archive.kind === 'reset').map((archive) => Number(archive.generation)));
+  const seen = new Set(active.map((entry) => entry.id).filter(Boolean));
+  const history = [];
+  for (const archive of [...archives].sort((a, b) => Number(b.generation) - Number(a.generation))) {
+    const resetArchive = archive.kind === 'reset' || Number(archive.generation) <= resetGeneration
+      || Boolean(metadata?.resetAt && archive.createdAt <= metadata.resetAt);
+    if (resetArchive && !includeResetHistory) continue;
+    for (const entry of [...(archive.entries || [])].reverse()) {
+      if (entry.id && seen.has(entry.id)) continue;
+      if (entry.id) seen.add(entry.id);
+      history.push({ ...entry, metadata: { ...entry.metadata, resetArchive } });
+    }
+  }
+  return [...history.reverse(), ...active].sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')));
+}
+
+async function evidenceSessions({ conversationStore, agentId, rootDir, includeArchived = true }) {
+  if (!conversationStore) return listSessionRecords({ rootDir, includeArchived, limit: 500 });
+  return (await conversationStore.listSessions({ agentId, includeArchived })).map((record) => ({ ...record, id: record.sessionId }));
+}
 
 function normalized(value) {
   return String(value ?? '').toLowerCase();
@@ -136,13 +168,13 @@ function matchesTime(entry, { since = null, until = null } = {}) {
   return true;
 }
 
-async function sessionMatchesForAgent({ agent = {}, role = 'any', query = '', limit = 50, includeSummaries = true, since = null, until = null, includeArchived = true } = {}) {
-  if (!agent.rootDir) return { matches: [], searchedSessionCount: 0, totalMatches: 0 };
-  const records = await listSessionRecords({ rootDir: agent.rootDir, includeArchived, limit: 500 });
+async function sessionMatchesForAgent({ conversationStore = null, agent = {}, role = 'any', query = '', limit = 50, includeSummaries = true, since = null, until = null, includeArchived = true } = {}) {
+  if (!conversationStore && !agent.rootDir) return { matches: [], searchedSessionCount: 0, totalMatches: 0 };
+  const records = await evidenceSessions({ conversationStore, agentId: agent.agentId, rootDir: agent.rootDir, includeArchived });
   const matches = [];
   let totalMatches = 0;
   for (const record of records) {
-    const result = await searchSessionEvidence({ rootDir: agent.rootDir, sessionId: record.id, query, role, includeSummaries, limit: 200, since, until });
+    const result = await searchSessionEvidence({ conversationStore, agentId: agent.agentId, rootDir: agent.rootDir, sessionId: record.id, query, role, includeSummaries, limit: 200, since, until });
     totalMatches += result.totalMatches || 0;
     for (const entry of result.results) {
       matches.push({
@@ -156,7 +188,7 @@ async function sessionMatchesForAgent({ agent = {}, role = 'any', query = '', li
           agentName: agent.agentName || agent.name || agent.agentId || null,
           sessionId: record.id,
           currentSession: false,
-          store: 'agent_workspace',
+          store: conversationStore ? 'postgres' : 'agent_workspace',
         },
       });
     }
@@ -168,11 +200,11 @@ async function sessionMatchesForAgent({ agent = {}, role = 'any', query = '', li
   return { matches: matches.slice(0, parseLimit(limit)), searchedSessionCount: records.length, totalMatches };
 }
 
-export async function searchSessionEvidence({ rootDir, sessionId = 'default', query = '', role = 'any', sourceId = null, includeSummaries = true, limit = 50, since = null, until = null } = {}) {
+export async function searchSessionEvidence({ conversationStore = null, agentId = null, rootDir, sessionId = 'default', query = '', role = 'any', sourceId = null, includeSummaries = true, limit = 50, since = null, until = null } = {}) {
   // Reset snapshots are archive-only human history. Session search may retain
   // compacted predecessors for the active conversation, but never traverses a
   // prior reset generation.
-  const transcript = await readSessionEntries({ rootDir, sessionId, limit: 0, includeHistory: true, includeResetHistory: false });
+  const transcript = await evidenceTranscript({ conversationStore, agentId, rootDir, sessionId, includeResetHistory: false });
   const max = parseLimit(limit);
   const entries = transcript
     .filter((entry) => includeSummaries || !entry.metadata?.compressionSummary)
@@ -210,13 +242,13 @@ export async function searchSessionEvidence({ rootDir, sessionId = 'default', qu
  * outside automatic prompt/context construction, but this explicit tool may
  * retrieve them with reset-archive provenance.
  */
-export async function searchAgentSessionEvidence({ rootDir, additionalRootDirs = [], dataRoot = null, agentId = null, sessionId = 'default', query = '', scope = 'agent_sessions', role = 'any', includeSummaries = true, limit = 12 } = {}) {
+export async function searchAgentSessionEvidence({ conversationStore = null, rootDir, additionalRootDirs = [], dataRoot = null, agentId = null, sessionId = 'default', query = '', scope = 'agent_sessions', role = 'any', includeSummaries = true, limit = 12 } = {}) {
   // Explicit retrieval may search reset snapshots; ordinary prompt/context never does.
   const normalizedScope = 'agent_sessions';
   const max = parseLimit(limit, 12);
-  const roots = [rootDir, ...(Array.isArray(additionalRootDirs) ? additionalRootDirs : [])].filter(Boolean).map(String).filter((item, index, values) => values.indexOf(item) === index);
+  const roots = conversationStore ? [null] : [rootDir, ...(Array.isArray(additionalRootDirs) ? additionalRootDirs : [])].filter(Boolean).map(String).filter((item, index, values) => values.indexOf(item) === index);
   const currentSessionId = String(sessionId || 'default');
-  const sessionRecords = (await Promise.all(roots.map(async (candidateRoot) => (await listSessionRecords({ rootDir: candidateRoot, includeArchived: true, limit: 500 })).map((record) => ({ rootDir: candidateRoot, sessionId: record.id }))))).flat();
+  const sessionRecords = (await Promise.all(roots.map(async (candidateRoot) => (await evidenceSessions({ conversationStore, agentId, rootDir: candidateRoot, includeArchived: true })).map((record) => ({ rootDir: candidateRoot, sessionId: record.id }))))).flat();
   const orderedSessions = [
     ...roots.map((candidateRoot) => ({ rootDir: candidateRoot, sessionId: currentSessionId })),
     ...sessionRecords.filter((record) => record.sessionId !== currentSessionId),
@@ -225,7 +257,7 @@ export async function searchAgentSessionEvidence({ rootDir, additionalRootDirs =
   const seenEvidence = new Set();
   const matches = [];
   for (const candidate of orderedSessions) {
-    const transcript = await readSessionEntries({ rootDir: candidate.rootDir, sessionId: candidate.sessionId, limit: 0, includeHistory: true, includeResetHistory: true });
+    const transcript = await evidenceTranscript({ conversationStore, agentId, rootDir: candidate.rootDir, sessionId: candidate.sessionId, includeResetHistory: true });
     for (const entry of transcript) {
       const entryKey = `${candidate.rootDir}:${entry.id || `${entry.ts}:${entry.role}:${entry.content}`}`;
       if (seenEntries.has(entryKey) || !recallEligible(entry) || (!includeSummaries && entry.metadata?.compressionSummary) || !matchesRole(entry, role) || !matchesQuery(entry, query)) continue;
@@ -241,7 +273,7 @@ export async function searchAgentSessionEvidence({ rootDir, additionalRootDirs =
           sessionId: candidate.sessionId,
           currentSession: candidate.sessionId === currentSessionId,
           resetArchive: Boolean(entry.metadata?.resetArchive),
-          store: candidate.rootDir === rootDir ? 'workspace' : 'agent_data',
+          store: conversationStore ? 'postgres' : candidate.rootDir === rootDir ? 'workspace' : 'agent_data',
         },
       });
     }
@@ -292,12 +324,12 @@ export async function searchAgentSessionEvidence({ rootDir, additionalRootDirs =
   };
 }
 
-export async function searchBurrowSessionEvidence({ agents = [], query = '', role = 'any', limit = 50, includeSummaries = true, since = null, until = null, includeArchived = true } = {}) {
+export async function searchBurrowSessionEvidence({ conversationStore = null, agents = [], query = '', role = 'any', limit = 50, includeSummaries = true, since = null, until = null, includeArchived = true } = {}) {
   const max = parseLimit(limit);
   const normalizedAgents = (Array.isArray(agents) ? agents : [])
-    .filter((agent) => agent?.rootDir)
+    .filter((agent) => agent && (conversationStore || agent.rootDir))
     .map((agent) => ({ ...agent, agentId: String(agent.agentId || agent.id || '').trim() || null }));
-  const perAgent = await Promise.all(normalizedAgents.map((agent) => sessionMatchesForAgent({ agent, query, role, limit: max, includeSummaries, since, until, includeArchived })));
+  const perAgent = await Promise.all(normalizedAgents.map((agent) => sessionMatchesForAgent({ conversationStore, agent, query, role, limit: max, includeSummaries, since, until, includeArchived })));
   const matches = perAgent.flatMap((result) => result.matches);
   matches.sort((left, right) => {
     const relevance = recallScore(right, query) - recallScore(left, query);

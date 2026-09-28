@@ -155,12 +155,12 @@ export function enforcePlainChatTerminalIntegrity({ modelOk = false, answerText 
   };
 }
 
-export async function appendChatToolLoopEntries({ sessionRoot, dataRoot = null, sessionId, logger, loop = null } = {}) {
+export async function appendChatToolLoopEntries({ stores = null, agentId = 'hatchet', sessionRoot, dataRoot = null, sessionId, logger, loop = null } = {}) {
   if (!loop?.iterations?.length) return;
   for (const iteration of loop.iterations.slice(-PERSISTED_CHAT_LOOP_ITERATIONS)) {
     const toolCalls = compactPersistedToolCalls(iteration.toolCalls);
     await appendRuntimeSessionEntry({
-      sessionRoot,
+      stores, agentId, sessionRoot,
       dataRoot,
       sessionId,
       type: 'tool_call',
@@ -192,7 +192,7 @@ export async function appendChatToolLoopEntries({ sessionRoot, dataRoot = null, 
   const digest = buildExecutionDigest({ toolResults: loop.toolResults || [] });
   if (digest) {
     await appendRuntimeSessionEntry({
-      sessionRoot,
+      stores, agentId, sessionRoot,
       dataRoot,
       sessionId,
       type: 'execution_digest',
@@ -208,7 +208,7 @@ export async function appendChatToolLoopEntries({ sessionRoot, dataRoot = null, 
   const toolActivity = chatToolActivity(loop, logger.runId);
   if (toolActivity) {
     await appendRuntimeActivity({
-      sessionRoot,
+      stores, agentId, sessionRoot,
       dataRoot,
       sessionId,
       logger,
@@ -219,6 +219,7 @@ export async function appendChatToolLoopEntries({ sessionRoot, dataRoot = null, 
 }
 
 export async function finalizePlainChatRuntimeResult({
+  stores = null, agentId = 'hatchet',
   sessionRoot,
   dataRoot,
   logger,
@@ -279,11 +280,11 @@ export async function finalizePlainChatRuntimeResult({
   // assistant transcript content; the transcript is the user-visible answer.
   const finalAnswerText = terminalIntegrity.answerText;
   const compactLoop = compactChatToolLoop(chatToolLoop);
-  await appendChatToolLoopEntries({ sessionRoot, dataRoot, sessionId, logger, loop: chatToolLoop });
+  await appendChatToolLoopEntries({ stores, agentId, sessionRoot, dataRoot, sessionId, logger, loop: chatToolLoop });
   let assistantTurn = null;
   if (finalAnswerText !== null && model?.ok) {
     assistantTurn = await appendRuntimeSessionTurn({
-      sessionRoot,
+      stores, agentId, sessionRoot,
       sessionId,
       role: 'assistant',
       content: finalAnswerText,
@@ -294,7 +295,7 @@ export async function finalizePlainChatRuntimeResult({
   }
   if (model && !model.ok) {
     await appendRuntimeSessionTurn({
-      sessionRoot,
+      stores, agentId, sessionRoot,
       sessionId,
       role: 'assistant',
       content: `[model_error: ${model.error || 'model failed'}]`,
@@ -326,7 +327,7 @@ export async function finalizePlainChatRuntimeResult({
     continuityScope: session?.continuityScope || executionContext?.continuityScope || null,
     targets: session?.targets || executionContext?.targets || [],
   });
-  await persistRunEvidence({ rootDir: sessionRoot, sessionId, record: runEvidence });
+  await persistRunEvidence({ rootDir: sessionRoot, sessionId, record: runEvidence, conversationStore:stores?.conversations,agentId });
 
   const actionRoute = session.actionRoute ?? { kind: session.kind, route: session.kind, reason: session.reason ?? null };
   const observedResultKind = decision === 'answered' ? 'answer' : null;
@@ -384,6 +385,7 @@ export async function finalizePlainChatRuntimeResult({
   };
 
   await appendValidatedRuntimeReceipt({
+    stores, agentId,
     sessionRoot,
     dataRoot,
     sessionId,

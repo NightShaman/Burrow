@@ -89,6 +89,7 @@ function continuationWorkResult({ eligibility = null, continuedResult = null, ba
 }
 
 export async function finalizeContinuationRuntimeResult({
+  stores = null, agentId = 'hatchet',
   sessionRoot,
   dataRoot,
   logger,
@@ -124,7 +125,7 @@ export async function finalizeContinuationRuntimeResult({
   const backgroundWork = compactContinuedWork({ item: activeWorkItem, step, result: continuedResult, updated: updatedItem, eligibility, continuationPlan });
   await logger.router({ stage: 'background-work-continue', intent, backgroundWork, continuationPlan, eligibility });
   const content = describeWorkStep({ step, updatedItem, result: continuedResult, eligibility });
-  await appendRuntimeSessionTurn({ sessionRoot, sessionId, role: 'assistant', content, runId: logger.runId, traceDir: logger.traceDir, metadata: { ...(subjectScope ? { subjectScope } : {}), decision: eligibility?.ok ? 'continued_work' : 'blocked', backgroundWork } });
+  await appendRuntimeSessionTurn({ stores, agentId, sessionRoot, sessionId, role: 'assistant', content, runId: logger.runId, traceDir: logger.traceDir, metadata: { ...(subjectScope ? { subjectScope } : {}), decision: eligibility?.ok ? 'continued_work' : 'blocked', backgroundWork } });
   const actionRoute = session.actionRoute ?? { kind: session.kind, route: session.kind, reason: session.reason ?? null };
   const activeKind = structuredWorkItemKind(activeWorkItem, session);
   const workflowSession = { ...session, kind: activeKind, workspaceRoot: activeWorkItem.workspaceRoot };
@@ -145,6 +146,7 @@ export async function finalizeContinuationRuntimeResult({
     traceDir: logger.traceDir,
   });
   await appendValidatedRuntimeReceipt({
+    stores, agentId,
     sessionRoot,
     dataRoot,
     sessionId,

@@ -129,23 +129,23 @@ export async function cleanupExpiredAttachments({ agentWorkspaceRoot, now = new 
 }
 
 /** Persist current-turn attachment bytes into the owning agent's artifact workspace. */
-export async function cleanupAgentAttachments({ databasePath = null, resolveAgentWorkspaceRoot, now = new Date() } = {}) {
+export async function cleanupAgentAttachments({ databasePath = null, agentStore = null, resolveAgentWorkspaceRoot, now = new Date() } = {}) {
   if (typeof resolveAgentWorkspaceRoot !== 'function') throw new Error('attachment_workspace_resolver_required');
-  const agents = new AgentRegistryStore({ databasePath });
+  const agents = agentStore || new AgentRegistryStore({ databasePath });
   try {
-    const results = await Promise.all(agents.list({ includeDisabled: true }).map(async (agent) => {
+    const results = await Promise.all((await agents.list({ includeDisabled: true })).map(async (agent) => {
       const agentWorkspaceRoot = await resolveAgentWorkspaceRoot(agent.id);
       if (!agentWorkspaceRoot) return { agentId: agent.id, deleted: [], skipped: true };
       const result = await cleanupExpiredAttachments({ agentWorkspaceRoot, now });
       return { agentId: agent.id, deleted: result.deleted, skipped: false };
     }));
     return { ok: true, retentionDays: ATTACHMENT_RETENTION_DAYS, agents: results, deleted: results.flatMap((result) => result.deleted.map((artifactPath) => ({ agentId: result.agentId, artifactPath }))) };
-  } finally { agents.close(); }
+  } finally { if (!agentStore) await agents.close(); }
 }
 
-export function createAttachmentCleanupScheduler({ databasePath = null, resolveAgentWorkspaceRoot, intervalMs = 24 * 60 * 60 * 1_000, clock = () => new Date() } = {}) {
+export function createAttachmentCleanupScheduler({ databasePath = null, agentStore = null, resolveAgentWorkspaceRoot, intervalMs = 24 * 60 * 60 * 1_000, clock = () => new Date() } = {}) {
   let timer = null;
-  const tick = () => cleanupAgentAttachments({ databasePath, resolveAgentWorkspaceRoot, now: clock() });
+  const tick = () => cleanupAgentAttachments({ databasePath, agentStore, resolveAgentWorkspaceRoot, now: clock() });
   return {
     start() { if (!timer) { timer = setInterval(() => { void tick(); }, intervalMs); timer.unref?.(); } return tick(); },
     stop() { if (timer) clearInterval(timer); timer = null; },
