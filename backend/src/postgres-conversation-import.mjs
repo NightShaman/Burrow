@@ -47,8 +47,10 @@ async function readSession(rootDir, sessionId) {
   if(items.some(x=>!x.isFile())) throw new Error(`unsupported_session_entry:${sessionId}`);
   const names = items.map(x=>x.name);
   const active = names.find(x => SESSION_NAME.test(x));
-  if (!active) throw new Error(`missing_active_transcript:${sessionId}`);
-  const entries = await jsonl(path.join(directory, active), `${sessionId}/session.jsonl`);
+  // Registered and reset sessions have metadata before the next transcript append.
+  // Missing data is only valid when metadata does not claim active turns.
+  if (!active && (Number(metadata.turnCount || 0) > 0 || Number(metadata.chatTurnCount || 0) > 0)) throw new Error(`missing_active_transcript:${sessionId}`);
+  const entries = active ? await jsonl(path.join(directory, active), `${sessionId}/session.jsonl`) : [];
   const archives = [];
   for (const name of names.filter(x => COMPACTED_NAME.test(x) || RESET_NAME.test(x)).sort()) {
     const archiveEntries = await jsonl(path.join(directory, name), `${sessionId}/${name}`);
@@ -86,12 +88,12 @@ export async function importConversationSessions(pool, { agentId: rawAgentId, ro
       await client.query('INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,$3::jsonb,$4,$5)', [agentId, session.sessionId, JSON.stringify(session.metadata), created, updated]);
       for (const entry of session.entries) {
         const entryId = id(entry.id, 'entry_id');
-        await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,entry,created_at) VALUES($1,$2,$3,$4::jsonb,$5)', [agentId, session.sessionId, entryId, JSON.stringify(entry), entry.ts || created]);
+        await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,entry,created_at) VALUES($1,$2,$3,$4::json,$5)', [agentId, session.sessionId, entryId, JSON.stringify(entry), entry.ts || created]);
         entriesImported++;
       }
       for (let n = 0; n < session.archives.length; n++) {
         const archive = session.archives[n];
-        await client.query('INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,entries,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8)', [agentId, session.sessionId, `${session.sessionId}.${archive.name.replace(/^session\./,'').replace(/\.jsonl$/,'')}`, n, archive.kind, JSON.stringify(archive.entries), JSON.stringify(archive.metadata || {}), archive.entries[0]?.ts || created]);
+        await client.query('INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,entries,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6::json,$7::jsonb,$8)', [agentId, session.sessionId, `${session.sessionId}.${archive.name.replace(/^session\./,'').replace(/\.jsonl$/,'')}`, n, archive.kind, JSON.stringify(archive.entries), JSON.stringify(archive.metadata || {}), archive.entries[0]?.ts || created]);
         archivesImported++;
       }
     }

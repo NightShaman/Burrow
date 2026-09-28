@@ -547,7 +547,7 @@ export class PostgresForgeStore {
       const value = buildSessionEntry({sessionId:body.sessionId,type:'message',role:'user',content:'',metadata:{attachments:[metadata],idempotencyKey:key}});
       try {
         await client.query('SELECT 1 FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE',[body.agentId,body.sessionId]);
-        await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at) VALUES($1,$2,$3,$4,$5::jsonb,$6)',[body.agentId,body.sessionId,value.id,key,JSON.stringify(value),value.ts]);
+        await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at) VALUES($1,$2,$3,$4,$5::json,$6)',[body.agentId,body.sessionId,value.id,key,JSON.stringify(value),value.ts]);
         await client.query('UPDATE conversation_sessions SET updated_at=$3 WHERE agent_id=$1 AND session_id=$2',[body.agentId,body.sessionId,value.ts]);
       } catch(error) {
         await fs.unlink(path.join(destination.agentWorkspaceRoot,metadata.artifactPath)).catch(()=>{});

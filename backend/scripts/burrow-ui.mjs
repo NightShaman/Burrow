@@ -13,7 +13,7 @@ import { inspectSessionContext, inspectSessionContextStatus } from '../src/conte
 import { activeConversationLimits } from '../src/context-preparation.mjs';
 import { createChatTurnRunId, runChatTurnFromBody, runChatTurnFromWorkbenchContinuation, chatTurnResponse, chatTurnProgressResponse, chatTurnErrorResponse, loadRuntimeConfig } from '../src/chat-turn-controller.mjs';
 import { resolveModelConfig, resolveRuntimeTracePath } from '../src/config.mjs';
-import { getSettingsMetaAsync, openSettingsDatabase, setSettingsMetaAsync, settingsOwnershipInventory } from '../src/settings-database.mjs';
+import { getSettingsMetaAsync, setSettingsMetaAsync, settingsOwnershipInventory } from '../src/settings-database.mjs';
 import { getUiAuthSecretAsync, hasUiAuthSecretAsync, setUiAuthSecretAsync } from '../src/ui-auth-secrets.mjs';
 import { ApiTokenStore, API_TOKEN_SCOPES } from '../src/api-token-store.mjs';
 import { SkillSettingsStore } from '../src/skill-settings-store.mjs';
@@ -923,7 +923,8 @@ async function createAgent(body = {}) {
     // Every agent starts with a real default conversation scope. Without this
     // metadata record, the first /api/sessions request returns an empty list
     // until some later action happens to materialize the session.
-    await writeSessionMetadata({ rootDir: context.agentWorkspaceRoot, sessionId: 'default' });
+    if (postgresApplication) await postgresApplication.stores.conversations.updateMetadata({ agentId: agent.id, sessionId: 'default', update: (metadata) => metadata });
+    else await writeSessionMetadata({ rootDir: context.agentWorkspaceRoot, sessionId: 'default' });
     return { ok: true, agent, context: { agentWorkspaceRoot: context.agentWorkspaceRoot, agentDataRoot: context.agentDataRoot, skillsRoot: context.skillsRoot } };
   } catch (error) {
     return { ok: false, status: String(error?.message || error) === 'agent_id_exists' ? 409 : 400, error: String(error?.message || error) };
@@ -1615,7 +1616,8 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
     if (!agent?.id) return;
     importRuntime ||= await runtimeConfig();
     const context = await ensureAgentRoots({ runtimeState: importRuntime.runtimeState, agent });
-    await writeSessionMetadata({ rootDir: context.agentWorkspaceRoot, sessionId: 'default' });
+    if (postgresApplication) await postgresApplication.stores.conversations.updateMetadata({ agentId: agent.id, sessionId: 'default', update: (metadata) => metadata });
+    else await writeSessionMetadata({ rootDir: context.agentWorkspaceRoot, sessionId: 'default' });
   };
   if (categories.settings && typeof categories.settings === 'object') {
     if (categories.settings.executionBoundaries) {
@@ -2271,7 +2273,7 @@ async function traceRootForRun({ rootDir, sessionId, runId, runtime, agentId } =
 }
 
 function runtimePolicyStatus(runtime) {
-  const boundaries = readExecutionBoundaries({ databasePath: runtime?.runtimeState?.settingsDatabasePath });
+  const boundaries = runtime.executionBoundaries;
   const status = executionBoundaryStatus(boundaries);
   return { retired: false, packs: 0, hardBlockCount: status.hardBlockCount, enabledHardBlockCount: status.enabledHardBlockCount, hardBlocks: status.hardBlocks.map((rule) => ({ id: rule.id, enabled: rule.enabled, type: rule.type, match: rule.match, operations: rule.operations, reason: rule.reason || null })) };
 }
@@ -2282,7 +2284,7 @@ async function executionBoundarySettings() {
 }
 
 async function saveExecutionBoundarySettings(body = {}) {
-  const result = saveExecutionBoundaries(body, { databasePath: settingsDatabasePath() });
+  const result = await saveExecutionBoundaries(body, { metadataStore: metadataStore() });
   return result.ok ? { ...result, status: executionBoundaryStatus(result.boundaries) } : result;
 }
 
@@ -3220,10 +3222,7 @@ const server = createServer(async (req, res) => {
       catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'mod_diagnostics_unavailable' }); }
     }
     if (req.method === 'GET' && url.pathname === '/api/diagnostics/inventory') {
-      const db = openSettingsDatabase({ databasePath: settingsDatabasePath() });
-      let mcpConfigured;
-      try { mcpConfigured = Number(db.prepare('SELECT COUNT(*) AS count FROM mcp_connections').get()?.count || 0); }
-      finally { await db.close(); }
+      const mcpConfigured = (await mcpStore().list()).length;
       const modInventory = await modDistribution.list();
       const installedMods = modInventory.mods.filter((mod) => mod.status === 'installed');
       return sendJson(res, 200, {

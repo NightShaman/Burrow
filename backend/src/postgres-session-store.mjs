@@ -46,7 +46,17 @@ CREATE TABLE IF NOT EXISTS conversation_archives (
 CREATE INDEX IF NOT EXISTS conversation_archives_session_order_idx ON conversation_archives(agent_id, session_id, created_at DESC);
 `;
 
-export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL;
+// v1-v3 schema constants remain immutable for adopted migration checksums.
+// PostgreSQL jsonb decodes JSON string escapes into text (rejecting \u0000 and
+// malformed surrogate pairs); json retains the original JSON lexical payload.
+export const POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL = `
+ALTER TABLE conversation_entries ALTER COLUMN entry TYPE JSON USING entry::json;
+ALTER TABLE conversation_archives ALTER COLUMN entries DROP DEFAULT;
+ALTER TABLE conversation_archives ALTER COLUMN entries TYPE JSON USING entries::json;
+ALTER TABLE conversation_archives ALTER COLUMN entries SET DEFAULT '[]'::json;
+`;
+
+export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL;
 
 
 const text = (value) => String(value ?? '');
@@ -84,7 +94,7 @@ export class PostgresSessionStore {
       await client.query(`INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,'{}'::jsonb,$3,$3) ON CONFLICT(agent_id,session_id) DO NOTHING`, [agentId, sid, now]);
       // Row lock serializes appenders before identity allocation, making commit-order paging complete.
       await client.query('SELECT 1 FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sid]);
-      const result = await client.query(`INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at) VALUES($1,$2,$3,$4,$5::jsonb,$6) ON CONFLICT DO NOTHING RETURNING sequence,entry`, [agentId, sid, entryId, key, JSON.stringify(value), now]);
+      const result = await client.query(`INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at) VALUES($1,$2,$3,$4,$5::json,$6) ON CONFLICT DO NOTHING RETURNING sequence,entry`, [agentId, sid, entryId, key, JSON.stringify(value), now]);
       if (result.rows[0]) {
         await client.query('UPDATE conversation_sessions SET updated_at=$3 WHERE agent_id=$1 AND session_id=$2', [agentId, sid, now]);
         return { ...rowEntry(result.rows[0]), idempotent: false };
@@ -103,8 +113,23 @@ export class PostgresSessionStore {
   }
 
   async projection({ agentId, sessionId, visibility, limit }) {
-    const result = await this.pool.query(`SELECT sequence,entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND entry->>'visibility'=$3 ORDER BY sequence DESC LIMIT $4`, [required(agentId, 'agentId'), required(sessionId, 'sessionId'), visibility, limitValue(limit)]);
-    return result.rows.reverse().map(rowEntry);
+    // Never invoke PostgreSQL JSON extraction on the entry: even extracting an
+    // unrelated field decodes escaped NUL and fails with 22P05. Scan newest first
+    // in bounded batches so the limit applies *after* visibility filtering.
+    const aid = required(agentId, 'agentId'); const sid = required(sessionId, 'sessionId');
+    const size = limitValue(limit); const matches = []; let before = null;
+    while (matches.length < size) {
+      const result = await this.pool.query(`SELECT sequence,entry FROM conversation_entries
+        WHERE agent_id=$1 AND session_id=$2 AND ($3::bigint IS NULL OR sequence<$3::bigint)
+        ORDER BY sequence DESC LIMIT $4`, [aid, sid, before, 256]);
+      for (const row of result.rows) {
+        if (row.entry.visibility === visibility) matches.push(rowEntry(row));
+        if (matches.length === size) break;
+      }
+      if (result.rows.length < 256) break;
+      before = String(result.rows.at(-1).sequence);
+    }
+    return matches.reverse();
   }
 
   async page(args = {}) {
@@ -125,14 +150,14 @@ export class PostgresSessionStore {
   async exportTranscript({ agentId, sessionId } = {}) {
     const result = await this.pool.query(`
       SELECT s.metadata,s.created_at,s.updated_at,
-        COALESCE((SELECT jsonb_agg(a.entries ORDER BY a.generation,a.created_at,a.archive_id)
+        COALESCE((SELECT json_agg(a.entries ORDER BY a.generation,a.created_at,a.archive_id)
           FROM conversation_archives a WHERE a.agent_id=s.agent_id AND a.session_id=s.session_id
           AND a.kind='compacted' AND a.generation >= COALESCE(
             (s.metadata->>'resetGeneration')::bigint,
             (SELECT max(r.generation)+1 FROM conversation_archives r
-              WHERE r.agent_id=s.agent_id AND r.session_id=s.session_id AND r.kind='reset'),0)), '[]'::jsonb) AS history,
-        COALESCE((SELECT jsonb_agg(e.entry ORDER BY e.sequence) FROM conversation_entries e
-          WHERE e.agent_id=s.agent_id AND e.session_id=s.session_id), '[]'::jsonb) AS entries
+              WHERE r.agent_id=s.agent_id AND r.session_id=s.session_id AND r.kind='reset'),0)), '[]'::json) AS history,
+        COALESCE((SELECT json_agg(e.entry ORDER BY e.sequence) FROM conversation_entries e
+          WHERE e.agent_id=s.agent_id AND e.session_id=s.session_id), '[]'::json) AS entries
       FROM conversation_sessions s WHERE s.agent_id=$1 AND s.session_id=$2`,
     [required(agentId, 'agentId'), required(sessionId, 'sessionId')]);
     const row = result.rows[0];
@@ -189,12 +214,12 @@ export class PostgresSessionStore {
       const old = await client.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence', [agentId, sid]);
       const archiveId = old.rows.length ? randomUUID() : null;
       const generation = Number(prior.generation || 0) + 1;
-      if (archiveId) await client.query('INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,entries,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8)', [agentId, sid, archiveId, generation - 1, 'compacted', JSON.stringify(old.rows.map((row) => row.entry)), JSON.stringify({ ...prior, compressionSummary: summary }), now]);
+      if (archiveId) await client.query('INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,entries,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6::json,$7::jsonb,$8)', [agentId, sid, archiveId, generation - 1, 'compacted', JSON.stringify(old.rows.map((row) => row.entry)), JSON.stringify({ ...prior, compressionSummary: summary }), now]);
       await client.query('DELETE FROM conversation_entries WHERE agent_id=$1 AND session_id=$2', [agentId, sid]);
       const summaryEntry = { id: randomUUID(), ts: now, sessionId: sid, type: 'summary', role: null, content: String(summary.text), visibility: 'debug', entersPrompt: false, metadata: { compressionSummary: summary } };
       const retained = (Array.isArray(tailEntries) ? tailEntries : []).map((entry) => ({ ...entry, sessionId: sid, metadata: { ...(entry.metadata || {}) } }));
       for (const entry of [summaryEntry, ...retained]) {
-        await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,entry,created_at) VALUES($1,$2,$3,$4::jsonb,$5)', [agentId, sid, text(entry.id).trim() || randomUUID(), JSON.stringify(entry), now]);
+        await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,entry,created_at) VALUES($1,$2,$3,$4::json,$5)', [agentId, sid, text(entry.id).trim() || randomUUID(), JSON.stringify(entry), now]);
       }
       const next = { ...prior, generation, archived: false, transcriptGeneration: randomUUID(), activeTranscript: 'postgres', archiveId, updatedAt: now, turnCount: 1 + retained.length, chatTurnCount: retained.filter((entry) => entry.type === 'message' && ['user','assistant','agent'].includes(entry.role)).length };
       await client.query('UPDATE conversation_sessions SET metadata=$3::jsonb,updated_at=$4 WHERE agent_id=$1 AND session_id=$2', [agentId, sid, JSON.stringify(next), now]);
@@ -211,7 +236,7 @@ export class PostgresSessionStore {
       const rows = await client.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence', [agentId, sid]);
       const archiveId = rows.rows.length ? randomUUID() : null;
       const generation = Number(prior.generation || 0) + 1;
-      if (archiveId) await client.query('INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,entries,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8)', [agentId, sid, archiveId, generation - 1, 'reset', JSON.stringify(rows.rows.map((row) => row.entry)), JSON.stringify({ ...prior, ...metadata }), now]);
+      if (archiveId) await client.query('INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,entries,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6::json,$7::jsonb,$8)', [agentId, sid, archiveId, generation - 1, 'reset', JSON.stringify(rows.rows.map((row) => row.entry)), JSON.stringify({ ...prior, ...metadata }), now]);
       await client.query('DELETE FROM conversation_entries WHERE agent_id=$1 AND session_id=$2', [agentId, sid]);
       const next = { ...prior, ...metadata, generation, resetGeneration: generation, archived: false, resetAt: now, archiveId, turnCount: 0, chatTurnCount: 0 };
       await client.query('UPDATE conversation_sessions SET metadata=$3::jsonb,updated_at=$4 WHERE agent_id=$1 AND session_id=$2', [agentId, sid, JSON.stringify(next), now]);
@@ -232,7 +257,7 @@ export class PostgresSessionStore {
       if (!reservation.rows[0]) throw new Error('fork_target_exists');
       const sourceRows = await client.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence DESC LIMIT $3', [sourceAgent, source, size]);
       const entries = sourceRows.rows.reverse().map((row) => row.entry);
-      for (const entry of entries) { const value = { ...entry, metadata: { ...(entry.metadata || {}), forkedFrom: source } }; await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,entry,created_at) VALUES($1,$2,$3,$4::jsonb,$5)', [targetAgent, target, text(value.id).trim() || randomUUID(), JSON.stringify(value), now]); }
+      for (const entry of entries) { const value = { ...entry, metadata: { ...(entry.metadata || {}), forkedFrom: source } }; await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,entry,created_at) VALUES($1,$2,$3,$4::json,$5)', [targetAgent, target, text(value.id).trim() || randomUUID(), JSON.stringify(value), now]); }
       return { ok: true, sourceAgentId: sourceAgent, targetAgentId: targetAgent, sourceSessionId: source, targetSessionId: target, copiedEntries: entries.length };
     });
   }

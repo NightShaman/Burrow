@@ -143,7 +143,23 @@ await pool.end();
 await handle.close();
 await assertSourcesUnchanged();
 assert.equal(await fs.readFile('/data/config/settings.key', 'utf8'), key);
-// Deliberate source drift must fail closed and shut down the managed server.
-await fs.appendFile(file, '\n');
-await assert.rejects(preparePostgresStartup({ env }), /source_changed/);
-console.log('PASS: managed startup, 16 agents with 16 handoffs each, root/embedded Forge, settings/conversation migration, restart receipt, pg_dump/restore, source/key preservation, drift fail-closed');
+// A committed receipt ends legacy authority: drift, unknown directories, and
+// removed settings/conversation/auxiliary sources must not affect startup.
+async function assertReceiptRestart() {
+  const restarted = await preparePostgresStartup({ env });
+  const current = createPostgresPool({ config: postgresConfig(restarted.env) });
+  try {
+    assert.equal(restarted.result.repeated, true);
+    await assertImported(current);
+  } finally { await current.end(); await restarted.close(); }
+}
+await fs.appendFile(file, 'invalid legacy drift\n');
+await assertReceiptRestart();
+await fs.mkdir('/data/workspace/new-unknown-agent/sessions', { recursive: true });
+await assertReceiptRestart();
+for (const source of sources.keys()) {
+  if (!source.endsWith('settings.key')) await fs.rm(source);
+}
+await assertReceiptRestart();
+assert.equal(await fs.readFile('/data/config/settings.key', 'utf8'), key);
+console.log('PASS: managed startup, 16 agents with 16 handoffs each, root/embedded Forge, settings/conversation migration, pg_dump/restore, source/key preservation before cutover, receipt authority after drift/unknown agents/removal');

@@ -75,14 +75,14 @@ function normalize(input) {
 /** Execute every import on one pinned client. Importers use savepoints through the transaction facade. */
 export async function runPostgresCutover(pool, manifestInput) {
   const manifest = normalize(manifestInput);
-  const before = await fingerprint([...manifest.sources, ...manifest.conversations.map(c => ({ name: `conversation:${c.agentId}`, path: path.join(c.rootDir, 'sessions') }))]);
   return withPostgresTransaction(pool, async client => {
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended('burrow-cutover',0))");
     const prior = await client.query('SELECT fingerprint,manifest,result FROM burrow_migration_receipts WHERE migration_id=$1 FOR UPDATE', [manifest.migrationId]);
     if (prior.rowCount) {
-      if (prior.rows[0].fingerprint !== before) throw new Error('migration_receipt_source_changed');
       return { ...prior.rows[0].result, repeated: true };
     }
+    // The committed receipt is authoritative; legacy sources are only read on first import.
+    const before = await fingerprint([...manifest.sources, ...manifest.conversations.map(c => ({ name: `conversation:${c.agentId}`, path: path.join(c.rootDir, 'sessions') }))]);
     const facade = postgresTransactionContext(client);
     const result = {};
     result.settings = await importSettingsDatabase(facade, manifest.settings.path || manifest.settings.databasePath, { auxiliarySources: manifest.sources.filter(s => s.kind === 'auxiliary').map(s => s.path) });

@@ -103,20 +103,22 @@ export async function importSettingsDatabase(pool, databasePath, { auxiliarySour
       owner_id:'default', policy_json:policy?.value_json || JSON.stringify(DEFAULT_RETENTION_POLICY),
       state_json:state?.value_json || JSON.stringify({lastRunAt:null,lastResult:null,lastError:null,nextRunAt:null}), updated_at:(policy || state).updated_at,
     });
+    // Deleted agents can leave metadata behind; archive it but do not project orphan rows.
+    const agentIds = new Set(byName.get('agents').rows.map(row => row.id));
     const connectionIds = new Set(byName.get('model_connections').rows.map(row => row.id));
     for (const row of meta.rows) {
       if (['dream-preload:', 'dream-ledger:', 'dream-scope-review:', 'rolling-continuity:', 'brain-promotion-candidates:'].some(prefix => row.key.startsWith(prefix))) await insert('working_memory_meta', {key:row.key,value_json:row.value_json,updated_at:row.updated_at});
       if (row.key.startsWith('dream-cycle:')) {
         const value = JSON.parse(row.value_json);
-        await insert('dream_cycle_state', {agent_id:row.key.slice('dream-cycle:'.length),state_json:value,updated_at:row.updated_at});
+        if (agentIds.has(row.key.slice('dream-cycle:'.length))) await insert('dream_cycle_state', {agent_id:row.key.slice('dream-cycle:'.length),state_json:value,updated_at:row.updated_at});
       }
       if (row.key.startsWith('dream-cycle-receipt:')) {
         const value = JSON.parse(row.value_json);
-        await insert('dream_cycle_receipts', {agent_id:value.agentId,run_id:value.runId,receipt_json:value,updated_at:row.updated_at});
+        if (agentIds.has(value.agentId)) await insert('dream_cycle_receipts', {agent_id:value.agentId,run_id:value.runId,receipt_json:value,updated_at:row.updated_at});
       }
       if (row.key.startsWith('dream-cycle-occurrence:')) {
         const value = JSON.parse(row.value_json);
-        await insert('dream_cycle_occurrences', {agent_id:value.agentId,scheduled_for:value.scheduledFor,occurrence_json:value,created_at:row.updated_at});
+        if (agentIds.has(value.agentId)) await insert('dream_cycle_occurrences', {agent_id:value.agentId,scheduled_for:value.scheduledFor,occurrence_json:value,created_at:row.updated_at});
       }
       if (row.key.startsWith('model_auth_preview:')) {
         const connectionId = row.key.slice('model_auth_preview:'.length);

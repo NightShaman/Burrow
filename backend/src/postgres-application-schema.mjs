@@ -17,7 +17,7 @@ import { POSTGRES_SKILL_SETTINGS_SCHEMA_SQL } from './postgres-skill-settings-st
 import { POSTGRES_SETUP_STATE_SCHEMA_SQL } from './postgres-setup-state-store.mjs';
 import { POSTGRES_RETENTION_SETTINGS_SCHEMA_SQL } from './postgres-retention-settings-store.mjs';
 import { POSTGRES_WORKING_MEMORY_RETENTION_SCHEMA_SQL } from './postgres-working-memory-retention-settings-store.mjs';
-import { POSTGRES_SESSION_SCHEMA_SQL, POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL } from './postgres-session-store.mjs';
+import { POSTGRES_SESSION_SCHEMA_SQL, POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL, POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL } from './postgres-session-store.mjs';
 import { POSTGRES_UI_AUTH_SECRET_SCHEMA_SQL } from './postgres-ui-auth-secret-store.mjs';
 
 // Version 1 and its component SQL are immutable after adoption. Schema changes
@@ -47,4 +47,5 @@ export const POSTGRES_APPLICATION_SCHEMA_MANIFEST = Object.freeze([
   { version: 8, name: 'verified-source-cutover-receipts', sql: `CREATE TABLE IF NOT EXISTS burrow_migration_receipts (
     migration_id TEXT PRIMARY KEY, manifest JSONB NOT NULL, fingerprint TEXT NOT NULL,
     completed_at TEXT NOT NULL, result JSONB NOT NULL);` },
+  { version: 9, name: 'lossless-conversation-json', sql: POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL },
 ]);
