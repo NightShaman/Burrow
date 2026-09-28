@@ -80,7 +80,7 @@ export function settingsKeyFromEnvironment(env = process.env) {
   return key;
 }
 
-function assertConnection(input = {}) {
+export function assertConnection(input = {}) {
   const provider = normalize(input.provider);
   const apiType = normalize(input.apiType);
   const baseUrl = normalize(input.baseUrl).replace(/\/+$/, '');
@@ -192,7 +192,7 @@ function safeModelMetadata(model = {}, { provider = '', apiType = '' } = {}) {
   };
 }
 
-function normalizeModels(models = [], { provider = '', apiType = '' } = {}) {
+export function normalizeModels(models = [], { provider = '', apiType = '' } = {}) {
   const ids = new Set();
   return (Array.isArray(models) ? models : []).map((model) => {
     const input = typeof model === 'string' ? { id: model } : (model || {});
@@ -224,14 +224,14 @@ function normalizeReasoningEffort(value) {
 }
 
 function aad(secretId, connectionId, name) { return Buffer.from(`${AAD_PREFIX}|${secretId}|connection|${connectionId}|${name}`); }
-function encrypt(key, secretId, connectionId, name, value) {
+export function encrypt(key, secretId, connectionId, name, value) {
   const nonce = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, nonce);
   cipher.setAAD(aad(secretId, connectionId, name));
   const ciphertext = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);
   return { ciphertext, nonce, authTag: cipher.getAuthTag() };
 }
-function decrypt(key, row) {
+export function decrypt(key, row) {
   let lastError;
   for (const prefix of [AAD_PREFIX, 'hatchetclaw-model-secret-v1']) {
     try {
@@ -256,7 +256,7 @@ function assertIdentity(input = {}) {
   return { kind, id, name, avatar };
 }
 
-function publicConnection(row) {
+export function publicConnection(row) {
   if (!row) return null;
   const authPreview = parseJson(row.auth_preview_json, null);
   const hasStructuredAuth = Boolean(row.auth_secret_id);
@@ -278,7 +278,7 @@ function publicConnection(row) {
   };
 }
 
-function secretPreview(auth = {}, fallbackProvider = '') {
+export function secretPreview(auth = {}, fallbackProvider = '') {
   return {
     type: auth.type || null,
     provider: auth.provider || fallbackProvider || null,
@@ -287,7 +287,7 @@ function secretPreview(auth = {}, fallbackProvider = '') {
   };
 }
 
-function normalizeAuth(input = {}, fallbackProvider = '') {
+export function normalizeAuth(input = {}, fallbackProvider = '') {
   const supplied = input.auth && typeof input.auth === 'object' ? input.auth : null;
   if (supplied) {
     const type = normalize(supplied.type || supplied.authType || 'api_key').toLowerCase();
@@ -367,7 +367,7 @@ function observedMinimumClientVersion(body = {}) {
   return maxSemver(data.map((model) => model?.minimal_client_version ?? model?.minimalClientVersion));
 }
 
-function canonicalizeOauthConnection(connection, auth) {
+export function canonicalizeOauthConnection(connection, auth) {
   if (auth?.type !== 'oauth' || !openAiLikeProvider(auth.provider || connection.provider) || !isChatGptBackendUrl(connection.baseUrl)) return connection;
   return { ...connection, apiType: 'openai-responses' };
 }
