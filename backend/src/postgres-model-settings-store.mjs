@@ -2,10 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 import {
   assertConnection, canonicalizeOauthConnection, decrypt, encrypt, normalizeAuth,
-  publicConnection, secretPreview, normalizeModels, normalizeReasoningEffort, normalizeTemperature,
+  publicConnection, secretPreview, normalizeModels, normalizeReasoningEffort, normalizeTemperature, assertIdentity,
 } from './model-settings-store.mjs';
 
 export const POSTGRES_MODEL_SETTINGS_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS chat_identities (
+  kind TEXT NOT NULL CHECK (kind IN ('operator', 'agent')),
+  id TEXT NOT NULL, name TEXT NOT NULL, avatar TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (kind, id)
+);
 CREATE TABLE IF NOT EXISTS model_connections (
   id TEXT PRIMARY KEY, provider TEXT NOT NULL, api_type TEXT NOT NULL, base_url TEXT NOT NULL,
   accepted_input_json TEXT NOT NULL DEFAULT '[]', models_json TEXT NOT NULL DEFAULT '[]',
@@ -33,15 +38,41 @@ const now = () => new Date().toISOString();
 const AUTH = 'providerAuth';
 const API_KEY = 'apiKey';
 const CONNECTION_WRITE_LOCK = 'burrow-model-settings-connection-write';
+const IDENTITY_WRITE_LOCK = 'burrow-model-settings-identity-write';
 const json = (value, fallback = {}) => { try { return JSON.parse(value); } catch { return fallback; } };
 
 export class PostgresModelSettingsStore {
-  constructor({ pool, key, ownsPool = false, clock = now } = {}) {
+  constructor({ pool, key, ownsPool = false, clock = now, bootstrapSampleIdentities = process.env.BURROW_BOOTSTRAP_SAMPLE_IDENTITIES } = {}) {
     if (!pool?.query || !pool?.connect) throw new Error('model_settings_postgres_pool_required');
     if (!Buffer.isBuffer(key) || key.length !== 32) throw new Error('settings_encryption_key_invalid');
     this.pool = pool; this.key = key; this.ownsPool = ownsPool; this.clock = clock;
+    this.bootstrapSampleIdentities = ["1", "true", "yes", "on"].includes(String(bootstrapSampleIdentities ?? "0").trim().toLowerCase());
   }
   async close() { if (this.ownsPool) await closePostgresPool(this.pool); }
+  defaultIdentityName(kind) { return this.bootstrapSampleIdentities ? (kind === 'operator' ? 'Rob' : 'Hatchet') : ''; }
+  async identitySnapshot(client = this.pool) {
+    const [agents, operator] = await Promise.all([
+      client.query("SELECT id, name, avatar, updated_at AS \"updatedAt\" FROM chat_identities WHERE kind='agent' ORDER BY CASE id WHEN 'hatchet' THEN 0 ELSE 1 END, id COLLATE \"C\""),
+      client.query("SELECT id, name, avatar, updated_at AS \"updatedAt\" FROM chat_identities WHERE kind='operator' AND id='default'")
+    ]);
+    const listed = agents.rows.slice();
+    if (this.bootstrapSampleIdentities && !listed.some((agent) => agent.id === 'hatchet')) listed.unshift({ id: 'hatchet', name: 'Hatchet', avatar: '', updatedAt: null });
+    return { operator: operator.rows[0] || { id: 'default', name: this.defaultIdentityName('operator'), avatar: '', updatedAt: null }, agents: listed };
+  }
+  async identities() { return this.identitySnapshot(); }
+  async saveIdentity(input = {}) {
+    const identity = assertIdentity(input);
+    return withPostgresTransaction(this.pool, async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`${IDENTITY_WRITE_LOCK}:${identity.kind}:${identity.id}`]);
+      const existing = await client.query('SELECT name, avatar FROM chat_identities WHERE kind=$1 AND id=$2 FOR UPDATE', [identity.kind, identity.id]);
+      const name = identity.name === undefined ? (existing.rows[0]?.name || this.defaultIdentityName(identity.kind)) : identity.name;
+      const avatar = identity.avatar === undefined ? (existing.rows[0]?.avatar || '') : identity.avatar;
+      const timestamp = this.clock();
+      await client.query(`INSERT INTO chat_identities (kind,id,name,avatar,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$5)
+        ON CONFLICT(kind,id) DO UPDATE SET name=EXCLUDED.name,avatar=EXCLUDED.avatar,updated_at=EXCLUDED.updated_at`, [identity.kind, identity.id, name, avatar, timestamp]);
+      return this.identitySnapshot(client);
+    });
+  }
   selectSql(where = '') { return `SELECT c.*, legacy.id AS secret_id, auth.id AS auth_secret_id, p.value_json AS auth_preview_json FROM model_connections c LEFT JOIN model_connection_secrets legacy ON legacy.connection_id=c.id AND legacy.name='${API_KEY}' LEFT JOIN model_connection_secrets auth ON auth.connection_id=c.id AND auth.name='${AUTH}' LEFT JOIN model_auth_previews p ON p.connection_id=c.id ${where}`; }
   async list() { const r = await this.pool.query(`${this.selectSql()} ORDER BY c.updated_at DESC`); return r.rows.map(publicConnection); }
   async get(id) { const r = await this.pool.query(`${this.selectSql('WHERE c.id=$1')}`, [id]); return publicConnection(r.rows[0]); }

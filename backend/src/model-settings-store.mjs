@@ -244,7 +244,7 @@ export function decrypt(key, row) {
   throw lastError;
 }
 
-function assertIdentity(input = {}) {
+export function assertIdentity(input = {}) {
   const kind = normalize(input.kind);
   const id = normalize(input.id);
   const name = input.name === undefined ? undefined : normalize(input.name);
