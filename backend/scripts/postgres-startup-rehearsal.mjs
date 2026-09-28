@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
-import { openSettingsDatabase } from '../src/settings-database.mjs';
+import { openSettingsDatabase, setSettingsMeta } from '../src/settings-database.mjs';
 import { ContinuityHandoffStore } from '../src/continuity-handoff-store.mjs';
 import { preparePostgresStartup } from '../src/postgres-startup.mjs';
 import { createPostgresPool, postgresConfig } from '../src/postgres-foundation.mjs';
@@ -36,6 +36,7 @@ try {
   for (const agentId of agentIds) {
     db.prepare('INSERT INTO agents(id,name,enabled,available_capabilities,created_at,updated_at) VALUES(?,?,?,?,?,?)').run(agentId, agentId, 1, '[]', at, at);
   }
+  setSettingsMeta(db, 'model_auth_preview:6c9c7b1a-c485-48d1-ae14-39fa2477ba36', { type: 'oauth', label: 'deleted connection' });
   seedForge(db, 'embedded-forge', 'speech');
 } finally { db.close(); }
 const forge = new DatabaseSync('/data/forge.sqlite');
@@ -73,6 +74,8 @@ async function assertSourcesUnchanged() {
   for (const [source, bytes] of sources) assert.deepEqual(await fs.readFile(source), bytes, `source changed: ${source}`);
 }
 async function assertImported(pool) {
+  assert.equal((await pool.query('SELECT count(*) FROM model_auth_previews')).rows[0].count, '0');
+  assert.deepEqual((await pool.query("SELECT value_json FROM settings_meta WHERE key='model_auth_preview:6c9c7b1a-c485-48d1-ae14-39fa2477ba36'")).rows[0].value_json, JSON.stringify({ type: 'oauth', label: 'deleted connection' }));
   assert.deepEqual((await pool.query('SELECT id FROM agents ORDER BY id')).rows.map(row => row.id), agentIds);
   const entries = (await pool.query('SELECT entry FROM conversation_entries')).rows;
   assert.equal(entries.length, 1);

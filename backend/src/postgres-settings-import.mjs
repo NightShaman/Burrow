@@ -103,6 +103,7 @@ export async function importSettingsDatabase(pool, databasePath, { auxiliarySour
       owner_id:'default', policy_json:policy?.value_json || JSON.stringify(DEFAULT_RETENTION_POLICY),
       state_json:state?.value_json || JSON.stringify({lastRunAt:null,lastResult:null,lastError:null,nextRunAt:null}), updated_at:(policy || state).updated_at,
     });
+    const connectionIds = new Set(byName.get('model_connections').rows.map(row => row.id));
     for (const row of meta.rows) {
       if (['dream-preload:', 'dream-ledger:', 'dream-scope-review:', 'rolling-continuity:', 'brain-promotion-candidates:'].some(prefix => row.key.startsWith(prefix))) await insert('working_memory_meta', {key:row.key,value_json:row.value_json,updated_at:row.updated_at});
       if (row.key.startsWith('dream-cycle:')) {
@@ -117,7 +118,12 @@ export async function importSettingsDatabase(pool, databasePath, { auxiliarySour
         const value = JSON.parse(row.value_json);
         await insert('dream_cycle_occurrences', {agent_id:value.agentId,scheduled_for:value.scheduledFor,occurrence_json:value,created_at:row.updated_at});
       }
-      if (row.key.startsWith('model_auth_preview:')) await insert('model_auth_previews', { connection_id:row.key.slice('model_auth_preview:'.length), value_json:row.value_json, updated_at:row.updated_at });
+      if (row.key.startsWith('model_auth_preview:')) {
+        const connectionId = row.key.slice('model_auth_preview:'.length);
+        // Legacy metadata outlives deleted connections. Preserve it in settings_meta,
+        // but only materialize active previews whose parent still exists.
+        if (connectionIds.has(connectionId)) await insert('model_auth_previews', { connection_id:connectionId, value_json:row.value_json, updated_at:row.updated_at });
+      }
       if (['openai_codex_client_version','models_dev_catalog'].includes(row.key)) await insert('model_settings_cache', { cache_key:row.key, value_json:row.value_json, updated_at:row.updated_at });
     }
     const sources = [...(hasForge ? [{ path: databasePath, selectedTables: ['forge_jobs','forge_selections'] }] : []), ...auxiliarySources];
