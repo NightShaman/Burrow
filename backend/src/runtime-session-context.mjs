@@ -8,7 +8,7 @@ import { readSessionReadEvidence } from './read-evidence-store.mjs';
 import { WorkingMemoryStore } from './working-memory-store.mjs';
 import { TaskBoardStore } from './task-board-store.mjs';
 
-export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessionId, runtimeState, normalizedArgs, workspaceRoot, resolvedTarget, message, explicitWorkspaceFiles = [], interruptedRun = null } = {}) {
+export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessionId, runtimeState, normalizedArgs, workspaceRoot, resolvedTarget, message, explicitWorkspaceFiles = [], interruptedRun = null, stores = null } = {}) {
   // Planning consumes no transcript prose. It receives only durable session
   // identity/metadata, while pending actions are resolved from their explicit
   // work-item and turn contracts rather than an arbitrary transcript tail.
@@ -56,16 +56,25 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
   });
   let activeProject = null;
   try {
-    const store = new TaskBoardStore({ databasePath: runtimeState.settingsDatabasePath });
-    try { activeProject = store.getConversationProject({ agentId: runtimeState.agentId, sessionId: resolvedSessionId }); }
-    finally { store.close(); }
+    if (stores?.tasks) {
+      activeProject = await stores.tasks.getConversationProject({ agentId: runtimeState.agentId, sessionId: resolvedSessionId });
+    } else {
+      const store = new TaskBoardStore({ databasePath: runtimeState.settingsDatabasePath });
+      try { activeProject = store.getConversationProject({ agentId: runtimeState.agentId, sessionId: resolvedSessionId }); }
+      finally { store.close(); }
+    }
   } catch { activeProject = null; }
   const ambientWorkingContext = { ...initialWorkingContext, ...(interruptedRun ? { interruptedRun } : {}), ...(activeProject ? { activeProject } : {}), continuity: workingContinuity, continuityScopeSource: generatedContinuityScope ? 'runtime_generated' : 'session_persisted' };
   let dreamPreload = null;
   try {
-    const store = new WorkingMemoryStore(runtimeState.settingsDatabasePath ? { databasePath: runtimeState.settingsDatabasePath } : {});
-    try { dreamPreload = store.getDreamPreload({ agentId: runtimeState.agentId, project: continuityScope }) || store.getDreamPreload({ agentId: runtimeState.agentId, project: 'global' }); }
-    finally { store.close(); }
+    if (stores?.workingMemory) {
+      dreamPreload = await stores.workingMemory.getDreamPreload({ agentId: runtimeState.agentId, project: continuityScope })
+        || await stores.workingMemory.getDreamPreload({ agentId: runtimeState.agentId, project: 'global' });
+    } else {
+      const store = new WorkingMemoryStore(runtimeState.settingsDatabasePath ? { databasePath: runtimeState.settingsDatabasePath } : {});
+      try { dreamPreload = store.getDreamPreload({ agentId: runtimeState.agentId, project: continuityScope }) || store.getDreamPreload({ agentId: runtimeState.agentId, project: 'global' }); }
+      finally { store.close(); }
+    }
   } catch { dreamPreload = null; }
   return { priorSession, conversationId, resolvedWorkingRoot, continuityHandoffs, compatibilityScope, continuityScope, generatedContinuityScope, verifiedSubjectScope, deicticFiles, workspaceFiles, initialWorkingContext, ambientWorkingContext, dreamPreload };
 }

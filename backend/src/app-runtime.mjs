@@ -107,6 +107,8 @@ async function runAskChatUnserialized({
   // Trusted server-side context for a participant in an operator group room.
   // The room transcript is prompt context, not the participant's private session.
   groupChannelContext = null,
+  // Optional explicitly owned asynchronous stores. Omitted means current SQLite defaults.
+  stores = null,
   // Internal test seam; never supplied by the chat transport.
   testHooks = null,
   // Internal transport observer. It receives persisted trace records and is
@@ -194,6 +196,7 @@ async function runAskChatUnserialized({
     message,
     explicitWorkspaceFiles,
     interruptedRun: continuity.recoveryManifest || null,
+    stores,
   });
   const { priorSession, conversationId, resolvedWorkingRoot, compatibilityScope, continuityScope, generatedContinuityScope, verifiedSubjectScope, deicticFiles, workspaceFiles, initialWorkingContext, ambientWorkingContext, dreamPreload } = sessionContext;
   const effectiveAction = action ?? normalizedArgs.action ?? null;

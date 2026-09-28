@@ -15,6 +15,7 @@ import { POSTGRES_SKILL_SETTINGS_SCHEMA_SQL } from './postgres-skill-settings-st
 import { POSTGRES_SETUP_STATE_SCHEMA_SQL } from './postgres-setup-state-store.mjs';
 import { POSTGRES_RETENTION_SETTINGS_SCHEMA_SQL } from './postgres-retention-settings-store.mjs';
 import { POSTGRES_WORKING_MEMORY_RETENTION_SCHEMA_SQL } from './postgres-working-memory-retention-settings-store.mjs';
+import { POSTGRES_SESSION_SCHEMA_SQL } from './postgres-session-store.mjs';
 
 // Version 1 and its component SQL are immutable after adoption. Schema changes
 // require an appended migration, never edits to a previously applied checksum.
@@ -32,4 +33,6 @@ export const POSTGRES_APPLICATION_SCHEMA_SQL = Object.freeze([
 
 export const POSTGRES_APPLICATION_SCHEMA_MANIFEST = Object.freeze([
   { version: 1, name: 'application-stores', sql: POSTGRES_APPLICATION_SCHEMA_SQL },
+  // Append-only: conversation authority is a staged successor migration; v1 is immutable.
+  { version: 2, name: 'conversation-session-boundary', sql: POSTGRES_SESSION_SCHEMA_SQL },
 ]);
