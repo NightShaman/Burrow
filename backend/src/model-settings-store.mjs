@@ -211,13 +211,13 @@ export function normalizeModels(models = [], { provider = '', apiType = '' } = {
 }
 
 
-function normalizeTemperature(value, fallback = 0.2) {
+export function normalizeTemperature(value, fallback = 0.2) {
   const temperature = value === undefined || value === null || value === '' ? fallback : Number(value);
   if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) throw new Error('model_temperature_invalid');
   return temperature;
 }
 
-function normalizeReasoningEffort(value) {
+export function normalizeReasoningEffort(value) {
   const effort = normalize(value || 'off').toLowerCase();
   if (!['off', 'minimal', 'low', 'medium', 'high', 'ultra', 'xhigh', 'max'].includes(effort)) throw new Error('model_reasoning_effort_invalid');
   return effort;

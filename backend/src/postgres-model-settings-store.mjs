@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 import {
   assertConnection, canonicalizeOauthConnection, decrypt, encrypt, normalizeAuth,
-  publicConnection, secretPreview, normalizeModels,
+  publicConnection, secretPreview, normalizeModels, normalizeReasoningEffort, normalizeTemperature,
 } from './model-settings-store.mjs';
 
 export const POSTGRES_MODEL_SETTINGS_SCHEMA_SQL = `
@@ -20,6 +20,13 @@ CREATE TABLE IF NOT EXISTS model_connection_secrets (
 CREATE TABLE IF NOT EXISTS model_auth_previews (
   connection_id TEXT PRIMARY KEY REFERENCES model_connections(id) ON DELETE CASCADE,
   value_json TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_model_selections (
+  agent_id TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+  connection_id TEXT NOT NULL REFERENCES model_connections(id) ON DELETE RESTRICT,
+  model_id TEXT NOT NULL, reasoning_effort TEXT NOT NULL DEFAULT 'off',
+  temperature DOUBLE PRECISION NOT NULL DEFAULT 0.2 CHECK (temperature >= 0 AND temperature <= 2),
+  updated_at TEXT NOT NULL
 );
 `;
 const now = () => new Date().toISOString();
@@ -78,6 +85,45 @@ export class PostgresModelSettingsStore {
     await this.saveSecret(client, id, AUTH, JSON.stringify(auth), stamp);
     await client.query(`INSERT INTO model_auth_previews(connection_id,value_json,updated_at) VALUES($1,$2,$3) ON CONFLICT(connection_id) DO UPDATE SET value_json=EXCLUDED.value_json,updated_at=EXCLUDED.updated_at`, [id, JSON.stringify(secretPreview(auth, provider)), stamp]);
   }
+  async modelSelection(agentId) {
+    const agent = String(agentId ?? '').trim();
+    if (!agent) throw new Error('agent_id_invalid');
+    const result = await this.pool.query('SELECT agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at FROM agent_model_selections WHERE agent_id=$1', [agent]);
+    const row = result.rows[0];
+    return row ? { agentId: row.agent_id, connectionId: row.connection_id, model: row.model_id, reasoningEffort: row.reasoning_effort, temperature: Number(row.temperature), updatedAt: row.updated_at } : null;
+  }
+  async saveModelSelection({ agentId, connectionId, model, reasoningEffort = 'off', temperature = undefined } = {}) {
+    const agent = String(agentId ?? '').trim();
+    if (!agent) throw new Error('agent_id_invalid');
+    const id = String(connectionId ?? '').trim();
+    const modelId = String(model ?? '').trim();
+    return withPostgresTransaction(this.pool, async (client) => {
+      const connectionRow = await client.query('SELECT * FROM model_connections WHERE id=$1 FOR SHARE', [id]);
+      if (!connectionRow.rows[0]) throw new Error('model_connection_not_found');
+      const connectionResult = await client.query(this.selectSql('WHERE c.id=$1'), [id]);
+      const connection = publicConnection(connectionResult.rows[0]);
+      const enabled = connection.models.find((item) => item.id === modelId && item.selected !== false);
+      if (!enabled) throw new Error('model_not_enabled_for_connection');
+      if (!await this.authWithClient(client, id, connection.provider)) throw new Error('model_connection_auth_required');
+      const effort = normalizeReasoningEffort(reasoningEffort);
+      if (enabled.reasoningEfforts?.length && effort !== 'off' && !enabled.reasoningEfforts.includes(effort)) throw new Error('model_reasoning_effort_not_supported');
+      let priorResult = await client.query('SELECT agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at FROM agent_model_selections WHERE agent_id=$1 FOR UPDATE', [agent]);
+      let prior = priorResult.rows[0];
+      if (!prior) {
+        await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`agent-model-selection:${agent}`]);
+        priorResult = await client.query('SELECT agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at FROM agent_model_selections WHERE agent_id=$1 FOR UPDATE', [agent]);
+        prior = priorResult.rows[0];
+      }
+      const selectedTemperature = normalizeTemperature(temperature, prior ? Number(prior.temperature) : 0.2);
+      const stamp = this.clock();
+      const result = await client.query(`INSERT INTO agent_model_selections (agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at) VALUES ($1,$2,$3,$4,$5,$6)
+        ON CONFLICT(agent_id) DO UPDATE SET connection_id=EXCLUDED.connection_id,model_id=EXCLUDED.model_id,reasoning_effort=EXCLUDED.reasoning_effort,temperature=EXCLUDED.temperature,updated_at=EXCLUDED.updated_at
+        RETURNING agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at`, [agent, connection.id, modelId, effort, selectedTemperature, stamp]);
+      const row = result.rows[0];
+      return { agentId: row.agent_id, connectionId: row.connection_id, model: row.model_id, reasoningEffort: row.reasoning_effort, temperature: Number(row.temperature), updatedAt: row.updated_at };
+    });
+  }
+
   async persistAuth(id, auth, timestamp = this.clock()) { return withPostgresTransaction(this.pool, async (client) => {
     const row = await client.query('SELECT provider,api_type,base_url FROM model_connections WHERE id=$1 FOR UPDATE', [id]);
     const current = row.rows[0];
@@ -86,5 +132,11 @@ export class PostgresModelSettingsStore {
     await this.writeAuth(client, id, auth, current?.provider || auth.provider, timestamp, false);
     return auth;
   }); }
-  async remove(id) { return withPostgresTransaction(this.pool, async (client) => (await client.query('DELETE FROM model_connections WHERE id=$1', [String(id ?? '').trim()])).rowCount > 0); }
+  async remove(id) { return withPostgresTransaction(this.pool, async (client) => {
+    const connectionId = String(id ?? '').trim();
+    const locked = await client.query('SELECT id FROM model_connections WHERE id=$1 FOR UPDATE', [connectionId]);
+    if (!locked.rows[0]) return false;
+    await client.query('DELETE FROM agent_model_selections WHERE connection_id=$1', [connectionId]);
+    return (await client.query('DELETE FROM model_connections WHERE id=$1', [connectionId])).rowCount > 0;
+  }); }
 }
