@@ -77,15 +77,22 @@ describe('Forge workspace', () => {
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(JSON.stringify(['gone', 'missing']));
   });
 
-  it('keeps modes in the header and long history alongside the studio', async () => {
-    const jobs = Array.from({ length: 30 }, (_, i) => ({ id: `layout-${i}`, kind: 'music', prompt: 'Long music direction '.repeat(20), status: 'succeeded', createdAt: '2026-09-26T12:00:00Z', artifacts: [] }));
+  it('keeps modes in the header and scopes compact recents to the active media type', async () => {
+    const jobs = [
+      ...Array.from({ length: 30 }, (_, i) => ({ id: `image-${i}`, kind: 'image', modelId: 'image-1', prompt: `Long image prompt ${i} `.repeat(20), status: 'succeeded', createdAt: '2026-09-26T12:00:00Z', artifacts: [] })),
+      ...Array.from({ length: 8 }, (_, i) => ({ id: `music-${i}`, kind: 'music', modelId: 'lyria', prompt: `Long music direction ${i} `.repeat(20), status: 'succeeded', createdAt: '2026-09-26T12:00:00Z', artifacts: [] })),
+    ];
     renderForge(jobs);
     await screen.findByRole('option', { name: 'Image One' });
-    fireEvent.click(screen.getByRole('tab', { name: /Music/ }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Lyrics' }), { target: { value: 'Long lyrics\n'.repeat(100) } });
+    expect(screen.getAllByRole('button', { name: /Image succeeded:/ })).toHaveLength(5);
+    expect(screen.queryByRole('button', { name: /Music succeeded:/ })).toBeNull();
     expect(screen.getByRole('tablist').closest('header')).toBeTruthy();
     expect(screen.queryByText('FORGE')).toBeNull();
     expect(screen.getByRole('heading', { name: 'Recent creations' }).closest('.forge-history')?.parentElement?.className).toBe('forge-grid');
+    fireEvent.click(screen.getByRole('tab', { name: /Music/ }));
+    expect(screen.getAllByRole('button', { name: /Music succeeded:/ })).toHaveLength(5);
+    expect(screen.queryByRole('button', { name: /Image succeeded:/ })).toBeNull();
+    expect(screen.getByText('No music model configured')).toBeTruthy();
   });
 
   it('switches modes and keeps unavailable video honest', async () => {
