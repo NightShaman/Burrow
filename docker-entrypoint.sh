@@ -43,7 +43,7 @@ export BURROW_CLAUDE_BIN="${BURROW_CLAUDE_BIN:-${BURROW_RUNTIME_ROOT}/integratio
 
 mode="${BURROW_POSTGRES_LIFECYCLE:-${BURROW_POSTGRES_MODE:-disabled}}"
 if [ "$mode" = "managed" ] || [ "$mode" = "external" ]; then
-  exec node /opt/burrow/deploy/docker/postgres-supervisor.mjs "$@"
+  exec node /opt/burrow/scripts/postgres-supervisor.mjs "$@"
 fi
 if [ "$mode" != "disabled" ]; then
   echo "Unsupported PostgreSQL lifecycle mode" >&2
