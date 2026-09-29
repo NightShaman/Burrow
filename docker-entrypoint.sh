@@ -21,14 +21,11 @@ if [ -n "$supplied_key" ] && [ "$supplied_key" != "***" ]; then
 elif [ -s "$key_file" ]; then
   BURROW_SETTINGS_KEY="$(cat "$key_file")"
 else
-  if [ -s "${BURROW_SETTINGS_DB:-${BURROW_RUNTIME_ROOT:-/data}/config/settings.sqlite}" ]; then
-    echo "Existing settings database has no persisted settings key; restore its key before startup." >&2
-    exit 1
-  fi
   mkdir -p "$(dirname "$key_file")"
   BURROW_SETTINGS_KEY="$(node -e "process.stdout.write(require(\"node:crypto\").randomBytes(32).toString(\"base64\"))")"
   umask 077
   printf "%s\n" "$BURROW_SETTINGS_KEY" > "$key_file"
+
 fi
 
 export BURROW_SETTINGS_KEY

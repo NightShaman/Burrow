@@ -4,7 +4,7 @@ import { createPostgresLifecycle, createExternalPostgresLifecycle } from './post
 
 /**
  * Resolve the opt-in PostgreSQL process lifecycle without changing the current
- * SQLite runtime default. The parent server owns the returned lifecycle and
+ * PostgreSQL runtime default. The parent server owns the returned lifecycle and
  * must call closePostgresLifecycle during orderly shutdown.
  *
  * Modes: `managed` starts PostgreSQL 17 under the application user; `external`

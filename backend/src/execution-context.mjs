@@ -47,6 +47,7 @@ export async function resolveExecutionTarget(targetRequest = null, { filesystemB
  */
 export function createExecutionContext({
   conversationStore = null,
+  stores = null,
   sessionId,
   conversationId = null,
   continuityScope = null,
@@ -61,7 +62,6 @@ export function createExecutionContext({
   target = null,
   dataRoot,
   cacheRoot,
-  settingsDatabasePath = null,
   agentWorkspaceRoot = null,
   agentDataRoot = null,
   skillsRoot = null,
@@ -92,7 +92,6 @@ export function createExecutionContext({
     target,
     dataRoot: absolute(dataRoot, 'data_root'),
     cacheRoot: absolute(cacheRoot, 'cache_root'),
-    settingsDatabasePath: optionalAbsolute(settingsDatabasePath, 'settings_database_path'),
     agentWorkspaceRoot: resolvedAgentWorkspaceRoot,
     agentDataRoot: resolvedAgentDataRoot,
     skillsRoot: resolvedSkillsRoot,
@@ -103,7 +102,7 @@ export function createExecutionContext({
     runAgentReply: typeof runAgentReply === 'function' ? runAgentReply : null,
     filesystemBoundaries: filesystemBoundaries.map((item) => absolute(item, 'filesystem_boundary')).filter(Boolean),
     executionBoundaries: executionBoundaries && typeof executionBoundaries === 'object' ? executionBoundaries : null,
-    toolSchemas: Array.isArray(toolSchemas) ? toolSchemas : nativeToolSchemas({ includeWorkingMemory: Boolean(agentId), includeBrainMemory: Boolean(includeBrainMemory), includeAgentProfile: Boolean(agentId && settingsDatabasePath), includeAgentChat: Boolean(includeAgentChat), includeTaskBoard: Boolean(includeTaskBoard), includeMcpMenu: mcpConnections instanceof Map && mcpConnections.size > 0 }),
+    toolSchemas: Array.isArray(toolSchemas) ? toolSchemas : nativeToolSchemas({ includeWorkingMemory: Boolean(agentId), includeBrainMemory: Boolean(includeBrainMemory), includeAgentProfile: Boolean(agentId), includeAgentChat: Boolean(includeAgentChat), includeTaskBoard: Boolean(includeTaskBoard), includeMcpMenu: mcpConnections instanceof Map && mcpConnections.size > 0 }),
     mcpTools: mcpTools instanceof Map ? mcpTools : new Map(),
     mcpConnections: mcpConnections instanceof Map ? mcpConnections : new Map(),
     protectedValues: protectedValues instanceof Map ? protectedValues : new Map(),
@@ -113,7 +112,7 @@ export function createExecutionContext({
     processExecutionRouter: typeof processExecutionRouter === 'function' ? processExecutionRouter : null,
     parentRunId: parentRunId == null ? null : String(parentRunId),
   };
-  Object.defineProperty(context, 'conversationStore', { value: conversationStore, enumerable: false });
+  Object.defineProperties(context, { conversationStore: { value: conversationStore, enumerable: false }, stores: { value: stores, enumerable: false } });
   return freeze(context);
 }
 

@@ -1,6 +1,5 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { openSettingsDatabase, settingsDatabasePath } from './settings-database.mjs';
 import { mergeAgentContextConfig, normalizeAgentContextConfig } from './agent-context-config.mjs';
 
 const ID = /^[a-zA-Z0-9._-]{1,96}$/;
@@ -66,64 +65,6 @@ function row(row) {
   };
 }
 
-export class AgentRegistryStore {
-  constructor({ databasePath, bootstrapSampleIdentities = process.env.BURROW_BOOTSTRAP_SAMPLE_IDENTITIES } = {}) {
-    this.databasePath = databasePath || settingsDatabasePath();
-    this.bootstrapSampleIdentities = bootstrapSampleIdentitiesEnabled(bootstrapSampleIdentities);
-    this.db = openSettingsDatabase({ databasePath: this.databasePath });
-  }
-  close() { this.db.close(); }
-  bootstrap() {
-    const existing = this.db.prepare('SELECT * FROM agents WHERE id=?').get('hatchet');
-    if (existing) return row(existing);
-    if (!this.bootstrapSampleIdentities) return null;
-    const timestamp = now();
-    this.db.prepare('INSERT INTO agents (id,name,enabled,available_capabilities,context_config_json,execution_environment_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)')
-      .run('hatchet', 'Hatchet', 1, json(DEFAULT_CAPABILITIES), json(normalizeAgentContextConfig({})), null, timestamp, timestamp);
-    return this.get('hatchet');
-  }
-  list({ includeDisabled = true } = {}) {
-    this.bootstrap();
-    const where = includeDisabled ? '' : 'WHERE enabled=1';
-    return this.db.prepare(`SELECT * FROM agents ${where} ORDER BY CASE id WHEN 'hatchet' THEN 0 ELSE 1 END, name COLLATE NOCASE, id`).all().map(row);
-  }
-  get(id) { return row(this.db.prepare('SELECT * FROM agents WHERE id=?').get(text(id))); }
-  // Runtime-facing lookup accepts a canonical id or a human-facing agent name.
-  // Keep CRUD lookup exact: an agent id is still the durable identity.
-  resolve(reference) {
-    const value = text(reference);
-    if (!value) return null;
-    const exact = this.get(value);
-    if (exact) return exact;
-    const matches = this.db.prepare('SELECT * FROM agents WHERE id COLLATE NOCASE=? OR name COLLATE NOCASE=? ORDER BY CASE WHEN id COLLATE NOCASE=? THEN 0 ELSE 1 END, id').all(value, value, value).map(row);
-    return matches.length === 1 ? matches[0] : null;
-  }
-  create(input = {}) {
-    this.bootstrap();
-    const agent = assertAgent(input);
-    if (this.get(agent.id)) throw new Error('agent_id_exists');
-    const timestamp = now();
-    this.db.prepare('INSERT INTO agents (id,name,enabled,available_capabilities,context_config_json,execution_environment_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)')
-      .run(agent.id, agent.name, agent.enabled === false ? 0 : 1, json(agent.availableCapabilities || DEFAULT_CAPABILITIES), json(normalizeAgentContextConfig(agent.contextConfig || {})), agent.executionEnvironment ? json(agent.executionEnvironment) : null, timestamp, timestamp);
-    return this.get(agent.id);
-  }
-  update(id, input = {}) {
-    const current = this.get(id);
-    if (!current) throw new Error('agent_not_found');
-    const patch = assertAgent({ ...input, id: current.id }, { requireName: false });
-    const timestamp = now();
-    this.db.prepare('UPDATE agents SET name=?, enabled=?, available_capabilities=?, context_config_json=?, execution_environment_json=?, updated_at=? WHERE id=?')
-      .run(patch.name === undefined ? current.name : patch.name, patch.enabled === undefined ? (current.enabled ? 1 : 0) : (patch.enabled ? 1 : 0), json(patch.availableCapabilities === undefined ? current.availableCapabilities : patch.availableCapabilities), json(patch.contextConfig === undefined ? current.contextConfig : mergeAgentContextConfig(current.contextConfig, patch.contextConfig)), patch.executionEnvironment === undefined ? (current.executionEnvironment ? json(current.executionEnvironment) : null) : (patch.executionEnvironment ? json(patch.executionEnvironment) : null), timestamp, current.id);
-    return this.get(current.id);
-  }
-  delete(id) {
-    const current = this.get(id);
-    if (!current) throw new Error('agent_not_found');
-    this.db.prepare('DELETE FROM agents WHERE id=?').run(text(id));
-    return current;
-  }
-}
-
 export async function ensureAgentRoots({ runtimeState, agent } = {}) {
   if (!runtimeState?.workspaceRoot || !agent?.id) throw new Error('agent_runtime_context_required');
   const workspaceRoot = path.resolve(runtimeState.workspaceRoot, agent.id);
@@ -146,7 +87,6 @@ export function agentRuntimeContext({ runtimeState, agent } = {}) {
     agentWorkspaceRoot: workspaceRoot,
     agentDataRoot: dataRoot,
     skillsRoot: path.join(workspaceRoot, 'skills'),
-    settingsDatabasePath: runtimeState.settingsDatabasePath || null,
     // Controller-owned persisted assignment. Null preserves local execution.
     executionEnvironment: agent.executionEnvironment || null,
     // No agent-specific filesystem boundary. Workspaces are context, not cages.

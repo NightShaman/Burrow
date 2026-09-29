@@ -25,7 +25,7 @@ async function writePayload(payload, tempDir = os.tmpdir()) {
 
 function childEnv(baseEnv = process.env) {
   const env = {};
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'BURROW_RUNTIME_ROOT', 'BURROW_WORKSPACE_ROOT', 'BURROW_AGENT_WORKSPACE_ROOT', 'BURROW_AGENT_DATA_ROOT', 'BURROW_CACHE_ROOT', 'BURROW_TRACE_ISOLATION', 'BURROW_SETTINGS_DB', 'BURROW_SETTINGS_KEY']) {
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'BURROW_RUNTIME_ROOT', 'BURROW_WORKSPACE_ROOT', 'BURROW_AGENT_WORKSPACE_ROOT', 'BURROW_AGENT_DATA_ROOT', 'BURROW_CACHE_ROOT', 'BURROW_TRACE_ISOLATION', 'BURROW_SETTINGS_KEY']) {
     if (baseEnv[key]) env[key] = baseEnv[key];
   }
   return env;

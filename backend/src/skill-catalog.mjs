@@ -1,7 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { SkillSettingsStore } from './skill-settings-store.mjs';
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -120,7 +119,7 @@ function compactSkill(skill) {
  * Build an agent's effective skill catalog from ownership only.
  * Agent-owned entries shadow shared entries with the same id.
  */
-export async function loadEffectiveSkillCatalog({ workspaceRoot, agentId, agentRuntime = null, overrides = {}, databasePath = null, skillStore = null } = {}) {
+export async function loadEffectiveSkillCatalog({ workspaceRoot, agentId, agentRuntime = null, overrides = {}, skillStore = null } = {}) {
   const runtimeAgentId = agentRuntime?.agentId == null ? null : normalizeId(agentRuntime.agentId);
   const runtimeAgentWorkspace = agentRuntime?.agentWorkspaceRoot ? path.resolve(agentRuntime.agentWorkspaceRoot) : null;
   const runtimeSkillsRoot = agentRuntime?.skillsRoot ? path.resolve(agentRuntime.skillsRoot) : null;
@@ -136,19 +135,19 @@ export async function loadEffectiveSkillCatalog({ workspaceRoot, agentId, agentR
     loadOwnedSkillRoot({ skillsRoot: agentRoot, owner: { scope: 'agent', agentId: resolvedAgentId }, overrides }),
   ]);
   let databaseSkills = [];
-  if (databasePath || skillStore) {
-    const store = skillStore || new SkillSettingsStore({ databasePath });
+  if (skillStore) {
+    const store = skillStore;
     const ownsStore = !skillStore;
     try {
       databaseSkills = (await store.effective(resolvedAgentId)).map((skill) => ({
         ...skill, priority: 0, path: null, sourcePath: null, absolutePath: null,
         sourceExists: true, owner: { scope: skill.global ? 'global' : 'agent', agentId: skill.global ? null : resolvedAgentId },
-        ownership: { scope: 'sqlite', agentId: skill.global ? null : resolvedAgentId, storage: 'settings.sqlite' },
+        ownership: { scope: 'postgres', agentId: skill.global ? null : resolvedAgentId, storage: 'skills' },
         portability: { memoryIndexable: true, memoryStoresBody: false },
       }));
     } finally { if (ownsStore) await store.close?.(); }
   }
-  // Collision order is explicit: assigned SQLite text < shared filesystem < agent filesystem.
+  // Collision order is explicit: assigned PostgreSQL text < shared filesystem < agent filesystem.
   // This preserves asset-capable filesystem defaults and, most importantly, local agent overrides.
   const effective = new Map(databaseSkills.map((skill) => [skill.id, skill]));
   for (const skill of globalSkills) effective.set(skill.id, skill);
@@ -189,7 +188,7 @@ export function selectCatalogSkills({ catalog = [], ids = [], source = 'model-se
     }
     selected.push({
       ...compactSkill(skill),
-      ...(skill.source === 'sqlite' ? { source: 'sqlite', skillContent: skill.content } : {}),
+      ...(skill.source === 'postgres' ? { source: 'postgres', skillContent: skill.content } : {}),
       selection: {
         source,
         owner: skill.owner || null,

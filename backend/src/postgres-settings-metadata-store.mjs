@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS settings_meta (
 
 const now = () => new Date().toISOString();
 
-/** Async settings metadata boundary shared by server consumers; JSON values match SQLite semantics. */
+/** Async settings metadata boundary shared by server consumers; JSON values use the shared metadata contract. */
 export class PostgresSettingsMetadataStore {
   constructor({ pool, ownsPool = false, clock = now } = {}) {
     if (!pool?.query) throw new Error('settings_metadata_postgres_pool_required');

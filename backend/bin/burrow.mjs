@@ -16,8 +16,6 @@ import { loadRuntimeConfig, runAskChat } from '../src/app-runtime.mjs';
 import { runRetentionCleanup } from '../src/retention.mjs';
 import { runCliSessionSearch } from '../src/cli-session-search.mjs';
 import { translateBlockers } from '../src/workbench-status.mjs';
-import { WorkingMemoryStore } from '../src/working-memory-store.mjs';
-import { consolidateDreamMemory } from '../src/dream-memory-consolidator.mjs';
 import { runDreamCycle } from '../src/dream-cycle-runner.mjs';
 import { ensureDefaultGlobalWorkspace } from '../src/runtime-workspace-defaults.mjs';
 import { createPortableInstallBackup, formatPortableInstallResult, planPortableInstallBackup, planPortableInstallRestore, restorePortableInstall } from '../scripts/portable-install-backup.mjs';
@@ -84,7 +82,7 @@ Options:
   --confirm              Actually delete retention cleanup candidates; omitted means dry-run
   --summary              Print only the retention plan summary; omit individual candidate paths
   --agent-id ID          Agent id for agent-scoped commands; defaults to hatchet
-  --mode MODE            Dream mode: light (recent sessions to local SQLite) or deep (durable Brain candidates)
+  --mode MODE            Dream mode: light (recent sessions to PostgreSQL) or deep (durable Brain candidates)
   --days N               Dream evidence window: defaults to 5 for light, 30 for deep
   --apply                Apply curated Dream candidates; omitted is a read-only dry run
   --model-profile NAME  Model profile for this Dream run (for example, mini)
@@ -336,7 +334,6 @@ async function main() {
     if (args.context_threshold) process.env.BURROW_CONTEXT_THRESHOLD = args.context_threshold;
     const loaded = await loadBurrowConfig({ rootDir });
     const runtimeState = resolveRuntimeStateConfig({ rootDir, args, loadedConfig: loaded.config });
-    if (process.env.BURROW_UI_POSTGRES !== '1') await ensureDefaultGlobalWorkspace({ installDir: rootDir, workspaceRoot: runtimeState.workspaceRoot, databasePath: runtimeState.settingsDatabasePath });
     await import('../scripts/burrow-ui.mjs');
     return;
   }
@@ -377,7 +374,6 @@ async function main() {
     const result = await runRetentionCleanup({
       dataRoot: runtimeState.dataRoot,
       traceRoot: path.join(runtimeState.cacheRoot, 'traces'),
-      settingsDatabasePath: runtimeState.settingsDatabasePath,
       retention,
       confirm: Boolean(args.confirm),
     });
@@ -395,24 +391,6 @@ async function main() {
       }
       : result;
     console.log(JSON.stringify(output, null, 2));
-    return;
-  }
-
-  if (command === 'dream-memory') {
-    const loaded = await loadBurrowConfig({ rootDir,  });
-    const runtimeState = resolveRuntimeStateConfig({ rootDir, args, loadedConfig: loaded.config });
-    const result = consolidateDreamMemory({ agentId: args.agent_id || 'hatchet', databasePath: runtimeState.settingsDatabasePath, limit: args.limit });
-    if (args.json) return console.log(JSON.stringify(result, null, 2));
-    console.log(`DreamMemory consolidated for ${result.agentId}: ${result.itemCount} item(s), ${result.document.markdown.length} chars.`);
-    return;
-  }
-
-  if (command === 'dream-cycle') {
-    const loaded = await loadBurrowConfig({ rootDir,  });
-    const runtimeState = resolveRuntimeStateConfig({ rootDir, args, loadedConfig: loaded.config });
-    const result = runDreamCycle({ agentId: args.agent_id || 'hatchet', databasePath: runtimeState.settingsDatabasePath, limit: args.limit });
-    if (args.json) return console.log(JSON.stringify(result, null, 2));
-    console.log(`Dream cycle completed for ${result.agentId}: ${result.phases.map((phase) => `${phase.phase}=${phase.inspected}`).join(', ')}; DreamMemory items=${result.dreamMemoryItemCount}.`);
     return;
   }
 

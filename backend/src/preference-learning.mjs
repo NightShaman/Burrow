@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { openSettingsDatabase, settingsDatabasePath } from './settings-database.mjs';
 
 const text = (value) => String(value ?? '').trim();
 const bounded = (value, limit) => { const source = text(value); return source.length <= limit ? source : source.slice(0, limit).trim(); };
@@ -10,8 +9,6 @@ const auditKey = (agentId) => `preference-audit:${agentId}`;
 const MAX_SIGNALS = 240;
 const MAX_AUDIT = 100;
 
-function meta(db, key, fallback = null) { return parse(db.prepare('SELECT value_json FROM settings_meta WHERE key=?').get(key)?.value_json, fallback); }
-function setMeta(db, key, value, at) { db.prepare('INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at').run(key, JSON.stringify(value), at); }
 
 export function normalizePreferenceSignal(value, { sourceRefs = [], at = new Date().toISOString() } = {}) {
   const kind = text(value?.kind).toLowerCase();
@@ -20,56 +17,6 @@ export function normalizePreferenceSignal(value, { sourceRefs = [], at = new Dat
   const reason = bounded(value?.reason, 240);
   if (!['reinforce', 'contradict', 'replace'].includes(kind) || !scope || !guidance || !reason) return null;
   return { id: `preference-signal:${randomUUID()}`, kind, scope, guidance, reason, sourceRefs: [...new Set(sourceRefs.map(text).filter(Boolean))].slice(0, 20), observedAt: at };
-}
-
-export function appendPreferenceSignal({ agentId, signal, databasePath = null, at = new Date().toISOString() } = {}) {
-  const id = text(agentId); const normalized = normalizePreferenceSignal(signal, { sourceRefs: signal?.sourceRefs, at });
-  if (!id || !normalized) return null;
-  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  try {
-    const current = meta(db, signalKey(id), { version: 1, agentId: id, signals: [] });
-    const signals = [normalized, ...(Array.isArray(current?.signals) ? current.signals : [])].slice(0, MAX_SIGNALS);
-    setMeta(db, signalKey(id), { version: 1, agentId: id, signals, updatedAt: at }, at);
-    return normalized;
-  } finally { db.close(); }
-}
-
-export function preferenceSignals({ agentId, databasePath = null, since = null, limit = 100 } = {}) {
-  const id = text(agentId); if (!id) throw new Error('preference_agent_required');
-  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  try {
-    const signals = meta(db, signalKey(id), { signals: [] })?.signals || [];
-    return signals.filter((signal) => !text(since) || signal.observedAt > since).slice(0, Math.max(1, Math.min(240, Number(limit) || 100)));
-  } finally { db.close(); }
-}
-
-export function preferenceLearningState({ agentId, databasePath = null } = {}) {
-  const id = text(agentId); if (!id) throw new Error('preference_agent_required');
-  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  try { return meta(db, stateKey(id), { version: 1, agentId: id, lastAutomatedAt: null, lastSignalAt: null }); }
-  finally { db.close(); }
-}
-
-export function applyPreferenceUpdate({ agentId, markdown, sourceSignals = [], profileStore, databasePath = null, at = new Date().toISOString() } = {}) {
-  const id = text(agentId); const document = typeof markdown === 'string' ? markdown.trim() : '';
-  if (!id || !document || !profileStore) throw new Error('preference_update_invalid');
-  const current = profileStore.get(id, 'PREFERENCES');
-  const state = preferenceLearningState({ agentId: id, databasePath });
-  // A profile edit after automated output is operator truth. Old observations cannot
-  // immediately resurrect guidance the operator changed or removed.
-  const newestSignalAt = sourceSignals.map((item) => item.observedAt).sort().at(-1) || null;
-  if (!newestSignalAt || (current?.updatedAt && ((state.lastAutomatedAt && current.updatedAt > state.lastAutomatedAt) || (!state.lastAutomatedAt && current.updatedAt > newestSignalAt)))) return { applied: false, reason: 'operator_baseline_newer' };
-  if (current?.markdown === document) return { applied: false, reason: 'unchanged' };
-  profileStore.replacePreferences(id, document);
-  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  try {
-    const nextState = { version: 1, agentId: id, lastAutomatedAt: at, lastSignalAt: newestSignalAt || state.lastSignalAt || null };
-    const audit = meta(db, auditKey(id), { version: 1, agentId: id, entries: [] });
-    const entry = { id: `preference-audit:${randomUUID()}`, at, actor: 'dream', disposition: 'updated', sourceSignalIds: sourceSignals.map((item) => item.id), previousMarkdown: current?.markdown || '', nextMarkdown: document };
-    setMeta(db, stateKey(id), nextState, at);
-    setMeta(db, auditKey(id), { version: 1, agentId: id, entries: [entry, ...(audit.entries || [])].slice(0, MAX_AUDIT), updatedAt: at }, at);
-    return { applied: true, entry, state: nextState };
-  } finally { db.close(); }
 }
 
 export function preferenceAdjudicationPrompt({ preferences, signals }) {
@@ -129,3 +76,5 @@ export async function applyPreferenceUpdateAsync({ agentId, markdown, sourceSign
     audit: (prior, current) => ({ version: 1, agentId: id, entries: [{ id: `preference-audit:${randomUUID()}`, at, actor: 'dream', disposition: 'updated', sourceSignalIds: sourceSignals.map((item) => item.id), previousMarkdown: current?.markdown || '', nextMarkdown: document }, ...(prior?.entries || [])].slice(0, MAX_AUDIT), updatedAt: at }),
   });
 }
+
+export { appendPreferenceSignalAsync as appendPreferenceSignal, preferenceSignalsAsync as preferenceSignals, preferenceLearningStateAsync as preferenceLearningState, applyPreferenceUpdateAsync as applyPreferenceUpdate };

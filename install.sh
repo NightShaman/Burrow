@@ -356,7 +356,6 @@ if [ ! -f "$ENV_FILE" ]; then
 BURROW_RUNTIME_ROOT=$INSTALL_DIR
 BURROW_WORKSPACE_ROOT=$INSTALL_DIR/workspace
 BURROW_CACHE_ROOT=$INSTALL_DIR/cache
-BURROW_SETTINGS_DB=$INSTALL_DIR/config/settings.sqlite
 BURROW_CLAUDE_BIN=$INSTALL_DIR/integrations/claude-code/node_modules/.bin/claude
 # 32-byte AES-256 key for encrypted model/provider settings. Keep this file private.
 BURROW_SETTINGS_KEY=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))')
@@ -385,7 +384,6 @@ set_env_value() {
 set_env_value BURROW_RUNTIME_ROOT "$INSTALL_DIR"
 set_env_value BURROW_WORKSPACE_ROOT "$INSTALL_DIR/workspace"
 set_env_value BURROW_CACHE_ROOT "$INSTALL_DIR/cache"
-set_env_value BURROW_SETTINGS_DB "$INSTALL_DIR/config/settings.sqlite"
 set_env_value BURROW_CLAUDE_BIN "$INSTALL_DIR/integrations/claude-code/node_modules/.bin/claude"
 if ! grep -q '^BURROW_SETTINGS_KEY=' "$ENV_FILE"; then
   set_env_value BURROW_SETTINGS_KEY "$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))')"

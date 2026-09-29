@@ -1,5 +1,4 @@
 import { completeCurator, curatorRoot, readCuratorSelection } from './curator-runtime.mjs';
-import { WorkingMemoryStore } from './working-memory-store.mjs';
 
 const ACTIONS = new Set(['ADD', 'UPDATE', 'RESOLVE', 'SUPERSEDE', 'NOOP']);
 const KINDS = new Set(['decision', 'finding', 'blocker', 'handoff', 'task']);
@@ -146,7 +145,7 @@ export function validateWorkingMemoryCuration({ proposal, agentId, project, sess
   return { ok: true, disposition: proposal.action.toLowerCase(), proposal, target };
 }
 
-export async function curateWorkingMemory({ databasePath, runtimeRoot = null, agentId, project, sessionId, conversationId, runId, message, answerText, toolResults, traceLogger = null } = {}) {
+export async function curateWorkingMemory({ stores, runtimeRoot = null, agentId, project, sessionId, conversationId, runId, message, answerText, toolResults, traceLogger = null } = {}) {
   const candidate = workingMemoryCurationCandidate({ toolResults });
   if (!text(agentId) || !text(project) || !text(conversationId) || !text(sessionId) || !text(runId)) {
     const result = { attempted: false, ...candidate, disposition: 'not_attempted', reason: 'curation_scope_unavailable' };
@@ -155,7 +154,7 @@ export async function curateWorkingMemory({ databasePath, runtimeRoot = null, ag
   }
   const root = curatorRoot({ runtimeRoot: runtimeRoot || undefined });
   let selection = null;
-  try { selection = readCuratorSelection({ databasePath, root }); }
+  try { selection = readCuratorSelection({ stores, root }); }
   catch (error) {
     const result = { attempted: false, ...candidate, disposition: 'not_attempted', reason: 'curator_selection_unavailable', error: String(error?.message || error) };
     await traceLogger?.event?.('working-memory-curation', { attempted: false, candidate: candidate.reason, disposition: result.disposition, reason: result.reason, error: result.error });
@@ -166,12 +165,13 @@ export async function curateWorkingMemory({ databasePath, runtimeRoot = null, ag
     await traceLogger?.event?.('working-memory-curation', { attempted: false, candidate: candidate.reason, disposition: result.disposition, reason: result.reason });
     return result;
   }
-  const store = new WorkingMemoryStore({ databasePath });
+  if (!stores?.workingMemory) throw new Error('working_memory_store_required');
+  const store = stores.workingMemory
   try {
     const safeToolResults = Array.isArray(toolResults) ? toolResults : [];
     const records = store.list({ agentId, project, includeInactive: true, limit: 24 });
     const prompt = workingMemoryCuratorPrompt({ agentId, project, sessionId, runId, message, answerText, toolResults, records });
-    const completion = await completeCurator({ selection, databasePath, root, prompt, jsonSchema: workingMemoryCuratorJsonSchema({ sessionId, runId, records }), traceLogger });
+    const completion = await completeCurator({ selection, stores, root, prompt, jsonSchema: workingMemoryCuratorJsonSchema({ sessionId, runId, records }), traceLogger });
     const proposal = parseWorkingMemoryCuration(completion?.choice?.text);
     const validation = validateWorkingMemoryCuration({ proposal, agentId, project, sessionId, runId, message, answerText, toolResults, records });
     if (!validation.ok || validation.disposition === 'noop') {
@@ -194,5 +194,5 @@ export async function curateWorkingMemory({ databasePath, runtimeRoot = null, ag
   } catch (error) {
     await traceLogger?.event?.('working-memory-curation', { attempted: true, source: 'curator-runtime', error: String(error?.message || error) });
     return { attempted: true, ...candidate, disposition: 'failed', error: String(error?.message || error), record: null };
-  } finally { store.close(); }
+  } finally { /* composed store remains open */ }
 }

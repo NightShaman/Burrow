@@ -5,7 +5,6 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { execFile, spawn } from 'node:child_process';
 import { discoverMods, MOD_DATA_DIRECTORY } from './mod-runtime.mjs';
-import { createModDistributionRepository } from './mod-distribution-repository.mjs';
 import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -308,8 +307,8 @@ async function removeDurably(filePath) {
   try { await directory.sync(); } finally { await directory.close(); }
 }
 
-export function createModDistribution({ runtimeRoot, databasePath, restart = null, onLifecycleChange = null, logger = console, settingsKey = null, archiveResources = {}, removePath = fs.rm, renamePath = fs.rename, copyPath = fs.cp, cleanupPath = fs.rm, repositoryPreparation = prepareRepository, repositoryFactory = createModDistributionRepository } = {}) {
-  if (!runtimeRoot || !databasePath) throw new Error('mod_distribution_configuration_required');
+export function createModDistribution({ runtimeRoot, restart = null, onLifecycleChange = null, logger = console, settingsKey = null, archiveResources = {}, removePath = fs.rm, renamePath = fs.rename, copyPath = fs.cp, cleanupPath = fs.rm, repositoryPreparation = prepareRepository, repositoryFactory = null } = {}) {
+  if (!runtimeRoot || typeof repositoryFactory !== 'function') throw new Error('mod_distribution_configuration_required');
   const modsRoot = path.join(runtimeRoot, 'mods');
   const archivePolicy = {
     ...DEFAULT_ARCHIVE_RESOURCES,
@@ -346,7 +345,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
       }
       await cleanupPath(journal.quarantine, { recursive: true, force: true });
       await cleanupPath(journal.recovery, { recursive: true, force: true });
-      const recoveryDb = await repositoryFactory({ databasePath });
+      const recoveryDb = await repositoryFactory();
       try {
         await recoveryDb.transaction((tx) => tx.restoreMetadata(journal));
       } finally { await recoveryDb.close(); }
@@ -379,7 +378,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
   async function schedulePoll(delay = null) {
     clearPoll();
     if (closed) return;
-    const db = await repositoryFactory({ databasePath });
+    const db = await repositoryFactory();
     let settings;
     try { settings = await refreshSettings(db); } finally { await db.close(); }
     if (!settings.enabled) return;
@@ -389,11 +388,11 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
     if (!closed) armPoll(wait);
   }
   async function sourceRefreshConfig() {
-    const db = await repositoryFactory({ databasePath });
+    const db = await repositoryFactory();
     try { return { ok: true, sourceRefresh: await refreshSettings(db) }; } finally { await db.close(); }
   }
   async function saveSourceRefreshConfig(value) {
-    const db = await repositoryFactory({ databasePath });
+    const db = await repositoryFactory();
     try {
       const config = validateModSourceRefreshConfig(value, { base: await refreshSettings(db) });
       await db.saveRefreshSettings(config, now());
@@ -420,7 +419,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
   }
   async function list() {
     await ready;
-    const db = await repositoryFactory({ databasePath });
+    const db = await repositoryFactory();
     try {
       const discovered = await discoverMods({ runtimeRoot, logger });
       const installed = new Map((await db.installationRows()).map((row) => [row.mod_id, row]));
@@ -443,7 +442,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
   }
   async function addSource(urlValue, authValue = null) {
     await ready;
-    const url = normalizeModSourceUrl(urlValue); const id = sourceId(url); const timestamp = now(); const auth = credentialInput(authValue); const db = await repositoryFactory({ databasePath });
+    const url = normalizeModSourceUrl(urlValue); const id = sourceId(url); const timestamp = now(); const auth = credentialInput(authValue); const db = await repositoryFactory();
     try {
       const row = await db.ensureSource(id, url, timestamp);
       if (auth) {
@@ -459,13 +458,13 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
     await ready;
     if (refreshPromise) return refreshPromise;
     refreshPromise = (async () => {
-      const db = await repositoryFactory({ databasePath });
+      const db = await repositoryFactory();
       let rows; let settings;
       try { rows = await db.sourceRows(); settings = await refreshSettings(db); } finally { await db.close(); }
       let failed = false; let cursor = 0;
       await Promise.all(Array.from({ length: Math.min(settings.concurrency, rows.length) }, async () => {
         while (cursor < rows.length) {
-          const row = rows[cursor++]; const workerDb = await repositoryFactory({ databasePath });
+          const row = rows[cursor++]; const workerDb = await repositoryFactory();
           try { const result = await refreshSource(workerDb, row); failed ||= result.status === 'failed'; } finally { await workerDb.close(); }
         }
       }));
@@ -475,12 +474,12 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
     try { return await refreshPromise; } finally { refreshPromise = null; }
   }
   async function removeSource(id) {
-    await ready; const db = await repositoryFactory({ databasePath }); try { const removed = (await db.removeSource(String(id))).changes > 0; return { ok: removed, removed }; } finally { await db.close(); } }
+    await ready; const db = await repositoryFactory(); try { const removed = (await db.removeSource(String(id))).changes > 0; return { ok: removed, removed }; } finally { await db.close(); } }
   async function install(modId, requestedVersion = null) {
     await ready;
     const id = String(modId || '').trim(); if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id))) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
-    locks.add(id); const db = await repositoryFactory({ databasePath }); let scratch;
+    locks.add(id); const db = await repositoryFactory(); let scratch;
     try {
       let source = await db.sourceByMod(id);
       if (!source) throw new Error('mod_source_not_resolved');
@@ -521,7 +520,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
     await ready;
     const id = String(modId || '').trim(); if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id))) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
-    locks.add(id); const db = await repositoryFactory({ databasePath });
+    locks.add(id); const db = await repositoryFactory();
     try {
       const discovered = await discoverMods({ runtimeRoot, logger });
       if (!discovered.some((entry) => entry.id === id)) throw Object.assign(new Error('mod_not_found'), { statusCode: 404 });
@@ -541,7 +540,7 @@ export function createModDistribution({ runtimeRoot, databasePath, restart = nul
     await ready;
     const id = String(modId || '').trim(); if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id))) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
-    locks.add(id); const db = await repositoryFactory({ databasePath });
+    locks.add(id); const db = await repositoryFactory();
     try {
       const discovered = await discoverMods({ runtimeRoot, logger });
       const mod = discovered.find((entry) => entry.id === id);

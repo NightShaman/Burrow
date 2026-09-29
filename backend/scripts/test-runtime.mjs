@@ -93,9 +93,8 @@ export async function createTestRuntime({ prefix = TEST_ROOT_PREFIX } = {}) {
     agentWorkspace: path.join(root, 'workspace', 'hatchet'),
     agentData: path.join(root, 'workspace', 'hatchet'),
     cache: path.join(root, 'cache'),
-    settingsDb: path.join(root, 'config', 'settings.sqlite'),
   };
-  await Promise.all([paths.tmp, paths.workspace, paths.agentWorkspace, paths.agentData, paths.cache, path.dirname(paths.settingsDb)].map((dir) => fs.mkdir(dir, { recursive: true })));
+  await Promise.all([paths.tmp, paths.workspace, paths.agentWorkspace, paths.agentData, paths.cache].map((dir) => fs.mkdir(dir, { recursive: true })));
   return paths;
 }
 
@@ -109,10 +108,10 @@ export async function removeStaleTestRuntimes({ prefix = TEST_ROOT_PREFIX, tmpRo
 
 export function testRuntimeEnv(runtime, baseEnv = process.env) {
   const env = { ...baseEnv };
-  for (const key of ['BURROW_CONFIG', 'BURROW_RUNTIME_ROOT', 'BURROW_DATA_ROOT', 'BURROW_WORKSPACE_ROOT', 'BURROW_AGENT_WORKSPACE_ROOT', 'BURROW_AGENT_DATA_ROOT', 'BURROW_CACHE_ROOT', 'BURROW_ARCHIVE_ROOT', 'BURROW_SETTINGS_DB', 'BURROW_SETTINGS_KEY', 'TMPDIR', 'TMP', 'TEMP']) delete env[key];
+  for (const key of ['BURROW_CONFIG', 'BURROW_RUNTIME_ROOT', 'BURROW_DATA_ROOT', 'BURROW_WORKSPACE_ROOT', 'BURROW_AGENT_WORKSPACE_ROOT', 'BURROW_AGENT_DATA_ROOT', 'BURROW_CACHE_ROOT', 'BURROW_ARCHIVE_ROOT', 'BURROW_SETTINGS_KEY', 'TMPDIR', 'TMP', 'TEMP']) delete env[key];
   // Isolated settings stores still encrypt connection secrets. This fixed test-only
   // key never reaches a deployed runtime and avoids inheriting host credentials.
-  return { ...env, TMPDIR: runtime.tmp, TMP: runtime.tmp, TEMP: runtime.tmp, BURROW_RUNTIME_ROOT: runtime.root, BURROW_WORKSPACE_ROOT: runtime.workspace, BURROW_AGENT_WORKSPACE_ROOT: runtime.agentWorkspace, BURROW_CACHE_ROOT: runtime.cache, BURROW_TRACE_ISOLATION: '1', BURROW_SETTINGS_DB: runtime.settingsDb, BURROW_SETTINGS_KEY: Buffer.alloc(32, 7).toString('base64') };
+  return { ...env, TMPDIR: runtime.tmp, TMP: runtime.tmp, TEMP: runtime.tmp, BURROW_RUNTIME_ROOT: runtime.root, BURROW_WORKSPACE_ROOT: runtime.workspace, BURROW_AGENT_WORKSPACE_ROOT: runtime.agentWorkspace, BURROW_CACHE_ROOT: runtime.cache, BURROW_TRACE_ISOLATION: '1', BURROW_SETTINGS_KEY: Buffer.alloc(32, 7).toString('base64') };
 }
 
 export async function removeTestRuntime(runtime) {

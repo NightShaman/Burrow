@@ -1,7 +1,4 @@
 import path from 'node:path';
-import { ModelSettingsStore, settingsKeyFromEnvironment } from './model-settings-store.mjs';
-import { getSettingsMeta, openSettingsDatabase } from './settings-database.mjs';
-import { getUiAuthSecret } from './ui-auth-secrets.mjs';
 import { normalizeContextCompressionConfig } from './context-compression.mjs';
 import { anthropicSupportsTemperature, isAnthropicMessagesConnection } from './anthropic-model-capabilities.mjs';
 
@@ -52,7 +49,7 @@ export function normalizeModelReasoningEffort(value) {
 }
 
 /**
- * Configuration ownership is SQLite plus service environment. This retained
+ * Configuration ownership is PostgreSQL plus service environment. This retained
  * loader is intentionally an inert compatibility seam: it never reads or
  * writes burrow.json (or any other application JSON configuration).
  */
@@ -71,30 +68,9 @@ function modelSupportsTemperature({ provider = '', api = '', model = '', declare
   if (isAnthropicMessagesConnection({ provider, apiType: api })) return anthropicSupportsTemperature(model);
   return true;
 }
-function explicitSettingsKey(args = {}) {
-  const supplied = args.settings_key ?? args.settingsKey;
-  if (supplied === undefined || supplied === null || supplied === '') return undefined;
-  if (Buffer.isBuffer(supplied)) return supplied;
-  return settingsKeyFromEnvironment({ BURROW_SETTINGS_KEY: supplied });
-}
-async function resolveSqliteModel(connectionId, modelId, args = {}) {
-  const store = new ModelSettingsStore({ databasePath: args.settings_db ?? args.settingsDb, key: explicitSettingsKey(args) });
-  try {
-    const connection = store.get(connectionId);
-    if (!connection) throw new Error('model_connection_not_found');
-    const model = selectedModels(connection).find((item) => item.id === modelId);
-    if (!model) throw new Error('model_not_enabled_for_connection');
-    const auth = await store.resolveAuth(connection.id, { fetchImpl: args.fetchImpl ?? fetch });
-    return { connection, model, auth };
-  } finally { store.close(); }
-}
-
-// Runtime servers may inject the async PostgreSQL stores. Once a model store is
-// supplied, never open SQLite as a compatibility fallback: an empty injected
-// store is authoritative and must report its own absence/errors.
 async function resolveInjectedModel(connectionId, modelId, args = {}) {
   const store = args.modelSettings || args.stores?.models || args.runtimeStores?.models;
-  if (!store) return null;
+  if (!store) throw new Error('model_settings_store_required');
   const connection = await store.get(connectionId);
   if (!connection) throw new Error('model_connection_not_found');
   const model = selectedModels(connection).find((item) => item.id === modelId);
@@ -116,22 +92,17 @@ async function resolveModelSelection(args, agentId) {
 
 /** Models are selected only by an enabled authoritative connection/model pair. */
 export async function resolveModelConfig(args = {}) {
+  if (!hasInjectedModelStore(args)) throw new Error('model_settings_store_required');
   let connectionId = text(args.model_connection_id ?? args.modelConnectionId);
   let modelId = text(args.model ?? args.model_id ?? args.modelId);
   let agentSelection = null;
   if (text(args.agent_id ?? args.agentId)) {
-    if (hasInjectedModelStore(args)) agentSelection = await resolveModelSelection(args, text(args.agent_id ?? args.agentId));
-    else if (process.env.BURROW_SETTINGS_KEY || explicitSettingsKey(args)) {
-      const store = new ModelSettingsStore({ databasePath: args.settings_db ?? args.settingsDb, key: explicitSettingsKey(args) });
-      try { agentSelection = store.modelSelection(text(args.agent_id ?? args.agentId)); } finally { store.close(); }
-    }
+    agentSelection = await resolveModelSelection(args, text(args.agent_id ?? args.agentId));
     connectionId = connectionId || agentSelection?.connectionId || '';
     modelId = modelId || agentSelection?.model || '';
   }
   if (!connectionId || !modelId) return null;
-  const { connection, model, auth } = hasInjectedModelStore(args)
-    ? await resolveInjectedModel(connectionId, modelId, args)
-    : await resolveSqliteModel(connectionId, modelId, args);
+  const { connection, model, auth } = await resolveInjectedModel(connectionId, modelId, args);
   const reasoningEffort = normalizeModelReasoningEffort(args.model_reasoning_effort ?? args.reasoning_effort ?? agentSelection?.reasoningEffort ?? 'off');
   const suppliedTemperature = args.temperature ?? args.model_temperature;
   const temperature = suppliedTemperature === undefined || suppliedTemperature === null || suppliedTemperature === '' ? (agentSelection?.temperature ?? 0.2) : Number(suppliedTemperature);
@@ -168,11 +139,11 @@ export async function resolveModelConfig(args = {}) {
     connectionId: connection.id,
     availableModels: selectedModels(connection),
     selectedModel: model.id,
-    // runtime_id remains only in older SQLite rows; all model connections use the direct API runtime.
+    // All model connections use the direct API runtime.
     runtimeId: 'direct-api',
     selectionSource: agentSelection ? 'agent-default' : 'turn-override',
   };
-  Object.defineProperty(result, 'resolveChildModel', { enumerable: false, value: async (childId) => resolveModelConfig({ modelConnectionId: connection.id, model: childId }) });
+  Object.defineProperty(result, 'resolveChildModel', { enumerable: false, value: async (childId) => resolveModelConfig({ ...args, model_connection_id: connection.id, modelConnectionId: connection.id, model: childId }) });
   return result;
 }
 export function redactModelConfig(modelConfig) {
@@ -186,30 +157,11 @@ function splitCsv(value) {
   return text(value).split(',').map((item) => item.trim()).filter(Boolean);
 }
 
-function readUiAuthSettings(databasePath) {
-  if (!databasePath) return {};
-  let db = null;
-  try {
-    db = openSettingsDatabase({ databasePath });
-    const value = getSettingsMeta(db, 'ui_auth');
-    const settings = value && typeof value === 'object' ? value : {};
-    if (settings.oidc && typeof settings.oidc === 'object' && !settings.oidc.clientSecret) {
-      try { settings.oidc = { ...settings.oidc, clientSecret: getUiAuthSecret(db) }; } catch {}
-    }
-    return settings;
-  } catch {
-    return {};
-  } finally {
-    try { db?.close(); } catch {}
-  }
-}
-
 export async function resolveUiConfig(args = {}) {
   const metadata = args.settingsMetadata || args.stores?.metadata || args.runtimeStores?.metadata;
   const secrets = args.uiAuthSecrets || args.stores?.uiAuthSecrets || args.runtimeStores?.uiAuthSecrets;
-  const settings = metadata
-    ? { ...((await metadata.get('ui_auth')) || {}) }
-    : readUiAuthSettings(args.settings_database_path ?? args.settingsDatabasePath ?? env('BURROW_SETTINGS_DB'));
+  if (!metadata?.get) throw new Error('ui_auth_metadata_store_required');
+  const settings = { ...((await metadata.get('ui_auth')) || {}) };
   if (settings.oidc && typeof settings.oidc === 'object' && !settings.oidc.clientSecret && secrets) {
     settings.oidc = { ...settings.oidc, clientSecret: await secrets.get() };
   }
@@ -222,7 +174,7 @@ export async function resolveUiConfig(args = {}) {
     port: args.ui_port ?? env('BURROW_UI_PORT', '42817'),
     authMode: mode,
     authEnabled: mode !== 'none',
-    authSource: args.ui_auth_mode || envMode ? 'environment' : (settings.mode ? (metadata ? 'database' : 'sqlite') : 'default'),
+    authSource: args.ui_auth_mode || envMode ? 'environment' : (settings.mode ? 'database' : 'default'),
     trustedProxy: {
       allowedProxies: splitCsv(args.ui_auth_allowed_proxies ?? env('BURROW_UI_AUTH_ALLOWED_PROXIES') ?? settings.trustedProxy?.allowedProxies?.join?.(',') ?? settings.trustedProxy?.allowedProxy ?? '127.0.0.1,::1'),
       userHeader: text(args.ui_auth_user_header ?? env('BURROW_UI_AUTH_USER_HEADER') ?? settings.trustedProxy?.userHeader ?? 'x-forwarded-user').toLowerCase() || 'x-forwarded-user',
@@ -268,8 +220,7 @@ export function resolveRuntimeStateConfig({ rootDir, args = {} } = {}) {
   const dataRoot = agentWorkspaceRoot;
   const cacheRoot = absolute(args.cache_root ?? env('BURROW_CACHE_ROOT'), path.join(runtimeRoot, 'cache'));
   const archiveRoot = absolute(args.archive_root ?? env('BURROW_ARCHIVE_ROOT'), path.join(runtimeRoot, 'archive'));
-  const settingsDatabasePath = absolute(args.settings_database_path ?? env('BURROW_SETTINGS_DB'), path.join(runtimeRoot, 'config', 'settings.sqlite'));
-  return { runtimeRoot, sourceRoot, workspaceRoot, workspaceRootSource: 'environment', agentId, agentWorkspaceRoot, agentWorkspaceRootSource: 'environment', agentDataRoot, agentDataRootSource: 'workspace', filesystemBoundaries: [], sourceCopyRoot: sourceRoot, skillsRoot: absolute(args.skills_root ?? env('BURROW_SKILLS_ROOT'), path.join(agentWorkspaceRoot, 'skills')), skillsRootSource: 'environment', dataRoot, dataRootSource: 'workspace', cacheRoot, cacheRootSource: 'environment', archiveRoot, archiveRootSource: 'environment', settingsDatabasePath };
+  return { runtimeRoot, sourceRoot, workspaceRoot, workspaceRootSource: 'environment', agentId, agentWorkspaceRoot, agentWorkspaceRootSource: 'environment', agentDataRoot, agentDataRootSource: 'workspace', filesystemBoundaries: [], sourceCopyRoot: sourceRoot, skillsRoot: absolute(args.skills_root ?? env('BURROW_SKILLS_ROOT'), path.join(agentWorkspaceRoot, 'skills')), skillsRootSource: 'environment', dataRoot, dataRootSource: 'workspace', cacheRoot, cacheRootSource: 'environment', archiveRoot, archiveRootSource: 'environment' };
 }
 function safe(value, fallback) { return text(value || fallback).replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 120) || fallback; }
 export function resolveRuntimeTracePath({ cacheRoot, workspaceRoot, agentId = DEFAULT_AGENT_ID, sessionId = 'default', runId = null, testIsolation = null } = {}) { const resolvedCacheRoot = path.resolve(cacheRoot); const tracedWorkspace = safe(path.basename(path.resolve(workspaceRoot || DEFAULT_WORKSPACE_ID)), DEFAULT_WORKSPACE_ID); const parts = [resolvedCacheRoot, testIsolation ? 'test-traces' : 'traces', tracedWorkspace, safe(agentId, DEFAULT_AGENT_ID), safe(sessionId, 'default')]; if (runId) parts.push(safe(runId, 'run')); return path.join(...parts); }

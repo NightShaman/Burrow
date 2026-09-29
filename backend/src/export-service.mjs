@@ -9,7 +9,7 @@ const EXPORT_FORMAT = 'burrow-export/v1';
 const PASSWORD_MIN_LENGTH = 12;
 
 export const EXPORT_CATEGORIES = Object.freeze([
-  { id: 'agents', label: 'Agents and profiles', containsSecrets: false, description: 'Agent registry, complete SQLite profile documents, per-agent Dream settings, and operator identity/avatar.' },
+  { id: 'agents', label: 'Agents and profiles', containsSecrets: false, description: 'Agent registry, complete PostgreSQL profile documents, per-agent Dream settings, and operator identity/avatar.' },
   { id: 'settings', label: 'Settings', containsSecrets: false, description: 'Portable non-secret runtime settings and preferences.' },
   { id: 'model-connections', label: 'Model connections', containsSecrets: true, description: 'Connection metadata and encrypted provider credentials.' },
   { id: 'mcp-connections', label: 'MCP connections', containsSecrets: true, description: 'MCP connection metadata, API keys, and per-agent tool grants.' },

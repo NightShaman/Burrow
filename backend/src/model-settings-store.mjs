@@ -1,7 +1,5 @@
 import { randomBytes, randomUUID, createCipheriv, createDecipheriv } from 'node:crypto';
-import { openSettingsDatabase, settingsDatabasePath, getSettingsMeta, setSettingsMeta } from './settings-database.mjs';
 import { openaiOAuthIdentity, refreshOpenAiOAuth } from './openai-oauth-login.mjs';
-import { __agentRegistry } from './agent-registry.mjs';
 import { anthropicSupportsTemperature, isAnthropicMessagesConnection } from './anthropic-model-capabilities.mjs';
 
 const AAD_PREFIX = 'burrow-model-secret-v1';
@@ -35,29 +33,13 @@ function codexClientVersionCacheFresh(cache = {}, nowMs = Date.now(), ttlMs = CO
   const checked = Date.parse(cache.lastCheckedAt || '');
   return Number.isFinite(checked) && checked > 0 && nowMs - checked < Math.max(1, Number(ttlMs) || CODEX_CLIENT_VERSION_CACHE_TTL_MS);
 }
-function readCodexClientVersionCache(storeOrDb) {
-  const db = storeOrDb?.db || storeOrDb;
-  return db ? safeCacheRecord(getSettingsMeta(db, CODEX_CLIENT_VERSION_META_KEY)) : {};
-}
-function writeCodexClientVersionCache(storeOrDb, patch = {}, { nowMs = Date.now() } = {}) {
-  const db = storeOrDb?.db || storeOrDb;
-  if (!db) return safeCacheRecord(patch);
-  const previous = readCodexClientVersionCache(db);
-  const next = { ...previous, ...patch, updatedAt: new Date(nowMs).toISOString() };
-  setSettingsMeta(db, CODEX_CLIENT_VERSION_META_KEY, next, { clock: () => new Date(nowMs).toISOString() });
-  return next;
-}
 async function readCodexClientVersionCacheAsync(target) {
-  return typeof target?.cacheGet === 'function' ? safeCacheRecord(await target.cacheGet(CODEX_CLIENT_VERSION_META_KEY)) : readCodexClientVersionCache(target);
+  return cacheGetAsync(target, CODEX_CLIENT_VERSION_META_KEY);
 }
 async function writeCodexClientVersionCacheAsync(target, patch = {}, { nowMs = Date.now() } = {}) {
-  if (typeof target?.cacheSet === 'function') {
-    const previous = await readCodexClientVersionCacheAsync(target);
-    const next = { ...previous, ...patch, updatedAt: new Date(nowMs).toISOString() };
-    await target.cacheSet(CODEX_CLIENT_VERSION_META_KEY, next, new Date(nowMs).toISOString());
-    return next;
-  }
-  return writeCodexClientVersionCache(target, patch, { nowMs });
+  const previous = await readCodexClientVersionCacheAsync(target);
+  const next = { ...previous, ...patch, updatedAt: new Date(nowMs).toISOString() };
+  return cacheSetAsync(target, CODEX_CLIENT_VERSION_META_KEY, next, nowMs);
 }
 function codexClientVersionFromCache(cache = {}) {
   return parseSemver(cache.currentVersion)?.raw || parseSemver(cache.lastGoodCatalogVersion)?.raw || CODEX_CLIENT_VERSION_FLOOR;
@@ -82,7 +64,6 @@ export const MODELS_DEV_CATALOG_CACHE_TTL_MS = 24 * 60 * 60_000;
 
 const oauthRefreshes = new Map();
 
-export { settingsDatabasePath } from './settings-database.mjs';
 
 export function settingsKeyFromEnvironment(env = process.env) {
   const encoded = normalize(env.BURROW_SETTINGS_KEY);
@@ -407,230 +388,9 @@ export async function refreshAnthropicOauth(auth = {}, { fetchImpl = fetch, nowM
   throw lastError || new Error('model_auth_refresh_failed');
 }
 
+// Compatibility export only; persistence requires the PostgreSQL store.
 export class ModelSettingsStore {
-  constructor({ databasePath, key, bootstrapSampleIdentities = process.env.BURROW_BOOTSTRAP_SAMPLE_IDENTITIES } = {}) {
-    this.databasePath = databasePath || settingsDatabasePath();
-    this.key = key || settingsKeyFromEnvironment();
-    this.bootstrapSampleIdentities = __agentRegistry.bootstrapSampleIdentitiesEnabled(bootstrapSampleIdentities);
-    this.db = openSettingsDatabase({ databasePath: this.databasePath });
-  }
-
-  close() { this.db.close(); }
-
-  connectionSelectSql(where = '') {
-    return `SELECT c.*, legacy.id AS secret_id, auth.id AS auth_secret_id, meta.value_json AS auth_preview_json
-      FROM model_connections c
-      LEFT JOIN model_connection_secrets legacy ON legacy.connection_id = c.id AND legacy.name = '${LEGACY_API_KEY_SECRET_NAME}'
-      LEFT JOIN model_connection_secrets auth ON auth.connection_id = c.id AND auth.name = '${AUTH_SECRET_NAME}'
-      LEFT JOIN settings_meta meta ON meta.key = 'model_auth_preview:' || c.id
-      ${where}`;
-  }
-
-  list() {
-    return this.db.prepare(`${this.connectionSelectSql()} ORDER BY c.updated_at DESC`).all().map(publicConnection);
-  }
-
-  get(id) {
-    return publicConnection(this.db.prepare(this.connectionSelectSql('WHERE c.id = ?')).get(id));
-  }
-
-  secret(id, name) {
-    const row = this.db.prepare(`SELECT * FROM model_connection_secrets WHERE connection_id = ? AND name = ?`).get(id, name);
-    return row ? decrypt(this.key, row) : null;
-  }
-
-  apiKey(id) { return this.secret(id, LEGACY_API_KEY_SECRET_NAME); }
-
-  auth(id) {
-    const structured = this.secret(id, AUTH_SECRET_NAME);
-    if (structured) return parseJson(structured, null);
-    const apiKey = this.apiKey(id);
-    return apiKey ? { type: 'api_key', provider: this.get(id)?.provider || null, source: 'legacy-api-key', apiKey } : null;
-  }
-
-  saveSecret(connectionId, name, value, timestamp = now()) {
-    const old = this.db.prepare(`SELECT id FROM model_connection_secrets WHERE connection_id=? AND name=?`).get(connectionId, name);
-    const secretId = old?.id || randomUUID();
-    const sealed = encrypt(this.key, secretId, connectionId, name, value);
-    if (old) this.db.prepare(`UPDATE model_connection_secrets SET ciphertext=?, nonce=?, auth_tag=?, updated_at=? WHERE id=?`).run(sealed.ciphertext, sealed.nonce, sealed.authTag, timestamp, secretId);
-    else this.db.prepare(`INSERT INTO model_connection_secrets (id, connection_id, name, ciphertext, nonce, auth_tag, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(secretId, connectionId, name, sealed.ciphertext, sealed.nonce, sealed.authTag, timestamp, timestamp);
-    return secretId;
-  }
-
-  hasAuth(id) { return Boolean(this.auth(id)); }
-
-  save(input = {}) {
-    let connection = assertConnection(input);
-    const id = normalize(input.id) || randomUUID();
-    const existing = this.db.prepare('SELECT id FROM model_connections WHERE id = ?').get(id);
-    const existingAuth = existing ? this.auth(id) : null;
-    const suppliedAuth = normalizeAuth(input, connection.provider);
-    const auth = suppliedAuth || existingAuth;
-    connection = canonicalizeOauthConnection(connection, auth);
-    const duplicateLabel = this.db.prepare('SELECT id FROM model_connections WHERE lower(provider) = lower(?) AND id <> ?').get(connection.provider, id);
-    if (duplicateLabel) throw new Error('provider_label_duplicate');
-    const timestamp = now();
-    const existingModels = existing
-      ? normalizeModels(parseJson(this.db.prepare('SELECT models_json FROM model_connections WHERE id = ?').get(id)?.models_json, []), { provider: connection.provider, apiType: connection.apiType })
-      : [];
-    const submittedModels = normalizeModels(input.models, { provider: connection.provider, apiType: connection.apiType });
-    // A connection edit commonly carries only model IDs/selection toggles. Keep
-    // provider-discovered capabilities (especially contextWindow) unless a
-    // fresh discovery explicitly supplies replacement metadata.
-    const existingById = new Map(existingModels.map((model) => [model.id, model]));
-    const models = submittedModels.map((model) => {
-      const prior = existingById.get(model.id);
-      if (!prior || model.manual || prior.manual) return model;
-      return normalizeModels([{ ...prior, ...model }], { provider: connection.provider, apiType: connection.apiType })[0];
-    });
-    const acceptedInput = connection.acceptedInput;
-    const save = () => {
-      this.db.exec('BEGIN IMMEDIATE');
-      try {
-      if (existing) {
-        this.db.prepare(`UPDATE model_connections SET provider=?, api_type=?, base_url=?, accepted_input_json=?, models_json=?, updated_at=? WHERE id=?`)
-          .run(connection.provider, connection.apiType, connection.baseUrl, stringifyJson(acceptedInput), stringifyJson(models), timestamp, id);
-      } else {
-        this.db.prepare(`INSERT INTO model_connections (id, provider, api_type, base_url, accepted_input_json, models_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run(id, connection.provider, connection.apiType, connection.baseUrl, stringifyJson(acceptedInput), stringifyJson(models), timestamp, timestamp);
-      }
-      if (suppliedAuth) {
-        if (auth.type === 'api_key' && input.auth === undefined) {
-          this.saveSecret(id, LEGACY_API_KEY_SECRET_NAME, auth.apiKey, timestamp);
-          // An explicit key replaces effective auth, including structured auth
-          // that would otherwise shadow this legacy Settings input.
-          this.db.prepare('DELETE FROM model_connection_secrets WHERE connection_id = ? AND name = ?').run(id, AUTH_SECRET_NAME);
-          this.db.prepare('DELETE FROM settings_meta WHERE key = ?').run(`model_auth_preview:${id}`);
-        }
-        else {
-          this.saveSecret(id, AUTH_SECRET_NAME, JSON.stringify(auth), timestamp);
-          this.db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?)
-            ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`)
-            .run(`model_auth_preview:${id}`, JSON.stringify(secretPreview(auth, connection.provider)), timestamp);
-        }
-      }
-        this.db.exec('COMMIT');
-      } catch (error) {
-        try { this.db.exec('ROLLBACK'); } catch {}
-        throw error;
-      }
-    };
-    save();
-    return this.get(id);
-  }
-
-  remove(id) {
-    const connectionId = normalize(id);
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      this.db.prepare('DELETE FROM agent_model_selections WHERE connection_id = ?').run(connectionId);
-      const removed = this.db.prepare('DELETE FROM model_connections WHERE id = ?').run(connectionId).changes > 0;
-      this.db.exec('COMMIT');
-      return removed;
-    } catch (error) {
-      try { this.db.exec('ROLLBACK'); } catch {}
-      throw error;
-    }
-  }
-
-  modelSelection(agentId) {
-    const agent = normalize(agentId);
-    if (!agent) throw new Error('agent_id_invalid');
-    const row = this.db.prepare('SELECT agent_id, connection_id, model_id, reasoning_effort, temperature, updated_at FROM agent_model_selections WHERE agent_id=?').get(agent);
-    if (!row) return null;
-    return { agentId: row.agent_id, connectionId: row.connection_id, model: row.model_id, reasoningEffort: row.reasoning_effort, temperature: Number(row.temperature), updatedAt: row.updated_at };
-  }
-
-  persistAuth(connectionId, auth, timestamp = now()) {
-    const connection = this.get(connectionId);
-    if (connection && auth?.type === 'oauth' && openAiLikeProvider(auth.provider || connection.provider) && isChatGptBackendUrl(connection.baseUrl) && connection.apiType !== 'openai-responses') {
-      this.db.prepare('UPDATE model_connections SET api_type=?, updated_at=? WHERE id=?').run('openai-responses', timestamp, connectionId);
-    }
-    this.saveSecret(connectionId, AUTH_SECRET_NAME, JSON.stringify(auth), timestamp);
-    this.db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?)
-      ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`)
-      .run(`model_auth_preview:${connectionId}`, JSON.stringify(secretPreview(auth, this.get(connectionId)?.provider || auth.provider)), timestamp);
-    return auth;
-  }
-
-  async resolveAuth(id, { fetchImpl = fetch, nowMs = Date.now() } = {}) {
-    const connection = this.get(id);
-    if (!connection) throw new Error('model_connection_not_found');
-    let auth = this.auth(connection.id);
-    if (!auth) throw new Error('model_connection_auth_required');
-    if (auth.type === 'oauth' && !isOauthFresh(auth, nowMs)) {
-      const refreshKey = `${connection.id}:${auth.refreshToken || ''}`;
-      let refresh = oauthRefreshes.get(refreshKey);
-      if (!refresh) {
-        refresh = (async () => {
-          const provider = auth.provider || connection.provider;
-          let refreshed;
-          if (openAiLikeProvider(provider)) refreshed = await refreshOpenAiOAuth(auth, { fetchImpl, nowMs });
-          else if (anthropicLikeProvider(provider)) refreshed = await refreshAnthropicOauth(auth, { fetchImpl, nowMs });
-          else throw new Error('model_auth_refresh_provider_unsupported');
-          return this.persistAuth(connection.id, refreshed);
-        })();
-        oauthRefreshes.set(refreshKey, refresh);
-      }
-      try { auth = await refresh; }
-      finally { if (oauthRefreshes.get(refreshKey) === refresh) oauthRefreshes.delete(refreshKey); }
-    }
-    const token = authToken(auth);
-    if (!token) throw new Error('model_connection_auth_required');
-    return {
-      type: auth.type || 'api_key',
-      provider: auth.provider || connection.provider,
-      source: auth.source || null,
-      token,
-      expiresAt: auth.expiresAt || null,
-    };
-  }
-
-  saveModelSelection({ agentId, connectionId, model, reasoningEffort = 'off', temperature = undefined } = {}) {
-    const agent = normalize(agentId);
-    const connection = this.get(normalize(connectionId));
-    const modelId = normalize(model);
-    if (!agent) throw new Error('agent_id_invalid');
-    if (!connection) throw new Error('model_connection_not_found');
-    const enabled = connection.models.find((item) => item.id === modelId && item.selected !== false);
-    if (!enabled) throw new Error('model_not_enabled_for_connection');
-    if (!this.hasAuth(connection.id)) throw new Error('model_connection_auth_required');
-    const effort = normalizeReasoningEffort(reasoningEffort);
-    const priorSelection = this.modelSelection(agent);
-    const selectedTemperature = normalizeTemperature(temperature, priorSelection?.temperature ?? 0.2);
-    if (enabled.reasoningEfforts?.length && effort !== 'off' && !enabled.reasoningEfforts.includes(effort)) throw new Error('model_reasoning_effort_not_supported');
-    const timestamp = now();
-    this.db.prepare(`INSERT INTO agent_model_selections (agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at) VALUES (?,?,?,?,?,?)
-      ON CONFLICT(agent_id) DO UPDATE SET connection_id=excluded.connection_id, model_id=excluded.model_id, reasoning_effort=excluded.reasoning_effort, temperature=excluded.temperature, updated_at=excluded.updated_at`)
-      .run(agent, connection.id, modelId, effort, selectedTemperature, timestamp);
-    return this.modelSelection(agent);
-  }
-
-  identities() {
-    const agents = this.db.prepare(`SELECT id, name, avatar, updated_at AS updatedAt FROM chat_identities WHERE kind='agent' ORDER BY CASE id WHEN 'hatchet' THEN 0 ELSE 1 END, id`).all();
-    const operator = this.db.prepare(`SELECT id, name, avatar, updated_at AS updatedAt FROM chat_identities WHERE kind='operator' AND id='default'`).get()
-      || { id: 'default', name: this.defaultIdentityName('operator'), avatar: '', updatedAt: null };
-    if (this.bootstrapSampleIdentities && !agents.some((agent) => agent.id === 'hatchet')) agents.unshift({ id: 'hatchet', name: 'Hatchet', avatar: '', updatedAt: null });
-    return { operator, agents };
-  }
-
-  defaultIdentityName(kind) {
-    if (this.bootstrapSampleIdentities) return kind === 'operator' ? 'Rob' : 'Hatchet';
-    return '';
-  }
-
-  saveIdentity(input = {}) {
-    const identity = assertIdentity(input);
-    const existing = this.db.prepare(`SELECT name, avatar FROM chat_identities WHERE kind=? AND id=?`).get(identity.kind, identity.id);
-    const name = identity.name === undefined ? (existing?.name || this.defaultIdentityName(identity.kind)) : identity.name;
-    const avatar = identity.avatar === undefined ? (existing?.avatar || '') : identity.avatar;
-    const timestamp = now();
-    this.db.prepare(`INSERT INTO chat_identities (kind, id, name, avatar, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(kind, id) DO UPDATE SET name=excluded.name, avatar=excluded.avatar, updated_at=excluded.updated_at`)
-      .run(identity.kind, identity.id, name, avatar, timestamp, timestamp);
-    return this.identities();
-  }
+  constructor() { throw new Error('postgres_required'); }
 }
 
 function modelDiscoveryUrl({ baseUrl, apiType } = {}) {
@@ -668,8 +428,8 @@ async function fetchCodexVersionFromUrl(url, { fetchImpl = fetch, signal = undef
   return parsed.raw;
 }
 
-export async function refreshCodexClientVersionCache({ store, db, fetchImpl = fetch, signal = undefined, nowMs = Date.now() } = {}) {
-  const target = store || db;
+export async function refreshCodexClientVersionCache({ store, fetchImpl = fetch, signal = undefined, nowMs = Date.now() } = {}) {
+  const target = store;
   const attempts = [
     ['npm', NPM_CODEX_LATEST_URL],
     ['github', GITHUB_CODEX_LATEST_URL],
@@ -684,11 +444,11 @@ export async function refreshCodexClientVersionCache({ store, db, fetchImpl = fe
   return writeCodexClientVersionCacheAsync(target, { lastCheckedAt: new Date(nowMs).toISOString(), lastError: String(lastError?.message || lastError || 'codex_client_version_refresh_failed') }, { nowMs });
 }
 
-export async function resolveCodexClientVersion({ store, db, nowMs = Date.now(), refresh = false, fetchImpl = fetch, signal = undefined } = {}) {
-  const target = store || db;
+export async function resolveCodexClientVersion({ store, nowMs = Date.now(), refresh = false, fetchImpl = fetch, signal = undefined } = {}) {
+  const target = store;
   const cache = await readCodexClientVersionCacheAsync(target);
   if (!refresh || codexClientVersionCacheFresh(cache, nowMs)) return { version: codexClientVersionFromCache(cache), cache, refreshed: false };
-  const next = await refreshCodexClientVersionCache({ store, db, fetchImpl, signal, nowMs });
+  const next = await refreshCodexClientVersionCache({ store, fetchImpl, signal, nowMs });
   return { version: codexClientVersionFromCache(next), cache: next, refreshed: true };
 }
 
@@ -745,19 +505,17 @@ function enrichFromModelsDev(models, catalog, { provider, snapshotAt } = {}) {
 
 async function cacheGetAsync(target, key) {
   if (!target) return {};
-  if (typeof target.cacheGet === 'function') return safeCacheRecord(await target.cacheGet(key));
-  const db = target?.db || target;
-  return safeCacheRecord(getSettingsMeta(db, key));
+  if (typeof target.cacheGet !== 'function') throw new Error('postgres_required');
+  return safeCacheRecord(await target.cacheGet(key));
 }
 async function cacheSetAsync(target, key, value, nowMs) {
   if (!target) return value;
-  if (typeof target.cacheSet === 'function') { await target.cacheSet(key, value, new Date(nowMs).toISOString()); return value; }
-  const db = target?.db || target;
-  setSettingsMeta(db, key, value, { clock: () => new Date(nowMs).toISOString() });
+  if (typeof target.cacheSet !== 'function') throw new Error('postgres_required');
+  await target.cacheSet(key, value, new Date(nowMs).toISOString());
   return value;
 }
-async function modelsDevSnapshot({ store, db, fetchImpl = fetch, signal, nowMs = Date.now(), catalogUrl = MODELS_DEV_CATALOG_URL, ttlMs = MODELS_DEV_CATALOG_CACHE_TTL_MS } = {}) {
-  const target = store || db;
+async function modelsDevSnapshot({ store, fetchImpl = fetch, signal, nowMs = Date.now(), catalogUrl = MODELS_DEV_CATALOG_URL, ttlMs = MODELS_DEV_CATALOG_CACHE_TTL_MS } = {}) {
+  const target = store;
   const cached = safeCacheRecord(await cacheGetAsync(target, MODELS_DEV_CATALOG_META_KEY));
   const checked = Date.parse(cached.lastCheckedAt || '');
   if (cached.catalog && Number.isFinite(checked) && nowMs - checked < Math.max(1, Number(ttlMs) || MODELS_DEV_CATALOG_CACHE_TTL_MS)) return cached;
@@ -795,15 +553,15 @@ function modelsDevProviderIdentity({ provider = '', apiType = '', baseUrl = '', 
   return normalize(provider);
 }
 
-export async function discoverModels({ baseUrl, provider = '', useModelsDev = false, apiType = 'openai-responses', apiKey, auth = {}, fetchImpl = fetch, catalogFetchImpl = fetchImpl, catalogUrl = MODELS_DEV_CATALOG_URL, catalogTtlMs = MODELS_DEV_CATALOG_CACHE_TTL_MS, signal = undefined, store = null, db = null, codexClientVersion = undefined, nowMs = Date.now() } = {}) {
+export async function discoverModels({ baseUrl, provider = '', useModelsDev = false, apiType = 'openai-responses', apiKey, auth = {}, fetchImpl = fetch, catalogFetchImpl = fetchImpl, catalogUrl = MODELS_DEV_CATALOG_URL, catalogTtlMs = MODELS_DEV_CATALOG_CACHE_TTL_MS, signal = undefined, store = null, codexClientVersion = undefined, nowMs = Date.now() } = {}) {
   const catalogProvider = modelsDevProviderIdentity({ provider, apiType, baseUrl, auth });
-  const catalogSnapshot = useModelsDev && catalogProvider ? await modelsDevSnapshot({ store, db, fetchImpl: catalogFetchImpl, signal, nowMs, catalogUrl, ttlMs: catalogTtlMs }) : null;
+  const catalogSnapshot = useModelsDev && catalogProvider ? await modelsDevSnapshot({ store, fetchImpl: catalogFetchImpl, signal, nowMs, catalogUrl, ttlMs: catalogTtlMs }) : null;
   const enrich = (models) => catalogSnapshot?.catalog
     ? enrichFromModelsDev(models, catalogSnapshot.catalog, { provider: catalogProvider, snapshotAt: catalogSnapshot.snapshotAt })
     : models;
   if (isChatGptBackendUrl(baseUrl) && openAiLikeProvider(auth.provider || 'OpenAI')) {
-    const target = store || db;
-    const initial = parseSemver(codexClientVersion)?.raw || (await resolveCodexClientVersion({ store, db, nowMs, refresh: false })).version;
+    const target = store;
+    const initial = parseSemver(codexClientVersion)?.raw || (await resolveCodexClientVersion({ store, nowMs, refresh: false })).version;
     const headers = chatGptCodexCatalogHeaders({ apiKey, auth });
     const versionCache = await readCodexClientVersionCacheAsync(target);
     const versions = [...new Set([initial, versionCache.lastGoodCatalogVersion, CODEX_CLIENT_VERSION_FLOOR].map((value) => parseSemver(value)?.raw).filter(Boolean))];

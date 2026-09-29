@@ -1,4 +1,3 @@
-import { getSettingsMeta, openSettingsDatabase, setSettingsMeta, settingsDatabasePath } from './settings-database.mjs';
 
 export const RETENTION_SETTINGS_META_KEY = 'retention_policy';
 export const RETENTION_STATE_META_KEY = 'retention_policy_state';
@@ -24,37 +23,24 @@ export function normalizeRetentionPolicy(input = {}, current = DEFAULT_RETENTION
   return { version: 1, enabled, traceMaxAgeDays, traceMaxBytes, intervalMinutes };
 }
 
-export function readRetentionPolicy({ databasePath = null, store = null } = {}) {
-  if (store) return store.readPolicy();
-  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  try { return normalizeRetentionPolicy(getSettingsMeta(db, RETENTION_SETTINGS_META_KEY) || {}, DEFAULT_RETENTION_POLICY); }
-  catch { return { ...DEFAULT_RETENTION_POLICY }; }
-  finally { db.close(); }
+export function readRetentionPolicy({ store = null } = {}) {
+  if (!store) throw new Error('postgres_required');
+  return store.readPolicy();
 }
 
-export function saveRetentionPolicy(input = {}, { databasePath = null, store = null } = {}) {
-  if (store) return store.savePolicy(input);
-  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  try {
-    const current = normalizeRetentionPolicy(getSettingsMeta(db, RETENTION_SETTINGS_META_KEY) || {}, DEFAULT_RETENTION_POLICY);
-    const policy = normalizeRetentionPolicy(input, current);
-    setSettingsMeta(db, RETENTION_SETTINGS_META_KEY, policy);
-    return policy;
-  } finally { db.close(); }
+export function saveRetentionPolicy(input = {}, { store = null } = {}) {
+  if (!store) throw new Error('postgres_required');
+  return store.savePolicy(input);
 }
 
-export function readRetentionPolicyState({ databasePath = null, store = null } = {}) {
-  if (store) return store.readState();
-  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  try { return getSettingsMeta(db, RETENTION_STATE_META_KEY) || { lastRunAt: null, lastResult: null, lastError: null, nextRunAt: null }; }
-  finally { db.close(); }
+export function readRetentionPolicyState({ store = null } = {}) {
+  if (!store) throw new Error('postgres_required');
+  return store.readState();
 }
 
-export function writeRetentionPolicyState(state, { databasePath = null, store = null } = {}) {
-  if (store) return store.writeState(state);
-  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  try { return setSettingsMeta(db, RETENTION_STATE_META_KEY, state); }
-  finally { db.close(); }
+export function writeRetentionPolicyState(state, { store = null } = {}) {
+  if (!store) throw new Error('postgres_required');
+  return store.writeState(state);
 }
 
 export function retentionPolicySuccessState({ policy, result, at = new Date(), previous = null } = {}) {

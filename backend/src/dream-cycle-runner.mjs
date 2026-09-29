@@ -1,18 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { AgentProfileStore } from './agent-profile-store.mjs';
-import { AgentRegistryStore } from './agent-registry.mjs';
 import { resolveModelConfig } from './config.mjs';
-import { DreamDiaryStore } from './dream-diary-store.mjs';
-import { consolidateDreamMemory, consolidateDreamMemoryAsync } from './dream-memory-consolidator.mjs';
-import { DreamSettingsStore } from './dream-settings-store.mjs';
+import { consolidateDreamMemoryAsync } from './dream-memory-consolidator.mjs';
 import { inspectAssembledPromptBudget } from './prompt-budget.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
 import { nextCronOccurrence } from './scheduled-job-store.mjs';
 import { reconciledDreamCycleState } from './dream-cycle-state.mjs';
-import { openSettingsDatabase, settingsDatabasePath, withSettingsTransaction } from './settings-database.mjs';
-import { WorkingMemoryStore } from './working-memory-store.mjs';
 import { listSessionRecords, readChatMessages, isChatMessage } from './session-store.mjs';
-import { appendPreferenceSignal, appendPreferenceSignalAsync, applyPreferenceUpdate, applyPreferenceUpdateAsync, parsePreferenceAdjudication, preferenceAdjudicationPrompt, preferenceLearningState, preferenceLearningStateAsync, preferenceSignals, preferenceSignalsAsync, validatePreferenceAdjudication } from './preference-learning.mjs';
+import { appendPreferenceSignalAsync, applyPreferenceUpdateAsync, parsePreferenceAdjudication, preferenceAdjudicationPrompt, preferenceLearningStateAsync, preferenceSignalsAsync, validatePreferenceAdjudication } from './preference-learning.mjs';
 
 const PHASES = Object.freeze(['light', 'rem', 'deep']);
 const DEFAULT_LIMIT = 12;
@@ -358,104 +352,22 @@ async function extractPhaseCandidates({ phase, messages, generatedAt, modelAdapt
   return output;
 }
 
-async function adjudicatePreferences({ agentId, profileStore, databasePath, generatedAt, modelAdapter = null, modelConfig = null, traceLogger = null } = {}) {
-  const state = preferenceLearningState({ agentId, databasePath });
-  const signals = preferenceSignals({ agentId, databasePath, since: state.lastSignalAt, limit: 100 });
-  if (!signals.length) return { disposition: 'no_new_signals', signalCount: 0 };
-  let adapter = modelAdapter; let config = modelConfig;
-  try {
-    if (!adapter) {
-      config = config || await resolveModelConfig({ agentId, settingsDb: databasePath });
-      if (!config?.model) return { disposition: 'model_unavailable', signalCount: signals.length };
-      adapter = createModelAdapter({ config: { ...config, temperature: 0, reasoningEffort: 'off' } });
-    }
-    const current = profileStore.get(agentId, 'PREFERENCES')?.markdown || '# PREFERENCES';
-    const result = await adapter.complete({ messages: [{ role: 'user', content: preferenceAdjudicationPrompt({ preferences: current, signals }) }], traceLogger });
-    const proposal = parsePreferenceAdjudication(modelText(result));
-    const validation = validatePreferenceAdjudication({ proposal, signals });
-    if (!validation.ok || validation.disposition === 'noop') return { disposition: validation.ok ? 'noop' : 'rejected', signalCount: signals.length, reason: validation.reason || proposal?.reason || null };
-    const update = applyPreferenceUpdate({ agentId, markdown: proposal.markdown, sourceSignals: validation.signals, profileStore, databasePath, at: generatedAt });
-    return { disposition: update.applied ? 'updated' : update.reason, signalCount: signals.length, signalIds: validation.signals.map((signal) => signal.id) };
-  } catch (error) { return { disposition: 'failed', signalCount: signals.length, reason: String(error?.message || error) }; }
-}
-
-function phaseInput({ phase, items, limit = DEFAULT_LIMIT }) {
-  if (phase === 'light') return items.slice(0, Math.max(1, Math.min(24, Number(limit) || DEFAULT_LIMIT)));
-  if (phase === 'rem') return items.slice(0, Math.max(1, Math.min(18, Number(limit) || DEFAULT_LIMIT)));
-  return items.slice(0, Math.max(1, Math.min(12, Number(limit) || DEFAULT_LIMIT)));
-}
-
-
-
-export function ensureDreamCycleState({ agentId, settings, databasePath = null, at = now() } = {}) {
-  const id = text(agentId);
-  if (!id) throw new Error('dream_cycle_agent_required');
-  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  try {
-    const key = phaseState(id);
-    const current = parseJson(db.prepare('SELECT value_json FROM settings_meta WHERE key=?').get(key)?.value_json);
-    const state = reconciledDreamCycleState({ agentId: id, settings, current, at });
-    db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`).run(key, json(state), at);
-    return state;
-  } finally { db.close(); }
-}
-
-export function listDueDreamCycles({ databasePath = null, at = now() } = {}) {
-  const agents = new AgentRegistryStore({ databasePath });
-  const settingsStore = new DreamSettingsStore({ databasePath });
-  try {
-    return agents.list({ includeDisabled: false }).map((agent) => {
-      const settings = settingsStore.get(agent.id);
-      const state = ensureDreamCycleState({ agentId: agent.id, settings, databasePath, at });
-      return { agent, settings, state, due: settings.enabled === true && state.nextRunAt && state.nextRunAt <= at };
-    }).filter((item) => item.due);
-  } finally { settingsStore.close(); agents.close(); }
-}
-
-export function claimDueDreamCycle({ agentId, databasePath = null, at = now() } = {}) {
-  const id = text(agentId);
-  if (!id) throw new Error('dream_cycle_agent_required');
-  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  try {
-    return withSettingsTransaction(db, () => {
-      const configured = db.prepare('SELECT enabled,cron_expression,timezone FROM dream_settings WHERE agent_id=?').get(id);
-      const stored = parseJson(db.prepare('SELECT value_json FROM settings_meta WHERE key=?').get(phaseState(id))?.value_json);
-      if (!configured) return null;
-      const current = reconciledDreamCycleState({ agentId: id, settings: configured, current: stored, at });
-      if (json(current) !== json(stored)) {
-        db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`).run(phaseState(id), json(current), at);
-      }
-      const scheduledFor = current.nextRunAt;
-      if (!current.enabled || !scheduledFor || scheduledFor > at) return null;
-      const nextRunAt = nextCronOccurrence(current.cron, current.timezone, new Date(scheduledFor));
-      const runId = `dream-cycle-${randomUUID()}`;
-      const occurrence = { version: 1, agentId: id, runId, scheduledFor, claimedAt: at, nextRunAt };
-      try { db.prepare('INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?)').run(occurrenceState(id, scheduledFor), json(occurrence), at); }
-      catch (error) { if (/UNIQUE constraint failed/i.test(String(error?.message || error))) return null; throw error; }
-      const state = { ...current, version: 1, agentId: id, enabled: true, cron: current.cron, timezone: current.timezone, nextRunAt, updatedAt: at };
-      const changed = db.prepare('UPDATE settings_meta SET value_json=?, updated_at=? WHERE key=? AND value_json=?').run(json(state), at, phaseState(id), json(current));
-      if (changed.changes !== 1) throw new Error('dream_cycle_claim_lost');
-      writeReceipt(db, { version: 1, ok: null, status: 'running', runId, agentId: id, trigger: 'scheduled', scheduledFor, generatedAt: scheduledFor, startedAt: at, runtimeInstanceId: dreamRuntimeInstanceId, error: null }, at);
-      return { agentId: id, runId, scheduledFor, nextRunAt };
-    });
-  } finally { db.close(); }
-}
-
-export async function runDreamExtractionDiagnostic({ agentId, databasePath = null, rootDir = null, generatedAt = now(), phase = null, modelAdapter = null, modelConfig = null, traceLogger = null, echoAllowedSourceRefs = false, conversationStore = null, conversationSessionIds = null, stores = null } = {}) {
+export async function runDreamExtractionDiagnostic({ agentId, rootDir = null, generatedAt = now(), phase = null, modelAdapter = null, modelConfig = null, traceLogger = null, echoAllowedSourceRefs = false, conversationStore = null, conversationSessionIds = null, stores = null } = {}) {
   const id = text(agentId);
   if (!id) throw new Error('dream_cycle_agent_required');
   const phases = phase ? [text(phase).toLowerCase()] : [...PHASES];
   if (phases.some((value) => !PHASES.includes(value))) throw new Error('dream_cycle_phase_invalid');
-  const injected = stores || null;
-  const settingsStore = injected?.dreamSettings || new DreamSettingsStore({ databasePath });
+  const injected = stores;
+  if (!injected?.dreamSettings || !injected?.models || !injected?.conversations) throw new Error('dream_cycle_stores_required');
+  const settingsStore = injected.dreamSettings;
   try {
     const settings = await settingsStore.get(id);
     let adapter = modelAdapter;
     let config = modelConfig;
     if (!adapter) {
       config = config || await resolveModelConfig(settings?.modelConnectionId && settings?.model
-        ? { modelConnectionId: settings.modelConnectionId, model: settings.model, ...(injected?.models ? { stores: { models: injected.models } } : { settingsDb: databasePath }) }
-        : { agentId: id, ...(injected?.models ? { stores: { models: injected.models } } : { settingsDb: databasePath }) });
+        ? { modelConnectionId: settings.modelConnectionId, model: settings.model, stores: { models: injected.models } }
+        : { agentId: id, stores: { models: injected.models } });
       if (config?.model) adapter = createModelAdapter({ config: { ...config, temperature: settings?.temperature ?? config.temperature ?? 0.2, reasoningEffort: 'off' } });
     }
     const results = [];
@@ -471,11 +383,11 @@ export async function runDreamExtractionDiagnostic({ agentId, databasePath = nul
       }
     }
     return { version: 1, ok: results.every((result) => result.ok), agentId: id, generatedAt, echoAllowedSourceRefs: echoAllowedSourceRefs === true, phases: results };
-  } finally { if (!injected?.dreamSettings) settingsStore.close(); }
+  } finally { /* composed store remains open */ }
 }
 
-async function adjudicatePreferencesAsync({ agentId, profileStore, metadataStore, databasePath = null, generatedAt, modelAdapter = null, modelConfig = null, traceLogger = null } = {}) {
-  if (!profileStore?.atomicPreferenceUpdate) return adjudicatePreferences({ agentId, profileStore, databasePath, generatedAt, modelAdapter, modelConfig, traceLogger });
+async function adjudicatePreferencesAsync({ agentId, profileStore, metadataStore, generatedAt, modelAdapter = null, modelConfig = null, traceLogger = null } = {}) {
+  if (!profileStore?.atomicPreferenceUpdate) throw new Error('dream_profile_store_required');
   const state = await preferenceLearningStateAsync({ agentId, metadataStore });
   const signals = await preferenceSignalsAsync({ agentId, metadataStore, since: state.lastSignalAt, limit: 100 });
   if (!signals.length) return { disposition: 'no_new_signals', signalCount: 0 };
@@ -493,39 +405,9 @@ async function adjudicatePreferencesAsync({ agentId, profileStore, metadataStore
   } catch (error) { return { disposition: 'failed', signalCount: signals.length, reason: String(error?.message || error) }; }
 }
 
-export async function runDreamCycle({ agentId, databasePath = null, rootDir = null, generatedAt = now(), runId: requestedRunId = null, scheduledFor = null, trigger = null, limit = DEFAULT_LIMIT, modelAdapter = null, modelConfig = null, traceLogger = null, stores } = {}) {
+export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now(), runId: requestedRunId = null, scheduledFor = null, trigger = null, limit = DEFAULT_LIMIT, modelAdapter = null, modelConfig = null, traceLogger = null, stores } = {}) {
   const id = text(agentId); if (!id) throw new Error('dream_cycle_agent_required');
-  let ownedSqlite = null;
-  if (!stores) {
-    const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-    const dreamSettings = new DreamSettingsStore({ databasePath });
-    const profileStore = new AgentProfileStore({ databasePath });
-    const diaryStore = new DreamDiaryStore({ databasePath });
-    const memoryStore = new WorkingMemoryStore({ databasePath });
-    const metadataStore = {
-      get: async (key) => parseJson(db.prepare('SELECT value_json FROM settings_meta WHERE key=?').get(key)?.value_json),
-      atomicUpdate: async (key, updater, at = now()) => withSettingsTransaction(db, () => {
-        const current = parseJson(db.prepare('SELECT value_json FROM settings_meta WHERE key=?').get(key)?.value_json);
-        const next = updater(current);
-        db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at`).run(key, json(next), at);
-        return next;
-      }),
-    };
-    const cycleStore = {
-      runtimeInstanceId: dreamRuntimeInstanceId,
-      write: async (receipt, at) => { writeReceipt(db, receipt, at); return receipt; },
-      ensureState: async ({ agentId: target, settings, at }) => withSettingsTransaction(db, () => {
-        const current = parseJson(db.prepare('SELECT value_json FROM settings_meta WHERE key=?').get(phaseState(target))?.value_json);
-        const configuredRow = db.prepare('SELECT enabled,cron_expression,timezone FROM dream_settings WHERE agent_id=?').get(target);
-        const configured = configuredRow || { enabled: settings.enabled, cron_expression: settings.cron, timezone: settings.timezone };
-        const state = { ...reconciledDreamCycleState({ agentId: target, settings: configured, current, at }), lastRunAt: settings.lastRunAt || current?.lastRunAt || null };
-        db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at`).run(phaseState(target), json(state), at);
-        return state;
-      }),
-    };
-    stores = { dreamSettings, profiles: profileStore, dreamDiary: diaryStore, dreamCycles: cycleStore, workingMemory: memoryStore, metadata: metadataStore };
-    ownedSqlite = { db, stores };
-  }
+  if (!stores) throw new Error('dream_cycle_stores_required');
   const { dreamSettings, profiles: profileStore, dreamDiary: diaryStore, dreamCycles: cycleStore, workingMemory: memoryStore, metadata: metadataStore } = stores || {};
   if (!dreamSettings || !profileStore || !diaryStore || !cycleStore || !memoryStore || !metadataStore) throw new Error('dream_cycle_stores_required');
   const runId = text(requestedRunId) || `dream-cycle-${randomUUID()}`;
@@ -550,8 +432,8 @@ export async function runDreamCycle({ agentId, databasePath = null, rootDir = nu
       const resolverArgs = settings?.modelConnectionId && settings?.model
         ? { modelConnectionId: settings.modelConnectionId, model: settings.model }
         : { agentId: id };
-      if (stores?.models) resolverArgs.stores = { models: stores.models };
-      else resolverArgs.settingsDb = databasePath;
+      if (!stores.models) throw new Error('dream_model_store_required');
+      resolverArgs.stores = { models: stores.models };
       resolvedDreamModel = await resolveModelConfig(resolverArgs);
     }
     if (!dreamAdapter && resolvedDreamModel?.model) dreamAdapter = createModelAdapter({ config: { ...resolvedDreamModel, temperature: settings.temperature ?? resolvedDreamModel.temperature ?? 0.2, reasoningEffort: 'off' } });
@@ -577,7 +459,7 @@ export async function runDreamCycle({ agentId, databasePath = null, rootDir = nu
     const preloadProjects = [...new Set(dreamMemoryCandidates.map((item) => text(item.project)).filter(Boolean))];
     const dreamPreloads = [];
     if (preloadItems.length) { dreamPreloads.push(await memoryStore.replaceDreamPreload({ agentId: id, project: 'global', items: preloadItems, expiresAt: preloadExpiry })); for (const project of preloadProjects.slice(0, 8)) { const items = dreamMemoryCandidates.filter((item) => item.project === project).slice(0, 5).map((item) => ({ id: item.id, title: item.title, content: item.content, sourceRefs: item.sourceRefs })); if (items.length) dreamPreloads.push(await memoryStore.replaceDreamPreload({ agentId: id, project, items, expiresAt: preloadExpiry })); } }
-    const preferences = await adjudicatePreferencesAsync({ agentId: id, profileStore, metadataStore, databasePath, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger });
+    const preferences = await adjudicatePreferencesAsync({ agentId: id, profileStore, metadataStore, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger });
     for (const entry of pendingDiaries) { const saved = await diaryStore.append(id, entry); const phase = phaseResults.find((result) => result.phase === entry.phase); if (phase) phase.diaryId = saved.id; }
     const completedAt = now(); const state = await cycleStore.ensureState({ agentId: id, settings: { ...settings, lastRunAt: generatedAt }, at: completedAt });
     const nextRunAt = state.nextRunAt;
@@ -592,40 +474,10 @@ export async function runDreamCycle({ agentId, databasePath = null, rootDir = nu
     throw error;
   } finally {
     activeDreamRunIds.delete(runId);
-    if (ownedSqlite) { ownedSqlite.stores.dreamDiary.close(); ownedSqlite.stores.profiles.close(); ownedSqlite.stores.workingMemory.close(); ownedSqlite.stores.dreamSettings.close(); ownedSqlite.db.close(); }
   }
 }
 
-export function reconcileInterruptedDreamCycles({ databasePath = null, at = now() } = {}) {
-  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  try {
-    return withSettingsTransaction(db, () => {
-      const rows = db.prepare("SELECT key,value_json FROM settings_meta WHERE key LIKE 'dream-cycle-receipt:%'").all();
-      let interrupted = 0;
-      for (const row of rows) {
-        const receipt = parseJson(row.value_json);
-        if (receipt.status !== 'running' || activeDreamRunIds.has(receipt.runId) || receipt.runtimeInstanceId === dreamRuntimeInstanceId) continue;
-        writeReceipt(db, { ...receipt, ok: false, status: 'interrupted', error: DREAM_INTERRUPTED_ERROR, completedAt: at }, at);
-        interrupted += 1;
-      }
-      return interrupted;
-    });
-  } finally { db.close(); }
-}
-
-export function latestDreamCycleReceipts({ agentId, databasePath = null, limit = 20 } = {}) {
-  const id = text(agentId);
-  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  try {
-    const prefix = id ? `dream-cycle-receipt:${id}:` : 'dream-cycle-receipt:%';
-    const rows = id
-      ? db.prepare('SELECT value_json FROM settings_meta WHERE key LIKE ? ORDER BY updated_at DESC LIMIT ?').all(`${prefix}%`, Math.max(1, Math.min(100, Number(limit) || 20)))
-      : db.prepare("SELECT value_json FROM settings_meta WHERE key LIKE 'dream-cycle-receipt:%' ORDER BY updated_at DESC LIMIT ?").all(Math.max(1, Math.min(100, Number(limit) || 20)));
-    return rows.map((row) => parseJson(row.value_json));
-  } finally { db.close(); }
-}
-
-export function createDreamCycleScheduler({ databasePath = null, intervalMs = 30_000, clock = now, resolveAgentRoot = null, stores = null, modelAdapter = null } = {}) {
+export function createDreamCycleScheduler({ intervalMs = 30_000, clock = now, resolveAgentRoot = null, stores = null, modelAdapter = null } = {}) {
   let timer = null;
   let ticking = false;
   async function tick() {
@@ -633,20 +485,17 @@ export function createDreamCycleScheduler({ databasePath = null, intervalMs = 30
     ticking = true;
     try {
       const at = clock();
-      const due = stores?.agents && stores?.dreamCycles
-        ? (await Promise.all((await stores.agents.list({ includeDisabled: false })).map(async (agent) => {
+      if (!stores?.agents || !stores?.dreamCycles || !stores?.dreamSettings) throw new Error('dream_cycle_stores_required');
+      const due = (await Promise.all((await stores.agents.list({ includeDisabled: false })).map(async (agent) => {
           const settings = await stores.dreamSettings.get(agent.id);
           const state = await stores.dreamCycles.ensureState({ agentId: agent.id, settings, at });
           return settings.enabled && state.nextRunAt && state.nextRunAt <= at ? { agent } : null;
-        }))).filter(Boolean)
-        : listDueDreamCycles({ databasePath, at });
+        }))).filter(Boolean);
       const results = [];
       for (const item of due) {
-        const claim = stores?.dreamCycles?.claimDue
-          ? await stores.dreamCycles.claimDue({ agentId: item.agent.id, at })
-          : claimDueDreamCycle({ agentId: item.agent.id, databasePath, at });
+        const claim = await stores.dreamCycles.claimDue({ agentId: item.agent.id, at });
         if (!claim) continue;
-        try { results.push(await runDreamCycle({ agentId: item.agent.id, databasePath, rootDir: await resolveAgentRoot?.(item.agent.id), generatedAt: claim.scheduledFor, scheduledFor: claim.scheduledFor, runId: claim.runId, trigger: 'scheduled', stores, modelAdapter })); }
+        try { results.push(await runDreamCycle({ agentId: item.agent.id, rootDir: await resolveAgentRoot?.(item.agent.id), generatedAt: claim.scheduledFor, scheduledFor: claim.scheduledFor, runId: claim.runId, trigger: 'scheduled', stores, modelAdapter })); }
         catch (error) { results.push({ ok: false, agentId: item.agent.id, error: String(error?.message || error), generatedAt: at }); }
       }
       return results;

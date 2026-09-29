@@ -179,7 +179,7 @@ async function writeProductUiTitle(installDir) {
 }
 
 function envTemplate({ installDir, settingsKey = '', host = '0.0.0.0', port = 42817 }) {
-  return `# Burrow single-directory runtime environment.\nBURROW_SOURCE_ROOT=${installDir}\nBURROW_RUNTIME_ROOT=${installDir}\nBURROW_WORKSPACE_ROOT=${installDir}/workspace\nBURROW_CACHE_ROOT=${installDir}/cache\nBURROW_SETTINGS_DB=${installDir}/config/settings.sqlite\nBURROW_UI_HOST=${host}\nBURROW_UI_PORT=${port}\n# Base64-encoded 32-byte SQLite encryption key.\nBURROW_SETTINGS_KEY=${settingsKey}\n`;
+  return `# Burrow single-directory runtime environment.\nBURROW_SOURCE_ROOT=${installDir}\nBURROW_RUNTIME_ROOT=${installDir}\nBURROW_WORKSPACE_ROOT=${installDir}/workspace\nBURROW_CACHE_ROOT=${installDir}/cache\nBURROW_UI_HOST=${host}\nBURROW_UI_PORT=${port}\n# Base64-encoded 32-byte PostgreSQL secret-encryption key.\nBURROW_SETTINGS_KEY=${settingsKey}\n`;
 }
 
 async function smokeInstall({ installDir, port, timeoutMs }) {

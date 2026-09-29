@@ -44,38 +44,12 @@ async function filesystemMetric(root, statfs = fs.statfs) {
   }
 }
 
-async function fileSize(filePath, stat = fs.stat) {
-  try { return { bytes: finite((await stat(filePath)).size), error: null }; }
-  catch (error) { return { bytes: null, error: error?.code === 'ENOENT' ? null : metricError(error) }; }
-}
-
-async function settingsMetric(databasePath, stat = fs.stat) {
-  const files = await Promise.all([
-    fileSize(databasePath, stat),
-    fileSize(`${databasePath}-wal`, stat),
-    fileSize(`${databasePath}-shm`, stat),
-  ]);
-  const [database, wal, shm] = files;
-  const errors = files.map((item) => item.error).filter(Boolean);
-  const knownBytes = files.map((item) => item.bytes).filter((value) => value !== null);
-  return {
-    databaseBytes: database.bytes,
-    walBytes: wal.bytes,
-    shmBytes: shm.bytes,
-    totalBytes: knownBytes.length ? knownBytes.reduce((sum, value) => sum + value, 0) : null,
-    error: errors.length ? errors.join('; ') : null,
-  };
-}
-
-export function createRuntimeMetricsCollector({ runtimeRoot, settingsDatabasePath, cacheMs = METRICS_CACHE_MS, clock = () => Date.now(), memoryUsage = process.memoryUsage, uptime = () => process.uptime(), cpuSampler = createProcessCpuSampler({ clock }), loadavg = () => os.loadavg(), statfs = fs.statfs, stat = fs.stat } = {}) {
+export function createRuntimeMetricsCollector({ runtimeRoot, cacheMs = METRICS_CACHE_MS, clock = () => Date.now(), memoryUsage = process.memoryUsage, uptime = () => process.uptime(), cpuSampler = createProcessCpuSampler({ clock }), loadavg = () => os.loadavg(), statfs = fs.statfs } = {}) {
   let cached = null;
   return async function collect() {
     const now = Number(clock());
     if (cached && now - cached.at < cacheMs) return cached.value;
-    const [filesystem, settingsDatabase] = await Promise.all([
-      filesystemMetric(runtimeRoot, statfs),
-      settingsMetric(settingsDatabasePath, stat),
-    ]);
+    const filesystem = await filesystemMetric(runtimeRoot, statfs);
     const memory = memoryUsage() || {};
     const cpu = cpuSampler();
     const loads = loadavg() || [];
@@ -92,11 +66,10 @@ export function createRuntimeMetricsCollector({ runtimeRoot, settingsDatabasePat
         cpu,
       },
       load: { oneMinute: finite(loads[0]), fiveMinutes: finite(loads[1]), fifteenMinutes: finite(loads[2]) },
-      settingsDatabase,
     };
     cached = { at: now, value };
     return value;
   };
 }
 
-export { filesystemMetric, settingsMetric };
+export { filesystemMetric };

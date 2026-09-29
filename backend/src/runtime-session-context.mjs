@@ -1,16 +1,14 @@
 import { readSessionMetadata, readSessionPendingActions } from './session-store.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
-import { listContinuityHandoffs } from './continuity-handoff-store.mjs';
 import { turnWorkspaceFacts } from './turn-workspace-facts.mjs';
 import { applyWorkingContextEvents, verifiedEventsFromTurnInput, workingContextFromSession } from './working-context.mjs';
 import { loadWorkingContinuityAsync, normalizeContinuityScope, projectHandoffsIntoWorkingContinuity } from './working-memory-continuity.mjs';
 import { validateReadEvidence } from './read-evidence.mjs';
 import { readSessionReadEvidence } from './read-evidence-store.mjs';
-import { WorkingMemoryStore } from './working-memory-store.mjs';
-import { TaskBoardStore } from './task-board-store.mjs';
 
 export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessionId, runtimeState, normalizedArgs, workspaceRoot, resolvedTarget, message, explicitWorkspaceFiles = [], interruptedRun = null, stores = null } = {}) {
-  const authority = stores?.conversations ? conversationAuthority({ store: stores.conversations, agentId: runtimeState.agentId || 'hatchet', rootDir: sessionRoot }) : conversationAuthority({ rootDir: sessionRoot, agentId: runtimeState.agentId || 'hatchet' });
+  if (!stores?.conversations || !stores?.continuity || !stores?.workingMemory || !stores?.tasks) throw new Error('runtime_stores_required');
+  const authority = conversationAuthority({ store: stores.conversations, agentId: runtimeState.agentId || 'hatchet', rootDir: sessionRoot });
   // Planning consumes no transcript prose. It receives only durable session
   // identity/metadata, while pending actions are resolved from their explicit
   // work-item and turn contracts rather than an arbitrary transcript tail.
@@ -26,7 +24,7 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
   const conversationId = priorSession.metadata?.conversationId || null;
   const isFreshConversation = !(priorSession?.turnCount > 0);
   const continuityHandoffs = isFreshConversation
-    ? await (stores?.continuity ? stores.continuity.list({ agentId: runtimeState.agentId || 'hatchet', limit: 1 }) : listContinuityHandoffs({ dataRoot: runtimeState.agentDataRoot, agentId: runtimeState.agentId || 'hatchet', limit: 1 }))
+    ? await stores.continuity.list({ agentId: runtimeState.agentId || 'hatchet', limit: 1 })
     : [];
   const workspaceResolution = turnWorkspaceFacts({
     configuredWorkspaceRoot: runtimeState.agentWorkspaceRoot || runtimeState.workspaceRoot,
@@ -51,32 +49,19 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
   const deicticFiles = { files: explicitWorkspaceFiles, summary: null, applied: false, ambiguous: false, question: null };
   const workspaceFiles = deicticFiles.files.length ? deicticFiles.files : explicitWorkspaceFiles;
   const workingContinuity = projectHandoffsIntoWorkingContinuity({
-    continuity: await loadWorkingContinuityAsync({ store: stores?.workingMemory || null, databasePath: runtimeState.settingsDatabasePath || null, agentId: runtimeState.agentId || null, continuityScope }),
+    continuity: await loadWorkingContinuityAsync({ store: stores.workingMemory, agentId: runtimeState.agentId || null, continuityScope }),
     handoffs: continuityHandoffs,
     agentId: runtimeState.agentId || null,
     continuityScope,
   });
   let activeProject = null;
   try {
-    if (stores?.tasks) {
-      activeProject = await stores.tasks.getConversationProject({ agentId: runtimeState.agentId, sessionId: resolvedSessionId });
-    } else {
-      const store = new TaskBoardStore({ databasePath: runtimeState.settingsDatabasePath });
-      try { activeProject = store.getConversationProject({ agentId: runtimeState.agentId, sessionId: resolvedSessionId }); }
-      finally { store.close(); }
-    }
+    activeProject = await stores.tasks.getConversationProject({ agentId: runtimeState.agentId, sessionId: resolvedSessionId });
   } catch { activeProject = null; }
   const ambientWorkingContext = { ...initialWorkingContext, ...(interruptedRun ? { interruptedRun } : {}), ...(activeProject ? { activeProject } : {}), continuity: workingContinuity, continuityScopeSource: generatedContinuityScope ? 'runtime_generated' : 'session_persisted' };
   let dreamPreload = null;
   try {
-    if (stores?.workingMemory) {
-      dreamPreload = await stores.workingMemory.getDreamPreload({ agentId: runtimeState.agentId, project: continuityScope })
-        || await stores.workingMemory.getDreamPreload({ agentId: runtimeState.agentId, project: 'global' });
-    } else {
-      const store = new WorkingMemoryStore(runtimeState.settingsDatabasePath ? { databasePath: runtimeState.settingsDatabasePath } : {});
-      try { dreamPreload = store.getDreamPreload({ agentId: runtimeState.agentId, project: continuityScope }) || store.getDreamPreload({ agentId: runtimeState.agentId, project: 'global' }); }
-      finally { store.close(); }
-    }
+    dreamPreload = await stores.workingMemory.getDreamPreload({ agentId: runtimeState.agentId, project: continuityScope }) || await stores.workingMemory.getDreamPreload({ agentId: runtimeState.agentId, project: 'global' });
   } catch { dreamPreload = null; }
   return { priorSession, conversationId, resolvedWorkingRoot, continuityHandoffs, compatibilityScope, continuityScope, generatedContinuityScope, verifiedSubjectScope, deicticFiles, workspaceFiles, initialWorkingContext, ambientWorkingContext, dreamPreload };
 }

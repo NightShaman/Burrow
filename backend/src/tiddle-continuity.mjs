@@ -1,8 +1,6 @@
 import { runSync, runAsync, tiddlePersistence } from './tiddle-persistence.mjs';
 import { randomUUID } from 'node:crypto';
-import { AgentRegistryStore } from './agent-registry.mjs';
 import { completeCurator, curatorRoot, readCuratorSelection } from './curator-runtime.mjs';
-import { settingsDatabasePath } from './settings-database.mjs';
 import { appendPreferenceSignal, appendPreferenceSignalAsync, normalizePreferenceSignal } from './preference-learning.mjs';
 
 const PASS_INTERVAL_MS = 4 * 60 * 60 * 1_000;
@@ -92,9 +90,9 @@ export async function appendTiddleResidueAsync({ metadataStore, ...input } = {})
 }
 
 /** Cheap terminal residue only: no model call, no warm-card mutation. */
-function* appendTiddleResidueOperation({ databasePath = null, stores = null, agentId, scope, sessionId, conversationId, runId, message, answerText, toolResults = [], at = iso() } = {}) {
+function* appendTiddleResidueOperation({ stores = null, agentId, scope, sessionId, conversationId, runId, message, answerText, toolResults = [], at = iso() } = {}) {
   if (!text(agentId) || !text(scope) || !text(sessionId) || !text(runId) || !text(answerText)) return null;
-  const db = tiddlePersistence({ databasePath, stores });
+  const db = tiddlePersistence({ stores });
   try {
     const current = (yield* meta(db, residueKey(agentId), { version: 1, agentId, items: [] }));
     const { item, value } = residueUpdate(current, { agentId, scope, sessionId, conversationId, runId, message, answerText, toolResults, at });
@@ -179,16 +177,16 @@ function* upsertGlobalCluster(db, { agentId, cluster, at }) {
   return { card, prior: existing || null };
 }
 
-export async function runTiddleSynthesis({ agentId, databasePath = null, stores = null, runtimeRoot = null, settingsKey = undefined, temperature = undefined, at = iso(), traceLogger = null } = {}) {
+export async function runTiddleSynthesis({ agentId, stores = null, runtimeRoot = null, settingsKey = undefined, temperature = undefined, at = iso(), traceLogger = null } = {}) {
   const id = text(agentId); if (!id) throw new Error('tiddle_agent_required');
-  const db = tiddlePersistence({ databasePath, stores });
+  const db = tiddlePersistence({ stores });
   const runId = `tiddle-synthesis-${randomUUID()}`;
   try {
     const candidates = (await runAsync(synthesisCandidates(db, id, at))); const globals = (await runAsync(activeCards(db, id, GLOBAL_SCOPE, at)));
     if (candidates.length < 2) { const receipt = { version: 1, ok: true, runId, agentId: id, generatedAt: at, windowDays: 21, candidateCount: candidates.length, disposition: 'noop', reason: 'insufficient_candidates' }; await runAsync(setMeta(db, synthesisKey(id), { ...receipt, lastSuccessAt: at }, at)); await runAsync(setMeta(db, receiptKey(id, runId), receipt, at)); return receipt; }
-    const configuredSelection = await readCuratorSelection({ stores, databasePath, root: curatorRoot({ runtimeRoot: runtimeRoot || undefined }) }); if (!configuredSelection) throw new Error('curator_selection_required');
+    const configuredSelection = await readCuratorSelection({ stores, root: curatorRoot({ runtimeRoot: runtimeRoot || undefined }) }); if (!configuredSelection) throw new Error('curator_selection_required');
     const selection = temperature === undefined ? configuredSelection : { ...configuredSelection, temperature };
-    const completion = await completeCurator({ selection, stores, databasePath, settingsKey, root: curatorRoot({ runtimeRoot: runtimeRoot || undefined }), prompt: synthesisPrompt({ agentId: id, at, candidates, globalCards: globals }), jsonSchema: synthesisSchema(), traceLogger });
+    const completion = await completeCurator({ selection, stores, settingsKey, root: curatorRoot({ runtimeRoot: runtimeRoot || undefined }), prompt: synthesisPrompt({ agentId: id, at, candidates, globalCards: globals }), jsonSchema: synthesisSchema(), traceLogger });
     const proposal = parseTiddleSynthesis(completion?.choice?.text); const clusters = validateSynthesisClusters(proposal, candidates, globals, at); const updates = await db.transaction(id, function* (tx) {
       const results = [];
       for (const cluster of clusters) results.push(yield* upsertGlobalCluster(tx, { agentId: id, cluster, at }));
@@ -211,10 +209,10 @@ function* upsertCard(db, { agentId, scope, proposal, residue, at }) {
   return { card, prior: existing || null };
 }
 
-export async function runTiddlePass({ agentId, databasePath = null, stores = null, runtimeRoot = null, settingsKey = undefined, temperature = undefined, at = iso(), traceLogger = null } = {}) {
+export async function runTiddlePass({ agentId, stores = null, runtimeRoot = null, settingsKey = undefined, temperature = undefined, at = iso(), traceLogger = null } = {}) {
   const id = text(agentId);
   if (!id) throw new Error('tiddle_agent_required');
-  const db = tiddlePersistence({ databasePath, stores });
+  const db = tiddlePersistence({ stores });
   const runId = `tiddle-pass-${randomUUID()}`;
   try {
     const lookbackStart = new Date(at).getTime() - LOOKBACK_MS;
@@ -237,16 +235,16 @@ export async function runTiddlePass({ agentId, databasePath = null, stores = nul
       await traceLogger?.event?.('tiddle-pass', receipt);
       return receipt;
     }
-    const configuredSelection = await readCuratorSelection({ stores, databasePath, root: curatorRoot({ runtimeRoot: runtimeRoot || undefined }) });
+    const configuredSelection = await readCuratorSelection({ stores, root: curatorRoot({ runtimeRoot: runtimeRoot || undefined }) });
     if (!configuredSelection) throw new Error('curator_selection_required');
     const selection = temperature === undefined ? configuredSelection : { ...configuredSelection, temperature };
     for (const [scope, group] of scopeGroups) {
       const { context: items, newRefs } = group;
       if (!newRefs.size) continue;
       const cards = (await runAsync(activeCards(db, id, scope, at)));
-      const completion = await completeCurator({ selection, stores, databasePath, settingsKey, root: curatorRoot({ runtimeRoot: runtimeRoot || undefined }), prompt: prompt({ agentId: id, scope, residue: items.map((item) => ({ ...item, newSinceLastPass: newRefs.has(item.ref) })), cards }), jsonSchema: schema(), traceLogger });
+      const completion = await completeCurator({ selection, stores, settingsKey, root: curatorRoot({ runtimeRoot: runtimeRoot || undefined }), prompt: prompt({ agentId: id, scope, residue: items.map((item) => ({ ...item, newSinceLastPass: newRefs.has(item.ref) })), cards }), jsonSchema: schema(), traceLogger });
       const proposal = parseTiddleProposal(completion?.choice?.text);
-      const observedPreference = proposal?.preferenceSignal ? await (stores?.metadata ? appendPreferenceSignalAsync({ metadataStore: stores.metadata, agentId: id, signal: { ...proposal.preferenceSignal, sourceRefs: [...newRefs] }, at }) : appendPreferenceSignal({ databasePath, agentId: id, signal: { ...proposal.preferenceSignal, sourceRefs: [...newRefs] }, at })) : null;
+      const observedPreference = proposal?.preferenceSignal ? await appendPreferenceSignalAsync({ metadataStore: stores.metadata, agentId: id, signal: { ...proposal.preferenceSignal, sourceRefs: [...newRefs] }, at }) : null;
       const cardUpdate = proposal?.action === 'UPSERT' ? { agentId: id, scope, proposal, residue: items, at } : null;
       const update = await commitScopePass(db, { agentId: id, scope, at, cardUpdate, entry: (cardUpdateResult) => {
         const card = cardUpdateResult?.card || null;
@@ -272,10 +270,10 @@ export async function runTiddlePass({ agentId, databasePath = null, stores = nul
   } finally { db.close(); }
 }
 
-function* listTiddleCardsOperation({ agentId, scope = null, databasePath = null, stores = null, limit = 100, at = iso() } = {}) {
+function* listTiddleCardsOperation({ agentId, scope = null, stores = null, limit = 100, at = iso() } = {}) {
   const id = text(agentId);
   if (!id) throw new Error('tiddle_agent_required');
-  const db = tiddlePersistence({ databasePath, stores });
+  const db = tiddlePersistence({ stores });
   try {
     const keys = scope ? [cardKey(id, text(scope))] : (yield () => db.rows(`rolling-continuity:${id}:`)).map((row) => row.key);
     const allCards = []; for (const key of keys) allCards.push(...((yield* meta(db, key, { cards: [] }))?.cards || []));
@@ -284,47 +282,48 @@ function* listTiddleCardsOperation({ agentId, scope = null, databasePath = null,
   } finally { db.close(); }
 }
 
-function* tiddleHistoryOperation({ agentId, cardId = null, since = null, limit = 100, databasePath = null, stores = null } = {}) {
+function* tiddleHistoryOperation({ agentId, cardId = null, since = null, limit = 100, stores = null } = {}) {
   const id = text(agentId);
   if (!id) throw new Error('tiddle_agent_required');
-  const db = tiddlePersistence({ databasePath, stores });
+  const db = tiddlePersistence({ stores });
   try {
     const entries = ((yield* meta(db, historyKey(id), { entries: [] }))?.entries || []).filter((entry) => (!text(cardId) || entry.cardId === text(cardId)) && (!text(since) || entry.at >= text(since))).slice(0, Math.max(1, Math.min(500, Number(limit) || 100)));
     return { ok: true, agentId: id, cardId: text(cardId) || null, entries };
   } finally { db.close(); }
 }
 
-function* tiddleStatusOperation({ agentId, databasePath = null, stores = null, limit = 10 } = {}) {
+function* tiddleStatusOperation({ agentId, stores = null, limit = 10 } = {}) {
   const id = text(agentId);
-  const db = tiddlePersistence({ databasePath, stores });
+  const db = tiddlePersistence({ stores });
   try {
     const state = id ? (yield* meta(db, passKey(id), null)) : null;
     const rows = (yield () => db.rows(id ? `tiddle-pass-receipt:${id}:` : 'tiddle-pass-receipt:')).slice(0, Math.max(1, Math.min(100, Number(limit) || 10)));
-    const selection = yield () => readCuratorSelection({ stores, databasePath: databasePath || settingsDatabasePath(), root: curatorRoot() });
+    const selection = yield () => readCuratorSelection({ stores, root: curatorRoot() });
     return { ok: true, agentId: id || null, cadenceHours: 4, lookbackHours: 24, cardTtlDays: 30, temperature: selection?.temperature ?? 0, state, receipts: rows.map((row) => parse(row.value_json, {})) };
   } finally { db.close(); }
 }
 
-function* listDueTiddlePassesOperation({ databasePath = null, stores = null, at = iso() } = {}) {
-  const agents = stores?.agents || new AgentRegistryStore({ databasePath });
-  const db = tiddlePersistence({ databasePath, stores });
+function* listDueTiddlePassesOperation({ stores = null, at = iso() } = {}) {
+  if (!stores?.agents) throw new Error('tiddle_agent_store_required');
+  const agents = stores.agents;
+  const db = tiddlePersistence({ stores });
   try { const due = []; for (const agent of (yield () => agents.list({ includeDisabled: false }))) { const state = yield* meta(db, passKey(agent.id), {}); if (!state.nextRunAt || state.nextRunAt <= at) due.push(agent); } return due; }
   finally { db.close(); if (!stores?.agents) agents.close(); }
 }
 
-export function createTiddleScheduler({ databasePath = null, stores = null, intervalMs = 60_000, clock = iso, runtimeRoot = null } = {}) {
+export function createTiddleScheduler({ stores = null, intervalMs = 60_000, clock = iso, runtimeRoot = null } = {}) {
   let timer = null; let ticking = false;
   async function tick() {
     if (ticking) return [];
     ticking = true;
     try {
       const at = clock();
-      const due = await listDueTiddlePasses({ databasePath, stores, at });
+      const due = await listDueTiddlePasses({ stores, at });
       // Await the batch so the reentrancy guard remains held through synthesis.
       return await Promise.all(due.map(async (agent) => {
-        const options = { agentId: agent.id, databasePath, stores, runtimeRoot, at };
+        const options = { agentId: agent.id, stores, runtimeRoot, at };
         const pass = await runTiddlePass(options);
-        const db = tiddlePersistence({ databasePath, stores });
+        const db = tiddlePersistence({ stores });
         let last;
         try { last = (await runAsync(meta(db, synthesisKey(agent.id), {})))?.lastSuccessAt; }
         finally { db.close(); }

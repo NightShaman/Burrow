@@ -85,14 +85,15 @@ export async function buildTurnContext({
     // excluded here; explicit history/search paths own that data.
     : await conversationAuthority({ store: stores?.conversations || null, agentId, rootDir: dataRoot }).entriesAll(sessionId);
   let profileFiles = null;
-  if (includeProfileFiles && agentRuntime?.agentId && agentRuntime?.settingsDatabasePath) {
-    const store = stores?.profiles || new AgentProfileStore({ databasePath: agentRuntime.settingsDatabasePath });
+  if (includeProfileFiles && agentRuntime?.agentId) {
+    const store = stores?.profiles;
+    if (!store) throw new Error('agent_profile_store_required');
     try {
       const documents = await store.list(agentRuntime.agentId);
       profileFiles = documents.length === AGENT_PROFILE_KINDS.length
         ? profileFilesFromDocuments(documents, { agentId: agentRuntime.agentId })
-        : { profileDir: 'sqlite:agent_profile_documents', files: [{ id: 'profile-unavailable', name: 'PROFILE_UNAVAILABLE.md', path: `sqlite:agent_profile_documents/${agentRuntime.agentId}`, content: 'Agent profile documents are unavailable. Do not borrow another agent profile; report this configuration blocker if it affects the task.', chars: 125 }], chars: 125 };
-    } finally { if (!stores?.profiles) store.close(); }
+        : { profileDir: 'postgres:agent_profile_documents', files: [{ id: 'profile-unavailable', name: 'PROFILE_UNAVAILABLE.md', path: `postgres:agent_profile_documents/${agentRuntime.agentId}`, content: 'Agent profile documents are unavailable. Do not borrow another agent profile; report this configuration blocker if it affects the task.', chars: 125 }], chars: 125 };
+    } finally { /* composed store remains open */ }
   }
   const context = buildContextEngineResult({
     transcript: resolvedTranscript,

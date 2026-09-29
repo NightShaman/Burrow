@@ -13,22 +13,18 @@ import { inspectSessionContext, inspectSessionContextStatus } from '../src/conte
 import { activeConversationLimits } from '../src/context-preparation.mjs';
 import { createChatTurnRunId, runChatTurnFromBody, runChatTurnFromWorkbenchContinuation, chatTurnResponse, chatTurnProgressResponse, chatTurnErrorResponse, loadRuntimeConfig } from '../src/chat-turn-controller.mjs';
 import { resolveModelConfig, resolveRuntimeTracePath } from '../src/config.mjs';
-import { getSettingsMetaAsync, setSettingsMetaAsync, settingsOwnershipInventory } from '../src/settings-database.mjs';
-import { getUiAuthSecretAsync, hasUiAuthSecretAsync, setUiAuthSecretAsync } from '../src/ui-auth-secrets.mjs';
-import { ApiTokenStore, API_TOKEN_SCOPES } from '../src/api-token-store.mjs';
-import { SkillSettingsStore } from '../src/skill-settings-store.mjs';
+import { API_TOKEN_SCOPES } from '../src/api-token-store.mjs';
 import { loadEffectiveSkillCatalog, skillManifest } from '../src/skill-catalog.mjs';
-import { completeSetup, readSetupStatus } from '../src/setup-state-store.mjs';
 import { collectTraceObservability } from '../src/trace-observability.mjs';
 import { listSubagentRecords, subagentVisibilitySummary } from '../src/subagent-store.mjs';
-import { ContinuityHandoffStore, buildContinuityHandoff, listContinuityHandoffs } from '../src/continuity-handoff-store.mjs';
-import { appendSessionEntry, archiveSession, forkSession, listResetSessionArchives, listSessionRecords, readActivityEvents, readChatMessages, readResetSessionArchive, readArchiveConversationPage, readSessionMetadata, readSessionTurns, exportSessionTranscript, renameSession, resetSession, summarizeSessionTurns, writeResetSessionArchiveMetadata, writeSessionMetadata } from '../src/session-store.mjs';
+import { buildContinuityHandoff } from '../src/continuity-handoff-store.mjs';
+import { appendSessionEntry, archiveSession, forkSession, listResetSessionArchives, listSessionRecords, readResetSessionArchive, readArchiveConversationPage, readSessionMetadata, readSessionTurns, exportSessionTranscript, renameSession, resetSession, summarizeSessionTurns, writeSessionMetadata } from '../src/session-store.mjs';
 import { runPendingRecoveryContinuations } from '../src/recovery-continuation-runner.mjs';
 import { recordActiveRunInterruptions } from '../src/interrupted-run-recovery.mjs';
 import { generateArchiveSummary } from '../src/archive-summary.mjs';
 import { listArchiveRuns, mergeArchiveRuns, readArchiveRun } from '../src/archive-proof.mjs';
 import { loadWorkingContinuityAsync, normalizeContinuityScope, projectHandoffsIntoWorkingContinuity } from '../src/working-memory-continuity.mjs';
-import { persistSessionWorkingContext, workingContextFromSession } from '../src/working-context.mjs';
+import { workingContextFromSession } from '../src/working-context.mjs';
 import { appendGroupChannelTurn, createGroupChannel, listGroupChannels, readGroupChannel, readGroupChannelTurns } from '../src/group-channel-store.mjs';
 import { resolveGroupMentionTargets } from '../src/group-channel-routing.mjs';
 import { planRetentionCleanup, runRetentionCleanup } from '../src/retention.mjs';
@@ -45,26 +41,21 @@ import { createExecutionProviderRegistry } from '../src/process-execution-router
 import { buildChatSupportStatus, buildWorkbenchStatus } from '../src/workbench-status.mjs';
 import { allowedNextSteps, appendWorkItemStep, archiveWorkItem, createWorkItem, listWorkItems, readWorkItem, workItemEligibility } from '../src/work-item-store.mjs';
 import { searchBurrowSessionEvidence, searchSessionEvidence } from '../src/session-search.mjs';
-import { ModelSettingsStore, CODEX_CLIENT_VERSION_CACHE_TTL_MS, discoverModels, refreshCodexClientVersionCache, settingsDatabasePath } from '../src/model-settings-store.mjs';
+import { CODEX_CLIENT_VERSION_CACHE_TTL_MS, discoverModels, refreshCodexClientVersionCache } from '../src/model-settings-store.mjs';
 import { claudeCredentialAuthPayload, detectClaudeCliCredential } from '../src/claude-cli-credentials.mjs';
 import { cancelClaudeCodeLogin, getClaudeCodeLogin, importClaudeCodeLoginCredential, startClaudeCodeLogin, submitClaudeCodeLoginCode } from '../src/claude-code-login.mjs';
 import { cancelOpenAiOAuthLogin, getOpenAiOAuthLogin, startOpenAiOAuthLogin, submitOpenAiOAuthCode } from '../src/openai-oauth-login.mjs';
-import { WorkingMemoryStore } from '../src/working-memory-store.mjs';
 import { curatorRoot, curatorRuntimeStatus, readCuratorSelection, saveCuratorSelection } from '../src/curator-runtime.mjs';
-import { AgentRegistryStore, agentRuntimeContext, ensureAgentRoots } from '../src/agent-registry.mjs';
-import { AGENT_PROFILE_KINDS, AgentProfileStore } from '../src/agent-profile-store.mjs';
-import { DreamDiaryStore } from '../src/dream-diary-store.mjs';
-import { DreamSettingsStore } from '../src/dream-settings-store.mjs';
-import { consolidateDreamMemory, consolidateDreamMemoryAsync } from '../src/dream-memory-consolidator.mjs';
-import { createDreamCycleScheduler, latestDreamCycleReceipts, reconcileInterruptedDreamCycles, runDreamCycle } from '../src/dream-cycle-runner.mjs';
+import { agentRuntimeContext, ensureAgentRoots } from '../src/agent-registry.mjs';
+import { AGENT_PROFILE_KINDS } from '../src/agent-profile-store.mjs';
+import { consolidateDreamMemoryAsync } from '../src/dream-memory-consolidator.mjs';
+import { createDreamCycleScheduler, runDreamCycle } from '../src/dream-cycle-runner.mjs';
 import { createTiddleScheduler, listTiddleCards, tiddleHistory, tiddleStatus } from '../src/tiddle-continuity.mjs';
 import { cleanupAgentAttachments, createAttachmentCleanupScheduler, deleteAttachmentArtifact, listSessionAttachments, resolveAttachmentArtifact } from '../src/attachment-store.mjs';
 import { resolveGeneratedArtifact } from '../src/generated-artifact-store.mjs';
-import { TaskBoardStore, TASK_PRIORITIES, TASK_STATUSES } from '../src/task-board-store.mjs';
-import { ScheduledJobStore } from '../src/scheduled-job-store.mjs';
+import { TASK_PRIORITIES, TASK_STATUSES } from '../src/task-board-store.mjs';
 import { createScheduledJobScheduler } from '../src/scheduled-job-scheduler.mjs';
 import { backgroundSchedulersEnabled } from '../src/background-scheduler-policy.mjs';
-import { McpSettingsStore } from '../src/mcp-settings-store.mjs';
 import { diagnoseMcpConnection as diagnoseMcpConnectionRuntime, discoverMcpTools, hydrateMcpProviderStates, reconcilePersistentMcpConnection } from '../src/mcporter-adapter.mjs';
 import { createRuntimeMetricsCollector } from '../src/runtime-metrics.mjs';
 import { createRuntimeServerLogger } from '../src/runtime-server-log.mjs';
@@ -78,7 +69,6 @@ import { buildExport, decodeExport, exportCatalog, normalizeImportRequest } from
 import { createExportRoutes } from './ui/export-routes.mjs';
 import { createTaskBoardRoutes } from './ui/task-board-routes.mjs';
 import { createWorkbenchRoutes } from './ui/workbench-routes.mjs';
-import { ForgeStore } from '../src/forge-store.mjs';
 import { configureForgeStoreFactory } from '../src/forge-agent-tools.mjs';
 import { createPostgresApplication } from '../src/postgres-composition.mjs';
 import { settingsKeyFromEnvironment } from '../src/model-settings-store.mjs';
@@ -122,9 +112,6 @@ async function serializeSessionChat({ agentId, sessionId, operation }) {
 }
 const claudeCodeLoginConnectionIds = new Map();
 const groupChannelRuns = new Map();
-let modelSettingsStore = null;
-let agentRegistryStore = null;
-let mcpSettingsStore = null;
 let scheduledJobScheduler = null;
 let loadedMods = [];
 let dreamCycleScheduler = null;
@@ -141,56 +128,38 @@ const OPENAI_OAUTH_USAGE_URL = process.env.BURROW_OPENAI_OAUTH_USAGE_URL || 'htt
 const anthropicUsageCache = new Map();
 const openaiOauthUsageCache = new Map();
 const runtimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
-// PostgreSQL server composition is deliberately opt-in. SQLite remains the
-// production/default path until every consumer has migrated; this switch is
-// for isolated real-PG rehearsals and focused integration tests only.
-const postgresEnabled = process.env.BURROW_UI_POSTGRES === '1';
-let postgresApplication = null;
+// PostgreSQL owns server persistence; startup fails if composition is unavailable.
 const serverLogger = createRuntimeServerLogger({ runtimeRoot });
-if (postgresEnabled) {
-  postgresApplication = await createPostgresApplication({
-    encryptionKey: settingsKeyFromEnvironment(),
-    runtimeRoot,
-    resolveAgent: async (agentId) => resolveAgentRuntime(agentId),
-    resolveOperator: async () => ({ operatorId: 'operator', agentWorkspaceRoot: runtimeRoot }),
-    connections: async () => postgresApplication?.stores.models.list() || [],
-    resolveConfig: (connectionId, modelId) => resolveModelConfig({ stores: postgresApplication?.stores, modelConnectionId: connectionId, model: modelId }),
-  });
-}
+const postgresApplication = await createPostgresApplication({
+  encryptionKey: settingsKeyFromEnvironment(),
+  runtimeRoot,
+  resolveAgent: async (agentId) => resolveAgentRuntime(agentId),
+  resolveOperator: async () => ({ operatorId: 'operator', agentWorkspaceRoot: runtimeRoot }),
+  connections: async () => postgresApplication.stores.models.list(),
+  resolveConfig: (connectionId, modelId) => resolveModelConfig({ stores: postgresApplication.stores, modelConnectionId: connectionId, model: modelId }),
+});
 await hydrateMcpProviderStates({ runtimeRoot: process.env.BURROW_MCPORTER_ROOT || path.join(runtimeRoot, 'integrations', 'mcporter') }).catch((error) => serverLogger.event('mcp_provider_state_hydration_failed', { error: String(error?.message || error) }));
 const runtimeMetrics = createRuntimeMetricsCollector({
   runtimeRoot: process.env.BURROW_DATA_ROOT || '/mnt/local/burrow',
-  settingsDatabasePath: settingsDatabasePath(),
+
 });
 
-function profilesStore() { return postgresApplication?.stores.profiles || new AgentProfileStore({ databasePath: settingsDatabasePath() }); }
-function dreamDiaryStore() { return postgresApplication?.stores.dreamDiary || new DreamDiaryStore({ databasePath: settingsDatabasePath() }); }
-function dreamSettingsStore() { return postgresApplication?.stores.dreamSettings || new DreamSettingsStore({ databasePath: settingsDatabasePath() }); }
+function profilesStore() { return postgresApplication.stores.profiles; }
+function dreamDiaryStore() { return postgresApplication.stores.dreamDiary; }
+function dreamSettingsStore() { return postgresApplication.stores.dreamSettings; }
 
-function agentsStore() {
-  if (postgresApplication) return postgresApplication.stores.agents;
-  if (!agentRegistryStore) agentRegistryStore = new AgentRegistryStore({ databasePath: settingsDatabasePath() });
-  return agentRegistryStore;
-}
+function agentsStore() { return postgresApplication.stores.agents; }
 
-async function withTaskBoard(operation) {
-  if (postgresApplication) return operation(postgresApplication.stores.tasks);
-  const store = new TaskBoardStore({ databasePath: settingsDatabasePath() });
-  try { return await operation(store); } finally { await store.close(); }
-}
+async function withTaskBoard(operation) { return operation(postgresApplication.stores.tasks); }
 
-async function withScheduledJobs(operation) {
-  if (postgresApplication) return operation(postgresApplication.stores.scheduledJobs);
-  const store = new ScheduledJobStore({ databasePath: settingsDatabasePath() });
-  try { return await operation(store); } finally { await store.close(); }
-}
+async function withScheduledJobs(operation) { return operation(postgresApplication.stores.scheduledJobs); }
 
 function scheduler() {
   if (!scheduledJobScheduler) {
-    const borrowedStore = postgresApplication?.stores.scheduledJobs || null;
+    const borrowedStore = postgresApplication.stores.scheduledJobs;
     scheduledJobScheduler = createScheduledJobScheduler({
-      storeFactory: () => borrowedStore || new ScheduledJobStore({ databasePath: settingsDatabasePath() }),
-      ...(borrowedStore ? { closeStore: async () => {} } : {}),
+      storeFactory: () => borrowedStore,
+      closeStore: async () => {},
       resolveAgentRuntime, rootDir: projectRoot,
       activeOwnerModIds: () => loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id),
     });
@@ -200,8 +169,8 @@ function scheduler() {
 
 function dreamScheduler() {
   if (!dreamCycleScheduler) dreamCycleScheduler = createDreamCycleScheduler({
-    databasePath: postgresApplication ? null : settingsDatabasePath(),
-    stores: postgresApplication?.stores || null,
+
+    stores: postgresApplication.stores,
     resolveAgentRoot: async (agentId) => (await resolveAgentRuntime(agentId))?.agentWorkspaceRoot || null,
   });
   return dreamCycleScheduler;
@@ -209,8 +178,8 @@ function dreamScheduler() {
 
 function rollingContinuityScheduler() {
   if (!tiddleScheduler) tiddleScheduler = createTiddleScheduler({
-    stores: postgresApplication?.stores || null,
-    databasePath: postgresApplication ? null : settingsDatabasePath(),
+    stores: postgresApplication.stores,
+
     runtimeRoot: process.env.BURROW_RUNTIME_ROOT || '/mnt/local/burrow',
   });
   return tiddleScheduler;
@@ -218,8 +187,8 @@ function rollingContinuityScheduler() {
 
 function attachmentScheduler() {
   if (!attachmentCleanupScheduler) attachmentCleanupScheduler = createAttachmentCleanupScheduler({
-    agentStore: postgresApplication?.stores.agents,
-    databasePath: postgresApplication ? null : settingsDatabasePath(),
+    agentStore: postgresApplication.stores.agents,
+
     resolveAgentWorkspaceRoot: async (agentId) => (await resolveAgentRuntime(agentId))?.agentWorkspaceRoot || null,
   });
   return attachmentCleanupScheduler;
@@ -227,8 +196,8 @@ function attachmentScheduler() {
 
 function retentionPolicyScheduler() {
   if (!retentionScheduler) retentionScheduler = createRetentionScheduler({
-    store: postgresApplication?.stores.retentionSettings,
-    databasePath: postgresApplication ? null : settingsDatabasePath(),
+    store: postgresApplication.stores.retentionSettings,
+
     runCleanup: async (policy) => retentionCleanup({ policy, confirm: true, includeAttachments: true }),
   });
   return retentionScheduler;
@@ -282,7 +251,7 @@ async function executeBoardTask(taskId) {
     body: { message: record.latestUserMessage, sessionId, runId, abortSignal: controller.signal },
     rootDir: projectRoot,
     agentRuntime,
-    stores: postgresApplication?.stores || null,
+    stores: postgresApplication.stores,
     resolveAgentRuntime,
     onTraceRecord: (traceRecord) => {
       const progress = publicChatProgress(traceRecord);
@@ -356,19 +325,8 @@ function startCodexClientVersionRefresh() {
   codexClientVersionRefreshInterval.unref?.();
 }
 
-let metadataStoreFactory = () => {
-  if (postgresApplication) return postgresApplication.stores.metadata;
-  const db = modelsStore().db;
-  return { get: (key) => getSettingsMetaAsync(db, key), set: (key, value) => setSettingsMetaAsync(db, key, value) };
-};
-let uiAuthSecretStoreFactory = () => {
-  if (postgresApplication) return postgresApplication.stores.uiAuthSecrets;
-  return {
-    get: (name) => getUiAuthSecretAsync(modelsStore().db, name),
-    has: (name) => hasUiAuthSecretAsync(modelsStore().db, name),
-    set: (name, value) => setUiAuthSecretAsync(modelsStore().db, value, name),
-  };
-};
+let metadataStoreFactory = () => postgresApplication.stores.metadata;
+let uiAuthSecretStoreFactory = () => postgresApplication.stores.uiAuthSecrets;
 export function configureMetadataStoreFactory(factory) {
   if (typeof factory !== 'function') throw new TypeError('metadata_store_factory_required');
   metadataStoreFactory = factory;
@@ -380,16 +338,8 @@ export function configureUiAuthSecretStoreFactory(factory) {
   uiAuthSecretStoreFactory = factory;
 }
 
-function modelsStore() {
-  if (postgresApplication) return postgresApplication.stores.models;
-  if (!modelSettingsStore) modelSettingsStore = new ModelSettingsStore({ databasePath: settingsDatabasePath() });
-  return modelSettingsStore;
-}
-function mcpStore() {
-  if (postgresApplication) return postgresApplication.stores.mcp;
-  if (!mcpSettingsStore) mcpSettingsStore = new McpSettingsStore({ databasePath: settingsDatabasePath() });
-  return mcpSettingsStore;
-}
+function modelsStore() { return postgresApplication.stores.models; }
+function mcpStore() { return postgresApplication.stores.mcp; }
 async function mcpConnections() { return { ok: true, connections: await mcpStore().list() }; }
 async function saveMcpConnection(body = {}) { try {
   const store = mcpStore();
@@ -648,55 +598,41 @@ async function saveArchiveSummaryModelSelection(agentId, body = {}) {
 async function archiveSummaryModelConfig(agentId) {
   const selection = await archiveSummarySelection(agentId);
   if (!selection?.connectionId || !selection?.model) return null;
-  return resolveModelConfig({ stores: postgresApplication?.stores, settingsDb: postgresApplication ? null : settingsDatabasePath(), agentId: null, modelConnectionId: selection.connectionId, model: selection.model, reasoningEffort: selection.reasoningEffort || 'off', temperature: selection.temperature ?? 0 });
+  return resolveModelConfig({ stores: postgresApplication.stores, agentId: null, modelConnectionId: selection.connectionId, model: selection.model, reasoningEffort: selection.reasoningEffort || 'off', temperature: selection.temperature ?? 0 });
 }
 async function archiveSummaryForSession({ agentId, rootDir, sessionId } = {}) {
   const modelConfig = await archiveSummaryModelConfig(agentId);
   if (!modelConfig) return null;
-  const store = postgresApplication?.stores.conversations;
+  const store = postgresApplication.stores.conversations;
   const turns = [];
-  if (store) {
-    let after = 0;
-    for (;;) { const page = await store.page({ agentId, sessionId, after, limit: 200 }); turns.push(...page.entries.filter(isChatMessage)); if (!page.hasMore) break; after = page.next; }
-  } else turns.push(...await readChatMessages({ rootDir, sessionId, limit: 0 }));
-  const metadata = store ? await store.getMetadata({agentId,sessionId}) : await readSessionMetadata({ rootDir, sessionId });
+  let after = 0;
+  for (;;) { const page = await store.page({ agentId, sessionId, after, limit: 200 }); turns.push(...page.entries.filter(isChatMessage)); if (!page.hasMore) break; after = page.next; }
+  const metadata = await store.getMetadata({agentId,sessionId});
   const summary = await generateArchiveSummary({ modelConfig, title: metadata?.archiveTitle || sessionId, turns });
   if (!summary) return null;
-  if (store) return store.patchMetadata({agentId,sessionId,metadata:{archiveSummary:summary,archiveSummaryStatus:'ready',archiveSummarizedAt:new Date().toISOString()}});
-  return writeSessionMetadata({ rootDir, sessionId, extra: { archiveSummary: summary, archiveSummaryStatus: 'ready', archiveSummarizedAt: new Date().toISOString() } });
+  return store.patchMetadata({agentId,sessionId,metadata:{archiveSummary:summary,archiveSummaryStatus:'ready',archiveSummarizedAt:new Date().toISOString()}});
 }
 
 async function archiveSummaryForReset({ agentId, rootDir, sessionId, archiveId = null, archivedPath = null } = {}) {
-  if (postgresApplication) {
-    if (!archiveId) return null;
-    const store = postgresApplication.stores.conversations;
-    const snapshot = await store.readArchive({agentId,sessionId,archiveId});
-    if (!snapshot) return null;
-    const modelConfig = await archiveSummaryModelConfig(agentId);
-    if (!modelConfig) return null;
-    const summary = await generateArchiveSummary({modelConfig,title:snapshot.metadata?.archiveTitle || sessionId,turns:snapshot.entries.filter(isChatMessage)});
-    return summary ? store.patchArchiveMetadata({agentId,sessionId,archiveId,metadata:{summary,summaryStatus:'ready',summarizedAt:new Date().toISOString()}}) : null;
-  }
-  const archive = archiveId ? { id: archiveId } : (archivedPath ? (await listResetSessionArchives({ rootDir, limit: 20 })).find((item) => item.fileName === path.basename(archivedPath)) : null);
-  if (!archive) return null;
-  const snapshot = await readResetSessionArchive({ rootDir, archiveId: archive.id });
+  if (!archiveId) return null;
+  const store = postgresApplication.stores.conversations;
+  const snapshot = await store.readArchive({agentId,sessionId,archiveId});
   if (!snapshot) return null;
   const modelConfig = await archiveSummaryModelConfig(agentId);
   if (!modelConfig) return null;
-  const summary = await generateArchiveSummary({ modelConfig, title: snapshot.archiveTitle, turns: snapshot.turns.filter((turn) => turn.visibility === 'chat') });
-  if (!summary) return null;
-  return writeResetSessionArchiveMetadata({ rootDir, archiveId: archive.id, metadata: { summary, summaryStatus: 'ready', summarizedAt: new Date().toISOString() } });
+  const summary = await generateArchiveSummary({modelConfig,title:snapshot.metadata?.archiveTitle || sessionId,turns:snapshot.entries.filter(isChatMessage)});
+  return summary ? store.patchArchiveMetadata({agentId,sessionId,archiveId,metadata:{summary,summaryStatus:'ready',summarizedAt:new Date().toISOString()}}) : null;
 }
 
 async function curatorSettings() {
   const root = curatorRoot();
-  return { ok: true, ...(await curatorRuntimeStatus({ stores: postgresApplication?.stores, databasePath: postgresApplication ? null : settingsDatabasePath(), root })) };
+  return { ok: true, ...(await curatorRuntimeStatus({ stores: postgresApplication.stores, root })) };
 }
 async function saveCuratorSettings(body = {}) {
   try {
     const root = curatorRoot();
-    const selection = await saveCuratorSelection(body, { stores: postgresApplication?.stores, databasePath: postgresApplication ? null : settingsDatabasePath(), root });
-    return { ok: true, selection, ...(await curatorRuntimeStatus({ stores: postgresApplication?.stores, databasePath: postgresApplication ? null : settingsDatabasePath(), root })) };
+    const selection = await saveCuratorSelection(body, { stores: postgresApplication.stores, root });
+    return { ok: true, selection, ...(await curatorRuntimeStatus({ stores: postgresApplication.stores, root })) };
   } catch (error) { return { ok: false, status: 400, error: String(error?.message || error) }; }
 }
 
@@ -872,7 +808,7 @@ async function resolveModelConnectionChatBody(body = {}) {
   }
   return {
     ...body,
-    // Only the SQLite record ID and exact enabled model cross the API boundary.
+    // Only the connection record ID and exact enabled model cross the API boundary.
     // Runtime resolution retrieves connection metadata and its encrypted secret
     // directly from the settings database.
     modelConnectionId: connection.id,
@@ -885,7 +821,7 @@ async function resolveModelConnectionChatBody(body = {}) {
 }
 
 async function runtimeConfig(agentId = 'hatchet') {
-  return loadRuntimeConfig({ rootDir: projectRoot, args: { agent_id: String(agentId || 'hatchet') }, stores: postgresApplication?.stores || null, tolerateModelResolutionError: true });
+  return loadRuntimeConfig({ rootDir: projectRoot, args: { agent_id: String(agentId || 'hatchet') }, stores: postgresApplication.stores, tolerateModelResolutionError: true });
 }
 
 async function resolveAgentRuntime(agentId = null) {
@@ -923,8 +859,8 @@ async function createAgent(body = {}) {
     // Every agent starts with a real default conversation scope. Without this
     // metadata record, the first /api/sessions request returns an empty list
     // until some later action happens to materialize the session.
-    if (postgresApplication) await postgresApplication.stores.conversations.updateMetadata({ agentId: agent.id, sessionId: 'default', update: (metadata) => metadata });
-    else await writeSessionMetadata({ rootDir: context.agentWorkspaceRoot, sessionId: 'default' });
+    await postgresApplication.stores.conversations.updateMetadata({ agentId: agent.id, sessionId: 'default', update: (metadata) => metadata });
+
     return { ok: true, agent, context: { agentWorkspaceRoot: context.agentWorkspaceRoot, agentDataRoot: context.agentDataRoot, skillsRoot: context.skillsRoot } };
   } catch (error) {
     return { ok: false, status: String(error?.message || error) === 'agent_id_exists' ? 409 : 400, error: String(error?.message || error) };
@@ -961,8 +897,8 @@ async function agentDreamSettings(agentId, body = null) {
     let modelResolutionError = null;
     try {
       const config = await resolveModelConfig(settings.modelConnectionId && settings.model
-        ? { modelConnectionId: settings.modelConnectionId, model: settings.model, stores: postgresApplication?.stores, settingsDb: postgresApplication ? null : settingsDatabasePath() }
-        : { agentId, stores: postgresApplication?.stores, settingsDb: postgresApplication ? null : settingsDatabasePath() });
+        ? { modelConnectionId: settings.modelConnectionId, model: settings.model, stores: postgresApplication.stores, }
+        : { agentId, stores: postgresApplication.stores, });
       if (config) effectiveModel = { modelConnectionId: config.connectionId, model: config.model };
     } catch (error) { modelResolutionError = String(error?.message || error); }
     return { ok: true, settings, effectiveModel, modelResolutionError };
@@ -986,8 +922,7 @@ async function agentDreamDiary(agentId, body = null, query = {}) {
 
 async function agentDreamMemoryConsolidate(agentId, body = {}) {
   try {
-    if (postgresApplication) return await consolidateDreamMemoryAsync({ agentId, workingMemoryStore: postgresApplication.stores.workingMemory, profileStore: postgresApplication.stores.profiles, limit: body.limit, generatedAt: body.generatedAt });
-    return await consolidateDreamMemory({ agentId, databasePath: settingsDatabasePath(), limit: body.limit, generatedAt: body.generatedAt });
+    return await consolidateDreamMemoryAsync({ agentId, workingMemoryStore: postgresApplication.stores.workingMemory, profileStore: postgresApplication.stores.profiles, limit: body.limit, generatedAt: body.generatedAt });
   } catch (error) {
     const message = String(error?.message || error);
     return { ok: false, status: message === 'agent_not_found' ? 404 : 400, error: message };
@@ -996,9 +931,9 @@ async function agentDreamMemoryConsolidate(agentId, body = {}) {
 
 async function agentDreamCycle(agentId, body = null, query = {}) {
   try {
-    if (body === null) return { ok: true, receipts: postgresApplication ? await postgresApplication.stores.dreamCycles.latest({ agentId, limit: query.limit || 20 }) : latestDreamCycleReceipts({ agentId, databasePath: settingsDatabasePath(), limit: query.limit || 20 }) };
+    if (body === null) return { ok: true, receipts: await postgresApplication.stores.dreamCycles.latest({ agentId, limit: query.limit || 20 }) };
     const context = await resolveAgentRuntime(agentId);
-    return { ok: true, result: await runDreamCycle({ agentId, databasePath: postgresApplication ? null : settingsDatabasePath(), rootDir: context?.agentWorkspaceRoot || null, limit: body.limit, generatedAt: body.generatedAt, stores: postgresApplication?.stores || undefined }) };
+    return { ok: true, result: await runDreamCycle({ agentId, rootDir: context?.agentWorkspaceRoot || null, limit: body.limit, generatedAt: body.generatedAt, stores: postgresApplication.stores || undefined }) };
   } catch (error) {
     const message = String(error?.message || error);
     return { ok: false, status: message === 'agent_not_found' ? 404 : 400, error: message };
@@ -1488,7 +1423,7 @@ async function authenticateApiToken(req, url) {
   if (!token) return null;
   const requiredScope = apiTokenScopeForRequest(req, url);
   if (!requiredScope) return null;
-  const store = postgresApplication?.stores.apiTokens || new ApiTokenStore({ databasePath: settingsDatabasePath() });
+  const store = postgresApplication.stores.apiTokens;
   try { return await store.authenticate(token, { requiredScope }); }
   finally { await store.close?.(); }
 }
@@ -1616,18 +1551,18 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
     if (!agent?.id) return;
     importRuntime ||= await runtimeConfig();
     const context = await ensureAgentRoots({ runtimeState: importRuntime.runtimeState, agent });
-    if (postgresApplication) await postgresApplication.stores.conversations.updateMetadata({ agentId: agent.id, sessionId: 'default', update: (metadata) => metadata });
-    else await writeSessionMetadata({ rootDir: context.agentWorkspaceRoot, sessionId: 'default' });
+    await postgresApplication.stores.conversations.updateMetadata({ agentId: agent.id, sessionId: 'default', update: (metadata) => metadata });
+
   };
   if (categories.settings && typeof categories.settings === 'object') {
     if (categories.settings.executionBoundaries) {
-      const result = await saveExecutionBoundaries(categories.settings.executionBoundaries, { metadataStore: postgresApplication?.stores.metadata, databasePath: postgresApplication ? null : settingsDatabasePath() });
+      const result = await saveExecutionBoundaries(categories.settings.executionBoundaries, { metadataStore: postgresApplication.stores.metadata, });
       if (!result.ok) return result;
       imported.push('settings:execution-boundaries');
     }
     if (categories.settings.curatorSelection) {
       try {
-        await saveCuratorSelection(categories.settings.curatorSelection, { stores: postgresApplication?.stores, databasePath: postgresApplication ? null : settingsDatabasePath(), root: curatorRoot() });
+        await saveCuratorSelection(categories.settings.curatorSelection, { stores: postgresApplication.stores, root: curatorRoot() });
         imported.push('settings:curator-selection');
       } catch (error) { return { ok: false, status: 400, error: String(error?.message || error) }; }
     }
@@ -1749,12 +1684,11 @@ async function exportSnapshot(categories = []) {
     };
   }
   if (categories.includes('settings')) {
-    const db = modelsStore().db;
     data.settings = {
       schema: 'burrow.portable-settings/v1',
-      executionBoundaries: await readExecutionBoundaries({ metadataStore: postgresApplication?.stores.metadata, databasePath: postgresApplication ? null : settingsDatabasePath() }),
-      curatorSelection: await readCuratorSelection({ stores: postgresApplication?.stores, databasePath: postgresApplication ? null : settingsDatabasePath(), root: curatorRoot() }),
-      ownership: settingsOwnershipInventory(db).ownership,
+      executionBoundaries: await readExecutionBoundaries({ metadataStore: postgresApplication.stores.metadata, }),
+      curatorSelection: await readCuratorSelection({ stores: postgresApplication.stores, root: curatorRoot() }),
+      ownership: [{ id: 'core-persistence', authority: 'postgres', storage: 'PostgreSQL' }],
     };
   }
   if (categories.includes('model-connections')) {
@@ -1948,21 +1882,10 @@ function boundedInteger(value, { fallback = 100, min = 1, max = 500 } = {}) {
 
 async function listSessions({ rootDir, rootDirs = null, agentId = null, includeArchived = false, query = '', updatedSince = null, limit = 100 } = {}) {
   const resolvedLimit = boundedInteger(limit, { fallback: 100, min: 1, max: 500 });
-  if (postgresApplication) {
-    agentId ||= (await resolveAgentRuntime()).agentId;
-    const rows = await postgresApplication.stores.conversations.listSessions({ agentId, includeArchived });
-    const since = updatedSince && !Number.isNaN(Date.parse(updatedSince)) ? String(updatedSince) : null;
-    return rows.filter((item) => !query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase())).filter((item) => !since || String(item.updatedAt || "") > since).slice(0, resolvedLimit).map((item) => ({ ...item, id: item.sessionId }));
-  }
+  agentId ||= (await resolveAgentRuntime()).agentId;
+  const rows = await postgresApplication.stores.conversations.listSessions({ agentId, includeArchived });
   const since = updatedSince && !Number.isNaN(Date.parse(updatedSince)) ? String(updatedSince) : null;
-  const roots = (rootDirs || [rootDir]).filter(Boolean).filter((item, index, all) => all.indexOf(item) === index);
-  const records = await Promise.all(roots.map((item) => listSessionRecords({ rootDir: item, includeArchived, query, limit: resolvedLimit })));
-  return records.flat()
-    .filter((item, index, all) => all.findIndex((candidate) => candidate.id === item.id) === index)
-    .filter((item) => !since || (item.updatedAt && item.updatedAt > since))
-    .map((item) => ({ ...item, sessionId: item.id, agentId }))
-    .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')))
-    .slice(0, resolvedLimit);
+  return rows.filter((item) => !query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase())).filter((item) => !since || String(item.updatedAt || "") > since).slice(0, resolvedLimit).map((item) => ({ ...item, id: item.sessionId }));
 }
 
 function archiveSessionListItem(record = {}, agentRuntime = {}, agent = {}) {
@@ -2015,17 +1938,17 @@ async function archiveDreamDetail(agentId, entryId) {
 async function archiveContinuityCards({ agentId = null, scope = null, limit = 200 } = {}) {
   const resolvedLimit = boundedInteger(limit, { fallback: 200, min: 1, max: 500 });
   const agents = (await agentsStore().list({ includeDisabled: true })).filter((agent) => !agentId || agent.id === String(agentId));
-  const cards = (await Promise.all(agents.map(async (agent) => (await listTiddleCards({ agentId: agent.id, scope, limit: resolvedLimit, stores: postgresApplication?.stores, databasePath: postgresApplication ? null : settingsDatabasePath() })).cards.map((card) => ({ ...card, kind: 'continuity', agentId: agent.id, agentName: agent.name }))))).flat();
+  const cards = (await Promise.all(agents.map(async (agent) => (await listTiddleCards({ agentId: agent.id, scope, limit: resolvedLimit, stores: postgresApplication.stores, })).cards.map((card) => ({ ...card, kind: 'continuity', agentId: agent.id, agentName: agent.name }))))).flat();
   return { ok: true, scope: scope || null, cards: cards.sort((left, right) => String(right.lastSeen || '').localeCompare(String(left.lastSeen || ''))).slice(0, resolvedLimit) };
 }
 
 async function archiveContinuityCardDetail({ agentId, cardId, limit = 200 } = {}) {
   const agent = await agentsStore().get(agentId);
   if (!agent) return { ok: false, status: 404, error: 'agent_not_found' };
-  const cards = (await listTiddleCards({ agentId, limit: 500, stores: postgresApplication?.stores, databasePath: postgresApplication ? null : settingsDatabasePath() })).cards;
+  const cards = (await listTiddleCards({ agentId, limit: 500, stores: postgresApplication.stores, })).cards;
   const card = cards.find((candidate) => candidate.id === cardId);
   if (!card) return { ok: false, status: 404, error: 'archive_continuity_card_not_found' };
-  const history = (await tiddleHistory({ agentId, cardId, limit: boundedInteger(limit, { fallback: 200, min: 1, max: 500 }), stores: postgresApplication?.stores, databasePath: postgresApplication ? null : settingsDatabasePath() })).entries;
+  const history = (await tiddleHistory({ agentId, cardId, limit: boundedInteger(limit, { fallback: 200, min: 1, max: 500 }), stores: postgresApplication.stores, })).entries;
   return { ok: true, card: { ...card, kind: 'continuity', agentId, agentName: agent.name }, history };
 }
 
@@ -2076,20 +1999,8 @@ async function archiveRunDetail({ agentRuntime = null, runId } = {}) {
 async function archiveSessions({ includeArchived = true, query = '', limit = 200, includeDisabled = false } = {}) {
   const resolvedLimit = boundedInteger(limit, { fallback: 200, min: 1, max: 1000 });
   const agents = await agentsStore().list({ includeDisabled: Boolean(includeDisabled) });
-  if (postgresApplication) {
-    const rows = (await Promise.all(agents.map(async (agent) => (await postgresApplication.stores.conversations.listSessions({ agentId: agent.id, includeArchived })).map((record) => archiveSessionListItem({ id: record.sessionId, ...record }, { agentId: agent.id }, agent))))).flat();
-    return rows.filter((item) => !query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase())).sort((a,b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))).slice(0, resolvedLimit);
-  }
-  const lists = await Promise.all(agents.map(async (agent) => {
-    if (!agent.enabled && !includeDisabled) return [];
-    const agentRuntime = await resolveAgentRuntime(agent.id);
-    const records = await listSessionRecords({ rootDir: agentRuntime.agentWorkspaceRoot, includeArchived, query, limit: resolvedLimit });
-    const resets = includeArchived ? await listResetSessionArchives({ rootDir: agentRuntime.agentWorkspaceRoot, query, limit: resolvedLimit }) : [];
-    return [...records, ...resets].map((record) => archiveSessionListItem(record, agentRuntime, agent));
-  }));
-  return lists.flat()
-    .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')))
-    .slice(0, resolvedLimit);
+  const rows = (await Promise.all(agents.map(async (agent) => (await postgresApplication.stores.conversations.listSessions({ agentId: agent.id, includeArchived })).map((record) => archiveSessionListItem({ id: record.sessionId, ...record }, { agentId: agent.id }, agent))))).flat();
+  return rows.filter((item) => !query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase())).sort((a,b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))).slice(0, resolvedLimit);
 }
 
 function activityItemFromTraceCard(card = {}) {
@@ -2170,35 +2081,16 @@ function compactChatTurn(turn = {}) {
 }
 
 async function sessionDetail(id, { rootDir, agentId = null } = {}) {
-  if (postgresApplication) {
-    agentId ||= (await resolveAgentRuntime()).agentId;
-    const metadata = await postgresApplication.stores.conversations.getMetadata({ agentId, sessionId: id });
-    if (!metadata) return null;
-    const [chatEntries, activityTurns] = await Promise.all([
-      postgresApplication.stores.conversations.projection({ agentId, sessionId: id, visibility: 'chat', limit: 200 }),
-      postgresApplication.stores.conversations.projection({ agentId, sessionId: id, visibility: 'activity', limit: 20 }),
-    ]);
-    const chatTurns = chatEntries.filter(isChatMessage);
-    const turns = [...chatTurns, ...activityTurns].sort((a,b) => String(a.ts || '').localeCompare(String(b.ts || ''))).map(compactChatTurn);
-    return { id, turnCount: metadata.turnCount ?? turns.length, metadata, summary: metadata.summary || summarizeSessionTurns(chatTurns, { maxChars: 2000 }), turns, activities: activityTurns.filter((turn) => turn.metadata?.toolActivity).map((turn) => ({ ...turn.metadata.toolActivity, runId: turn.runId || null })) };
-  }
-  const metadata = rootDir ? await readSessionMetadata({ rootDir, sessionId: id }) : null;
+  agentId ||= (await resolveAgentRuntime()).agentId;
+  const metadata = await postgresApplication.stores.conversations.getMetadata({ agentId, sessionId: id });
   if (!metadata) return null;
-  // The cockpit needs rendered chat plus compact activity cards, never raw
-  // model/tool/debug envelopes. Those remain available through trace routes.
-  // Fetch the two bounded projections separately so a verbose work turn cannot
-  // make ordinary chat hydration transfer or parse its invisible debug payload.
-  const [chatTurns, activityTurns] = await Promise.all([
-    readChatMessages({ rootDir, sessionId: id, limit: 200 }),
-    readActivityEvents({ rootDir, sessionId: id, limit: 20 }),
+  const [chatEntries, activityTurns] = await Promise.all([
+    postgresApplication.stores.conversations.projection({ agentId, sessionId: id, visibility: 'chat', limit: 200 }),
+    postgresApplication.stores.conversations.projection({ agentId, sessionId: id, visibility: 'activity', limit: 20 }),
   ]);
-  const turns = [...chatTurns, ...activityTurns]
-    .sort((left, right) => String(left.ts || '').localeCompare(String(right.ts || '')))
-    .map(compactChatTurn);
-  const activities = activityTurns
-    .filter((turn) => turn.metadata?.toolActivity)
-    .map((turn) => ({ ...turn.metadata.toolActivity, runId: turn.runId || turn.metadata.toolActivity.runId || null }));
-  return { id, turnCount: metadata.turnCount ?? turns.length, metadata, summary: metadata.summary || summarizeSessionTurns(chatTurns, { maxChars: 2000 }), turns, activities };
+  const chatTurns = chatEntries.filter(isChatMessage);
+  const turns = [...chatTurns, ...activityTurns].sort((a,b) => String(a.ts || '').localeCompare(String(b.ts || ''))).map(compactChatTurn);
+  return { id, turnCount: metadata.turnCount ?? turns.length, metadata, summary: metadata.summary || summarizeSessionTurns(chatTurns, { maxChars: 2000 }), turns, activities: activityTurns.filter((turn) => turn.metadata?.toolActivity).map((turn) => ({ ...turn.metadata.toolActivity, runId: turn.runId || null })) };
 }
 
 async function archiveSessionDetail(agentId, sessionId, pageOptions = {}) {
@@ -2230,7 +2122,7 @@ async function archiveSessionDetail(agentId, sessionId, pageOptions = {}) {
       hasMore: page.hasMore, nextCursor: page.nextCursor, historyStatus: page.historyStatus,
     };
   }
-  const metadata = postgresApplication ? await postgresApplication.stores.conversations.getMetadata({agentId:agentRuntime.agentId,sessionId}) : await readSessionMetadata({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId });
+  const metadata = await postgresApplication.stores.conversations.getMetadata({agentId:agentRuntime.agentId,sessionId});
   if (!metadata || !page) return null;
   const session = { id: sessionId, turnCount: metadata.turnCount ?? page.turns.length, metadata, summary: metadata.summary || summarizeSessionTurns(page.turns, { maxChars: 2000 }), turns: page.turns.map(compactChatTurn), activities: [] };
   return {
@@ -2279,7 +2171,7 @@ function runtimePolicyStatus(runtime) {
 }
 
 async function executionBoundarySettings() {
-  const boundaries = await readExecutionBoundaries({ metadataStore: postgresApplication?.stores.metadata, databasePath: postgresApplication ? null : settingsDatabasePath() });
+  const boundaries = await readExecutionBoundaries({ metadataStore: postgresApplication.stores.metadata, });
   return { ok: true, boundaries, status: executionBoundaryStatus(boundaries) };
 }
 
@@ -2302,7 +2194,7 @@ async function runtimeStatus(agentId = null) {
     const runtime = await runtimeConfig();
     const agentRuntime = await selectedAgentRuntime(agentId);
     const selected = agentRuntime ? await modelsStore().modelSelection(agentRuntime.agentId) : null;
-    const selectedRuntime = selected ? await loadRuntimeConfig({ rootDir: projectRoot, args: { agent_id: agentRuntime.agentId }, stores: postgresApplication?.stores || null, tolerateModelResolutionError: true }) : runtime;
+    const selectedRuntime = selected ? await loadRuntimeConfig({ rootDir: projectRoot, args: { agent_id: agentRuntime.agentId }, stores: postgresApplication.stores, tolerateModelResolutionError: true }) : runtime;
     const traceRoot = path.join(runtime.runtimeState.cacheRoot, 'traces');
     const traces = await cachedTraceObservability(traceRoot);
     return {
@@ -2421,7 +2313,7 @@ async function localContinuityContext(body = {}) {
 async function sessionContinuityScope(body = {}) {
   const agentRuntime = await resolveAgentRuntime(body.agentId);
   const sessionId = String(body.sessionId || 'default').trim() || 'default';
-  const metadata = postgresApplication ? await postgresApplication.stores.conversations.getMetadata({agentId:agentRuntime.agentId,sessionId}) : await readSessionMetadata({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId });
+  const metadata = await postgresApplication.stores.conversations.getMetadata({agentId:agentRuntime.agentId,sessionId});
   return { ok: true, agentId: agentRuntime.agentId, sessionId, continuityScope: workingContextFromSession({ metadata }).continuityScope || null };
 }
 
@@ -2430,20 +2322,20 @@ async function setSessionContinuityScope(body = {}) {
   const sessionId = String(body.sessionId || 'default').trim() || 'default';
   const continuityScope = normalizeContinuityScope(body.continuityScope ?? body.scope);
   if (!continuityScope) return { ok: false, error: 'continuity_scope_required' };
-  const metadata = postgresApplication ? await postgresApplication.stores.conversations.getMetadata({agentId:agentRuntime.agentId,sessionId}) : await readSessionMetadata({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId });
+  const metadata = await postgresApplication.stores.conversations.getMetadata({agentId:agentRuntime.agentId,sessionId});
   const workingContext = workingContextFromSession({ metadata });
-  if (postgresApplication) await postgresApplication.stores.conversations.patchMetadata({agentId:agentRuntime.agentId,sessionId,metadata:{workingContext:{...workingContext,continuityScope}}});
-  else await persistSessionWorkingContext({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId, workingContext: { ...workingContext, continuityScope } });
+  await postgresApplication.stores.conversations.patchMetadata({agentId:agentRuntime.agentId,sessionId,metadata:{workingContext:{...workingContext,continuityScope}}});
+
   return { ok: true, agentId: agentRuntime.agentId, sessionId, continuityScope };
 }
 
 async function clearSessionContinuityScope(body = {}) {
   const agentRuntime = await resolveAgentRuntime(body.agentId);
   const sessionId = String(body.sessionId || 'default').trim() || 'default';
-  const metadata = postgresApplication ? await postgresApplication.stores.conversations.getMetadata({agentId:agentRuntime.agentId,sessionId}) : await readSessionMetadata({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId });
+  const metadata = await postgresApplication.stores.conversations.getMetadata({agentId:agentRuntime.agentId,sessionId});
   const { continuityScope: _removed, ...workingContext } = workingContextFromSession({ metadata });
-  if (postgresApplication) await postgresApplication.stores.conversations.patchMetadata({agentId:agentRuntime.agentId,sessionId,metadata:{workingContext}});
-  else await persistSessionWorkingContext({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId, workingContext });
+  await postgresApplication.stores.conversations.patchMetadata({agentId:agentRuntime.agentId,sessionId,metadata:{workingContext}});
+
   return { ok: true, agentId: agentRuntime.agentId, sessionId, continuityScope: null };
 }
 
@@ -2451,17 +2343,17 @@ async function sessionReadHandoff(body = {}) {
   try {
     const { agentRuntime, sessionId, dataRoot } = await localContinuityContext(body);
     const session = await sessionDetail(sessionId, { rootDir: agentRuntime.agentWorkspaceRoot, agentId: agentRuntime.agentId });
-    const metadata = postgresApplication ? await postgresApplication.stores.conversations.getMetadata({agentId:agentRuntime.agentId,sessionId}) : await readSessionMetadata({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId });
+    const metadata = await postgresApplication.stores.conversations.getMetadata({agentId:agentRuntime.agentId,sessionId});
     const workingContext = workingContextFromSession({ metadata });
     const continuityScope = normalizeContinuityScope(workingContext.continuityScope) || `conversation:${metadata?.conversationId || sessionId}`;
-    const handoffs = await (postgresApplication ? postgresApplication.stores.continuity.list({ agentId: agentRuntime.agentId, limit: 1 }) : listContinuityHandoffs({ dataRoot, agentId: agentRuntime.agentId, limit: 1 }));
+    const handoffs = await postgresApplication.stores.continuity.list({ agentId: agentRuntime.agentId, limit: 1 });
     const workingContinuity = projectHandoffsIntoWorkingContinuity({
-      continuity: await loadWorkingContinuityAsync({ store: postgresApplication?.stores.workingMemory || null, agentId: agentRuntime.agentId, continuityScope }),
+      continuity: await loadWorkingContinuityAsync({ store: postgresApplication.stores.workingMemory, agentId: agentRuntime.agentId, continuityScope }),
       handoffs,
       agentId: agentRuntime.agentId,
       continuityScope,
     });
-    return { ok: true, owner: postgresApplication ? 'postgres' : 'sqlite', handoffModel: 'rolling_continuity_metadata', agentId: agentRuntime.agentId, sessionId, continuityScope, sessionSummary: session?.summary || null, handoffs, workingContinuity };
+    return { ok: true, owner: 'postgres', handoffModel: 'rolling_continuity_metadata', agentId: agentRuntime.agentId, sessionId, continuityScope, sessionSummary: session?.summary || null, handoffs, workingContinuity };
   } catch (error) { return { ok: false, error: String(error?.message || error) }; }
 }
 
@@ -2474,8 +2366,8 @@ async function sessionWriteHandoff(body = {}) {
     const runId = String(body.runId || `ui-handoff-${Date.now()}`);
     const handoff = buildContinuityHandoff({ agentId: agentRuntime.agentId, sessionId, runId, message: body.message || `Session ${sessionId} continuity handoff`, answerText: content, toolResults: [], curated: { title: body.title || `Burrow session handoff: ${sessionId}`, content } });
     if (!handoff) return { ok: false, error: 'handoff_content_insufficient' };
-    const store = postgresApplication?.stores.continuity || new ContinuityHandoffStore({ dataRoot });
-    try { return { ok: true, owner: postgresApplication ? 'postgres' : 'sqlite', handoff: await store.upsert(handoff) }; } finally { if (!postgresApplication) await store.close(); }
+    const store = postgresApplication.stores.continuity;
+    return { ok: true, owner: 'postgres', handoff: await store.upsert(handoff) };
   } catch (error) { return { ok: false, error: String(error?.message || error) }; }
 }
 
@@ -2488,52 +2380,50 @@ async function sessionWriteHandoffCandidate(body = {}) {
 
 async function brainPromotionCandidates(body = {}) {
   const agentRuntime = await resolveAgentRuntime(body.agentId);
-  const store = postgresApplication?.stores.workingMemory || new WorkingMemoryStore({ databasePath: settingsDatabasePath() });
+  const store = postgresApplication.stores.workingMemory;
   try {
     return { ok: true, owner: 'local_review_queue', entersPrompt: false, writesBrain: false, agentId: agentRuntime.agentId, candidates: await store.listBrainPromotionCandidates({ agentId: agentRuntime.agentId, status: body.status || 'pending', limit: body.limit || 20 }) };
   } catch (error) { return { ok: false, error: String(error?.message || error) }; }
-  finally { if (!postgresApplication) await store.close(); }
 }
 
 async function updateBrainPromotionCandidate(body = {}) {
   const agentRuntime = await resolveAgentRuntime(body.agentId);
-  const store = postgresApplication?.stores.workingMemory || new WorkingMemoryStore({ databasePath: settingsDatabasePath() });
+  const store = postgresApplication.stores.workingMemory;
   try {
     return { ok: true, owner: 'local_review_queue', entersPrompt: false, writesBrain: false, candidate: await store.updateBrainPromotionCandidate({ agentId: agentRuntime.agentId, candidateId: body.candidateId || body.id, status: body.status, reason: body.reason }) };
   } catch (error) { return { ok: false, error: String(error?.message || error) }; }
-  finally { if (!postgresApplication) await store.close(); }
 }
 
 async function retentionPolicySettings() {
   const runtime = await runtimeConfig();
-  const policy = await readRetentionPolicy({ databasePath: postgresApplication ? null : runtime.runtimeState.settingsDatabasePath, store: postgresApplication?.stores.retentionSettings });
-  const state = await readRetentionPolicyState({ databasePath: postgresApplication ? null : runtime.runtimeState.settingsDatabasePath, store: postgresApplication?.stores.retentionSettings });
-  const plan = await planRetentionCleanup({ dataRoot: runtime.runtimeState.agentDataRoot, traceRoot: path.join(runtime.runtimeState.cacheRoot, 'traces'), settingsDatabasePath: runtime.runtimeState.settingsDatabasePath, retention: policy });
+  const policy = await readRetentionPolicy({ store: postgresApplication.stores.retentionSettings });
+  const state = await readRetentionPolicyState({ store: postgresApplication.stores.retentionSettings });
+  const plan = await planRetentionCleanup({ dataRoot: runtime.runtimeState.agentDataRoot, traceRoot: path.join(runtime.runtimeState.cacheRoot, 'traces'), retention: policy });
   return { ok: true, policy, state, plan };
 }
 
 async function saveRetentionPolicySettings(body = {}) {
   try {
     const runtime = await runtimeConfig();
-    const policy = await saveRetentionPolicy(body.policy || body, { databasePath: postgresApplication ? null : runtime.runtimeState.settingsDatabasePath, store: postgresApplication?.stores.retentionSettings });
-    const state = await readRetentionPolicyState({ databasePath: postgresApplication ? null : runtime.runtimeState.settingsDatabasePath, store: postgresApplication?.stores.retentionSettings });
+    const policy = await saveRetentionPolicy(body.policy || body, { store: postgresApplication.stores.retentionSettings });
+    const state = await readRetentionPolicyState({ store: postgresApplication.stores.retentionSettings });
     return { ok: true, policy, state };
   } catch (error) { return { ok: false, status: 400, error: String(error?.message || error) }; }
 }
 
 async function retentionCleanup(body = {}) {
   const runtime = await runtimeConfig();
-  const savedPolicy = await readRetentionPolicy({ databasePath: postgresApplication ? null : runtime.runtimeState.settingsDatabasePath, store: postgresApplication?.stores.retentionSettings });
+  const savedPolicy = await readRetentionPolicy({ store: postgresApplication.stores.retentionSettings });
   const policy = body.policy ? normalizeRetentionPolicy(body.policy, savedPolicy) : savedPolicy;
   if (body.confirm === true && !policy.enabled && body.requireEnabled !== false) return { ok: false, status: 409, error: 'retention_policy_disabled', policy };
   try {
-    const result = await runRetentionCleanup({ dataRoot: runtime.runtimeState.agentDataRoot, traceRoot: path.join(runtime.runtimeState.cacheRoot, 'traces'), settingsDatabasePath: runtime.runtimeState.settingsDatabasePath, retention: policy, confirm: body.confirm === true });
-    const attachments = body.confirm === true && body.includeAttachments === true ? await cleanupAgentAttachments({ agentStore: postgresApplication?.stores.agents, databasePath: postgresApplication ? null : settingsDatabasePath(), resolveAgentWorkspaceRoot: async (agentId) => (await resolveAgentRuntime(agentId))?.agentWorkspaceRoot || null }) : null;
-    const state = body.confirm === true ? await writeRetentionPolicyState(retentionPolicySuccessState({ policy, result, previous: await readRetentionPolicyState({ databasePath: postgresApplication ? null : runtime.runtimeState.settingsDatabasePath, store: postgresApplication?.stores.retentionSettings }) }), { databasePath: postgresApplication ? null : runtime.runtimeState.settingsDatabasePath, store: postgresApplication?.stores.retentionSettings }) : await readRetentionPolicyState({ databasePath: postgresApplication ? null : runtime.runtimeState.settingsDatabasePath, store: postgresApplication?.stores.retentionSettings });
+    const result = await runRetentionCleanup({ dataRoot: runtime.runtimeState.agentDataRoot, traceRoot: path.join(runtime.runtimeState.cacheRoot, 'traces'), retention: policy, confirm: body.confirm === true });
+    const attachments = body.confirm === true && body.includeAttachments === true ? await cleanupAgentAttachments({ agentStore: postgresApplication.stores.agents, resolveAgentWorkspaceRoot: async (agentId) => (await resolveAgentRuntime(agentId))?.agentWorkspaceRoot || null }) : null;
+    const state = body.confirm === true ? await writeRetentionPolicyState(retentionPolicySuccessState({ policy, result, previous: await readRetentionPolicyState({ store: postgresApplication.stores.retentionSettings }) }), { store: postgresApplication.stores.retentionSettings }) : await readRetentionPolicyState({ store: postgresApplication.stores.retentionSettings });
     return { ok: true, policy, state, ...result, attachments };
   } catch (error) {
-    if (body.confirm === true) await writeRetentionPolicyState(retentionPolicyFailureState({ policy, error, previous: await readRetentionPolicyState({ databasePath: postgresApplication ? null : runtime.runtimeState.settingsDatabasePath, store: postgresApplication?.stores.retentionSettings }) }), { databasePath: postgresApplication ? null : runtime.runtimeState.settingsDatabasePath, store: postgresApplication?.stores.retentionSettings });
-    return { ok: false, status: 500, error: String(error?.message || error), policy, state: await readRetentionPolicyState({ databasePath: postgresApplication ? null : runtime.runtimeState.settingsDatabasePath, store: postgresApplication?.stores.retentionSettings }) };
+    if (body.confirm === true) await writeRetentionPolicyState(retentionPolicyFailureState({ policy, error, previous: await readRetentionPolicyState({ store: postgresApplication.stores.retentionSettings }) }), { store: postgresApplication.stores.retentionSettings });
+    return { ok: false, status: 500, error: String(error?.message || error), policy, state: await readRetentionPolicyState({ store: postgresApplication.stores.retentionSettings }) };
   }
 }
 
@@ -2701,7 +2591,7 @@ async function agentOverview(body = {}) {
       const { all: sessionIds, hydrated: hydratedSessionIds, truncated } = overviewSessionIds(sessionId, childSessionIds);
       const contextEntries = await Promise.all(hydratedSessionIds.map(async (currentSessionId) => {
         const liveRun = currentSessionId === sessionId ? active : null;
-        const context = await inspectSessionContextStatus({ stores: postgresApplication?.stores, agentId: agentRuntime.agentId, rootDir: projectRoot, dataRoot: agentRuntime.agentWorkspaceRoot, sessionId: currentSessionId, limits, contextConfig: runtime.contextConfig, contextWindow: runtime.modelConfig?.contextWindow, contextTokens: runtime.modelConfig?.contextTokens, liveContext: liveRun?.contextUsage || null });
+        const context = await inspectSessionContextStatus({ stores: postgresApplication.stores, agentId: agentRuntime.agentId, rootDir: projectRoot, dataRoot: agentRuntime.agentWorkspaceRoot, sessionId: currentSessionId, limits, contextConfig: runtime.contextConfig, contextWindow: runtime.modelConfig?.contextWindow, contextTokens: runtime.modelConfig?.contextTokens, liveContext: liveRun?.contextUsage || null });
         return [currentSessionId, context];
       }));
       return {
@@ -2895,7 +2785,7 @@ async function handleChatCommand({ parsed, sessionId, agentRuntime } = {}) {
   const runtime = await runtimeConfig(agentRuntime.agentId);
   const limits = activeConversationLimits({ modelConfig: runtime.modelConfig, contextConfig: runtime.contextConfig });
   const active = [...activeChatRuns.values()].find((run) => run.agentId === agentRuntime.agentId && run.sessionId === sessionId && !run.controller.signal.aborted) || null;
-  const status = await inspectSessionContextStatus({ stores: postgresApplication?.stores, agentId: agentRuntime.agentId, rootDir: projectRoot, dataRoot: agentRuntime.agentWorkspaceRoot, sessionId, limits, contextConfig: runtime.contextConfig, contextWindow: runtime.modelConfig?.contextWindow, contextTokens: runtime.modelConfig?.contextTokens, liveContext: active?.contextUsage || null });
+  const status = await inspectSessionContextStatus({ stores: postgresApplication.stores, agentId: agentRuntime.agentId, rootDir: projectRoot, dataRoot: agentRuntime.agentWorkspaceRoot, sessionId, limits, contextConfig: runtime.contextConfig, contextWindow: runtime.modelConfig?.contextWindow, contextTokens: runtime.modelConfig?.contextTokens, liveContext: active?.contextUsage || null });
   const context = status.context || {};
   if (parsed.command === 'context') {
     if (parsed.args === 'full') {
@@ -2904,7 +2794,7 @@ async function handleChatCommand({ parsed, sessionId, agentRuntime } = {}) {
       if (!request) return { status: 404, response: chatCommandResponse({ command: 'context', sessionId, text: 'No full running provider context is available for this session. The selected request may predate persisted request capture.', receipt: { error: 'provider_request_unavailable', runId: context.runId || null }, ok: false }) };
       return { status: 200, response: chatCommandResponse({ command: 'context', sessionId, text: contextFullText({ request, agentRuntime, sessionId, status }), receipt: { mode: 'full', runId: request.runId, sentAt: request.ts, requestId: request.payload?.requestId || null, messageCount: request.payload?.messageCount ?? null, promptChars: request.payload?.promptChars ?? null, bodyChars: request.payload?.bodyChars ?? null, estimatedTokens: context.estimatedTokens ?? null, capacityTokens: context.capacityTokens ?? null } }) };
     }
-    const inspection = await inspectSessionContext({ stores: postgresApplication?.stores, agentId: agentRuntime.agentId, rootDir: projectRoot, dataRoot: agentRuntime.agentWorkspaceRoot, sessionId, limits, includeProfileFiles: true, agentRuntime, contextWindow: runtime.modelConfig?.contextWindow, contextTokens: runtime.modelConfig?.contextTokens });
+    const inspection = await inspectSessionContext({ stores: postgresApplication.stores, agentId: agentRuntime.agentId, rootDir: projectRoot, dataRoot: agentRuntime.agentWorkspaceRoot, sessionId, limits, includeProfileFiles: true, agentRuntime, contextWindow: runtime.modelConfig?.contextWindow, contextTokens: runtime.modelConfig?.contextTokens });
     return { status: 200, response: chatCommandResponse({ command: 'context', sessionId, text: renderContextInspection({ inspection, status, agentRuntime, model: runtime.modelConfig?.model }), receipt: { context: { estimatedTokens: context.estimatedTokens ?? null, capacityTokens: context.capacityTokens ?? null, percent: context.percent ?? null, pressure: context.pressure ?? 'unknown', source: context.source ?? null }, reconstruction: { profileFiles: inspection.support?.profileFiles?.files?.map((file) => ({ name: file.name, chars: file.chars })) || [], rawRecentTurnCount: inspection.rawRecentTurnCount ?? 0, priorSummaryChars: inspection.priorSummary?.chars ?? 0 }, compaction: { active: Boolean(status.compaction?.active), next: status.compaction?.next || null }, memory: { source: inspection.memoryProvenance?.source || 'none' } } }) };
   }
   return { status: 200, response: chatCommandResponse({ command: 'status', sessionId, text: commandText('Status', [['Agent', agentRuntime.agentId], ['Session', sessionId], ['Model', runtime.modelConfig?.model || 'unconfigured'], ['Model configured', Boolean(runtime.modelConfig?.model)], ['Run', active ? `${active.runId} (${active.phase})` : 'idle'], ...contextMeterLines(context, status.compaction, { source: status.recall?.used ? 'session recall' : 'none' })]), receipt: { agentId: agentRuntime.agentId, model: runtime.modelConfig?.model || null, modelConfigured: Boolean(runtime.modelConfig?.model), activeRun: active ? activeChatRunSummary(active) : null, context, compaction: { active: Boolean(status.compaction?.active), next: status.compaction?.next || null }, memory: { source: status.recall?.used ? 'session recall' : 'none' } } }) };
@@ -2954,7 +2844,7 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId })
       body: { ...chatBody, runId, abortSignal: controller.signal },
       rootDir: projectRoot,
       agentRuntime,
-      stores: postgresApplication?.stores || null,
+      stores: postgresApplication.stores,
       resolveAgentRuntime,
       registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerActiveAgentRun(activeChatRuns, { agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
       onTraceRecord: streaming ? (traceRecord) => {
@@ -3052,7 +2942,7 @@ async function startGroupChannelMessage(channelId, body = {}) {
     // identity, tools, memory scope, and continuity head. The shared channel
     // is only a visible operator transcript.
     void runChatTurnFromBody({
-      body: { message, sessionId, runId, abortSignal: controller.signal }, rootDir: projectRoot, agentRuntime, stores: postgresApplication?.stores || null, resolveAgentRuntime,
+      body: { message, sessionId, runId, abortSignal: controller.signal }, rootDir: projectRoot, agentRuntime, stores: postgresApplication.stores, resolveAgentRuntime,
       groupChannelContext: { channelId, channelName: channel.name, turns: room?.turns || [] },
     }).then(async (result) => {
       if (!controller.signal.aborted && result?.answerText) await appendGroupChannelTurn({ rootDir, channelId, role: 'agent', content: result.answerText, runId, metadata: { fromAgentId: agentId, fromAgentName: agentRuntime.agent?.name || agentId, recipient: 'group', participantSessionId: sessionId } });
@@ -3103,39 +2993,30 @@ async function currentActiveChatRunSummaries({ agentId = null, sessionId = null 
 const exportRoute = createExportRoutes({ readJsonBody, sendJson, exportCatalog, normalizeImportRequest, decodeExport, buildExport, exportSnapshot, importPreview, applyImport });
 const taskBoardRoute = createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundaryBody, withTaskBoard, taskStatuses: TASK_STATUSES, taskPriorities: TASK_PRIORITIES, executeBoardTask });
 const workbenchRoute = createWorkbenchRoutes({ readJsonBody, sendJson, selectedAgentRuntime, dataRootForAgent, listWorkItemSummaries, createWorkbenchItem, readWorkItem, runWorkbenchItemStep, continueWorkbenchItem, archiveWorkbenchItem, workbenchPlan, workbenchRun });
-let forgeStoreInstance;
-const forgeStoreFactory = () => {
-  if (postgresApplication) return postgresApplication.stores.forge;
-  if (!forgeStoreInstance) forgeStoreInstance = postgresApplication?.stores.forge || new ForgeStore({ databasePath: settingsDatabasePath(), resolveAgent: resolveAgentRuntime, resolveOperator: async () => ({ operatorId: 'operator', agentWorkspaceRoot: runtimeRoot }), runtimeRoot, connections: async () => await modelsStore().list(), resolveConfig: (connectionId, modelId) => resolveModelConfig({ settingsDb: settingsDatabasePath(), modelConnectionId: connectionId, model: modelId }) });
-  return forgeStoreInstance;
-};
+const forgeStoreFactory = () => postgresApplication.stores.forge;
 configureForgeStoreFactory(forgeStoreFactory);
 const forgeRoute = createForgeRoutes({ store: forgeStoreFactory, readJsonBody, sendJson, sendStaticFile });
 const dreamRoute = createDreamRoutes({ readJsonBody, sendJson, agentDreamSettings, agentDreamDiary, agentDreamMemoryConsolidate, agentDreamCycle });
-const skillStoreCall = async (operation) => {
-  if (postgresApplication) return operation(postgresApplication.stores.skills);
-  const store = new SkillSettingsStore({ databasePath: settingsDatabasePath() });
-  try { return await operation(store); } finally { await store.close(); }
-};
+const skillStoreCall = async (operation) => operation(postgresApplication.stores.skills);
 const skillApi = {
   listSkills: async () => ({ ok: true, skills: await skillStoreCall(async store => await store.list()) }),
   createSkill: async (body) => ({ ok: true, skill: await skillStoreCall(store => store.create(body)) }),
   getSkill: async (id) => { const skill = await skillStoreCall(async store => await store.get(id)); return skill ? { ok: true, skill } : { ok: false, status: 404, error: 'skill_not_found' }; },
   updateSkill: async (id, body) => { const skill = await skillStoreCall(async store => await store.update(id, body)); return skill ? { ok: true, skill } : { ok: false, status: 404, error: 'skill_not_found' }; },
   deleteSkill: async (id) => await skillStoreCall(async store => await store.delete(id)) ? { ok: true } : { ok: false, status: 404, error: 'skill_not_found' },
-  agentSkills: async (id) => { const runtime = await resolveAgentRuntime(id); const assignments = await skillStoreCall(store => store.assignments(runtime.agentId)); const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: runtime.workspaceRoot, agentRuntime: runtime, databasePath: postgresApplication ? null : settingsDatabasePath(), skillStore: postgresApplication?.stores.skills || null }); return { ok: true, ...assignments, effectiveSkills: catalog.skills.map(skillManifest) }; },
+  agentSkills: async (id) => { const runtime = await resolveAgentRuntime(id); const assignments = await skillStoreCall(store => store.assignments(runtime.agentId)); const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: runtime.workspaceRoot, agentRuntime: runtime, skillStore: postgresApplication.stores.skills }); return { ok: true, ...assignments, effectiveSkills: catalog.skills.map(skillManifest) }; },
   saveAgentSkills: async (id, body) => { const runtime = await resolveAgentRuntime(id); await skillStoreCall(store => store.replaceAssignments(runtime.agentId, body.skillIds)); return skillApi.agentSkills(runtime.agentId); },
 };
-const settingsRoute = createSettingsRoutes({ ...skillApi, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, archiveSummaryModelSelection: async (agentId) => ({ ok: true, selection: await archiveSummarySelection((await resolveAgentRuntime(agentId)).agentId) }), saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection: async (id) => await modelsStore().remove(id), setupStatus: async () => postgresApplication ? postgresApplication.stores.setupState.readStatus() : readSetupStatus(modelsStore().db), completeSetup: async () => postgresApplication ? postgresApplication.stores.setupState.completeSetup() : completeSetup(modelsStore().db) });
+const settingsRoute = createSettingsRoutes({ ...skillApi, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, archiveSummaryModelSelection: async (agentId) => ({ ok: true, selection: await archiveSummarySelection((await resolveAgentRuntime(agentId)).agentId) }), saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection: async (id) => await modelsStore().remove(id), setupStatus: async () => postgresApplication.stores.setupState.readStatus(), completeSetup: async () => postgresApplication.stores.setupState.completeSetup() });
 const agentRoute = createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession, agentOverview });
-const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, exportSessionTranscript, writeSessionMetadata, resetSession, renameSession, archiveSession, forkSession, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication?.stores.conversations || null });
-const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication?.stores, databasePath: postgresApplication ? null : settingsDatabasePath() }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication?.stores, databasePath: postgresApplication ? null : settingsDatabasePath() }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication?.stores, databasePath: postgresApplication ? null : settingsDatabasePath() }), uiAuthSettings, saveUiAuthSettings, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
+const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, exportSessionTranscript, writeSessionMetadata, resetSession, renameSession, archiveSession, forkSession, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
+const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
 const observabilityRoute = createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, codexLbAccounts, anthropicOauthUsage, openaiOauthUsage, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
 const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJson, validateBoundaryBody, withScheduledJobs, scheduler, listGroupChannels, createGroupChannel, readGroupChannelTurns, groupChannelRuns, startGroupChannelMessage, cancelGroupChannelRun, runtimeDataRoot });
 const authRoute = createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
 const chatRoute = createChatRoutes({ handleChat, readJsonBody, sendJson, selectedAgentRuntime, cancelChatRun });
 const modsRuntimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
-const modLoadOptions = { ...(postgresApplication ? { stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, disabledModIds: postgresApplication.disabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter } : {}), runtimeRoot: modsRuntimeRoot, databasePath: settingsDatabasePath(), executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), resolveAgentWorkspaceRoot: async (id) => {
+const modLoadOptions = { stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, disabledModIds: postgresApplication.disabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), resolveAgentWorkspaceRoot: async (id) => {
   const agent = await agentsStore().get(id);
   if (!agent) throw new Error('agent_not_found');
   return agentRuntimeContext({ runtimeState: (await runtimeConfig()).runtimeState, agent }).agentWorkspaceRoot;
@@ -3149,7 +3030,7 @@ async function transitionMod({ modId, enabled, installed, action }) {
   if (action === 'update-preflight') return;
   // A failed uninstall can restore files and lifecycle records after the old
   // host/catalog entry was removed. Re-discover a disabled mod as well as
-  // reactivating an enabled one so memory, filesystem, and SQLite converge.
+  // reactivating an enabled one so memory, filesystem, and PostgreSQL converge.
   if (action === 'uninstall-recovery' && installed && !enabled && !old) {
     const [restored] = await loadMods({ ...modLoadOptions, onlyModIds: [modId] });
     if (!restored) throw Object.assign(new Error('mod_recovery_failed'), { statusCode: 500 });
@@ -3175,14 +3056,13 @@ async function transitionMod({ modId, enabled, installed, action }) {
     throw Object.assign(new Error('mod_busy'), { statusCode: 409 });
   }
   loadedMods = old ? loadedMods.map((entry) => entry.id === modId ? next : entry) : [...loadedMods, next];
-  if (action === 'update') await publishModTools(next, modLoadOptions.databasePath, modLoadOptions.modCatalogWriter);
+  if (action === 'update') await publishModTools(next, modLoadOptions.modCatalogWriter);
   next.commitProviderReplacement?.();
   if (old) await cleanupMods([old]);
 }
 const modDistribution = createModDistribution({
   runtimeRoot: modsRuntimeRoot,
-  databasePath: settingsDatabasePath(),
-  ...(postgresApplication ? { repositoryFactory: postgresApplication.modDistributionRepositoryFactory } : {}),
+  repositoryFactory: postgresApplication.modDistributionRepositoryFactory,
   onLifecycleChange: transitionMod,
 });
 // Complete durable uninstall reconciliation before accepting requests. The
@@ -3234,18 +3114,18 @@ const server = createServer(async (req, res) => {
       });
     }
     if (req.method === 'GET' && url.pathname === '/api/settings/api-tokens') {
-      const store = postgresApplication?.stores.apiTokens || new ApiTokenStore({ databasePath: settingsDatabasePath() });
+      const store = postgresApplication.stores.apiTokens;
       try { return sendJson(res, 200, { ok: true, supportedScopes: API_TOKEN_SCOPES, tokens: await store.list() }); }
       finally { await store.close?.(); }
     }
     if (req.method === 'POST' && url.pathname === '/api/settings/api-tokens') {
-      const store = postgresApplication?.stores.apiTokens || new ApiTokenStore({ databasePath: settingsDatabasePath() });
+      const store = postgresApplication.stores.apiTokens;
       try { return sendJson(res, 201, { ok: true, token: await store.create(await readJsonBody(req)) }); }
       finally { await store.close?.(); }
     }
     if (req.method === 'DELETE' && url.pathname.startsWith('/api/settings/api-tokens/')) {
       const id = decodeURIComponent(url.pathname.slice('/api/settings/api-tokens/'.length));
-      const store = postgresApplication?.stores.apiTokens || new ApiTokenStore({ databasePath: settingsDatabasePath() });
+      const store = postgresApplication.stores.apiTokens;
       try {
         const token = await store.revoke(id);
         return sendJson(res, token ? 200 : 404, token ? { ok: true, token } : { ok: false, error: 'api_token_not_found' });
@@ -3327,7 +3207,7 @@ async function shutdownRuntime(signal, { exitCode = signal === 'SIGINT' ? 130 : 
   try {
     await serverLogger.event('shutdown_started', { signal, activeRuns: activeChatRuns.size });
     const closePromise = new Promise((resolve) => server.close(() => resolve()));
-    await recordActiveRunInterruptions({ stores:postgresApplication?.stores, activeRuns: activeChatRuns, resolveAgentRuntime, reason: signal === 'SIGINT' ? 'service_interrupt' : 'service_shutdown' });
+    await recordActiveRunInterruptions({ stores:postgresApplication.stores, activeRuns: activeChatRuns, resolveAgentRuntime, reason: signal === 'SIGINT' ? 'service_interrupt' : 'service_shutdown' });
     server.closeIdleConnections?.();
     await Promise.race([closePromise, new Promise((resolve) => setTimeout(() => { forced = true; server.closeAllConnections?.(); resolve(); }, SHUTDOWN_DRAIN_MS))]);
     await modDistribution.close();
@@ -3358,15 +3238,14 @@ server.on('clientError', (error, socket) => { void serverLogger.event('client_er
 server.on('connection', (socket) => { socket.once('error', (error) => { void serverLogger.event('socket_error', { code: error?.code || null, error: String(error?.message || error), remoteAddress: socket.remoteAddress || null }); }); });
 // Direct server/Docker startup must publish bundled skills just like the installer.
 const bundledSkillRuntime = await runtimeConfig();
-await ensureDefaultGlobalWorkspace({ installDir: projectRoot, workspaceRoot: bundledSkillRuntime.runtimeState.workspaceRoot, databasePath: postgresApplication ? null : settingsDatabasePath(), skillStore: postgresApplication?.stores.skills || null });
+await ensureDefaultGlobalWorkspace({ installDir: projectRoot, workspaceRoot: bundledSkillRuntime.runtimeState.workspaceRoot, skillStore: postgresApplication.stores.skills });
 
 server.listen(port, host, async () => {
   await serverLogger.event('listener_started', { host, port, pid: process.pid, version: releaseVersion });
-  if (postgresApplication) await postgresApplication.stores.dreamCycles.reconcileInterrupted();
-  else reconcileInterruptedDreamCycles({ databasePath: settingsDatabasePath() });
+  await postgresApplication.stores.dreamCycles.reconcileInterrupted();
   if (backgroundSchedulersEnabled()) {
-    const store = postgresApplication?.stores.scheduledJobs || new ScheduledJobStore({ databasePath: settingsDatabasePath() });
-    try { await store.markMissedRuns(); await store.markMissedSchedules({ activeOwnerModIds: loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id) }); } finally { if (!postgresApplication) await store.close(); }
+    const store = postgresApplication.stores.scheduledJobs;
+    try { await store.markMissedRuns(); await store.markMissedSchedules({ activeOwnerModIds: loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id) }); } finally { /* Shared application store remains open. */ }
     await scheduler().start();
     await dreamScheduler().start();
     await rollingContinuityScheduler().start();
@@ -3380,7 +3259,7 @@ server.listen(port, host, async () => {
   // ordinary chat. It starts only after the listener is live, and a queue claim
   // prevents duplicate recovery when startup is retried.
   void runPendingRecoveryContinuations({
-    stores:postgresApplication?.stores,
+    stores:postgresApplication.stores,
     agentRuntimes: await Promise.all((await agentsStore().list({ includeDisabled: false })).map((agent) => resolveAgentRuntime(agent.id))),
     createRunId: createChatTurnRunId,
     runContinuation: async ({ runtime, sessionId, runId, manifest, continuation }) => {
@@ -3390,7 +3269,7 @@ server.listen(port, host, async () => {
       const lifecycle = registerActiveAgentRun(activeChatRuns, { agentId: runtime.agentId, sessionId, runId, message: `Recover interrupted run: ${manifest.objective || 'reconcile durable state'}`, source: 'recovery' });
       try {
         return await runChatTurnFromBody({
-          stores:postgresApplication?.stores,
+          stores:postgresApplication.stores,
           body: { message: recoveryInstruction, sessionId, runId, abortSignal: lifecycle.signal },
           rootDir: projectRoot, agentRuntime: runtime, resolveAgentRuntime,
           onTraceRecord: lifecycle.onTraceRecord, onModelTextDelta: lifecycle.onModelTextDelta,

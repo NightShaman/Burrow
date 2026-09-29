@@ -23,7 +23,6 @@ import { executeForgeTool, forgeFailure } from './forge-agent-tools.mjs';
 import { credentialProducer, protectMcpOutput, protectToolOutput, resolveManagedProtectedBindings } from './protected-values.mjs';
 import { loadEffectiveSkillCatalog, loadSelectedSkillText, skillManifest, selectCatalogSkills } from './skill-catalog.mjs';
 import path from 'node:path';
-import { openSettingsDatabase } from './settings-database.mjs';
 
 function workspacePath(filePath, workspaceRoot, rootDir) {
   if (!filePath) return filePath;
@@ -111,15 +110,13 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       const protectedInput = await resolveManagedProtectedBindings(action.protectedBindings, executionContext?.protectedValues, {
         caller: { agentId, sessionId, conversationId: resolvedConversationId },
         authorize: async (entry) => {
-          const mod = activeModToolConnection(entry.providerId, entry.databasePath);
+          const mod = activeModToolConnection(entry.providerId);
           if (!mod || mod !== entry.mod || !mod.tools.some((tool) => tool.name === entry.toolName)) return false;
-          const db = openSettingsDatabase({ databasePath: entry.databasePath });
-          try {
-            return Boolean(db.prepare('SELECT 1 FROM mcp_connections WHERE id=? AND enabled=1').get(entry.providerId) &&
-              (mod.tools.find((tool) => tool.name === entry.toolName)?.availability === 'mod-authorized' ||
-                db.prepare('SELECT 1 FROM agent_mcp_tools WHERE agent_id=? AND connection_id=? AND tool_name=? AND enabled=1')
-                  .get(agentId, entry.providerId, entry.toolName)));
-          } finally { db.close(); }
+          const mcp = executionContext?.stores?.mcp;
+          if (!mcp) return false;
+          const connection = await mcp.get(entry.providerId);
+          const grants = await mcp.agentTools(agentId);
+          return Boolean(connection?.enabled && (mod.tools.find((tool) => tool.name === entry.toolName)?.availability === 'mod-authorized' || grants.some((grant) => grant.connectionId === entry.providerId && grant.toolName === entry.toolName && grant.enabled)));
         },
       });
       if (protectedInput.errors.length) {
@@ -209,14 +206,14 @@ export async function executeReviewedProposalActions({ conversationStore = null,
 
     if (action.tool === 'scheduled_jobs_create') {
       const started = await traceLogger?.toolStart?.({ tool: action.tool, toolCallId: action.toolCallId || null });
-      const result = createAgentScheduledJob({ action, agentId, sessionId, databasePath: executionContext?.settingsDatabasePath });
+      const result = await createAgentScheduledJob({ action, agentId, sessionId, store: executionContext?.stores?.scheduledJobs });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, jobId: result.job?.id || null, error: result.error || null });
       continue;
     }
     if (['scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now'].includes(action.tool)) {
       const started = await traceLogger?.toolStart?.({ tool: action.tool, toolCallId: action.toolCallId || null, jobId: action.jobId || null });
-      const result = await executeAgentScheduledJobTool({ action, agentId, sessionId, databasePath: executionContext?.settingsDatabasePath, rootDir, resolveAgentRuntime });
+      const result = await executeAgentScheduledJobTool({ action, agentId, sessionId, store: executionContext?.stores?.scheduledJobs, rootDir, resolveAgentRuntime });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, jobId: result.job?.id || action.jobId || null, error: result.error || null });
       continue;
@@ -250,7 +247,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
 
     if (action.tool === 'list_skills' || action.tool === 'load_skill') {
       const skillsWorkspace = executionContext?.agentWorkspaceRoot ? path.dirname(executionContext.agentWorkspaceRoot) : executionRoot;
-      const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: skillsWorkspace, agentId: agentId || executionContext?.agentId || 'hatchet', agentRuntime: executionContext?.agentRuntime || null, databasePath: executionContext?.settingsDatabasePath || null });
+      const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: skillsWorkspace, agentId: agentId || executionContext?.agentId || 'hatchet', agentRuntime: executionContext?.agentRuntime || null, store: executionContext?.stores?.tasks || null });
       const started = await traceLogger?.toolStart?.({ tool: action.tool, skillId: action.skillId || null, catalogCount: catalog.availableSkills.length });
       let result;
       if (action.tool === 'list_skills') {
@@ -312,15 +309,13 @@ export async function executeReviewedProposalActions({ conversationStore = null,
         if (selected.connection.transport === 'mod') {
           // Reviews and discovery are snapshots. A revoked grant must fail even
           // when a queued action executes later in the same turn.
-          const db = openSettingsDatabase({ databasePath: selected.connection.databasePath });
-          try {
-            const liveMod = activeModToolConnection(selected.connection.id, selected.connection.databasePath);
-            if (!liveMod || liveMod !== selected.connection.mod || !liveMod.tools.some((tool) => tool.name === action.mcpToolName) ||
-                !db.prepare('SELECT 1 FROM mcp_connections WHERE id=? AND enabled=1').get(selected.connection.id)) throw new Error('mcp_provider_not_available');
-            const current = db.prepare('SELECT enabled FROM agent_mcp_tools WHERE agent_id=? AND connection_id=? AND tool_name=?')
-              .get(agentId, selected.connection.id, action.mcpToolName);
-            if (liveMod.tools.find((tool) => tool.name === action.mcpToolName)?.availability !== 'mod-authorized' && !current?.enabled) throw new Error('mcp_tool_not_granted');
-          } finally { db.close(); }
+          const mcp = executionContext?.stores?.mcp;
+          if (!mcp) throw new Error('mcp_store_required');
+          const liveMod = activeModToolConnection(selected.connection.id);
+          const connection = await mcp.get(selected.connection.id);
+          if (!liveMod || liveMod !== selected.connection.mod || !liveMod.tools.some((tool) => tool.name === action.mcpToolName) || !connection?.enabled) throw new Error('mcp_provider_not_available');
+          const grants = await mcp.agentTools(agentId);
+          if (liveMod.tools.find((tool) => tool.name === action.mcpToolName)?.availability !== 'mod-authorized' && !grants.some((grant) => grant.connectionId === selected.connection.id && grant.toolName === action.mcpToolName && grant.enabled)) throw new Error('mcp_tool_not_granted');
         }
         const output = selected.connection.transport === 'mod'
           ? await selected.connection.invoke(action.mcpToolName, action.mcpArguments, { context: { agentId, sessionId, conversationId, runId: executionContext?.parentRunId || null }, abortSignal })
@@ -330,7 +325,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
             managedIssuer: (declaration) => {
               if (!agentId || !executionContext?.protectedValues || typeof selected.connection.resolveProtectedReference !== 'function') return null;
               return { managed: true, reference: declaration.reference, version: declaration.version,
-                providerId: selected.connection.id, databasePath: selected.connection.databasePath,
+                providerId: selected.connection.id,
                 toolName: action.mcpToolName, mod: selected.connection.mod,
                 caller: { agentId, sessionId, conversationId: resolvedConversationId },
                 resolve: (reference, caller) => selected.connection.resolveProtectedReference(action.mcpToolName, reference, caller) };
@@ -387,7 +382,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
 
     if (action.tool === 'memory_working_search') {
       const started = await traceLogger?.toolStart?.({ tool: 'memory_working_search', query: action.query, project: action.project || null });
-      const result = executeWorkingMemorySearchTool({ arguments: { query: action.query, project: action.project, limit: action.limit }, agentId, continuityScope: executionContext?.continuityScope, store: workingMemoryStore });
+      const result = await executeWorkingMemorySearchTool({ arguments: { query: action.query, project: action.project, limit: action.limit }, agentId, continuityScope: executionContext?.continuityScope, store: workingMemoryStore || executionContext?.stores?.workingMemory });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'memory_working_search', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, query: result.query, project: result.project, resultCount: result.resultCount ?? 0, error: result.error || null });
       continue;
@@ -395,7 +390,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
 
     if (action.tool === 'memory_rolling_search') {
       const started = await traceLogger?.toolStart?.({ tool: 'memory_rolling_search', query: action.query, project: action.project || null });
-      const result = executeRollingContinuitySearchTool({ arguments: { query: action.query, project: action.project, limit: action.limit }, agentId, continuityScope: executionContext?.continuityScope, store: workingMemoryStore });
+      const result = await executeRollingContinuitySearchTool({ arguments: { query: action.query, project: action.project, limit: action.limit }, agentId, continuityScope: executionContext?.continuityScope, store: workingMemoryStore || executionContext?.stores?.workingMemory });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'memory_rolling_search', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, query: result.query, project: result.project, resultCount: result.resultCount ?? 0, error: result.error || null });
       continue;
@@ -403,7 +398,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
 
     if (action.tool === 'memory_working_write') {
       const started = await traceLogger?.toolStart?.({ tool: 'memory_working_write', project: action.project, kind: action.memoryKind });
-      const result = executeWorkingMemoryRecordTool({ arguments: { project: action.project, kind: action.memoryKind, state: action.state, title: action.title, content: action.content, sourceRefs: action.sourceRefs }, agentId, sessionId, conversationId: resolvedConversationId, continuityScope: executionContext?.continuityScope, store: workingMemoryStore });
+      const result = await executeWorkingMemoryRecordTool({ arguments: { project: action.project, kind: action.memoryKind, state: action.state, title: action.title, content: action.content, sourceRefs: action.sourceRefs }, agentId, sessionId, conversationId: resolvedConversationId, continuityScope: executionContext?.continuityScope, store: workingMemoryStore || executionContext?.stores?.workingMemory });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'memory_working_write', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, record: result.record || null, error: result.error || null });
       continue;
@@ -411,7 +406,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
 
     if (action.tool === 'session_read_handoff') {
       const started = await traceLogger?.toolStart?.({ tool: 'session_read_handoff' });
-      const result = executeSessionHandoffReadTool({ agentId, sessionId: sessionId || executionContext?.sessionId || 'default', dataRoot: executionContext?.agentDataRoot || dataRoot });
+      const result = await executeSessionHandoffReadTool({ agentId, sessionId: sessionId || executionContext?.sessionId || 'default', store: executionContext?.stores?.continuity });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'session_read_handoff', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, found: Boolean(result.handoff), error: result.error || null });
       continue;
@@ -419,7 +414,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
 
     if (action.tool === 'session_write_handoff') {
       const started = await traceLogger?.toolStart?.({ tool: 'session_write_handoff' });
-      const result = executeContinuityHandoffWriteTool({ arguments: { title: action.title, content: action.content, sourceRefs: action.sourceRefs }, agentId, sessionId, runId: traceLogger?.runId || null, dataRoot: executionContext?.agentDataRoot || dataRoot });
+      const result = await executeContinuityHandoffWriteTool({ arguments: { title: action.title, content: action.content, sourceRefs: action.sourceRefs }, agentId, sessionId, runId: traceLogger?.runId || null, store: executionContext?.stores?.continuity });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'session_write_handoff', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, handoff: result.handoff || null, error: result.error || null });
       continue;
@@ -427,21 +422,21 @@ export async function executeReviewedProposalActions({ conversationStore = null,
 
     if (action.tool === 'tasks_list') {
       const started = await traceLogger?.toolStart?.({ tool: 'tasks_list', projectId: action.project || null });
-      const result = executeTaskBoardListTool({ arguments: { projectId: action.project, status: action.status, priority: action.priority, assignedAgentId: action.assignedAgentId }, databasePath: executionContext?.settingsDatabasePath });
+      const result = await executeTaskBoardListTool({ arguments: { projectId: action.project, status: action.status, priority: action.priority, assignedAgentId: action.assignedAgentId }, store: executionContext?.stores?.tasks });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'tasks_list', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, resultCount: result.resultCount, error: result.error || null });
       continue;
     }
     if (action.tool === 'tasks_create') {
       const started = await traceLogger?.toolStart?.({ tool: 'tasks_create', projectId: action.project || null });
-      const result = executeTaskBoardCreateTool({ arguments: { projectId: action.project, title: action.title, ...(action.description === null ? {} : { description: action.description }), ...(action.status === null ? {} : { status: action.status }), ...(action.priority === null ? {} : { priority: action.priority }), ...(action.metadata === null ? {} : { metadata: action.metadata }), ...(action.assignedAgentId === null ? {} : { assignedAgentId: action.assignedAgentId }) }, agentId, databasePath: executionContext?.settingsDatabasePath });
+      const result = await executeTaskBoardCreateTool({ arguments: { projectId: action.project, title: action.title, ...(action.description === null ? {} : { description: action.description }), ...(action.status === null ? {} : { status: action.status }), ...(action.priority === null ? {} : { priority: action.priority }), ...(action.metadata === null ? {} : { metadata: action.metadata }), ...(action.assignedAgentId === null ? {} : { assignedAgentId: action.assignedAgentId }) }, agentId, store: executionContext?.stores?.tasks });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'tasks_create', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, task: result.task || null, error: result.error || null });
       continue;
     }
     if (action.tool === 'tasks_update') {
       const started = await traceLogger?.toolStart?.({ tool: 'tasks_update', taskId: action.taskId });
-      const result = executeTaskBoardUpdateTool({ arguments: { taskId: action.taskId, ...(action.title === null ? {} : { title: action.title }), ...(action.description === null ? {} : { description: action.description }), ...(action.status === null ? {} : { status: action.status }), ...(action.priority === null ? {} : { priority: action.priority }), ...(action.metadata === null ? {} : { metadata: action.metadata }), ...(action.assignedAgentId === null ? {} : { assignedAgentId: action.assignedAgentId }) }, agentId, databasePath: executionContext?.settingsDatabasePath });
+      const result = await executeTaskBoardUpdateTool({ arguments: { taskId: action.taskId, ...(action.title === null ? {} : { title: action.title }), ...(action.description === null ? {} : { description: action.description }), ...(action.status === null ? {} : { status: action.status }), ...(action.priority === null ? {} : { priority: action.priority }), ...(action.metadata === null ? {} : { metadata: action.metadata }), ...(action.assignedAgentId === null ? {} : { assignedAgentId: action.assignedAgentId }) }, agentId, store: executionContext?.stores?.tasks });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'tasks_update', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, task: result.task || null, error: result.error || null });
       continue;
@@ -449,21 +444,21 @@ export async function executeReviewedProposalActions({ conversationStore = null,
 
     if (action.tool === 'tasks_assign') {
       const started = await traceLogger?.toolStart?.({ tool: 'tasks_assign', taskId: action.taskId, assignedAgentId: action.assignedAgentId });
-      const result = executeTaskBoardReassignTool({ arguments: { taskId: action.taskId, assignedAgentId: action.assignedAgentId }, agentId, databasePath: executionContext?.settingsDatabasePath });
+      const result = await executeTaskBoardReassignTool({ arguments: { taskId: action.taskId, assignedAgentId: action.assignedAgentId }, agentId, store: executionContext?.stores?.tasks });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'tasks_assign', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, task: result.task || null, error: result.error || null });
       continue;
     }
     if (action.tool === 'tasks_delete') {
       const started = await traceLogger?.toolStart?.({ tool: 'tasks_delete', taskId: action.taskId });
-      const result = executeTaskBoardDeleteTool({ arguments: { taskId: action.taskId }, databasePath: executionContext?.settingsDatabasePath });
+      const result = await executeTaskBoardDeleteTool({ arguments: { taskId: action.taskId }, store: executionContext?.stores?.tasks });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'tasks_delete', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, task: result.task || null, error: result.error || null });
       continue;
     }
     if (action.tool === 'agent_update_tools_profile') {
       const started = await traceLogger?.toolStart?.({ tool: 'agent_update_tools_profile', agentId });
-      const result = updateOwnToolsProfile({ agentId, markdown: action.profileToolsContent, databasePath: executionContext?.settingsDatabasePath });
+      const result = await updateOwnToolsProfile({ agentId, markdown: action.profileToolsContent, store: executionContext?.stores?.profiles });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'agent_update_tools_profile', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, agentId: agentId || null, document: result.document || null, error: result.error || null });
       continue;

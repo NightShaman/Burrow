@@ -1,4 +1,3 @@
-import { openSettingsDatabase, settingsDatabasePath } from './settings-database.mjs';
 import { withPostgresTransaction } from './postgres-foundation.mjs';
 
 // Small effect runner lets legacy synchronous readers and async server callers
@@ -13,7 +12,7 @@ export async function runAsync(iterator) {
   while (!step.done) { try { step = iterator.next(await step.value()); } catch (error) { step = iterator.throw(error); } }
   return step.value;
 }
-export function tiddlePersistence({ stores, databasePath } = {}) {
+export function tiddlePersistence({ stores } = {}) {
   if (stores?.metadata) {
     const metadata = stores.metadata;
     const pool = metadata.pool;
@@ -30,13 +29,5 @@ export function tiddlePersistence({ stores, databasePath } = {}) {
     });
     return adapter(pool);
   }
-  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  const adapter = {
-    get: key => { try { return JSON.parse(db.prepare('SELECT value_json FROM settings_meta WHERE key=?').get(key)?.value_json || 'null'); } catch { return null; } },
-    set: (key, value, at) => db.prepare('INSERT INTO settings_meta(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at').run(key, JSON.stringify(value), at),
-    rows: prefix => db.prepare('SELECT key,value_json,updated_at FROM settings_meta WHERE substr(key,1,?)=? ORDER BY updated_at DESC,key').all(prefix.length, prefix),
-    transaction: (_agentId, operation) => { db.exec('BEGIN IMMEDIATE'); try { const result = runSync(operation(adapter)); db.exec('COMMIT'); return result; } catch (error) { db.exec('ROLLBACK'); throw error; } },
-    close: () => db.close(),
-  };
-  return adapter;
+  throw new Error('tiddle_postgres_store_required');
 }

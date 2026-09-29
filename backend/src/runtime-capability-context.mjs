@@ -1,13 +1,12 @@
 import { modToolConnections } from './mod-agent-tools.mjs';
-import { McpSettingsStore } from './mcp-settings-store.mjs';
 import { nativeToolSchemas } from './action-proposal.mjs';
 import { createExecutionContext } from './execution-context.mjs';
 
-export async function loadRuntimeMcpCapabilities({ databasePath, agentId, stores = null } = {}) {
+export async function loadRuntimeMcpCapabilities({ agentId, stores } = {}) {
   const mcpTools = new Map();
   const mcpConnections = new Map();
-  const mcpStore = stores?.mcp || (process.env.BURROW_SETTINGS_KEY ? new McpSettingsStore({ databasePath }) : null);
-  if (!mcpStore) return { mcpTools, mcpConnections };
+  const mcpStore = stores?.mcp;
+  if (!mcpStore) throw new Error('runtime_mcp_store_required');
   try {
     const connections = await mcpStore.list();
     for (const connection of connections) {
@@ -19,7 +18,7 @@ export async function loadRuntimeMcpCapabilities({ databasePath, agentId, stores
     }
     // The live host registry supplies invocation for mod tools. Its catalog is
     // layered over the persisted catalog, never used to replace it wholesale.
-    for (const connection of modToolConnections(databasePath)) {
+    for (const connection of modToolConnections()) {
       const persisted = await mcpStore.get(connection.id);
       if (persisted?.enabled) mcpConnections.set(connection.id, { ...persisted, ...connection });
     }
@@ -27,9 +26,7 @@ export async function loadRuntimeMcpCapabilities({ databasePath, agentId, stores
       const connection = mcpConnections.get(grant.connectionId);
       if (connection) mcpTools.set(`${grant.connectionId}:${grant.toolName}`, { ...grant, connection, apiKey: connection.apiKey });
     }
-  } finally {
-    if (!stores?.mcp) await mcpStore.close?.();
-  }
+  } finally { /* composed store remains open */ }
   return { mcpTools, mcpConnections };
 }
 
@@ -37,6 +34,7 @@ export function createRuntimeExecutionContext({ stores = null, runtimeState, res
   const includeAgentChat = Boolean(agentRuntime && typeof resolveAgentRuntime === 'function');
   const includeTaskBoard = Boolean(runtimeState.agentId);
   return createExecutionContext({
+    stores,
     conversationStore: stores?.conversations,
     sessionId: resolvedSessionId,
     conversationId,
@@ -51,13 +49,12 @@ export function createRuntimeExecutionContext({ stores = null, runtimeState, res
     target: resolvedTarget,
     dataRoot,
     cacheRoot: runtimeState.cacheRoot,
-    settingsDatabasePath: runtimeState.settingsDatabasePath,
     agentWorkspaceRoot: agentRuntime?.agentWorkspaceRoot,
     agentDataRoot: agentRuntime?.agentDataRoot,
     skillsRoot: agentRuntime?.skillsRoot,
     filesystemBoundaries: agentRuntime?.filesystemBoundaries || runtimeState.filesystemBoundaries,
     executionBoundaries,
-    toolSchemas: nativeToolSchemas({ includeWorkingMemory: Boolean(runtimeState.agentId), includeAgentProfile: Boolean(runtimeState.agentId && runtimeState.settingsDatabasePath), includeAgentChat, includeTaskBoard, includeMcpMenu: mcpConnections.size > 0 }),
+    toolSchemas: nativeToolSchemas({ includeWorkingMemory: Boolean(runtimeState.agentId), includeAgentProfile: Boolean(runtimeState.agentId), includeAgentChat, includeTaskBoard, includeMcpMenu: mcpConnections.size > 0 }),
     mcpTools,
     mcpConnections,
     protectedValues: new Map(),

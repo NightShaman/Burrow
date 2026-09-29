@@ -1,4 +1,3 @@
-import { WorkingMemoryStore } from './working-memory-store.mjs';
 
 export const DEFAULT_WORKING_CONTINUITY_LIMIT = 12_000;
 export const DEFAULT_WORKING_CONTINUITY_ITEM_LIMIT = 1_800;
@@ -40,28 +39,9 @@ export function selectWorkingContinuity({ records = [], agentId = null, continui
   };
 }
 
-export function loadWorkingContinuity({ databasePath = null, agentId = null, continuityScope = null, project = null, store = null, ...limits } = {}) {
-  const scope = normalizeContinuityScope(continuityScope ?? project);
-  // No scope means no ambient STM by design. Avoid even opening the shared
-  // SQLite database on ordinary unscoped turns, which also keeps the read path
-  // out of unrelated settings-store contention.
-  if (!scope || !text(agentId)) return selectWorkingContinuity({ records: [], agentId, continuityScope: scope, ...limits });
-  let workingStore = store;
-  try {
-    workingStore ||= new WorkingMemoryStore(databasePath ? { databasePath } : {});
-    const records = workingStore.list({ agentId, project: scope, includeInactive: false, limit: DEFAULT_WORKING_CONTINUITY_RECORD_LIMIT });
-    return selectWorkingContinuity({ records, agentId, continuityScope: scope, ...limits });
-  } catch (error) {
-    // Ambient continuity is optional support, never a reason to fail a normal
-    // chat turn when another SQLite connection is briefly initializing.
-    if (String(error?.code || '').includes('SQLITE') || /database is locked/i.test(String(error?.message || ''))) {
-      return { scope, reason: 'store_unavailable', records: [], omittedCount: 0, candidateCount: 0, chars: 0 };
-    }
-    throw error;
-  } finally { if (!store && workingStore) workingStore.close(); }
-}
+export function loadWorkingContinuity() { throw new Error('working_memory_postgres_store_required'); }
 
-/** Async store boundary; the synchronous compatibility API remains available to SQLite callers. */
+/** PostgreSQL working-memory boundary. */
 export async function loadWorkingContinuityAsync(options = {}) {
   if (!options.store) return loadWorkingContinuity(options);
   const { store, agentId = null, continuityScope = null, project = null, ...limits } = options;

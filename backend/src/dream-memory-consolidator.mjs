@@ -1,5 +1,3 @@
-import { AgentProfileStore } from './agent-profile-store.mjs';
-import { WorkingMemoryStore } from './working-memory-store.mjs';
 
 const DEFAULT_LIMIT = 12;
 
@@ -29,31 +27,6 @@ export function renderDreamMemoryDocument(items = [], { generatedAt = new Date()
   }
   lines.push('', `Updated: ${generatedAt}`);
   return `${lines.join('\n')}\n`;
-}
-
-export function consolidateDreamMemory({ agentId, databasePath = null, limit = DEFAULT_LIMIT, generatedAt = new Date().toISOString(), items = null } = {}) {
-  const id = text(agentId);
-  if (!id) throw new Error('dream_memory_agent_required');
-  const memoryStore = new WorkingMemoryStore({ databasePath });
-  const profileStore = new AgentProfileStore({ databasePath });
-  try {
-    profileStore.ensure(id);
-    const candidateItems = Array.isArray(items)
-      ? items
-      : memoryStore.list({ agentId: id, includeInactive: false, limit: Math.max(1, Math.min(100, Number(limit) || DEFAULT_LIMIT)) })
-        .filter((item) => item.id.startsWith('dream-'));
-    // Session-window blobs are raw continuity residue, not DreamMemory candidates.
-    // Reject them defensively even if a caller bypasses the Dream cycle selection gate.
-    const boundedItems = candidateItems
-      .filter((item) => item?.kind !== 'session-window' && !String(item?.id || '').startsWith('session-window-'))
-      .slice(0, Math.max(1, Math.min(50, Number(limit) || DEFAULT_LIMIT)));
-    const markdown = renderDreamMemoryDocument(boundedItems, { generatedAt });
-    const document = profileStore.replaceDreamMemory(id, markdown);
-    return { ok: true, agentId: id, itemCount: boundedItems.length, document, markdown };
-  } finally {
-    memoryStore.close();
-    profileStore.close();
-  }
 }
 
 /** Async PG path. Stores are mandatory so this path can never silently touch SQLite. */

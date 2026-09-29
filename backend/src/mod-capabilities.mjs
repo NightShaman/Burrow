@@ -1,11 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readModConversationPage } from './mod-conversation-pager.mjs';
-import { AgentRegistryStore } from './agent-registry.mjs';
-import { ModelSettingsStore } from './model-settings-store.mjs';
-import { ScheduledJobStore } from './scheduled-job-store.mjs';
 import { resolveModelConfig } from './config.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
-import { listSessionRecords, listResetSessionArchives } from './session-store.mjs';
 
 function invalid() { throw new Error('mod_capability_input_invalid'); }
 function bounded(value, max) { if (typeof value !== 'string' || !value || value.length > max) invalid(); return value; }
@@ -71,13 +67,14 @@ function summarizedRun(run) {
   };
 }
 
-// Only this core-side service has access to SQLite secrets and provider credentials.
-export function createModCapabilities({ databasePath, resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null, stores = null } = {}) {
+// Only this core-side service has access to PostgreSQL secrets and provider credentials.
+export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null, stores = null } = {}) {
   if (typeof resolveAgentRuntime !== 'function') throw new Error('mod_agent_resolver_required');
   const injected = stores || {};
-  const withStore = async (key, Store, fn) => { const store = injected[key]; if (store) return fn(store); const owned = new Store({ databasePath }); try { return await fn(owned); } finally { await owned.close?.(); } };
-  const withJobs = (fn) => withStore('scheduledJobs', ScheduledJobStore, fn);
-  const conversationStore = injected.conversations || null;
+  for (const key of ['agents','models','scheduledJobs','conversations']) if (!injected[key]) throw new Error(`mod_${key}_store_required`);
+  const withStore = async (key, fn) => fn(injected[key]);
+  const withJobs = (fn) => withStore('scheduledJobs', fn);
+  const conversationStore = injected.conversations;
   const schedulerOwner = () => { if (typeof ownerModId !== 'string' || !ownerModId) throw new Error('mod_scheduler_owner_unavailable'); return ownerModId; };
   const ownedJob = (store, jobId) => store.getOwnedJob(schedulerOwner(), bounded(jobId, 96));
   function page(input = {}, max = 100) { const value = plain(input); const limit = count(value.limit, 50, max); let offset = 0; if (value.cursor !== undefined && value.cursor !== null) { let cursor; try { cursor = JSON.parse(Buffer.from(bounded(value.cursor, 512), 'base64url').toString('utf8')); } catch { invalid(); } if (cursor?.ownerModId !== schedulerOwner() || !Number.isSafeInteger(cursor.offset) || cursor.offset < 1) invalid(); offset = cursor.offset; } return { value, limit, offset }; }
@@ -95,7 +92,7 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
   }
   async function agentRoot(id) {
     bounded(id, 96);
-    const agent = await withStore('agents', AgentRegistryStore, (store) => store.get(id));
+    const agent = await withStore('agents', (store) => store.get(id));
     if (!agent) throw new Error('agent_not_found');
     if (!agent.enabled && typeof resolveAgentWorkspaceRoot !== 'function') throw new Error('agent_disabled');
     const root = agent.enabled ? (await resolveAgentRuntime(id)).agentWorkspaceRoot : await resolveAgentWorkspaceRoot(id);
@@ -151,12 +148,12 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
       return scheduledJobScheduler.trigger(jobId, { ownerModId: schedulerOwner() });
     },
     async listAgents() {
-      return await withStore('agents', AgentRegistryStore, async (store) => (await store.list()).map(({ id, name, enabled }) => ({ id, name, enabled })));
+      return await withStore('agents', async (store) => (await store.list()).map(({ id, name, enabled }) => ({ id, name, enabled })));
     },
     async getOperatorIdentity() {
       // Deliberately project only public display identity. Avatars and the rest of
       // the settings/profile surface are not mod capabilities.
-      return await withStore('models', ModelSettingsStore, async (store) => {
+      return await withStore('models', async (store) => {
         const operator = (await store.identities()).operator;
         return { id: operator.id, name: operator.name || null };
       });
@@ -185,12 +182,8 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
         inventories.set(id, snapshot);
         try {
           // Read the whole inventory only at traversal creation, never per page.
-          const sessions = conversationStore
-            ? await conversationStore.listSessions({ agentId, includeArchived })
-            : await listSessionRecords({ rootDir, includeArchived, limit: Infinity });
-          const resets = !includeArchived ? [] : conversationStore
-            ? (await conversationStore.listArchives({ agentId, limit: null })).filter((archive) => archive.kind === 'reset')
-            : await listResetSessionArchives({ rootDir, limit: Infinity });
+          const sessions = await conversationStore.listSessions({ agentId, includeArchived });
+          const resets = !includeArchived ? [] : (await conversationStore.listArchives({ agentId, limit: null })).filter((archive) => archive.kind === 'reset');
           const entryKey = (entry) => entry.archiveId ? `archive:${entry.archiveId}` : `session:${entry.id}`;
           const entries = [...sessions.map((record) => {
               const id = record.sessionId || record.id;
@@ -229,7 +222,7 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
       return page;
     },
     async listModels() {
-      return withStore('models', ModelSettingsStore, async (store) => {
+      return withStore('models', async (store) => {
         const out = [];
         for (const connection of await store.list()) {
           if (!(await store.hasAuth(connection.id))) continue;
@@ -248,7 +241,7 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
       if (typeof prompt !== 'string' || !prompt) invalid();
       const tokens = positiveSafeInteger(maxTokens);
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
-      const config = await resolveModelConfig({ modelConnectionId: connectionId, model, settingsDb: databasePath, fetchImpl, modelSettings: injected.models });
+      const config = await resolveModelConfig({ modelConnectionId: connectionId, model, fetchImpl, modelSettings: injected.models });
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
       let result;
       try {

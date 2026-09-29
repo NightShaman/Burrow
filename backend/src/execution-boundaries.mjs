@@ -1,5 +1,4 @@
 import path from 'node:path';
-import { getSettingsMeta, openSettingsDatabase, setSettingsMeta, settingsDatabasePath } from './settings-database.mjs';
 
 export const EXECUTION_BOUNDARIES_META_KEY = 'execution_boundaries';
 export const BOUNDARY_OPERATIONS = Object.freeze(['read', 'write', 'delete', 'execute', 'delegate']);
@@ -70,25 +69,19 @@ export function validateExecutionBoundaries(input = {}) {
   return { ok: errors.length === 0, errors, boundaries: { version: 1, hardBlocks } };
 }
 
-export function readExecutionBoundaries({ databasePath = null, metadataStore = null } = {}) {
-  if (metadataStore) return metadataStore.get(EXECUTION_BOUNDARIES_META_KEY).then(value => { const checked = validateExecutionBoundaries(value || emptyExecutionBoundaries()); return checked.ok ? checked.boundaries : emptyExecutionBoundaries(); });
-  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  try {
-    const stored = getSettingsMeta(db, EXECUTION_BOUNDARIES_META_KEY);
-    const checked = validateExecutionBoundaries(stored || emptyExecutionBoundaries());
-    return checked.ok ? checked.boundaries : emptyExecutionBoundaries();
-  } finally { db.close(); }
+export async function readExecutionBoundaries({ metadataStore } = {}) {
+  if (!metadataStore?.get) throw new Error('execution_boundaries_metadata_store_required');
+  const stored = await metadataStore.get(EXECUTION_BOUNDARIES_META_KEY);
+  const checked = validateExecutionBoundaries(stored || emptyExecutionBoundaries());
+  return checked.ok ? checked.boundaries : emptyExecutionBoundaries();
 }
 
-export function saveExecutionBoundaries(input = {}, { databasePath = null, metadataStore = null } = {}) {
+export async function saveExecutionBoundaries(input = {}, { metadataStore } = {}) {
+  if (!metadataStore?.set) throw new Error('execution_boundaries_metadata_store_required');
   const checked = validateExecutionBoundaries(input);
   if (!checked.ok) return { ok: false, status: 400, errors: checked.errors, boundaries: checked.boundaries };
-  if (metadataStore) return metadataStore.set(EXECUTION_BOUNDARIES_META_KEY, checked.boundaries).then(() => ({ ok: true, boundaries: checked.boundaries, validation: { ok: true, errors: [] } }));
-  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  try {
-    setSettingsMeta(db, EXECUTION_BOUNDARIES_META_KEY, checked.boundaries);
-    return { ok: true, boundaries: checked.boundaries, validation: { ok: true, errors: [] } };
-  } finally { db.close(); }
+  await metadataStore.set(EXECUTION_BOUNDARIES_META_KEY, checked.boundaries);
+  return { ok: true, boundaries: checked.boundaries, validation: { ok: true, errors: [] } };
 }
 
 function globToRegex(pattern) {

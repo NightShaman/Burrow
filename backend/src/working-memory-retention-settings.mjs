@@ -1,4 +1,3 @@
-import { getSettingsMeta, openSettingsDatabase, setSettingsMeta, settingsDatabasePath } from './settings-database.mjs';
 
 export const WORKING_MEMORY_RETENTION_META_KEY = 'working_memory_retention';
 export const DEFAULT_WORKING_MEMORY_RETENTION = Object.freeze({
@@ -26,31 +25,12 @@ export function normalizeWorkingMemoryRetention(input = {}, current = DEFAULT_WO
   };
 }
 
-export function readWorkingMemoryRetention({ databasePath = null, db = null } = {}) {
-  const ownedDb = db || openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  try {
-    return normalizeWorkingMemoryRetention(
-      getSettingsMeta(ownedDb, WORKING_MEMORY_RETENTION_META_KEY) || {},
-      DEFAULT_WORKING_MEMORY_RETENTION,
-    );
-  } catch {
-    return { ...DEFAULT_WORKING_MEMORY_RETENTION };
-  } finally {
-    if (!db) ownedDb.close();
-  }
+export function readWorkingMemoryRetention({ store = null } = {}) {
+  if (!store) throw new Error('postgres_required');
+  return store.read();
 }
 
-export function saveWorkingMemoryRetention(input = {}, { databasePath = null } = {}) {
-  const db = openSettingsDatabase({ databasePath: databasePath || settingsDatabasePath() });
-  try {
-    const current = normalizeWorkingMemoryRetention(
-      getSettingsMeta(db, WORKING_MEMORY_RETENTION_META_KEY) || {},
-      DEFAULT_WORKING_MEMORY_RETENTION,
-    );
-    const policy = normalizeWorkingMemoryRetention(input, current);
-    setSettingsMeta(db, WORKING_MEMORY_RETENTION_META_KEY, policy);
-    return policy;
-  } finally {
-    db.close();
-  }
+export function saveWorkingMemoryRetention(input = {}, { store = null } = {}) {
+  if (!store) throw new Error('postgres_required');
+  return store.save(input);
 }

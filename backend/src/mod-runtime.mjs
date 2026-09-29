@@ -3,9 +3,7 @@ import { createModCapabilities } from './mod-capabilities.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ModSettingsStore } from './mod-settings-store.mjs';
 import { startModHost } from './mod-host.mjs';
-import { openSettingsDatabase } from './settings-database.mjs';
 
 // Reserved for mod-owned persistent data; never a discoverable/installable mod.
 export const MOD_DATA_DIRECTORY = 'mod-data';
@@ -202,17 +200,12 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
   }
 }
 
-export async function loadMods({ runtimeRoot, databasePath, logger = console, executionProviders = null, replaceExecutionProviders = false, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null, stores = null, onlyModIds = null, modStoreFactory = null, disabledModIds = null, modCatalogWriter = null } = {}) {
+export async function loadMods({ runtimeRoot, logger = console, executionProviders = null, replaceExecutionProviders = false, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null, stores = null, onlyModIds = null, modStoreFactory = null, disabledModIds = null, modCatalogWriter = null } = {}) {
   const discoveredAll = await discoverMods({ runtimeRoot });
   const selectedIds = onlyModIds ? new Set(onlyModIds) : null;
   const discovered = selectedIds ? discoveredAll.filter((mod) => selectedIds.has(mod.id)) : discoveredAll;
-  let disabled;
-  if (disabledModIds) disabled = new Set(await disabledModIds());
-  else {
-    const lifecycleDb = openSettingsDatabase({ databasePath });
-    try { disabled = new Set(lifecycleDb.prepare('SELECT mod_id FROM mod_lifecycle WHERE enabled=0').all().map(row => row.mod_id)); }
-    finally { lifecycleDb.close(); }
-  }
+  if (typeof disabledModIds !== 'function' || typeof modStoreFactory !== 'function' || typeof modCatalogWriter !== 'function') throw new Error('postgres_mod_dependencies_required');
+  const disabled = new Set(await disabledModIds());
   const loaded = [];
   for (const mod of discovered) {
     if (mod.status === 'failed') { loaded.push(mod); continue; }
@@ -233,9 +226,9 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
         const systemCapability = requestedSystem ? declaredCapabilities[0] || null : null;
         if (requestedSystem && !systemCapability) throw new Error(`system_mod_capability_required:${mod.id}`);
         let unregisterController = null;
-        store = modStoreFactory ? await modStoreFactory(mod.id, { databasePath }) : new ModSettingsStore({ modId: mod.id, databasePath });
+        store = await modStoreFactory(mod.id);
         host = startModHost({
-          mod, store, logger, systemCapability, capabilities: resolveAgentRuntime ? createModCapabilities({ databasePath, resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl: capabilityFetch, ownerModId: mod.id, scheduledJobScheduler, stores }) : null, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs,
+          mod, store, logger, systemCapability, capabilities: resolveAgentRuntime ? createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl: capabilityFetch, ownerModId: mod.id, scheduledJobScheduler, stores }) : null, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs,
           onSystemControllerReady(controllerProxy) {
             if (!systemCapability || !executionProviders) return;
             unregisterController = executionProviders.register(mod.id, controllerProxy, { replace: replaceExecutionProviders });
@@ -281,7 +274,7 @@ export async function loadMods({ runtimeRoot, databasePath, logger = console, ex
         });
       }
       Object.assign(mod, { routes, store, lifecycleCleanup: host ? () => host.close() : null, commitProviderReplacement, host, status: 'loaded' });
-      if (mod.status === 'loaded' && !replaceExecutionProviders) await publishModTools(mod, databasePath, modCatalogWriter);
+      if (mod.status === 'loaded' && !replaceExecutionProviders) await publishModTools(mod, modCatalogWriter);
       loaded.push(mod);
     } catch (error) {
       if (host) {

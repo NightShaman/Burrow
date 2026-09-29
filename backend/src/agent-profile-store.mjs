@@ -1,4 +1,3 @@
-import { openSettingsDatabase, settingsDatabasePath } from './settings-database.mjs';
 
 export const AGENT_PROFILE_KINDS = Object.freeze(['SOUL', 'RULES', 'ORIENTATION', 'PREFERENCES', 'TOOLS', 'DREAM_MEMORY']);
 const PROFILE_KIND_NAMES = Object.freeze({ DREAMMEMORY: 'DREAM_MEMORY', PREFERENCESMD: 'PREFERENCES' });
@@ -34,70 +33,18 @@ function document(row) {
   };
 }
 
+// Compatibility export only; persistence requires the PostgreSQL store.
 export class AgentProfileStore {
-  constructor({ databasePath } = {}) {
-    this.databasePath = databasePath || settingsDatabasePath();
-    this.db = openSettingsDatabase({ databasePath: this.databasePath });
-  }
-  close() { this.db.close(); }
-  list(agent) {
-    const id = agentId(agent);
-    if (!this.db.prepare('SELECT id FROM agents WHERE id=?').get(id)) throw new Error('agent_not_found');
-    return this.db.prepare(`SELECT kind,markdown,created_at,updated_at FROM agent_profile_documents
-      WHERE agent_id=? ORDER BY CASE kind WHEN 'SOUL' THEN 0 WHEN 'RULES' THEN 1 WHEN 'ORIENTATION' THEN 2 WHEN 'PREFERENCES' THEN 3 WHEN 'TOOLS' THEN 4 WHEN 'DREAM_MEMORY' THEN 5 END`).all(id).map(document);
-  }
-  get(agent, documentKind) {
-    return document(this.db.prepare('SELECT kind,markdown,created_at,updated_at FROM agent_profile_documents WHERE agent_id=? AND kind=?').get(agentId(agent), kind(documentKind)));
-  }
-  replace(agent, documents = []) {
-    const id = agentId(agent);
-    const normalized = (Array.isArray(documents) ? documents : []).map((item) => ({ kind: kind(item?.kind), markdown: markdown(item?.markdown) }));
-    if (normalized.length !== AGENT_PROFILE_KINDS.length || new Set(normalized.map((item) => item.kind)).size !== AGENT_PROFILE_KINDS.length) throw new Error('agent_profile_documents_complete_set_required');
-    if (!this.db.prepare('SELECT id FROM agents WHERE id=?').get(id)) throw new Error('agent_not_found');
-    const timestamp = now();
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      const upsert = this.db.prepare(`INSERT INTO agent_profile_documents (agent_id,kind,markdown,created_at,updated_at) VALUES (?,?,?,?,?)
-        ON CONFLICT(agent_id,kind) DO UPDATE SET markdown=excluded.markdown,updated_at=excluded.updated_at`);
-      for (const item of normalized) upsert.run(id, item.kind, item.markdown, timestamp, timestamp);
-      this.db.exec('COMMIT');
-      return this.list(id);
-    } catch (error) { try { this.db.exec('ROLLBACK'); } catch {} throw error; }
-  }
-  ensure(agent, documents = []) {
-    const id = agentId(agent);
-    if (this.list(id).length === AGENT_PROFILE_KINDS.length) return this.list(id);
-    const byKind = new Map((Array.isArray(documents) ? documents : []).map((item) => [String(item?.kind || '').toUpperCase(), String(item?.markdown || '')]));
-    return this.replace(id, AGENT_PROFILE_KINDS.map((documentKind) => ({ kind: documentKind, markdown: byKind.get(documentKind) || '' })));
-  }
-  replacePreferences(agent, value) {
-    return this.replaceSingle(agent, 'PREFERENCES', value);
-  }
-  replaceTools(agent, value) {
-    return this.replaceSingle(agent, 'TOOLS', value);
-  }
-  replaceDreamMemory(agent, value) {
-    return this.replaceSingle(agent, 'DREAM_MEMORY', value);
-  }
-  replaceSingle(agent, documentKind, value) {
-    const id = agentId(agent);
-    const normalizedKind = kind(documentKind);
-    const content = markdown(value);
-    if (!this.db.prepare('SELECT id FROM agents WHERE id=?').get(id)) throw new Error('agent_not_found');
-    const timestamp = now();
-    this.db.prepare(`INSERT INTO agent_profile_documents (agent_id,kind,markdown,created_at,updated_at) VALUES (?,?,?,?,?)
-      ON CONFLICT(agent_id,kind) DO UPDATE SET markdown=excluded.markdown,updated_at=excluded.updated_at`).run(id, normalizedKind, content, timestamp, timestamp);
-    return this.get(id, normalizedKind);
-  }
+  constructor() { throw new Error('postgres_required'); }
 }
 
 export function profileFilesFromDocuments(documents = [], { agentId: owningAgentId = null } = {}) {
   const byKind = new Map((Array.isArray(documents) ? documents : []).map((item) => [item.kind, item]));
   const files = AGENT_PROFILE_KINDS.map((documentKind) => byKind.get(documentKind)).filter(Boolean).map((item) => {
     const displayName = item.kind === 'DREAM_MEMORY' ? 'DreamMemory' : item.kind === 'PREFERENCES' ? 'PREFERENCES' : item.kind;
-    return { id: displayName.toLowerCase(), name: `${displayName}.md`, path: `sqlite:agent_profile_documents/${owningAgentId || 'agent'}/${item.kind}`, content: item.markdown, chars: item.markdown.length };
+    return { id: displayName.toLowerCase(), name: `${displayName}.md`, path: `postgres:agent_profile_documents/${owningAgentId || 'agent'}/${item.kind}`, content: item.markdown, chars: item.markdown.length };
   });
-  return { profileDir: 'sqlite:agent_profile_documents', files, chars: files.reduce((total, file) => total + file.chars, 0) };
+  return { profileDir: 'postgres:agent_profile_documents', files, chars: files.reduce((total, file) => total + file.chars, 0) };
 }
 
 export { agentId, kind, markdown };

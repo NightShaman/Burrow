@@ -108,7 +108,7 @@ async function runAskChatUnserialized({
   // Trusted server-side context for a participant in an operator group room.
   // The room transcript is prompt context, not the participant's private session.
   groupChannelContext = null,
-  // Optional explicitly owned asynchronous stores. Omitted means current SQLite defaults.
+  // Required composed PostgreSQL stores.
   stores = null,
   // Internal test seam; never supplied by the chat transport.
   testHooks = null,
@@ -126,6 +126,7 @@ async function runAskChatUnserialized({
   registerNestedAgentRun = null,
 } = {}) {
   if (!rootDir) throw new Error('rootDir is required');
+  if (!stores?.metadata || !stores?.conversations) throw new Error('runtime_stores_required');
   if (!message) throw new Error('message is required');
 
   const { normalizedArgs, attachments } = normalizeRuntimeTurnInput({ args, workspaceRoot, target, action, noCallModel, callModel, agentRuntime });
@@ -245,14 +246,13 @@ async function runAskChatUnserialized({
       lifecycle?.finish?.();
     }
   };
-  const { mcpTools, mcpConnections } = await loadRuntimeMcpCapabilities({ databasePath: runtimeState.settingsDatabasePath, agentId: runtimeState.agentId, stores });
+  const { mcpTools, mcpConnections } = await loadRuntimeMcpCapabilities({ agentId: runtimeState.agentId, stores });
   const executionContext = createRuntimeExecutionContext({ stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId });
   const effectiveSkillCatalog = await loadEffectiveSkillCatalog({
     workspaceRoot: runtimeState.workspaceRoot,
     agentId: runtimeState.agentId,
     agentRuntime,
     overrides: scopedSkillsConfig,
-    databasePath: runtimeState.settingsDatabasePath,
     skillStore: stores?.skills || null,
   });
   const preliminaryTurnPlan = await planTurnWithModel({
@@ -265,7 +265,7 @@ async function runAskChatUnserialized({
     workspaceContext: { workspaceRoot: resolvedWorkingRoot, files: workspaceFiles },
     skillConfig: scopedSkillsConfig,
     skillIndex: { skills: effectiveSkillCatalog.skills },
-    // Keep provider metadata available for no-call control paths; model remains null when no SQLite selection was made.
+    // Keep provider metadata available for no-call control paths; model remains null when no PostgreSQL selection was made.
     modelConfig,
     traceLogger: logger,
   });
@@ -421,7 +421,7 @@ async function runAskChatUnserialized({
     // Tiddle residue is advisory and must never turn a completed chat response
     // into a failure. The periodic pass owns semantic reconciliation later.
     try {
-      const residue = await appendTiddleResidueAsync({ metadataStore: stores?.metadata, databasePath: runtimeState.settingsDatabasePath, agentId: runtimeState.agentId, scope: continuityScope, sessionId: resolvedSessionId, conversationId: conversationId || resolvedSessionId, runId: logger.runId, message, answerText: result.answerText, toolResults: result?.proposalExecution?.tools || [] });
+      const residue = await appendTiddleResidueAsync({ metadataStore: stores.metadata, agentId: runtimeState.agentId, scope: continuityScope, sessionId: resolvedSessionId, conversationId: conversationId || resolvedSessionId, runId: logger.runId, message, answerText: result.answerText, toolResults: result?.proposalExecution?.tools || [] });
       await logger.event('tiddle-residue-recorded', { rollingContinuity: true, residue: residue ? { ref: residue.ref, scope: residue.scope } : null });
     } catch (error) {
       await logger.event('tiddle-residue-recorded', { rollingContinuity: true, error: String(error?.message || error) });

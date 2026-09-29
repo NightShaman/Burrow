@@ -3,7 +3,6 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { writeTraceRetentionState } from './trace-observability.mjs';
 import { listSessionRecords, readSessionMetadata } from './session-store.mjs';
-import { TaskBoardStore } from './task-board-store.mjs';
 
 function finitePositive(value) {
   const n = Number(value);
@@ -92,7 +91,7 @@ function traceCandidates(runs, { maxAgeDays = null, maxBytes = null, nowMs = Dat
   return [...selected.values()].sort((a, b) => a.mtimeMs - b.mtimeMs || a.id.localeCompare(b.id));
 }
 
-export async function planRetentionCleanup({ dataRoot, traceRoot = null, settingsDatabasePath = null, retention = {}, now = new Date() } = {}) {
+export async function planRetentionCleanup({ dataRoot, traceRoot = null, retention = {}, now = new Date() } = {}) {
   if (!dataRoot) throw new Error('dataRoot is required');
   const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
   const resolvedTraceRoot = traceRoot || path.join(dataRoot, 'traces');
@@ -101,7 +100,7 @@ export async function planRetentionCleanup({ dataRoot, traceRoot = null, setting
   const sessions = sessionRetentionEnabled ? await listSessionRecords({ rootDir: dataRoot, includeArchived: true, limit: 100000 }) : [];
   const sessionPolicies = { main: retention.mainMaxAgeDays ?? 60, task: retention.taskMaxAgeDays ?? 30, subagent: retention.subagentMaxAgeDays ?? 7 };
   const nowDate = new Date(nowMs);
-  const taskBoard = sessionRetentionEnabled ? new TaskBoardStore({ databasePath: settingsDatabasePath || undefined }) : null;
+  const taskBoard = null;
   const sessionCandidates = (await Promise.all(sessions.map(async (record) => {
     const meta = record.metadata || {};
     const kind = meta.kind || 'main';
@@ -224,9 +223,9 @@ export async function acquireRetentionCleanupLease(traceRoot) {
   }
 }
 
-export async function runRetentionCleanup({ dataRoot, traceRoot = null, settingsDatabasePath = null, retention = {}, confirm = false, now = new Date() } = {}) {
+export async function runRetentionCleanup({ dataRoot, traceRoot = null, retention = {}, confirm = false, now = new Date() } = {}) {
   const resolvedTraceRoot = traceRoot || path.join(dataRoot, 'traces');
-  if (!confirm) return planRetentionCleanup({ dataRoot, traceRoot: resolvedTraceRoot, settingsDatabasePath, retention, now });
+  if (!confirm) return planRetentionCleanup({ dataRoot, traceRoot: resolvedTraceRoot, retention, now });
   const lease = await acquireRetentionCleanupLease(resolvedTraceRoot);
   if (!lease.acquired) {
     return {
@@ -240,7 +239,7 @@ export async function runRetentionCleanup({ dataRoot, traceRoot = null, settings
     };
   }
   try {
-    const plan = await planRetentionCleanup({ dataRoot, traceRoot: resolvedTraceRoot, settingsDatabasePath, retention, now });
+    const plan = await planRetentionCleanup({ dataRoot, traceRoot: resolvedTraceRoot, retention, now });
     const deletedSessions = [];
     for (const entry of plan.delete.sessions) {
       const metadata = await readSessionMetadata({ rootDir: dataRoot, sessionId: entry.id });
