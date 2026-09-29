@@ -1,7 +1,4 @@
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import { conversationAuthority } from './conversation-authority.mjs';
-import { listSessionRecords, readSessionEntries } from './session-store.mjs';
 
 const MAX_ITEMS = 12;
 const MAX_ITEM_CHARS = 360;
@@ -9,17 +6,8 @@ const MAX_SOURCE_REFS = 8;
 const DEFAULT_BUDGET = 6_000;
 const MAX_PERSISTED_RECORDS = 32;
 const MAX_RECORD_AGE_MS = 14 * 24 * 60 * 60 * 1_000;
-const EVIDENCE_FILE = 'run-evidence.jsonl';
 
 function text(value) { return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''; }
-function safeSessionId(value) { return text(value).replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120) || 'default'; }
-function evidenceFile(rootDir, sessionId) { return path.join(rootDir, 'sessions', safeSessionId(sessionId), EVIDENCE_FILE); }
-async function readEvidenceFile(rootDir, sessionId) {
-  try {
-    const content = await fs.readFile(evidenceFile(rootDir, sessionId), 'utf8');
-    return content.split('\n').filter(Boolean).flatMap((line) => { try { return [compactRunEvidence(JSON.parse(line))]; } catch { return []; } });
-  } catch (error) { if (error?.code === 'ENOENT') return []; throw error; }
-}
 function retainedEvidence(records, now = Date.now()) {
   const cutoff = now - MAX_RECORD_AGE_MS;
   const deduped = new Map();
@@ -33,15 +21,10 @@ function retainedEvidence(records, now = Date.now()) {
   return [...deduped.values()].slice(-MAX_PERSISTED_RECORDS);
 }
 export async function persistRunEvidence({ rootDir, sessionId, record, conversationStore = null, agentId } = {}) {
-  if (!rootDir || !sessionId || !record) throw new Error('run_evidence_persistence_invalid');
-  if (conversationStore) { const metadata = await conversationStore.updateMetadata({agentId,sessionId,update:current=>({...current,runEvidence:retainedEvidence([...(current.runEvidence || []),record])})}); return {filePath:null,recordCount:metadata.runEvidence.length,deduplicatedCount:Math.max(0,metadata.runEvidence.length-1)}; }
-  const filePath = evidenceFile(rootDir, sessionId);
-  const records = retainedEvidence([...(await readEvidenceFile(rootDir, sessionId)), record]);
-  await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  const temporary = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(temporary, records.map((item) => `${JSON.stringify(item)}\n`).join(''), { encoding: 'utf8', mode: 0o600 });
-  await fs.rename(temporary, filePath);
-  return { filePath, recordCount: records.length, deduplicatedCount: Math.max(0, records.length - 1) };
+  if (!conversationStore) throw new Error('conversation_store_required');
+  if (!sessionId || !record) throw new Error('run_evidence_persistence_invalid');
+  const metadata = await conversationStore.updateMetadata({agentId,sessionId,update:current=>({...current,runEvidence:retainedEvidence([...(current.runEvidence || []),record])})});
+  return {filePath:null,recordCount:metadata.runEvidence.length,deduplicatedCount:Math.max(0,metadata.runEvidence.length-1)};
 }
 function bounded(value, limit = MAX_ITEM_CHARS) { const v = text(value); return v.length <= limit ? v : `${v.slice(0, Math.max(0, limit - 1))}…`; }
 function list(value) { return Array.isArray(value) ? value : []; }
@@ -250,8 +233,9 @@ export function selectRunEvidence(records = [], { message = '', targets = [], se
 }
 
 export async function readRunEvidenceWithDiagnostics({ rootDir, sessionId = 'default', limit = 24, conversationStore = null, agentId } = {}) {
-  const entries = conversationStore ? await conversationAuthority({store:conversationStore,agentId}).entriesAll(sessionId) : await readSessionEntries({ rootDir, sessionId, limit: 0 });
-  const dedicated = conversationStore ? (await conversationStore.getMetadata({agentId,sessionId}))?.runEvidence || [] : await readEvidenceFile(rootDir, sessionId);
+  if (!conversationStore) throw new Error('conversation_store_required');
+  const entries = await conversationAuthority({store:conversationStore,agentId}).entriesAll(sessionId);
+  const dedicated = (await conversationStore.getMetadata({agentId,sessionId}))?.runEvidence || [];
   const legacy = list(entries).filter((entry) => entry?.type === 'evidence' && entry?.metadata?.runEvidence).map((entry) => compactRunEvidence(entry.metadata.runEvidence));
   const retained = retainedEvidence([...legacy, ...dedicated]).reverse();
   return {
@@ -261,13 +245,14 @@ export async function readRunEvidenceWithDiagnostics({ rootDir, sessionId = 'def
       rootDir: rootDir || null, sessionId: sessionId || null, entryCount: entries.length,
       evidenceEntryCount: legacy.length, dedicatedEntryCount: dedicated.length,
       retainedCount: retained.length, deduplicatedCount: Math.max(0, legacy.length + dedicated.length - retained.length),
-      maxRecords: MAX_PERSISTED_RECORDS, maxAgeDays: 14, dedicatedStore: conversationStore ? 'postgres' : evidenceFile(rootDir, sessionId),
+      maxRecords: MAX_PERSISTED_RECORDS, maxAgeDays: 14, dedicatedStore: 'postgres',
     },
   };
 }
 
 export async function readRunEvidenceAcrossSessions({ rootDir, sessionId = 'default', limit = 64, conversationStore = null, agentId } = {}) {
-  const sessions = conversationStore ? await conversationStore.listSessions({agentId,includeArchived:false}) : await listSessionRecords({ rootDir, includeArchived: false, limit: 500 });
+  if (!conversationStore) throw new Error('conversation_store_required');
+  const sessions = await conversationStore.listSessions({agentId,includeArchived:false});
   const ids = unique([sessionId, ...sessions.map((item) => item.sessionId || item.id)], 512);
   const records = [];
   let legacyCount = 0;

@@ -1,4 +1,3 @@
-import { readSessionMetadata, readSessionPendingActions } from './session-store.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 import { turnWorkspaceFacts } from './turn-workspace-facts.mjs';
 import { applyWorkingContextEvents, verifiedEventsFromTurnInput, workingContextFromSession } from './working-context.mjs';
@@ -8,7 +7,9 @@ import { readSessionReadEvidence } from './read-evidence-store.mjs';
 
 export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessionId, runtimeState, normalizedArgs, workspaceRoot, resolvedTarget, message, explicitWorkspaceFiles = [], interruptedRun = null, stores = null } = {}) {
   if (!stores?.conversations || !stores?.continuity || !stores?.workingMemory || !stores?.tasks) throw new Error('runtime_stores_required');
-  const authority = conversationAuthority({ store: stores.conversations, agentId: runtimeState.agentId || 'hatchet', rootDir: sessionRoot });
+  const agentId = runtimeState?.agentId;
+  if (typeof agentId !== 'string' || !agentId.trim()) throw new Error('agent_id_required');
+  const authority = conversationAuthority({ store: stores.conversations, agentId });
   // Planning consumes no transcript prose. It receives only durable session
   // identity/metadata, while pending actions are resolved from their explicit
   // work-item and turn contracts rather than an arbitrary transcript tail.
@@ -24,7 +25,7 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
   const conversationId = priorSession.metadata?.conversationId || null;
   const isFreshConversation = !(priorSession?.turnCount > 0);
   const continuityHandoffs = isFreshConversation
-    ? await stores.continuity.list({ agentId: runtimeState.agentId || 'hatchet', limit: 1 })
+    ? await stores.continuity.list({ agentId: agentId, limit: 1 })
     : [];
   const workspaceResolution = turnWorkspaceFacts({
     configuredWorkspaceRoot: runtimeState.agentWorkspaceRoot || runtimeState.workspaceRoot,
@@ -36,7 +37,7 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
   // fresh session without an interrupted run must begin from its actual
   // conversation/handoff state, never arbitrary prior file excerpts.
   const validReadEvidence = (!isFreshConversation || interruptedRun)
-    ? await validateReadEvidence(await readSessionReadEvidence({ rootDir: sessionRoot, sessionId: resolvedSessionId, conversationStore:stores?.conversations, agentId:runtimeState.agentId }))
+    ? await validateReadEvidence(await readSessionReadEvidence({ rootDir: sessionRoot, sessionId: resolvedSessionId, conversationStore:stores?.conversations, agentId }))
     : [];
   const compatibilityScope = normalizeContinuityScope(normalizedArgs.continuity_scope ?? normalizedArgs.continuityScope ?? normalizedArgs.working_project ?? normalizedArgs.workingProject);
   const continuityScope = normalizeContinuityScope(priorWorkingContext.continuityScope) || compatibilityScope || `conversation:${conversationId || resolvedSessionId}`;

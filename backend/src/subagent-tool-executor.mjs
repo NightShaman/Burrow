@@ -185,6 +185,7 @@ export async function executeSpawnSubagentTool({
   traceLogger = null,
   modelConfig = null,
   executionPolicy: executionPolicyInput = null,
+  childRunner = null,
 } = {}) {
   const activityId = compactString(args.activityId) || null;
   const task = compactString(args.task || args.purpose || args.reason);
@@ -264,6 +265,9 @@ export async function executeSpawnSubagentTool({
     task: normalizeTaskForSpawnRequest(task),
   };
   spawnRequest.key = spawnRequestIdentity(spawnRequest);
+  const conversationStore = executionContext?.conversationStore || executionContext?.stores?.conversations;
+  if (!conversationStore) throw new Error('conversation_store_required');
+  if (typeof executionContext?.agentId !== 'string' || !executionContext.agentId.trim()) throw new Error('agent_id_required');
   const existing = await findSubagentBySpawnRequestKey({ dataRoot, key: spawnRequest.key });
   if (existing) {
     const reused = reusedSubagentResult({ record: existing, task, target, request: spawnRequest });
@@ -272,7 +276,7 @@ export async function executeSpawnSubagentTool({
   }
   const id = safeId(args.id || `subagent-${Date.now()}`);
   const childSessionId = subagentChildSessionId(id);
-  const owner = { sessionId: parentSessionId, conversationId: parentConversationId, turnId: parentRunId, parentRunId, requestedBy: 'model-tool' };
+  const owner = { agentId: executionContext.agentId, sessionId: parentSessionId, conversationId: parentConversationId, turnId: parentRunId, parentRunId, requestedBy: 'model-tool' };
   const scope = { workspaceRoot: target.root, baseRoot: target.root, target };
   const executionPolicy = normalizeExecutionPolicyInput(executionPolicyInput);
   const mayMutate = executionPolicyAllowsMutation(executionPolicy);
@@ -303,15 +307,15 @@ export async function executeSpawnSubagentTool({
     model: modelSelection,
     provenance: ['spawn-subagent-tool', 'context:isolated'],
   });
-  await startSubagentChildSession({ dataRoot, id, workerProfile: 'spawn_subagent', purpose: task, owner, trace: { runId: id, childSessionId, traceDir }, model: modelSelection });
+  await startSubagentChildSession({ dataRoot, id, workerProfile: 'spawn_subagent', purpose: task, owner, trace: { runId: id, childSessionId, traceDir }, model: modelSelection, conversationStore });
   const spawnedAt = new Date().toISOString();
   const running = await updateSubagentStatus({ dataRoot, id, status: 'running', phase: 'spawned', trace: { runId: id, childSessionId, traceDir }, activity: { kind: 'run', status: 'running', phase: 'spawned', label: 'Subagent spawned', sequence: 0, startedAt: spawnedAt, lastActualActivityAt: spawnedAt }, provenance: { source: 'spawn-subagent-tool', reason: 'spawned' } });
 
   const remoteExecution = resolveNativeFilesystemExecutionTarget(executionContext || {}).kind === 'remote';
   let childRun;
   try {
-    childRun = remoteExecution
-      ? { ok: true, spawned: true, exitCode: 0, durationMs: null, result: await runSpawnSubagentChild({ id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy, parentExecutionContext: executionContext, signal: executionContext?.abortSignal || null }) }
+    childRun = remoteExecution || childRunner
+      ? { ok: true, spawned: true, exitCode: 0, durationMs: null, result: await (childRunner || runSpawnSubagentChild)({ id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy, parentExecutionContext: executionContext, signal: executionContext?.abortSignal || null }) }
       : await runSubagentProcess({ args: { id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy }, signal: executionContext?.abortSignal || null });
   } catch (error) {
     const code = compactString(error?.code || error?.message || 'subagent_child_dispatch_failed').split(':')[0];
@@ -346,7 +350,7 @@ export async function executeSpawnSubagentTool({
     child,
   };
   const finished = await updateSubagentStatus({ dataRoot, id, status, phase: 'idle', trace: { runId: id, childSessionId, traceDir }, model: modelSelection, result, provenance: { source: 'spawn-subagent-tool', reason: status } });
-  await finishSubagentChildSession({ dataRoot, sessionId: childSessionId, id, workerProfile: 'spawn_subagent', owner, trace: { runId: id, childSessionId, traceDir }, status, result, model: modelSelection });
+  await finishSubagentChildSession({ dataRoot, sessionId: childSessionId, id, workerProfile: 'spawn_subagent', owner, trace: { runId: id, childSessionId, traceDir }, status, result, model: modelSelection, conversationStore });
   await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'spawn_subagent', ...(activityId ? { activityId } : {}), ok: result.ok, id, childSessionId, status, spawned: Boolean(childRun.spawned), exitCode: childRun.exitCode ?? null, spawnRequestKey: spawnRequest.key, record: subagentVisibilitySummary(finished.record) });
 
   return {

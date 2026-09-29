@@ -1,5 +1,5 @@
 import { PostgresSessionStore } from './postgres-session-store.mjs';
-import { buildSessionEntry } from './session-store.mjs';
+import { buildSessionEntry } from './session-entry.mjs';
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import {
@@ -15,10 +15,6 @@ import {
   resolveGeneratedArtifact,
 } from "./generated-artifact-store.mjs";
 import { persistChatAttachments } from "./attachment-store.mjs";
-import {
-  readSessionMetadata,
-  appendSessionTurnIfAbsent,
-} from "./session-store.mjs";
 import { diagnostic } from "./forge-diagnostics.mjs";
 import {
   closePostgresPool,

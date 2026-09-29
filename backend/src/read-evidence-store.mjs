@@ -1,28 +1,13 @@
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import { mergeReadEvidence } from './read-evidence.mjs';
 
-function safeId(value) { return String(value || '').trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120) || 'default'; }
-function evidencePath(rootDir, sessionId) { return path.join(path.resolve(rootDir), 'sessions', safeId(sessionId), 'read-evidence.json'); }
-
-// ReadEvidence is active-session evidence, deliberately separate from bounded
-// session metadata. Its merge path bounds persistence; prompt assembly applies
-// the additional per-request injection budget.
-export async function writeSessionReadEvidence({ rootDir, sessionId, evidence = [], conversationStore = null, agentId } = {}) {
-  if (!rootDir || !sessionId) return [];
+export async function writeSessionReadEvidence({ sessionId, evidence = [], conversationStore, agentId } = {}) {
+  if (!conversationStore) throw new Error('conversation_store_required');
   const retained = mergeReadEvidence(evidence, []);
-  if (conversationStore) { await conversationStore.patchMetadata({agentId,sessionId,metadata:{readEvidence:retained}}); return retained; }
-  const filePath = evidencePath(rootDir, sessionId);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, `${JSON.stringify(retained)}\n`, 'utf8');
+  await conversationStore.patchMetadata({agentId,sessionId,metadata:{readEvidence:retained}});
   return retained;
 }
 
-export async function readSessionReadEvidence({ rootDir, sessionId, conversationStore = null, agentId } = {}) {
-  if (!rootDir || !sessionId) return [];
-  if (conversationStore) return (await conversationStore.getMetadata({agentId,sessionId}))?.readEvidence || [];
-  try {
-    const parsed = JSON.parse(await fs.readFile(evidencePath(rootDir, sessionId), 'utf8'));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) { if (error?.code === 'ENOENT' || error instanceof SyntaxError) return []; throw error; }
+export async function readSessionReadEvidence({ sessionId, conversationStore, agentId } = {}) {
+  if (!conversationStore) throw new Error('conversation_store_required');
+  return (await conversationStore.getMetadata({agentId,sessionId}))?.readEvidence || [];
 }

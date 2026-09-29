@@ -6,7 +6,7 @@ import { reviewProposalActions } from './action-safety.mjs';
 import { executeReviewedProposalActions } from './proposal-executor.mjs';
 import { createExecutionContext } from './execution-context.mjs';
 import { executionPolicyAllowsMutation, normalizeExecutionPolicyInput } from './execution-policy.mjs';
-import { appendSessionActivity, appendSessionEntry, appendSessionTurn, writeSessionMetadata } from './session-store.mjs';
+import { conversationAuthority } from './conversation-authority.mjs';
 import { updateSubagentStatus } from './subagent-store.mjs';
 import { normalizeProviderMessages } from './provider-messages.mjs';
 import { prepareNativeToolContinuation } from './native-continuation-preparation.mjs';
@@ -112,11 +112,11 @@ function compactChildToolCalls(toolCalls = []) {
   }));
 }
 
-async function appendChildToolRound({ rootDir, sessionId, runId, traceDir, iteration, toolCalls = [], toolResults = [], activitySequence }) {
+async function appendChildToolRound({ authority, rootDir, sessionId, runId, traceDir, iteration, toolCalls = [], toolResults = [], activitySequence }) {
   const compactCalls = compactChildToolCalls(toolCalls);
   if (compactCalls.length) {
-    await appendSessionEntry({
-      rootDir, sessionId, type: 'tool_call', role: null,
+    await authority.append({
+      sessionId, type: 'tool_call', role: null,
       content: JSON.stringify({ type: 'toolCall', iteration, toolCalls: compactCalls }),
       runId, traceDir, visibility: 'debug', entersPrompt: false,
       metadata: { decision: 'chat_tool_call', canonicalExecution: true, subagentExecution: true, iteration, toolCalls: compactCalls },
@@ -124,8 +124,8 @@ async function appendChildToolRound({ rootDir, sessionId, runId, traceDir, itera
   }
   for (const result of toolResults) {
     const normalizedResult = summarizeToolResults([result])[0] || result;
-    await appendSessionEntry({
-      rootDir, sessionId, type: 'tool_result', role: null, content: JSON.stringify(normalizedResult),
+    await authority.append({
+      sessionId, type: 'tool_result', role: null, content: JSON.stringify(normalizedResult),
       runId, traceDir, visibility: 'debug', entersPrompt: false,
       metadata: { decision: 'chat_tool_result', canonicalExecution: true, subagentExecution: true, iteration, tool: result.tool || null, callId: result.activityId || null, ok: result.ok ?? null, normalizedResult },
     });
@@ -133,9 +133,9 @@ async function appendChildToolRound({ rootDir, sessionId, runId, traceDir, itera
   const toolActivity = chatToolActivity({ toolResults }, runId);
   if (!toolActivity) return activitySequence;
   const sequence = activitySequence + 1;
-  await appendSessionActivity({
-    rootDir, sessionId, runId, traceDir, sequence, content: toolActivity.summary,
-    metadata: { decision: 'chat_tool_activity', subagentExecution: true, toolActivity },
+  await authority.append({
+    sessionId, runId, traceDir, type: 'event', visibility: 'activity', entersPrompt: false, role: null, content: toolActivity.summary,
+    metadata: { decision: 'chat_tool_activity', subagentExecution: true, toolActivity, activitySequence: sequence },
   });
   return sequence;
 }
@@ -145,7 +145,7 @@ async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSes
   const proposal = proposalFromNativeToolCalls(toolCalls);
   const reviews = reviewProposalActions({ actions: proposal.actions, workspaceRoot: target.root });
   const executionContext = createExecutionContext({
-    conversationStore: parentExecutionContext?.conversationStore,
+    conversationStore: parentExecutionContext?.conversationStore || parentExecutionContext?.stores?.conversations,
     agentId: parentExecutionContext?.agentId,
     sessionId: childSessionId, conversationId, workspaceRoot: target.root, target, dataRoot, cacheRoot: traceLogger?.traceDir || null,
     executionEnvironment: parentExecutionContext?.executionEnvironment?.kind === 'remote' ? parentExecutionContext.executionEnvironment : null,
@@ -422,6 +422,13 @@ export async function runSpawnSubagentChild({
   parentExecutionContext = null,
   signal = parentExecutionContext?.abortSignal || null,
 } = {}) {
+  const conversationStore = parentExecutionContext?.conversationStore || parentExecutionContext?.stores?.conversations;
+  if (!conversationStore) throw new Error('conversation_store_required');
+  const agentId = owner?.agentId;
+  if (typeof agentId !== 'string' || !agentId.trim()) throw new Error('agent_id_required');
+  if (parentExecutionContext?.agentId && parentExecutionContext.agentId !== agentId) throw new Error('subagent_owner_agent_mismatch');
+  parentExecutionContext = { ...parentExecutionContext, conversationStore, agentId };
+  const authority = conversationAuthority({ store: conversationStore, agentId: parentExecutionContext.agentId });
   const blockers = [];
   if (!id) blockers.push('subagent_id_required');
   if (!compactString(task)) blockers.push('subagent_task_required');
@@ -449,7 +456,7 @@ export async function runSpawnSubagentChild({
   await progress?.({ type: 'subagent-progress', phase: 'started', id });
   await recordLiveActivity({ kind: 'run', phase: 'model-loop', label: 'Subagent started' }, 'started');
   const prompt = childPrompt({ task, target });
-  await appendSessionEntry({ rootDir: dataRoot, sessionId: childSessionId, type: 'event', content: prompt, visibility: 'debug', entersPrompt: false, runId: id, traceDir, metadata: { kind: 'subagent-runtime-context', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null } });
+  await authority.append({ sessionId: childSessionId, type: 'event', content: prompt, visibility: 'debug', entersPrompt: false, runId: id, traceDir, metadata: { kind: 'subagent-runtime-context', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null } });
 
   const childTraceDir = traceDir || path.join(dataRoot, 'subagents', id, 'trace');
   const modelTrace = {
@@ -483,7 +490,7 @@ export async function runSpawnSubagentChild({
   const firstToolCalls = choiceToolCalls(first.choice);
   const firstText = choiceText(first.choice);
   // Tool requests are persisted as canonical structured activity, not fake assistant text.
-  if (compactString(firstText)) await appendSessionTurn({ visibility: terminalResultFromToolCalls(firstToolCalls) ? 'debug' : 'chat', entersPrompt: !terminalResultFromToolCalls(firstToolCalls), rootDir: dataRoot, sessionId: childSessionId, role: 'assistant', content: firstText, runId: id, traceDir, metadata: { kind: 'subagent-model-response', toolCallCount: firstToolCalls.length } });
+  if (compactString(firstText)) await authority.appendTurn({ visibility: terminalResultFromToolCalls(firstToolCalls) ? 'debug' : 'chat', entersPrompt: !terminalResultFromToolCalls(firstToolCalls), sessionId: childSessionId, role: 'assistant', content: firstText, runId: id, traceDir, metadata: { kind: 'subagent-model-response', toolCallCount: firstToolCalls.length } });
 
   let lastText = firstText;
   let activitySequence = 0;
@@ -508,7 +515,7 @@ export async function runSpawnSubagentChild({
     await recordLiveActivity({ kind: 'tool', phase: 'tool-result', label: `Finished ${batch.results.length} tool result${batch.results.length === 1 ? '' : 's'}`, status: batchOk ? 'completed' : 'error', tool: batch.results[0]?.tool || toolCalls[0]?.name || null, error: batchOk ? null : (batch.results.find((result) => result?.ok === false)?.error || 'tool_failed'), counts: { toolResults: batch.results.length } }, batchOk ? 'tool_result' : 'tool_error');
     toolResults.push(...batch.results);
     activitySequence = await appendChildToolRound({
-      rootDir: dataRoot, sessionId: childSessionId, runId: id, traceDir, iteration: round + 1,
+      authority, sessionId: childSessionId, runId: id, traceDir, iteration: round + 1,
       toolCalls, toolResults: batch.results, activitySequence,
     });
     const allowMoreTools = true;
@@ -571,13 +578,13 @@ export async function runSpawnSubagentChild({
     terminalResult = terminalResultFromToolCalls(nextToolCalls, { toolResults, target });
     const nextText = choiceText(next.choice);
     if (compactString(nextText)) lastText = nextText;
-    if (compactString(nextText)) await appendSessionTurn({ visibility: terminalResult ? 'debug' : 'chat', entersPrompt: !terminalResult, rootDir: dataRoot, sessionId: childSessionId, role: 'assistant', content: nextText, runId: id, traceDir, metadata: { kind: nextToolCalls.length ? 'subagent-model-response' : 'subagent-final-response', evidenceCount: toolResults.length, toolCallCount: nextToolCalls.length } });
+    if (compactString(nextText)) await authority.appendTurn({ visibility: terminalResult ? 'debug' : 'chat', entersPrompt: !terminalResult, sessionId: childSessionId, role: 'assistant', content: nextText, runId: id, traceDir, metadata: { kind: nextToolCalls.length ? 'subagent-model-response' : 'subagent-final-response', evidenceCount: toolResults.length, toolCallCount: nextToolCalls.length } });
   }
 
   if (terminalResult) {
     const status = terminalResult.ok ? 'succeeded' : 'failed';
     await updateSubagentStatus({ dataRoot, id, status, phase: 'idle', result: terminalResult, activity: subagentLiveActivity({ kind: 'terminal', phase: 'idle', status: terminalResult.ok ? 'completed' : 'error', label: terminalResult.ok ? 'Subagent completed' : 'Subagent failed', completedAt: nowIso(), counts: { evidence: terminalResult.evidence?.length || 0 } }), provenance: { source: 'spawn-subagent-child', reason: terminalResult.ok ? 'terminal_completed' : 'terminal_not_completed' } });
-    await writeSessionMetadata({ rootDir: dataRoot, sessionId: childSessionId, extra: { sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: status, subagentOk: terminalResult.ok, workerProfile: 'spawn_subagent' } });
+    await conversationStore.updateMetadata({ agentId, sessionId: childSessionId, update: old => ({ ...old, sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: status, subagentOk: terminalResult.ok, workerProfile: 'spawn_subagent' }) });
     return terminalResult;
   }
 
@@ -598,25 +605,25 @@ export async function runSpawnSubagentChild({
   if (!synthesis.ok) {
     const result = subagentResult({ ok: false, summary: 'Minion final synthesis model call failed.', blockers: [`subagent_model_failed:${synthesis.error || synthesis.status}`], toolResults, target });
     await updateSubagentStatus({ dataRoot, id, status: 'failed', phase: 'idle', result, activity: subagentLiveActivity({ kind: 'terminal', phase: 'idle', status: 'error', label: 'Subagent failed', completedAt: nowIso(), error: result.blockers?.[0] || null }), provenance: { source: 'spawn-subagent-child', reason: 'final_synthesis_failed' } });
-    await writeSessionMetadata({ rootDir: dataRoot, sessionId: childSessionId, extra: { sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: 'failed', subagentOk: false, workerProfile: 'spawn_subagent' } });
+    await conversationStore.updateMetadata({ agentId, sessionId: childSessionId, update: old => ({ ...old, sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: 'failed', subagentOk: false, workerProfile: 'spawn_subagent' }) });
     return result;
   }
   const synthesisText = choiceText(synthesis.choice);
   if (compactString(synthesisText)) lastText = synthesisText;
   const synthesisToolCalls = choiceToolCalls(synthesis.choice);
   terminalResult = terminalResultFromToolCalls(synthesisToolCalls, { toolResults, target });
-  if (compactString(synthesisText) || !terminalResult) await appendSessionTurn({ visibility: terminalResult ? 'debug' : 'chat', entersPrompt: !terminalResult, rootDir: dataRoot, sessionId: childSessionId, role: 'assistant', content: synthesisText || (synthesisToolCalls.length ? '[terminal signal]' : '[missing terminal signal]'), runId: id, traceDir, metadata: { kind: 'subagent-final-response', evidenceCount: toolResults.length, toolCallCount: synthesisToolCalls.length, finalSynthesis: true } });
+  if (compactString(synthesisText) || !terminalResult) await authority.appendTurn({ visibility: terminalResult ? 'debug' : 'chat', entersPrompt: !terminalResult, sessionId: childSessionId, role: 'assistant', content: synthesisText || (synthesisToolCalls.length ? '[terminal signal]' : '[missing terminal signal]'), runId: id, traceDir, metadata: { kind: 'subagent-final-response', evidenceCount: toolResults.length, toolCallCount: synthesisToolCalls.length, finalSynthesis: true } });
 
   if (terminalResult) {
     const status = terminalResult.ok ? 'succeeded' : 'failed';
     await updateSubagentStatus({ dataRoot, id, status, phase: 'idle', result: terminalResult, activity: subagentLiveActivity({ kind: 'terminal', phase: 'idle', status: terminalResult.ok ? 'completed' : 'error', label: terminalResult.ok ? 'Subagent completed' : 'Subagent failed', completedAt: nowIso(), counts: { evidence: terminalResult.evidence?.length || 0 } }), provenance: { source: 'spawn-subagent-child', reason: terminalResult.ok ? 'terminal_completed' : 'terminal_not_completed' } });
-    await writeSessionMetadata({ rootDir: dataRoot, sessionId: childSessionId, extra: { sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: status, subagentOk: terminalResult.ok, workerProfile: 'spawn_subagent' } });
+    await conversationStore.updateMetadata({ agentId, sessionId: childSessionId, update: old => ({ ...old, sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: status, subagentOk: terminalResult.ok, workerProfile: 'spawn_subagent' }) });
     return terminalResult;
   }
 
   const result = subagentTerminalMissingResult({ toolResults, target, text: lastText });
   await updateSubagentStatus({ dataRoot, id, status: 'failed', phase: 'idle', result, activity: subagentLiveActivity({ kind: 'terminal', phase: 'idle', status: 'error', label: 'Subagent failed', completedAt: nowIso(), error: result.blockers?.[0] || null }), provenance: { source: 'spawn-subagent-child', reason: 'terminal_signal_missing' } });
-  await writeSessionMetadata({ rootDir: dataRoot, sessionId: childSessionId, extra: { sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: 'failed', subagentOk: false, workerProfile: 'spawn_subagent' } });
+  await conversationStore.updateMetadata({ agentId, sessionId: childSessionId, update: old => ({ ...old, sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: 'failed', subagentOk: false, workerProfile: 'spawn_subagent' }) });
   return result;
 
 

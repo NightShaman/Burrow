@@ -5,7 +5,7 @@ import { inspectAssembledPromptBudget } from './prompt-budget.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
 import { nextCronOccurrence } from './scheduled-job-store.mjs';
 import { reconciledDreamCycleState } from './dream-cycle-state.mjs';
-import { listSessionRecords, readChatMessages, isChatMessage } from './session-store.mjs';
+import { isChatMessage } from './session-entry.mjs';
 import { appendPreferenceSignalAsync, applyPreferenceUpdateAsync, parsePreferenceAdjudication, preferenceAdjudicationPrompt, preferenceLearningStateAsync, preferenceSignalsAsync, validatePreferenceAdjudication } from './preference-learning.mjs';
 
 const PHASES = Object.freeze(['light', 'rem', 'deep']);
@@ -305,19 +305,7 @@ async function sessionWindow({ rootDir, phase, generatedAt, conversationStore = 
     return output.sort((a, b) => a.at.localeCompare(b.at));
   }
   if (!rootDir) return [];
-  const since = Date.parse(phaseWindowStart({ phase, generatedAt }));
-  const until = Date.parse(generatedAt);
-  const records = await listSessionRecords({ rootDir, includeArchived: true, limit: Infinity });
-  const output = [];
-  for (const record of records) {
-    const turns = await readChatMessages({ rootDir, sessionId: record.id, limit: 0, includeHistory: true, includeResetHistory: true });
-    for (const turn of turns) {
-      const at = Date.parse(turn.ts);
-      if (!Number.isFinite(at) || at < since || at > until) continue;
-      output.push({ sourceRef: `session:${record.id}:message:${turn.id}`, sessionId: record.id, role: turn.role, at: new Date(at).toISOString(), content: text(turn.content) });
-    }
-  }
-  return output.sort((a, b) => a.at.localeCompare(b.at));
+  throw new Error('conversation_store_required');
 }
 
 async function extractPhaseCandidates({ phase, messages, generatedAt, modelAdapter, modelConfig, traceLogger, echoAllowedSourceRefs = false }) {

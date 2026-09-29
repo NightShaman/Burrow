@@ -1,5 +1,4 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
-import { readArchiveConversationPage } from './session-store.mjs';
 import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
 import { MOD_CAPABILITY_RESULT_MAX_BYTES, modCapabilityResultBytes } from './mod-capability-envelope.mjs';
 
@@ -93,8 +92,9 @@ function segmentTurn(turn, offset, target, status, before, next, scope) {
 }
 
 export async function readModConversationPage({ rootDir, conversationStore = null, sessionId, archiveId, limit, before, from, to, agentId, signal = null }) {
+  if (!conversationStore) throw new Error('conversation_store_required');
   const target = { agentId, sessionId, archiveId };
-  const scope = createHash('sha256').update(JSON.stringify({ source: conversationStore ? 'postgres' : rootDir, target, from, to })).digest('hex');
+  const scope = createHash('sha256').update(JSON.stringify({ source: 'postgres', target, from, to })).digest('hex');
   let segment = null;
   if (before) {
     let raw;
@@ -107,9 +107,7 @@ export async function readModConversationPage({ rootDir, conversationStore = nul
   // Fetch a genuine archive page once. The archive reader supplies signed
   // continuation points for members of this page so byte-envelope truncation
   // and content segmentation remain exact without a transcript rescan per turn.
-  const page = conversationStore
-    ? await readPostgresConversationPage({ conversationStore, agentId, sessionId, archiveId, limit, before: cursor, from, to, scope })
-    : await readArchiveConversationPage({ rootDir, sessionId, archiveId, limit, before: cursor, from, to, signal, includeNavigation: true });
+  const page = await readPostgresConversationPage({ conversationStore, agentId, sessionId, archiveId, limit, before: cursor, from, to, scope });
   if (!page) return null;
   const status = page.historyStatus;
   if (!page.turns.length) return output(target, [], [], false, null, status);

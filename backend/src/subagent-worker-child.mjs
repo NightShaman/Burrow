@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
 import { runSpawnSubagentChild } from './subagent-worker-runner.mjs';
+import { createPostgresPool } from './postgres-foundation.mjs';
+import { PostgresSessionStore } from './postgres-session-store.mjs';
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
@@ -9,12 +11,15 @@ async function main() {
   if (!payloadPath) throw new Error('payload path is required');
   const payload = JSON.parse(await readFile(payloadPath, 'utf8'));
   const childArgs = payload.args || payload;
+  const pool = createPostgresPool();
+  const conversationStore = new PostgresSessionStore({ pool });
   const heartbeat = setInterval(() => {
     process.stdout.write(`${JSON.stringify({ __burrowSubagentProgress: true, phase: 'heartbeat', at: new Date().toISOString() })}\n`);
   }, HEARTBEAT_INTERVAL_MS);
   try {
     const result = await runSpawnSubagentChild({
       ...childArgs,
+      parentExecutionContext: { conversationStore, agentId: childArgs.owner?.agentId },
       progress: async (event = {}) => {
         process.stdout.write(`${JSON.stringify({ __burrowSubagentProgress: true, ...event, at: new Date().toISOString() })}\n`);
       },
@@ -22,6 +27,7 @@ async function main() {
     process.stdout.write(`${JSON.stringify({ __burrowSubagentResult: true, ok: Boolean(result.ok), result })}\n`);
   } finally {
     clearInterval(heartbeat);
+    await pool.end();
   }
 }
 

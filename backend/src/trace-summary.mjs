@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { redactAndTruncateText, redactText } from './redaction.mjs';
-import { readSessionEntries } from './session-store.mjs';
+import { evidenceTranscript } from './session-search.mjs';
 
 async function readJsonl(filePath) {
   try {
@@ -72,7 +72,6 @@ async function dirMtimeMs(dirPath) {
 }
 
 export async function latestTraceRun({ rootDir } = {}) {
-  if (!rootDir) throw new Error('rootDir is required');
 
   const tracesDir = await traceBaseRoot(rootDir, null);
   let entries = [];
@@ -239,21 +238,12 @@ function latestAuthorityFromEntries(entries = [], runId = null) {
     .at(-1) || {});
 }
 
-async function latestReceiptAuthorityEvidence({ rootDir, runId, sessionId }) {
-  if (!rootDir || !runId) return null;
-  if (sessionId) {
-    const evidence = latestAuthorityFromEntries(await readSessionEntries({ rootDir: dataRootFromTraceRoot(rootDir), sessionId, limit: 0, includeHistory: true }), runId);
-    if (evidence) return compactAuthorityEvidence(evidence);
-  }
-  let sessionDirs = [];
-  try {
-    sessionDirs = await fs.readdir(path.join(dataRootFromTraceRoot(rootDir), 'sessions'), { withFileTypes: true });
-  } catch (error) {
-    if (error?.code === 'ENOENT') return null;
-    throw error;
-  }
-  for (const entry of sessionDirs.filter((item) => item.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
-    const evidence = latestAuthorityFromEntries(await readSessionEntries({ rootDir: dataRootFromTraceRoot(rootDir), sessionId: entry.name, limit: 0, includeHistory: true }), runId);
+async function latestReceiptAuthorityEvidence({ conversationStore, agentId, runId, sessionId }) {
+  if (!conversationStore) throw new Error('conversation_store_required');
+  if (!runId) return null;
+  const sessions = sessionId ? [{sessionId}] : await conversationStore.listSessions({agentId,includeArchived:true});
+  for (const session of sessions) {
+    const evidence = latestAuthorityFromEntries(await evidenceTranscript({conversationStore,agentId,sessionId:session.sessionId,includeResetHistory:true}), runId);
     if (evidence) return compactAuthorityEvidence(evidence);
   }
   return null;
@@ -319,10 +309,9 @@ function authorityEntryFromReceipt(entry = {}, { sessionId = null } = {}) {
   };
 }
 
-export async function listAuthorityExplanationsForSession({ rootDir, sessionId, limit = 20 } = {}) {
-  if (!rootDir) throw new Error('rootDir is required');
+export async function listAuthorityExplanationsForSession({ rootDir, conversationStore, agentId, sessionId, limit = 20 } = {}) {
   if (!sessionId) throw new Error('sessionId is required');
-  const entries = await readSessionEntries({ rootDir, sessionId, limit: 0, includeHistory: true });
+  const entries = await evidenceTranscript({ conversationStore, agentId, sessionId, includeResetHistory: true });
   const items = entries
     .filter((entry) => entry.type === 'receipt' && receiptAuthorityEvidence(entry))
     .map((entry) => authorityEntryFromReceipt(entry, { sessionId }))
@@ -335,8 +324,8 @@ export async function listAuthorityExplanationsForSession({ rootDir, sessionId, 
   };
 }
 
-export async function latestAuthorityExplanationForSession({ rootDir, sessionId } = {}) {
-  const listed = await listAuthorityExplanationsForSession({ rootDir, sessionId, limit: 1 });
+export async function latestAuthorityExplanationForSession({ rootDir, conversationStore, agentId, sessionId } = {}) {
+  const listed = await listAuthorityExplanationsForSession({ rootDir, conversationStore, agentId, sessionId, limit: 1 });
   const latest = listed.items[0] || null;
   const authority = latest?.authority || authorityExplanationFromTraceSummary({});
   return {
@@ -372,9 +361,10 @@ export function authorityExplanationFromTraceSummary(traceSummary = {}) {
   };
 }
 
-export async function summarizeTrace({ rootDir, runId, includeToolOutput = false, maxOutputChars = 1000, includeRelatedWorkTrace = true } = {}) {
+export async function summarizeTrace({ rootDir, conversationStore, agentId, runId, includeToolOutput = false, maxOutputChars = 1000, includeRelatedWorkTrace = true } = {}) {
   if (!rootDir) throw new Error('rootDir is required');
   if (!runId) throw new Error('runId is required');
+  if (!conversationStore) throw new Error('conversation_store_required');
 
   const traceRoot = await traceBaseRoot(rootDir, runId);
   const traceDir = path.join(traceRoot, runId);
@@ -429,7 +419,7 @@ export async function summarizeTrace({ rootDir, runId, includeToolOutput = false
   const resolvedSessionId = traceSessionId || sessionSummary?.sessionId || null;
   const [workItems, authorityEvidence] = await Promise.all([
     linkedWorkItems({ rootDir: traceRoot, runId, sessionId: resolvedSessionId }),
-    latestReceiptAuthorityEvidence({ rootDir: traceRoot, runId, sessionId: resolvedSessionId }),
+    latestReceiptAuthorityEvidence({ conversationStore, agentId, runId, sessionId: resolvedSessionId }),
   ]);
 
   let relatedWorkTrace = null;
@@ -438,6 +428,7 @@ export async function summarizeTrace({ rootDir, runId, includeToolOutput = false
     const related = await summarizeTrace({
       rootDir: traceRoot,
       runId: relatedRunId,
+      conversationStore, agentId,
       includeToolOutput,
       maxOutputChars,
       includeRelatedWorkTrace: false,
@@ -482,8 +473,6 @@ export async function summarizeTrace({ rootDir, runId, includeToolOutput = false
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const rootDir = process.argv[2] || process.cwd();
-  const runId = process.argv[3];
-  const summary = await summarizeTrace({ rootDir, runId });
-  console.log(JSON.stringify(summary, null, 2));
+  console.error('Standalone trace-summary CLI is retired. Use burrow trace --root DIR --run-id ID (requires PostgreSQL authority).');
+  process.exitCode = 1;
 }

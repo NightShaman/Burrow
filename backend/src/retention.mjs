@@ -2,7 +2,6 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { writeTraceRetentionState } from './trace-observability.mjs';
-import { listSessionRecords, readSessionMetadata } from './session-store.mjs';
 
 function finitePositive(value) {
   const n = Number(value);
@@ -91,16 +90,17 @@ function traceCandidates(runs, { maxAgeDays = null, maxBytes = null, nowMs = Dat
   return [...selected.values()].sort((a, b) => a.mtimeMs - b.mtimeMs || a.id.localeCompare(b.id));
 }
 
-export async function planRetentionCleanup({ dataRoot, traceRoot = null, retention = {}, now = new Date() } = {}) {
+export async function planRetentionCleanup({ dataRoot, conversationStore, taskStore, agentId, traceRoot = null, retention = {}, now = new Date() } = {}) {
   if (!dataRoot) throw new Error('dataRoot is required');
   const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
   const resolvedTraceRoot = traceRoot || path.join(dataRoot, 'traces');
   const traces = await listTraceRuns(resolvedTraceRoot);
   const sessionRetentionEnabled = ['mainMaxAgeDays', 'taskMaxAgeDays', 'subagentMaxAgeDays'].some((key) => retention[key] != null);
-  const sessions = sessionRetentionEnabled ? await listSessionRecords({ rootDir: dataRoot, includeArchived: true, limit: 100000 }) : [];
+  if (sessionRetentionEnabled && !conversationStore) throw new Error('conversation_store_required');
+  const sessions = sessionRetentionEnabled ? (await conversationStore.listSessions({agentId,includeArchived:true})).map(record=>({...record,id:record.sessionId})) : [];
   const sessionPolicies = { main: retention.mainMaxAgeDays ?? 60, task: retention.taskMaxAgeDays ?? 30, subagent: retention.subagentMaxAgeDays ?? 7 };
   const nowDate = new Date(nowMs);
-  const taskBoard = null;
+  const taskBoard = taskStore;
   const sessionCandidates = (await Promise.all(sessions.map(async (record) => {
     const meta = record.metadata || {};
     const kind = meta.kind || 'main';
@@ -111,7 +111,7 @@ export async function planRetentionCleanup({ dataRoot, traceRoot = null, retenti
     let eligibility = meta.retentionEligibleAt || meta.completedAt || meta.archivedAt || record.updatedAt;
     if (kind === 'task') {
       if (!meta.ownerTaskId) return null;
-      const task = taskBoard?.getTask(meta.ownerTaskId);
+      const task = await taskBoard?.getTask(meta.ownerTaskId);
       if (!task || !['done', 'cancelled'].includes(task.status)) return null;
       eligibility = task.terminalAt || task.metadata?.terminalAt || null;
     } else if (kind !== 'main' && !meta.completedAt) {
@@ -120,10 +120,9 @@ export async function planRetentionCleanup({ dataRoot, traceRoot = null, retenti
     const completed = new Date(eligibility).getTime();
     const days = sessionPolicies[kind];
     return Number.isFinite(completed) && Number.isFinite(days) && completed <= nowMs - days * 86400000
-      ? { id: record.id, path: path.join(dataRoot, 'sessions', record.id), kind, reasons: ['age'] }
+      ? { id: record.id, agentId, sessionId: record.id, kind, reasons: ['age'] }
       : null;
   }))).filter(Boolean);
-  taskBoard?.close();
   const traceMaxAgeDays = retention.traceMaxAgeDays ?? retention.maxAgeDays ?? null;
   const traceMaxBytes = retention.traceMaxBytes ?? null;
   const candidates = traceCandidates(traces, { maxAgeDays: traceMaxAgeDays, maxBytes: traceMaxBytes, nowMs });
@@ -223,9 +222,9 @@ export async function acquireRetentionCleanupLease(traceRoot) {
   }
 }
 
-export async function runRetentionCleanup({ dataRoot, traceRoot = null, retention = {}, confirm = false, now = new Date() } = {}) {
+export async function runRetentionCleanup({ dataRoot, conversationStore, taskStore, agentId, traceRoot = null, retention = {}, confirm = false, now = new Date() } = {}) {
   const resolvedTraceRoot = traceRoot || path.join(dataRoot, 'traces');
-  if (!confirm) return planRetentionCleanup({ dataRoot, traceRoot: resolvedTraceRoot, retention, now });
+  if (!confirm) return planRetentionCleanup({ dataRoot, conversationStore, taskStore, agentId, traceRoot: resolvedTraceRoot, retention, now });
   const lease = await acquireRetentionCleanupLease(resolvedTraceRoot);
   if (!lease.acquired) {
     return {
@@ -239,13 +238,14 @@ export async function runRetentionCleanup({ dataRoot, traceRoot = null, retentio
     };
   }
   try {
-    const plan = await planRetentionCleanup({ dataRoot, traceRoot: resolvedTraceRoot, retention, now });
+    const plan = await planRetentionCleanup({ dataRoot, conversationStore, taskStore, agentId, traceRoot: resolvedTraceRoot, retention, now });
     const deletedSessions = [];
     for (const entry of plan.delete.sessions) {
-      const metadata = await readSessionMetadata({ rootDir: dataRoot, sessionId: entry.id });
+      const metadata = await conversationStore.getMetadata({ agentId, sessionId: entry.id });
       if (isCurrentMain(metadata, entry.id)) throw new Error('retention_refused_current_main');
-      await fs.rm(entry.path, { recursive: true, force: true });
-      deletedSessions.push(entry.path);
+      if (typeof conversationStore.deleteSession !== 'function') throw new Error('conversation_store_retention_unsupported');
+      await conversationStore.deleteSession({agentId,sessionId:entry.id});
+      deletedSessions.push(entry.id);
     }
     const deletedTraces = [];
     for (const entry of plan.delete.traces) {

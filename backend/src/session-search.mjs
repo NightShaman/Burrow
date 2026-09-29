@@ -1,12 +1,11 @@
 import { conversationAuthority } from './conversation-authority.mjs';
-import { listSessionRecords, readSessionEntries } from './session-store.mjs';
 import { compressionSummariesFromTranscript } from './session-compression.mjs';
 import { listContinuityHandoffs } from './continuity-handoff-store.mjs';
 
 // PostgreSQL owns both live entries and archive evidence when injected. Never
 // supplement an empty/failed authority read from workspace JSONL exports.
-async function evidenceTranscript({ conversationStore, agentId, rootDir, sessionId, includeResetHistory = false }) {
-  if (!conversationStore) return readSessionEntries({ rootDir, sessionId, limit: 0, includeHistory: true, includeResetHistory });
+export async function evidenceTranscript({ conversationStore, agentId, rootDir, sessionId, includeResetHistory = false }) {
+  if (!conversationStore) throw new Error('conversation_store_required');
   const authority = conversationAuthority({ store: conversationStore, agentId });
   const [active, archives, metadata] = await Promise.all([
     authority.entriesAll(sessionId),
@@ -30,7 +29,7 @@ async function evidenceTranscript({ conversationStore, agentId, rootDir, session
 }
 
 async function evidenceSessions({ conversationStore, agentId, rootDir, includeArchived = true }) {
-  if (!conversationStore) return listSessionRecords({ rootDir, includeArchived, limit: 500 });
+  if (!conversationStore) throw new Error('conversation_store_required');
   return (await conversationStore.listSessions({ agentId, includeArchived })).map((record) => ({ ...record, id: record.sessionId }));
 }
 
@@ -169,7 +168,7 @@ function matchesTime(entry, { since = null, until = null } = {}) {
 }
 
 async function sessionMatchesForAgent({ conversationStore = null, agent = {}, role = 'any', query = '', limit = 50, includeSummaries = true, since = null, until = null, includeArchived = true } = {}) {
-  if (!conversationStore && !agent.rootDir) return { matches: [], searchedSessionCount: 0, totalMatches: 0 };
+  if (!conversationStore) throw new Error('conversation_store_required');
   const records = await evidenceSessions({ conversationStore, agentId: agent.agentId, rootDir: agent.rootDir, includeArchived });
   const matches = [];
   let totalMatches = 0;
@@ -188,7 +187,7 @@ async function sessionMatchesForAgent({ conversationStore = null, agent = {}, ro
           agentName: agent.agentName || agent.name || agent.agentId || null,
           sessionId: record.id,
           currentSession: false,
-          store: conversationStore ? 'postgres' : 'agent_workspace',
+          store: 'postgres',
         },
       });
     }
@@ -246,7 +245,8 @@ export async function searchAgentSessionEvidence({ conversationStore = null, roo
   // Explicit retrieval may search reset snapshots; ordinary prompt/context never does.
   const normalizedScope = 'agent_sessions';
   const max = parseLimit(limit, 12);
-  const roots = conversationStore ? [null] : [rootDir, ...(Array.isArray(additionalRootDirs) ? additionalRootDirs : [])].filter(Boolean).map(String).filter((item, index, values) => values.indexOf(item) === index);
+  if (!conversationStore) throw new Error('conversation_store_required');
+  const roots = [null];
   const currentSessionId = String(sessionId || 'default');
   const sessionRecords = (await Promise.all(roots.map(async (candidateRoot) => (await evidenceSessions({ conversationStore, agentId, rootDir: candidateRoot, includeArchived: true })).map((record) => ({ rootDir: candidateRoot, sessionId: record.id }))))).flat();
   const orderedSessions = [
@@ -273,7 +273,7 @@ export async function searchAgentSessionEvidence({ conversationStore = null, roo
           sessionId: candidate.sessionId,
           currentSession: candidate.sessionId === currentSessionId,
           resetArchive: Boolean(entry.metadata?.resetArchive),
-          store: conversationStore ? 'postgres' : candidate.rootDir === rootDir ? 'workspace' : 'agent_data',
+          store: 'postgres',
         },
       });
     }
@@ -325,6 +325,7 @@ export async function searchAgentSessionEvidence({ conversationStore = null, roo
 }
 
 export async function searchBurrowSessionEvidence({ conversationStore = null, agents = [], query = '', role = 'any', limit = 50, includeSummaries = true, since = null, until = null, includeArchived = true } = {}) {
+  if (!conversationStore) throw new Error('conversation_store_required');
   const max = parseLimit(limit);
   const normalizedAgents = (Array.isArray(agents) ? agents : [])
     .filter((agent) => agent && (conversationStore || agent.rootDir))

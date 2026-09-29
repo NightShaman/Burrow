@@ -1,8 +1,6 @@
 import path from 'node:path';
-import { writeSessionMetadata } from './session-store.mjs';
 import { recentFileReferentsFromToolResults } from './file-referents.mjs';
 import { mergeReadEvidence } from './read-evidence.mjs';
-import { writeSessionReadEvidence } from './read-evidence-store.mjs';
 
 const MAX_TARGETS = 6;
 const MAX_REFERENTS = 8;
@@ -89,11 +87,8 @@ export function applyWorkingContextEvents(context = null, events = []) {
 
 export async function persistSessionWorkingContext({ rootDir, sessionId, workingContext, conversationStore = null, agentId } = {}) {
   const normalized = normalizeWorkingContext(workingContext);
-  if (!rootDir || !sessionId) return normalized;
-  if (conversationStore) { const {readEvidence = [], ...context}=normalized; await conversationStore.patchMetadata({agentId,sessionId,metadata:{workingContext:context,readEvidence}}); return normalized; }
-  // Keep bounded active-session evidence outside session metadata's defensive
-  // graph budget. The metadata ledger carries only routing/reference state.
-  await writeSessionReadEvidence({ rootDir, sessionId, evidence: normalized.readEvidence || [] });
-  const { readEvidence: _readEvidence, ...metadataWorkingContext } = normalized;
-  return writeSessionMetadata({ rootDir, sessionId, extra: { workingContext: metadataWorkingContext } });
+  if (!conversationStore) throw new Error('conversation_store_required');
+  const {readEvidence = [], ...context} = normalized;
+  await conversationStore.patchMetadata({agentId,sessionId,metadata:{workingContext:context,readEvidence}});
+  return normalized;
 }

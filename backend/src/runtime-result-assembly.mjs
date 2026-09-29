@@ -1,5 +1,4 @@
 import { appendRuntimeSessionContextState } from './runtime-session-writer.mjs';
-import { appendSessionEntry, appendSessionContextState } from './session-store.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 import { createExecutionPolicyEvidence } from './execution-policy-evidence.mjs';
 import { compactExecution } from './runtime-result-shapes.mjs';
@@ -265,8 +264,9 @@ export async function appendRuntimeReceipt({ stores = null, agentId = 'hatchet',
   const rootDir = sessionRoot || dataRoot;
   if (!rootDir || !sessionId || !receipt) return null;
   const receiptRef = compactPersistedReceipt({ receipt, logger });
-  const authority = stores?.conversations ? conversationAuthority({ store: stores.conversations, agentId, rootDir }) : null;
-  const receiptEntry = await (authority ? authority.append({
+  if (!stores?.conversations) throw new Error('conversation_store_required');
+  const authority = conversationAuthority({ store: stores.conversations, agentId });
+  const receiptEntry = await authority.append({
     sessionId,
     type: 'receipt',
     role: null,
@@ -275,9 +275,7 @@ export async function appendRuntimeReceipt({ stores = null, agentId = 'hatchet',
     traceDir: receiptRef.traceDir,
     metadata: { ...(subjectScope ? { subjectScope } : {}), receiptRef, authorityEvidence: receipt.authorityEvidence || null },
     visibility: 'debug', entersPrompt: false,
-  }) : appendSessionEntry({
-    rootDir, sessionId, type: 'receipt', role: null, content: `Runtime receipt: ${receiptRef.decision || 'completed'}${receiptRef.runId ? ` (${receiptRef.runId})` : ''}`, runId: receiptRef.runId, traceDir: receiptRef.traceDir, metadata: { ...(subjectScope ? { subjectScope } : {}), receiptRef, authorityEvidence: receipt.authorityEvidence || null },
-  }));
+  });
   // Only runtime-structured facts are derived here. Operator instructions,
   // decisions, and pins require an explicit caller-created context-state record.
   for (const state of runtimeContextStates({ receipt, sessionId, logger })) {

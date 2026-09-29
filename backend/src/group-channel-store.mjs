@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { appendSessionEntry, readSessionTurns } from './session-store.mjs';
+import { conversationAuthority } from './conversation-authority.mjs';
 
 const ID = /^[a-zA-Z0-9._-]{1,96}$/;
 const safe = (value, field) => {
@@ -39,17 +39,19 @@ export async function listGroupChannels({ rootDir } = {}) {
   return channels.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
 }
 
-export async function appendGroupChannelTurn({ rootDir, channelId, role, content, runId = null, metadata = {} } = {}) {
+export async function appendGroupChannelTurn({ rootDir, conversationStore = null, channelId, role, content, runId = null, metadata = {} } = {}) {
   const channel = await readGroupChannel({ rootDir, id: channelId });
   if (!channel) throw new Error('group_channel_not_found');
-  const entry = await appendSessionEntry({ rootDir: channelDir(rootDir, channelId), sessionId: 'transcript', type: 'message', role, content, runId, metadata: { kind: 'group-channel', channelId, ...metadata }, visibility: 'chat', entersPrompt: false });
+  if (!conversationStore) throw new Error('conversation_store_required');
+  const entry = await conversationAuthority({ store: conversationStore, agentId: 'group-channel' }).append({ sessionId: channelId, type: 'message', role, content, runId, metadata: { kind: 'group-channel', channelId, ...metadata }, visibility: 'chat', entersPrompt: false });
   channel.updatedAt = entry.ts;
   await fs.writeFile(metaFile(rootDir, channelId), `${JSON.stringify(channel, null, 2)}\n`, 'utf8');
   return entry;
 }
 
-export async function readGroupChannelTurns({ rootDir, channelId, limit = 200 } = {}) {
+export async function readGroupChannelTurns({ rootDir, conversationStore = null, channelId, limit = 200 } = {}) {
   const channel = await readGroupChannel({ rootDir, id: channelId });
   if (!channel) return null;
-  return { channel, turns: await readSessionTurns({ rootDir: channelDir(rootDir, channelId), sessionId: 'transcript', limit }) };
+  if (!conversationStore) throw new Error('conversation_store_required');
+  return { channel, turns: (await conversationAuthority({ store: conversationStore, agentId: 'group-channel' }).entries(channelId, { limit })).filter(entry => entry.type === 'message') };
 }

@@ -1,4 +1,4 @@
-import { summarizeSessionTurns } from './session-store.mjs';
+import { summarizeSessionTurns } from './session-entry.mjs';
 import { compressionSummariesFromTranscript } from './session-compression.mjs';
 import { contextStatesFromTranscript, renderContextStates } from './session-context-state.mjs';
 

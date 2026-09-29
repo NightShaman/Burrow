@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { appendSessionTurnIfAbsent } from './session-store.mjs';
+import { conversationAuthority } from './conversation-authority.mjs';
 
 const ID = /^[a-zA-Z0-9._-]{1,96}$/;
 const MAX_MESSAGE = 20_000;
@@ -71,20 +71,20 @@ function provenance({ sender, senderRuntime, recipient, sourceSessionId, targetS
   };
 }
 
-async function appendAgentMessage({ rootDir, sessionId: targetSessionId, content, sender, senderRuntime, recipient, sourceSessionId, sourceRunId, messageMode, direction, deliveryId, replyToEntryId = null }) {
-  return appendSessionTurnIfAbsent({ idempotencyKey: `${deliveryId}:${direction}`,
-    rootDir,
+async function appendAgentMessage({ conversationStore, agentId: transcriptAgentId, sessionId: targetSessionId, content, sender, senderRuntime, recipient, sourceSessionId, sourceRunId, messageMode, direction, deliveryId, replyToEntryId = null }) {
+  return conversationAuthority({ store: conversationStore, agentId: transcriptAgentId }).appendTurnIfAbsent({
     sessionId: targetSessionId,
     role: 'agent',
     content,
     runId: sourceRunId,
     metadata: provenance({ sender, senderRuntime, recipient, sourceSessionId, targetSessionId, sourceRunId, messageMode, direction, replyToEntryId }),
-  });
+  }, { idempotencyKey: `${deliveryId}:${direction}` });
 }
 
 // An agent message is a first-class, attributed transcript turn. It is not a
 // user turn; attribution identifies where the message came from.
-export async function sendAgentMessage({ senderRuntime, resolveRecipientRuntime, runRecipientReply = null, recipientAgentId, targetSessionId = 'default', content, messageMode = 'request_reply', runId = null, sourceSessionId = null } = {}) {
+export async function sendAgentMessage({ conversationStore = null, senderRuntime, resolveRecipientRuntime, runRecipientReply = null, recipientAgentId, targetSessionId = 'default', content, messageMode = 'request_reply', runId = null, sourceSessionId = null } = {}) {
+  if (!conversationStore) throw new Error('conversation_store_required');
   const sender = agentId(senderRuntime?.agentId, 'agent_message_sender');
   const requestedRecipient = agentId(recipientAgentId, 'agent_message_recipient');
   const body = text(content);
@@ -102,12 +102,12 @@ export async function sendAgentMessage({ senderRuntime, resolveRecipientRuntime,
 
   const deliver = async () => {
     const recipientEntry = await appendAgentMessage({
-      rootDir: recipientRuntime.agentWorkspaceRoot, sessionId: session, content: body,
+      conversationStore, agentId: recipient, sessionId: session, content: body,
       sender, senderRuntime, recipient, sourceSessionId: source, sourceRunId: runId,
       messageMode: resolvedMode, direction: 'inbound', deliveryId,
     });
     const sourceEntry = await appendAgentMessage({
-      rootDir: senderRuntime.agentWorkspaceRoot, sessionId: source, content: body,
+      conversationStore, agentId: sender, sessionId: source, content: body,
       sender, senderRuntime, recipient, sourceSessionId: source, sourceRunId: runId,
       messageMode: resolvedMode, direction: 'outbound', deliveryId, replyToEntryId: recipientEntry.id,
     });
@@ -149,7 +149,7 @@ export async function sendAgentMessage({ senderRuntime, resolveRecipientRuntime,
   const replyText = text(reply?.answerText);
   if (!replyText) return { ...receipt, reply: { ok: false, error: reply?.error || 'agent_message_reply_empty' } };
   const replyEntry = await appendAgentMessage({
-    rootDir: senderRuntime.agentWorkspaceRoot, sessionId: source, content: replyText,
+    conversationStore, agentId: sender, sessionId: source, content: replyText,
     sender: recipient, senderRuntime: recipientRuntime, recipient: sender,
     sourceSessionId: session, sourceRunId: reply?.runId || null,
     messageMode: 'reply', direction: 'inbound', deliveryId: `${deliveryId}:reply`, replyToEntryId: sourceEntry.id,

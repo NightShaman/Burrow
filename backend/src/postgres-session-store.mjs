@@ -81,6 +81,22 @@ export class PostgresSessionStore {
     if (!pool?.query || !pool?.connect) throw new Error('session_postgres_pool_required');
     this.pool = pool; this.ownsPool = ownsPool; this.clock = clock;
   }
+  async deleteSession({agentId: rawAgentId, sessionId: rawSessionId} = {}) {
+    const agentId = required(rawAgentId, 'agentId');
+    const sessionId = required(rawSessionId, 'sessionId');
+    return withPostgresTransaction(this.pool, async client => {
+      // Lock the authority row before cascaded deletion; active continuity is
+      // never eligible even if a retention plan was built before a new run.
+      const selected = await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sessionId]);
+      if (!selected.rows.length) return {deleted:false};
+      const metadata = selected.rows[0].metadata || {};
+      if (['running', 'finalizing'].includes(metadata.continuityHead?.state)) throw new Error('session_retention_active');
+      if (metadata.current === true || metadata.currentMain === true || (['main', 'default'].includes(sessionId) && (!metadata.kind || metadata.kind === 'main'))) throw new Error('retention_refused_current_main');
+      const result = await client.query('DELETE FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [agentId, sessionId]);
+      return {deleted:result.rowCount === 1};
+    });
+  }
+
   async close() { await closeContinuityOwners(this.pool); if (this.ownsPool) await closePostgresPool(this.pool); }
 
   async append({ agentId: rawAgentId, sessionId: rawSessionId, entry, idempotencyKey = null } = {}) {

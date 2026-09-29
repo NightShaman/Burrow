@@ -1,5 +1,5 @@
 import { conversationAuthority } from './conversation-authority.mjs';
-import { readSessionEntries, summarizeSessionTurns } from './session-store.mjs';
+import { summarizeSessionTurns } from './session-entry.mjs';
 import { planContextCompression } from './context-compression.mjs';
 import { contextStatesFromTranscript, renderContextStates } from './session-context-state.mjs';
 
@@ -178,13 +178,15 @@ export async function appendCompressionSummary({ rootDir, sessionId = 'default',
   // They remain in the active transcript even when their surrounding chat is
   // summarized for provider context.
   const tailEntries = transcript.filter((entry) => String(entry?.type || '') === 'context_state' || isCanonicalExecutionEntry(entry) || !sourceIds.has(entry?.id));
-  const authority = conversation || conversationAuthority({ rootDir });
+  if (!conversation) throw new Error('conversation_store_required');
+  const authority = conversation;
   const rotation = await authority.compact(sessionId, { summary, tailEntries });
   return { entry: rotation.summaryEntry, summary, rotation };
 }
 
 export async function runSessionCompression({ rootDir, sessionId = 'default', config = {}, contextBudget = null, maxChars = null, logger = null, stores = null, agentId = 'hatchet', conversation = null } = {}) {
-  const authority = conversation || conversationAuthority({ store: stores?.conversations || null, agentId, rootDir });
+  if (!conversation && !stores?.conversations) throw new Error('conversation_store_required');
+  const authority = conversation || conversationAuthority({ store: stores?.conversations || null, agentId });
   const transcript = await authority.entriesAll(sessionId);
   const existingSummaries = compressionSummariesFromTranscript(transcript);
   // The active successor already contains the current semantic summary. Only

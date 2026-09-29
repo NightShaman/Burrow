@@ -25,12 +25,6 @@ export function createSessionRoutes({
   archiveContinuityCardDetail,
   listSessions,
   sessionDetail,
-  exportSessionTranscript,
-  writeSessionMetadata,
-  resetSession,
-  renameSession,
-  archiveSession,
-  forkSession,
   sessionWriteHandoff,
   sessionContinuityScope,
   setSessionContinuityScope,
@@ -43,6 +37,7 @@ export function createSessionRoutes({
   listAuthorityExplanationsForSession,
   conversationStore = null,
 } = {}) {
+  if (!conversationStore) throw new Error('conversation_store_required');
   const resultResponse = (res, result, success = 200) => {
     sendJson(res, result.ok === false ? (result.status || 500) : success, result);
     return true;
@@ -153,7 +148,6 @@ export function createSessionRoutes({
       const options = { includeArchived: url.searchParams.get('archived') === 'true', query: url.searchParams.get('q') || '', updatedSince: url.searchParams.get('updatedSince'), limit: url.searchParams.get('limit') || 100 };
       if (agentId) {
         const agent = await resolveAgentRuntime(agentId);
-        if (!conversationStore) await writeSessionMetadata({ rootDir: agent.agentWorkspaceRoot, sessionId: 'default' });
         sendJson(res, 200, { ok: true, sessions: await listSessions({ rootDir: agent.agentWorkspaceRoot, agentId: agent.agentId, ...options }) });
         return true;
       }
@@ -171,21 +165,19 @@ export function createSessionRoutes({
       const agentRuntime = await resolveAgentRuntime(agentId);
       const resolvedAgentId = agentRuntime.agentId;
       const rootDir = await runtimeSessionRoot(sessionId, resolvedAgentId);
-      if (req.method === 'GET' && action === 'authority' && parts[2] === 'latest') { sendJson(res, 200, { ok: true, ...(await latestAuthorityExplanationForSession({ rootDir, sessionId })) }); return true; }
-      if (req.method === 'GET' && action === 'authority' && !parts[2]) { sendJson(res, 200, { ok: true, ...(await listAuthorityExplanationsForSession({ rootDir, sessionId, limit: url.searchParams.get('limit') || 20 })) }); return true; }
+      if (req.method === 'GET' && action === 'authority' && parts[2] === 'latest') { sendJson(res, 200, { ok: true, ...(await latestAuthorityExplanationForSession({ conversationStore, agentId: resolvedAgentId, rootDir, sessionId })) }); return true; }
+      if (req.method === 'GET' && action === 'authority' && !parts[2]) { sendJson(res, 200, { ok: true, ...(await listAuthorityExplanationsForSession({ conversationStore, agentId: resolvedAgentId, rootDir, sessionId, limit: url.searchParams.get('limit') || 20 })) }); return true; }
       if (req.method === 'GET' && action === 'export' && !parts[2]) {
-        const exported = conversationStore
-          ? await conversationStore.exportTranscript({ agentId: resolvedAgentId, sessionId })
-          : await exportSessionTranscript({ rootDir, sessionId });
+        const exported = await conversationStore.exportTranscript({ agentId: resolvedAgentId, sessionId });
         sendJson(res, exported ? 200 : 404, exported ? { ok: true, ...exported } : { ok: false, error: 'not_found' });
         return true;
       }
       if (req.method === 'GET' && !action) { const session = await sessionDetail(sessionId, { rootDir, agentId: resolvedAgentId }); sendJson(res, session ? 200 : 404, session ? { ok: true, session } : { ok: false, error: 'not_found' }); return true; }
-      if (req.method === 'POST' && action === 'reset') { const agentRuntime = await resolveAgentRuntime(agentId); if (conversationStore) { await sessionWriteHandoff({ agentId: resolvedAgentId, sessionId, title: `Boundary checkpoint before session reset: ${sessionId}`, runId: `session-reset-${Date.now()}`, message: `Preserve the useful state from session ${sessionId} before resetting it.` }); const result = await conversationStore.reset({ agentId: resolvedAgentId, sessionId }); await archiveSummaryForReset?.({agentId:resolvedAgentId,sessionId,archiveId:result.archiveId}); sendJson(res, 200, result); return true; } await sessionWriteHandoff({ agentId: agentRuntime.agentId, sessionId, title: `Boundary checkpoint before session reset: ${sessionId}`, runId: `session-reset-${Date.now()}`, message: `Preserve the useful state from session ${sessionId} before resetting it.` }); const result = await resetSession({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId }); await archiveSummaryForReset?.({ agentId: agentRuntime.agentId, rootDir: agentRuntime.agentWorkspaceRoot, archivedPath: result.archivedPath }); sendJson(res, 200, result); return true; }
-      if (req.method === 'POST' && action === 'rename') { const body = await readJsonBody(req); if (conversationStore) { sendJson(res, 200, await conversationStore.rename({ agentId: resolvedAgentId, sessionId, targetSessionId: body.targetSessionId })); return true; } sendJson(res, 200, await renameSession({ rootDir, sessionId, targetSessionId: body.targetSessionId })); return true; }
-      if (req.method === 'POST' && action === 'archive') { const body = await readJsonBody(req); const result = conversationStore ? await conversationStore.archive({ agentId: resolvedAgentId, sessionId, archived: body.archived !== false }) : await archiveSession({ rootDir, sessionId, archived: body.archived !== false }); if (result.archived) await archiveSummaryForSession?.({ agentId: agentId || (await resolveAgentRuntime()).agentId, rootDir, sessionId }); sendJson(res, 200, result); return true; }
-      if (req.method === 'POST' && action === 'unarchive') { sendJson(res, 200, conversationStore ? await conversationStore.archive({ agentId: resolvedAgentId, sessionId, archived: false }) : await archiveSession({ rootDir, sessionId, archived: false })); return true; }
-      if (req.method === 'POST' && action === 'fork') { const body = await readJsonBody(req); sendJson(res, 200, conversationStore ? await conversationStore.fork({ agentId: resolvedAgentId, sourceSessionId: sessionId, targetSessionId: body.targetSessionId || `${sessionId}-fork` }) : await forkSession({ rootDir, sourceSessionId: sessionId, targetSessionId: body.targetSessionId || `${sessionId}-fork` })); return true; }
+      if (req.method === 'POST' && action === 'reset') { await sessionWriteHandoff({ agentId: resolvedAgentId, sessionId, title: `Boundary checkpoint before session reset: ${sessionId}`, runId: `session-reset-${Date.now()}`, message: `Preserve the useful state from session ${sessionId} before resetting it.` }); const result = await conversationStore.reset({ agentId: resolvedAgentId, sessionId }); await archiveSummaryForReset?.({agentId:resolvedAgentId,sessionId,archiveId:result.archiveId}); sendJson(res, 200, result); return true; }
+      if (req.method === 'POST' && action === 'rename') { const body = await readJsonBody(req); sendJson(res, 200, await conversationStore.rename({ agentId: resolvedAgentId, sessionId, targetSessionId: body.targetSessionId })); return true; }
+      if (req.method === 'POST' && action === 'archive') { const body = await readJsonBody(req); const result = await conversationStore.archive({ agentId: resolvedAgentId, sessionId, archived: body.archived !== false }); if (result.archived) await archiveSummaryForSession?.({agentId:resolvedAgentId,rootDir,sessionId}); sendJson(res, 200, result); return true; }
+      if (req.method === 'POST' && action === 'unarchive') { sendJson(res, 200, await conversationStore.archive({ agentId: resolvedAgentId, sessionId, archived: false })); return true; }
+      if (req.method === 'POST' && action === 'fork') { const body = await readJsonBody(req); sendJson(res, 200, await conversationStore.fork({ agentId: resolvedAgentId, sourceSessionId: sessionId, targetSessionId: body.targetSessionId || `${sessionId}-fork` })); return true; }
     }
     if (req.method === 'GET' && url.pathname === '/api/session/continuity-scope') { sendJson(res, 200, await sessionContinuityScope(Object.fromEntries(url.searchParams))); return true; }
     if (req.method === 'PUT' && url.pathname === '/api/session/continuity-scope') return resultResponse(res, await setSessionContinuityScope(await readJsonBody(req)));

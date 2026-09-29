@@ -1,4 +1,4 @@
-import { listSessionRecords, readSessionEntries } from './session-store.mjs';
+import { evidenceTranscript } from './session-search.mjs';
 import { readRunEvidence } from './run-evidence.mjs';
 import { listSubagentRecords, subagentVisibilitySummary } from './subagent-store.mjs';
 import { summarizeTrace } from './trace-summary.mjs';
@@ -402,13 +402,13 @@ function timelineFor({ receipt, answer, activities, executionEntries, trace, evi
   return timeline.sort((left, right) => String(left.ts || '').localeCompare(String(right.ts || ''))).slice(-MAX_TIMELINE);
 }
 
-async function proofDetail({ agentId, agentName, sessionId, runId, entries, evidence, subagentRecords = [], traceRoot = null }) {
+async function proofDetail({ conversationStore, agentId, agentName, sessionId, runId, entries, evidence, subagentRecords = [], traceRoot = null }) {
   const receipt = receiptFor(entries, runId);
   const answer = answerFor(entries, runId);
   const request = requestFor(entries, runId);
   const activities = activitiesFor(entries, runId);
   const executionEntries = executionEntriesFor(entries, runId);
-  const trace = traceRoot ? await summarizeTrace({ rootDir: traceRoot, runId, includeToolOutput: false, includeRelatedWorkTrace: false }) : null;
+  const trace = traceRoot ? await summarizeTrace({ conversationStore, agentId, rootDir: traceRoot, runId, includeToolOutput: false, includeRelatedWorkTrace: false }) : null;
   const bounds = runBounds(entries, runId, trace?.exists ? trace : null);
   const status = statusFor({ receipt, evidence, answer });
   const context = contextProof(receipt);
@@ -456,9 +456,10 @@ async function proofDetail({ agentId, agentName, sessionId, runId, entries, evid
   };
 }
 
-async function recordsFor(rootDir, sessionId = null) {
+async function recordsFor(conversationStore, agentId, sessionId = null) {
+  if (!conversationStore) throw new Error('conversation_store_required');
   if (sessionId) return [{ id: sessionId }];
-  return listSessionRecords({ rootDir, includeArchived: true, limit: 500 });
+  return (await conversationStore.listSessions({agentId,includeArchived:true})).map(record=>({...record,id:record.sessionId}));
 }
 
 function traceRootFor({ traceRoot = null, resolveTraceRoot = null, sessionId } = {}) {
@@ -471,36 +472,36 @@ export function mergeArchiveRuns(runLists = [], limit = 100) {
     .slice(0, boundedInteger(limit));
 }
 
-export async function listArchiveRuns({ rootDir, dataRoot = null, traceRoot = null, resolveTraceRoot = null, agentId, agentName = null, sessionId = null, limit = 100 } = {}) {
+export async function listArchiveRuns({ rootDir, conversationStore, dataRoot = null, traceRoot = null, resolveTraceRoot = null, agentId, agentName = null, sessionId = null, limit = 100 } = {}) {
   if (!rootDir || !agentId) throw new Error('archive_run_scope_required');
   const results = [];
   const subagentRecords = dataRoot ? await listSubagentRecords({ dataRoot, includeFinal: true, limit: 500 }) : [];
-  for (const session of await recordsFor(rootDir, sessionId)) {
+  for (const session of await recordsFor(conversationStore, agentId, sessionId)) {
     const id = session.id;
     const [entries, evidence] = await Promise.all([
-      readSessionEntries({ rootDir, sessionId: id, limit: 0, includeHistory: true }),
-      readRunEvidence({ rootDir, sessionId: id, limit: MAX_RUNS }),
+      evidenceTranscript({ conversationStore, agentId, sessionId: id, includeResetHistory: true }),
+      readRunEvidence({ conversationStore, agentId, rootDir, sessionId: id, limit: MAX_RUNS }),
     ]);
     const byRun = new Map(evidence.map((item) => [item.runId, item]));
     // Tool calls, results, and activity events are already persisted before a
     // terminal receipt. A runtime restart must not hide that existing evidence.
     for (const entry of entries) if (entry.runId) if (!byRun.has(entry.runId)) byRun.set(entry.runId, null);
     const sessionTraceRoot = traceRootFor({ traceRoot, resolveTraceRoot, sessionId: id });
-    for (const [runId, item] of byRun) results.push(await proofDetail({ agentId, agentName, sessionId: id, runId, entries, evidence: item, subagentRecords, traceRoot: sessionTraceRoot }));
+    for (const [runId, item] of byRun) results.push(await proofDetail({ conversationStore, agentId, agentName, sessionId: id, runId, entries, evidence: item, subagentRecords, traceRoot: sessionTraceRoot }));
   }
   return results.sort((left, right) => String(right.completedAt || right.startedAt || '').localeCompare(String(left.completedAt || left.startedAt || ''))).slice(0, boundedInteger(limit));
 }
 
-export async function readArchiveRun({ rootDir, dataRoot = null, traceRoot = null, resolveTraceRoot = null, agentId, agentName = null, runId } = {}) {
+export async function readArchiveRun({ rootDir, conversationStore, dataRoot = null, traceRoot = null, resolveTraceRoot = null, agentId, agentName = null, runId } = {}) {
   if (!rootDir || !agentId || !runId) throw new Error('archive_run_target_required');
   const subagentRecords = dataRoot ? await listSubagentRecords({ dataRoot, includeFinal: true, limit: 500 }) : [];
-  for (const session of await recordsFor(rootDir)) {
+  for (const session of await recordsFor(conversationStore, agentId)) {
     const [entries, evidence] = await Promise.all([
-      readSessionEntries({ rootDir, sessionId: session.id, limit: 0, includeHistory: true }),
-      readRunEvidence({ rootDir, sessionId: session.id, limit: MAX_RUNS }),
+      evidenceTranscript({ conversationStore, agentId, sessionId: session.id, includeResetHistory: true }),
+      readRunEvidence({ conversationStore, agentId, rootDir, sessionId: session.id, limit: MAX_RUNS }),
     ]);
     const item = evidence.find((candidate) => candidate.runId === runId) || null;
-    if (item || entries.some((entry) => entry.runId === runId)) return proofDetail({ agentId, agentName, sessionId: session.id, runId, entries, evidence: item, subagentRecords, traceRoot: traceRootFor({ traceRoot, resolveTraceRoot, sessionId: session.id }) });
+    if (item || entries.some((entry) => entry.runId === runId)) return proofDetail({ conversationStore, agentId, agentName, sessionId: session.id, runId, entries, evidence: item, subagentRecords, traceRoot: traceRootFor({ traceRoot, resolveTraceRoot, sessionId: session.id }) });
   }
   return null;
 }

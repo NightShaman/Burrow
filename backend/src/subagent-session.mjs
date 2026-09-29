@@ -1,4 +1,4 @@
-import { appendSessionEntry, readSessionMetadata, writeSessionMetadata } from './session-store.mjs';
+import { conversationAuthority } from './conversation-authority.mjs';
 
 function compact(value, fallback = '') {
   return String(value ?? fallback).trim();
@@ -8,16 +8,17 @@ export function subagentChildSessionId(id) {
   return `subagent-${compact(id, 'worker')}`.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 140);
 }
 
-export async function startSubagentChildSession({ dataRoot, id, workerProfile, purpose, owner = {}, trace = {}, model = null } = {}) {
+export async function startSubagentChildSession({ dataRoot, id, workerProfile, purpose, owner = {}, trace = {}, model = null, conversationStore = null } = {}) {
+  if (!conversationStore) throw new Error('conversation_store_required');
   if (!dataRoot || !id) return null;
   const sessionId = subagentChildSessionId(id);
+  const agentId = owner?.agentId;
+  if (typeof agentId !== 'string' || !agentId.trim()) throw new Error('agent_id_required');
+  const authority = conversationAuthority({ store: conversationStore, agentId });
   const parentSessionId = compact(owner.sessionId, 'default');
   const parentConversationId = compact(owner.conversationId) || null;
   const parentRunId = compact(owner.parentRunId || owner.turnId || trace.runId);
-  await writeSessionMetadata({
-    rootDir: dataRoot,
-    sessionId,
-    extra: {
+  await conversationStore.updateMetadata({ agentId, sessionId, update: old => ({ ...old,
       sessionKind: 'subagent',
       workerProfile: compact(workerProfile),
       subagentId: compact(id),
@@ -26,10 +27,8 @@ export async function startSubagentChildSession({ dataRoot, id, workerProfile, p
       parentRunId: parentRunId || null,
       parentChild: true,
       model: model || null,
-    },
-  });
-  await appendSessionEntry({
-    rootDir: dataRoot,
+    }) });
+  await authority.append({
     sessionId,
     type: 'message',
     role: 'user',
@@ -38,8 +37,7 @@ export async function startSubagentChildSession({ dataRoot, id, workerProfile, p
     parentId: parentRunId || null,
     metadata: { kind: 'subagent-delegated-task', parentAgentId: owner.agentId || null, workerProfile, subagentId: id, parentSessionId, parentConversationId, parentRunId: parentRunId || null },
   });
-  await appendSessionEntry({
-    rootDir: dataRoot,
+  await authority.append({
     sessionId,
     type: 'event',
     content: `${workerProfile || 'Minion'} started.`,
@@ -47,15 +45,18 @@ export async function startSubagentChildSession({ dataRoot, id, workerProfile, p
     parentId: parentRunId || null,
     metadata: { kind: 'subagent-start', workerProfile, subagentId: id, parentSessionId, parentConversationId },
   });
-  await writeSessionMetadata({ rootDir: dataRoot, sessionId, extra: { sessionKind: 'subagent', parentSessionId, parentConversationId, parentRunId: parentRunId || null, parentChild: true, subagentId: id, workerProfile } });
+  await conversationStore.updateMetadata({ agentId, sessionId, update: old => ({ ...old, sessionKind: 'subagent', parentSessionId, parentConversationId, parentRunId: parentRunId || null, parentChild: true, subagentId: id, workerProfile }) });
   return sessionId;
 }
 
-export async function finishSubagentChildSession({ dataRoot, sessionId, id, workerProfile, owner = {}, result = {}, trace = {}, status = null, model = null } = {}) {
+export async function finishSubagentChildSession({ dataRoot, sessionId, id, workerProfile, owner = {}, result = {}, trace = {}, status = null, model = null, conversationStore = null } = {}) {
+  if (!conversationStore) throw new Error('conversation_store_required');
   if (!dataRoot || !sessionId) return null;
+  const agentId = owner?.agentId;
+  if (typeof agentId !== 'string' || !agentId.trim()) throw new Error('agent_id_required');
+  const authority = conversationAuthority({ store: conversationStore, agentId });
   const summary = compact(result.summary, `${workerProfile || 'Minion'} finished.`);
-  await appendSessionEntry({
-    rootDir: dataRoot,
+  await authority.append({
     sessionId,
     type: 'message',
     role: 'assistant',
@@ -71,16 +72,15 @@ export async function finishSubagentChildSession({ dataRoot, sessionId, id, work
     blockers: Array.isArray(result.blockers) ? result.blockers : [],
     warnings: Array.isArray(result.warnings) ? result.warnings : [],
   };
-  await appendSessionEntry({
-    rootDir: dataRoot,
+  await authority.append({
     sessionId,
     type: 'event',
     content: JSON.stringify(details),
     runId: trace.runId || null,
     metadata: { kind: 'subagent-receipt', workerProfile, subagentId: id },
   });
-  const existing = await readSessionMetadata({ rootDir: dataRoot, sessionId }) || {};
-  await writeSessionMetadata({ rootDir: dataRoot, sessionId, extra: {
+  const existing = await authority.metadata(sessionId) || {};
+  await conversationStore.updateMetadata({ agentId, sessionId, update: old => ({ ...old,
     sessionKind: existing.sessionKind || 'subagent',
     parentSessionId: existing.parentSessionId || compact(owner.sessionId, 'default'),
     parentConversationId: existing.parentConversationId || compact(owner.conversationId) || null,
@@ -91,6 +91,6 @@ export async function finishSubagentChildSession({ dataRoot, sessionId, id, work
     subagentId: id,
     workerProfile: existing.workerProfile || workerProfile,
     model: model || existing.model || null,
-  } });
+  }) });
   return sessionId;
 }

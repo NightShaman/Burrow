@@ -114,7 +114,7 @@ export async function prepareSessionTurnContext({
     && (transcript.length > 0 || !dataRoot);
   const resolvedTranscript = useSuppliedTranscript
     ? transcript
-    : await conversationAuthority({ store: stores?.conversations || null, agentId, rootDir: dataRoot }).entriesAll(sessionId);
+    : await conversationAuthority({ store: stores?.conversations || null, agentId }).entriesAll(sessionId);
   const options = turnContextOptions({ rootDir, dataRoot, agentRuntime, sessionId, contextConfig, modelConfig, support, transcript: resolvedTranscript, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId });
   let turnContext = await buildTurnContext(options);
   const preCompressionInspection = inspectContextEngineResult({
@@ -182,6 +182,6 @@ export async function compressContextForPromptPressure({
     return { compressed: false, reason: 'compression_failed', error: error?.message || String(error), promptInspection };
   }
   if (!compressionResult.compressed) return { ...compressionResult, promptInspection };
-  const turnContext = await buildTurnContext(turnContextOptions({ rootDir, dataRoot, agentRuntime, sessionId, contextConfig, modelConfig, support, agentWorkspaceRoot, agentDataRoot, cacheRoot }));
+  const turnContext = await buildTurnContext(turnContextOptions({ rootDir, dataRoot, agentRuntime, sessionId, contextConfig, modelConfig, support, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId }));
   return { ...compressionResult, promptInspection, turnContext, conversationContext: conversationContextFromEngine(turnContext) };
 }

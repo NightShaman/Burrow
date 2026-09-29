@@ -1,5 +1,4 @@
 import { postgresContinuity } from './postgres-continuity.mjs';
-import { recordInterruptedRun } from './session-store.mjs';
 
 function boundedText(value, limit = 2_000) {
   const text = String(value || '').trim();
@@ -12,12 +11,13 @@ function boundedText(value, limit = 2_000) {
  * facts against the durable transcript, workspace, and receipts before acting.
  */
 export async function recordActiveRunInterruptions({ stores = null, activeRuns, resolveAgentRuntime, reason = 'service_shutdown' } = {}) {
+  if (!stores?.conversations) throw new Error('runtime_stores_required');
   const records = activeRuns instanceof Map ? [...activeRuns.values()] : Array.isArray(activeRuns) ? activeRuns : [];
   const settled = await Promise.allSettled(records.map(async (record) => {
     if (!record?.agentId || !record?.sessionId || !record?.runId) return null;
     const runtime = await resolveAgentRuntime(record.agentId);
-    const authority=stores?.conversations ? postgresContinuity({store:stores.conversations,agentId:record.agentId}):null;
-    const manifest = await (authority ? authority.interrupt.bind(authority) : recordInterruptedRun)({
+    const authority = postgresContinuity({ store: stores.conversations, agentId: record.agentId });
+    const manifest = await authority.interrupt({
       rootDir: runtime.agentWorkspaceRoot,
       sessionId: record.sessionId,
       runId: record.runId,

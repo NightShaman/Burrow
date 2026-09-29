@@ -5,15 +5,14 @@ import { routeRequest } from '../src/request-router.mjs';
 import { assemblePrompt } from '../src/prompt-assembler.mjs';
 import { createTraceLogger } from '../src/trace-logger.mjs';
 import { runBurrow } from '../src/runner.mjs';
-import { loadBurrowConfig, resolveModelConfig, resolveExecutionConfig, configDefaults, resolveRuntimeStateConfig, resolveRuntimeTracePath, resolveRuntimeTraceRoot, resolveRetentionConfig, resolveSkillsConfig, resolveContextConfig } from '../src/config.mjs';
+import { loadBurrowConfig, resolveModelConfig, resolveExecutionConfig, configDefaults, resolveRuntimeStateConfig, resolveRuntimeTracePath, resolveSkillsConfig, resolveContextConfig } from '../src/config.mjs';
 import { runDoctor } from '../src/doctor.mjs';
-import { latestTraceRun, summarizeTrace } from '../src/trace-summary.mjs';
+import { runCliTrace, runCliRetention } from '../src/cli-authority-commands.mjs';
 import { parseActionProposal } from '../src/action-proposal.mjs';
 import { reviewProposalActions } from '../src/action-safety.mjs';
 import { runExec } from '../src/harness/exec.mjs';
 import { createOpenAICompatibleModelAdapter } from '../src/model-adapter.mjs';
 import { loadRuntimeConfig, runAskChat } from '../src/app-runtime.mjs';
-import { runRetentionCleanup } from '../src/retention.mjs';
 import { runCliSessionSearch } from '../src/cli-session-search.mjs';
 import { translateBlockers } from '../src/workbench-status.mjs';
 import { runDreamCycle } from '../src/dream-cycle-runner.mjs';
@@ -47,6 +46,7 @@ Options:
   --session-id ID         Persistent ask/chat session id
   --latest                Summarize the most recently modified trace run
   --tool-output           Include compact tool stdout/stderr previews in trace summary
+  --agent-id ID           PostgreSQL conversation owner (default: hatchet)
   --query TEXT            Search query for session-search
   --role ROLE             Role filter for session-search: any, user, assistant, summary
   --source-id ID          Find raw/source evidence related to a compression source entry id
@@ -350,14 +350,7 @@ async function main() {
   }
 
   if (command === 'trace') {
-    const runtimeConfig = await loadRuntimeConfig({ rootDir, args });
-    const dataRoot = runtimeConfig.runtimeState.dataRoot;
-    const traceRoot = await resolveRuntimeTraceRoot(rootDir, args);
-    const latest = args.latest ? await latestTraceRun({ rootDir: traceRoot }) : null;
-    const runId = args.run_id || latest?.runId;
-    if (!runId) throw new Error('--run-id is required unless --latest finds a trace');
-    const summary = await summarizeTrace({ rootDir: traceRoot, runId, includeToolOutput: Boolean(args.tool_output) });
-    console.log(JSON.stringify({ ...summary, latest: Boolean(args.latest), dataRoot, traceRoot }, null, 2));
+    console.log(JSON.stringify(await runCliTrace({ rootDir, args }), null, 2));
     return;
   }
 
@@ -368,15 +361,7 @@ async function main() {
   }
 
   if (command === 'retention') {
-    const loaded = await loadBurrowConfig({ rootDir,  });
-    const runtimeState = resolveRuntimeStateConfig({ rootDir, args, loadedConfig: loaded.config });
-    const retention = resolveRetentionConfig(loaded.config);
-    const result = await runRetentionCleanup({
-      dataRoot: runtimeState.dataRoot,
-      traceRoot: path.join(runtimeState.cacheRoot, 'traces'),
-      retention,
-      confirm: Boolean(args.confirm),
-    });
+    const result = await runCliRetention({ rootDir, args });
     // Audits need the plan's truth, not thousands of candidate paths. Keeping
     // this projection opt-in preserves the detailed CLI/API plan for review.
     const output = args.summary

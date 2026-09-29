@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { isChatMessage } from '../src/session-store.mjs';
 import { ensureDefaultGlobalWorkspace } from '../src/runtime-workspace-defaults.mjs';
 import { publishModTools } from '../src/mod-agent-tools.mjs';
 import { diagnosticMods, modJobs, pendingModOperations } from '../src/mod-diagnostics.mjs';
@@ -18,7 +17,6 @@ import { loadEffectiveSkillCatalog, skillManifest } from '../src/skill-catalog.m
 import { collectTraceObservability } from '../src/trace-observability.mjs';
 import { listSubagentRecords, subagentVisibilitySummary } from '../src/subagent-store.mjs';
 import { buildContinuityHandoff } from '../src/continuity-handoff-store.mjs';
-import { appendSessionEntry, archiveSession, forkSession, listResetSessionArchives, listSessionRecords, readResetSessionArchive, readArchiveConversationPage, readSessionMetadata, readSessionTurns, exportSessionTranscript, renameSession, resetSession, summarizeSessionTurns, writeSessionMetadata } from '../src/session-store.mjs';
 import { runPendingRecoveryContinuations } from '../src/recovery-continuation-runner.mjs';
 import { recordActiveRunInterruptions } from '../src/interrupted-run-recovery.mjs';
 import { generateArchiveSummary } from '../src/archive-summary.mjs';
@@ -85,6 +83,28 @@ import { createChatRoutes } from './ui/chat-routes.mjs';
 import { cleanupMods, createModRoute, loadMods } from '../src/mod-runtime.mjs';
 import { createModDistribution, createModManagementRoute } from '../src/mod-distribution.mjs';
 import { MAX_OVERVIEW_CHILD_CONTEXTS, normalizeOverviewBody, overviewSessionIds } from '../src/agent-overview.mjs';
+
+function isChatMessage(entry) {
+  return entry?.type === 'message' && ['user', 'assistant', 'agent'].includes(String(entry?.role || ''))
+    && entry?.visibility === 'chat' && entry?.entersPrompt === true
+    && Boolean(String(entry?.content || '').trim() || (Array.isArray(entry?.metadata?.attachments) && entry.metadata.attachments.length));
+}
+
+function summarizeSessionTurns(turns = [], { maxChars = 4000 } = {}) {
+  const rendered = (turns || []).map((turn) => turn.role === 'agent'
+    ? `[Agent message from ${turn.metadata?.fromAgentName || turn.metadata?.fromAgentId || 'another agent'}]: ${turn.content}`
+    : `${turn.role}: ${turn.content}`).join('\n\n').trim();
+  if (!rendered || !Number.isFinite(maxChars) || rendered.length <= maxChars) return rendered;
+  const markerFor = (omitted) => `\n\n[truncated ${omitted} chars from earlier session turns]`;
+  let retainedChars = Math.max(0, maxChars - markerFor(0).length);
+  let retained = rendered.slice(Math.max(0, rendered.length - retainedChars)).trim();
+  for (let index = 0; index < 3; index += 1) {
+    const marker = markerFor(rendered.length - retained.length);
+    retainedChars = Math.max(0, maxChars - marker.length);
+    retained = rendered.slice(Math.max(0, rendered.length - retainedChars)).trim();
+  }
+  return `${retained}${markerFor(rendered.length - retained.length)}`;
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sourceRoot = path.resolve(__dirname, '..');
@@ -1314,17 +1334,9 @@ async function runtimeAgentDataRoot() {
 }
 
 async function runtimeSessionRoot(sessionId, agentId = null) {
-  // An agent's ordinary chats live in its workspace, but spawned child
-  // transcripts live in its agent-data session store. Resolve the requested
-  // id across both roots before falling back to the normal workspace root.
-  const agentRuntime = agentId ? await resolveAgentRuntime(agentId) : await resolveAgentRuntime();
-  const roots = [agentRuntime.agentWorkspaceRoot, agentRuntime.agentDataRoot, await runtimeAgentWorkspaceRoot(), await runtimeDataRoot()]
-    .filter(Boolean)
-    .filter((root, index, all) => all.indexOf(root) === index);
-  for (const rootDir of roots) {
-    if (await readSessionMetadata({ rootDir, sessionId })) return rootDir;
-  }
-  return roots[0] || null;
+  // Paths remain artifact locations, not session persistence authorities.
+  const agentRuntime = await resolveAgentRuntime(agentId);
+  return agentRuntime.agentWorkspaceRoot;
 }
 
 function remoteAddress(req) {
@@ -1863,9 +1875,9 @@ async function listDirs(dir) {
 
 async function sessionPreview(id) {
   try {
-    const rootDir = await runtimeAgentWorkspaceRoot();
-    const meta = await readSessionMetadata({ rootDir, sessionId: id });
-    const turns = await readSessionTurns({ rootDir, sessionId: id, limit: 20 });
+    const { agentId } = await resolveAgentRuntime();
+    const meta = await postgresApplication.stores.conversations.getMetadata({ agentId, sessionId: id });
+    const turns = await postgresApplication.stores.conversations.projection({ agentId, sessionId: id, visibility: 'chat', limit: 20 });
     const last = turns.at(-1) || null;
     return { id, turnCount: meta?.turnCount ?? turns.length, createdAt: meta?.createdAt || null, updatedAt: meta?.updatedAt || last?.ts || null, lastRole: meta?.lastRole || last?.role || null, lastContent: last?.content || '', summary: meta?.summary || '' };
   } catch (error) {
@@ -1956,6 +1968,7 @@ async function archiveRunsForAgent({ agentRuntime, sessionId = null, limit = 100
   const agent = await agentsStore().resolve(agentRuntime.agentId) || { id: agentRuntime.agentId, name: agentRuntime.agentId };
   const runtime = await runtimeConfig(agentRuntime.agentId);
   return listArchiveRuns({
+    conversationStore: postgresApplication.stores.conversations,
     rootDir: agentRuntime.agentWorkspaceRoot,
     dataRoot: agentRuntime.agentDataRoot,
     resolveTraceRoot: (actualSessionId) => runtimeTraceRoot(runtime, actualSessionId, agentRuntime.agentId),
@@ -1978,6 +1991,7 @@ async function archiveRunDetailForAgent({ agentRuntime, runId } = {}) {
   const agent = await agentsStore().resolve(agentRuntime.agentId) || { id: agentRuntime.agentId, name: agentRuntime.agentId };
   const runtime = await runtimeConfig(agentRuntime.agentId);
   return readArchiveRun({
+    conversationStore: postgresApplication.stores.conversations,
     rootDir: agentRuntime.agentWorkspaceRoot,
     dataRoot: agentRuntime.agentDataRoot,
     resolveTraceRoot: (actualSessionId) => runtimeTraceRoot(runtime, actualSessionId, agentRuntime.agentId),
@@ -1999,7 +2013,14 @@ async function archiveRunDetail({ agentRuntime = null, runId } = {}) {
 async function archiveSessions({ includeArchived = true, query = '', limit = 200, includeDisabled = false } = {}) {
   const resolvedLimit = boundedInteger(limit, { fallback: 200, min: 1, max: 1000 });
   const agents = await agentsStore().list({ includeDisabled: Boolean(includeDisabled) });
-  const rows = (await Promise.all(agents.map(async (agent) => (await postgresApplication.stores.conversations.listSessions({ agentId: agent.id, includeArchived })).map((record) => archiveSessionListItem({ id: record.sessionId, ...record }, { agentId: agent.id }, agent))))).flat();
+  const store = postgresApplication.stores.conversations;
+  const rows = (await Promise.all(agents.map(async (agent) => {
+    const [sessions, archives] = await Promise.all([store.listSessions({ agentId: agent.id, includeArchived }), store.listArchives({ agentId: agent.id, limit: null })]);
+    return [
+      ...sessions.map((record) => archiveSessionListItem({ id: record.sessionId, ...record, metadata: record }, { agentId: agent.id }, agent)),
+      ...archives.filter((record) => record.kind === 'reset').map((record) => archiveSessionListItem({ id: record.archiveId, archiveSnapshot: 'reset', sourceSessionId: record.sessionId, turnCount: record.entries.length, updatedAt: record.createdAt, archiveSummary: record.metadata?.summary, summaryStatus: record.metadata?.summaryStatus, metadata: { ...record.metadata, createdAt: record.createdAt } }, { agentId: agent.id }, agent)),
+    ];
+  }))).flat();
   return rows.filter((item) => !query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase())).sort((a,b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))).slice(0, resolvedLimit);
 }
 
@@ -2024,7 +2045,7 @@ async function sessionActivities({ sessionId, turns } = {}) {
   const receiptRuns = [...new Set((turns || []).filter((turn) => turn.type === 'receipt' && turn.runId).map((turn) => turn.runId))];
   const activities = [];
   for (const runId of receiptRuns.slice(-20)) {
-    const trace = await summarizeTrace({ rootDir: runtimeTraceRoot(runtime, sessionId), runId, includeToolOutput: false, includeRelatedWorkTrace: false });
+    const trace = await summarizeTrace({ conversationStore: postgresApplication.stores.conversations, agentId: runtime.runtimeState.agentId, rootDir: runtimeTraceRoot(runtime, sessionId), runId, includeToolOutput: false, includeRelatedWorkTrace: false });
     const items = (trace.cards || []).filter((card) => card.stream === 'tool').map(activityItemFromTraceCard).filter(Boolean);
     const uniqueItems = items.filter((item, index, all) => all.findIndex((candidate) => candidate.label === item.label && candidate.status === item.status && candidate.detail === item.detail) === index);
     if (!uniqueItems.length) continue;
@@ -2093,11 +2114,31 @@ async function sessionDetail(id, { rootDir, agentId = null } = {}) {
   return { id, turnCount: metadata.turnCount ?? turns.length, metadata, summary: metadata.summary || summarizeSessionTurns(chatTurns, { maxChars: 2000 }), turns, activities: activityTurns.filter((turn) => turn.metadata?.toolActivity).map((turn) => ({ ...turn.metadata.toolActivity, runId: turn.runId || null })) };
 }
 
+// UI cursors bind to both authority scope and the exact PostgreSQL snapshot.
+function uiArchivePage(source, { agentId, sessionId, limit, before, from, to }) {
+  const turns = source.filter(isChatMessage).filter((turn) => (!from || String(turn.ts || '') >= from) && (!to || String(turn.ts || '') <= to));
+  const scope = `${agentId}:${sessionId}`;
+  const digest = createHmac('sha256', settingsKeyFromEnvironment()).update(JSON.stringify({ scope, from, to, turns })).digest('hex');
+  let end = turns.length;
+  if (before) {
+    let cursor;
+    try { cursor = JSON.parse(Buffer.from(before, 'base64url').toString('utf8')); } catch { throw new Error('archive_cursor_invalid'); }
+    if (cursor.scope !== scope || cursor.digest !== digest || !Number.isSafeInteger(cursor.end) || cursor.end < 0 || cursor.end > turns.length) throw new Error('archive_cursor_invalid');
+    end = cursor.end;
+  }
+  const start = Math.max(0, end - boundedInteger(limit, { fallback: 100, max: 500 }));
+  return { turns: turns.slice(start, end), hasMore: start > 0, nextCursor: start > 0 ? Buffer.from(JSON.stringify({ scope, digest, end: start })).toString('base64url') : null, historyStatus: 'complete' };
+}
+
 async function archiveSessionDetail(agentId, sessionId, pageOptions = {}) {
   const agentRuntime = await resolveAgentRuntime(agentId);
   const agent = await agentsStore().resolve(agentRuntime.agentId) || { id: agentRuntime.agentId, name: agentRuntime.agentId };
-  const resetSnapshot = await readResetSessionArchive({ rootDir: agentRuntime.agentWorkspaceRoot, archiveId: sessionId, includeTurns: false });
-  const page = await readArchiveConversationPage({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId: resetSnapshot?.sourceSessionId || sessionId, archiveId: resetSnapshot?.id || null, ...pageOptions });
+  const store = postgresApplication.stores.conversations;
+  const archive = (await store.listArchives({ agentId: agentRuntime.agentId, limit: null })).find((item) => item.kind === 'reset' && item.archiveId === sessionId);
+  const resetSnapshot = archive ? { id: archive.archiveId, sourceSessionId: archive.sessionId, turnCount: archive.entries.length, createdAt: archive.createdAt, updatedAt: archive.createdAt, archiveSummary: archive.metadata?.summary, summaryStatus: archive.metadata?.summaryStatus, archiveTitle: archive.metadata?.archiveTitle } : null;
+  const source = archive ? archive.entries : (await store.exportTranscript({ agentId: agentRuntime.agentId, sessionId }))?.entries;
+  if (!source) return null;
+  const page = uiArchivePage(source, { agentId: agentRuntime.agentId, sessionId, ...pageOptions });
   if (resetSnapshot) {
     const chatTurns = page.turns.map(compactChatTurn);
     return {
@@ -2147,17 +2188,17 @@ async function listTraces(sessionId = 'default', agentId = null) {
 
 async function traceRootForRun({ rootDir, sessionId, runId, runtime, agentId } = {}) {
   const findTraceDir = async (id) => {
-    const turns = await readSessionTurns({ rootDir, sessionId: id, limit: 500, includeHistory: true });
+    const turns = (await postgresApplication.stores.conversations.exportTranscript({ agentId, sessionId: id }))?.entries || [];
     return turns.findLast((turn) => turn.runId === runId && turn.traceDir)?.traceDir || null;
   };
   let traceDir = rootDir ? await findTraceDir(sessionId) : null;
   // Legacy trace URLs do not carry sessionId. Resolve through the selected
   // agent's session lineage rather than mixing unrelated session histories.
   if (!traceDir && rootDir) {
-    const records = await listSessionRecords({ rootDir, includeArchived: true, limit: 500 });
+    const records = await postgresApplication.stores.conversations.listSessions({ agentId, includeArchived: true });
     for (const record of records) {
-      if (record.id === sessionId) continue;
-      traceDir = await findTraceDir(record.id);
+      if (record.sessionId === sessionId) continue;
+      traceDir = await findTraceDir(record.sessionId);
       if (traceDir) break;
     }
   }
@@ -2398,7 +2439,7 @@ async function retentionPolicySettings() {
   const runtime = await runtimeConfig();
   const policy = await readRetentionPolicy({ store: postgresApplication.stores.retentionSettings });
   const state = await readRetentionPolicyState({ store: postgresApplication.stores.retentionSettings });
-  const plan = await planRetentionCleanup({ dataRoot: runtime.runtimeState.agentDataRoot, traceRoot: path.join(runtime.runtimeState.cacheRoot, 'traces'), retention: policy });
+  const plan = await planRetentionCleanup({ taskStore: postgresApplication.stores.tasks, conversationStore: postgresApplication.stores.conversations, agentId: runtime.runtimeState.agentId, dataRoot: runtime.runtimeState.agentDataRoot, traceRoot: path.join(runtime.runtimeState.cacheRoot, 'traces'), retention: policy });
   return { ok: true, policy, state, plan };
 }
 
@@ -2417,7 +2458,7 @@ async function retentionCleanup(body = {}) {
   const policy = body.policy ? normalizeRetentionPolicy(body.policy, savedPolicy) : savedPolicy;
   if (body.confirm === true && !policy.enabled && body.requireEnabled !== false) return { ok: false, status: 409, error: 'retention_policy_disabled', policy };
   try {
-    const result = await runRetentionCleanup({ dataRoot: runtime.runtimeState.agentDataRoot, traceRoot: path.join(runtime.runtimeState.cacheRoot, 'traces'), retention: policy, confirm: body.confirm === true });
+    const result = await runRetentionCleanup({ taskStore: postgresApplication.stores.tasks, conversationStore: postgresApplication.stores.conversations, agentId: runtime.runtimeState.agentId, dataRoot: runtime.runtimeState.agentDataRoot, traceRoot: path.join(runtime.runtimeState.cacheRoot, 'traces'), retention: policy, confirm: body.confirm === true });
     const attachments = body.confirm === true && body.includeAttachments === true ? await cleanupAgentAttachments({ agentStore: postgresApplication.stores.agents, resolveAgentWorkspaceRoot: async (agentId) => (await resolveAgentRuntime(agentId))?.agentWorkspaceRoot || null }) : null;
     const state = body.confirm === true ? await writeRetentionPolicyState(retentionPolicySuccessState({ policy, result, previous: await readRetentionPolicyState({ store: postgresApplication.stores.retentionSettings }) }), { store: postgresApplication.stores.retentionSettings }) : await readRetentionPolicyState({ store: postgresApplication.stores.retentionSettings });
     return { ok: true, policy, state, ...result, attachments };
@@ -2770,9 +2811,7 @@ async function handleChatCommand({ parsed, sessionId, agentRuntime } = {}) {
     const active = [...activeChatRuns.values()].find((run) => run.agentId === agentRuntime.agentId && run.sessionId === sessionId && !run.controller.signal.aborted) || null;
     if (active) await cancelChatRun(active.runId, { reason: 'superseded by /new' }, agentRuntime);
     await sessionWriteHandoff({ agentId: agentRuntime.agentId, sessionId, title: `Boundary checkpoint before new conversation: ${sessionId}`, runId: `session-reset-${Date.now()}`, message: `Preserve the useful state from session ${sessionId} before starting a new conversation.` });
-    const reset = postgresApplication
-      ? await postgresApplication.stores.conversations.reset({ agentId: agentRuntime.agentId, sessionId })
-      : await resetSession({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId });
+    const reset = await postgresApplication.stores.conversations.reset({ agentId: agentRuntime.agentId, sessionId });
     await archiveSummaryForReset({ agentId: agentRuntime.agentId, rootDir: agentRuntime.agentWorkspaceRoot, sessionId, archiveId: reset.archiveId, archivedPath: reset.archivedPath });
     return { status: 200, response: chatCommandResponse({ command: 'new', sessionId, text: 'Started a fresh conversation. Prior history was archived; it was not deleted.', receipt: { conversationId: reset.conversationId, archivedPath: reset.archivedPath || null, resetAt: reset.resetAt || reset.metadata?.resetAt || null, ...(reset.archiveId ? { archiveId: reset.archiveId } : {}), ...(active ? { cancelledRunId: active.runId } : {}) } }) };
   }
@@ -2869,8 +2908,10 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId })
         // a monotonic per-run high-water mark across initial and continuation requests.
         record.contextUsage = updateContextUsageHighWater(record.contextUsage, usage);
         try {
-          await appendSessionEntry({
-            rootDir: agentRuntime.agentWorkspaceRoot,
+          await postgresApplication.stores.conversations.append({
+            agentId: agentRuntime.agentId,
+            sessionId,
+            entry: {
             sessionId,
             type: 'event',
             role: null,
@@ -2879,6 +2920,7 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId })
             metadata: { contextMeter: record.contextUsage },
             visibility: 'debug',
             entersPrompt: false,
+            },
           });
         } catch {
           // Meter persistence is observational; it must never interrupt a run.
@@ -2929,8 +2971,8 @@ async function startGroupChannelMessage(channelId, body = {}) {
   const targetIds = requested.length ? requested : (mentionTargets.length ? mentionTargets : channel.participantAgentIds);
   const targets = targetIds.filter((agentId) => channel.participantAgentIds.includes(agentId));
   if (!targets.length) return { ok: false, error: 'group_channel_targets_required' };
-  const operatorTurn = await appendGroupChannelTurn({ rootDir, channelId, role: 'user', content: message, metadata: { sender: 'operator', recipientAgentIds: targets, delivery: requested.length || mentionTargets.length ? 'targeted' : 'broadcast', mentions: mentions.mentions } });
-  const room = await readGroupChannelTurns({ rootDir, channelId, limit: 500 });
+  const operatorTurn = await appendGroupChannelTurn({ rootDir, conversationStore: postgresApplication.stores.conversations, channelId, role: 'user', content: message, metadata: { sender: 'operator', recipientAgentIds: targets, delivery: requested.length || mentionTargets.length ? 'targeted' : 'broadcast', mentions: mentions.mentions } });
+  const room = await readGroupChannelTurns({ rootDir, conversationStore: postgresApplication.stores.conversations, channelId, limit: 500 });
   const launches = await Promise.all(targets.map(async (agentId) => {
     const agentRuntime = await resolveAgentRuntime(agentId);
     const sessionId = `group-${channelId}`;
@@ -2945,9 +2987,9 @@ async function startGroupChannelMessage(channelId, body = {}) {
       body: { message, sessionId, runId, abortSignal: controller.signal }, rootDir: projectRoot, agentRuntime, stores: postgresApplication.stores, resolveAgentRuntime,
       groupChannelContext: { channelId, channelName: channel.name, turns: room?.turns || [] },
     }).then(async (result) => {
-      if (!controller.signal.aborted && result?.answerText) await appendGroupChannelTurn({ rootDir, channelId, role: 'agent', content: result.answerText, runId, metadata: { fromAgentId: agentId, fromAgentName: agentRuntime.agent?.name || agentId, recipient: 'group', participantSessionId: sessionId } });
+      if (!controller.signal.aborted && result?.answerText) await appendGroupChannelTurn({ rootDir, conversationStore: postgresApplication.stores.conversations, channelId, role: 'agent', content: result.answerText, runId, metadata: { fromAgentId: agentId, fromAgentName: agentRuntime.agent?.name || agentId, recipient: 'group', participantSessionId: sessionId } });
     }).catch(async (error) => {
-      if (!controller.signal.aborted) await appendGroupChannelTurn({ rootDir, channelId, role: 'agent', content: `Request failed: ${String(error?.message || error)}`, runId, metadata: { fromAgentId: agentId, fromAgentName: agentRuntime.agent?.name || agentId, recipient: 'group', participantSessionId: sessionId, failed: true } });
+      if (!controller.signal.aborted) await appendGroupChannelTurn({ rootDir, conversationStore: postgresApplication.stores.conversations, channelId, role: 'agent', content: `Request failed: ${String(error?.message || error)}`, runId, metadata: { fromAgentId: agentId, fromAgentName: agentRuntime.agent?.name || agentId, recipient: 'group', participantSessionId: sessionId, failed: true } });
     }).finally(() => groupChannelRuns.delete(groupChannelRunKey(channelId, agentId, runId)));
     return { agentId, runId, sessionId };
   }));
@@ -3009,10 +3051,10 @@ const skillApi = {
 };
 const settingsRoute = createSettingsRoutes({ ...skillApi, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, archiveSummaryModelSelection: async (agentId) => ({ ok: true, selection: await archiveSummarySelection((await resolveAgentRuntime(agentId)).agentId) }), saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection: async (id) => await modelsStore().remove(id), setupStatus: async () => postgresApplication.stores.setupState.readStatus(), completeSetup: async () => postgresApplication.stores.setupState.completeSetup() });
 const agentRoute = createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession, agentOverview });
-const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, exportSessionTranscript, writeSessionMetadata, resetSession, renameSession, archiveSession, forkSession, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
+const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
 const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
-const observabilityRoute = createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, codexLbAccounts, anthropicOauthUsage, openaiOauthUsage, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
-const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJson, validateBoundaryBody, withScheduledJobs, scheduler, listGroupChannels, createGroupChannel, readGroupChannelTurns, groupChannelRuns, startGroupChannelMessage, cancelGroupChannelRun, runtimeDataRoot });
+const observabilityRoute = createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, codexLbAccounts, anthropicOauthUsage, openaiOauthUsage, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore: postgresApplication.stores.conversations, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
+const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJson, validateBoundaryBody, withScheduledJobs, scheduler, listGroupChannels, createGroupChannel, readGroupChannelTurns, groupChannelRuns, startGroupChannelMessage, cancelGroupChannelRun, runtimeDataRoot, conversationStore: postgresApplication.stores.conversations });
 const authRoute = createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
 const chatRoute = createChatRoutes({ handleChat, readJsonBody, sendJson, selectedAgentRuntime, cancelChatRun });
 const modsRuntimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
@@ -3153,7 +3195,7 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/attachments') {
       const agentRuntime = await resolveAgentRuntime(url.searchParams.get('agentId'));
       const sessionId = url.searchParams.get('sessionId') || 'default';
-      const turns = await readSessionTurns({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId, limit: 500, includeHistory: true });
+      const turns = (await postgresApplication.stores.conversations.exportTranscript({ agentId: agentRuntime.agentId, sessionId }))?.entries || [];
       return sendJson(res, 200, { ok: true, agentId: agentRuntime.agentId, sessionId, attachments: await listSessionAttachments({ agentWorkspaceRoot: agentRuntime.agentWorkspaceRoot, sessionTurns: turns, sessionId, limit: url.searchParams.get('limit') || 200 }) });
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/generated-artifacts/')) {

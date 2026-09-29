@@ -1,5 +1,5 @@
 import { RECOVERY_TRANSCRIPT_MAX_MESSAGES, assessInterruptedRunRecovery } from './recovery-resume-policy.mjs';
-import { isChatMessage } from './session-store.mjs';
+import { isChatMessage } from './session-entry.mjs';
 import { continuityOwner } from './postgres-continuity-owner.mjs';
 
 // Runtime identity is not a PID: independent hosts may reuse the same PID.

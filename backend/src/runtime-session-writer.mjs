@@ -1,12 +1,10 @@
 import { normalizeSessionContextState } from './session-context-state.mjs';
-import { appendSessionActivity, appendSessionContextState, appendSessionEntry, appendSessionTurn } from './session-store.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 
 function resolveAuthority({ conversationStore = null, stores = null, agentId = 'hatchet', sessionRoot = null, dataRoot = null } = {}) {
   const store = conversationStore || stores?.conversations || null;
-  return store
-    ? conversationAuthority({ store, agentId, rootDir: sessionRoot || dataRoot })
-    : null;
+  if (!store) throw new Error('conversation_store_required');
+  return conversationAuthority({ store, agentId });
 }
 
 export async function appendRuntimeSessionTurn({
@@ -15,7 +13,7 @@ export async function appendRuntimeSessionTurn({
 } = {}) {
   const authority = resolveAuthority({ conversationStore, stores, agentId, sessionRoot, dataRoot });
   const turn = { sessionId, role, content, runId, traceDir, metadata, ...(visibility !== undefined ? { visibility } : {}), ...(entersPrompt !== undefined ? { entersPrompt } : {}), ...(parentId !== undefined ? { parentId } : {}) };
-  return authority ? authority.appendTurn(turn) : appendSessionTurn({ rootDir: sessionRoot || dataRoot, ...turn });
+  return authority.appendTurn(turn);
 }
 
 export async function appendRuntimeSessionEntry({
@@ -24,7 +22,7 @@ export async function appendRuntimeSessionEntry({
 } = {}) {
   const authority = resolveAuthority({ conversationStore, stores, agentId, sessionRoot, dataRoot });
   const entry = { sessionId, type, role, content, runId, traceDir, metadata, ...(visibility !== undefined ? { visibility } : {}), ...(entersPrompt !== undefined ? { entersPrompt } : {}), ...(parentId !== undefined ? { parentId } : {}) };
-  return authority ? authority.append(entry) : appendSessionEntry({ rootDir: sessionRoot || dataRoot, ...entry });
+  return authority.append(entry);
 }
 
 export async function appendRuntimeSessionContextState({
@@ -32,8 +30,8 @@ export async function appendRuntimeSessionContextState({
   sessionId, runId = null, traceDir = null, state,
 } = {}) {
   const authority = resolveAuthority({ conversationStore, stores, agentId, sessionRoot, dataRoot });
-  if (authority) { const contextState = normalizeSessionContextState(state); return authority.append({ sessionId, type: 'context_state', role: null, content: contextState.title, runId, traceDir, metadata: { contextState }, visibility: 'debug', entersPrompt: false }); }
-  return appendSessionContextState({ rootDir: sessionRoot || dataRoot, sessionId, runId, traceDir, state });
+  const contextState = normalizeSessionContextState(state);
+  return authority.append({ sessionId, type: 'context_state', role: null, content: contextState.title, runId, traceDir, metadata: { contextState }, visibility: 'debug', entersPrompt: false });
 }
 
 export async function appendRuntimeActivity({
@@ -43,6 +41,5 @@ export async function appendRuntimeActivity({
   if (!(sessionRoot || dataRoot || stores?.conversations || conversationStore) || !sessionId || !content) return null;
   const authority = resolveAuthority({ conversationStore, stores, agentId, sessionRoot, dataRoot });
   if (!Number.isSafeInteger(Number(sequence)) || Number(sequence) < 0) throw new Error('activity_sequence_invalid');
-  if (authority) return authority.append({ sessionId, maxContentChars: 4000, type: 'event', role: null, content, runId: runId || logger?.runId || null, traceDir: traceDir || logger?.traceDir || null, metadata: { ...metadata, activitySequence: Number(sequence) }, visibility: 'activity', entersPrompt: false });
-  return appendSessionActivity({ rootDir: sessionRoot || dataRoot, sessionId, runId: runId || logger?.runId || null, traceDir: traceDir || logger?.traceDir || null, sequence, content, metadata });
+  return authority.append({ sessionId, maxContentChars: 4000, type: 'event', role: null, content, runId: runId || logger?.runId || null, traceDir: traceDir || logger?.traceDir || null, metadata: { ...metadata, activitySequence: Number(sequence) }, visibility: 'activity', entersPrompt: false });
 }

@@ -5,7 +5,6 @@ import { routeRequest } from './request-router.mjs';
 import { prepareContextForTurn } from './context-builder.mjs';
 import { createTraceLogger } from './trace-logger.mjs';
 import { resolveRuntimeTracePath } from './config.mjs';
-import { claimSessionContinuityHead, isSessionContinuityCurrent, readSessionContinuityHead, recordInterruptedRun } from './session-store.mjs';
 import { prepareRuntimeSupportContext } from './runtime-support-context.mjs';
 import { workbenchWorkflow } from './workbench-workflow.mjs';
 import { buildContinuationPlan, explicitContinueRequested } from './work-item-service.mjs';
@@ -42,7 +41,7 @@ export { loadRuntimeConfig };
 // turns in one process cooperative: a later claimant can still invalidate an
 // earlier turn. Queue the complete runtime turn per session so operator turns
 // and nested A2A replies cannot race each other. Cross-process protection
-// remains the continuity head and file lock in session-store.
+// remains the PostgreSQL continuity head and transactional ownership guard.
 const sessionExecutionQueues = new Map();
 function sessionExecutionKey({ rootDir, sessionId, args = {}, agentRuntime = null } = {}) {
   const sessionRoot = agentRuntime?.agentWorkspaceRoot
@@ -164,8 +163,8 @@ async function runAskChatUnserialized({
   // unrelated CLI/test turns into one apparent runaway trace.
   const resolvedRunId = runId || normalizedArgs.run_id || defaults.runId || createFallbackRunId();
   const resolvedSessionId = sessionId || normalizedArgs.session_id || normalizedArgs.run_id || 'default';
-  const continuityAuthority = stores?.conversations ? postgresContinuity({store:stores.conversations,agentId:runtimeState.agentId}) : null;
-  const continuity = await (continuityAuthority ? continuityAuthority.claim.bind(continuityAuthority) : claimSessionContinuityHead)({
+  const continuityAuthority = postgresContinuity({ store: stores.conversations, agentId: runtimeState.agentId });
+  const continuity = await continuityAuthority.claim({
     rootDir: sessionRoot,
     sessionId: resolvedSessionId,
     runId: resolvedRunId,
@@ -407,7 +406,7 @@ async function runAskChatUnserialized({
 
   const modelExecution = await runRuntimeModelExecution({ continuityAuthority, runtimeTurn, prompt, message, shouldCallModel, modelConfig, logger, resolvedWorkingRoot, rootDir, dataRoot, resolvedSessionId, conversationId, runtimeConfig, executionPolicy, executionContext, normalizedArgs, attachments: turnAttachments, sessionRoot, resolvedRunId, continuity, initialWorkingContext, onTextDelta: onModelTextDelta, onThoughtDelta: onModelThoughtDelta, onContextUsage: onModelContextUsage, command, json });
   if (modelExecution.superseded) {
-    await (continuityAuthority ? continuityAuthority.interrupt.bind(continuityAuthority) : recordInterruptedRun)({
+    await continuityAuthority.interrupt({
       rootDir: sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation,
       reason: 'superseded_by_newer_session_run', objective: message, traceRef: logger.traceDir,
       lastCompletedStep: 'Model execution completed after session ownership changed; terminal result was not persisted.',

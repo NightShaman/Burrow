@@ -83,7 +83,7 @@ export async function buildTurnContext({
     // Read the complete active transcript so the token-derived context budget
     // can choose the useful window. Rotated compacted/reset history remains
     // excluded here; explicit history/search paths own that data.
-    : await conversationAuthority({ store: stores?.conversations || null, agentId, rootDir: dataRoot }).entriesAll(sessionId);
+    : await conversationAuthority({ store: stores?.conversations || null, agentId }).entriesAll(sessionId);
   let profileFiles = null;
   if (includeProfileFiles && agentRuntime?.agentId) {
     const store = stores?.profiles;
@@ -305,7 +305,7 @@ export function inspectContextEngineResult({ sessionId = 'default', context, tra
 
 export async function inspectSessionContext({ rootDir, dataRoot = rootDir, sessionId = 'default', limits = {}, includeProfileFiles = false, agentRuntime = null, contextWindow = null, contextTokens = null, agentWorkspaceRoot = null, agentDataRoot = null, cacheRoot = null, stores = null, conversationStore = stores?.conversations || null, agentId = agentRuntime?.agentId || 'hatchet' } = {}) {
   assertContextBoundary({ rootDir, dataRoot, agentWorkspaceRoot, agentDataRoot, cacheRoot });
-  const transcript = await conversationAuthority({ store: conversationStore, agentId, rootDir: dataRoot }).entriesAll(sessionId);
+  const transcript = await conversationAuthority({ store: conversationStore, agentId }).entriesAll(sessionId);
   const context = await buildTurnContext({ rootDir, dataRoot, sessionId, transcript, limits, includeProfileFiles, agentRuntime, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId });
   return inspectContextEngineResult({ sessionId, context, transcript, contextWindow, contextTokens });
 }
@@ -336,7 +336,7 @@ function compactCompressionSummary(summary = {}) {
 // inspection endpoint it contains no transcript, prompt text, or provider body.
 export async function inspectSessionContextStatus({ rootDir, dataRoot = rootDir, sessionId = 'default', limits = {}, contextConfig = {}, contextWindow = null, contextTokens = null, liveContext = null, agentRuntime = null, agentWorkspaceRoot = null, agentDataRoot = null, cacheRoot = null, stores = null, conversationStore = stores?.conversations || null, agentId = agentRuntime?.agentId || 'hatchet' } = {}) {
   assertContextBoundary({ rootDir, dataRoot, agentWorkspaceRoot, agentDataRoot, cacheRoot });
-  const transcript = await conversationAuthority({ store: conversationStore, agentId, rootDir: dataRoot }).entriesAll(sessionId);
+  const transcript = await conversationAuthority({ store: conversationStore, agentId }).entriesAll(sessionId);
   const context = await buildTurnContext({ rootDir, dataRoot, sessionId, transcript, limits, includeProfileFiles: false, agentRuntime, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId });
   const inspection = inspectContextEngineResult({ sessionId, context, transcript, contextWindow, contextTokens });
   const budget = inspection.contextBudget || {};

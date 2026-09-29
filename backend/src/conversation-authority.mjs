@@ -1,17 +1,7 @@
-import {
-  readSessionEntries,
-  readSessionMetadata,
-  readSessionPendingActions,
-  appendSessionEntry,
-  appendSessionTurn,
-  appendSessionTurnIfAbsent,
-  rotateCompactedTranscript,
-  projectPendingActions,
-  buildSessionEntry,
-} from './session-store.mjs';
+import { projectPendingActions, buildSessionEntry } from './session-entry.mjs';
 
 function injectedStore(store) {
-  if (store == null) return null;
+  if (store == null) throw new TypeError('conversation_store_required');
   if (typeof store !== 'object' || typeof store.read !== 'function' || typeof store.append !== 'function') {
     throw new TypeError('conversation_store_invalid');
   }
@@ -77,39 +67,27 @@ async function readAllPending(store, agentId, sessionId) {
   return projectPendingActions(found);
 }
 
-export function conversationAuthority({ store = null, agentId = 'hatchet', rootDir = null } = {}) {
+export function conversationAuthority({ store = null, agentId } = {}) {
   const pg = injectedStore(store);
+  if (typeof agentId !== 'string' || !agentId.trim()) throw new Error('agent_id_required');
   const key = (sessionId) => scope(agentId, sessionId);
   return Object.freeze({
-    async metadata(sessionId) { return pg ? pg.getMetadata(key(sessionId)) : readSessionMetadata({ rootDir, sessionId }); },
-    async entries(sessionId, options = {}) {
-      if (pg) return pg.read(scopedReadOptions(agentId, sessionId, options));
-      const { agentId: _agent, sessionId: _session, rootDir: _root, ...safeOptions } = options || {};
-      return readSessionEntries({ rootDir, sessionId, ...safeOptions });
-    },
-    async entriesAll(sessionId) {
-      return pg ? readAllEntries(pg, agentId, sessionId) : readSessionEntries({ rootDir, sessionId, limit: 0 });
-    },
-    async pendingActions(sessionId) {
-      return pg ? readAllPending(pg, agentId, sessionId) : readSessionPendingActions({ rootDir, sessionId });
-    },
+    async metadata(sessionId) { return pg.getMetadata(key(sessionId)); },
+    async entries(sessionId, options = {}) { return pg.read(scopedReadOptions(agentId, sessionId, options)); },
+    async entriesAll(sessionId) { return readAllEntries(pg, agentId, sessionId); },
+    async pendingActions(sessionId) { return readAllPending(pg, agentId, sessionId); },
     async compact(sessionId, { summary, tailEntries = [] } = {}) {
-      if (pg) {
-        if (typeof pg.compact !== 'function') throw new Error('conversation_store_compaction_unsupported');
-        return pg.compact({ ...key(sessionId), summary, tailEntries });
-      }
-      return rotateCompactedTranscript({ rootDir, sessionId, summary, tailEntries });
+      if (typeof pg.compact !== 'function') throw new Error('conversation_store_compaction_unsupported');
+      return pg.compact({ ...key(sessionId), summary, tailEntries });
     },
     async append(entry, { idempotencyKey = null } = {}) {
-      return pg ? pg.append({ ...key(entry.sessionId), entry: buildSessionEntry(entry), idempotencyKey }) : appendSessionEntry({ rootDir, ...entry });
+      return pg.append({ ...key(entry.sessionId), entry: buildSessionEntry(entry), idempotencyKey });
     },
     async appendTurn(turn, { idempotencyKey = null } = {}) {
-      const entry = turnEntry(turn);
-      return pg ? pg.append({ ...key(turn.sessionId), entry, idempotencyKey }) : appendSessionTurn({ rootDir, ...entry });
+      return pg.append({ ...key(turn.sessionId), entry: turnEntry(turn), idempotencyKey });
     },
     async appendTurnIfAbsent(turn, { idempotencyKey = null } = {}) {
-      const entry = turnEntry(turn);
-      return pg ? pg.appendIfAbsent({ ...key(turn.sessionId), entry, idempotencyKey }) : appendSessionTurnIfAbsent({ rootDir, ...entry, idempotencyKey });
+      return pg.appendIfAbsent({ ...key(turn.sessionId), entry: turnEntry(turn), idempotencyKey });
     },
   });
 }
