@@ -146,6 +146,7 @@ async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSes
   const reviews = reviewProposalActions({ actions: proposal.actions, workspaceRoot: target.root });
   const executionContext = createExecutionContext({
     conversationStore: parentExecutionContext?.conversationStore || parentExecutionContext?.stores?.conversations,
+    stores: parentExecutionContext?.stores,
     agentId: parentExecutionContext?.agentId,
     sessionId: childSessionId, conversationId, workspaceRoot: target.root, target, dataRoot, cacheRoot: traceLogger?.traceDir || null,
     executionEnvironment: parentExecutionContext?.executionEnvironment?.kind === 'remote' ? parentExecutionContext.executionEnvironment : null,

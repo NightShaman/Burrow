@@ -358,7 +358,8 @@ export async function executeReviewedProposalActions({ conversationStore = null,
     if (action.tool === 'session_search') {
       const started = await traceLogger?.toolStart?.({ tool: 'session_search', query: action.query, scope: action.sessionScope });
       const result = await searchAgentSessionEvidence({
-        conversationStore: conversationStore || executionContext?.conversationStore,
+        conversationStore: conversationStore || executionContext?.conversationStore || executionContext?.stores?.conversations,
+        continuityStore: executionContext?.stores?.continuity,
         rootDir: executionContext?.agentWorkspaceRoot || rootDir,
         additionalRootDirs: [dataRoot || executionContext?.dataRoot].filter(Boolean),
         dataRoot: executionContext?.agentDataRoot || dataRoot,

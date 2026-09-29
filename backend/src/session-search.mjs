@@ -1,6 +1,5 @@
 import { conversationAuthority } from './conversation-authority.mjs';
 import { compressionSummariesFromTranscript } from './session-compression.mjs';
-import { listContinuityHandoffs } from './continuity-handoff-store.mjs';
 
 // PostgreSQL owns both live entries and archive evidence when injected. Never
 // supplement an empty/failed authority read from workspace JSONL exports.
@@ -241,7 +240,7 @@ export async function searchSessionEvidence({ conversationStore = null, agentId 
  * outside automatic prompt/context construction, but this explicit tool may
  * retrieve them with reset-archive provenance.
  */
-export async function searchAgentSessionEvidence({ conversationStore = null, rootDir, additionalRootDirs = [], dataRoot = null, agentId = null, sessionId = 'default', query = '', scope = 'agent_sessions', role = 'any', includeSummaries = true, limit = 12 } = {}) {
+export async function searchAgentSessionEvidence({ conversationStore = null, continuityStore = null, rootDir, additionalRootDirs = [], dataRoot = null, agentId = null, sessionId = 'default', query = '', scope = 'agent_sessions', role = 'any', includeSummaries = true, limit = 12 } = {}) {
   // Explicit retrieval may search reset snapshots; ordinary prompt/context never does.
   const normalizedScope = 'agent_sessions';
   const max = parseLimit(limit, 12);
@@ -285,8 +284,8 @@ export async function searchAgentSessionEvidence({ conversationStore = null, roo
     return current || String(right.ts || '').localeCompare(String(left.ts || ''));
   });
   const activeAgentId = String(agentId || '').trim();
-  const handoffs = activeAgentId && dataRoot
-    ? listContinuityHandoffs({ dataRoot, agentId: activeAgentId, limit: 5 })
+  const handoffs = activeAgentId && continuityStore
+    ? await continuityStore.list({ agentId: activeAgentId, limit: 5 })
     : [];
   const handoffMatches = handoffs
     .filter((handoff) => matchesQuery({ id: handoff.id, type: 'handoff', content: `${handoff.title}\n${handoff.content}\n${handoff.evidenceSummary}` }, query))
@@ -300,7 +299,7 @@ export async function searchAgentSessionEvidence({ conversationStore = null, roo
       entersPrompt: false,
       contentSnippet: snippet(handoff.content, query),
       handoff: { title: handoff.title, sourceRefs: handoff.sourceRefs, evidenceSummary: handoff.evidenceSummary, expiresAt: handoff.expiresAt },
-      source: { kind: 'session_handoff', sessionId: handoff.sessionId, currentSession: handoff.sessionId === currentSessionId, store: 'agent_data' },
+      source: { kind: 'session_handoff', sessionId: handoff.sessionId, currentSession: handoff.sessionId === currentSessionId, store: 'postgres' },
       recallScore: 45 + (handoff.sessionId === currentSessionId ? 5 : 0),
     }));
   const allMatches = [...matches, ...handoffMatches];
