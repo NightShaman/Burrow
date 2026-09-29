@@ -77,6 +77,7 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
   const injected = stores || {};
   const withStore = async (key, Store, fn) => { const store = injected[key]; if (store) return fn(store); const owned = new Store({ databasePath }); try { return await fn(owned); } finally { await owned.close?.(); } };
   const withJobs = (fn) => withStore('scheduledJobs', ScheduledJobStore, fn);
+  const conversationStore = injected.conversations || null;
   const schedulerOwner = () => { if (typeof ownerModId !== 'string' || !ownerModId) throw new Error('mod_scheduler_owner_unavailable'); return ownerModId; };
   const ownedJob = (store, jobId) => store.getOwnedJob(schedulerOwner(), bounded(jobId, 96));
   function page(input = {}, max = 100) { const value = plain(input); const limit = count(value.limit, 50, max); let offset = 0; if (value.cursor !== undefined && value.cursor !== null) { let cursor; try { cursor = JSON.parse(Buffer.from(bounded(value.cursor, 512), 'base64url').toString('utf8')); } catch { invalid(); } if (cursor?.ownerModId !== schedulerOwner() || !Number.isSafeInteger(cursor.offset) || cursor.offset < 1) invalid(); offset = cursor.offset; } return { value, limit, offset }; }
@@ -184,11 +185,23 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
         inventories.set(id, snapshot);
         try {
           // Read the whole inventory only at traversal creation, never per page.
-          const sessions = await listSessionRecords({ rootDir, includeArchived, limit: Infinity });
-          const resets = includeArchived ? await listResetSessionArchives({ rootDir, limit: Infinity }) : [];
+          const sessions = conversationStore
+            ? await conversationStore.listSessions({ agentId, includeArchived })
+            : await listSessionRecords({ rootDir, includeArchived, limit: Infinity });
+          const resets = !includeArchived ? [] : conversationStore
+            ? (await conversationStore.listArchives({ agentId, limit: null })).filter((archive) => archive.kind === 'reset')
+            : await listResetSessionArchives({ rootDir, limit: Infinity });
           const entryKey = (entry) => entry.archiveId ? `archive:${entry.archiveId}` : `session:${entry.id}`;
-          const entries = [...sessions.map(({ id, metadata, updatedAt, archived }) => ({ id, agentId, archiveTitle: metadata?.archiveTitle || null, updatedAt, archived: Boolean(archived), archiveId: null })),
-            ...resets.map(({ id, sourceSessionId, archiveTitle, updatedAt }) => ({ id, agentId, sourceSessionId, archiveTitle, updatedAt, archived: true, archiveId: id }))]
+          const entries = [...sessions.map((record) => {
+              const id = record.sessionId || record.id;
+              const metadata = record.metadata || record;
+              return { id, agentId, archiveTitle: metadata?.archiveTitle || null, updatedAt: record.updatedAt, archived: Boolean(metadata?.archived), archiveId: null };
+            }),
+            ...resets.map((record) => {
+              const id = record.archiveId || record.id;
+              const sourceSessionId = record.sessionId || record.sourceSessionId;
+              return { id, agentId, sourceSessionId, archiveTitle: record.metadata?.archiveTitle || record.archiveTitle || null, updatedAt: record.createdAt || record.updatedAt, archived: true, archiveId: id };
+            })]
             .sort((a, b) => entryKey(a) < entryKey(b) ? -1 : entryKey(a) > entryKey(b) ? 1 : 0);
           snapshot.entries = Object.freeze(entries.map((entry) => Object.freeze(entry)));
           if (disposed) throw new Error('mod_capability_shutdown');
@@ -209,7 +222,7 @@ export function createModCapabilities({ databasePath, resolveAgentRuntime, resol
       if (archiveId !== null) bounded(archiveId, 256);
       if (before !== null) bounded(before, 8192);
       for (const date of [from, to]) if (date !== null) bounded(date, 64);
-      const page = await readModConversationPage({ rootDir, agentId, sessionId, archiveId, limit: count(limit, 50, 100), before, from, to, signal });
+      const page = await readModConversationPage({ rootDir, conversationStore, agentId, sessionId, archiveId, limit: count(limit, 50, 100), before, from, to, signal });
       if (!page) throw new Error('archive_conversation_not_found');
       // Preserve the archive reader's completeness marker: legacy snapshots can
       // still expose their retained turns without claiming the missing history.

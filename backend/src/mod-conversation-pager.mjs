@@ -14,7 +14,7 @@ function decode(value) {
     const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
     const { mac, ...payload } = parsed || {};
     if (typeof mac !== 'string' || !/^[a-f0-9]{64}$/.test(mac) || !timingSafeEqual(Buffer.from(mac), Buffer.from(signature(payload)))) badCursor();
-    if (parsed?.v !== 1 || typeof parsed.before !== 'string' && parsed.before !== null || !Number.isSafeInteger(parsed.offset) || parsed.offset < 1 || typeof parsed.digest !== 'string' || !/^[a-f0-9]{64}$/.test(parsed.digest)) badCursor();
+    if (![1, 2].includes(parsed?.v) || (parsed.v === 1 && typeof parsed.before !== 'string' && parsed.before !== null) || !Number.isSafeInteger(parsed.offset) || parsed.offset < 1 || typeof parsed.digest !== 'string' || !/^[a-f0-9]{64}$/.test(parsed.digest)) badCursor();
     return parsed;
   } catch { badCursor(); }
 }
@@ -28,6 +28,48 @@ function output(target, turns, gaps, hasMore, nextCursor, status) {
   const historyStatus = gaps.length ? 'unavailable' : status;
   return { ...target, turns, gaps, hasMore, nextCursor, historyStatus, historyWarnings: warnings(historyStatus, turns, gaps) };
 }
+
+function postgresCursor(value) { return encode({ v: 2, ...value }); }
+function decodePostgresCursor(value, scope) {
+  const parsed = decode(value);
+  if (parsed.v !== 2 || parsed.scope !== scope || !Number.isSafeInteger(parsed.offset) || parsed.offset < 1 || typeof parsed.digest !== 'string') badCursor();
+  return parsed;
+}
+function entryTime(entry) {
+  const value = Date.parse(entry?.ts || '');
+  return Number.isNaN(value) ? null : value;
+}
+async function readPostgresConversationPage({ conversationStore, agentId, sessionId, archiveId, limit, before, from, to, scope }) {
+  let source;
+  if (archiveId) {
+    const archive = await conversationStore.readArchive({ agentId, sessionId, archiveId });
+    if (!archive) return null;
+    source = archive.entries || [];
+  } else {
+    const transcript = await conversationStore.exportTranscript({ agentId, sessionId });
+    if (!transcript) return null;
+    source = transcript.entries || [];
+  }
+  const fromTime = from ? Date.parse(from) : null;
+  const toTime = to ? Date.parse(to) : null;
+  const entries = source.filter((entry) => {
+    const time = entryTime(entry);
+    return !(fromTime !== null && time !== null && time < fromTime) && !(toTime !== null && time !== null && time > toTime);
+  }).reverse();
+  const sourceDigest = createHash('sha256').update(JSON.stringify(entries)).digest('hex');
+  let offset = 0;
+  if (before) {
+    const parsed = decodePostgresCursor(before, scope);
+    if (parsed.digest !== sourceDigest) throw new Error('mod_conversation_cursor_stale');
+    offset = parsed.offset;
+  }
+  const turns = entries.slice(offset, offset + limit);
+  const turnReadCursors = turns.map((_entry, index) => offset + index > 0 ? postgresCursor({ scope, offset: offset + index, digest: sourceDigest }) : null);
+  const turnCursors = turns.map((_entry, index) => offset + index + 1 < entries.length ? postgresCursor({ scope, offset: offset + index + 1, digest: sourceDigest }) : null);
+  const nextCursor = turnCursors.at(-1) || null;
+  return { turns, turnReadCursors, turnCursors, hasMore: Boolean(nextCursor), nextCursor, historyStatus: 'complete' };
+}
+
 // Segment content at Unicode scalar boundaries. Offsets are code-point indexes,
 // allowing exact reassembly without splitting UTF-16 surrogate pairs.
 function segmentTurn(turn, offset, target, status, before, next, scope) {
@@ -50,9 +92,9 @@ function segmentTurn(turn, offset, target, status, before, next, scope) {
   return best ? make(best) : null;
 }
 
-export async function readModConversationPage({ rootDir, sessionId, archiveId, limit, before, from, to, agentId, signal = null }) {
+export async function readModConversationPage({ rootDir, conversationStore = null, sessionId, archiveId, limit, before, from, to, agentId, signal = null }) {
   const target = { agentId, sessionId, archiveId };
-  const scope = createHash('sha256').update(JSON.stringify({ rootDir, target, from, to })).digest('hex');
+  const scope = createHash('sha256').update(JSON.stringify({ source: conversationStore ? 'postgres' : rootDir, target, from, to })).digest('hex');
   let segment = null;
   if (before) {
     let raw;
@@ -65,7 +107,9 @@ export async function readModConversationPage({ rootDir, sessionId, archiveId, l
   // Fetch a genuine archive page once. The archive reader supplies signed
   // continuation points for members of this page so byte-envelope truncation
   // and content segmentation remain exact without a transcript rescan per turn.
-  const page = await readArchiveConversationPage({ rootDir, sessionId, archiveId, limit, before: cursor, from, to, signal, includeNavigation: true });
+  const page = conversationStore
+    ? await readPostgresConversationPage({ conversationStore, agentId, sessionId, archiveId, limit, before: cursor, from, to, scope })
+    : await readArchiveConversationPage({ rootDir, sessionId, archiveId, limit, before: cursor, from, to, signal, includeNavigation: true });
   if (!page) return null;
   const status = page.historyStatus;
   if (!page.turns.length) return output(target, [], [], false, null, status);
