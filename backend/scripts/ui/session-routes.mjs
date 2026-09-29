@@ -145,7 +145,7 @@ export function createSessionRoutes({
     }
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       const agentId = url.searchParams.get('agentId');
-      const options = { includeArchived: url.searchParams.get('archived') === 'true', query: url.searchParams.get('q') || '', updatedSince: url.searchParams.get('updatedSince'), limit: url.searchParams.get('limit') || 100 };
+      const options = { includeArchived: url.searchParams.get('archived') === 'true', query: url.searchParams.get('q') || '', updatedSince: url.searchParams.get('updatedSince'), limit: url.searchParams.get('limit') };
       if (agentId) {
         const agent = await resolveAgentRuntime(agentId);
         sendJson(res, 200, { ok: true, sessions: await listSessions({ rootDir: agent.agentWorkspaceRoot, agentId: agent.agentId, ...options }) });
@@ -155,7 +155,7 @@ export function createSessionRoutes({
       const sessions = (await Promise.all(agents.map(async (agent) => {
         const runtime = await resolveAgentRuntime(agent.id);
         return listSessions({ rootDir: runtime.agentWorkspaceRoot, agentId: runtime.agentId, ...options });
-      }))).flat().sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))).slice(0, Number(options.limit) || 100);
+      }))).flat().sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))).slice(0, options.limit == null ? undefined : Number(options.limit));
       sendJson(res, 200, { ok: true, sessions });
       return true;
     }

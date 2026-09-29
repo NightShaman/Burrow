@@ -1893,12 +1893,13 @@ function boundedInteger(value, { fallback = 100, min = 1, max = 500 } = {}) {
   return Math.max(min, Math.min(max, Math.floor(number)));
 }
 
-async function listSessions({ rootDir, rootDirs = null, agentId = null, includeArchived = false, query = '', updatedSince = null, limit = 100 } = {}) {
-  const resolvedLimit = boundedInteger(limit, { fallback: 100, min: 1, max: 500 });
+async function listSessions({ rootDir, rootDirs = null, agentId = null, includeArchived = false, query = '', updatedSince = null, limit = null } = {}) {
+  const resolvedLimit = limit == null ? null : Number(limit);
+  if (resolvedLimit !== null && (!Number.isSafeInteger(resolvedLimit) || resolvedLimit < 1)) throw new RangeError('session_list_limit_invalid');
   agentId ||= (await resolveAgentRuntime()).agentId;
   const rows = await postgresApplication.stores.conversations.listSessions({ agentId, includeArchived });
   const since = updatedSince && !Number.isNaN(Date.parse(updatedSince)) ? String(updatedSince) : null;
-  return rows.filter((item) => !query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase())).filter((item) => !since || String(item.updatedAt || "") > since).slice(0, resolvedLimit).map((item) => ({ ...item, id: item.sessionId }));
+  return rows.filter((item) => !query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase())).filter((item) => !since || String(item.updatedAt || "") > since).slice(0, resolvedLimit ?? undefined).map((item) => ({ ...item, id: item.sessionId }));
 }
 
 function archiveSessionListItem(record = {}, agentRuntime = {}, agent = {}) {
