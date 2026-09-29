@@ -2,6 +2,7 @@
 import { ensureDefaultGlobalWorkspace } from '../src/runtime-workspace-defaults.mjs';
 import { publishModTools } from '../src/mod-agent-tools.mjs';
 import { diagnosticMods, modJobs, pendingModOperations } from '../src/mod-diagnostics.mjs';
+import { forgeDiagnosticJobs, forgeDiagnosticJob, postgresDiagnostic } from '../src/forge-diagnostic-summary.mjs';
 import { releaseVersion } from '../src/release-version.mjs';
 import { createServer } from 'node:http';
 import { promises as fs } from 'node:fs';
@@ -1426,7 +1427,7 @@ function bearerToken(req) {
 function apiTokenScopeForRequest(req, url) {
   if (req.method !== 'GET') return null;
   const pathname = url.pathname;
-  if (pathname === '/api/health' || pathname === '/api/status' || pathname === '/api/metrics' || pathname === '/api/diagnostics/inventory' || pathname === '/api/diagnostics/mods' || /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/pending$/.test(pathname) || /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/jobs(?:\/[A-Za-z0-9_-]+)?$/.test(pathname) || pathname === '/api/agents' || pathname === '/api/agent-status' || pathname === '/api/sessions' || /^\/api\/sessions\/[^/]+$/.test(pathname) || pathname === '/api/session/context' || pathname === '/api/session/context-status' || pathname === '/api/context' || pathname === '/api/chat/runs/active' || pathname === '/api/traces' || pathname.startsWith('/api/traces/') || pathname === '/api/archive/runs' || pathname.startsWith('/api/archive/runs/') || pathname === '/api/archive/sessions' || pathname.startsWith('/api/archive/sessions/')) return 'diagnostics:read';
+  if (pathname === '/api/health' || pathname === '/api/status' || pathname === '/api/metrics' || pathname === '/api/diagnostics/inventory' || pathname === '/api/diagnostics/postgres' || pathname === '/api/diagnostics/forge/jobs' || /^\/api\/diagnostics\/forge\/jobs\/[0-9a-f-]{36}$/i.test(pathname) || pathname === '/api/diagnostics/mods' || /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/pending$/.test(pathname) || /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/jobs(?:\/[A-Za-z0-9_-]+)?$/.test(pathname) || pathname === '/api/agents' || pathname === '/api/agent-status' || pathname === '/api/sessions' || /^\/api\/sessions\/[^/]+$/.test(pathname) || pathname === '/api/session/context' || pathname === '/api/session/context-status' || pathname === '/api/context' || pathname === '/api/chat/runs/active' || pathname === '/api/traces' || pathname.startsWith('/api/traces/') || pathname === '/api/archive/runs' || pathname.startsWith('/api/archive/runs/') || pathname === '/api/archive/sessions' || pathname.startsWith('/api/archive/sessions/')) return 'diagnostics:read';
   return null;
 }
 
@@ -3131,6 +3132,17 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {
       if (await serveV18Asset(url, res)) return;
       return sendJson(res, 404, { ok: false, error: 'ui_artifact_not_found' });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/diagnostics/postgres') return sendJson(res, 200, await postgresDiagnostic(postgresApplication.pool));
+    if (req.method === 'GET' && url.pathname === '/api/diagnostics/forge/jobs') {
+      const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : 50;
+      const cursor = url.searchParams.get('cursor') || undefined;
+      try { return sendJson(res, 200, await forgeDiagnosticJobs(postgresApplication.pool, { limit, cursor })); }
+      catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'forge_diagnostics_unavailable' }); }
+    }
+    if (req.method === 'GET' && url.pathname.startsWith('/api/diagnostics/forge/jobs/')) {
+      try { return sendJson(res, 200, await forgeDiagnosticJob(postgresApplication.pool, url.pathname.slice('/api/diagnostics/forge/jobs/'.length))); }
+      catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'forge_diagnostics_unavailable' }); }
     }
     if (req.method === 'GET' && url.pathname === '/api/diagnostics/mods') return sendJson(res, 200, { ok: true, mods: diagnosticMods(loadedMods) });
     if (req.method === 'GET' && /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/pending$/.test(url.pathname)) {
