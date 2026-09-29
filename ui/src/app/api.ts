@@ -53,13 +53,6 @@ export type RuntimeMetrics = {
     fiveMinutes: number | null;
     fifteenMinutes: number | null;
   };
-  settingsDatabase: {
-    databaseBytes: number | null;
-    walBytes: number | null;
-    shmBytes: number | null;
-    totalBytes: number | null;
-    error: string | null;
-  };
 };
 
 export type RuntimeAgent = {

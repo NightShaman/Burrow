@@ -104,7 +104,6 @@ export function SystemStatsRail({ active }: { active: boolean }) {
 
     <section className="system-rail-group">
       <h3>Storage</h3>
-      <Stat label="Settings database" value={formatBytes(metrics?.settingsDatabase.totalBytes)} detail={metrics ? `DB ${formatBytes(metrics.settingsDatabase.databaseBytes)} · WAL ${formatBytes(metrics.settingsDatabase.walBytes)}` : undefined} />
       <Stat label="Trace storage" value={formatBytes(health?.traces?.logicalBytes)} detail={`${health?.traces?.count ?? '—'} runs`} />
       <Stat label="Last hour" value={`${traceRate?.runs ?? '—'} runs`} detail={traceRate ? `${formatBytes(traceRate.allocatedBytes)} allocated` : undefined} />
     </section>
