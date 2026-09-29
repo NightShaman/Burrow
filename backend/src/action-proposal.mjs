@@ -334,7 +334,7 @@ export function nativeToolSchemas({ includeForge = true, includeMutations = true
       type: 'function',
       function: {
         name: 'session_write_handoff',
-        description: 'Write a concise local continuity handoff for this active agent and session. This is agent-local SQLite support context, not a repository file or durable knowledge store. Include compact source references to the evidence behind it.',
+        description: 'Write a concise local continuity handoff for this active agent and session. This is agent-local PostgreSQL support context, not a repository file or durable knowledge store. Include compact source references to the evidence behind it.',
         parameters: {
           type: 'object', additionalProperties: false,
           properties: { title: { type: 'string' }, content: { type: 'string' }, sourceRefs: { type: 'array', items: { type: 'string' } }, reason: { type: 'string' } },

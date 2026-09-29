@@ -23,7 +23,7 @@ Burrow installs into one self-contained user home, `~/.burrow` by default:
 curl -fsSL https://raw.githubusercontent.com/NightShaman/Burrow/main/install.sh | sh
 ```
 
-Node.js, npm, `curl`, and `tar` must be available. The installer does not require `/opt`, root access, or Docker.
+Node.js, npm, `curl`, and `tar` must be available. Native managed installs require PostgreSQL 17 and pgvector; on Ubuntu the installer provisions missing packages automatically (requires sudo for APT), or configure an external PostgreSQL 17 server in `burrow.env`. Burrow itself runs as a non-root user; the installer does not require `/opt` or Docker.
 
 To install elsewhere, download the script first and pass `--dir`:
 

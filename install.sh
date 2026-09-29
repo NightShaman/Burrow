@@ -99,6 +99,7 @@ if [ "$UNINSTALL" -eq 1 ]; then
 fi
 
 TMP_ROOT=""
+PG_KEY_TMP=""
 update_log() { printf '%s\n' "Burrow update: $*"; }
 verbose_log() {
   [ "$VERBOSE" -eq 1 ] || return 0
@@ -107,6 +108,7 @@ verbose_log() {
 cleanup() {
   status=$?
   [ -z "$TMP_ROOT" ] || rm -rf "$TMP_ROOT"
+  [ -z "$PG_KEY_TMP" ] || rm -f "$PG_KEY_TMP"
   exit "$status"
 }
 trap cleanup EXIT HUP INT TERM
@@ -284,6 +286,88 @@ if [ -n "${BURROW_INSTALL_TEST_ROOT:-}" ]; then
   done
   case "${XDG_RUNTIME_DIR:-}" in "$TEST_ROOT"|"$TEST_ROOT"/*) ;; *) echo "Burrow install: test isolation requires XDG_RUNTIME_DIR beneath BURROW_INSTALL_TEST_ROOT." >&2; exit 1 ;; esac
 fi
+# Install host packages only for the default managed binary layout. Custom binary
+# paths are operator-owned; an APT install cannot satisfy them reliably.
+install_managed_postgres_ubuntu() {
+  [ -r /etc/os-release ] || { echo "Burrow install: automatic PostgreSQL installation requires Ubuntu; install PostgreSQL 17 and pgvector manually for this host." >&2; exit 1; }
+  . /etc/os-release
+  [ "${ID:-}" = ubuntu ] || { echo "Burrow install: automatic PostgreSQL installation requires Ubuntu; install PostgreSQL 17 and pgvector manually for this host." >&2; exit 1; }
+  command -v apt-get >/dev/null 2>&1 || { echo "Burrow install: apt-get is required to install PostgreSQL." >&2; exit 1; }
+  command -v curl >/dev/null 2>&1 || { echo "Burrow install: curl is required to configure the PostgreSQL APT repository." >&2; exit 1; }
+  if [ "$(id -u)" -eq 0 ]; then SUDO="";
+  elif command -v sudo >/dev/null 2>&1; then SUDO=sudo;
+  else echo "Burrow install: sudo is required to install managed PostgreSQL packages." >&2; exit 1; fi
+  case "${VERSION_CODENAME:-}" in
+    ''|*[!a-z0-9]*) echo "Burrow install: unsupported Ubuntu codename for PostgreSQL APT repository." >&2; exit 1 ;;
+  esac
+  echo "Burrow install: installing PostgreSQL 17 and pgvector from PGDG for Ubuntu ${VERSION_CODENAME}..."
+  $SUDO apt-get update
+  $SUDO apt-get install -y ca-certificates curl gnupg
+  $SUDO install -d -m 0755 /etc/apt/keyrings
+  # Keyring and source changes are idempotent across updates.
+  PG_KEY_TMP=$(mktemp "${TMPDIR:-/tmp}/burrow-pgdg-key.XXXXXX")
+  curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o "$PG_KEY_TMP"
+  $SUDO gpg --dearmor --yes -o /etc/apt/keyrings/postgresql.gpg "$PG_KEY_TMP"
+  rm -f "$PG_KEY_TMP"; PG_KEY_TMP=""
+  printf '%s\n' "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | $SUDO tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+  $SUDO apt-get update
+  $SUDO apt-get install -y postgresql-17 postgresql-client-17 postgresql-17-pgvector
+}
+
+# Native installs use the same PostgreSQL supervisor as the Docker entrypoint.
+# Resolve database mode before touching durable configuration or activating an app.
+ENV_FILE="$INSTALL_DIR/burrow.env"
+env_setting() { sed -n "s/^$1=//p" "$ENV_FILE" 2>/dev/null | tail -n 1; }
+postgres_mode=$(env_setting BURROW_POSTGRES_LIFECYCLE)
+[ -n "$postgres_mode" ] || postgres_mode=$(env_setting BURROW_POSTGRES_MODE)
+if [ -z "$postgres_mode" ]; then
+  if [ -n "$(env_setting BURROW_POSTGRES_URL)" ] || [ -n "$(env_setting DATABASE_URL)" ]; then
+    postgres_mode=external
+  else
+    postgres_mode=managed
+  fi
+fi
+case "$postgres_mode" in
+  managed)
+    [ "$(id -u)" -ne 0 ] || { echo "Burrow install: managed PostgreSQL cannot run as root; install as the Burrow service user." >&2; exit 1; }
+    pg_bin_dir=$(env_setting BURROW_POSTGRES_BIN_DIR)
+    [ -n "$pg_bin_dir" ] || pg_bin_dir=/usr/lib/postgresql/17/bin
+    pg_initdb=$(env_setting BURROW_POSTGRES_INITDB)
+    pg_ctl=$(env_setting BURROW_POSTGRES_PG_CTL)
+    pg_server=$(env_setting BURROW_POSTGRES_BIN)
+    [ -n "$pg_initdb" ] || pg_initdb="$pg_bin_dir/initdb"
+    [ -n "$pg_ctl" ] || pg_ctl="$pg_bin_dir/pg_ctl"
+    [ -n "$pg_server" ] || pg_server="$pg_bin_dir/postgres"
+    # The installer writes these default paths to burrow.env, so updates must
+    # recognize the resolved paths, not merely the absence of overrides.
+    pg_config="$(dirname "$pg_server")/pg_config"
+    if [ "$pg_bin_dir" = /usr/lib/postgresql/17/bin ] && [ "$pg_initdb" = /usr/lib/postgresql/17/bin/initdb ] && [ "$pg_ctl" = /usr/lib/postgresql/17/bin/pg_ctl ] && [ "$pg_server" = /usr/lib/postgresql/17/bin/postgres ] && [ -z "${BURROW_INSTALL_TEST_ROOT:-}" ]; then
+      pg_missing=0
+      for pg_exe in "$pg_initdb" "$pg_ctl" "$pg_server"; do [ -x "$pg_exe" ] || pg_missing=1; done
+      [ -f /usr/share/postgresql/17/extension/vector.control ] || pg_missing=1
+      if [ "$pg_missing" -eq 1 ]; then
+        install_managed_postgres_ubuntu
+      fi
+    fi
+    for pg_exe in "$pg_initdb" "$pg_ctl" "$pg_server"; do
+      [ -x "$pg_exe" ] || { echo "Burrow install: managed PostgreSQL 17 requires $pg_exe. Install PostgreSQL 17 and pgvector for PostgreSQL 17, or configure BURROW_POSTGRES_LIFECYCLE=external with BURROW_POSTGRES_URL in $ENV_FILE." >&2; exit 1; }
+    done
+    pg_major=$("$pg_server" --version | sed -n 's/.*PostgreSQL) \([0-9][0-9]*\).*/\1/p')
+    [ "$pg_major" = 17 ] || { echo "Burrow install: managed PostgreSQL server must be major 17." >&2; exit 1; }
+    [ -x "$pg_config" ] || [ "$pg_bin_dir" = /usr/lib/postgresql/17/bin ] || { echo "Burrow install: managed PostgreSQL 17 requires $pg_config to locate its pgvector extension." >&2; exit 1; }
+    if [ "$pg_bin_dir" = /usr/lib/postgresql/17/bin ]; then pg_sharedir=/usr/share/postgresql/17
+    else pg_sharedir=$("$pg_config" --sharedir); fi
+    if [ ! -f "$pg_sharedir/extension/vector.control" ]; then
+      echo "Burrow install: managed PostgreSQL 17 requires its pgvector extension (postgresql-17-pgvector on Ubuntu)." >&2; exit 1
+    fi
+    ;;
+  external)
+    if [ -z "$(env_setting BURROW_POSTGRES_URL)" ] && [ -z "$(env_setting DATABASE_URL)" ] && [ -z "$(env_setting BURROW_POSTGRES_HOST)" ]; then
+      echo "Burrow install: external PostgreSQL requires BURROW_POSTGRES_URL or BURROW_POSTGRES_HOST in $ENV_FILE." >&2; exit 1
+    fi
+    ;;
+  *) echo "Burrow install: PostgreSQL lifecycle $postgres_mode is not supported for a PostgreSQL-only runtime. Set managed or external in $ENV_FILE." >&2; exit 1 ;;
+esac
 prepare_service_restart
 verbose_log "install root prepared; source mode=${SOURCE_DIR:+assembled}"
 # An update is entered through the absolute launcher, but package lifecycle
@@ -347,7 +431,6 @@ PACKAGE
   # Burrow payload. The runtime invokes Claude only when that integration is
   # actually used.
 fi
-ENV_FILE="$INSTALL_DIR/burrow.env"
 if [ ! -f "$ENV_FILE" ]; then
   umask 077
   cat > "$ENV_FILE" <<ENV
@@ -387,6 +470,16 @@ set_env_value BURROW_CACHE_ROOT "$INSTALL_DIR/cache"
 set_env_value BURROW_CLAUDE_BIN "$INSTALL_DIR/integrations/claude-code/node_modules/.bin/claude"
 if ! grep -q '^BURROW_SETTINGS_KEY=' "$ENV_FILE"; then
   set_env_value BURROW_SETTINGS_KEY "$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))')"
+fi
+# Existing operator database settings are preserved. Old installations without
+# a mode now receive managed PostgreSQL (or external when a URL is configured).
+if [ -z "$(env_setting BURROW_POSTGRES_LIFECYCLE)" ] && [ -z "$(env_setting BURROW_POSTGRES_MODE)" ]; then
+  set_env_value BURROW_POSTGRES_LIFECYCLE "$postgres_mode"
+fi
+if [ "$postgres_mode" = managed ]; then
+  set_env_value BURROW_POSTGRES_INITDB "$pg_initdb"
+  set_env_value BURROW_POSTGRES_PG_CTL "$pg_ctl"
+  set_env_value BURROW_POSTGRES_BIN "$pg_server"
 fi
 # Listener values are durable by default. Explicit installer flags are the
 # supported deployment-management interface for changing them on install or update.
@@ -474,7 +567,10 @@ UNIT
       *) echo "Usage: burrow service {install|uninstall|start|stop|restart|status|logs}" >&2; exit 2 ;;
     esac
     ;;
-  serve) shift; exec node "$BURROW_HOME/app/backend/bin/burrow.mjs" serve --root "$BURROW_HOME/app/backend" "$@" ;;
+  serve)
+    shift
+    exec node "$BURROW_HOME/app/backend/scripts/postgres-supervisor.mjs" node "$BURROW_HOME/app/backend/bin/burrow.mjs" serve --root "$BURROW_HOME/app/backend" "$@"
+    ;;
   install-backup) shift; exec node "$BURROW_HOME/app/backend/bin/burrow.mjs" install-backup --root "$BURROW_HOME" "$@" ;;
   install-restore) shift; exec node "$BURROW_HOME/app/backend/bin/burrow.mjs" install-restore "$@" ;;
   *) exec node "$BURROW_HOME/app/backend/bin/burrow.mjs" "$@" --root "$BURROW_HOME/app/backend" ;;

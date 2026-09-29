@@ -266,7 +266,7 @@ export async function loadSelectedSkillText(rootDir, selected, { maxTotalChars =
   let remaining = Number.isFinite(maxTotalChars) ? Math.max(0, Number(maxTotalChars)) : Infinity;
   for (const item of asArray(selected)) {
     try {
-      const fullContent = item.source === 'sqlite' ? String(item.skillContent ?? item.content ?? '') : await fs.readFile(item.absolutePath || path.resolve(rootDir, item.path || item.sourcePath || ''), 'utf8');
+      const fullContent = item.source === 'postgres' ? String(item.skillContent ?? item.content ?? '') : await fs.readFile(item.absolutePath || path.resolve(rootDir, item.path || item.sourcePath || ''), 'utf8');
       const sourceBytes = Buffer.byteLength(fullContent, 'utf8');
       const allowed = Math.min(fullContent.length, remaining, Number.isFinite(maxPerSkillChars) ? Math.max(0, Number(maxPerSkillChars)) : Infinity);
       const content = fullContent.slice(0, allowed);
