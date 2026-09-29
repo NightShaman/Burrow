@@ -146,9 +146,9 @@ export function chatTurnInputFromWorkbenchContinuation({ item, body = {}, rootDi
   };
 }
 
-export async function runChatTurnFromWorkbenchContinuation({ item, body = {}, rootDir, dataRoot, agentDataRoot, agentRuntime = null } = {}) {
+export async function runChatTurnFromWorkbenchContinuation({ item, body = {}, rootDir, dataRoot, agentDataRoot, agentRuntime = null, resolveAgentRuntime = null, stores = null } = {}) {
   const input = chatTurnInputFromWorkbenchContinuation({ item, body, rootDir, dataRoot, agentDataRoot, agentRuntime });
-  return runChatTurn({ ...input, agentRuntime });
+  return runChatTurn({ ...input, agentRuntime, resolveAgentRuntime, stores });
 }
 
 export function chatTurnSummary(result) {

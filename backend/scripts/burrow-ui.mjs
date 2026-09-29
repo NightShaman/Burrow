@@ -2702,7 +2702,9 @@ async function continueWorkbenchItem(id, body = {}, agentRuntime = null) {
     item,
     body,
     rootDir: projectRoot,
-    ...(agentRuntime ? { agentRuntime, resolveAgentRuntime } : (await runtimeAgentDataRoot() ? { agentDataRoot: await runtimeAgentDataRoot() } : { dataRoot })),
+    stores: postgresApplication.stores,
+    resolveAgentRuntime,
+    ...(agentRuntime ? { agentRuntime } : (await runtimeAgentDataRoot() ? { agentDataRoot: await runtimeAgentDataRoot() } : { dataRoot })),
   });
   return chatTurnResponse(result);
 }
