@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Agent } from '../../app/types';
-import { Chat } from './ChatPage';
+import { Chat, ChatModelSelector } from './ChatPage';
 
 const agent: Agent = {
   id: 'smatchet',
@@ -51,6 +51,25 @@ function renderChat(overrides: Partial<Parameters<typeof Chat>[0]> = {}) {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+});
+
+describe('Chat session picker', () => {
+  it('excludes group and artifact sessions even when the API omits classification metadata', () => {
+    const sessions = [
+      { id: 'default' },
+      { id: 'Issues' },
+      { id: 'group-group-34d69c4b-2848-4b5b-a76a-8b0262a9a9be' },
+      { id: 'artifact-smoke-image-1790371247' },
+      { id: 'artifact-foundry-tts-1790372961-bf1b91cc' },
+    ];
+    const provider = { id: 'provider', provider: 'test', apiType: 'openai', url: '', apiKey: '', models: ['test-model'] };
+    const onSessionChange = vi.fn();
+
+    render(<ChatModelSelector selected={agent} savedProviders={[provider]} updateAgent={vi.fn()} sessions={sessions} sessionId="default" onSessionChange={onSessionChange} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} />);
+
+    const picker = screen.getByRole('combobox', { name: 'Session' });
+    expect(Array.from((picker as HTMLSelectElement).options).map((option) => option.value)).toEqual(['default', 'Issues']);
+  });
 });
 
 describe('Chat composer draft ownership', () => {

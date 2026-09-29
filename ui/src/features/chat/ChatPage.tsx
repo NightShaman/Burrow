@@ -20,7 +20,16 @@ export function ChatModelSelector({ selected, savedProviders, updateAgent, sessi
   const efforts = ['off', ...modelEfforts.filter((item) => item !== 'off')];
   const effort = efforts.includes(selected.effort) ? selected.effort : provider?.defaultEfforts?.[model] ?? modelEfforts[0] ?? 'off';
   const temperature = Number.isFinite(selected.temperature) ? Math.max(0, Math.min(2, selected.temperature)) : 0.2;
-  const selectableSessions = sessions.filter((session) => session.metadata?.kind !== 'subagent' && session.metadata?.kind !== 'group' && !session.parentSessionId && session.ownerTaskId == null && !session.id.startsWith('group:'));
+  const selectableSessions = sessions.filter((session) => {
+    const id = session.id.toLowerCase();
+    return session.metadata?.kind !== 'subagent'
+      && session.metadata?.kind !== 'group'
+      && !session.parentSessionId
+      && session.ownerTaskId == null
+      && !id.startsWith('group:')
+      && !id.startsWith('group-')
+      && !id.startsWith('artifact-');
+  });
   const updateForModel = (next: SavedProvider | undefined, nextModel: string) => updateAgent({ provider: next?.provider ?? '', model: nextModel, effort: next?.defaultEfforts?.[nextModel] ?? next?.modelEfforts?.[nextModel]?.[0] ?? 'off' });
   const chooseProvider = (providerName: string) => { const next = savedProviders.find((item) => item.provider === providerName); updateForModel(next, next?.models[0] ?? ''); };
   const chooseModel = (nextModel: string) => updateForModel(provider, nextModel);
