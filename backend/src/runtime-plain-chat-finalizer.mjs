@@ -175,7 +175,7 @@ export async function appendChatToolLoopEntries({ stores = null, agentId = 'hatc
     for (const result of iteration.proposalExecution?.toolResults || []) {
       const normalizedResult = summarizeToolResults([result])[0] || result;
       await appendRuntimeSessionEntry({
-        sessionRoot,
+        stores, agentId, sessionRoot,
         dataRoot,
         sessionId,
         type: 'tool_result',
