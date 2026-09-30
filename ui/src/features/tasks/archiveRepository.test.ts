@@ -17,6 +17,15 @@ const card = { agentId: 'agent/name', id: 'card/name' } as ContinuityCard;
 beforeEach(() => apiMock.mockReset());
 
 describe('archiveRepository', () => {
+  it('loads authoritative availability dates for a month and optional agent', async () => {
+    const result = { ok: true as const, kind: 'sessions' as const, month: '2026-09', dates: ['2026-09-12'] };
+    apiMock.mockResolvedValueOnce(result).mockResolvedValueOnce({ ...result, kind: 'dreams', dates: [] });
+    await expect(repository.listCalendarAvailability('sessions', '2026-09')).resolves.toEqual(result);
+    await expect(repository.listCalendarAvailability('dreams', '2026-09', 'agent/name')).resolves.toEqual({ ...result, kind: 'dreams', dates: [] });
+    expect(apiMock).toHaveBeenNthCalledWith(1, '/api/archive/calendar?kind=sessions&month=2026-09', { signal: undefined });
+    expect(apiMock).toHaveBeenNthCalledWith(2, '/api/archive/calendar?kind=dreams&month=2026-09&agentId=agent%2Fname', { signal: undefined });
+  });
+
   it('encodes searches and resource-owned detail paths', async () => {
     apiMock.mockResolvedValueOnce({ sessions: [session], nextCursor: 'session-cursor', hasMore: true }).mockResolvedValueOnce({ turns: [] });
 

@@ -16,6 +16,7 @@ export function createSessionRoutes({
   agentsStore,
   agentRuntimeContext,
   archiveSessions,
+  archiveCalendar,
   archiveSessionDetail,
   archiveRuns,
   archiveRunDetail,
@@ -90,6 +91,10 @@ export function createSessionRoutes({
       const runtime = await runtimeConfig(agentRuntime.agentId);
       const limits = activeConversationLimits({ modelConfig: runtime.modelConfig, contextConfig: runtime.contextConfig });
       sendJson(res, 200, { ok: true, context: await inspectSessionContext({ conversationStore, agentId: agentRuntime.agentId, rootDir: projectRoot, dataRoot: agentRuntime.agentWorkspaceRoot, sessionId, limits, contextWindow: runtime.modelConfig?.contextWindow, contextTokens: runtime.modelConfig?.contextTokens }) });
+      return true;
+    }
+    if (req.method === 'GET' && url.pathname === '/api/archive/calendar') {
+      sendJson(res, 200, await archiveCalendar({ kind: url.searchParams.get('kind'), month: url.searchParams.get('month'), agentId: url.searchParams.get('agentId') }));
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/dreams') {
@@ -188,7 +193,7 @@ export function createSessionRoutes({
     if (req.method === 'POST' && url.pathname === '/api/session/handoff-candidate') { sendJson(res, 200, await sessionWriteHandoffCandidate(await readJsonBody(req))); return true; }
     return false;
     } catch (error) {
-      if (!['archive_cursor_invalid', 'archive_date_invalid'].includes(error?.message)) throw error;
+      if (!['archive_cursor_invalid', 'archive_date_invalid', 'archive_month_invalid', 'archive_kind_invalid'].includes(error?.message)) throw error;
       sendJson(res, 400, { ok: false, error: error.message });
       return true;
     }

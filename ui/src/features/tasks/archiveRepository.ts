@@ -3,11 +3,18 @@ import type { ArchiveDetail, ArchiveDream, ArchiveDreamDocument, ArchiveSession,
 
 export type ArchivePage<T> = { items: T[]; nextCursor: string | null; hasMore: boolean };
 type CursorPage = { nextCursor: string | null; hasMore: boolean };
+export type ArchiveCalendarKind = 'sessions' | 'dreams';
+export type ArchiveCalendarAvailability = { ok: true; kind: ArchiveCalendarKind; month: string; dates: string[] };
 
 export type ArchiveRepository = ReturnType<typeof createArchiveRepository>;
 
 export function createArchiveRepository() {
   return {
+    async listCalendarAvailability(kind: ArchiveCalendarKind, month: string, agentId?: string, signal?: AbortSignal): Promise<ArchiveCalendarAvailability> {
+      const query = new URLSearchParams({ kind, month });
+      if (agentId) query.set('agentId', agentId);
+      return api<ArchiveCalendarAvailability>(`/api/archive/calendar?${query}`, { signal });
+    },
     async listSessions(query: string, signal?: AbortSignal, cursor?: string | null, date?: string, agentId?: string): Promise<ArchivePage<ArchiveSession>> {
       const params = new URLSearchParams({ archived: 'true', limit: '200' });
       if (query) params.set('q', query);

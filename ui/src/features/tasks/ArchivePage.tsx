@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Agent } from '../../app/types';
 import { ArchiveRunsProof } from './ArchiveRunsProof';
 import { readArchiveSessionCache, writeArchiveSessionCache } from './archiveCache';
-import { archiveRepository } from './archiveRepository';
-import { archiveSessionDate, buildCalendarDays, buildDateBuckets, dateFromMonthKey, dreamDate, filterArchiveSessions, filterDreamEntries, groupDreamEntries, monthKey } from './archiveDerivations';
+import { archiveRepository, type ArchiveCalendarKind } from './archiveRepository';
+import { archiveSessionDate, buildCalendarDays, dateFromMonthKey, dreamDate, filterArchiveSessions, filterDreamEntries, groupDreamEntries, monthKey } from './archiveDerivations';
 import { archiveSessionTitle, ChatArchiveReader, DreamArchiveReader, formatArchiveDate, TiddleArchiveReader } from './ArchiveReaders';
 import type { ArchiveDetail, ArchiveKind, ArchiveSession, ContinuityCard, ContinuityCardGroup, DreamEntry, DreamGroup } from './archiveTypes';
 
@@ -255,14 +255,31 @@ export function Archive({ agents, operatorName = 'Operator' }: { agents: Agent[]
     return () => abort.abort();
   }, [kind, selectedTiddleCard]);
 
-  const agentSessions = useMemo(() => filterArchiveSessions(sessions, selectedAgent, ''), [selectedAgent, sessions]);
   const visibleSessions = useMemo(() => filterArchiveSessions(sessions, '', selectedDate), [selectedDate, sessions]);
-  const agentDreams = useMemo(() => filterDreamEntries(dreams, selectedAgent, search), [dreams, search, selectedAgent]);
   const visibleDreams = useMemo(() => filterDreamEntries(dreams, '', search, selectedDate), [dreams, search, selectedDate]);
   const dreamGroups = useMemo<DreamGroup[]>(() => groupDreamEntries(visibleDreams), [visibleDreams]);
-  const dateBuckets = useMemo(() => buildDateBuckets(kind, agentSessions, agentDreams), [agentDreams, agentSessions, kind]);
   const [calendarMonth, setCalendarMonth] = useState(() => monthKey(new Date()));
+  const [calendarDates, setCalendarDates] = useState<string[]>([]);
+  const [calendarAvailabilityState, setCalendarAvailabilityState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const calendarKind: ArchiveCalendarKind | null = kind === 'chat' ? 'sessions' : kind === 'dreams' ? 'dreams' : null;
+  useEffect(() => {
+    if (!calendarKind) { setCalendarDates([]); setCalendarAvailabilityState('ready'); return; }
+    const abort = new AbortController();
+    setCalendarDates([]);
+    setCalendarAvailabilityState('loading');
+    archiveRepository.listCalendarAvailability(calendarKind, calendarMonth, selectedAgent || undefined, abort.signal)
+      .then((response) => {
+        if (!abort.signal.aborted && response.kind === calendarKind && response.month === calendarMonth) {
+          setCalendarDates(response.dates);
+          setCalendarAvailabilityState('ready');
+        }
+      })
+      .catch(() => { if (!abort.signal.aborted) { setCalendarDates([]); setCalendarAvailabilityState('error'); } });
+    return () => abort.abort();
+  }, [calendarKind, calendarMonth, selectedAgent]);
+  const dateBuckets = useMemo(() => calendarDates.map((key) => ({ key, count: 1, year: '', month: '', day: '', label: '' })), [calendarDates]);
   const calendarDays = useMemo(() => buildCalendarDays(calendarMonth, dateBuckets), [calendarMonth, dateBuckets]);
+  const availableDates = useMemo(() => new Set(calendarDates), [calendarDates]);
   const calendarLabel = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(dateFromMonthKey(calendarMonth));
   const handleKindChange = (nextKind: ArchiveKind) => {
     setKind(nextKind);
@@ -289,9 +306,10 @@ export function Archive({ agents, operatorName = 'Operator' }: { agents: Agent[]
           <section><span className="archive-sidebar-label">MODS</span>{modArchives.map((mod) => <button key={mod.modId} type="button" className={activeMod?.modId === mod.modId ? 'active' : ''} onClick={() => setModId(mod.modId)}>{mod.name}</button>)}</section>
           <section className="archive-calendar" aria-label="Archive calendar">
             <div className="archive-calendar-heading"><span className="archive-sidebar-label">When <small>UTC</small></span><button type="button" className="archive-all-dates" onClick={() => setSelectedDate('')}>All dates</button></div>
+            <div className="sr-only" role="status" aria-live="polite">{calendarAvailabilityState === 'loading' ? 'Loading dates with archived records.' : calendarAvailabilityState === 'error' ? 'Could not load archive date availability; all dates remain selectable.' : `${calendarDates.length} dates with archived records in ${calendarMonth}.`}</div>
             <div className="archive-calendar-nav"><button type="button" aria-label="Previous month" onClick={() => { const month = dateFromMonthKey(calendarMonth); setCalendarMonth(monthKey(new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() - 1, 1)))); }}>‹</button><strong>{calendarLabel}</strong><button type="button" aria-label="Next month" onClick={() => { const month = dateFromMonthKey(calendarMonth); setCalendarMonth(monthKey(new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 1)))); }}>›</button></div>
             <div className="archive-calendar-weekdays" aria-hidden="true">{['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
-            <div className="archive-calendar-grid">{calendarDays.map((day, index) => day ? <button key={day.key} type="button" className={`${selectedDate === day.key ? 'active ' : ''}date-selectable`} onClick={() => setSelectedDate(day.key)} aria-label={`Select ${day.key}`} aria-pressed={selectedDate === day.key}>{day.day}</button> : <span key={`blank-${index}`} aria-hidden="true" />)}</div>
+            <div className="archive-calendar-grid">{calendarDays.map((day, index) => day ? <button key={day.key} type="button" className={`${availableDates.has(day.key) ? 'has-data ' : ''}${selectedDate === day.key ? 'active ' : ''}date-selectable`} onClick={() => setSelectedDate(day.key)} aria-label={`Select ${day.key}${availableDates.has(day.key) ? ', has archived records' : ''}`} aria-pressed={selectedDate === day.key} aria-busy={calendarAvailabilityState === 'loading'}>{day.day}</button> : <span key={`blank-${index}`} aria-hidden="true" />)}</div>
           </section>
         </aside>
         <main className="archive-content">

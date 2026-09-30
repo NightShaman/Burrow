@@ -5,7 +5,7 @@ import { loadModArchives, modsChangedEvent } from '../../app/modPanels';
 vi.mock('../../app/modPanels', () => ({ loadModArchives: vi.fn(), modsChangedEvent: 'burrow:mods-changed' }));
 vi.mock('../mods/ModArchiveHost', () => ({ ModArchiveHost: ({ date }: { date: string }) => <div data-testid="mod-date">{date || 'all dates'}</div> }));
 const emptyPage = { items: [], nextCursor: null, hasMore: false };
-vi.mock('./archiveRepository', () => ({ archiveRepository: { listContinuityCards: async () => emptyPage, listDreams: async () => emptyPage, listSessions: async () => emptyPage } }));
+vi.mock('./archiveRepository', () => ({ archiveRepository: { listContinuityCards: async () => emptyPage, listCalendarAvailability: async (kind: 'sessions' | 'dreams', month: string) => ({ ok: true as const, kind, month, dates: [] }), listDreams: async () => emptyPage, listSessions: async () => emptyPage } }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 it('discovers Archive contributions, passes calendar date and removes disabled destinations', async () => {
   vi.mocked(loadModArchives).mockResolvedValue([{ modId: 'fixture', name: 'Fixture archive', archiveUrl: '/api/mods/fixture/ui/archive.js' }]);

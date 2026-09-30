@@ -22,7 +22,7 @@ import { runPendingRecoveryContinuations } from '../src/recovery-continuation-ru
 import { recordActiveRunInterruptions } from '../src/interrupted-run-recovery.mjs';
 import { generateArchiveSummary } from '../src/archive-summary.mjs';
 import { listArchiveRuns, readArchiveRun } from '../src/archive-proof.mjs';
-import { archivePage, archiveUtcDay, matchesArchiveDay } from '../src/archive-pagination.mjs';
+import { archivePage, archiveUtcDay, archiveUtcMonth, archiveCalendarDates, matchesArchiveDay } from '../src/archive-pagination.mjs';
 import { loadWorkingContinuityAsync, normalizeContinuityScope, projectHandoffsIntoWorkingContinuity } from '../src/working-memory-continuity.mjs';
 import { workingContextFromSession } from '../src/working-context.mjs';
 import { appendGroupChannelTurn, createGroupChannel, listGroupChannels, readGroupChannel, readGroupChannelTurns } from '../src/group-channel-store.mjs';
@@ -1428,7 +1428,7 @@ function bearerToken(req) {
 function apiTokenScopeForRequest(req, url) {
   if (req.method !== 'GET') return null;
   const pathname = url.pathname;
-  if (pathname === '/api/health' || pathname === '/api/status' || pathname === '/api/metrics' || pathname === '/api/diagnostics/inventory' || pathname === '/api/diagnostics/postgres' || pathname === '/api/diagnostics/forge/jobs' || /^\/api\/diagnostics\/forge\/jobs\/[0-9a-f-]{36}$/i.test(pathname) || pathname === '/api/diagnostics/mods' || /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/pending$/.test(pathname) || /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/jobs(?:\/[A-Za-z0-9_-]+)?$/.test(pathname) || pathname === '/api/agents' || pathname === '/api/agent-status' || pathname === '/api/sessions' || /^\/api\/sessions\/[^/]+$/.test(pathname) || pathname === '/api/session/context' || pathname === '/api/session/context-status' || pathname === '/api/context' || pathname === '/api/chat/runs/active' || pathname === '/api/traces' || pathname.startsWith('/api/traces/') || pathname === '/api/archive/runs' || pathname.startsWith('/api/archive/runs/') || pathname === '/api/archive/sessions' || pathname.startsWith('/api/archive/sessions/')) return 'diagnostics:read';
+  if (pathname === '/api/health' || pathname === '/api/status' || pathname === '/api/metrics' || pathname === '/api/diagnostics/inventory' || pathname === '/api/diagnostics/postgres' || pathname === '/api/diagnostics/forge/jobs' || /^\/api\/diagnostics\/forge\/jobs\/[0-9a-f-]{36}$/i.test(pathname) || pathname === '/api/diagnostics/mods' || /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/pending$/.test(pathname) || /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/jobs(?:\/[A-Za-z0-9_-]+)?$/.test(pathname) || pathname === '/api/agents' || pathname === '/api/agent-status' || pathname === '/api/sessions' || /^\/api\/sessions\/[^/]+$/.test(pathname) || pathname === '/api/session/context' || pathname === '/api/session/context-status' || pathname === '/api/context' || pathname === '/api/chat/runs/active' || pathname === '/api/traces' || pathname.startsWith('/api/traces/') || pathname === '/api/archive/calendar' || pathname === '/api/archive/runs' || pathname.startsWith('/api/archive/runs/') || pathname === '/api/archive/sessions' || pathname.startsWith('/api/archive/sessions/')) return 'diagnostics:read';
   return null;
 }
 
@@ -1929,18 +1929,22 @@ function archiveSessionListItem(record = {}, agentRuntime = {}, agent = {}) {
   };
 }
 
-async function archiveDreams({ agentId = null, date = null, phase = null, limit = 200, cursor = null } = {}) {
-  if (date) archiveUtcDay(date);
+async function archiveDreamRows({ agentId = null, phase = null } = {}) {
   const agents = (await agentsStore().list({ includeDisabled: true })).filter((agent) => !agentId || agent.id === String(agentId));
   const store = dreamDiaryStore();
   try {
-    const entries = (await Promise.all(agents.map(async (agent) => {
+    return (await Promise.all(agents.map(async (agent) => {
       const listed = await store.list(agent.id, { phase, limit: null });
       return listed.map((entry) => ({ id: entry.id, kind: 'dream', agentId: agent.id, agentName: agent.name, entryDate: entry.entryDate, phase: entry.phase, title: `${entry.phase.toUpperCase()} dream · ${entry.entryDate}`, excerpt: String(entry.narrative || '').slice(0, 320).trim(), createdAt: entry.createdAt }));
     }))).flat();
-    const page = archivePage(entries.filter((entry) => matchesArchiveDay(entry.createdAt, date)), { limit, cursor, scope: JSON.stringify(['dreams', agentId, date, phase]), timestamp: (row) => row.createdAt, identity: (row) => `${row.agentId}:${row.id}` });
-    return { ok: true, entries: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
   } finally { await store.close(); }
+}
+
+async function archiveDreams({ agentId = null, date = null, phase = null, limit = 200, cursor = null } = {}) {
+  if (date) archiveUtcDay(date);
+  const entries = await archiveDreamRows({ agentId, phase });
+  const page = archivePage(entries.filter((entry) => matchesArchiveDay(entry.createdAt, date)), { limit, cursor, scope: JSON.stringify(['dreams', agentId, date, phase]), timestamp: (row) => row.createdAt, identity: (row) => `${row.agentId}:${row.id}` });
+  return { ok: true, entries: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
 }
 
 async function archiveDreamDetail(agentId, entryId) {
@@ -2016,17 +2020,29 @@ async function archiveRunDetail({ agentRuntime = null, runId } = {}) {
   return null;
 }
 
-async function archiveSessions({ includeArchived = true, query = '', agentId = null, date = null, limit = 200, includeDisabled = false, cursor = null } = {}) {
-  if (date) archiveUtcDay(date);
+async function archiveSessionRows({ includeArchived = true, agentId = null, includeDisabled = false } = {}) {
   const agents = (await agentsStore().list({ includeDisabled: Boolean(includeDisabled) })).filter((agent) => !agentId || agent.id === agentId);
   const store = postgresApplication.stores.conversations;
-  const rows = (await Promise.all(agents.map(async (agent) => {
+  return (await Promise.all(agents.map(async (agent) => {
     const [sessions, archives] = await Promise.all([store.listSessions({ agentId: agent.id, includeArchived }), store.listArchives({ agentId: agent.id, limit: null })]);
     return [
       ...sessions.map((record) => archiveSessionListItem({ id: record.sessionId, ...record, metadata: record }, { agentId: agent.id }, agent)),
       ...archives.filter((record) => record.kind === 'reset').map((record) => archiveSessionListItem({ id: record.archiveId, archiveSnapshot: 'reset', sourceSessionId: record.sessionId, turnCount: record.entries.length, updatedAt: record.createdAt, archiveSummary: record.metadata?.summary, summaryStatus: record.metadata?.summaryStatus, metadata: { ...record.metadata, createdAt: record.createdAt } }, { agentId: agent.id }, agent)),
     ];
   }))).flat();
+}
+
+async function archiveCalendar({ kind, month, agentId = null } = {}) {
+  const parsedMonth = archiveUtcMonth(month);
+  if (!['sessions', 'dreams'].includes(kind)) throw new Error('archive_kind_invalid');
+  const rows = kind === 'dreams' ? await archiveDreamRows({ agentId }) : await archiveSessionRows({ agentId });
+  const dates = archiveCalendarDates(rows, parsedMonth, (row) => kind === 'dreams' ? row.createdAt : row.archivedAt || row.updatedAt || row.createdAt);
+  return { ok: true, kind, month: parsedMonth, dates };
+}
+
+async function archiveSessions({ includeArchived = true, query = '', agentId = null, date = null, limit = 200, includeDisabled = false, cursor = null } = {}) {
+  if (date) archiveUtcDay(date);
+  const rows = await archiveSessionRows({ includeArchived, agentId, includeDisabled });
   const page = archivePage(rows.filter((item) => (matchesArchiveDay(item.archivedAt || item.updatedAt || item.createdAt, date)) && (!query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase()))), { limit, cursor, max: 1000, scope: JSON.stringify(['sessions', includeArchived, query, includeDisabled, agentId, date]), timestamp: (row) => row.updatedAt, identity: (row) => `${row.agentId}:${row.id}` });
   return { sessions: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
 }
@@ -3060,7 +3076,7 @@ const skillApi = {
 };
 const settingsRoute = createSettingsRoutes({ ...skillApi, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, archiveSummaryModelSelection: async (agentId) => ({ ok: true, selection: await archiveSummarySelection((await resolveAgentRuntime(agentId)).agentId) }), saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection: async (id) => await modelsStore().remove(id), setupStatus: async () => postgresApplication.stores.setupState.readStatus(), completeSetup: async () => postgresApplication.stores.setupState.completeSetup() });
 const agentRoute = createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession, agentOverview });
-const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
+const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
 const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
 const observabilityRoute = createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, codexLbAccounts, anthropicOauthUsage, openaiOauthUsage, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore: postgresApplication.stores.conversations, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
 const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJson, validateBoundaryBody, withScheduledJobs, scheduler, listGroupChannels, createGroupChannel, readGroupChannelTurns, groupChannelRuns, startGroupChannelMessage, cancelGroupChannelRun, runtimeDataRoot, conversationStore: postgresApplication.stores.conversations });

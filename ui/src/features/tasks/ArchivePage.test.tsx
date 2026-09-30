@@ -26,11 +26,18 @@ describe('Archive detail selection', () => {
   it('sends selected UTC day and agent as server filters for chat and dreams', async () => {
     const sessions = vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([]));
     vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([]));
+    const availability = vi.spyOn(archiveRepository, 'listCalendarAvailability').mockImplementation(async (kind, month, agentId) => ({ ok: true, kind, month, dates: agentId ? [`${month}-12`] : [`${month}-29`] }));
+    const testAgents = [{ id: 'smatchet', name: 'Smatchet', avatar: '', activity: '', context: null, provider: '', model: '', effort: '', temperature: 0, workspace: '', files: [], subagents: [] }];
     const dreams = vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([]));
-    render(<Archive agents={[]} />);
+    render(<Archive agents={testAgents} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Select 2026-09-29' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Select 2026-09-29, has archived records' }));
     await waitFor(() => expect(sessions).toHaveBeenCalledWith('', expect.any(AbortSignal), null, '2026-09-29', undefined));
+    expect(availability).toHaveBeenCalledWith('sessions', expect.stringMatching(/^\d{4}-\d{2}$/), undefined, expect.any(AbortSignal));
+    const agentSelect = screen.getByRole('combobox', { name: 'Filter by agent' });
+    Object.defineProperty(agentSelect, 'options', { configurable: true, value: [{ value: '' }, { value: 'smatchet' }] });
+    fireEvent.change(agentSelect, { target: { value: 'smatchet' } });
+    await waitFor(() => expect(availability).toHaveBeenLastCalledWith('sessions', expect.stringMatching(/^\d{4}-\d{2}$/), 'smatchet', expect.any(AbortSignal)));
 
     fireEvent.click(screen.getByRole('button', { name: /Dreams/ }));
     await waitFor(() => expect(dreams).toHaveBeenCalledWith(expect.any(AbortSignal), null, '2026-09-29', undefined));

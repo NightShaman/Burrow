@@ -31,3 +31,16 @@ export function archiveUtcDay(value) {
 export function matchesArchiveDay(timestamp, day) {
   return !day || String(timestamp || '').slice(0, 10) === day;
 }
+
+// Availability is computed from all retained records, never from a paginated page.
+export function archiveUtcMonth(value) {
+  const month = String(value || '');
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || Number(month.slice(0, 4)) < 1) throw new Error('archive_month_invalid');
+  return month;
+}
+
+export function archiveCalendarDates(rows, month, timestamp) {
+  archiveUtcMonth(month);
+  return [...new Set(rows.map((row) => String(timestamp(row) || '').slice(0, 10))
+    .filter((day) => day.startsWith(`${month}-`) && /^\d{4}-\d{2}-\d{2}$/.test(day)))].sort();
+}
