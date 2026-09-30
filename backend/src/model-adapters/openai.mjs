@@ -5,8 +5,6 @@ import { googleCompatibleWireModel } from './google-wire.mjs';
 import {
   readResponseTextBounded,
   toolOutputText,
-  toolOutputContent,
-  attachmentViewUserMessage,
   chatToolContinuationMessages,
   buildProviderMessageManifest,
   messageContentChars,
@@ -36,16 +34,6 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
     if (!isToolContinuation && (!resolvedMessages.length || !resolvedMessages.some((message) => message.content))) throw new Error('prompt or messages are required');
     const resolvedTools = Array.isArray(tools) && tools.length ? tools : null;
     const resolvedToolNames = toolNames(resolvedTools);
-    const continuationOutput = (toolContinuation?.toolResults || []).flatMap((result, index) => {
-      const call = toolContinuation?.toolCalls?.[index] || {};
-      const output = {
-        type: 'function_call_output',
-        call_id: call.id || `tool-call-${index}`,
-        output: toolOutputContent(result),
-      };
-      const imageMessage = attachmentViewUserMessage(result, call, index);
-      return imageMessage ? [output, ...messagesToResponsesInput([imageMessage])] : [output];
-    });
     // The runtime prepares native continuation messages against the real
     // provider budget. Preserve that protocol-valid sequence here; direct
     // adapter callers retain the unprepared compatibility construction.
@@ -57,9 +45,10 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         ? toolContinuation.preparedMessages
         : chatToolContinuationMessages({ baseMessages: toolContinuation.baseMessages || resolvedMessages, toolCalls: toolContinuation.toolCalls, toolResults: toolContinuation.toolResults }))
       : null;
-    const continuationInput = chatGptBackend
-      ? messagesToResponsesInput(providerContinuationMessages)
-      : continuationOutput;
+    // Replay the budget-prepared transcript on every Responses continuation.
+    // Codex upstream rejects previous_response_id, and proxies can hoist system
+    // messages into non-inherited instructions. Replay preserves both rules and calls.
+    const continuationInput = messagesToResponsesInput(providerContinuationMessages);
     const continuationMessages = isToolContinuation && mode !== 'openai-responses'
       ? providerContinuationMessages
       : null;
@@ -67,7 +56,6 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       ? {
           model: wireModel,
           input: isToolContinuation ? continuationInput : messagesToResponsesInput(messages, prompt),
-          ...(!chatGptBackend && isToolContinuation && toolContinuation.previousResponseId ? { previous_response_id: toolContinuation.previousResponseId } : {}),
           ...(chatGptBackend || config.supportsTemperature === false ? {} : { temperature }),
           ...(resolvedTools ? { tools: resolvedTools.map(responseApiTool), tool_choice: toolChoice } : {}),
           ...(maxTokens ? { max_output_tokens: maxTokens } : {}),
@@ -84,6 +72,11 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
           ...(config.extra || {}),
           ...(streaming ? { stream: true } : {}),
         };
+    if (mode === 'openai-responses') {
+      // Connection extras must not replace the authoritative replay or re-enable chaining.
+      body.input = isToolContinuation ? continuationInput : messagesToResponsesInput(messages, prompt);
+      delete body.previous_response_id;
+    }
     // ChatGPT's account/Codex backend is not the public Responses API.
     // It rejects output limits, including explicit caller or extra values.
     if (chatGptBackend) {
