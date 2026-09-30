@@ -21,7 +21,8 @@ import { buildContinuityHandoff } from '../src/continuity-handoff-store.mjs';
 import { runPendingRecoveryContinuations } from '../src/recovery-continuation-runner.mjs';
 import { recordActiveRunInterruptions } from '../src/interrupted-run-recovery.mjs';
 import { generateArchiveSummary } from '../src/archive-summary.mjs';
-import { listArchiveRuns, mergeArchiveRuns, readArchiveRun } from '../src/archive-proof.mjs';
+import { listArchiveRuns, readArchiveRun } from '../src/archive-proof.mjs';
+import { archivePage, archiveUtcDay, matchesArchiveDay } from '../src/archive-pagination.mjs';
 import { loadWorkingContinuityAsync, normalizeContinuityScope, projectHandoffsIntoWorkingContinuity } from '../src/working-memory-continuity.mjs';
 import { workingContextFromSession } from '../src/working-context.mjs';
 import { appendGroupChannelTurn, createGroupChannel, listGroupChannels, readGroupChannel, readGroupChannelTurns } from '../src/group-channel-store.mjs';
@@ -1928,15 +1929,17 @@ function archiveSessionListItem(record = {}, agentRuntime = {}, agent = {}) {
   };
 }
 
-async function archiveDreams({ agentId = null, date = null, phase = null, limit = 200 } = {}) {
+async function archiveDreams({ agentId = null, date = null, phase = null, limit = 200, cursor = null } = {}) {
+  if (date) archiveUtcDay(date);
   const agents = (await agentsStore().list({ includeDisabled: true })).filter((agent) => !agentId || agent.id === String(agentId));
   const store = dreamDiaryStore();
   try {
     const entries = (await Promise.all(agents.map(async (agent) => {
-      const listed = await store.list(agent.id, { date, phase, limit });
+      const listed = await store.list(agent.id, { phase, limit: null });
       return listed.map((entry) => ({ id: entry.id, kind: 'dream', agentId: agent.id, agentName: agent.name, entryDate: entry.entryDate, phase: entry.phase, title: `${entry.phase.toUpperCase()} dream · ${entry.entryDate}`, excerpt: String(entry.narrative || '').slice(0, 320).trim(), createdAt: entry.createdAt }));
     }))).flat();
-    return { ok: true, entries: entries.sort((a, b) => String(b.entryDate || b.createdAt).localeCompare(String(a.entryDate || a.createdAt))).slice(0, Math.max(1, Math.min(500, Number(limit) || 200))) };
+    const page = archivePage(entries.filter((entry) => matchesArchiveDay(entry.createdAt, date)), { limit, cursor, scope: JSON.stringify(['dreams', agentId, date, phase]), timestamp: (row) => row.createdAt, identity: (row) => `${row.agentId}:${row.id}` });
+    return { ok: true, entries: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
   } finally { await store.close(); }
 }
 
@@ -1949,21 +1952,22 @@ async function archiveDreamDetail(agentId, entryId) {
   } catch (error) { return { ok: false, status: String(error?.message || error) === 'dream_diary_entry_not_found' ? 404 : 400, error: String(error?.message || error) }; } finally { await store.close(); }
 }
 
-async function archiveContinuityCards({ agentId = null, scope = null, limit = 200 } = {}) {
-  const resolvedLimit = boundedInteger(limit, { fallback: 200, min: 1, max: 500 });
+async function archiveContinuityCards({ agentId = null, scope = null, limit = 200, cursor = null } = {}) {
   const agents = (await agentsStore().list({ includeDisabled: true })).filter((agent) => !agentId || agent.id === String(agentId));
-  const cards = (await Promise.all(agents.map(async (agent) => (await listTiddleCards({ agentId: agent.id, scope, limit: resolvedLimit, stores: postgresApplication.stores, })).cards.map((card) => ({ ...card, kind: 'continuity', agentId: agent.id, agentName: agent.name }))))).flat();
-  return { ok: true, scope: scope || null, cards: cards.sort((left, right) => String(right.lastSeen || '').localeCompare(String(left.lastSeen || ''))).slice(0, resolvedLimit) };
+  const cards = (await Promise.all(agents.map(async (agent) => (await listTiddleCards({ agentId: agent.id, scope, limit: null, stores: postgresApplication.stores, })).cards.map((card) => ({ ...card, kind: 'continuity', agentId: agent.id, agentName: agent.name }))))).flat();
+  const page = archivePage(cards, { limit, cursor, scope: JSON.stringify(['cards', agentId, scope]), timestamp: (row) => row.lastSeen, identity: (row) => `${row.agentId}:${row.id}` });
+  return { ok: true, scope: scope || null, cards: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
 }
 
-async function archiveContinuityCardDetail({ agentId, cardId, limit = 200 } = {}) {
+async function archiveContinuityCardDetail({ agentId, cardId, limit = 200, cursor = null } = {}) {
   const agent = await agentsStore().get(agentId);
   if (!agent) return { ok: false, status: 404, error: 'agent_not_found' };
-  const cards = (await listTiddleCards({ agentId, limit: 500, stores: postgresApplication.stores, })).cards;
+  const cards = (await listTiddleCards({ agentId, limit: null, stores: postgresApplication.stores, })).cards;
   const card = cards.find((candidate) => candidate.id === cardId);
   if (!card) return { ok: false, status: 404, error: 'archive_continuity_card_not_found' };
-  const history = (await tiddleHistory({ agentId, cardId, limit: boundedInteger(limit, { fallback: 200, min: 1, max: 500 }), stores: postgresApplication.stores, })).entries;
-  return { ok: true, card: { ...card, kind: 'continuity', agentId, agentName: agent.name }, history };
+  const history = (await tiddleHistory({ agentId, cardId, limit: null, stores: postgresApplication.stores, })).entries;
+  const page = archivePage(history, { limit, cursor, scope: JSON.stringify(['history', agentId, cardId]), timestamp: (row) => row.at, identity: (row) => row.id });
+  return { ok: true, card: { ...card, kind: 'continuity', agentId, agentName: agent.name }, history: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
 }
 
 async function archiveRunsForAgent({ agentRuntime, sessionId = null, limit = 100 } = {}) {
@@ -1981,13 +1985,13 @@ async function archiveRunsForAgent({ agentRuntime, sessionId = null, limit = 100
   });
 }
 
-async function archiveRuns({ agentRuntime = null, sessionId = null, limit = 100 } = {}) {
-  if (agentRuntime) return archiveRunsForAgent({ agentRuntime, sessionId, limit });
-  const resolvedLimit = boundedInteger(limit, { fallback: 100, min: 1, max: 200 });
-  const agents = await agentsStore().list({ includeDisabled: false });
-  const lists = await Promise.all(agents.map(async (agent) => archiveRunsForAgent({ agentRuntime: await resolveAgentRuntime(agent.id), sessionId, limit: resolvedLimit })));
-  return mergeArchiveRuns(lists, resolvedLimit);
+async function archiveRuns({ agentRuntime = null, sessionId = null, limit = 100, cursor = null } = {}) {
+  const agents = agentRuntime ? [agentRuntime] : await Promise.all((await agentsStore().list({ includeDisabled: false })).map((agent) => resolveAgentRuntime(agent.id)));
+  const lists = await Promise.all(agents.map((runtime) => archiveRunsForAgent({ agentRuntime: runtime, sessionId, limit: null })));
+  const page = archivePage(lists.flat(), { limit, cursor, max: 200, scope: JSON.stringify(['runs', agentRuntime?.agentId, sessionId]), timestamp: (row) => row.completedAt || row.startedAt, identity: (row) => `${row.agentId}:${row.runId}` });
+  return { runs: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
 }
+
 
 async function archiveRunDetailForAgent({ agentRuntime, runId } = {}) {
   const agent = await agentsStore().resolve(agentRuntime.agentId) || { id: agentRuntime.agentId, name: agentRuntime.agentId };
@@ -2012,9 +2016,9 @@ async function archiveRunDetail({ agentRuntime = null, runId } = {}) {
   return null;
 }
 
-async function archiveSessions({ includeArchived = true, query = '', limit = 200, includeDisabled = false } = {}) {
-  const resolvedLimit = boundedInteger(limit, { fallback: 200, min: 1, max: 1000 });
-  const agents = await agentsStore().list({ includeDisabled: Boolean(includeDisabled) });
+async function archiveSessions({ includeArchived = true, query = '', agentId = null, date = null, limit = 200, includeDisabled = false, cursor = null } = {}) {
+  if (date) archiveUtcDay(date);
+  const agents = (await agentsStore().list({ includeDisabled: Boolean(includeDisabled) })).filter((agent) => !agentId || agent.id === agentId);
   const store = postgresApplication.stores.conversations;
   const rows = (await Promise.all(agents.map(async (agent) => {
     const [sessions, archives] = await Promise.all([store.listSessions({ agentId: agent.id, includeArchived }), store.listArchives({ agentId: agent.id, limit: null })]);
@@ -2023,7 +2027,8 @@ async function archiveSessions({ includeArchived = true, query = '', limit = 200
       ...archives.filter((record) => record.kind === 'reset').map((record) => archiveSessionListItem({ id: record.archiveId, archiveSnapshot: 'reset', sourceSessionId: record.sessionId, turnCount: record.entries.length, updatedAt: record.createdAt, archiveSummary: record.metadata?.summary, summaryStatus: record.metadata?.summaryStatus, metadata: { ...record.metadata, createdAt: record.createdAt } }, { agentId: agent.id }, agent)),
     ];
   }))).flat();
-  return rows.filter((item) => !query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase())).sort((a,b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))).slice(0, resolvedLimit);
+  const page = archivePage(rows.filter((item) => (matchesArchiveDay(item.archivedAt || item.updatedAt || item.createdAt, date)) && (!query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase()))), { limit, cursor, max: 1000, scope: JSON.stringify(['sessions', includeArchived, query, includeDisabled, agentId, date]), timestamp: (row) => row.updatedAt, identity: (row) => `${row.agentId}:${row.id}` });
+  return { sessions: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
 }
 
 function activityItemFromTraceCard(card = {}) {

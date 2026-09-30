@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Archive } from './ArchivePage';
-import { archiveRepository } from './archiveRepository';
+import { archiveRepository, type ArchivePage } from './archiveRepository';
 import type { ArchiveDetail, ArchiveSession, ContinuityCard, ContinuityCardGroup } from './archiveTypes';
 
 function deferred<T>() {
@@ -15,21 +15,36 @@ function card(id: string, title: string): ContinuityCard {
 }
 
 function detail(value: ContinuityCard): ContinuityCardGroup {
-  return { card: value, history: [] };
+  return { card: value, history: [], nextCursor: null, hasMore: false } as ContinuityCardGroup;
 }
+
+function collectionPage<T>(items: T[]): ArchivePage<T> { return { items, nextCursor: null, hasMore: false }; }
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.clear(); });
 
 describe('Archive detail selection', () => {
+  it('sends selected UTC day and agent as server filters for chat and dreams', async () => {
+    const sessions = vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([]));
+    vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([]));
+    const dreams = vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([]));
+    render(<Archive agents={[]} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Select 2026-09-29' }));
+    await waitFor(() => expect(sessions).toHaveBeenCalledWith('', expect.any(AbortSignal), null, '2026-09-29', undefined));
+
+    fireEvent.click(screen.getByRole('button', { name: /Dreams/ }));
+    await waitFor(() => expect(dreams).toHaveBeenCalledWith(expect.any(AbortSignal), null, '2026-09-29', undefined));
+  });
+
   it('does not let a slower previous Tiddle request replace the current card', async () => {
     const firstCard = card('first', 'First card');
     const secondCard = card('second', 'Second card');
     const firstRequest = deferred<ContinuityCardGroup>();
     const secondRequest = deferred<ContinuityCardGroup>();
 
-    vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue([firstCard, secondCard]);
-    vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue([]);
-    vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue([]);
+    vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([firstCard, secondCard]));
+    vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([]));
+    vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([]));
     vi.spyOn(archiveRepository, 'loadContinuityCard').mockImplementation((selected) => selected.id === 'first' ? firstRequest.promise : secondRequest.promise);
 
     render(<Archive agents={[]} />);
@@ -52,9 +67,9 @@ describe('Paginated chat history', () => {
   const session = (id: string): ArchiveSession => ({ id, sessionId: id, agentId: 'smatchet', agentName: 'Smatchet', title: id, summary: '', archived: true } as ArchiveSession);
   const page = (text: string, hasMore: boolean, nextCursor: string | null = null): ArchiveDetail => ({ session: { turns: [{ role: 'user', content: text, ts: text }] }, hasMore, nextCursor, historyStatus: 'complete' });
   it('loads earlier turns, preserves loaded history on failure, and shows the beginning', async () => {
-    vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue([]);
-    vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue([]);
-    vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue([session('one')]);
+    vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([]));
+    vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([]));
+    vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([session('one')]));
     const load = vi.spyOn(archiveRepository, 'loadSession').mockResolvedValueOnce(page('new', true, 'older')).mockResolvedValueOnce(page('old', false));
     render(<Archive agents={[]} />);
     fireEvent.click(await screen.findByRole('button', { name: /one.*turns/i }));
@@ -66,9 +81,9 @@ describe('Paginated chat history', () => {
     expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'one' }), expect.any(AbortSignal), 'older');
   });
   it('does not let a late older page enter the next selected conversation', async () => {
-    vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue([]);
-    vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue([]);
-    vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue([session('one'), session('two')]);
+    vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([]));
+    vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([]));
+    vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([session('one'), session('two')]));
     const old = deferred<ArchiveDetail>();
     vi.spyOn(archiveRepository, 'loadSession').mockImplementation((selected, _signal, before) => before ? old.promise : Promise.resolve(page(selected.sessionId, selected.sessionId === 'one', selected.sessionId === 'one' ? 'older' : null)));
     render(<Archive agents={[]} />);

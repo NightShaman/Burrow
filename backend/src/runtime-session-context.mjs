@@ -5,7 +5,11 @@ import { loadWorkingContinuityAsync, normalizeContinuityScope, projectHandoffsIn
 import { validateReadEvidence } from './read-evidence.mjs';
 import { readSessionReadEvidence } from './read-evidence-store.mjs';
 
-export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessionId, runtimeState, normalizedArgs, workspaceRoot, resolvedTarget, message, explicitWorkspaceFiles = [], interruptedRun = null, stores = null } = {}) {
+export function agentExecutionWorkspaceRoot(agentRuntime) {
+  return agentRuntime?.executionEnvironment?.workspaceRoot || agentRuntime?.agentWorkspaceRoot || null;
+}
+
+export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessionId, runtimeState, normalizedArgs, workspaceRoot, resolvedTarget, agentRuntime = null, message, explicitWorkspaceFiles = [], interruptedRun = null, stores = null } = {}) {
   if (!stores?.conversations || !stores?.continuity || !stores?.workingMemory || !stores?.tasks) throw new Error('runtime_stores_required');
   const agentId = runtimeState?.agentId;
   if (typeof agentId !== 'string' || !agentId.trim()) throw new Error('agent_id_required');
@@ -27,11 +31,14 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
   const continuityHandoffs = isFreshConversation
     ? await stores.continuity.list({ agentId: agentId, limit: 1 })
     : [];
+  // Execution assignments select the host's working directory, not the
+  // controller-owned agent data/attachment root. Keep those namespaces separate.
+  const configuredWorkingRoot = agentExecutionWorkspaceRoot(agentRuntime) || runtimeState.agentWorkspaceRoot || runtimeState.workspaceRoot;
   const workspaceResolution = turnWorkspaceFacts({
-    configuredWorkspaceRoot: runtimeState.agentWorkspaceRoot || runtimeState.workspaceRoot,
+    configuredWorkspaceRoot: configuredWorkingRoot,
     requestedWorkspaceRoot: workspaceRoot ?? normalizedArgs.workspace_root ?? null,
   });
-  const resolvedWorkingRoot = resolvedTarget?.root || workspaceRoot || normalizedArgs.workspace_root || runtimeState.agentWorkspaceRoot || runtimeState.workspaceRoot || null;
+  const resolvedWorkingRoot = resolvedTarget?.root || workspaceRoot || normalizedArgs.workspace_root || configuredWorkingRoot || null;
   const priorWorkingContext = workingContextFromSession(priorSession);
   // ReadEvidence is an active-session aid, not ambient new-session memory. A
   // fresh session without an interrupted run must begin from its actual

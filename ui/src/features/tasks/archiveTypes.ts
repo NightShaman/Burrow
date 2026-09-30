@@ -11,4 +11,4 @@ export type ArchiveDreamDocument = { document: { id: string; kind: 'dream'; agen
 export type DreamGroup = { key: string; agentId: string; agentName: string; day: string; entries: DreamEntry[] };
 export type DateBucket = { key: string; year: string; month: string; day: string; label: string; count: number };
 export type CalendarDay = { key: string; day: number; count: number; hasData: boolean };
-export type ContinuityCardGroup = { card: ContinuityCard; history: ContinuityHistoryEntry[] };
+export type ContinuityCardGroup = { card: ContinuityCard; history: ContinuityHistoryEntry[]; nextCursor: string | null; hasMore: boolean };

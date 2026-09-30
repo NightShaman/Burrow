@@ -2,7 +2,9 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ArchiveRunDetail } from '../../app/api';
 import { ArchiveRunsProof } from './ArchiveRunsProof';
-import { archiveRepository } from './archiveRepository';
+import { archiveRepository, type ArchivePage } from './archiveRepository';
+
+const runsPage = (runs: ArchiveRunDetail[]): ArchivePage<ArchiveRunDetail> => ({ items: runs, nextCursor: null, hasMore: false });
 
 function run(agentId = 'smatchet'): ArchiveRunDetail {
   return { id: 'shared', runId: 'shared', agentId, sessionId: 'default', status: 'completed', objective: `${agentId} objective`, counts: { observations: 0, changes: 0, verifications: 0, unresolved: 0, failures: 0, toolActivities: 0, subagents: 0 }, evidence: { observations: [], changes: [], verifications: [], unresolved: [], failures: [] }, timeline: [], references: { trace: null, sourceRefs: [] }, subagents: [] };
@@ -17,7 +19,7 @@ for (const [status, label] of statuses) for (const expected of [false, true]) fo
   it(`${status}: expected=${expected}, actionRequired=${actionRequired}`, async () => {
     const value = run();
     value.subagents = [{ id: 'child', status: 'succeeded', phase: null, purpose: 'Child check', createdAt: null, completedAt: null, model: null, result: null, trace: {}, verification: { status, expected, actionRequired, check: 'test', observed: 'receipt outcome' } }];
-    vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue([value]);
+    vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue(runsPage([value]));
     vi.spyOn(archiveRepository, 'loadRun').mockResolvedValue(value);
     render(<ArchiveRunsProof selectedAgent="" search="" />);
     fireEvent.click(await screen.findByRole('button', { name: /smatchet objective/ }));
@@ -32,7 +34,7 @@ it('keeps aggregate selection agent-qualified and ignores stale detail responses
   const first = run('hatchet'), second = run('smatchet');
   let finishFirst!: (value: ArchiveRunDetail) => void;
   const pending = new Promise<ArchiveRunDetail>((resolve) => { finishFirst = resolve; });
-  vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue([first, second]);
+  vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue(runsPage([first, second]));
   const load = vi.spyOn(archiveRepository, 'loadRun').mockImplementation((_id, agent) => agent === 'hatchet' ? pending : Promise.resolve(second));
   const view = render(<ArchiveRunsProof selectedAgent="" search="" />);
   const firstButton = await screen.findByRole('button', { name: /hatchet objective/ });
@@ -51,7 +53,7 @@ it('keeps aggregate selection agent-qualified and ignores stale detail responses
 it('does not restore pending detail after changing the agent filter', async () => {
   const value = run();
   let finish!: (value: ArchiveRunDetail) => void;
-  vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue([value]);
+  vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue(runsPage([value]));
   vi.spyOn(archiveRepository, 'loadRun').mockReturnValue(new Promise((resolve) => { finish = resolve; }));
   const view = render(<ArchiveRunsProof selectedAgent="" search="" />);
   fireEvent.click(await screen.findByRole('button', { name: /smatchet objective/ }));
@@ -63,7 +65,7 @@ it('does not restore pending detail after changing the agent filter', async () =
 it('renders linked child summaries as safe Markdown with chat line breaks', async () => {
   const value = run();
   value.subagents = [{ id: 'child', status: 'succeeded', phase: null, purpose: 'Markdown child', createdAt: null, completedAt: null, model: null, trace: {}, result: { summary: '## Child reply\n\n**Completed** with `code`\nNext line\n\n- First finding\n- Second finding\n\n```js\nconst done = true;\n```\n\n[Reference](https://example.com)\n\n<script>alert(1)</script>\n\n<img src=x onerror=alert(1)>\n\n[Unsafe](javascript:alert(1))', evidence: 2, changedFiles: 0 } }];
-  vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue([value]);
+  vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue(runsPage([value]));
   vi.spyOn(archiveRepository, 'loadRun').mockResolvedValue(value);
   render(<ArchiveRunsProof selectedAgent="" search="" />);
   fireEvent.click(await screen.findByRole('button', { name: /smatchet objective/ }));
@@ -82,7 +84,7 @@ it('renders linked child summaries as safe Markdown with chat line breaks', asyn
 it('lazy-loads and expands full redacted tool evidence from the trace API', async () => {
   const value = run();
   value.sessionId = 'proof-session';
-  vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue([value]);
+  vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue(runsPage([value]));
   vi.spyOn(archiveRepository, 'loadRun').mockResolvedValue(value);
   const trace = vi.spyOn(archiveRepository, 'loadRunTrace').mockResolvedValue({ tools: [{ name: 'shell', output: '[REDACTED]' }] });
   render(<ArchiveRunsProof selectedAgent="" search="" />);

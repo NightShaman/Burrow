@@ -480,7 +480,7 @@ export async function listArchiveRuns({ rootDir, conversationStore, dataRoot = n
     const id = session.id;
     const [entries, evidence] = await Promise.all([
       evidenceTranscript({ conversationStore, agentId, sessionId: id, includeResetHistory: true }),
-      readRunEvidence({ conversationStore, agentId, rootDir, sessionId: id, limit: MAX_RUNS }),
+      readRunEvidence({ conversationStore, agentId, rootDir, sessionId: id, limit: null }),
     ]);
     const byRun = new Map(evidence.map((item) => [item.runId, item]));
     // Tool calls, results, and activity events are already persisted before a
@@ -489,7 +489,7 @@ export async function listArchiveRuns({ rootDir, conversationStore, dataRoot = n
     const sessionTraceRoot = traceRootFor({ traceRoot, resolveTraceRoot, sessionId: id });
     for (const [runId, item] of byRun) results.push(await proofDetail({ conversationStore, agentId, agentName, sessionId: id, runId, entries, evidence: item, subagentRecords, traceRoot: sessionTraceRoot }));
   }
-  return results.sort((left, right) => String(right.completedAt || right.startedAt || '').localeCompare(String(left.completedAt || left.startedAt || ''))).slice(0, boundedInteger(limit));
+  return results.sort((left, right) => String(right.completedAt || right.startedAt || '').localeCompare(String(left.completedAt || left.startedAt || ''))).slice(0, limit === null ? undefined : boundedInteger(limit));
 }
 
 export async function readArchiveRun({ rootDir, conversationStore, dataRoot = null, traceRoot = null, resolveTraceRoot = null, agentId, agentName = null, runId } = {}) {

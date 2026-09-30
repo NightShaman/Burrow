@@ -53,8 +53,8 @@ export class PostgresDreamDiaryStore {
   async list(agent, { date: filterDate = null, phase: filterPhase = null, limit = 30 } = {}) {
     const agentId = text(agent); if (!agentId) throw new Error('dream_diary_agent_required');
     const check = await this.pool.query('SELECT id FROM agents WHERE id=$1', [agentId]); if (!check.rows[0]) throw new Error('agent_not_found');
-    const d = filterDate ? date(filterDate) : null, p = filterPhase ? phase(filterPhase) : null, n = Math.max(1, Math.min(200, Number(limit) || 30));
-    const result = await this.pool.query(`SELECT * FROM dream_diary_entries WHERE agent_id=$1 AND ($2::text IS NULL OR entry_date=$2::text) AND ($3::text IS NULL OR phase=$3::text) ORDER BY entry_date DESC,created_at DESC LIMIT $4`, [agentId, d, p, n]);
+    const d = filterDate ? date(filterDate) : null, p = filterPhase ? phase(filterPhase) : null, n = limit === null ? null : Math.max(1, Math.min(200, Number(limit) || 30));
+    const result = await this.pool.query(`SELECT * FROM dream_diary_entries WHERE agent_id=$1 AND ($2::text IS NULL OR entry_date=$2::text) AND ($3::text IS NULL OR phase=$3::text) ORDER BY entry_date DESC,created_at DESC${n === null ? '' : ' LIMIT $4'}`, n === null ? [agentId, d, p] : [agentId, d, p, n]);
     return result.rows.map(publicRow);
   }
   async get(agent, entryId) {

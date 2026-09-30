@@ -43,6 +43,7 @@ export function createSessionRoutes({
     return true;
   };
   return async function handleSessionRoute({ req, res, url } = {}) {
+    try {
     if (req.method === 'GET' && url.pathname === '/api/session/context') {
       const sessionId = url.searchParams.get('sessionId') || 'default';
       const agentRuntime = await resolveAgentRuntime(url.searchParams.get('agentId'));
@@ -92,7 +93,7 @@ export function createSessionRoutes({
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/dreams') {
-      sendJson(res, 200, await archiveDreams({ agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), phase: url.searchParams.get('phase'), limit: url.searchParams.get('limit') || 200 }));
+      sendJson(res, 200, await archiveDreams({ agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), phase: url.searchParams.get('phase'), limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') }));
       return true;
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/archive/dreams/')) {
@@ -104,22 +105,22 @@ export function createSessionRoutes({
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/continuity/cards') {
-      sendJson(res, 200, await archiveContinuityCards({ agentId: url.searchParams.get('agentId'), scope: url.searchParams.get('scope'), limit: url.searchParams.get('limit') || 200 }));
+      sendJson(res, 200, await archiveContinuityCards({ agentId: url.searchParams.get('agentId'), scope: url.searchParams.get('scope'), limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') }));
       return true;
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/archive/continuity/cards/')) {
       const parts = url.pathname.slice('/api/archive/continuity/cards/'.length).split('/').map(decodeURIComponent);
       const [agentId, cardId] = parts;
       if (!agentId || !cardId) { sendJson(res, 400, { ok: false, error: 'archive_continuity_card_target_required' }); return true; }
-      const result = await archiveContinuityCardDetail({ agentId, cardId, limit: url.searchParams.get('limit') || 200 });
+      const result = await archiveContinuityCardDetail({ agentId, cardId, limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') });
       sendJson(res, result.ok ? 200 : (result.status || 500), result);
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/runs') {
       const agentId = url.searchParams.get('agentId');
       const agentRuntime = agentId ? await resolveAgentRuntime(agentId) : null;
-      const result = await archiveRuns({ agentRuntime, sessionId: url.searchParams.get('sessionId'), limit: url.searchParams.get('limit') || 100 });
-      sendJson(res, 200, { ok: true, runs: result });
+      const result = await archiveRuns({ agentRuntime, sessionId: url.searchParams.get('sessionId'), limit: url.searchParams.get('limit') || 100, cursor: url.searchParams.get('cursor') });
+      sendJson(res, 200, { ok: true, ...result });
       return true;
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/archive/runs/')) {
@@ -132,7 +133,7 @@ export function createSessionRoutes({
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/sessions') {
-      sendJson(res, 200, { ok: true, sessions: await archiveSessions({ includeArchived: url.searchParams.get('archived') !== 'false', query: url.searchParams.get('q') || '', limit: url.searchParams.get('limit') || 200 }) });
+      sendJson(res, 200, { ok: true, ...(await archiveSessions({ includeArchived: url.searchParams.get('archived') !== 'false', query: url.searchParams.get('q') || '', agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') })) });
       return true;
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/archive/sessions/')) {
@@ -186,5 +187,10 @@ export function createSessionRoutes({
     if (req.method === 'POST' && url.pathname === '/api/session/handoff') { sendJson(res, 200, await sessionWriteHandoff(await readJsonBody(req))); return true; }
     if (req.method === 'POST' && url.pathname === '/api/session/handoff-candidate') { sendJson(res, 200, await sessionWriteHandoffCandidate(await readJsonBody(req))); return true; }
     return false;
+    } catch (error) {
+      if (!['archive_cursor_invalid', 'archive_date_invalid'].includes(error?.message)) throw error;
+      sendJson(res, 400, { ok: false, error: error.message });
+      return true;
+    }
   };
 }

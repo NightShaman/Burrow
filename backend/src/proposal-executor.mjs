@@ -94,7 +94,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       const target = resolveProcessExecutionTarget(executionContext || {});
       const traceDetails = {
         command: redactText(action.command).slice(0, 2000),
-        cwd: redactText(action.cwd ? path.resolve(action.cwd) : (executionContext?.executionEnvironment?.workspaceRoot || executionRoot)).slice(0, 1000),
+        cwd: redactText(action.cwd ? path.resolve(action.cwd) : executionRoot).slice(0, 1000),
         providerId: target.kind === 'remote' ? target.providerId : null,
       };
       const started = await traceLogger?.toolStart?.({
@@ -136,7 +136,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       }
       const process = {
         command: action.command,
-        cwd: action.cwd ? path.resolve(action.cwd) : (executionContext?.executionEnvironment?.workspaceRoot || executionRoot),
+        cwd: action.cwd ? path.resolve(action.cwd) : executionRoot,
         env: protectedInput.env,
         traceLogger: traceLogger ? {
           ...traceLogger,

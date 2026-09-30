@@ -239,7 +239,7 @@ export async function readRunEvidenceWithDiagnostics({ rootDir, sessionId = 'def
   const legacy = list(entries).filter((entry) => entry?.type === 'evidence' && entry?.metadata?.runEvidence).map((entry) => compactRunEvidence(entry.metadata.runEvidence));
   const retained = retainedEvidence([...legacy, ...dedicated]).reverse();
   return {
-    records: retained.slice(0, Math.max(1, Number(limit) || 24)),
+    records: retained.slice(0, limit === null ? undefined : Math.max(1, Number(limit) || 24)),
     retainedCount: retained.length,
     diagnostics: {
       rootDir: rootDir || null, sessionId: sessionId || null, entryCount: entries.length,

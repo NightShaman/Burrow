@@ -9,16 +9,16 @@ export function archiveDate(value: string | null): Date | null {
 
 export function formatDayKey(value: string | null): string | null {
   const date = archiveDate(value);
-  return date ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` : null;
+  return date ? `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}` : null;
 }
 
 export function monthKey(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
 export function dateFromMonthKey(key: string): Date {
   const [year, month] = key.split('-').map(Number);
-  return new Date(year, month - 1, 1);
+  return new Date(Date.UTC(year, month - 1, 1));
 }
 
 export function archiveSessionDate(session: ArchiveSession): string | null {
@@ -87,10 +87,10 @@ export function buildDateBuckets(kind: ArchiveKind, sessions: ArchiveSession[], 
     }
     buckets.set(key, {
       key,
-      year: String(date.getFullYear()),
-      month: new Intl.DateTimeFormat(undefined, { month: 'long' }).format(date),
-      day: new Intl.DateTimeFormat(undefined, { day: 'numeric' }).format(date),
-      label: new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' }).format(date),
+      year: String(date.getUTCFullYear()),
+      month: new Intl.DateTimeFormat(undefined, { month: 'long', timeZone: 'UTC' }).format(date),
+      day: new Intl.DateTimeFormat(undefined, { day: 'numeric', timeZone: 'UTC' }).format(date),
+      label: new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(date),
       count: 1,
     });
   });
@@ -99,8 +99,8 @@ export function buildDateBuckets(kind: ArchiveKind, sessions: ArchiveSession[], 
 
 export function buildCalendarDays(calendarMonth: string, dateBuckets: DateBucket[]): Array<CalendarDay | null> {
   const month = dateFromMonthKey(calendarMonth);
-  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
-  const firstDay = new Date(month.getFullYear(), month.getMonth(), 1).getDay();
+  const daysInMonth = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0)).getUTCDate();
+  const firstDay = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), 1)).getUTCDay();
   const counts = new Map(dateBuckets.map((bucket) => [bucket.key, bucket.count]));
   return [
     ...Array<null>(firstDay).fill(null),

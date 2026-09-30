@@ -9,7 +9,7 @@ import { prepareRuntimeSupportContext } from './runtime-support-context.mjs';
 import { workbenchWorkflow } from './workbench-workflow.mjs';
 import { buildContinuationPlan, explicitContinueRequested } from './work-item-service.mjs';
 import { prepareRuntimeWorkItemContext } from './runtime-work-item-context.mjs';
-import { prepareRuntimeSessionContext } from './runtime-session-context.mjs';
+import { agentExecutionWorkspaceRoot, prepareRuntimeSessionContext } from './runtime-session-context.mjs';
 import { createTerminalCommitter } from './runtime-terminal-commit.mjs';
 import { createCompatibilityObserver } from './compatibility-observability.mjs';
 import { runContinuationBranch } from './runtime-continuation-branch.mjs';
@@ -28,7 +28,8 @@ import { applyWorkingContextEvents } from './working-context.mjs';
 import { appendTiddleResidueAsync } from './tiddle-continuity.mjs';
 import { persistChatAttachments } from './attachment-store.mjs';
 
-import { createExecutionContext, resolveExecutionTarget } from './execution-context.mjs';
+import { createExecutionContext } from './execution-context.mjs';
+import { resolveRuntimeTurnTarget } from './runtime-turn-target.mjs';
 import { runtimeHeapStage } from './runtime-heap-diagnostics.mjs';
 import { loadRuntimeMcpCapabilities, createRuntimeExecutionContext } from './runtime-capability-context.mjs';
 
@@ -184,7 +185,7 @@ async function runAskChatUnserialized({
   let targetResolutionError = null;
   if (targetRequest) {
     try {
-      resolvedTarget = await resolveExecutionTarget(targetRequest, { filesystemBoundaries: runtimeState.filesystemBoundaries });
+      resolvedTarget = await resolveRuntimeTurnTarget(targetRequest, { agentRuntime, filesystemBoundaries: runtimeState.filesystemBoundaries, runId: resolvedRunId });
     } catch (error) {
       targetResolutionError = error?.message || String(error);
     }
@@ -196,6 +197,7 @@ async function runAskChatUnserialized({
     normalizedArgs,
     workspaceRoot,
     resolvedTarget,
+    agentRuntime,
     message,
     explicitWorkspaceFiles,
     interruptedRun: continuity.recoveryManifest || null,
@@ -227,7 +229,9 @@ async function runAskChatUnserialized({
         message: content,
         sessionId: recipientSessionId,
         runId: nestedRunId,
-        workspaceRoot: recipientRuntime.agentWorkspaceRoot,
+        // Let the recipient resolve its own execution assignment. Passing its
+        // controller-owned data root here overrides the remote workspace.
+        workspaceRoot: agentExecutionWorkspaceRoot(recipientRuntime),
         json: true,
         agentRuntime: recipientRuntime,
         resolveAgentRuntime,

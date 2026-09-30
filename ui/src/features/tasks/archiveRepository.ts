@@ -1,38 +1,57 @@
 import { api, type ArchiveRunListResponse, type ArchiveRunResponse } from '../../app/api';
 import type { ArchiveDetail, ArchiveDream, ArchiveDreamDocument, ArchiveSession, ContinuityCard, ContinuityCardGroup, DreamEntry } from './archiveTypes';
 
+export type ArchivePage<T> = { items: T[]; nextCursor: string | null; hasMore: boolean };
+type CursorPage = { nextCursor: string | null; hasMore: boolean };
+
 export type ArchiveRepository = ReturnType<typeof createArchiveRepository>;
 
 export function createArchiveRepository() {
   return {
-    async listSessions(query: string, signal?: AbortSignal) {
-      return (await api<{ sessions: ArchiveSession[] }>(`/api/archive/sessions?archived=true&limit=200&q=${encodeURIComponent(query)}`, { signal })).sessions;
+    async listSessions(query: string, signal?: AbortSignal, cursor?: string | null, date?: string, agentId?: string): Promise<ArchivePage<ArchiveSession>> {
+      const params = new URLSearchParams({ archived: 'true', limit: '200' });
+      if (query) params.set('q', query);
+      if (date) params.set('date', date);
+      if (agentId) params.set('agentId', agentId);
+      if (cursor) params.set('cursor', cursor);
+      const response = await api<{ sessions: ArchiveSession[] } & CursorPage>(`/api/archive/sessions?${params}`, { signal });
+      return { items: response.sessions, nextCursor: response.nextCursor, hasMore: response.hasMore };
     },
     loadSession(session: ArchiveSession, signal?: AbortSignal, before?: string) {
       const query = new URLSearchParams({ limit: '100' });
       if (before) query.set('before', before);
       return api<ArchiveDetail>(`/api/archive/sessions/${encodeURIComponent(session.agentId ?? '')}/${encodeURIComponent(session.sessionId)}?${query}`, { signal });
     },
-    async listDreams(signal?: AbortSignal): Promise<DreamEntry[]> {
-      const response = await api<{ entries: ArchiveDream[] }>('/api/archive/dreams?limit=200', { signal });
-      return response.entries.map((entry) => ({ ...entry, narrative: entry.excerpt, sourceRefs: [] }));
+    async listDreams(signal?: AbortSignal, cursor?: string | null, date?: string, agentId?: string): Promise<ArchivePage<DreamEntry>> {
+      const query = new URLSearchParams({ limit: '200' });
+      if (date) query.set('date', date);
+      if (agentId) query.set('agentId', agentId);
+      if (cursor) query.set('cursor', cursor);
+      const response = await api<{ entries: ArchiveDream[] } & CursorPage>(`/api/archive/dreams?${query}`, { signal });
+      return { items: response.entries.map((entry) => ({ ...entry, narrative: entry.excerpt, sourceRefs: [] })), nextCursor: response.nextCursor, hasMore: response.hasMore };
     },
     async loadDream(entry: DreamEntry, signal?: AbortSignal) {
       const response = await api<ArchiveDreamDocument>(`/api/archive/dreams/${encodeURIComponent(entry.agentId)}/${encodeURIComponent(entry.id)}`, { signal });
       return { ...entry, narrative: response.document.markdown };
     },
-    async listContinuityCards(agentId = '', signal?: AbortSignal) {
+    async listContinuityCards(agentId = '', signal?: AbortSignal, cursor?: string | null): Promise<ArchivePage<ContinuityCard>> {
       const query = new URLSearchParams({ limit: '500' });
       if (agentId) query.set('agentId', agentId);
-      return (await api<{ cards: ContinuityCard[] }>(`/api/archive/continuity/cards?${query}`, { signal })).cards;
+      if (cursor) query.set('cursor', cursor);
+      const response = await api<{ cards: ContinuityCard[] } & CursorPage>(`/api/archive/continuity/cards?${query}`, { signal });
+      return { items: response.cards, nextCursor: response.nextCursor, hasMore: response.hasMore };
     },
-    loadContinuityCard(card: ContinuityCard, signal?: AbortSignal) {
-      return api<ContinuityCardGroup>(`/api/archive/continuity/cards/${encodeURIComponent(card.agentId)}/${encodeURIComponent(card.id)}?limit=500`, { signal });
+    loadContinuityCard(card: ContinuityCard, signal?: AbortSignal, cursor?: string | null) {
+      const query = new URLSearchParams({ limit: '500' });
+      if (cursor) query.set('cursor', cursor);
+      return api<ContinuityCardGroup & CursorPage>(`/api/archive/continuity/cards/${encodeURIComponent(card.agentId)}/${encodeURIComponent(card.id)}?${query}`, { signal });
     },
-    async listRuns(agentId = '', signal?: AbortSignal) {
+    async listRuns(agentId = '', signal?: AbortSignal, cursor?: string | null): Promise<ArchivePage<ArchiveRunListResponse['runs'][number]>> {
       const query = new URLSearchParams({ limit: '100' });
       if (agentId) query.set('agentId', agentId);
-      return (await api<ArchiveRunListResponse>(`/api/archive/runs?${query}`, { signal })).runs;
+      if (cursor) query.set('cursor', cursor);
+      const response = await api<ArchiveRunListResponse & CursorPage>(`/api/archive/runs?${query}`, { signal });
+      return { items: response.runs, nextCursor: response.nextCursor, hasMore: response.hasMore };
     },
     async loadRun(runId: string, agentId: string, signal?: AbortSignal) {
       return (await api<ArchiveRunResponse>(`/api/archive/runs/${encodeURIComponent(runId)}?agentId=${encodeURIComponent(agentId)}`, { signal })).run;

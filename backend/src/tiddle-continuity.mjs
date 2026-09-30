@@ -277,7 +277,7 @@ function* listTiddleCardsOperation({ agentId, scope = null, stores = null, limit
   try {
     const keys = scope ? [cardKey(id, text(scope))] : (yield () => db.rows(`rolling-continuity:${id}:`)).map((row) => row.key);
     const allCards = []; for (const key of keys) allCards.push(...((yield* meta(db, key, { cards: [] }))?.cards || []));
-    const cards = allCards.filter((card) => !card.expiresAt || card.expiresAt >= at).sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen))).slice(0, Math.max(1, Math.min(500, Number(limit) || 100)));
+    const cards = allCards.filter((card) => !card.expiresAt || card.expiresAt >= at).sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen))).slice(0, limit === null ? undefined : Math.max(1, Math.min(500, Number(limit) || 100)));
     return { ok: true, agentId: id, scope: text(scope) || null, cards };
   } finally { db.close(); }
 }
@@ -287,7 +287,7 @@ function* tiddleHistoryOperation({ agentId, cardId = null, since = null, limit =
   if (!id) throw new Error('tiddle_agent_required');
   const db = tiddlePersistence({ stores });
   try {
-    const entries = ((yield* meta(db, historyKey(id), { entries: [] }))?.entries || []).filter((entry) => (!text(cardId) || entry.cardId === text(cardId)) && (!text(since) || entry.at >= text(since))).slice(0, Math.max(1, Math.min(500, Number(limit) || 100)));
+    const entries = ((yield* meta(db, historyKey(id), { entries: [] }))?.entries || []).filter((entry) => (!text(cardId) || entry.cardId === text(cardId)) && (!text(since) || entry.at >= text(since))).slice(0, limit === null ? undefined : Math.max(1, Math.min(500, Number(limit) || 100)));
     return { ok: true, agentId: id, cardId: text(cardId) || null, entries };
   } finally { db.close(); }
 }

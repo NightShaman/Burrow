@@ -18,13 +18,17 @@ beforeEach(() => apiMock.mockReset());
 
 describe('archiveRepository', () => {
   it('encodes searches and resource-owned detail paths', async () => {
-    apiMock.mockResolvedValueOnce({ sessions: [session] }).mockResolvedValueOnce({ turns: [] });
+    apiMock.mockResolvedValueOnce({ sessions: [session], nextCursor: 'session-cursor', hasMore: true }).mockResolvedValueOnce({ turns: [] });
 
-    await expect(repository.listSessions('design & css')).resolves.toEqual([session]);
+    await expect(repository.listSessions('design & css')).resolves.toEqual({ items: [session], nextCursor: 'session-cursor', hasMore: true });
     await expect(repository.loadSession(session)).resolves.toEqual({ turns: [] });
 
-    expect(apiMock).toHaveBeenNthCalledWith(1, '/api/archive/sessions?archived=true&limit=200&q=design%20%26%20css', { signal: undefined });
+    expect(apiMock).toHaveBeenNthCalledWith(1, '/api/archive/sessions?archived=true&limit=200&q=design+%26+css', { signal: undefined });
     expect(apiMock).toHaveBeenNthCalledWith(2, '/api/archive/sessions/agent%2Fname/session%2Fname?limit=100', { signal: undefined });
+
+    apiMock.mockResolvedValueOnce({ sessions: [session], nextCursor: null, hasMore: false });
+    await repository.listSessions('', undefined, 'next token', '2026-09-29', 'agent/name');
+    expect(apiMock).toHaveBeenNthCalledWith(3, '/api/archive/sessions?archived=true&limit=200&date=2026-09-29&agentId=agent%2Fname&cursor=next+token', { signal: undefined });
   });
 
   it('omits agentId for All agents and preserves explicit agent filters', async () => {
@@ -35,10 +39,16 @@ describe('archiveRepository', () => {
     expect(apiMock).toHaveBeenNthCalledWith(2, '/api/archive/runs?limit=100&agentId=agent%2Fname', { signal: undefined });
   });
 
-  it('normalizes dream summaries and loads full dream documents', async () => {
-    apiMock.mockResolvedValueOnce({ entries: [{ ...dream, excerpt: 'Summary' }] }).mockResolvedValueOnce({ document: { markdown: '# Full dream' } });
+  it('passes a selected UTC day through dream pagination', async () => {
+    apiMock.mockResolvedValueOnce({ entries: [], nextCursor: 'older', hasMore: true });
+    await repository.listDreams(undefined, 'older', '2026-09-29', 'agent/name');
+    expect(apiMock).toHaveBeenCalledWith('/api/archive/dreams?limit=200&date=2026-09-29&agentId=agent%2Fname&cursor=older', { signal: undefined });
+  });
 
-    await expect(repository.listDreams()).resolves.toEqual([{ ...dream, excerpt: 'Summary', narrative: 'Summary', sourceRefs: [] }]);
+  it('normalizes dream summaries and loads full dream documents', async () => {
+    apiMock.mockResolvedValueOnce({ entries: [{ ...dream, excerpt: 'Summary' }], nextCursor: null, hasMore: false }).mockResolvedValueOnce({ document: { markdown: '# Full dream' } });
+
+    await expect(repository.listDreams()).resolves.toEqual({ items: [{ ...dream, excerpt: 'Summary', narrative: 'Summary', sourceRefs: [] }], nextCursor: null, hasMore: false });
     await expect(repository.loadDream(dream)).resolves.toEqual({ ...dream, narrative: '# Full dream' });
 
     expect(apiMock).toHaveBeenNthCalledWith(2, '/api/archive/dreams/agent%2Fname/dream%2Fname', { signal: undefined });
