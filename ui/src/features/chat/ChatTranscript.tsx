@@ -88,7 +88,19 @@ export const ChatTranscript = memo(function ChatTranscript({ selected, parent, o
   </div>;
 });
 
-function formatTime(value?: string) { if (!value) return 'Now'; const date = new Date(value); return Number.isNaN(date.getTime()) ? 'Now' : new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date); }
+export function formatTime(value?: string, now = new Date()) {
+  if (!value) return 'Now';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Now';
+  const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date);
+  const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (sameDay(date, now)) return time;
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (sameDay(date, yesterday)) return `Yesterday · ${time}`;
+  const day = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' as const } : {}) }).format(date);
+  return `${day} · ${time}`;
+}
 
 async function copyMarkdown(text: string) {
   try {
