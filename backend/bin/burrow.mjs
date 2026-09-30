@@ -19,8 +19,11 @@ import { runDreamCycle } from '../src/dream-cycle-runner.mjs';
 import { ensureDefaultGlobalWorkspace } from '../src/runtime-workspace-defaults.mjs';
 import { createPortableInstallBackup, formatPortableInstallResult, planPortableInstallBackup, planPortableInstallRestore, restorePortableInstall } from '../scripts/portable-install-backup.mjs';
 
+import { runCliPostgresAccess } from '../src/managed-postgres-access.mjs';
+
 function usage() {
   return `Usage:
+  burrow postgres-access create|rotate|revoke|list [--name NAME] [--json]
   burrow ask --root DIR --message TEXT [--session-id ID] [--call-model] [--json]
   burrow chat --root DIR --message TEXT [--session-id ID] [--call-model] [--json]
   burrow plan --root DIR --message TEXT [--json]
@@ -300,6 +303,12 @@ async function main() {
   const [command, ...rest] = process.argv.slice(2);
   if (!command || command === '--help' || command === '-h') {
     console.log(usage());
+    return;
+  }
+  if (command === 'postgres-access') {
+    const accessArgs = parseArgs(rest);
+    if (accessArgs.help || accessArgs.h) { console.log(usage()); return; }
+    console.log(JSON.stringify(await runCliPostgresAccess({ ...accessArgs, _: [command, ...accessArgs._] }), null, 2));
     return;
   }
   if (command !== 'install-backup' && command !== 'install-restore' && command !== 'ask' && command !== 'chat' && command !== 'plan' && command !== 'trace' && command !== 'session-search' && command !== 'run' && command !== 'factory' && command !== 'review-proposal' && command !== 'doctor' && command !== 'retention' && command !== 'dream-memory' && command !== 'dream-cycle' && command !== 'serve') throw new Error(`unknown command: ${command}`);

@@ -1,5 +1,7 @@
 import pg from 'pg';
+import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { checkServerIdentity } from 'node:tls';
 
 const { Pool } = pg;
 
@@ -22,6 +24,37 @@ export function postgresConfig(env = process.env) {
         user: env.BURROW_POSTGRES_USER || 'burrow',
         password: env.BURROW_POSTGRES_PASSWORD,
       };
+  // pg connection-string TLS options override the ssl object. Reject mixed
+  // sources rather than silently losing CA or certificate verification.
+  const tlsMode = env.BURROW_POSTGRES_SSL_MODE;
+  if (tlsMode && !['disable', 'verify-full'].includes(tlsMode)) {
+    throw new Error('BURROW_POSTGRES_SSL_MODE must be disable or verify-full');
+  }
+  if (connectionString && tlsMode) {
+    let url;
+    try { url = new URL(connectionString); } catch { throw new Error('Invalid PostgreSQL connection URL'); }
+    if ([...url.searchParams.keys()].some((key) => /^ssl/i.test(key))) {
+      throw new Error('Use BURROW_POSTGRES_SSL_MODE without URL ssl parameters');
+    }
+  }
+  const caFile = env.BURROW_POSTGRES_SSL_CA_FILE;
+  if (caFile && tlsMode !== 'verify-full') {
+    throw new Error('BURROW_POSTGRES_SSL_CA_FILE requires verify-full');
+  }
+  if (tlsMode === 'disable') config.ssl = false;
+  if (tlsMode === 'verify-full') {
+    // node-postgres omits SNI for IP literals; Node then skips its default
+    // hostname check. Pin verification to the configured destination explicitly.
+    const hostname = connectionString ? new URL(connectionString).hostname.replace(/^\[|\]$/g, '') : config.host;
+    config.ssl = { rejectUnauthorized: true, checkServerIdentity: (_servername, cert) => checkServerIdentity(hostname, cert) };
+    if (caFile) {
+      try { config.ssl.ca = readFileSync(caFile, 'utf8'); }
+      catch { throw new Error('Unable to read BURROW_POSTGRES_SSL_CA_FILE'); }
+      if (!config.ssl.ca.includes('-----BEGIN CERTIFICATE-----')) {
+        throw new Error('BURROW_POSTGRES_SSL_CA_FILE must contain a PEM certificate');
+      }
+    }
+  }
   const max = positiveInteger(env.BURROW_POSTGRES_POOL_MAX, 10);
   const idleTimeoutMillis = positiveInteger(env.BURROW_POSTGRES_IDLE_TIMEOUT_MS, 30_000);
   const connectionTimeoutMillis = positiveInteger(env.BURROW_POSTGRES_CONNECTION_TIMEOUT_MS, 10_000);
