@@ -87,7 +87,7 @@ function queryMatch(entry, query) {
   };
 }
 
-function matchesQuery(entry, query) {
+export function matchesQuery(entry, query) {
   return queryMatch(entry, query).matches;
 }
 

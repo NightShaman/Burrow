@@ -112,6 +112,7 @@ export async function deleteAttachmentArtifact({ agentWorkspaceRoot, artifactPat
 export async function cleanupExpiredAttachments({ agentWorkspaceRoot, now = new Date(), retentionDays = ATTACHMENT_RETENTION_DAYS } = {}) {
   if (!agentWorkspaceRoot) throw new Error('attachment_workspace_required');
   const root = attachmentRoot(agentWorkspaceRoot);
+  if (retentionDays === null) return { root, deleted: [] };
   const cutoff = new Date(now).getTime() - Number(retentionDays) * 86400000;
   let entries = [];
   try { entries = await fs.readdir(root, { withFileTypes: true }); } catch (error) { if (error?.code === 'ENOENT') return { root, deleted: [] }; throw error; }
@@ -128,17 +129,17 @@ export async function cleanupExpiredAttachments({ agentWorkspaceRoot, now = new 
 }
 
 /** Persist current-turn attachment bytes into the owning agent's artifact workspace. */
-export async function cleanupAgentAttachments({ agentStore = null, resolveAgentWorkspaceRoot, now = new Date() } = {}) {
+export async function cleanupAgentAttachments({ agentStore = null, resolveAgentWorkspaceRoot, retentionDays = ATTACHMENT_RETENTION_DAYS, now = new Date() } = {}) {
   if (typeof resolveAgentWorkspaceRoot !== 'function') throw new Error('attachment_workspace_resolver_required');
   if (!agentStore) throw new Error('postgres_required');
   const agents = agentStore;
   const results = await Promise.all((await agents.list({ includeDisabled: true })).map(async (agent) => {
     const agentWorkspaceRoot = await resolveAgentWorkspaceRoot(agent.id);
     if (!agentWorkspaceRoot) return { agentId: agent.id, deleted: [], skipped: true };
-    const result = await cleanupExpiredAttachments({ agentWorkspaceRoot, now });
+    const result = await cleanupExpiredAttachments({ agentWorkspaceRoot, now, retentionDays });
     return { agentId: agent.id, deleted: result.deleted, skipped: false };
   }));
-  return { ok: true, retentionDays: ATTACHMENT_RETENTION_DAYS, agents: results, deleted: results.flatMap((result) => result.deleted.map((artifactPath) => ({ agentId: result.agentId, artifactPath }))) };
+  return { ok: true, retentionDays, agents: results, deleted: results.flatMap((result) => result.deleted.map((artifactPath) => ({ agentId: result.agentId, artifactPath }))) };
 }
 
 export function createAttachmentCleanupScheduler({ agentStore = null, resolveAgentWorkspaceRoot, intervalMs = 24 * 60 * 60 * 1_000, clock = () => new Date() } = {}) {
@@ -151,12 +152,12 @@ export function createAttachmentCleanupScheduler({ agentStore = null, resolveAge
   };
 }
 
-export async function persistChatAttachments({ agentWorkspaceRoot, attachments = [], now = new Date() } = {}) {
+export async function persistChatAttachments({ agentWorkspaceRoot, attachments = [], retentionDays = ATTACHMENT_RETENTION_DAYS, now = new Date() } = {}) {
   if (!Array.isArray(attachments) || !attachments.length) return [];
   if (!agentWorkspaceRoot) throw new Error('attachment_workspace_required');
   const root = attachmentRoot(agentWorkspaceRoot);
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
-  await cleanupExpiredAttachments({ agentWorkspaceRoot, now });
+  await cleanupExpiredAttachments({ agentWorkspaceRoot, now, retentionDays });
   const stamp = new Date(now).toISOString().replace(/[:.]/g, '-');
   const persisted = [];
   for (let index = 0; index < attachments.length; index += 1) {

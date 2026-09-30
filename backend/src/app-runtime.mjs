@@ -144,7 +144,8 @@ async function runAskChatUnserialized({
     skillsRoot: path.resolve(agentRuntime.skillsRoot),
     filesystemBoundaries: agentRuntime.filesystemBoundaries.map((item) => path.resolve(item)),
   } : loadedRuntimeState;
-  const persistedAttachments = await persistChatAttachments({ agentWorkspaceRoot: runtimeState.agentWorkspaceRoot || runtimeState.workspaceRoot, attachments });
+  const attachmentRetention = stores.albdruck ? (await stores.albdruck.readRetention()).attachmentDays : 30;
+  const persistedAttachments = await persistChatAttachments({ retentionDays: attachmentRetention, agentWorkspaceRoot: runtimeState.agentWorkspaceRoot || runtimeState.workspaceRoot, attachments });
   const turnAttachments = persistedAttachments.length ? persistedAttachments : attachments;
   const promptAttachments = promptTextAttachments(turnAttachments);
   const attachmentManifest = attachmentSummary(turnAttachments);
@@ -315,6 +316,8 @@ async function runAskChatUnserialized({
   const explicitContinuityRequested = Boolean(compatibilityScope || normalizedArgs.continuity_scope || normalizedArgs.continuityScope || normalizedArgs.working_project || normalizedArgs.workingProject);
   const supportContext = await prepareRuntimeSupportContext({ stores, rootDir, sessionRoot, dataRoot, runtimeState, agentRuntime, resolvedSessionId, message, priorSession, continuityScope, explicitContinuityRequested, route, runtimeConfig, logger });
   const { sessionRecall, runEvidence, contextSupport } = supportContext;
+  const albdruckRecall = route.memory.needsMemory && stores.albdruck
+    ? await stores.albdruck.recall({ agentId: runtimeState.agentId, query: route.memory.query, scope: route.memory.global ? 'global' : 'agent' }) : null;
   const preparedContext = await prepareContextForTurn({
     rootDir: sessionRoot,
     dataRoot: sessionRoot,
@@ -382,7 +385,7 @@ async function runAskChatUnserialized({
   const modelTask = incomingAgentMessage
     ? `[Agent message from ${incomingAgentMessage.senderAgentId || 'another agent'}]: ${message}`
     : message;
-  const promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, temporalContext: { turnStartedAt, lastOperatorMessageAt, timezone: await operatorTimezone(stores.metadata) } });
+  const promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, temporalContext: { turnStartedAt, lastOperatorMessageAt, timezone: await operatorTimezone(stores.metadata) } });
   const { turnContext, conversationContext, prompt, finalPromptInspection, contextCompression } = promptContext;
   if (finalPromptInspection.pressure === 'blocked') {
     const content = 'I could not safely fit the final prompt inside the configured model context window after compression. I should not call the model with an over-budget prompt.';

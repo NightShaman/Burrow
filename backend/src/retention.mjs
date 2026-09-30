@@ -95,15 +95,16 @@ export async function planRetentionCleanup({ dataRoot, conversationStore, taskSt
   const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
   const resolvedTraceRoot = traceRoot || path.join(dataRoot, 'traces');
   const traces = await listTraceRuns(resolvedTraceRoot);
-  const sessionRetentionEnabled = ['mainMaxAgeDays', 'taskMaxAgeDays', 'subagentMaxAgeDays'].some((key) => retention[key] != null);
+  const sessionRetentionEnabled = retention.conversationDays != null || ['mainMaxAgeDays', 'taskMaxAgeDays', 'subagentMaxAgeDays'].some((key) => retention[key] != null);
   if (sessionRetentionEnabled && !conversationStore) throw new Error('conversation_store_required');
   const sessions = sessionRetentionEnabled ? (await conversationStore.listSessions({agentId,includeArchived:true})).map(record=>({...record,id:record.sessionId})) : [];
-  const sessionPolicies = { main: retention.mainMaxAgeDays ?? 60, task: retention.taskMaxAgeDays ?? 30, subagent: retention.subagentMaxAgeDays ?? 7 };
+  const sessionPolicies = { main: retention.conversationDays ?? retention.mainMaxAgeDays ?? 60, task: retention.conversationDays ?? retention.taskMaxAgeDays ?? 30, subagent: retention.conversationDays ?? retention.subagentMaxAgeDays ?? 7 };
   const nowDate = new Date(nowMs);
   const taskBoard = taskStore;
   const sessionCandidates = (await Promise.all(sessions.map(async (record) => {
     const meta = record.metadata || {};
     const kind = meta.kind || 'main';
+    if (['running', 'finalizing'].includes(meta.continuityHead?.state)) return null;
     if (kind === 'main' && isCurrentMain(record)) return null;
     // Task retention is anchored to the owning board task reaching a terminal
     // status, not merely to the end of a chat run. Missing or active ownership

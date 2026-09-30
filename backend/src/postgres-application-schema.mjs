@@ -1,3 +1,4 @@
+import { POSTGRES_ALBDRUCK_SCHEMA_SQL } from './postgres-albdruck-store.mjs';
 import { POSTGRES_MOD_DISTRIBUTION_SCHEMA_SQL } from './postgres-mod-distribution-repository.mjs';
 import { POSTGRES_MOD_SCHEMA_SQL } from './postgres-mod-store.mjs';
 import { POSTGRES_AGENT_REGISTRY_SCHEMA_SQL } from './postgres-agent-registry.mjs';
@@ -52,4 +53,5 @@ export const POSTGRES_APPLICATION_SCHEMA_MANIFEST = Object.freeze([
   { version: 11, name: 'scheduled-job-timezone-inheritance', sql: `ALTER TABLE scheduled_jobs ALTER COLUMN timezone DROP NOT NULL;
 ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS effective_timezone TEXT;` },
   { version: 12, name: 'dream-timezone-inheritance', sql: 'ALTER TABLE dream_settings ALTER COLUMN timezone DROP NOT NULL;' },
+  { version: 13, name: 'albdruck-knowledge', sql: POSTGRES_ALBDRUCK_SCHEMA_SQL },
 ]);

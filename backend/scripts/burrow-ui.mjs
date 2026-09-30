@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createAlbdruckRoutes } from './ui/albdruck-routes.mjs';
 import { validateTimezone, operatorTimezone, saveOperatorTimezone } from '../src/timezone.mjs';
 import { ensureDefaultGlobalWorkspace } from '../src/runtime-workspace-defaults.mjs';
 import { publishModTools } from '../src/mod-agent-tools.mjs';
@@ -52,7 +53,7 @@ import { AGENT_PROFILE_KINDS } from '../src/agent-profile-store.mjs';
 import { consolidateDreamMemoryAsync } from '../src/dream-memory-consolidator.mjs';
 import { createDreamCycleScheduler, runDreamCycle } from '../src/dream-cycle-runner.mjs';
 import { createTiddleScheduler, listTiddleCards, tiddleHistory, tiddleStatus } from '../src/tiddle-continuity.mjs';
-import { cleanupAgentAttachments, createAttachmentCleanupScheduler, deleteAttachmentArtifact, listSessionAttachments, resolveAttachmentArtifact } from '../src/attachment-store.mjs';
+import { cleanupAgentAttachments, deleteAttachmentArtifact, listSessionAttachments, resolveAttachmentArtifact } from '../src/attachment-store.mjs';
 import { resolveGeneratedArtifact } from '../src/generated-artifact-store.mjs';
 import { TASK_PRIORITIES, TASK_STATUSES } from '../src/task-board-store.mjs';
 import { createScheduledJobScheduler } from '../src/scheduled-job-scheduler.mjs';
@@ -139,7 +140,6 @@ let scheduledJobScheduler = null;
 let loadedMods = [];
 let dreamCycleScheduler = null;
 let tiddleScheduler = null;
-let attachmentCleanupScheduler = null;
 let retentionScheduler = null;
 let installStagingCleanupScheduler = null;
 const traceStatusCache = new Map();
@@ -208,19 +208,24 @@ function rollingContinuityScheduler() {
   return tiddleScheduler;
 }
 
-function attachmentScheduler() {
-  if (!attachmentCleanupScheduler) attachmentCleanupScheduler = createAttachmentCleanupScheduler({
-    agentStore: postgresApplication.stores.agents,
-
-    resolveAgentWorkspaceRoot: async (agentId) => (await resolveAgentRuntime(agentId))?.agentWorkspaceRoot || null,
-  });
-  return attachmentCleanupScheduler;
-}
-
 function retentionPolicyScheduler() {
   if (!retentionScheduler) retentionScheduler = createRetentionScheduler({
     store: postgresApplication.stores.retentionSettings,
-
+    runIndependentCleanup: async () => {
+      const stores = postgresApplication.stores;
+      const policy = await stores.albdruck.readRetention();
+      await stores.albdruck.prune();
+      if (policy.operationalDays !== null) {
+        const runtime = await runtimeConfig();
+        await runRetentionCleanup({ dataRoot: runtime.runtimeState.agentDataRoot, traceRoot: path.join(runtime.runtimeState.cacheRoot, 'traces'), retention: { traceMaxAgeDays: policy.operationalDays }, confirm: true });
+      }
+      for (const agent of await stores.agents.list({ includeDisabled: true })) {
+        const runtime = await resolveAgentRuntime(agent.id);
+        if (!runtime) continue;
+        await runRetentionCleanup({ dataRoot: runtime.agentDataRoot, traceRoot: path.join(runtime.agentDataRoot, 'traces'), conversationStore: stores.conversations, taskStore: stores.tasks, agentId: agent.id, retention: { conversationDays: policy.conversationDays }, confirm: true });
+      }
+      await cleanupAgentAttachments({ agentStore: stores.agents, retentionDays: policy.attachmentDays, resolveAgentWorkspaceRoot: async (id) => (await resolveAgentRuntime(id))?.agentWorkspaceRoot || null });
+    },
     runCleanup: async (policy) => retentionCleanup({ policy, confirm: true, includeAttachments: true }),
   });
   return retentionScheduler;
@@ -2486,7 +2491,7 @@ async function retentionCleanup(body = {}) {
   if (body.confirm === true && !policy.enabled && body.requireEnabled !== false) return { ok: false, status: 409, error: 'retention_policy_disabled', policy };
   try {
     const result = await runRetentionCleanup({ taskStore: postgresApplication.stores.tasks, conversationStore: postgresApplication.stores.conversations, agentId: runtime.runtimeState.agentId, dataRoot: runtime.runtimeState.agentDataRoot, traceRoot: path.join(runtime.runtimeState.cacheRoot, 'traces'), retention: policy, confirm: body.confirm === true });
-    const attachments = body.confirm === true && body.includeAttachments === true ? await cleanupAgentAttachments({ agentStore: postgresApplication.stores.agents, resolveAgentWorkspaceRoot: async (agentId) => (await resolveAgentRuntime(agentId))?.agentWorkspaceRoot || null }) : null;
+    const attachments = body.confirm === true && body.includeAttachments === true ? await cleanupAgentAttachments({ agentStore: postgresApplication.stores.agents, retentionDays: (await postgresApplication.stores.albdruck.readRetention()).attachmentDays, resolveAgentWorkspaceRoot: async (agentId) => (await resolveAgentRuntime(agentId))?.agentWorkspaceRoot || null }) : null;
     const state = body.confirm === true ? await writeRetentionPolicyState(retentionPolicySuccessState({ policy, result, previous: await readRetentionPolicyState({ store: postgresApplication.stores.retentionSettings }) }), { store: postgresApplication.stores.retentionSettings }) : await readRetentionPolicyState({ store: postgresApplication.stores.retentionSettings });
     return { ok: true, policy, state, ...result, attachments };
   } catch (error) {
@@ -3081,6 +3086,7 @@ const skillApi = {
 const settingsRoute = createSettingsRoutes({ timezoneSettings: async () => ({ ok: true, timezone: await operatorTimezone(postgresApplication.stores.metadata) }), saveTimezoneSettings: (body) => saveOperatorTimezone(postgresApplication.stores.metadata, body), ...skillApi, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, archiveSummaryModelSelection: async (agentId) => ({ ok: true, selection: await archiveSummarySelection((await resolveAgentRuntime(agentId)).agentId) }), saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection: async (id) => await modelsStore().remove(id), setupStatus: async () => postgresApplication.stores.setupState.readStatus(), completeSetup: async () => postgresApplication.stores.setupState.completeSetup() });
 const agentRoute = createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession, agentOverview });
 const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
+const albdruckRoute = createAlbdruckRoutes({ store: postgresApplication.stores.albdruck, readJsonBody, sendJson });
 const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
 const observabilityRoute = createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, codexLbAccounts, anthropicOauthUsage, openaiOauthUsage, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore: postgresApplication.stores.conversations, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
 const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJson, validateBoundaryBody, withScheduledJobs, scheduler, listGroupChannels, createGroupChannel, readGroupChannelTurns, groupChannelRuns, startGroupChannelMessage, cancelGroupChannelRun, runtimeDataRoot, conversationStore: postgresApplication.stores.conversations });
@@ -3264,6 +3270,7 @@ const server = createServer(async (req, res) => {
     if (await observabilityRoute({ req, res, url })) return;
     if (await agentRoute({ req, res, url })) return;
     if (await sessionRoute({ req, res, url })) return;
+    if (await albdruckRoute({ req, res, url })) return;
     if (await generalSettingsRoute({ req, res, url })) return;
     if (await dreamRoute({ req, res, url })) return;
     if (await settingsRoute({ req, res, url })) return;
@@ -3331,7 +3338,7 @@ server.listen(port, host, async () => {
     await scheduler().start();
     await dreamScheduler().start();
     await rollingContinuityScheduler().start();
-    await attachmentScheduler().start();
+    // Attachment cleanup shares the existing retention scheduler.
     await retentionPolicyScheduler().start();
     await installerStagingScheduler().start();
     startCodexClientVersionRefresh();

@@ -1,3 +1,4 @@
+import { PostgresAlbdruckStore } from './postgres-albdruck-store.mjs';
 import { createPostgresModDistributionRepository } from './postgres-mod-distribution-repository.mjs';
 import { postgresModStoreFactory, disabledPostgresMods, publishPostgresModCatalog } from './postgres-mod-store.mjs';
 import { createPostgresPool, closePostgresPool } from './postgres-foundation.mjs';
@@ -71,6 +72,7 @@ export async function createPostgresApplication({
     metadata: new PostgresSettingsMetadataStore({ ...common, ...(clock ? { clock } : {}) }),
     conversations: new PostgresSessionStore({ ...common, ...(clock ? { clock } : {}) }),
     };
+    stores.albdruck = new PostgresAlbdruckStore({ pool: sharedPool, resolveOriginal: ref => stores.conversations.resolveOriginal(ref), searchHistory: input => stores.conversations.history(input) });
     await stores.forge.init();
     let closed = false;
     return Object.freeze({

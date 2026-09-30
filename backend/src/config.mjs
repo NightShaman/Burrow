@@ -262,3 +262,13 @@ export function resolveContextConfig(args = {}) {
 }
 export function resolveSkillsConfig() { return { disabledSkillIds: [], experimentalSkillIds: [], deprecatedSkillIds: [], memoryIndex: { enabled: false, namespace: 'skills', storesBody: false } }; }
 export const __test__ = {};
+
+// Bounds protect provider context and per-request database/response work; not retention limits.
+export function resolveAlbdruckConfig() {
+  const positiveInteger = (name, fallback) => {
+    const value = Number(env(name, fallback));
+    if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Invalid ${name}: expected a positive safe integer`);
+    return value;
+  };
+  return { promptMaxChars: positiveInteger('BURROW_ALBDRUCK_PROMPT_MAX_CHARS', 4000), maxPageSize: positiveInteger('BURROW_ALBDRUCK_MAX_PAGE_SIZE', 200) };
+}

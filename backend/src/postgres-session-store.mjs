@@ -1,3 +1,5 @@
+import { resolveAlbdruckConfig } from './config.mjs';
+import { matchesQuery } from './session-search.mjs';
 import { closeContinuityOwners } from './postgres-continuity-owner.mjs';
 import { randomUUID } from 'node:crypto';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
@@ -77,6 +79,11 @@ const limitValue = (value) => {
 };
 function rowEntry(row) { return row ? { ...row.entry, sequence: String(row.sequence) } : null; }
 
+export function assertConversationDeletionAllowed(sessionId, metadata = {}) {
+  if (['running', 'finalizing'].includes(metadata.continuityHead?.state)) throw new Error('session_retention_active');
+  if (metadata.current === true || metadata.currentMain === true || (['main', 'default'].includes(sessionId) && (!metadata.kind || metadata.kind === 'main'))) throw new Error('retention_refused_current_main');
+}
+
 /** Staged PostgreSQL authority boundary; callers explicitly own the pool. */
 export class PostgresSessionStore {
   constructor({ pool, ownsPool = false, clock = stamp } = {}) {
@@ -91,15 +98,90 @@ export class PostgresSessionStore {
       // never eligible even if a retention plan was built before a new run.
       const selected = await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sessionId]);
       if (!selected.rows.length) return {deleted:false};
-      const metadata = selected.rows[0].metadata || {};
-      if (['running', 'finalizing'].includes(metadata.continuityHead?.state)) throw new Error('session_retention_active');
-      if (metadata.current === true || metadata.currentMain === true || (['main', 'default'].includes(sessionId) && (!metadata.kind || metadata.kind === 'main'))) throw new Error('retention_refused_current_main');
+      assertConversationDeletionAllowed(sessionId, selected.rows[0].metadata);
       const result = await client.query('DELETE FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [agentId, sessionId]);
       return {deleted:result.rowCount === 1};
     });
   }
 
   async close() { await closeContinuityOwners(this.pool); if (this.ownsPool) await closePostgresPool(this.pool); }
+
+  /** Original JSON is decoded in JS: SQL JSON extraction is not lossless for NUL. */
+  async history({ agentId, scope = 'agent', query, cursor = '', pageSize = Math.min(50, resolveAlbdruckConfig().maxPageSize) } = {}) {
+    if (!['agent', 'global'].includes(scope) || (scope === 'agent' && (typeof agentId !== 'string' || !agentId.trim()))) throw new Error('albdruck_scope_invalid');
+    if (typeof query !== 'string' || !query.trim()) throw new Error('albdruck_query_required');
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > resolveAlbdruckConfig().maxPageSize) throw new Error('albdruck_page_size_invalid');
+    const binding = JSON.stringify([scope, scope === 'agent' ? agentId : null, query.trim()]);
+    let after = null;
+    if (cursor) {
+      try {
+        const value = JSON.parse(Buffer.from(cursor, 'base64url').toString());
+        if (value.v !== 1 || value.binding !== binding || !Array.isArray(value.key) || value.key.length !== 3 || value.key.some(x => typeof x !== 'string')) throw new Error();
+        after = value.key;
+      } catch { throw new Error('albdruck_cursor_invalid'); }
+    } else if (typeof cursor !== 'string') throw new Error('albdruck_cursor_invalid');
+    const compare = (a, b) => { for (let i = 0; i < 3; i++) { if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; } return 0; };
+    const originals = new Map();
+    const consider = (row, entry, provenance) => {
+      if (entry?.type !== 'message' || entry.metadata?.compressionSummary || !['user','assistant','agent'].includes(entry.role) || typeof entry.content !== 'string') return;
+      const entryId = entry.id || row.entry_id;
+      if (typeof entryId !== 'string' || !entryId) return;
+      const key = [row.agent_id, row.session_id, entryId];
+      if ((after && compare(key, after) <= 0) || !matchesQuery(entry, query.trim())) return;
+      const id = JSON.stringify(key);
+      if (!originals.has(id)) originals.set(id, { key, item: {
+        agentId: row.agent_id, sessionId: row.session_id, entryId,
+        timestamp: entry.timestamp ?? row.created_at, role: entry.role, content: entry.content,
+        sourceRef: { kind: 'conversation_entry', agentId: row.agent_id, sessionId: row.session_id, entryId },
+        provenance,
+      } });
+      // Retain only the smallest page plus lookahead while scanning authority.
+      if (originals.size > pageSize + 1) {
+        const largest = [...originals.entries()].reduce((a,b) => compare(a[1].key,b[1].key) > 0 ? a : b);
+        originals.delete(largest[0]);
+      }
+    };
+    // One repeatable-read snapshot keeps reset/compaction from hiding a turn during scanning.
+    return withPostgresTransaction(this.pool, async client => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      let sequence = '0';
+      for (;;) {
+        const { rows } = await client.query(`SELECT agent_id,session_id,entry_id,entry,created_at,sequence FROM conversation_entries
+          WHERE ($1::text IS NULL OR agent_id=$1) AND sequence>$2::bigint ORDER BY sequence LIMIT 256`, [scope === 'agent' ? agentId : null, sequence]);
+        for (const row of rows) consider(row, row.entry, { store: 'live', reset: false });
+        if (rows.length < 256) break;
+        sequence = String(rows.at(-1).sequence);
+      }
+      let archiveKey = null;
+      for (;;) {
+        const { rows } = await client.query(`SELECT agent_id,session_id,archive_id,entries,generation,kind,created_at FROM conversation_archives
+          WHERE ($1::text IS NULL OR agent_id=$1) AND ($2::text IS NULL OR (agent_id,session_id,archive_id)>($2,$3,$4))
+          ORDER BY agent_id,session_id,archive_id LIMIT 64`, [scope === 'agent' ? agentId : null, ...(archiveKey || [null,null,null])]);
+        for (const row of rows) for (const entry of row.entries) consider(row, entry, { store: 'archive', reset: row.kind === 'reset', archiveId: row.archive_id, kind: row.kind, generation: Number(row.generation), archivedAt: row.created_at });
+        if (rows.length < 64) break;
+        const last = rows.at(-1); archiveKey = [last.agent_id,last.session_id,last.archive_id];
+      }
+      const ordered = [...originals.values()].sort((a,b) => compare(a.key,b.key));
+      const page = ordered.slice(0,pageSize);
+      return { items: page.map(x => x.item), nextCursor: ordered.length > pageSize ? Buffer.from(JSON.stringify({ v: 1, binding, key: page.at(-1).key })).toString('base64url') : null };
+    });
+  }
+
+  async resolveOriginal({ agentId, sessionId, entryId }) {
+    const { rows } = await this.pool.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND entry_id=$3', [agentId, sessionId, entryId]);
+    if (rows[0]) return rows[0].entry;
+    // Read original JSON values without SQL JSON extraction (lossless numbers).
+    let before = null;
+    for (;;) {
+      const { rows: archives } = await this.pool.query('SELECT archive_id,entries FROM conversation_archives WHERE agent_id=$1 AND session_id=$2 AND ($3::text IS NULL OR archive_id<$3) ORDER BY archive_id DESC LIMIT 64', [agentId, sessionId, before]);
+      for (const archive of archives) {
+        const entry = (archive.entries || []).find(value => value.id === entryId);
+        if (entry) return entry;
+      }
+      if (archives.length < 64) return null;
+      before = archives.at(-1).archive_id;
+    }
+  }
 
   async append({ agentId: rawAgentId, sessionId: rawSessionId, entry, idempotencyKey = null } = {}) {
     const agentId = required(rawAgentId, 'agentId'); const sid = required(rawSessionId, 'sessionId');

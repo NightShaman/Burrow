@@ -1,9 +1,10 @@
 import { readRetentionPolicy, readRetentionPolicyState, retentionPolicyFailureState, retentionPolicySuccessState, writeRetentionPolicyState } from './retention-settings.mjs';
 
-export function createRetentionScheduler({ store = null, runCleanup, intervalMs = 60_000, clock = () => new Date() } = {}) {
+export function createRetentionScheduler({ store = null, runCleanup, runIndependentCleanup = null, intervalMs = 60_000, clock = () => new Date() } = {}) {
   if (typeof runCleanup !== 'function') throw new Error('retention_scheduler_cleanup_required');
   let timer = null;
   let ticking = false;
+  let independentDueAt = 0;
   async function tick() {
     if (ticking) return null;
     ticking = true;
@@ -14,6 +15,12 @@ export function createRetentionScheduler({ store = null, runCleanup, intervalMs 
       state = await readRetentionPolicyState({ store });
       const now = clock();
       const nowMs = now.getTime();
+      // Independent retention ignores the Dreams enable flag, not its cadence.
+      // Advance only after success so a failed cleanup is retried next tick.
+      if (runIndependentCleanup && nowMs >= independentDueAt) {
+        await runIndependentCleanup();
+        independentDueAt = clock().getTime() + policy.intervalMinutes * 60_000;
+      }
       const dueAt = state.nextRunAt ? Date.parse(state.nextRunAt) : null;
       if (!policy.enabled || (Number.isFinite(dueAt) && dueAt > nowMs)) return { ok: true, skipped: true, reason: policy.enabled ? 'not_due' : 'disabled', policy, state };
       const result = await runCleanup(policy);

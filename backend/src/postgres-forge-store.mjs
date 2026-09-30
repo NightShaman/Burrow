@@ -1,3 +1,4 @@
+import { PostgresAlbdruckStore } from './postgres-albdruck-store.mjs';
 import { PostgresSessionStore } from './postgres-session-store.mjs';
 import { buildSessionEntry } from './session-entry.mjs';
 import { randomUUID } from "node:crypto";
@@ -538,7 +539,7 @@ export class PostgresForgeStore {
       const prior = await client.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND idempotency_key=$3', [body.agentId,body.sessionId,key]);
       if (prior.rows[0]) return prior.rows[0].entry;
       const bytes = await fs.readFile(resolved.filePath);
-      const [stored] = await persistChatAttachments({ agentWorkspaceRoot: destination.agentWorkspaceRoot, attachments: [{ name: artifact.name, type: artifact.mimeType, content: `data:${artifact.mimeType};base64,${bytes.toString('base64')}` }] });
+      const [stored] = await persistChatAttachments({ retentionDays: (await new PostgresAlbdruckStore({ pool: this.pool }).readRetention()).attachmentDays, agentWorkspaceRoot: destination.agentWorkspaceRoot, attachments: [{ name: artifact.name, type: artifact.mimeType, content: `data:${artifact.mimeType};base64,${bytes.toString('base64')}` }] });
       const { content, ...metadata } = stored;
       const value = buildSessionEntry({sessionId:body.sessionId,type:'message',role:'user',content:'',metadata:{attachments:[metadata],idempotencyKey:key}});
       try {
