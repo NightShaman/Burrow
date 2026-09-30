@@ -41,6 +41,23 @@ describe('Forge workspace', () => {
     expect((screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).value).toBe('my draft');
   });
 
+  it('scopes the viewer to the active type while Recents permits cross-type selection', async () => {
+    const jobs = ['image', 'music'].map((kind) => ({ id: kind, kind, modelId: kind, prompt: `${kind} output`, status: 'succeeded', createdAt: '2026-09-27T00:00:00Z', artifacts: [] }));
+    renderForge(jobs);
+    await screen.findByRole('heading', { name: 'Image' });
+    fireEvent.click(screen.getByRole('tab', { name: /Music/ }));
+    expect(screen.getByRole('heading', { name: 'Music' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Image' })).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: /Recents/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Image succeeded: image output' }));
+    expect(screen.getByText('image output', { selector: 'p' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: /Music/ }));
+    expect(screen.getByRole('heading', { name: 'Music' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: /Video/ }));
+    expect(screen.queryByRole('heading', { name: 'Image' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Music' })).toBeNull();
+  });
+
   it('shows an empty recents state', async () => {
     renderForge();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' }).hasAttribute('disabled')).toBe(false));

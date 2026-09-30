@@ -188,8 +188,9 @@ export function Forge({ selectedAgentId, sessionId }: { agents?: Agent[]; select
     }, 1500);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [jobs]);
-  const recentJobs = showRecents ? jobs : jobs.filter((job) => job.kind === mode).slice(0, 5);
-  const selectedJob = jobs.find((job) => job.id === selectedJobId) ?? jobs[0];
+  const scopedJobs = showRecents ? jobs : jobs.filter((job) => job.kind === mode);
+  const recentJobs = showRecents ? scopedJobs : scopedJobs.slice(0, 5);
+  const selectedJob = scopedJobs.find((job) => job.id === selectedJobId) ?? scopedJobs[0];
   const submit = async () => {
     const model = availableModels.find((item) => modelKey(item) === selectedModel);
     const submittedPrompt = mode === 'music' ? composeMusicPrompt(prompt, lyrics) : prompt.trim();
