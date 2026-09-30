@@ -1,0 +1,32 @@
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { apiForTarget } from '../../app/api';
+import { ConversationPurge } from './ConversationPurge';
+vi.mock('../../app/api', () => ({ apiForTarget: vi.fn() }));
+afterEach(() => { cleanup(); vi.resetAllMocks(); });
+it('requires deliberate confirmation and nonblank reason; posts exact contract and shows counts', async () => {
+  const done = vi.fn();
+  vi.mocked(apiForTarget).mockResolvedValue({agentId:'a',sessionId:'s',deleted:false,removed:{evidence:2,knowledge:1,revisions:3,working_memory:4,continuity_handoffs:0,conversation_project_bindings:0,dream_diary_entries:0,working_memory_meta:1}});
+  render(<ConversationPurge conversation={{agentId:'a',sessionId:'s'}} onClose={vi.fn()} onPurged={done}/>);
+  const button = screen.getByText('Confirm permanent purge');
+  expect(button).toHaveProperty('disabled',true);
+  fireEvent.change(screen.getByLabelText(/Type the exact/),{target:{value:'s'}});
+  fireEvent.change(screen.getByLabelText('Purge reason (required)'),{target:{value:'   '}});
+  expect(button).toHaveProperty('disabled',true);
+  fireEvent.change(screen.getByLabelText('Purge reason (required)'),{target:{value:' remove '}});
+  fireEvent.click(button);
+  await screen.findByText('evidence: 2');
+  expect(apiForTarget).toHaveBeenCalledWith(undefined,'/api/albdruck/purge-conversation',{method:'POST',body:JSON.stringify({agentId:'a',sessionId:'s',reason:'remove'})});
+  expect(screen.getByText(/already absent/)).toBeTruthy(); expect(done).toHaveBeenCalledOnce();
+});
+it('surfaces protection errors without claiming success and allows retry/cancel', async () => {
+  const done = vi.fn(), close = vi.fn();
+  vi.mocked(apiForTarget).mockRejectedValue(new Error('409 albdruck_purge_current_main'));
+  render(<ConversationPurge conversation={{agentId:'a',sessionId:'s'}} onClose={close} onPurged={done}/>);
+  fireEvent.change(screen.getByLabelText(/Type the exact/),{target:{value:'s'}});
+  fireEvent.change(screen.getByLabelText('Purge reason (required)'),{target:{value:'remove'}});
+  fireEvent.click(screen.getByText('Confirm permanent purge'));
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent','Purge failed: 409 albdruck_purge_current_main');
+  await waitFor(() => expect(screen.getByText('Confirm permanent purge')).toHaveProperty('disabled',false));
+  expect(done).not.toHaveBeenCalled(); fireEvent.click(screen.getByText('Cancel purge')); expect(close).toHaveBeenCalledOnce();
+});
