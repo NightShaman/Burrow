@@ -71,3 +71,15 @@
 .forge-jobs button>span:nth-child(3){grid-column:3;grid-row:1}
 @container(max-width:1050px){.forge-heading{grid-template-columns:1fr}.forge-modes{grid-column:1}.forge-heading>div:first-child{text-align:center}}
 @container(max-width:700px){.forge-grid{grid-template-columns:minmax(0,1fr);flex:none;grid-template-rows:auto auto auto}.forge-prompt{flex:none;grid-template-rows:auto auto auto}.forge-prompt textarea{height:auto}.forge-studio{grid-row:auto}.forge-preview,.forge-history{grid-column:1}.forge-preview{min-height:220px}.forge-heading h1{font-size:24px}.forge-modes{gap:6px;overflow:visible}.forge-modes button{padding:10px}.forge-panel-head{padding:14px}.forge-jobs time{white-space:normal;text-align:right}}
+
+.forge-studio[hidden]{display:none}
+.forge-recents-grid{grid-template-rows:minmax(300px,1fr);align-items:start}
+.forge-recents-grid .forge-history{grid-column:1;grid-row:1}
+.forge-recents-grid .forge-preview{grid-column:2;grid-row:1}
+.forge-recents-grid .forge-jobs{max-height:65vh;overflow:auto;scrollbar-width:thin}
+.forge-recents-grid .forge-jobs button{grid-template-columns:80px minmax(0,1fr)}
+.forge-recents-grid .forge-jobs button>span:nth-child(3){grid-column:1 / -1;grid-row:2}
+.forge-recents-grid .forge-jobs time{grid-column:1 / -1;grid-row:3;text-align:left;max-width:none}
+.forge-recent-details{padding:16px 20px;overflow-wrap:anywhere;color:var(--muted)}
+.forge-recent-details p{white-space:pre-wrap}
+@container(max-width:700px){.forge-recents-grid .forge-preview{grid-column:1;grid-row:2}.forge-recents-grid .forge-jobs{max-height:40vh}}

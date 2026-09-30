@@ -23,6 +23,31 @@ function renderForge(initialJobs: unknown[] = []) {
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe('Forge workspace', () => {
+  it('browses beyond five creations across kinds and selects an older creation without losing the draft', async () => {
+    const jobs = Array.from({ length: 9 }, (_, i) => ({ id: `old-${i}`, connectionId: 'c1', modelId: `model-${i}`, kind: i === 8 ? 'music' : 'image', prompt: `creation ${i}`, status: 'succeeded', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', artifacts: [] }));
+    renderForge(jobs);
+    await screen.findByRole('button', { name: 'Image succeeded: creation 0' });
+    expect(screen.queryByRole('button', { name: 'Image succeeded: creation 6' })).toBeNull();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), { target: { value: 'my draft' } });
+    fireEvent.click(screen.getByRole('tab', { name: /Recents/ }));
+    expect(screen.getByRole('tab', { name: /Recents/ }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.queryByRole('textbox', { name: 'Prompt' })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Recent creations list' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Image succeeded: creation 6' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Music succeeded: creation 8' }));
+    expect(screen.getByRole('heading', { name: 'Music' })).toBeTruthy();
+    expect(screen.getByText('creation 8', { selector: 'p' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: /Image/ }));
+    expect((screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).value).toBe('my draft');
+  });
+
+  it('shows an empty recents state', async () => {
+    renderForge();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' }).hasAttribute('disabled')).toBe(false));
+    fireEvent.click(screen.getByRole('tab', { name: /Recents/ }));
+    expect(screen.getByText('No recent creations.')).toBeTruthy();
+  });
+
   it('restores per-mode selections, saves only explicit changes, and retains work across agents and remounts', async () => {
     const second = { ...catalog.models[0], modelId: 'image-2', label: 'Image Two' };
     const speech = { ...second, modelId: 'voice', kind: 'audio', label: 'Voice' };
