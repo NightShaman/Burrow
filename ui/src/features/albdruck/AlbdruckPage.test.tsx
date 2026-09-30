@@ -8,6 +8,7 @@ const item = {id:'k',document:{claim:'Use PG',rationale:null,alternatives:[],con
 function mockApi() { vi.mocked(apiForTarget).mockImplementation(async (_target,path) => {
   if (path.endsWith('retention')) return {knowledgeDays:null,evidenceDays:30,revisionDays:null};
   if (path.includes('/knowledge/k?')) return {...item,evidence:[{status:'live_original',sourceRef:{kind:'conversation_entry'},content:'original'},{status:'preserved_excerpt',content:'excerpt'},{status:'unavailable',content:null}],revisions:[]};
+  if (path.includes('/history')) return {items:[],nextCursor:null};
   return {items:[item],nextCursor:'k'};
 }); }
 describe('Albdruck',()=>{
@@ -32,8 +33,21 @@ describe('Albdruck',()=>{
     fireEvent.click(screen.getByText('Next page'));
     await waitFor(()=>expect(vi.mocked(apiForTarget).mock.calls.some(c=>c[1].includes('cursor=k'))).toBe(true));
     fireEvent.change(screen.getByLabelText('View'),{target:{value:'recall'}});
-    expect(screen.getByText(/not historical conversations/)).toBeTruthy();
-    await waitFor(()=>expect(vi.mocked(apiForTarget).mock.calls.some(c=>c[1].includes('/recall?scope=global') && c[2]?.method==='POST')).toBe(true));
+    expect(screen.getByText(/full original conversation entries/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Search originals'),{target:{value:'original'}});
+    fireEvent.click(screen.getByText('Search'));
+    await waitFor(()=>expect(vi.mocked(apiForTarget).mock.calls.some(c=>c[1].includes('/history?scope=global') && c[2]?.method==='POST' && JSON.parse(c[2].body as string).query==='original')).toBe(true));
+  });
+  it('paginates full originals and labels live and reset archives without knowledge requests',async()=>{
+    const original = {agentId:'a',sessionId:'s',entryId:'e',timestamp:'2026-01-01T00:00:00Z',role:'user',content:'Complete original\nsecond line',sourceRef:{kind:'conversation_entry',agentId:'a',sessionId:'s',entryId:'e'},provenance:{store:'archive',reset:true,archiveId:'archive-1'}};
+    vi.mocked(apiForTarget).mockImplementation(async (_t,path,init)=> path.endsWith('retention') ? {knowledgeDays:null,evidenceDays:null,revisionDays:null} : path.includes('/history') ? JSON.parse(init?.body as string).cursor ? {items:[{...original,entryId:'f',provenance:{store:'live',reset:false}}],nextCursor:null} : {items:[original],nextCursor:'opaque'} : {items:[],nextCursor:null});
+    render(<Albdruck agents={[]}/>); fireEvent.change(screen.getByLabelText('Scope'),{target:{value:'global'}}); fireEvent.change(screen.getByLabelText('View'),{target:{value:'recall'}});
+    expect(screen.getByText('Search') as HTMLButtonElement).toHaveProperty('disabled',true);
+    fireEvent.change(screen.getByLabelText('Search originals'),{target:{value:'original'}}); fireEvent.click(screen.getByText('Search'));
+    expect(await screen.findByText(/Complete original second line/)).toBeTruthy(); expect(screen.getByText('Original conversation · Reset archive')).toBeTruthy();
+    fireEvent.click(screen.getByText('Next page')); await screen.findByText('Original conversation · Live');
+    expect(vi.mocked(apiForTarget).mock.calls.some(c=>c[1].includes('/history?scope=global') && JSON.parse(c[2]?.body as string).cursor==='opaque')).toBe(true);
+    expect(vi.mocked(apiForTarget).mock.calls.some(c=>c[1].includes('/recall?'))).toBe(false);
   });
   it('ignores a stale list response after scope change',async()=>{
     let resolveOld!: (value: unknown)=>void;
