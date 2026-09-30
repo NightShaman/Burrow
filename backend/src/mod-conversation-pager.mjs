@@ -1,3 +1,4 @@
+import { isChatMessage } from './session-entry.mjs';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
 import { MOD_CAPABILITY_RESULT_MAX_BYTES, modCapabilityResultBytes } from './mod-capability-envelope.mjs';
@@ -21,7 +22,7 @@ function digest(turn) { return createHash('sha256').update(JSON.stringify(turn))
 function warnings(status, turns, gaps) {
   return [...(status === 'unavailable' ? ['archive_history_unavailable'] : []),
     ...(turns.some((turn) => turn.contentTruncated) ? ['stored_turn_content_truncated'] : []),
-    ...(gaps.length ? ['turn_metadata_exceeds_envelope'] : [])];
+    ...new Set(gaps.map(gap => gap.reason))];
 }
 function output(target, turns, gaps, hasMore, nextCursor, status) {
   const historyStatus = gaps.length ? 'unavailable' : status;
@@ -51,9 +52,15 @@ async function readPostgresConversationPage({ conversationStore, agentId, sessio
   }
   const fromTime = from ? Date.parse(from) : null;
   const toTime = to ? Date.parse(to) : null;
-  const entries = source.filter((entry) => {
+  const entries = source.map((entry, recordIndex) => ({ entry, recordIndex })).filter(({ entry }) => {
+    if (!isChatMessage(entry)) return false;
     const time = entryTime(entry);
     return !(fromTime !== null && time !== null && time < fromTime) && !(toTime !== null && time !== null && time > toTime);
+  }).map(({ entry, recordIndex }) => {
+    const invalidFields = [];
+    if (typeof entry.id !== 'string' || !entry.id.trim()) invalidFields.push('id');
+    if (typeof entry.ts !== 'string' || entryTime(entry) === null) invalidFields.push('ts');
+    return invalidFields.length ? { invalidSourceRecord: true, recordIndex, turnId: typeof entry.id === 'string' && entry.id ? entry.id : null, invalidFields } : entry;
   }).reverse();
   const sourceDigest = createHash('sha256').update(JSON.stringify(entries)).digest('hex');
   let offset = 0;
@@ -118,6 +125,14 @@ export async function readModConversationPage({ rootDir, conversationStore = nul
     const turn = page.turns[index];
     const beforeTurn = page.turnReadCursors[index];
     const afterTurn = page.turnCursors[index];
+    if (turn.invalidSourceRecord) {
+      if (segment) badCursor();
+      const gap = { turnId: turn.turnId, recordIndex: turn.recordIndex, reason: 'invalid_source_turn', invalidFields: turn.invalidFields };
+      const candidate = output(target, turns, [...gaps, gap], Boolean(afterTurn), afterTurn, status);
+      if (modCapabilityResultBytes(candidate) > MOD_CAPABILITY_RESULT_MAX_BYTES) return output(target, turns, gaps, true, beforeTurn, status);
+      gaps.push(gap);
+      continue;
+    }
     if (segment) {
       if (index !== page.turns.length - 1 || digest(turn) !== segment.digest || typeof turn.content !== 'string') badCursor();
       const piece = segmentTurn(turn, segment.offset, target, status, beforeTurn, afterTurn, scope);
