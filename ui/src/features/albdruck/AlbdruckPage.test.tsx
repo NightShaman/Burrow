@@ -49,6 +49,31 @@ describe('Albdruck',()=>{
     expect(vi.mocked(apiForTarget).mock.calls.some(c=>c[1].includes('/history?scope=global') && JSON.parse(c[2]?.body as string).cursor==='opaque')).toBe(true);
     expect(vi.mocked(apiForTarget).mock.calls.some(c=>c[1].includes('/recall?'))).toBe(false);
   });
+  it('roundtrips all six independent retention limits including null and explicit values', async () => {
+    const keys = ['knowledgeDays','evidenceDays','revisionDays','conversationDays','operationalDays','attachmentDays'] as const;
+    const initial = {knowledgeDays:null,evidenceDays:7,revisionDays:null,conversationDays:null,operationalDays:null,attachmentDays:30};
+    vi.mocked(apiForTarget).mockImplementation(async (_t,path,init) => path.endsWith('retention') ? init?.method === 'PUT' ? JSON.parse(init.body as string) : initial : {items:[],nextCursor:null});
+    render(<Albdruck agents={[]}/>);
+    const labels = ['Derived knowledge (days)','Preserved evidence excerpts (days)','Knowledge revisions (days)','Original conversations (days)','Operational traces (days)','Attachments (days)'];
+    for (let i=0;i<keys.length;i++) expect(await screen.findByLabelText(labels[i])).toHaveProperty('value',initial[keys[i]] === null ? '' : String(initial[keys[i]]));
+    const values = [1,null,3,4,5,null];
+    for (let i=0;i<keys.length;i++) fireEvent.change(screen.getByLabelText(labels[i]),{target:{value:values[i] === null ? '' : String(values[i])}});
+    fireEvent.click(screen.getByText('Save retention'));
+    await waitFor(() => expect(vi.mocked(apiForTarget).mock.calls.find(c=>c[1].endsWith('retention') && c[2]?.method === 'PUT')).toBeTruthy());
+    const call = vi.mocked(apiForTarget).mock.calls.find(c=>c[1].endsWith('retention') && c[2]?.method === 'PUT')!;
+    expect(JSON.parse(call[2]!.body as string)).toEqual(Object.fromEntries(keys.map((k,i)=>[k,values[i]])));
+    expect(screen.queryByText(/conversations are not deleted/i)).toBeNull();
+  });
+  it('labels soft deletion Archive while preserving DELETE operation and reason', async () => {
+    mockApi(); render(<Albdruck agents={[]}/>);
+    fireEvent.change(screen.getByLabelText('Scope'),{target:{value:'global'}});
+    fireEvent.click(await screen.findByText('Use PG'));
+    fireEvent.change(await screen.findByLabelText('Operation'),{target:{value:'delete'}});
+    expect(screen.getByText(/Archive is a soft deletion with a revision, not full erasure/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Reason (required)'),{target:{value:'Outdated'}});
+    fireEvent.click(screen.getByText('Apply archive'));
+    await waitFor(()=>expect(vi.mocked(apiForTarget).mock.calls.some(c=>c[2]?.method==='DELETE' && JSON.parse(c[2].body as string).reason==='Outdated')).toBe(true));
+  });
   it('ignores a stale list response after scope change',async()=>{
     let resolveOld!: (value: unknown)=>void;
     vi.mocked(apiForTarget).mockImplementation(async (_t,path)=>path.endsWith('retention') ? {knowledgeDays:null,evidenceDays:null,revisionDays:null} : path.includes('scope=agent') ? new Promise(r=>{resolveOld=r;}) : {items:[],nextCursor:null});
