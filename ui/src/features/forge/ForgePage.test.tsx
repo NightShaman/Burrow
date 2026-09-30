@@ -23,6 +23,29 @@ function renderForge(initialJobs: unknown[] = []) {
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe('Forge workspace', () => {
+  it('uses origin for music and speech and keeps unresolved audio in Recents only', async () => {
+    const base = { kind: 'audio', modelId: 'same-model', status: 'succeeded', createdAt: '2026-09-27T00:00:00Z', artifacts: [] };
+    renderForge([
+      { ...base, id: 'music', mode: 'music', prompt: 'music output' },
+      { ...base, id: 'speech', mode: 'speech', prompt: 'speech output' },
+      { ...base, id: 'unknown', mode: null, prompt: 'unknown output' },
+      { ...base, id: 'legacy', kind: 'music', prompt: 'legacy music' },
+    ]);
+    await screen.findByRole('option', { name: 'Image One' });
+    fireEvent.click(screen.getByRole('tab', { name: /Music/ }));
+    expect(screen.getByRole('button', { name: 'Music succeeded: music output' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Music succeeded: legacy music' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /speech output|unknown output/ })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Creation viewer' }).querySelector('h2')?.textContent).toBe('Music');
+    fireEvent.click(screen.getByRole('tab', { name: /Speech/ }));
+    expect(screen.getByRole('button', { name: 'Speech succeeded: speech output' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /music output|unknown output/ })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Creation viewer' }).querySelector('h2')?.textContent).toBe('Speech');
+    fireEvent.click(screen.getByRole('tab', { name: /Recents/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Audio succeeded: unknown output' }));
+    expect(screen.getByRole('region', { name: 'Creation viewer' }).querySelector('h2')?.textContent).toBe('Audio');
+  });
+
   it('browses beyond five creations across kinds and selects an older creation without losing the draft', async () => {
     const jobs = Array.from({ length: 9 }, (_, i) => ({ id: `old-${i}`, connectionId: 'c1', modelId: `model-${i}`, kind: i === 8 ? 'music' : 'image', prompt: `creation ${i}`, status: 'succeeded', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', artifacts: [] }));
     renderForge(jobs);
@@ -122,7 +145,7 @@ describe('Forge workspace', () => {
   it('keeps modes in the header and scopes compact recents to the active media type', async () => {
     const jobs = [
       ...Array.from({ length: 30 }, (_, i) => ({ id: `image-${i}`, kind: 'image', modelId: 'image-1', prompt: `Long image prompt ${i} `.repeat(20), status: 'succeeded', createdAt: '2026-09-26T12:00:00Z', artifacts: [] })),
-      ...Array.from({ length: 8 }, (_, i) => ({ id: `music-${i}`, kind: 'music', modelId: 'lyria', prompt: `Long music direction ${i} `.repeat(20), status: 'succeeded', createdAt: '2026-09-26T12:00:00Z', artifacts: [] })),
+      ...Array.from({ length: 8 }, (_, i) => ({ id: `music-${i}`, mode: 'music', kind: 'audio', modelId: 'lyria', prompt: `Long music direction ${i} `.repeat(20), status: 'succeeded', createdAt: '2026-09-26T12:00:00Z', artifacts: [] })),
     ];
     renderForge(jobs);
     await screen.findByRole('option', { name: 'Image One' });
@@ -159,7 +182,7 @@ describe('Forge workspace', () => {
     const musicCatalog = { ...catalog, music: { available: true, reason: null, models: [{ connectionId: 'g1', modelId: 'lyria', label: 'Lyria', kind: 'audio', available: true, controls: [] }] }, models: [...catalog.models, { connectionId: 's1', modelId: 'speech', label: 'Speech', kind: 'audio', available: true, controls: [] }] };
     apiMock.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/forge/catalog') return Promise.resolve(musicCatalog);
-      if (init?.method === 'POST') return Promise.resolve({ job: { id: 'music-1', connectionId: 'g1', modelId: 'lyria', kind: 'music', prompt: 'a bright synth line', status: 'queued', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', artifacts: [] } });
+      if (init?.method === 'POST') return Promise.resolve({ job: { id: 'music-1', connectionId: 'g1', modelId: 'lyria', mode: 'music', kind: 'audio', prompt: 'a bright synth line', status: 'queued', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', artifacts: [] } });
       if (path === '/api/forge/jobs') return Promise.resolve({ jobs: [] });
       return Promise.resolve({});
     });
@@ -181,7 +204,7 @@ describe('Forge workspace', () => {
     const musicCatalog = { ...catalog, music: { available: true, reason: null, models: [{ connectionId: 'g1', modelId: 'lyria', label: 'Lyria', kind: 'audio', available: true, controls: [] }] } };
     apiMock.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/forge/catalog') return Promise.resolve(musicCatalog);
-      if (init?.method === 'POST') return Promise.resolve({ job: { id: 'music-lyrics', connectionId: 'g1', modelId: 'lyria', kind: 'music', prompt: 'dreamy synth pop', status: 'queued', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', artifacts: [] } });
+      if (init?.method === 'POST') return Promise.resolve({ job: { id: 'music-lyrics', connectionId: 'g1', modelId: 'lyria', mode: 'music', kind: 'audio', prompt: 'dreamy synth pop', status: 'queued', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', artifacts: [] } });
       if (path === '/api/forge/jobs') return Promise.resolve({ jobs: [] });
       return Promise.resolve({});
     });
