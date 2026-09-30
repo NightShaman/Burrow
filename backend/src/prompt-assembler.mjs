@@ -38,6 +38,7 @@ function sourceForSection(name) {
     'support-operational-continuity': 'operational-continuity-provider',
     'support-working-context': 'working-context-provider',
     'runtime-host-context': 'runtime-execution-context-provider',
+    'turn-time-context': 'conversation-store-provider',
     'active-ui-target': 'agent-context-provider',
     'verified-child-evidence': 'child-evidence-provider',
     'support-subagent': 'subagent-provider',
@@ -386,6 +387,18 @@ function renderRuntimeHostContext(context = null) {
   ].join('\n');
 }
 
+export function renderTurnTimeContext(context = null) {
+  const now = new Date(context?.turnStartedAt);
+  if (!Number.isFinite(now.getTime())) return '';
+  const last = context?.lastOperatorMessageAt ? new Date(context.lastOperatorMessageAt) : null;
+  if (!last || !Number.isFinite(last.getTime()) || last > now) return `Turn started: ${now.toISOString()} (UTC)\nPrevious operator message to this agent: unknown`;
+  let minutes = Math.floor((now - last) / 60_000);
+  const days = Math.floor(minutes / 1440); minutes %= 1440;
+  const hours = Math.floor(minutes / 60); minutes %= 60;
+  const parts = [days && `${days}d`, hours && `${hours}h`, minutes && `${minutes}m`].filter(Boolean);
+  return `Turn started: ${now.toISOString()} (UTC)\nPrevious operator message to this agent: ${last.toISOString()} (${parts.join(' ') || 'less than 1m'} ago)`;
+}
+
 function renderUiTarget(target = null) {
   if (!target?.url) return '';
   return `Active UI target${target.label ? ` (${target.label})` : ''}: ${target.url}\nUse the granted browser tools to open or select this target when visual inspection, browser debugging, or UI validation is needed. This is the current target; do not assume a fixed dev-server port.`;
@@ -560,6 +573,7 @@ export async function assemblePrompt({
     section('support-dream-preload', clampText(renderDreamPreload(supportContext?.dreamPreload || null), limits.dreamPreloadChars ?? 2_000)),
     section('support-working-context', renderWorkingContext(supportContext?.workingContext || null, limits.workingContextChars ?? 0)),
     section('runtime-host-context', clampText(renderRuntimeHostContext(supportContext?.runtimeHost || null), limits.runtimeHostChars ?? 1_000)),
+    section('turn-time-context', renderTurnTimeContext(supportContext?.temporalContext || null)),
     section('active-ui-target', clampText(renderUiTarget(supportContext?.uiTarget || null), limits.uiTargetChars ?? 2_500)),
     section('verified-child-evidence', clampText(renderVerifiedChildEvidence(supportContext?.childEvidence || []), limits.childEvidenceChars ?? 10_000)),
     section('support-extra-eyes', clampText(renderExtraEyesReview(supportContext?.extraEyesReview || null), limits.extraEyesChars ?? 6_000)),

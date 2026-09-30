@@ -104,9 +104,9 @@ export function chatTurnInputFromBody({ body = {}, rootDir, dataRoot, agentDataR
   };
 }
 
-export async function runChatTurnFromBody({ body = {}, rootDir, dataRoot, agentDataRoot, agentRuntime = null, resolveAgentRuntime = null, stores = null, groupChannelContext = null, onTraceRecord = null, onModelTextDelta = null, onModelThoughtDelta = null, onModelContextUsage = null, registerNestedAgentRun = null } = {}) {
+export async function runChatTurnFromBody({ body = {}, rootDir, dataRoot, agentDataRoot, agentRuntime = null, resolveAgentRuntime = null, stores = null, groupChannelContext = null, turnSource = null, onTraceRecord = null, onModelTextDelta = null, onModelThoughtDelta = null, onModelContextUsage = null, registerNestedAgentRun = null } = {}) {
   const input = chatTurnInputFromBody({ body, rootDir, dataRoot, agentDataRoot, agentRuntime });
-  return runChatTurn({ ...input, agentRuntime, resolveAgentRuntime, stores, groupChannelContext, onTraceRecord, onModelTextDelta, onModelThoughtDelta, onModelContextUsage, registerNestedAgentRun });
+  return runChatTurn({ ...input, agentRuntime, resolveAgentRuntime, stores, groupChannelContext, turnSource, onTraceRecord, onModelTextDelta, onModelThoughtDelta, onModelContextUsage, registerNestedAgentRun });
 }
 
 

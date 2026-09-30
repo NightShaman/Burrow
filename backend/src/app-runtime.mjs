@@ -105,6 +105,8 @@ async function runAskChatUnserialized({
   // Trusted internal provenance for one bounded recipient response. It is never
   // accepted from serialized request args.
   incomingAgentMessage = null,
+  // Internal ingress provenance; never taken from request body.
+  turnSource = null,
   // Trusted server-side context for a participant in an operator group room.
   // The room transcript is prompt context, not the participant's private session.
   groupChannelContext = null,
@@ -203,7 +205,7 @@ async function runAskChatUnserialized({
     interruptedRun: continuity.recoveryManifest || null,
     stores,
   });
-  const { priorSession, conversationId, resolvedWorkingRoot, compatibilityScope, continuityScope, generatedContinuityScope, verifiedSubjectScope, deicticFiles, workspaceFiles, initialWorkingContext, ambientWorkingContext, dreamPreload } = sessionContext;
+  const { turnStartedAt, lastOperatorMessageAt, priorSession, conversationId, resolvedWorkingRoot, compatibilityScope, continuityScope, generatedContinuityScope, verifiedSubjectScope, deicticFiles, workspaceFiles, initialWorkingContext, ambientWorkingContext, dreamPreload } = sessionContext;
   const effectiveAction = action ?? normalizedArgs.action ?? null;
   const turnMemoryContext = {};
   // An explicit data root owns its trace cache too. This keeps isolated callers
@@ -365,6 +367,7 @@ async function runAskChatUnserialized({
       traceDir: logger.traceDir,
       metadata: {
         ...userTurnMetadata({ command, session, intent, attachments: turnAttachments, turnPlan, subjectScope: verifiedSubjectScope }),
+        ...(turnSource ? { source: turnSource } : {}),
         ...(earlyContinuationPlan ? { continuationPlan: earlyContinuationPlan } : {}),
       },
     });
@@ -378,7 +381,7 @@ async function runAskChatUnserialized({
   const modelTask = incomingAgentMessage
     ? `[Agent message from ${incomingAgentMessage.senderAgentId || 'another agent'}]: ${message}`
     : message;
-  const promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext });
+  const promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, temporalContext: { turnStartedAt, lastOperatorMessageAt } });
   const { turnContext, conversationContext, prompt, finalPromptInspection, contextCompression } = promptContext;
   if (finalPromptInspection.pressure === 'blocked') {
     const content = 'I could not safely fit the final prompt inside the configured model context window after compression. I should not call the model with an over-budget prompt.';

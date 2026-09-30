@@ -17,6 +17,8 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
   // Planning consumes no transcript prose. It receives only durable session
   // identity/metadata, while pending actions are resolved from their explicit
   // work-item and turn contracts rather than an arbitrary transcript tail.
+  const turnStartedAt = new Date().toISOString();
+  const lastOperatorMessageAt = await stores.conversations.lastOperatorMessageAt({ agentId });
   const metadata = await authority.metadata(resolvedSessionId);
   const pendingActions = await authority.pendingActions(resolvedSessionId);
   const priorSession = {
@@ -71,5 +73,5 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
   try {
     dreamPreload = await stores.workingMemory.getDreamPreload({ agentId: runtimeState.agentId, project: continuityScope }) || await stores.workingMemory.getDreamPreload({ agentId: runtimeState.agentId, project: 'global' });
   } catch { dreamPreload = null; }
-  return { priorSession, conversationId, resolvedWorkingRoot, continuityHandoffs, compatibilityScope, continuityScope, generatedContinuityScope, verifiedSubjectScope, deicticFiles, workspaceFiles, initialWorkingContext, ambientWorkingContext, dreamPreload };
+  return { turnStartedAt, lastOperatorMessageAt, priorSession, conversationId, resolvedWorkingRoot, continuityHandoffs, compatibilityScope, continuityScope, generatedContinuityScope, verifiedSubjectScope, deicticFiles, workspaceFiles, initialWorkingContext, ambientWorkingContext, dreamPreload };
 }

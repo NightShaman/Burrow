@@ -56,7 +56,9 @@ ALTER TABLE conversation_archives ALTER COLUMN entries TYPE JSON USING entries::
 ALTER TABLE conversation_archives ALTER COLUMN entries SET DEFAULT '[]'::json;
 `;
 
-export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL;
+export const POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL = `CREATE INDEX IF NOT EXISTS conversation_entries_agent_recent_idx ON conversation_entries(agent_id, created_at DESC, sequence DESC);`;
+
+export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL;
 
 
 const text = (value) => String(value ?? '');
@@ -153,6 +155,40 @@ export class PostgresSessionStore {
     const result = await this.pool.query(`SELECT sequence,entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND sequence>$3 ORDER BY sequence LIMIT $4`, [agentId, sid, cursor.toString(), size + 1]);
     const hasMore = result.rows.length > size; const rows = hasMore ? result.rows.slice(0, size) : result.rows;
     return { entries: rows.map(rowEntry), next: hasMore ? String(rows.at(-1).sequence) : null, hasMore };
+  }
+
+  async lastOperatorMessageAt({ agentId: rawAgentId } = {}) {
+    const agentId = required(rawAgentId, 'agentId');
+    let newest = null;
+    const consider = (entry) => {
+      if (entry?.type !== 'message' || entry?.role !== 'user') return;
+      if (entry?.metadata?.source === 'scheduled' || String(entry?.runId || '').startsWith('scheduled-')) return;
+      const at = new Date(entry.ts);
+      if (Number.isFinite(at.getTime()) && (!newest || at > newest)) newest = at;
+    };
+    let beforeAt = null; let beforeSequence = null;
+    // Decode JSON in JS: PostgreSQL JSON extraction can fail on escaped NUL.
+    // Compaction moves messages to archives, so active entries alone are not
+    // sufficient. Walk both sources without a history depth cutoff.
+    for (;;) {
+      const rows = (await this.pool.query(`SELECT sequence,entry,created_at FROM conversation_entries
+        WHERE agent_id=$1 AND ($2::text IS NULL OR (created_at,sequence)<($2::text,$3::bigint))
+        ORDER BY created_at DESC,sequence DESC LIMIT 256`, [agentId, beforeAt, beforeSequence])).rows;
+      for (const row of rows) consider(row.entry);
+      if (rows.length < 256) break;
+      beforeAt = rows.at(-1).created_at;
+      beforeSequence = String(rows.at(-1).sequence);
+    }
+    let beforeArchive = null;
+    for (;;) {
+      const rows = (await this.pool.query(`SELECT archive_id,entries FROM conversation_archives
+        WHERE agent_id=$1 AND ($2::text IS NULL OR archive_id<$2::text)
+        ORDER BY archive_id DESC LIMIT 64`, [agentId, beforeArchive])).rows;
+      for (const row of rows) for (const entry of row.entries || []) consider(entry);
+      if (rows.length < 64) break;
+      beforeArchive = rows.at(-1).archive_id;
+    }
+    return newest?.toISOString() || null;
   }
 
   async listSessions({ agentId: rawAgentId, includeArchived = true } = {}) {

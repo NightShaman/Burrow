@@ -36,6 +36,7 @@ export function createScheduledJobScheduler({ storeFactory, closeStore: closeSto
         rootDir,
         agentRuntime,
         resolveAgentRuntime,
+        turnSource: 'scheduled',
       });
       const store = await openStore();
       try { await store.completeRun(run.id, { runId: result.runId || runId, dispatchedAt: record.startedAt, traceDir: result.traceDir || null, decision: result.decision || null, ok: Boolean(result.ok), error: result.ok ? null : (result.error || null), result: boundedResult(result) }); } finally { await closeStore(store); }
