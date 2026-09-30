@@ -49,4 +49,6 @@ export const POSTGRES_APPLICATION_SCHEMA_MANIFEST = Object.freeze([
     completed_at TEXT NOT NULL, result JSONB NOT NULL);` },
   { version: 9, name: 'lossless-conversation-json', sql: POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL },
   { version: 10, name: 'operator-message-lookup', sql: POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL },
+  { version: 11, name: 'scheduled-job-timezone-inheritance', sql: `ALTER TABLE scheduled_jobs ALTER COLUMN timezone DROP NOT NULL;
+ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS effective_timezone TEXT;` },
 ]);

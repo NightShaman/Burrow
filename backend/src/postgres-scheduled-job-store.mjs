@@ -147,10 +147,8 @@ function jobInput(input, { partial = false } = {}) {
 }
 
 export const POSTGRES_SCHEDULED_JOB_SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS scheduled_jobs (id TEXT PRIMARY KEY, owner_mod_id TEXT, agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE, name TEXT NOT NULL, prompt TEXT NOT NULL, cron_expression TEXT NOT NULL, timezone TEXT, session_id TEXT NOT NULL, enabled BOOLEAN NOT NULL DEFAULT FALSE, next_run_at TIMESTAMPTZ, last_run_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL, model_connection_id TEXT, model TEXT);
+CREATE TABLE IF NOT EXISTS scheduled_jobs (id TEXT PRIMARY KEY, owner_mod_id TEXT, agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE, name TEXT NOT NULL, prompt TEXT NOT NULL, cron_expression TEXT NOT NULL, timezone TEXT NOT NULL, session_id TEXT NOT NULL, enabled BOOLEAN NOT NULL DEFAULT FALSE, next_run_at TIMESTAMPTZ, last_run_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL, model_connection_id TEXT, model TEXT);
 CREATE INDEX IF NOT EXISTS scheduled_jobs_due_idx ON scheduled_jobs (next_run_at) WHERE enabled;
-ALTER TABLE scheduled_jobs ALTER COLUMN timezone DROP NOT NULL;
-ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS effective_timezone TEXT;
 CREATE TABLE IF NOT EXISTS scheduled_job_runs (id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES scheduled_jobs(id) ON DELETE CASCADE, scheduled_for TIMESTAMPTZ NOT NULL, status TEXT NOT NULL CHECK (status IN ('running','completed','failed','cancelled','missed','skipped')), agent_id TEXT NOT NULL, session_id TEXT NOT NULL, run_id TEXT, dispatched_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, trace_dir TEXT, decision TEXT, ok BOOLEAN, error TEXT, result_json JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL, UNIQUE (job_id, scheduled_for));
 CREATE INDEX IF NOT EXISTS scheduled_job_runs_job_idx ON scheduled_job_runs (job_id, scheduled_for DESC, created_at DESC);
 `;
