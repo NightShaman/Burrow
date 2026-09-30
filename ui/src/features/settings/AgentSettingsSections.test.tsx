@@ -35,6 +35,35 @@ const dreamSettings = (overrides = {}) => ({ enabled: false, cron: '0 4 * * *', 
 afterEach(cleanup);
 
 describe('agent settings sections', () => {
+  it('preserves explicit cron zones and allows switching to inheritance', async () => {
+    const job = { id: 'zone-job', agentId: 'smatchet', name: 'Zone job', prompt: 'Prepare', cron: '0 9 * * *', timezone: 'Europe/London', effectiveTimezone: 'Europe/London', enabled: true };
+    apiMock.mockImplementation((_target, path) => Promise.resolve(path === '/api/settings/timezone' ? { timezone: 'America/Chicago' } : { jobs: [job] }));
+    render(<ConfirmProvider><AgentSchedules agentId="smatchet" targets={targets} savedProviders={[]} /></ConfirmProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: /Zone job/ }));
+    expect((screen.getByRole('checkbox', { name: 'Use operator timezone' }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByDisplayValue('Europe/London')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save job' }));
+    await waitFor(() => expect(apiMock.mock.calls.some(([, , init]) => init?.method === 'PATCH')).toBe(true));
+    expect(JSON.parse(apiMock.mock.calls.find(([, , init]) => init?.method === 'PATCH')![2]!.body as string).timezone).toBe('Europe/London');
+    await screen.findByRole('button', { name: 'Add job' });
+    fireEvent.click(screen.getByRole('button', { name: /Zone job/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Use operator timezone' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save job' }));
+    await waitFor(() => expect(apiMock.mock.calls.filter(([, , init]) => init?.method === 'PATCH')).toHaveLength(2));
+    expect(JSON.parse(apiMock.mock.calls.filter(([, , init]) => init?.method === 'PATCH')[1][2]!.body as string).timezone).toBeNull();
+  });
+
+  it('shows inherited Dream effective zone and omits it from writes', async () => {
+    apiMock.mockImplementation((_target, path) => Promise.resolve(path.includes('dream-settings') ? { settings: dreamSettings({ timezone: null, effectiveTimezone: 'America/Chicago' }) } : { receipts: [] }));
+    render(<AgentDreams agentId="smatchet" targets={targets} savedProviders={[]} />);
+    expect(await screen.findByText(/Effective timezone: America\/Chicago/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save dream settings' }));
+    await waitFor(() => expect(apiMock.mock.calls.some(([, , init]) => init?.method === 'PUT')).toBe(true));
+    const body = JSON.parse(apiMock.mock.calls.find(([, , init]) => init?.method === 'PUT')![2]!.body as string);
+    expect(body.timezone).toBeNull();
+    expect(body).not.toHaveProperty('effectiveTimezone');
+  });
+
   beforeEach(() => {
     apiMock.mockReset();
     apiMock.mockImplementation(() => new Promise(() => undefined));
@@ -53,7 +82,7 @@ describe('agent settings sections', () => {
 
     await waitFor(() => expect(apiMock.mock.calls.some(([, path, init]) => path === '/api/scheduled-jobs' && init?.method === 'POST')).toBe(true));
     const [, , init] = apiMock.mock.calls.find(([, path, request]) => path === '/api/scheduled-jobs' && request?.method === 'POST')!;
-    expect(JSON.parse(init?.body as string)).toMatchObject({ agentId: 'smatchet', timezone: 'America/Chicago', modelConnectionId: 'connection-1', model: 'model-1' });
+    expect(JSON.parse(init?.body as string)).toMatchObject({ agentId: 'smatchet', timezone: null, modelConnectionId: 'connection-1', model: 'model-1' });
     expect(apiMock.mock.calls.some(([, path]) => path.includes('/api/agents/'))).toBe(false);
   });
 
