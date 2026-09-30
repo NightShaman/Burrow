@@ -1,3 +1,4 @@
+import { localDay } from './timezone.mjs';
 // Archive cursors are scoped to the collection/filter and identify a stable
 // position in a descending timestamp + identity ordering.
 import { createHash } from 'node:crypto';
@@ -28,8 +29,8 @@ export function archiveUtcDay(value) {
   return date;
 }
 
-export function matchesArchiveDay(timestamp, day) {
-  return !day || String(timestamp || '').slice(0, 10) === day;
+export function matchesArchiveDay(timestamp, day, timezone = 'UTC') {
+  return !day || localDay(timestamp, timezone) === day;
 }
 
 // Availability is computed from all retained records, never from a paginated page.
@@ -39,8 +40,8 @@ export function archiveUtcMonth(value) {
   return month;
 }
 
-export function archiveCalendarDates(rows, month, timestamp) {
+export function archiveCalendarDates(rows, month, timestamp, timezone = 'UTC') {
   archiveUtcMonth(month);
-  return [...new Set(rows.map((row) => String(timestamp(row) || '').slice(0, 10))
+  return [...new Set(rows.map((row) => localDay(timestamp(row), timezone))
     .filter((day) => day.startsWith(`${month}-`) && /^\d{4}-\d{2}-\d{2}$/.test(day)))].sort();
 }

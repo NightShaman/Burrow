@@ -1,3 +1,4 @@
+import { localTimestamp } from './timezone.mjs';
 import { resolveRuntimeTraceRoot } from './config.mjs';
 import { createTraceLogger } from './trace-logger.mjs';
 import { loadSelectedSkillText } from './skill-catalog.mjs';
@@ -390,13 +391,14 @@ function renderRuntimeHostContext(context = null) {
 export function renderTurnTimeContext(context = null) {
   const now = new Date(context?.turnStartedAt);
   if (!Number.isFinite(now.getTime())) return '';
+  const localCue = `Operator local: ${localTimestamp(now, context?.timezone || 'UTC')} (${context?.timezone || 'UTC'})`;
   const last = context?.lastOperatorMessageAt ? new Date(context.lastOperatorMessageAt) : null;
-  if (!last || !Number.isFinite(last.getTime()) || last > now) return `Turn started: ${now.toISOString()} (UTC)\nPrevious operator message to this agent: unknown`;
+  if (!last || !Number.isFinite(last.getTime()) || last > now) return `Turn started: ${now.toISOString()} (UTC)\n${localCue}\nPrevious operator message to this agent: unknown`;
   let minutes = Math.floor((now - last) / 60_000);
   const days = Math.floor(minutes / 1440); minutes %= 1440;
   const hours = Math.floor(minutes / 60); minutes %= 60;
   const parts = [days && `${days}d`, hours && `${hours}h`, minutes && `${minutes}m`].filter(Boolean);
-  return `Turn started: ${now.toISOString()} (UTC)\nPrevious operator message to this agent: ${last.toISOString()} (${parts.join(' ') || 'less than 1m'} ago)`;
+  return `Turn started: ${now.toISOString()} (UTC)\n${localCue}\nPrevious operator message to this agent: ${last.toISOString()} (${parts.join(' ') || 'less than 1m'} ago)\nPrevious operator message local: ${localTimestamp(last, context?.timezone || 'UTC')} (${context?.timezone || 'UTC'})`;
 }
 
 function renderUiTarget(target = null) {

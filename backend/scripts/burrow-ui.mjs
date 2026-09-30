@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { validateTimezone, operatorTimezone, saveOperatorTimezone } from '../src/timezone.mjs';
 import { ensureDefaultGlobalWorkspace } from '../src/runtime-workspace-defaults.mjs';
 import { publishModTools } from '../src/mod-agent-tools.mjs';
 import { diagnosticMods, modJobs, pendingModOperations } from '../src/mod-diagnostics.mjs';
@@ -1859,7 +1860,7 @@ function validateBoundaryBody(kind, input = {}) {
   if (kind === 'workspace-write') { requireStringField(body, 'path'); if (typeof body.content !== 'string') throw Object.assign(new Error('content_required'), { statusCode: 400 }); }
   if (kind === 'project-create') requireStringField(body, 'name');
   if (kind === 'task-create') { requireStringField(body, 'projectId'); requireStringField(body, 'title'); }
-  if (kind === 'scheduled-job-create') for (const field of ['agentId', 'name', 'prompt', 'cron', 'timezone']) requireStringField(body, field);
+  if (kind === 'scheduled-job-create') for (const field of ['agentId', 'name', 'prompt', 'cron']) requireStringField(body, field);
   if (kind === 'group-create') { requireStringField(body, 'name'); if (!Array.isArray(body.participantAgentIds) || !body.participantAgentIds.length || body.participantAgentIds.some((id) => typeof id !== 'string' || !id.trim())) throw Object.assign(new Error('group_participants_required'), { statusCode: 400 }); }
   if (kind === 'group-message') requireStringField(body, 'message');
   return body;
@@ -1940,10 +1941,11 @@ async function archiveDreamRows({ agentId = null, phase = null } = {}) {
   } finally { await store.close(); }
 }
 
-async function archiveDreams({ agentId = null, date = null, phase = null, limit = 200, cursor = null } = {}) {
+async function archiveDreams({ timezone = 'UTC', agentId = null, date = null, phase = null, limit = 200, cursor = null } = {}) {
+  timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
   if (date) archiveUtcDay(date);
   const entries = await archiveDreamRows({ agentId, phase });
-  const page = archivePage(entries.filter((entry) => matchesArchiveDay(entry.createdAt, date)), { limit, cursor, scope: JSON.stringify(['dreams', agentId, date, phase]), timestamp: (row) => row.createdAt, identity: (row) => `${row.agentId}:${row.id}` });
+  const page = archivePage(entries.filter((entry) => matchesArchiveDay(entry.createdAt, date, timezone)), { limit, cursor, scope: JSON.stringify(['dreams', agentId, date, phase, timezone]), timestamp: (row) => row.createdAt, identity: (row) => `${row.agentId}:${row.id}` });
   return { ok: true, entries: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
 }
 
@@ -2032,18 +2034,20 @@ async function archiveSessionRows({ includeArchived = true, agentId = null, incl
   }))).flat();
 }
 
-async function archiveCalendar({ kind, month, agentId = null } = {}) {
+async function archiveCalendar({ timezone = 'UTC', kind, month, agentId = null } = {}) {
+  timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
   const parsedMonth = archiveUtcMonth(month);
   if (!['sessions', 'dreams'].includes(kind)) throw new Error('archive_kind_invalid');
   const rows = kind === 'dreams' ? await archiveDreamRows({ agentId }) : await archiveSessionRows({ agentId });
-  const dates = archiveCalendarDates(rows, parsedMonth, (row) => kind === 'dreams' ? row.createdAt : row.archivedAt || row.updatedAt || row.createdAt);
+  const dates = archiveCalendarDates(rows, parsedMonth, (row) => kind === 'dreams' ? row.createdAt : row.archivedAt || row.updatedAt || row.createdAt, timezone);
   return { ok: true, kind, month: parsedMonth, dates };
 }
 
-async function archiveSessions({ includeArchived = true, query = '', agentId = null, date = null, limit = 200, includeDisabled = false, cursor = null } = {}) {
+async function archiveSessions({ timezone = 'UTC', includeArchived = true, query = '', agentId = null, date = null, limit = 200, includeDisabled = false, cursor = null } = {}) {
+  timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
   if (date) archiveUtcDay(date);
   const rows = await archiveSessionRows({ includeArchived, agentId, includeDisabled });
-  const page = archivePage(rows.filter((item) => (matchesArchiveDay(item.archivedAt || item.updatedAt || item.createdAt, date)) && (!query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase()))), { limit, cursor, max: 1000, scope: JSON.stringify(['sessions', includeArchived, query, includeDisabled, agentId, date]), timestamp: (row) => row.updatedAt, identity: (row) => `${row.agentId}:${row.id}` });
+  const page = archivePage(rows.filter((item) => (matchesArchiveDay(item.archivedAt || item.updatedAt || item.createdAt, date, timezone)) && (!query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase()))), { limit, cursor, max: 1000, scope: JSON.stringify(['sessions', includeArchived, query, includeDisabled, agentId, date, timezone]), timestamp: (row) => row.updatedAt, identity: (row) => `${row.agentId}:${row.id}` });
   return { sessions: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
 }
 
@@ -3074,7 +3078,7 @@ const skillApi = {
   agentSkills: async (id) => { const runtime = await resolveAgentRuntime(id); const assignments = await skillStoreCall(store => store.assignments(runtime.agentId)); const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: runtime.workspaceRoot, agentRuntime: runtime, skillStore: postgresApplication.stores.skills }); return { ok: true, ...assignments, effectiveSkills: catalog.skills.map(skillManifest) }; },
   saveAgentSkills: async (id, body) => { const runtime = await resolveAgentRuntime(id); await skillStoreCall(store => store.replaceAssignments(runtime.agentId, body.skillIds)); return skillApi.agentSkills(runtime.agentId); },
 };
-const settingsRoute = createSettingsRoutes({ ...skillApi, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, archiveSummaryModelSelection: async (agentId) => ({ ok: true, selection: await archiveSummarySelection((await resolveAgentRuntime(agentId)).agentId) }), saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection: async (id) => await modelsStore().remove(id), setupStatus: async () => postgresApplication.stores.setupState.readStatus(), completeSetup: async () => postgresApplication.stores.setupState.completeSetup() });
+const settingsRoute = createSettingsRoutes({ timezoneSettings: async () => ({ ok: true, timezone: await operatorTimezone(postgresApplication.stores.metadata) }), saveTimezoneSettings: (body) => saveOperatorTimezone(postgresApplication.stores.metadata, body), ...skillApi, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, archiveSummaryModelSelection: async (agentId) => ({ ok: true, selection: await archiveSummarySelection((await resolveAgentRuntime(agentId)).agentId) }), saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection: async (id) => await modelsStore().remove(id), setupStatus: async () => postgresApplication.stores.setupState.readStatus(), completeSetup: async () => postgresApplication.stores.setupState.completeSetup() });
 const agentRoute = createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession, agentOverview });
 const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
 const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });

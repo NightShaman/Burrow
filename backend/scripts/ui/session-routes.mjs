@@ -94,11 +94,11 @@ export function createSessionRoutes({
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/calendar') {
-      sendJson(res, 200, await archiveCalendar({ kind: url.searchParams.get('kind'), month: url.searchParams.get('month'), agentId: url.searchParams.get('agentId') }));
+      sendJson(res, 200, await archiveCalendar({ kind: url.searchParams.get('kind'), month: url.searchParams.get('month'), timezone: url.searchParams.get('timezone'), agentId: url.searchParams.get('agentId') }));
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/dreams') {
-      sendJson(res, 200, await archiveDreams({ agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), phase: url.searchParams.get('phase'), limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') }));
+      sendJson(res, 200, await archiveDreams({ agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), timezone: url.searchParams.get('timezone'), phase: url.searchParams.get('phase'), limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') }));
       return true;
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/archive/dreams/')) {
@@ -138,7 +138,7 @@ export function createSessionRoutes({
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/sessions') {
-      sendJson(res, 200, { ok: true, ...(await archiveSessions({ includeArchived: url.searchParams.get('archived') !== 'false', query: url.searchParams.get('q') || '', agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') })) });
+      sendJson(res, 200, { ok: true, ...(await archiveSessions({ includeArchived: url.searchParams.get('archived') !== 'false', query: url.searchParams.get('q') || '', agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), timezone: url.searchParams.get('timezone'), limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') })) });
       return true;
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/archive/sessions/')) {
@@ -193,7 +193,7 @@ export function createSessionRoutes({
     if (req.method === 'POST' && url.pathname === '/api/session/handoff-candidate') { sendJson(res, 200, await sessionWriteHandoffCandidate(await readJsonBody(req))); return true; }
     return false;
     } catch (error) {
-      if (!['archive_cursor_invalid', 'archive_date_invalid', 'archive_month_invalid', 'archive_kind_invalid'].includes(error?.message)) throw error;
+      if (!['archive_cursor_invalid', 'archive_date_invalid', 'archive_month_invalid', 'archive_kind_invalid', 'archive_timezone_invalid'].includes(error?.message)) throw error;
       sendJson(res, 400, { ok: false, error: error.message });
       return true;
     }

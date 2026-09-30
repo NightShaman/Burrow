@@ -1,3 +1,5 @@
+import { operatorTimezone } from './timezone.mjs';
+import { PostgresSettingsMetadataStore } from './postgres-settings-metadata-store.mjs';
 import { randomUUID } from "node:crypto";
 import {
   parseCron,
@@ -233,7 +235,7 @@ export class PostgresScheduledJobStore {
     return jobRow(result.rows[0]);
   }
   async createJob(input = {}, { ownerModId = null } = {}) {
-    const job = jobInput(input);
+    const job = jobInput({ ...input, timezone: input.timezone === undefined ? await operatorTimezone(new PostgresSettingsMetadataStore({ pool: this.pool })) : input.timezone });
     await this.validateModel(job);
     const enabled = job.enabled === true;
     const stamp = timestamp(this.clock);
