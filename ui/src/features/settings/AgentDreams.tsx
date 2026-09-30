@@ -12,6 +12,7 @@ type DreamCycleReceipt = {
   runId: string;
   status?: 'running' | 'completed' | 'partial' | 'failed' | 'interrupted' | string | null;
   error?: string | null;
+  phases?: { phase?: string; extractionError?: string | null; diaryError?: string | null; modelResponses?: { ok?: boolean; provider?: string | null; model?: string | null; status?: string | number | null; error?: string | null }[] }[];
   trigger?: string | null;
   startedAt?: string | null;
   completedAt?: string | null;
@@ -122,9 +123,15 @@ export function AgentDreams({ agentId, targets, savedProviders, overflowTarget }
           const at = receipt.completedAt || receipt.startedAt;
           const status = typeof receipt.status === 'string' && receipt.status.trim() ? receipt.status.trim().toLowerCase() : 'unknown';
           const label = status === 'running' ? 'Running' : status === 'interrupted' ? 'Interrupted' : status.charAt(0).toUpperCase() + status.slice(1);
+          const failures = (receipt.phases ?? []).flatMap((phase) => {
+            const responses = (phase.modelResponses ?? []).filter((response) => response.ok === false || response.error);
+            const fallback = [...new Set([phase.extractionError, phase.diaryError].filter(Boolean))].join(' · ');
+            return responses.length ? responses.map((response) => [phase.phase || 'Unknown phase', response.provider, response.model, response.status != null ? `HTTP ${response.status}` : null, response.error || fallback || 'Model request failed'].filter(Boolean).join(' · ')) : fallback ? [`${phase.phase || 'Unknown phase'} · ${fallback}`] : [];
+          });
           return <div className={`dream-cycle-receipt dream-cycle-${status}`} key={receipt.runId}>
             <div className="dream-cycle-receipt-heading"><strong>{label}</strong>{at && <time dateTime={at}>{new Date(at).toLocaleString()}</time>}</div>
-            {receipt.error && <p role={status === 'interrupted' || status === 'failed' ? 'alert' : undefined}>{receipt.error}</p>}
+            {failures.length > 0 && <ul aria-label="Dream phase failures">{failures.map((failure, index) => <li key={index}>{failure}</li>)}</ul>}
+            {receipt.error && !failures.some((failure) => failure.includes(receipt.error!)) && <p role={status === 'interrupted' || status === 'failed' ? 'alert' : undefined}>{receipt.error}</p>}
           </div>;
         })}
       </div> : <p className="settings-description">No dream activity recorded yet.</p>}

@@ -1,3 +1,4 @@
+import { redactProtectedText } from './redaction.mjs';
 import { randomUUID } from 'node:crypto';
 import { resolveModelConfig } from './config.mjs';
 import { consolidateDreamMemoryAsync } from './dream-memory-consolidator.mjs';
@@ -28,6 +29,12 @@ function writeReceipt(db, receipt, at) {
 }
 function entryId(agentId, phase, title, content) { return `dream-${phase}-${Buffer.from(`${agentId}\0${title}\0${content}`).toString('base64url').slice(0, 40)}`; }
 function clamp(value, limit) { const source = text(value).replace(/\s+/g, ' '); return source.length <= limit ? source : `${source.slice(0, limit).trim()}…`; }
+function safeModelError(value, config = {}) {
+  if (typeof value !== 'string') return null;
+  return clamp(redactProtectedText(value, [config.apiKey, config.accessToken, config.token].filter(Boolean))
+    .replace(/Bearer\s+[^\s"']+/gi, 'Bearer [redacted]')
+    .replace(/\bsk-[a-zA-Z0-9_-]+/g, '[redacted]'), 500) || null;
+}
 function diagnosticLabel(value, limit) { const source = clamp(value, limit); return source && /^[a-z0-9._:/-]+$/i.test(source) ? source : null; }
 function modelText(result) {
   const choice = result?.choice || result?.choices?.[0] || null;
@@ -54,7 +61,7 @@ function boundedUsage(value, depth = 0) {
   return Object.fromEntries(entries);
 }
 
-function modelResponseDiagnostics(result) {
+export function modelResponseDiagnostics(result, modelConfig = {}) {
   const choice = result?.choice || result?.choices?.[0] || null;
   const content = choice?.message?.content ?? choice?.content ?? result?.message?.content ?? result?.content;
   const blockTypes = [];
@@ -73,6 +80,7 @@ function modelResponseDiagnostics(result) {
     provider: diagnosticLabel(result?.provider, 64),
     api: diagnosticLabel(result?.api, 64),
     model: diagnosticLabel(result?.model, 160),
+    error: result?.ok === false ? safeModelError(result?.error, modelConfig) : null,
     status: typeof result?.status === 'number' ? String(result.status) : diagnosticLabel(result?.status, 64),
     ok: typeof result?.ok === 'boolean' ? result.ok : null,
     finishReason: diagnosticLabel(choice?.finishReason || choice?.finish_reason || result?.finishReason, 128),
@@ -168,17 +176,26 @@ function fitsPrompt(content, modelConfig) {
   return !['compress', 'blocked'].includes(budget.pressure);
 }
 
-async function completeTextResult({ content, modelAdapter, modelConfig, traceLogger }) {
+export async function completeTextResult({ content, modelAdapter, modelConfig, traceLogger }) {
   if (!modelAdapter) throw new Error('dream_model_unavailable');
   if (!fitsPrompt(content, modelConfig)) throw new Error('dream_prompt_budget_exceeded');
   const diagnostics = [];
   let response = await modelAdapter.complete({ messages: [{ role: 'user', content }], traceLogger });
-  diagnostics.push(modelResponseDiagnostics(response));
+  diagnostics.push(modelResponseDiagnostics(response, modelConfig));
+  const rejectFailure = () => {
+    if (response?.ok !== false) return;
+    const diagnostic = diagnostics.at(-1);
+    const error = new Error(diagnostic.error || `dream_model_request_failed${diagnostic.status ? `: HTTP ${diagnostic.status}` : ''}`);
+    error.diagnostics = diagnostics;
+    throw error;
+  };
+  rejectFailure();
   let result = modelText(response);
   if (!result) {
     const retryContent = `${content}\n\nThe previous attempt returned no usable text. Retry now and output only the requested result; do not stop after internal reasoning.`;
     response = await modelAdapter.complete({ messages: [{ role: 'user', content: retryContent }], traceLogger });
-    diagnostics.push(modelResponseDiagnostics(response));
+    diagnostics.push(modelResponseDiagnostics(response, modelConfig));
+    rejectFailure();
     result = modelText(response);
   }
   if (!result) {
@@ -452,7 +469,7 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     const completedAt = now(); const state = await cycleStore.ensureState({ agentId: id, settings: { ...settings, lastRunAt: generatedAt }, at: completedAt });
     const nextRunAt = state.nextRunAt;
     const hasErrors = phaseResults.some((phase) => phase.extractionError || phase.diaryError);
-    const receipt = { ...lifecycle, ok: !hasErrors, status: hasErrors ? (pendingDiaries.length ? 'partial' : 'failed') : 'completed', phases: phaseResults, dreamMemoryItemCount: consolidation.itemCount, dreamPreloadCount: dreamPreloads.length, preferences, nextRunAt, completedAt };
+    const receipt = { ...lifecycle, ok: !hasErrors, error: hasErrors ? phaseResults.map((phase) => phase.extractionError || phase.diaryError).find(Boolean) : null, status: hasErrors ? (pendingDiaries.length ? 'partial' : 'failed') : 'completed', phases: phaseResults, dreamMemoryItemCount: consolidation.itemCount, dreamPreloadCount: dreamPreloads.length, preferences, nextRunAt, completedAt };
     await cycleStore.write(receipt, completedAt); return receipt;
   } catch (error) {
     if (lifecycle) {
