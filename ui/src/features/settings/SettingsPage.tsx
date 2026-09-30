@@ -7,6 +7,7 @@ import type { Theme } from '../../app/usePersistedLayout';
 import type { AgentRailPreferences } from '../../app/useAgentRailPreferences';
 import { AgentToolbar } from './AgentToolbar';
 import { ModelConnections } from './ModelConnections';
+import { OperatorTimezone } from './OperatorTimezone';
 import { OperatorProfile } from './OperatorProfile';
 import { AgentSettings } from './AgentSettings';
 import { AgentMcpTools } from './AgentMcpTools';
@@ -35,7 +36,7 @@ const isBoolean = (value: unknown): value is boolean => typeof value === 'boolea
 export function Settings({ tab, setTab, agents, selected, targets, savedProviders, onModelConnectionsChanged, onAgentsChanged, onOperatorProfileChanged, onFirstRunComplete, leftTopPanel, setLeftTopPanel, leftBottomPanel, setLeftBottomPanel, rightTopPanel, setRightTopPanel, rightBottomPanel, setRightBottomPanel, leftSinglePanel, setLeftSinglePanel, rightSinglePanel, setRightSinglePanel, leftRailLayout, setLeftRailLayout, rightRailLayout, setRightRailLayout, theme, setTheme, agentRailPreferences, setAgentRailPreferences, previewFirstRun = false }: { tab: SettingsTab; setTab: (t: SettingsTab) => void; agents: Agent[]; selected: Agent; targets: ApiTarget[]; savedProviders: SavedProvider[]; onModelConnectionsChanged: () => Promise<void>; onAgentsChanged: () => Promise<void>; onOperatorProfileChanged: (profile: { name: string; avatar: string }) => void; onFirstRunComplete: () => void; leftTopPanel: PanelId; setLeftTopPanel: (id: PanelId) => void; leftBottomPanel: PanelId; setLeftBottomPanel: (id: PanelId) => void; rightTopPanel: PanelId; setRightTopPanel: (id: PanelId) => void; rightBottomPanel: PanelId; setRightBottomPanel: (id: PanelId) => void; leftSinglePanel: PanelId; setLeftSinglePanel: (id: PanelId) => void; rightSinglePanel: PanelId; setRightSinglePanel: (id: PanelId) => void; leftRailLayout: typeof railLayouts[number]; setLeftRailLayout: (layout: typeof railLayouts[number]) => void; rightRailLayout: typeof railLayouts[number]; setRightRailLayout: (layout: typeof railLayouts[number]) => void; theme: Theme; setTheme: (theme: Theme) => void; agentRailPreferences: AgentRailPreferences; setAgentRailPreferences: (next: AgentRailPreferences | ((current: AgentRailPreferences) => AgentRailPreferences)) => void; previewFirstRun?: boolean }) {
   const [settingsAgentId, setSettingsAgentId] = useState(selected.id);
   const [agentSection, setAgentSection] = useState<'details' | 'profile-documents' | 'mcp-tools' | 'cron-jobs' | 'dreams' | 'skills'>('details');
-  const [generalSection, setGeneralSection] = useState<'operator-profile' | 'execution-boundaries' | 'trace-retention' | 'export' | 'rail-panels' | 'tiddle-signal' | 'appearance'>('operator-profile');
+  const [generalSection, setGeneralSection] = useState<'operator-timezone' | 'operator-profile' | 'execution-boundaries' | 'trace-retention' | 'export' | 'rail-panels' | 'tiddle-signal' | 'appearance'>('operator-profile');
   const [connectionSection, setConnectionSection] = useState<'authentication' | 'model-providers' | 'mcp-servers' | 'api-tokens'>('authentication');
   const [modsSection, setModsSection] = useState<'installed' | 'sources' | 'automatic-checks'>('installed');
   const [selectedRailPanel, setSelectedRailPanel] = useState<PanelId | null>(null);
@@ -95,6 +96,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
         {tab === 'general' && <nav className="settings-prototype-section-items" aria-label="General settings sections">
           {([
             ['operator-profile', 'Operator profile'],
+            ['operator-timezone', 'Operator timezone'],
             ['execution-boundaries', 'Execution boundaries'],
             ['trace-retention', 'Trace retention'],
             ['export', 'Export'],
@@ -132,6 +134,7 @@ export function Settings({ tab, setTab, agents, selected, targets, savedProvider
         {selectedContribution?.settingsUrl ? <div ref={setModNavigationColumn} /> : selectedModSettings ? <nav className="settings-prototype-section-items" aria-label={`${selectedModSettings.navigation.title} settings sections`}><button type="button" className="active" aria-current="page">{selectedModSettings.navigation.title}</button></nav> : selectedContribution && <span>Extension settings</span>}
       </section>
       <section className="settings-blank-column settings-prototype-configuration" ref={setConfigurationColumn}>
+        {tab === 'general' && generalSection === 'operator-timezone' && <OperatorTimezone />}
         {tab === 'general' && generalSection === 'operator-profile' && <OperatorProfile onSaved={onOperatorProfileChanged} />}
         {tab === 'general' && generalSection === 'execution-boundaries' && <ExecutionBoundaries overflowTarget={overflowColumn} />}
         {tab === 'general' && generalSection === 'trace-retention' && <RetentionSettings />}

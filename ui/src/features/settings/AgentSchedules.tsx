@@ -31,11 +31,12 @@ export function AgentSchedules({ agentId, targets, savedProviders, overflowTarge
   const [jobs, setJobs] = useState<ScheduledJob[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingManagedId, setViewingManagedId] = useState<string | null>(null);
-  const [name, setName] = useState(''); const [prompt, setPrompt] = useState(''); const [cron, setCron] = useState('0 9 * * *'); const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'); const [enabled, setEnabled] = useState(true);
+  const [name, setName] = useState(''); const [prompt, setPrompt] = useState(''); const [cron, setCron] = useState('0 9 * * *'); const [timezone, setTimezone] = useState(''); const [enabled, setEnabled] = useState(true);
   const [jobModel, setJobModel] = useState<JobModel>({ modelConnectionId: null, model: null });
   const [state, setState] = useState<'loading' | 'idle' | 'saving'>('loading'); const [error, setError] = useState('');
   const [triggeringId, setTriggeringId] = useState<string | null>(null); const [notice, setNotice] = useState('');
   const requestVersion = useRef(0);
+  const defaultTimezone = useRef('');
   const nameInput = useRef<HTMLInputElement>(null);
   const load = async (signal?: AbortSignal, version = requestVersion.current) => {
     try {
@@ -49,10 +50,14 @@ export function AgentSchedules({ agentId, targets, savedProviders, overflowTarge
     const version = ++requestVersion.current;
     const controller = new AbortController();
     setState('loading'); setEditingId(null); setViewingManagedId(null); setError(''); setNotice(''); setTriggeringId(null); setJobModel({ modelConnectionId: null, model: null });
+    setTimezone(''); defaultTimezone.current = '';
+    void request<{ timezone: string }>('/api/settings/timezone', { signal: controller.signal }).then(result => {
+      if (!controller.signal.aborted && version === requestVersion.current && result.timezone) { defaultTimezone.current = result.timezone; setTimezone(current => current || result.timezone); }
+    }).catch(() => { if (!controller.signal.aborted) setError('Could not load default timezone; enter a timezone explicitly.'); });
     void load(controller.signal, version);
     return () => controller.abort();
   }, [owner.target.id, owner.resourceId]);
-  const reset = () => { setEditingId(null); setViewingManagedId(null); setName(''); setPrompt(''); setCron('0 9 * * *'); setTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'); setEnabled(true); setJobModel({ modelConnectionId: null, model: null }); setError(''); };
+  const reset = () => { setEditingId(null); setViewingManagedId(null); setName(''); setPrompt(''); setCron('0 9 * * *'); setTimezone(defaultTimezone.current); setEnabled(true); setJobModel({ modelConnectionId: null, model: null }); setError(''); };
   const edit = (job: ScheduledJob) => { setViewingManagedId(null); setEditingId(job.id); setName(job.name); setPrompt(job.prompt); setCron(job.cron); setTimezone(job.timezone); setEnabled(job.enabled); setJobModel({ modelConnectionId: job.modelConnectionId ?? null, model: job.model ?? null }); setError(''); nameInput.current?.focus(); };
   const viewManaged = (job: ScheduledJob) => { setEditingId(null); setViewingManagedId(job.id); setError(''); };
   useEffect(() => { if (viewingManagedId) nameInput.current?.focus(); }, [viewingManagedId]);

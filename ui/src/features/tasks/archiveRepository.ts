@@ -8,15 +8,19 @@ export type ArchiveCalendarAvailability = { ok: true; kind: ArchiveCalendarKind;
 
 export type ArchiveRepository = ReturnType<typeof createArchiveRepository>;
 
+export function browserTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
 export function createArchiveRepository() {
   return {
     async listCalendarAvailability(kind: ArchiveCalendarKind, month: string, agentId?: string, signal?: AbortSignal): Promise<ArchiveCalendarAvailability> {
-      const query = new URLSearchParams({ kind, month });
+      const query = new URLSearchParams({ kind, month, timezone: browserTimezone() });
       if (agentId) query.set('agentId', agentId);
       return api<ArchiveCalendarAvailability>(`/api/archive/calendar?${query}`, { signal });
     },
     async listSessions(query: string, signal?: AbortSignal, cursor?: string | null, date?: string, agentId?: string): Promise<ArchivePage<ArchiveSession>> {
-      const params = new URLSearchParams({ archived: 'true', limit: '200' });
+      const params = new URLSearchParams({ archived: 'true', limit: '200', timezone: browserTimezone() });
       if (query) params.set('q', query);
       if (date) params.set('date', date);
       if (agentId) params.set('agentId', agentId);
@@ -30,7 +34,7 @@ export function createArchiveRepository() {
       return api<ArchiveDetail>(`/api/archive/sessions/${encodeURIComponent(session.agentId ?? '')}/${encodeURIComponent(session.sessionId)}?${query}`, { signal });
     },
     async listDreams(signal?: AbortSignal, cursor?: string | null, date?: string, agentId?: string): Promise<ArchivePage<DreamEntry>> {
-      const query = new URLSearchParams({ limit: '200' });
+      const query = new URLSearchParams({ limit: '200', timezone: browserTimezone() });
       if (date) query.set('date', date);
       if (agentId) query.set('agentId', agentId);
       if (cursor) query.set('cursor', cursor);

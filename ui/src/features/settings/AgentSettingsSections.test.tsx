@@ -42,7 +42,7 @@ describe('agent settings sections', () => {
 
 
   it('saves an explicit cron model override without changing the agent model', async () => {
-    apiMock.mockImplementation((_target, _path, init) => init?.method === 'POST' ? Promise.resolve({}) : Promise.resolve({ jobs: [] }));
+    apiMock.mockImplementation((_target, path, init) => path === '/api/settings/timezone' ? Promise.resolve({ timezone: 'America/Chicago' }) : init?.method === 'POST' ? Promise.resolve({}) : Promise.resolve({ jobs: [] }));
     render(<ConfirmProvider><AgentSchedules agentId="smatchet" targets={targets} savedProviders={[{ id: 'connection-1', provider: 'Claude', apiType: 'anthropic-messages', url: '', apiKey: '', models: ['model-1'] }]} /></ConfirmProvider>);
 
     await screen.findByText('No cron jobs configured for this agent.');
@@ -53,12 +53,12 @@ describe('agent settings sections', () => {
 
     await waitFor(() => expect(apiMock.mock.calls.some(([, path, init]) => path === '/api/scheduled-jobs' && init?.method === 'POST')).toBe(true));
     const [, , init] = apiMock.mock.calls.find(([, path, request]) => path === '/api/scheduled-jobs' && request?.method === 'POST')!;
-    expect(JSON.parse(init?.body as string)).toMatchObject({ agentId: 'smatchet', modelConnectionId: 'connection-1', model: 'model-1' });
+    expect(JSON.parse(init?.body as string)).toMatchObject({ agentId: 'smatchet', timezone: 'America/Chicago', modelConnectionId: 'connection-1', model: 'model-1' });
     expect(apiMock.mock.calls.some(([, path]) => path.includes('/api/agents/'))).toBe(false);
   });
 
   it('saves null cron model fields when inheriting the agent chat model', async () => {
-    apiMock.mockImplementation((_target, _path, init) => init?.method === 'POST' ? Promise.resolve({}) : Promise.resolve({ jobs: [] }));
+    apiMock.mockImplementation((_target, path, init) => path === '/api/settings/timezone' ? Promise.resolve({ timezone: 'America/Chicago' }) : init?.method === 'POST' ? Promise.resolve({}) : Promise.resolve({ jobs: [] }));
     render(<ConfirmProvider><AgentSchedules agentId="smatchet" targets={targets} savedProviders={[]} /></ConfirmProvider>);
 
     await screen.findByText('No cron jobs configured for this agent.');

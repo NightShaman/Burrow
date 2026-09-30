@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../../app/api';
-import { createArchiveRepository } from './archiveRepository';
+import { browserTimezone, createArchiveRepository } from './archiveRepository';
 import type { ArchiveSession, ContinuityCard, DreamEntry } from './archiveTypes';
 
 vi.mock('../../app/api', async (importOriginal) => ({
@@ -22,8 +22,8 @@ describe('archiveRepository', () => {
     apiMock.mockResolvedValueOnce(result).mockResolvedValueOnce({ ...result, kind: 'dreams', dates: [] });
     await expect(repository.listCalendarAvailability('sessions', '2026-09')).resolves.toEqual(result);
     await expect(repository.listCalendarAvailability('dreams', '2026-09', 'agent/name')).resolves.toEqual({ ...result, kind: 'dreams', dates: [] });
-    expect(apiMock).toHaveBeenNthCalledWith(1, '/api/archive/calendar?kind=sessions&month=2026-09', { signal: undefined });
-    expect(apiMock).toHaveBeenNthCalledWith(2, '/api/archive/calendar?kind=dreams&month=2026-09&agentId=agent%2Fname', { signal: undefined });
+    expect(apiMock).toHaveBeenNthCalledWith(1, `/api/archive/calendar?kind=sessions&month=2026-09&timezone=${encodeURIComponent(browserTimezone())}`, { signal: undefined });
+    expect(apiMock).toHaveBeenNthCalledWith(2, `/api/archive/calendar?kind=dreams&month=2026-09&timezone=${encodeURIComponent(browserTimezone())}&agentId=agent%2Fname`, { signal: undefined });
   });
 
   it('encodes searches and resource-owned detail paths', async () => {
@@ -32,12 +32,12 @@ describe('archiveRepository', () => {
     await expect(repository.listSessions('design & css')).resolves.toEqual({ items: [session], nextCursor: 'session-cursor', hasMore: true });
     await expect(repository.loadSession(session)).resolves.toEqual({ turns: [] });
 
-    expect(apiMock).toHaveBeenNthCalledWith(1, '/api/archive/sessions?archived=true&limit=200&q=design+%26+css', { signal: undefined });
+    expect(apiMock).toHaveBeenNthCalledWith(1, `/api/archive/sessions?archived=true&limit=200&timezone=${encodeURIComponent(browserTimezone())}&q=design+%26+css`, { signal: undefined });
     expect(apiMock).toHaveBeenNthCalledWith(2, '/api/archive/sessions/agent%2Fname/session%2Fname?limit=100', { signal: undefined });
 
     apiMock.mockResolvedValueOnce({ sessions: [session], nextCursor: null, hasMore: false });
     await repository.listSessions('', undefined, 'next token', '2026-09-29', 'agent/name');
-    expect(apiMock).toHaveBeenNthCalledWith(3, '/api/archive/sessions?archived=true&limit=200&date=2026-09-29&agentId=agent%2Fname&cursor=next+token', { signal: undefined });
+    expect(apiMock).toHaveBeenNthCalledWith(3, `/api/archive/sessions?archived=true&limit=200&timezone=${encodeURIComponent(browserTimezone())}&date=2026-09-29&agentId=agent%2Fname&cursor=next+token`, { signal: undefined });
   });
 
   it('omits agentId for All agents and preserves explicit agent filters', async () => {
@@ -51,7 +51,7 @@ describe('archiveRepository', () => {
   it('passes a selected UTC day through dream pagination', async () => {
     apiMock.mockResolvedValueOnce({ entries: [], nextCursor: 'older', hasMore: true });
     await repository.listDreams(undefined, 'older', '2026-09-29', 'agent/name');
-    expect(apiMock).toHaveBeenCalledWith('/api/archive/dreams?limit=200&date=2026-09-29&agentId=agent%2Fname&cursor=older', { signal: undefined });
+    expect(apiMock).toHaveBeenCalledWith(`/api/archive/dreams?limit=200&timezone=${encodeURIComponent(browserTimezone())}&date=2026-09-29&agentId=agent%2Fname&cursor=older`, { signal: undefined });
   });
 
   it('normalizes dream summaries and loads full dream documents', async () => {
