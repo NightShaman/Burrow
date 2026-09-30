@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1
 
-FROM node:22-bookworm AS ui-build
+FROM node:24-bookworm AS ui-build
 WORKDIR /build/ui
 COPY ui/package*.json ./
 RUN npm ci
 COPY ui/ ./
 RUN npm run build
 
-FROM node:22-bookworm AS runtime
+FROM node:24-bookworm AS runtime
 ARG BURROW_UID=4226
 ARG BURROW_GID=4226
 ENV NODE_ENV=production \
