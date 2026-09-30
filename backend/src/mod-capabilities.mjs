@@ -108,6 +108,7 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
   const dispose = () => { disposed = true; for (const item of inventories.values()) clearTimeout(item.timer); inventories.clear(); };
   return Object.freeze({
     dispose,
+    async getOperatorTimezone() { return { timezone: await injected.scheduledJobs.effective(null) }; },
     async listScheduledJobs(input) {
       const { value, limit, offset } = page(input);
       if (!Number.isSafeInteger(offset) || offset < 0) invalid();

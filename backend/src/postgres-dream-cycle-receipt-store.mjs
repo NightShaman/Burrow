@@ -1,3 +1,5 @@
+import { operatorTimezone } from './timezone.mjs';
+import { PostgresSettingsMetadataStore } from './postgres-settings-metadata-store.mjs';
 import { randomUUID } from 'node:crypto';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 import { nextCronOccurrence } from './scheduled-job-store.mjs';
@@ -52,7 +54,8 @@ export class PostgresDreamCycleReceiptStore {
       const existing = readState((await readLockedState(client, id)).rows[0]);
       // Completion must reconcile against settings changed while the model ran,
       // not the snapshot captured when the run started.
-      const configured = (await client.query('SELECT enabled,cron_expression,timezone FROM dream_settings WHERE agent_id=$1', [id])).rows[0] || settings;
+      let configured = (await client.query('SELECT enabled,cron_expression,timezone FROM dream_settings WHERE agent_id=$1', [id])).rows[0] || settings;
+      configured = { ...configured, effectiveTimezone: configured.timezone ?? await operatorTimezone(new PostgresSettingsMetadataStore({ pool: client })) };
       const state = { ...reconciledDreamCycleState({ agentId: id, settings: configured, current: existing || {}, at }), lastRunAt: settings.lastRunAt || existing?.lastRunAt || null };
       await upsertState(client, state, at);
       return state;
@@ -63,8 +66,9 @@ export class PostgresDreamCycleReceiptStore {
     return withPostgresTransaction(this.pool, async (client) => {
       const agent = await lockAgent(client, id);
       if (!agent.rows[0]) throw new Error('agent_not_found');
-      const configured = (await client.query('SELECT enabled,cron_expression,timezone FROM dream_settings WHERE agent_id=$1', [id])).rows[0];
+      let configured = (await client.query('SELECT enabled,cron_expression,timezone FROM dream_settings WHERE agent_id=$1', [id])).rows[0];
       if (!configured) return null;
+      configured = { ...configured, effectiveTimezone: configured.timezone ?? await operatorTimezone(new PostgresSettingsMetadataStore({ pool: client })) };
       const current = readState((await readLockedState(client, id)).rows[0]);
       const state = reconciledDreamCycleState({ agentId: id, settings: configured, current: current || {}, at });
       const scheduledFor = state.nextRunAt;

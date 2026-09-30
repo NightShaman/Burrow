@@ -129,8 +129,8 @@ function jobInput(input, { partial = false } = {}) {
   if (!partial || input.cron !== undefined)
     result.cron = parseCron(input.cron).expression;
   if (!partial || input.timezone !== undefined) {
-    result.timezone = text(input.timezone);
-    if (!validTimezone(result.timezone))
+    result.timezone = input.timezone == null ? null : text(input.timezone);
+    if (result.timezone !== null && !validTimezone(result.timezone))
       throw new Error("scheduled_job_timezone_invalid");
   }
   if (input.sessionId !== undefined) {
@@ -147,8 +147,10 @@ function jobInput(input, { partial = false } = {}) {
 }
 
 export const POSTGRES_SCHEDULED_JOB_SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS scheduled_jobs (id TEXT PRIMARY KEY, owner_mod_id TEXT, agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE, name TEXT NOT NULL, prompt TEXT NOT NULL, cron_expression TEXT NOT NULL, timezone TEXT NOT NULL, session_id TEXT NOT NULL, enabled BOOLEAN NOT NULL DEFAULT FALSE, next_run_at TIMESTAMPTZ, last_run_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL, model_connection_id TEXT, model TEXT);
+CREATE TABLE IF NOT EXISTS scheduled_jobs (id TEXT PRIMARY KEY, owner_mod_id TEXT, agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE, name TEXT NOT NULL, prompt TEXT NOT NULL, cron_expression TEXT NOT NULL, timezone TEXT, session_id TEXT NOT NULL, enabled BOOLEAN NOT NULL DEFAULT FALSE, next_run_at TIMESTAMPTZ, last_run_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL, model_connection_id TEXT, model TEXT);
 CREATE INDEX IF NOT EXISTS scheduled_jobs_due_idx ON scheduled_jobs (next_run_at) WHERE enabled;
+ALTER TABLE scheduled_jobs ALTER COLUMN timezone DROP NOT NULL;
+ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS effective_timezone TEXT;
 CREATE TABLE IF NOT EXISTS scheduled_job_runs (id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES scheduled_jobs(id) ON DELETE CASCADE, scheduled_for TIMESTAMPTZ NOT NULL, status TEXT NOT NULL CHECK (status IN ('running','completed','failed','cancelled','missed','skipped')), agent_id TEXT NOT NULL, session_id TEXT NOT NULL, run_id TEXT, dispatched_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, trace_dir TEXT, decision TEXT, ok BOOLEAN, error TEXT, result_json JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL, UNIQUE (job_id, scheduled_for));
 CREATE INDEX IF NOT EXISTS scheduled_job_runs_job_idx ON scheduled_job_runs (job_id, scheduled_for DESC, created_at DESC);
 `;
@@ -165,6 +167,17 @@ export class PostgresScheduledJobStore {
     this.pool = pool;
     this.ownsPool = ownsPool;
     this.clock = clock;
+  }
+  async effective(timezone, client = this.pool) { return timezone ?? await operatorTimezone(new PostgresSettingsMetadataStore({ pool: client })); }
+  async resolved(row, client = this.pool) { const job = jobRow(row); return job && { ...job, effectiveTimezone: await this.effective(job.timezone, client) }; }
+  async reconcileInherited(client, at) {
+    const zone = await this.effective(null, client);
+    const rows = await client.query('SELECT * FROM scheduled_jobs WHERE timezone IS NULL AND effective_timezone IS DISTINCT FROM $1 ORDER BY id FOR UPDATE', [zone]);
+    for (const row of rows.rows) {
+      if (row.effective_timezone === zone) continue;
+      const next = row.enabled ? nextCronOccurrence(row.cron_expression, zone, new Date(at)) : null;
+      await client.query('UPDATE scheduled_jobs SET effective_timezone=$1,next_run_at=$2 WHERE id=$3', [zone, next, row.id]);
+    }
   }
   async close() {
     if (this.ownsPool) await closePostgresPool(this.pool);
@@ -191,7 +204,7 @@ export class PostgresScheduledJobStore {
       "SELECT * FROM scheduled_jobs WHERE id=$1",
       [id(jobId, "scheduled_job_id")],
     );
-    return jobRow(result.rows[0]);
+    return this.resolved(result.rows[0]);
   }
   async listJobs({
     agentId = null,
@@ -222,7 +235,7 @@ export class PostgresScheduledJobStore {
       sql += ` LIMIT $${args.push(Math.max(1, Math.min(Number(limit) || 50, 101)))} OFFSET $${args.push(Math.max(0, Number(offset) || 0))}`;
     }
     const result = await this.pool.query(sql, args);
-    return result.rows.map(jobRow);
+    return Promise.all(result.rows.map(row => this.resolved(row)));
   }
   async getOwnedJob(ownerModId, jobId) {
     const result = await this.pool.query(
@@ -232,16 +245,17 @@ export class PostgresScheduledJobStore {
         id(ownerModId, "scheduled_job_owner_mod_id"),
       ],
     );
-    return jobRow(result.rows[0]);
+    return this.resolved(result.rows[0]);
   }
   async createJob(input = {}, { ownerModId = null } = {}) {
-    const job = jobInput({ ...input, timezone: input.timezone === undefined ? await operatorTimezone(new PostgresSettingsMetadataStore({ pool: this.pool })) : input.timezone });
+    const job = jobInput({ ...input, timezone: input.timezone ?? null });
     await this.validateModel(job);
     const enabled = job.enabled === true;
     const stamp = timestamp(this.clock);
     const jobId = input.id ? id(input.id, "scheduled_job_id") : randomUUID();
+    const effectiveTimezone = await this.effective(job.timezone);
     const next = enabled
-      ? nextCronOccurrence(job.cron, job.timezone, new Date(stamp))
+      ? nextCronOccurrence(job.cron, effectiveTimezone, new Date(stamp))
       : null;
     await this.pool.query(
       "INSERT INTO scheduled_jobs (id,owner_mod_id,agent_id,name,prompt,cron_expression,timezone,session_id,enabled,next_run_at,last_run_at,created_at,updated_at,model_connection_id,model) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12,$13,$14)",
@@ -262,6 +276,7 @@ export class PostgresScheduledJobStore {
         job.model || null,
       ],
     );
+    await this.pool.query("UPDATE scheduled_jobs SET effective_timezone=$1 WHERE id=$2", [effectiveTimezone, jobId]);
     return this.getJob(jobId);
   }
   async updateJob(jobId, input = {}, { ownerModId = undefined } = {}) {
@@ -291,7 +306,7 @@ export class PostgresScheduledJobStore {
       const nextRun = !next.enabled
         ? null
         : recompute
-          ? nextCronOccurrence(next.cron, next.timezone, new Date(stamp))
+          ? nextCronOccurrence(next.cron, await this.effective(next.timezone, client), new Date(stamp))
           : current.nextRunAt;
       await client.query(
         "UPDATE scheduled_jobs SET agent_id=$1,name=$2,prompt=$3,cron_expression=$4,timezone=$5,session_id=$6,enabled=$7,next_run_at=$8,updated_at=$9,model_connection_id=$10,model=$11 WHERE id=$12",
@@ -310,12 +325,13 @@ export class PostgresScheduledJobStore {
           current.id,
         ],
       );
-      return jobRow(
+      if (recompute) await client.query("UPDATE scheduled_jobs SET effective_timezone=$1 WHERE id=$2", [await this.effective(next.timezone, client), current.id]);
+      return this.resolved(
         (
           await client.query("SELECT * FROM scheduled_jobs WHERE id=$1", [
             current.id,
           ])
-        ).rows[0],
+        ).rows[0], client,
       );
     });
   }
@@ -388,13 +404,14 @@ export class PostgresScheduledJobStore {
       ? `AND (owner_mod_id IS NULL OR owner_mod_id = ANY($2::text[]))`
       : "AND owner_mod_id IS NULL";
     const result = await withPostgresTransaction(this.pool, async (client) => {
+      await this.reconcileInherited(client, when);
       const jobs = await client.query(
         `SELECT * FROM scheduled_jobs WHERE enabled AND next_run_at IS NOT NULL AND next_run_at<$1 ${ownerClause} ORDER BY next_run_at FOR UPDATE`,
         owners.length ? [when, owners] : [when],
       );
       let missed = 0;
       for (const row of jobs.rows) {
-        const job = jobRow(row);
+        const job = await this.resolved(row, client);
         let scheduled = job.nextRunAt;
         while (scheduled && new Date(scheduled) < new Date(when)) {
           await client.query(
@@ -403,7 +420,7 @@ export class PostgresScheduledJobStore {
           );
           scheduled = nextCronOccurrence(
             job.cron,
-            job.timezone,
+            await this.effective(job.timezone, client),
             new Date(scheduled),
           );
           missed += 1;
@@ -426,6 +443,7 @@ export class PostgresScheduledJobStore {
       ),
     ];
     return withPostgresTransaction(this.pool, async (client) => {
+      await this.reconcileInherited(client, when);
       const args = owners.length ? [when, owners] : [when];
       const ownerClause = owners.length
         ? "AND (owner_mod_id IS NULL OR owner_mod_id = ANY($2::text[]))"
@@ -436,10 +454,10 @@ export class PostgresScheduledJobStore {
       );
       const claimed = [];
       for (const row of due.rows) {
-        const job = jobRow(row);
+        const job = await this.resolved(row, client);
         if (!job.nextRunAt || new Date(job.nextRunAt) > new Date(when))
           continue;
-        const next = nextCronOccurrence(job.cron, job.timezone, new Date(when));
+        const next = nextCronOccurrence(job.cron, job.effectiveTimezone, new Date(when));
         await client.query(
           "UPDATE scheduled_jobs SET next_run_at=$1,last_run_at=$2,updated_at=$2 WHERE id=$3",
           [next, when, job.id],
@@ -517,7 +535,7 @@ export class PostgresScheduledJobStore {
           await client.query("SELECT * FROM scheduled_job_runs WHERE id=$1", [
             current.id,
           ])
-        ).rows[0],
+        ).rows[0], client,
       );
     });
   }
