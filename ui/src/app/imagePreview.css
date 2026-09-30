@@ -1,0 +1,11 @@
+.image-preview-trigger { display: inline-flex; max-width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
+.image-preview-trigger:focus-visible { outline: 2px solid var(--accent, #d776e8); outline-offset: 4px; }
+.image-viewer-backdrop { position: fixed; inset: 0; z-index: 10000; background: #000c; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.image-viewer { width: 96vw; height: 92dvh; display: flex; flex-direction: column; background: var(--panel, #191921); color: var(--text, #eee); border: 1px solid #ffffff30; border-radius: 12px; overflow: hidden; }
+.image-viewer header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+.image-viewer header span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.image-viewer header button { padding: 8px 12px; }
+.image-viewer-stage { flex: 1; min-height: 0; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 12px; }
+.image-viewer-stage img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.image-viewer-stage.actual-size { display: block; }
+.image-viewer-stage.actual-size img { max-width: none; max-height: none; }

@@ -1,3 +1,4 @@
+import { ImagePreview } from '../../app/ImagePreview';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, fetchApi } from '../../app/api';
 import type { Agent } from '../../app/types';
@@ -88,7 +89,7 @@ function ArtifactMedia({ artifact }: { artifact: Artifact }) {
     return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [artifact.previewUrl, artifact.mimeType]);
   if (!src) return <div className="forge-file">Loading preview…</div>;
-  if (artifact.kind === 'image') return <img src={src} alt={artifact.name} />;
+  if (artifact.kind === 'image') return <ImagePreview src={src} alt={artifact.name} />;
   if (artifact.kind === 'video') return <video controls src={src} />;
   if (artifact.kind === 'audio') return <audio controls src={src} />;
   return <div className="forge-file">{artifact.name}</div>;

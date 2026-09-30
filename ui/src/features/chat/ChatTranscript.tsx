@@ -1,3 +1,4 @@
+import { ImagePreview } from '../../app/ImagePreview';
 import { isValidElement, memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { HTMLAttributes, ReactNode, SyntheticEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -223,7 +224,7 @@ function MessageAttachment({ attachment, target, agentId }: { attachment: Sessio
   }, [agentId, isImage, path, target?.baseUrl]);
   const imageSource = isImage && !failed ? source ?? attachment.preview ?? null : null;
   return <div className="message-attachment-card">{imageSource
-    ? <figure className="message-attachment-image"><img src={imageSource} alt={attachment.name} loading="lazy" onError={() => setFailed(true)} /><figcaption>{attachment.name}</figcaption></figure>
+    ? <figure className="message-attachment-image"><ImagePreview src={imageSource} alt={attachment.name} loading="lazy" onError={() => setFailed(true)} /><figcaption>{attachment.name}</figcaption></figure>
     : <span className="message-attachment" title={attachment.type}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m4 18 5.5-5.5 3.5 3.5 2.5-2.5 4.5 4.5" /></svg><span>{attachment.name}</span></span>}
     {url && <button type="button" onClick={download} disabled={downloadState === 'downloading'} aria-label={`Download ${attachment.name}`}>{downloadState === 'downloading' ? 'Downloading…' : downloadState === 'failed' ? 'Retry download' : 'Download'}</button>}
     {downloadState === 'failed' && <span role="status">Download failed</span>}
@@ -245,6 +246,18 @@ function GeneratedArtifactCard({ artifact, target, agentId }: { artifact: Genera
   const reference = artifact.storageReference?.trim();
   const canDownload = Boolean(reference && agentId);
   const displayName = artifact.name?.trim() || `Generated ${artifact.kind || 'artifact'}`;
+  const [previewUrl, setPreviewUrl] = useState('');
+  useEffect(() => {
+    if (!reference || !agentId || artifact.kind !== 'image') return;
+    let cancelled = false;
+    let url = '';
+    setPreviewUrl('');
+    void fetchApiForTarget(target, generatedArtifactPath(agentId, reference), { headers: { accept: artifact.mimeType || 'image/*' } })
+      .then(response => { if (!response.ok) throw new Error('Preview unavailable'); return response.blob(); })
+      .then(blob => { if (!cancelled) { url = URL.createObjectURL(blob); setPreviewUrl(url); } })
+      .catch(() => {});
+    return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
+  }, [reference, agentId, target, artifact.kind, artifact.mimeType]);
   const details = [artifact.kind, artifact.mimeType, formatArtifactSize(artifact.sizeBytes)].filter(Boolean).join(' · ');
   const provenance = [artifact.provenance?.provider, artifact.provenance?.model].filter(Boolean).join(' · ');
   const download = async () => {
@@ -269,7 +282,7 @@ function GeneratedArtifactCard({ artifact, target, agentId }: { artifact: Genera
   };
   const actionLabel = !canDownload ? 'Download unavailable' : downloadState === 'downloading' ? 'Downloading…' : downloadState === 'failed' ? 'Retry download' : 'Download';
   return <article className="generated-artifact">
-    <div className="generated-artifact-icon" aria-hidden="true">↓</div>
+    <div className="generated-artifact-icon">{previewUrl ? <ImagePreview src={previewUrl} alt={displayName} /> : <span aria-hidden="true">↓</span>}</div>
     <div className="generated-artifact-info"><strong>{displayName}</strong><span>{details || 'Generated artifact'}</span>{provenance && <span>Created by {provenance}</span>}{downloadState === 'failed' && <span className="generated-artifact-error" role="status">Download failed</span>}</div>
     <button type="button" onClick={download} disabled={!canDownload || downloadState === 'downloading'}>{actionLabel}</button>
   </article>;
