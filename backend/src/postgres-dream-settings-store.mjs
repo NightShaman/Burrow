@@ -8,14 +8,13 @@ CREATE TABLE IF NOT EXISTS dream_settings (
   agent_id TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   cron_expression TEXT NOT NULL,
-  timezone TEXT,
+  timezone TEXT NOT NULL,
   prompt TEXT NOT NULL,
   model_connection_id TEXT,
   model TEXT,
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
- );
-ALTER TABLE dream_settings ALTER COLUMN timezone DROP NOT NULL;
+);
 `;
 export const DREAM_SETTINGS_SCHEMA_SQL = POSTGRES_DREAM_SETTINGS_SCHEMA_SQL;
 
