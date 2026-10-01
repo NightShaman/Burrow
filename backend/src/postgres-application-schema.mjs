@@ -1,3 +1,4 @@
+import { POSTGRES_DREAM_EXTRACTION_SCHEMA_SQL } from './postgres-dream-extraction-store.mjs';
 import { POSTGRES_ALBDRUCK_SCHEMA_SQL } from './postgres-albdruck-store.mjs';
 import { POSTGRES_MOD_DISTRIBUTION_SCHEMA_SQL } from './postgres-mod-distribution-repository.mjs';
 import { POSTGRES_MOD_SCHEMA_SQL } from './postgres-mod-store.mjs';
@@ -54,4 +55,5 @@ export const POSTGRES_APPLICATION_SCHEMA_MANIFEST = Object.freeze([
 ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS effective_timezone TEXT;` },
   { version: 12, name: 'dream-timezone-inheritance', sql: 'ALTER TABLE dream_settings ALTER COLUMN timezone DROP NOT NULL;' },
   { version: 13, name: 'albdruck-knowledge', sql: POSTGRES_ALBDRUCK_SCHEMA_SQL },
+  { version: 14, name: 'dream-incremental-extraction', sql: POSTGRES_DREAM_EXTRACTION_SCHEMA_SQL },
 ]);

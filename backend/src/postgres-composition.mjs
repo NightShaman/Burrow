@@ -1,3 +1,4 @@
+import { PostgresDreamExtractionStore } from './postgres-dream-extraction-store.mjs';
 import { PostgresAlbdruckStore } from './postgres-albdruck-store.mjs';
 import { createPostgresModDistributionRepository } from './postgres-mod-distribution-repository.mjs';
 import { postgresModStoreFactory, disabledPostgresMods, publishPostgresModCatalog } from './postgres-mod-store.mjs';
@@ -58,6 +59,7 @@ export async function createPostgresApplication({
     tasks: new PostgresTaskBoardStore({ ...common, ...(clock ? { clock } : {}) }),
     scheduledJobs: new PostgresScheduledJobStore({ ...common, ...(clock ? { clock } : {}) }),
     dreamSettings: new PostgresDreamSettingsStore(common),
+    dreamExtractions: new PostgresDreamExtractionStore(common),
     dreamDiary: new PostgresDreamDiaryStore(common),
     dreamCycles: new PostgresDreamCycleReceiptStore({ ...common, ...(clock ? { clock } : {}), ...(runtimeInstanceId ? { runtimeInstanceId } : {}) }),
     continuity: new PostgresContinuityHandoffStore(common),
