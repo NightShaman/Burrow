@@ -180,7 +180,21 @@ export async function completeTextResult({ content, modelAdapter, modelConfig, t
   if (!modelAdapter) throw new Error('dream_model_unavailable');
   if (!fitsPrompt(content, modelConfig)) throw new Error('dream_prompt_budget_exceeded');
   const diagnostics = [];
-  let response = await modelAdapter.complete({ messages: [{ role: 'user', content }], traceLogger });
+  const request = async (prompt) => {
+    for (let attempt = 0; ; attempt++) {
+      try { return await modelAdapter.complete({ messages: [{ role: 'user', content: prompt }], traceLogger }); }
+      catch (cause) {
+        const code = diagnosticLabel(cause?.cause?.code || cause?.code, 64);
+        const retryable = ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET'].includes(code);
+        diagnostics.push({ stage: 'transport', error: safeModelError(cause?.message, modelConfig), code, attempt: attempt + 1, retryable });
+        if (retryable && attempt === 0) continue;
+        const error = new Error(safeModelError(cause?.message, modelConfig) || 'dream_model_transport_failed');
+        error.diagnostics = diagnostics;
+        throw error;
+      }
+    }
+  };
+  let response = await request(content);
   diagnostics.push(modelResponseDiagnostics(response, modelConfig));
   const rejectFailure = () => {
     if (response?.ok !== false) return;
@@ -193,7 +207,7 @@ export async function completeTextResult({ content, modelAdapter, modelConfig, t
   let result = modelText(response);
   if (!result) {
     const retryContent = `${content}\n\nThe previous attempt returned no usable text. Retry now and output only the requested result; do not stop after internal reasoning.`;
-    response = await modelAdapter.complete({ messages: [{ role: 'user', content: retryContent }], traceLogger });
+    response = await request(retryContent);
     diagnostics.push(modelResponseDiagnostics(response, modelConfig));
     rejectFailure();
     result = modelText(response);
@@ -287,6 +301,7 @@ function phaseExtractionPrompt({ phase, windowStart, generatedAt, messages, echo
     `Return strict JSON only with exactly: ${shape}.`,
     `Every candidate must cite one or more exact sourceRefs from Chat evidence.${echoAllowedSourceRefs ? ' Also echo every sourceRef in allowedSourceRefs.' : ''} Burrow validates citations against the supplied evidence; do not invent references. Extract operational continuity that will remain useful and explicit operator behavioral corrections/preferences. A single direct correction is sufficient. Do not extract secrets, tool/debug output, system prompts, generic requests, transient moods, or speculation. Prefer an empty array over weak evidence.`,
     `Phase: ${phase}. Window: ${windowStart} through ${generatedAt}.`,
+    `Allowed citation manifest (authoritative): ${JSON.stringify(messages.map(item => item.sourceRef))}. Cite only the top-level sourceRef of a supplied message. References embedded inside message content, including prior DreamMemory references, are historical quoted data, NOT eligible citations. Ground each claim in the actual supplied message; do not merely substitute an allowed ref for an unsupported claim.`,
     `Chat evidence: ${JSON.stringify(messages)}`,
   ].join('\n\n');
 }
@@ -330,10 +345,11 @@ async function sessionWindow({ rootDir, phase, generatedAt, conversationStore = 
   throw new Error('conversation_store_required');
 }
 
-async function extractPhaseCandidates({ phase, messages, generatedAt, modelAdapter, modelConfig, traceLogger, echoAllowedSourceRefs = false }) {
+export async function extractPhaseCandidates({ phase, messages, generatedAt, modelAdapter, modelConfig, traceLogger, echoAllowedSourceRefs = false }) {
   const output = { memories: [], preferences: [], chunks: 0, diagnostics: [] };
   const prompt = (items) => phaseExtractionPrompt({ phase, windowStart: phaseWindowStart({ phase, generatedAt }), generatedAt, messages: items, echoAllowedSourceRefs });
-  for (const chunk of promptChunks(messages, prompt, modelConfig)) {
+  const repairPrompt = (items) => `${prompt(items)}\n\nCitation validation failed on the previous attempt. Re-extract every supported candidate from this same chunk. Use ONLY the authoritative manifest; never cite references inside content. Return empty arrays only if this evidence supports no useful candidates.`;
+  for (const chunk of promptChunks(messages, prompt, modelConfig, items => fitsPrompt(repairPrompt(items), modelConfig))) {
     let completion;
     try {
       completion = await completeTextResult({ content: prompt(chunk), modelAdapter, modelConfig, traceLogger });
@@ -351,13 +367,27 @@ async function extractPhaseCandidates({ phase, messages, generatedAt, modelAdapt
         throw error;
       }
       const allowed = new Set(chunk.map((item) => item.sourceRef));
-      for (const item of [...parsed.memories, ...parsed.preferences]) if (!Array.isArray(item.sourceRefs) || !item.sourceRefs.length || item.sourceRefs.some((ref) => !allowed.has(ref))) throw new Error('dream_extraction_invalid_citation');
+      const citationFailures = (value) => [...value.memories, ...value.preferences].flatMap((item, candidate) => !Array.isArray(item?.sourceRefs) || !item.sourceRefs.length ? [{ candidate, reason: 'missing_source_refs' }] : item.sourceRefs.filter(ref => !allowed.has(ref)).map(ref => ({ candidate, reason: 'outside_chunk', sourceRef: typeof ref === 'string' && /^session:[^\s:]+:message:[a-zA-Z0-9-]+$/.test(ref) ? ref : '[invalid reference format]' })));
+      const invalid = (value) => [...value.memories, ...value.preferences].filter(item => !Array.isArray(item?.sourceRefs) || !item.sourceRefs.length || item.sourceRefs.some(ref => !allowed.has(ref))).length;
+      if (invalid(parsed)) {
+        output.diagnostics.push({ stage: 'citation_validation', chunk: output.chunks, allowedCount: allowed.size, invalidCandidates: invalid(parsed), citationFailures: citationFailures(parsed), repairAttempt: 1 });
+        // Re-extract from original evidence, not from the untrusted failed answer.
+        // The repair instruction is included in partition budgeting as well.
+        completion = await completeTextResult({ content: repairPrompt(chunk), modelAdapter, modelConfig, traceLogger });
+        output.diagnostics.push(...completion.diagnostics);
+        parsed = extractionPayload(parseModelJson(completion.text));
+        if (!Array.isArray(parsed?.memories) || !Array.isArray(parsed?.preferences)) throw new Error('dream_extraction_invalid_shape');
+        if (invalid(parsed)) {
+          output.diagnostics.push({ stage: 'citation_validation', chunk: output.chunks, allowedCount: allowed.size, invalidCandidates: invalid(parsed), citationFailures: citationFailures(parsed), repairExhausted: true });
+          throw new Error('dream_extraction_invalid_citation');
+        }
+      }
       const source = parsePhaseExtraction(JSON.stringify(parsed), chunk.map((item) => item.sourceRef));
       output.memories.push(...source.memories);
       output.preferences.push(...source.preferences);
       output.chunks += 1;
     } catch (error) {
-      if (!error.diagnostics) error.diagnostics = [...output.diagnostics, ...(completion?.diagnostics || [])];
+      if (!error.diagnostics) error.diagnostics = [...output.diagnostics];
       throw error;
     }
   }

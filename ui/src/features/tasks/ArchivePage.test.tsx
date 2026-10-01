@@ -20,10 +20,13 @@ function detail(value: ContinuityCard): ContinuityCardGroup {
 
 function collectionPage<T>(items: T[]): ArchivePage<T> { return { items, nextCursor: null, hasMore: false }; }
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.clear(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); window.localStorage.clear(); });
 
 describe('Archive detail selection', () => {
-  it('sends selected UTC day and agent as server filters for chat and dreams', async () => {
+  it('sends selected local day and agent as server filters for chat and dreams', async () => {
+    // Freeze only Date: async rendering and waitFor must retain real timers.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 8, 15, 12));
     const sessions = vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([]));
     vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([]));
     const availability = vi.spyOn(archiveRepository, 'listCalendarAvailability').mockImplementation(async (kind, month, agentId) => ({ ok: true, kind, month, dates: agentId ? [`${month}-12`] : [`${month}-29`] }));
