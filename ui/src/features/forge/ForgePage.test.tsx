@@ -193,6 +193,8 @@ describe('Forge workspace', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Musical direction' }), { target: { value: 'a bright synth line' } });
     fireEvent.click(screen.getByRole('button', { name: 'Generate Music' }));
     await waitFor(() => expect(screen.getByText('Forge job accepted.')).toBeTruthy());
+    const request = apiMock.mock.calls.find(([path, init]) => path === '/api/forge/jobs' && init?.method === 'POST');
+    expect(JSON.parse(request![1].body as string).prompt).toBe('a bright synth line');
     fireEvent.click(screen.getByRole('tab', { name: /Speech/ }));
     expect(screen.queryByRole('option', { name: 'Lyria' })).toBeNull();
     expect(screen.getByRole('option', { name: 'Speech' })).toBeTruthy();
@@ -200,7 +202,8 @@ describe('Forge workspace', () => {
 
   it('composes optional music lyrics into the submitted prompt and keeps empty lyrics unchanged', async () => {
     expect(composeMusicPrompt(' bright synth line ', '')).toBe('bright synth line');
-    expect(composeMusicPrompt('bright synth line', 'verse one')).toContain('--- Supplied lyrics');
+    expect(composeMusicPrompt(' bright synth line ', '  \n ')).toBe('bright synth line');
+    expect(composeMusicPrompt('bright synth line', '[Verse 1]\nFirst line\n\n[Chorus]\n  Indented refrain')).toBe('bright synth line\n\nWith the following lyrics:\n[Verse 1]\nFirst line\n\n[Chorus]\n  Indented refrain');
     const musicCatalog = { ...catalog, music: { available: true, reason: null, models: [{ connectionId: 'g1', modelId: 'lyria', label: 'Lyria', kind: 'audio', available: true, controls: [] }] } };
     apiMock.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/forge/catalog') return Promise.resolve(musicCatalog);
@@ -218,7 +221,7 @@ describe('Forge workspace', () => {
     const request = apiMock.mock.calls.find(([path, init]) => path === '/api/forge/jobs' && init?.method === 'POST');
     expect(request).toBeTruthy();
     const body = JSON.parse(request![1].body as string);
-    expect(body.prompt).toContain('Shine through the night');
+    expect(body.prompt).toBe('dreamy synth pop\n\nWith the following lyrics:\nShine through the night');
     expect(body.idempotencyKey).toBeTruthy();
   });
 

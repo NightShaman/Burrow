@@ -57,7 +57,7 @@ export function composeMusicPrompt(direction: string, lyrics: string): string {
   const base = direction.trim();
   const suppliedLyrics = lyrics.trim();
   if (!suppliedLyrics) return base;
-  return `${base}\n\n--- Supplied lyrics (guidance; not guaranteed verbatim) ---\n${suppliedLyrics}\n--- End supplied lyrics ---`;
+  return `${base}\n\nWith the following lyrics:\n${suppliedLyrics}`;
 }
 
 function artifactPath(url: string): string {
