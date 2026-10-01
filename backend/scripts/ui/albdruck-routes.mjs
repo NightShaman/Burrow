@@ -10,7 +10,7 @@ export function createAlbdruckRoutes({ store, readJsonBody, sendJson }) {
       else if (url.pathname === '/api/albdruck/purge-conversation' && req.method === 'POST') result = await store.purgeConversation(await readJsonBody(req));
       else if (url.pathname === '/api/albdruck/history' && req.method === 'POST') result = await store.history({ ...await readJsonBody(req), ...options });
       else if (url.pathname === '/api/albdruck/recall' && req.method === 'POST') result = await store.recall({ ...await readJsonBody(req), ...options });
-      else if (url.pathname === '/api/albdruck/knowledge' && req.method === 'GET') result = await store.list({ ...options, query: url.searchParams.get('query') || '', cursor: url.searchParams.get('cursor') || '', ...(url.searchParams.has('pageSize') ? { pageSize: Number(url.searchParams.get('pageSize')) } : {}) });
+      else if (url.pathname === '/api/albdruck/knowledge' && req.method === 'GET') result = await store.list({ ...options, state: url.searchParams.get('state') || 'active', query: url.searchParams.get('query') || '', cursor: url.searchParams.get('cursor') || '', ...(url.searchParams.has('pageSize') ? { pageSize: Number(url.searchParams.get('pageSize')) } : {}) });
       else {
         const match = /^\/api\/albdruck\/knowledge\/([^/]+)$/.exec(url.pathname);
         if (!match) return false;

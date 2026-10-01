@@ -189,7 +189,7 @@ const collection = {
       req('Refresh mod sources now', 'POST', '/api/mod-management/refresh', { body: {} }),
     ]),
     folder('Retention', [
-      req('Albdruck knowledge', 'GET', '/api/albdruck/knowledge', { query: [['agentId', '{{agentId}}']] }),
+      req('Albdruck knowledge', 'GET', '/api/albdruck/knowledge', { query: [['agentId', '{{agentId}}'], ['state', 'active']] }),
       req('Purge conversation', 'POST', '/api/albdruck/purge-conversation', { body: { agentId: '{{agentId}}', sessionId: '{{sessionId}}', reason: 'Explicit operator purge' } }),
       req('Albdruck retention', 'GET', '/api/albdruck/retention'),
       req('Retention dry run', 'GET', '/api/retention'),

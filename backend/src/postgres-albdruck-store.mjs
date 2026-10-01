@@ -118,11 +118,35 @@ export class PostgresAlbdruckStore {
   }
   async recall({ agentId, query, pageSize = Math.min(50, this.maxPageSize), scope = 'agent' }) {
     if (typeof query !== 'string' || !query.trim()) return { items: [], nextCursor: null };
-    return this.list({ agentId, scope, query: query.trim(), pageSize });
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > this.maxPageSize) throw new Error('albdruck_page_size_invalid');
+    // PostgreSQL English lexemes remove stopwords and rank whole terms, not
+    // accidental substrings or JSON field names. OR preserves partial recall.
+    const { rows } = await this.pool.query(`WITH lexemes AS (
+      SELECT unnest(tsvector_to_array(to_tsvector('english', $2))) AS term
+    ), search AS (
+      SELECT to_tsquery('english', string_agg(quote_literal(term), ' | ')) AS query FROM lexemes
+    ), ranked AS (
+      SELECT k.*, setweight(to_tsvector('english', coalesce(document->>'claim','')), 'A') ||
+        setweight(to_tsvector('english', coalesce(document->>'rationale','') || ' ' ||
+          coalesce(document->>'alternatives','') || ' ' || coalesce(document->>'constraints','') || ' ' ||
+          coalesce(document->>'relationships','')), 'B') AS vector
+      FROM albdruck_knowledge k WHERE scope=$1 AND state='active'
+    ) SELECT ranked.*, ts_rank_cd(vector, search.query) AS score
+      FROM ranked CROSS JOIN search WHERE vector @@ search.query
+      ORDER BY score DESC, updated_at DESC, id LIMIT $3`, [scopeKey({agentId,scope}), query.trim(), pageSize]);
+    const items = [];
+    for (const row of rows) {
+      const detail = await this.detail({ id: row.id, agentId, scope });
+      if (detail?.state === 'active') items.push({ ...row, evidence: detail.evidence.map(({sourceRef,status}) => ({sourceRef,status})) });
+    }
+    return { items, nextCursor: null };
   }
   async reinforce(input) {
     const document = normalizeKnowledge(input.document);
     const scope = scopeKey(input);
+    const proposal = input.reconciliation;
+    if (proposal && (!['new','reinforce','supersede','contradiction'].includes(proposal.action) || typeof proposal.reason !== 'string' || !proposal.reason.trim())) throw new Error('albdruck_reconciliation_invalid');
+    if (proposal && proposal.action !== 'new' && (!proposal.targetId || !proposal.expectedFingerprint)) throw new Error('albdruck_reconciliation_target_required');
     if (!Array.isArray(input.sourceRefs) || !input.sourceRefs.length) throw new Error('albdruck_evidence_required');
     const evidence = [];
     for (const source of input.sourceRefs) {
@@ -130,13 +154,27 @@ export class PostgresAlbdruckStore {
       if (input.scope !== 'global' && ref.agentId !== String(input.agentId)) throw new Error('albdruck_evidence_scope_mismatch');
       const entry = await this.resolveOriginal(ref);
       if (!isChatMessage(entry) || typeof entry.content !== 'string') throw new Error('albdruck_original_evidence_unavailable');
-      evidence.push({ ref, key: JSON.stringify(canonical(ref)), excerpt: entry.content });
+      if (input.expectedOriginals) {
+        const expected = input.expectedOriginals.find(item => JSON.stringify(canonical(item.ref)) === JSON.stringify(canonical(ref)));
+        if (!expected || expected.content !== entry.content || expected.role !== entry.role) throw new Error('albdruck_original_evidence_changed');
+      }
+      evidence.push({ ref, key: JSON.stringify(canonical(ref)), excerpt: entry.content, role: entry.role });
     }
     return withPostgresTransaction(this.pool, async client => {
       await client.query('LOCK TABLE albdruck_knowledge, albdruck_evidence, albdruck_revisions IN SHARE ROW EXCLUSIVE MODE');
-      for (const item of evidence) if (!await this.resolveOriginal(item.ref)) throw new Error('albdruck_original_evidence_unavailable');
-      const fingerprint = knowledgeFingerprint(document);
-      await client.query(`INSERT INTO albdruck_knowledge(id,scope,fingerprint,document) VALUES($1,$2,$3,$4) ON CONFLICT(scope,fingerprint) DO NOTHING`, [randomUUID(), scope, fingerprint, document]);
+      for (const item of evidence) {
+        const current = await this.resolveOriginal(item.ref);
+        if (!isChatMessage(current) || current.content !== item.excerpt || current.role !== item.role) throw new Error('albdruck_original_evidence_changed');
+      }
+      let target = null;
+      if (proposal && proposal.action !== 'new') {
+        const result = await client.query('SELECT * FROM albdruck_knowledge WHERE id=$1 AND scope=$2 FOR UPDATE', [proposal.targetId, scope]);
+        target = result.rows[0];
+        if (!target || target.state !== 'active' || target.fingerprint !== proposal.expectedFingerprint) throw new Error('albdruck_reconciliation_stale_target');
+        if (proposal.action === 'supersede' && !evidence.some(item => item.role === 'user')) throw new Error('albdruck_correction_user_evidence_required');
+      }
+      const fingerprint = proposal?.action === 'reinforce' ? target.fingerprint : knowledgeFingerprint(document);
+      if (proposal?.action !== 'reinforce') await client.query(`INSERT INTO albdruck_knowledge(id,scope,fingerprint,document) VALUES($1,$2,$3,$4) ON CONFLICT(scope,fingerprint) DO NOTHING`, [randomUUID(), scope, fingerprint, document]);
       const { rows: [row] } = await client.query('SELECT * FROM albdruck_knowledge WHERE scope=$1 AND fingerprint=$2 FOR UPDATE', [scope, fingerprint]);
       if (row.state !== 'active') throw new Error('albdruck_inactive_requires_review');
       let added = 0;
@@ -146,14 +184,28 @@ export class PostgresAlbdruckStore {
       }
       if (added) {
         await client.query('UPDATE albdruck_knowledge SET updated_at=now() WHERE id=$1', [row.id]);
-        await client.query(`INSERT INTO albdruck_revisions(knowledge_id,operation,document) VALUES($1,'reinforce',$2)`, [row.id, { document, addedEvidence: added }]);
+        await client.query(`INSERT INTO albdruck_revisions(knowledge_id,operation,document) VALUES($1,'reinforce',$2)`, [row.id, { document: row.document, observedDocument: document, reason: proposal?.reason ?? null, addedEvidence: added }]);
       }
-      return { id: row.id, addedEvidence: added, changed: added > 0 };
+      const superseded = [];
+      if (proposal?.action === 'supersede') {
+        const link = { reason: proposal.reason, before: target.document, after: document,
+          supersededId: target.id, replacementId: row.id, sourceRefs: evidence.map(item => item.ref) };
+        if (row.id === target.id) throw new Error('albdruck_self_supersession');
+        await client.query("UPDATE albdruck_knowledge SET state='superseded',updated_at=now() WHERE id=$1", [target.id]);
+        await client.query("INSERT INTO albdruck_revisions(knowledge_id,operation,document) VALUES($1,'supersede',$2),($3,'replace',$2)", [target.id, link, row.id]);
+        superseded.push(target.id);
+      }
+      if (proposal?.action === 'contradiction') {
+        const link = { reason: proposal.reason, conflictingId: target.id, candidateId: row.id, sourceRefs: evidence.map(item => item.ref) };
+        await client.query("INSERT INTO albdruck_revisions(knowledge_id,operation,document) VALUES($1,'unresolved_contradiction',$2),($3,'unresolved_contradiction',$2)", [target.id, link, row.id]);
+      }
+      return { id: row.id, addedEvidence: added, changed: added > 0 || superseded.length > 0, superseded };
     });
   }
-  async list({ agentId, scope = 'agent', query = '', cursor = '', pageSize = Math.min(50, this.maxPageSize) } = {}) {
+  async list({ agentId, scope = 'agent', query = '', cursor = '', pageSize = Math.min(50, this.maxPageSize), state = 'active' } = {}) {
     if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > this.maxPageSize) throw new Error('albdruck_page_size_invalid');
-    const { rows } = await this.pool.query(`SELECT * FROM albdruck_knowledge WHERE scope=$1 AND state='active' AND id>$2 AND ($3='' OR strpos(lower(document::text),lower($3))>0) ORDER BY id LIMIT $4`, [scopeKey({agentId,scope}), cursor, String(query), pageSize + 1]);
+    if (!['active','superseded','deleted'].includes(state)) throw new Error('albdruck_state_invalid');
+    const { rows } = await this.pool.query(`SELECT * FROM albdruck_knowledge WHERE scope=$1 AND state=$5 AND id>$2 AND ($3='' OR strpos(lower(document::text),lower($3))>0) ORDER BY id LIMIT $4`, [scopeKey({agentId,scope}), cursor, String(query), pageSize + 1, state]);
     const hasMore = rows.length > pageSize;
     const items = rows.slice(0,pageSize);
     return { items, nextCursor: hasMore ? items.at(-1).id : null };
