@@ -31,7 +31,7 @@ function entryId(agentId, phase, title, content) { return `dream-${phase}-${Buff
 function clamp(value, limit) { const source = text(value).replace(/\s+/g, ' '); return source.length <= limit ? source : `${source.slice(0, limit).trim()}…`; }
 function safeModelError(value, config = {}) {
   if (typeof value !== 'string') return null;
-  return clamp(redactProtectedText(value, [config.apiKey, config.accessToken, config.token].filter(Boolean))
+  return clamp(redactProtectedText(value, [config?.apiKey, config?.accessToken, config?.token].filter(Boolean))
     .replace(/Bearer\s+[^\s"']+/gi, 'Bearer [redacted]')
     .replace(/\bsk-[a-zA-Z0-9_-]+/g, '[redacted]'), 500) || null;
 }
@@ -337,7 +337,7 @@ async function sessionWindow({ rootDir, phase, generatedAt, conversationStore = 
       const at = Date.parse(turn.ts || turn.at || turn.createdAt);
       if (!Number.isFinite(at) || at < since || at > until) continue;
       const sessionId = turn.__sessionId || turn.sessionId || '';
-      output.push({ sourceRef: `session:${sessionId}:message:${turn.id}`, sessionId, role: turn.role, at: new Date(at).toISOString(), content: text(turn.content) });
+      output.push({ sourceRef: `session:${sessionId}:message:${turn.id}`, sessionId, entryId: turn.id, role: turn.role, at: new Date(at).toISOString(), content: text(turn.content) });
     }
     return output.sort((a, b) => a.at.localeCompare(b.at));
   }
@@ -532,7 +532,7 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     if (!dreamAdapter && resolvedDreamModel?.model) dreamAdapter = createModelAdapter({ config: { ...resolvedDreamModel, temperature: settings.temperature ?? resolvedDreamModel.temperature ?? 0.2, reasoningEffort: 'off' } });
     const phaseResults = []; const pendingDiaries = []; const selectedByKey = new Map(); const preferenceByKey = new Map();
     for (const phase of PHASES) {
-      const messages = phaseWindows[phase]; let extraction; let extractionError = null; let extractionDiagnostics = [];
+      const messages = phaseWindows[phase]; let extraction; let extractionError = null; let extractionDiagnostics = []; const albdruckDiagnostics = [];
       try { extraction = await extractPhaseCandidates({ phase, messages, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger }); extractionDiagnostics = extraction.diagnostics; const reconciled = await reconcileDreamCandidates({ phase, candidates: extraction, messages, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger }); extractionDiagnostics = [...extractionDiagnostics, ...reconciled.diagnostics]; Object.assign(extraction, reconciled); }
       catch (error) { extraction = { memories: [], preferences: [], chunks: 0, diagnostics: [] }; extractionError = clamp(error?.message || error, 500); extractionDiagnostics = [...extractionDiagnostics, ...(error?.diagnostics || [])]; }
       if (phase === PHASES.reduce((longest, value) => PHASE_WINDOWS_DAYS[value] > PHASE_WINDOWS_DAYS[longest] ? value : longest)) for (const candidate of extraction.memories) { const key = `${candidate.kind}|${candidate.title.toLowerCase()}|${candidate.content.toLowerCase()}`; const existing = selectedByKey.get(key); selectedByKey.set(key, existing ? { ...existing, sourceRefs: [...new Set([...existing.sourceRefs, ...candidate.sourceRefs])] } : { ...candidate, id: entryId(id, phase, candidate.title, candidate.content), phase }); }
@@ -540,15 +540,19 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
       for (const candidate of extraction.preferences) { if (!candidate.sourceRefs.every((ref) => userRefs.has(ref))) continue; const key = `${candidate.kind}|${candidate.scope.toLowerCase()}|${candidate.guidance.toLowerCase()}`; const existing = preferenceByKey.get(key); preferenceByKey.set(key, existing ? { ...existing, sourceRefs: [...new Set([...existing.sourceRefs, ...candidate.sourceRefs])] } : candidate); }
       if (stores.albdruck && !extractionError) {
         for (const candidate of extraction.memories.filter(value => ['decision','finding'].includes(value.kind))) {
-          const refs = candidate.sourceRefs.map(sourceRef => {
-            const message = messages.find(value => value.sourceRef === sourceRef);
-            return { kind: 'conversation_entry', agentId: id, sessionId: message.sessionId, entryId: sourceRef.slice(`session:${message.sessionId}:message:`.length) };
-          });
+          const refs = [];
           try {
+            for (const sourceRef of candidate.sourceRefs) {
+              const message = messages.find(value => value.sourceRef === sourceRef);
+              if (!message?.sessionId || !message?.entryId) throw new Error('dream_albdruck_source_locator_unavailable');
+              refs.push({ kind: 'conversation_entry', agentId: id, sessionId: message.sessionId, entryId: message.entryId });
+            }
             await stores.albdruck.reinforce({ agentId: id, document: { claim: candidate.content, rationale: candidate.rationale, alternatives: candidate.alternatives, constraints: candidate.constraints, relationships: candidate.relationships }, sourceRefs: refs });
+            albdruckDiagnostics.push({ operation: 'reinforce', ok: true, sourceRefs: refs });
           } catch (error) {
-            // An operator deletion/supersession must not be resurrected by Dream.
-            if (error.message !== 'albdruck_inactive_requires_review') throw error;
+            // Knowledge maintenance is optional; validation and inactive-record
+            // protections remain authoritative. Never retry with weaker evidence.
+            albdruckDiagnostics.push({ operation: 'reinforce', ok: false, sourceRefs: refs, citations: [...candidate.sourceRefs], error: safeModelError(String(error?.message || error), resolvedDreamModel) });
           }
         }
       }
@@ -556,9 +560,13 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
       let diaryNarrative = null; let diaryError = null;
       try { if (extractionError) throw new Error(extractionError); diaryNarrative = await generateOperatorDiary({ phase, settings, soul, items: extraction.memories, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger }); } catch (error) { diaryError = clamp(error?.message || error, 500); }
       if (diaryNarrative) pendingDiaries.push({ entryDate: generatedAt.slice(0, 10), phase, narrative: diaryNarrative, sourceRefs: selected.flatMap((item) => item.sourceRefs || []).slice(0, 16) });
-      phaseResults.push({ phase, windowDays: PHASE_WINDOWS_DAYS[phase], inspected: messages.length, recorded: selected.length, selected: selected.length, summary: `${phase.toUpperCase()} pass inspected ${messages.length} persisted chat message${messages.length === 1 ? '' : 's'} in its ${PHASE_WINDOWS_DAYS[phase]}-day window and selected ${selected.length} candidate${selected.length === 1 ? '' : 's'}.`, chunks: extraction.chunks, modelResponses: extractionDiagnostics, ...(extractionError ? { extractionError } : {}), ...(diaryError ? { diaryError } : {}), windowStart: phaseWindowStart({ phase, generatedAt }), windowEnd: generatedAt, earliestAt: messages[0]?.at || null, latestAt: messages.at(-1)?.at || null });
+      phaseResults.push({ phase, windowDays: PHASE_WINDOWS_DAYS[phase], inspected: messages.length, recorded: selected.length, selected: selected.length, summary: `${phase.toUpperCase()} pass inspected ${messages.length} persisted chat message${messages.length === 1 ? '' : 's'} in its ${PHASE_WINDOWS_DAYS[phase]}-day window and selected ${selected.length} candidate${selected.length === 1 ? '' : 's'}.`, chunks: extraction.chunks, modelResponses: extractionDiagnostics, albdruckDiagnostics, ...(extractionError ? { extractionError } : {}), ...(diaryError ? { diaryError } : {}), windowStart: phaseWindowStart({ phase, generatedAt }), windowEnd: generatedAt, earliestAt: messages[0]?.at || null, latestAt: messages.at(-1)?.at || null });
     }
-    if (stores.albdruck) await stores.albdruck.prune();
+    if (stores.albdruck) {
+      const diagnostics = phaseResults.at(-1).albdruckDiagnostics;
+      try { await stores.albdruck.prune(); diagnostics.push({ operation: 'prune', ok: true, sourceRefs: [] }); }
+      catch (error) { diagnostics.push({ operation: 'prune', ok: false, sourceRefs: [], error: safeModelError(String(error?.message || error), resolvedDreamModel) }); }
+    }
     for (const candidate of preferenceByKey.values()) await appendPreferenceSignalAsync({ agentId: id, signal: candidate, metadataStore, at: generatedAt });
     const dreamMemoryCandidates = [...selectedByKey.values()].slice(0, Math.max(1, Math.min(36, Number(limit) * 3 || 36)));
     const memoryOwner = phaseResults.reduce((longest, value) => value.windowDays > longest.windowDays ? value : longest);
