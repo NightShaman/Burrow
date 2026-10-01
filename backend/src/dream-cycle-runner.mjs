@@ -306,7 +306,7 @@ function phaseExtractionPrompt({ phase, windowStart, generatedAt, messages, echo
   ].join('\n\n');
 }
 
-async function sessionWindow({ rootDir, phase, generatedAt, conversationStore = null, conversationAgentId = null, conversationSessionIds = [] }) {
+export async function sessionWindow({ rootDir, phase, generatedAt, conversationStore = null, conversationAgentId = null, conversationSessionIds = [] }) {
   if (conversationStore) {
     const since = Date.parse(phaseWindowStart({ phase, generatedAt }));
     const until = Date.parse(generatedAt);
@@ -314,7 +314,16 @@ async function sessionWindow({ rootDir, phase, generatedAt, conversationStore = 
     const entries = [];
     const seen = new Set();
     const addEntries = (values, sessionId) => { for (const value of values || []) { if (value?.id && seen.has(`${sessionId}:${value.id}`)) continue; if (value?.id) seen.add(`${sessionId}:${value.id}`); entries.push({ ...value, __sessionId: sessionId }); } };
+    // Child execution transcripts are not conversational Dream evidence. Use
+    // persisted provenance plus the canonical legacy child-session namespace.
+    const sessions = typeof conversationStore.listSessions === 'function'
+      ? await conversationStore.listSessions({ agentId: conversationAgentId, includeArchived: true }) : [];
+    const childIds = new Set(sessions.filter(session =>
+      session.sessionKind === 'subagent' || session.metadata?.sessionKind === 'subagent'
+      || session.parentChild === true || session.metadata?.parentChild === true
+    ).map(session => session.sessionId));
     for (const sessionId of conversationSessionIds) {
+      if (childIds.has(sessionId) || String(sessionId).startsWith('subagent-')) continue;
       let after = '0';
       if (typeof conversationStore.page === 'function') {
         do {
@@ -334,6 +343,7 @@ async function sessionWindow({ rootDir, phase, generatedAt, conversationStore = 
     }
     for (const turn of entries) {
       if (!isChatMessage(turn)) continue;
+      if (String(turn.metadata?.kind || '').startsWith('subagent-') || turn.metadata?.subagentId) continue;
       const at = Date.parse(turn.ts || turn.at || turn.createdAt);
       if (!Number.isFinite(at) || at < since || at > until) continue;
       const sessionId = turn.__sessionId || turn.sessionId || '';
