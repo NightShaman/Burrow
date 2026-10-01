@@ -65,6 +65,27 @@ function boundedUsage(value, depth = 0) {
   return Object.fromEntries(entries);
 }
 
+// Provider failures and thrown transport failures share the same structured policy.
+function modelFailureDetails(value, modelConfig = {}) {
+  const source = value?.errorDetails || value?.cause || value || {};
+  const details = {};
+  for (const key of ['eventType', 'type', 'code', 'param', 'responseStatus']) {
+    if (source[key] != null) details[key] = safeModelError(String(source[key]), modelConfig);
+  }
+  if (source.status != null) details.status = Number(source.status) || diagnosticLabel(source.status, 64);
+  if (typeof source.retryable === 'boolean') details.retryable = source.retryable;
+  return details;
+}
+
+function retryableModelFailure(details, status) {
+  if (typeof details.retryable === 'boolean') return details.retryable;
+  const httpStatus = Number(details.status || status);
+  if ([408, 429, 500, 502, 503, 504].includes(httpStatus)) return true;
+  return ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET',
+    'server_error', 'upstream_error', 'upstream_response_body_error', 'rate_limit_exceeded'].includes(details.code)
+    || ['server_error', 'upstream_error'].includes(details.type);
+}
+
 export function modelResponseDiagnostics(result, modelConfig = {}) {
   const choice = result?.choice || result?.choices?.[0] || null;
   const content = choice?.message?.content ?? choice?.content ?? result?.message?.content ?? result?.content;
@@ -85,6 +106,7 @@ export function modelResponseDiagnostics(result, modelConfig = {}) {
     api: diagnosticLabel(result?.api, 64),
     model: diagnosticLabel(result?.model, 160),
     error: result?.ok === false ? safeModelError(result?.error, modelConfig) : null,
+    ...(result?.errorDetails ? { errorDetails: modelFailureDetails(result, modelConfig) } : {}),
     status: typeof result?.status === 'number' ? String(result.status) : diagnosticLabel(result?.status, 64),
     ok: typeof result?.ok === 'boolean' ? result.ok : null,
     finishReason: diagnosticLabel(choice?.finishReason || choice?.finish_reason || result?.finishReason, 128),
@@ -197,17 +219,27 @@ export async function completeTextResult({ content, modelAdapter, modelConfig, t
           await onProgress?.({ request: { requestId, status: 'streaming', attempt: attempt + 1, startedAt, inputChars: prompt.length, responseChars, lastActivityAt: now() } });
         };
         const response = await modelAdapter.complete({ messages: [{ role: 'user', content: prompt }], traceLogger, onTextDelta: activity, onThoughtDelta: activity });
+        if (response?.ok === false) {
+          const failure = new Error(safeModelError(response.error, modelConfig) || 'dream_model_request_failed');
+          failure.modelResponse = response;
+          throw failure;
+        }
         const completedAt = now();
-        await onProgress?.({ request: { requestId, status: response?.ok === false ? 'failed' : 'completed', completedAt, durationMs: Date.parse(completedAt) - Date.parse(startedAt), responseChars, diagnostics: modelResponseDiagnostics(response, modelConfig) } });
+        await onProgress?.({ request: { requestId, status: 'completed', completedAt, durationMs: Date.parse(completedAt) - Date.parse(startedAt), responseChars, diagnostics: modelResponseDiagnostics(response, modelConfig) } });
         return response;
       }
       catch (cause) {
-        const code = diagnosticLabel(cause?.cause?.code || cause?.code, 64);
-        const retryable = ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET'].includes(code);
-        await onProgress?.({ request: { requestId, status: retryable && attempt === 0 ? 'retrying' : 'failed', error: safeModelError(cause?.message, modelConfig), code, retryable, completedAt: now() } });
-        diagnostics.push({ stage: 'transport', error: safeModelError(cause?.message, modelConfig), code, attempt: attempt + 1, retryable });
+        const response = cause.modelResponse;
+        const details = modelFailureDetails(response || cause, modelConfig);
+        const code = details.code || null;
+        const retryable = retryableModelFailure(details, response?.status);
+        const completedAt = now();
+        const diagnostic = { ...(response ? modelResponseDiagnostics(response, modelConfig) : {}), stage: response ? 'provider' : 'transport', error: safeModelError(cause?.message, modelConfig), errorDetails: details, code, attempt: attempt + 1, retryable };
+        await onProgress?.({ request: { requestId, status: retryable && attempt === 0 ? 'retrying' : 'failed', error: diagnostic.error, code, retryable, completedAt, durationMs: Date.parse(completedAt) - Date.parse(startedAt), responseChars, diagnostics: diagnostic } });
+        diagnostics.push(diagnostic);
+        // Keep the existing single recovery attempt; never replay completed batches.
         if (retryable && attempt === 0) continue;
-        const error = new Error(safeModelError(cause?.message, modelConfig) || 'dream_model_transport_failed');
+        const error = new Error(diagnostic.error || 'dream_model_transport_failed');
         error.diagnostics = diagnostics;
         throw error;
       }
