@@ -182,10 +182,10 @@ export async function completeTextResult({ content, modelAdapter, modelConfig, t
   const diagnostics = [];
   const request = async (prompt) => {
     for (let attempt = 0; ; attempt++) {
-      try { return await modelAdapter.complete({ messages: [{ role: 'user', content: prompt }], traceLogger }); }
+      try { return await modelAdapter.complete({ messages: [{ role: 'user', content: prompt }], traceLogger, onTextDelta: () => {} }); }
       catch (cause) {
         const code = diagnosticLabel(cause?.cause?.code || cause?.code, 64);
-        const retryable = ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET'].includes(code);
+        const retryable = ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET'].includes(code);
         diagnostics.push({ stage: 'transport', error: safeModelError(cause?.message, modelConfig), code, attempt: attempt + 1, retryable });
         if (retryable && attempt === 0) continue;
         const error = new Error(safeModelError(cause?.message, modelConfig) || 'dream_model_transport_failed');
@@ -387,7 +387,8 @@ export async function extractPhaseCandidates({ phase, messages, generatedAt, mod
       output.preferences.push(...source.preferences);
       output.chunks += 1;
     } catch (error) {
-      if (!error.diagnostics) error.diagnostics = [...output.diagnostics];
+      error.diagnostics = [...output.diagnostics, ...(error.diagnostics || []).filter(item => !output.diagnostics.includes(item))];
+      error.completedChunks = output.chunks;
       throw error;
     }
   }
@@ -489,7 +490,7 @@ async function adjudicatePreferencesAsync({ agentId, profileStore, metadataStore
     if (!adapter && config?.model) adapter = createModelAdapter({ config: { ...config, temperature: 0, reasoningEffort: 'off' } });
     if (!adapter) return { disposition: 'model_unavailable', signalCount: signals.length };
     const current = (await profileStore.get(agentId, 'PREFERENCES'))?.markdown || '# PREFERENCES';
-    const result = await adapter.complete({ messages: [{ role: 'user', content: preferenceAdjudicationPrompt({ preferences: current, signals }) }], traceLogger });
+    const result = await adapter.complete({ messages: [{ role: 'user', content: preferenceAdjudicationPrompt({ preferences: current, signals }) }], traceLogger, onTextDelta: () => {} });
     const proposal = parsePreferenceAdjudication(modelText(result));
     const validation = validatePreferenceAdjudication({ proposal, signals });
     if (!validation.ok || validation.disposition === 'noop') return { disposition: validation.ok ? 'noop' : 'rejected', signalCount: signals.length, reason: validation.reason || proposal?.reason || null };
@@ -534,7 +535,7 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     for (const phase of PHASES) {
       const messages = phaseWindows[phase]; let extraction; let extractionError = null; let extractionDiagnostics = []; const albdruckDiagnostics = [];
       try { extraction = await extractPhaseCandidates({ phase, messages, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger }); extractionDiagnostics = extraction.diagnostics; const reconciled = await reconcileDreamCandidates({ phase, candidates: extraction, messages, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger }); extractionDiagnostics = [...extractionDiagnostics, ...reconciled.diagnostics]; Object.assign(extraction, reconciled); }
-      catch (error) { extraction = { memories: [], preferences: [], chunks: 0, diagnostics: [] }; extractionError = clamp(error?.message || error, 500); extractionDiagnostics = [...extractionDiagnostics, ...(error?.diagnostics || [])]; }
+      catch (error) { extraction = { memories: [], preferences: [], chunks: extraction?.chunks || error.completedChunks || 0, diagnostics: [] }; extractionError = clamp(error?.message || error, 500); extractionDiagnostics = [...extractionDiagnostics, ...(error?.diagnostics || [])]; }
       if (phase === PHASES.reduce((longest, value) => PHASE_WINDOWS_DAYS[value] > PHASE_WINDOWS_DAYS[longest] ? value : longest)) for (const candidate of extraction.memories) { const key = `${candidate.kind}|${candidate.title.toLowerCase()}|${candidate.content.toLowerCase()}`; const existing = selectedByKey.get(key); selectedByKey.set(key, existing ? { ...existing, sourceRefs: [...new Set([...existing.sourceRefs, ...candidate.sourceRefs])] } : { ...candidate, id: entryId(id, phase, candidate.title, candidate.content), phase }); }
       const userRefs = new Set(messages.filter((message) => message.role === 'user').map((message) => message.sourceRef));
       for (const candidate of extraction.preferences) { if (!candidate.sourceRefs.every((ref) => userRefs.has(ref))) continue; const key = `${candidate.kind}|${candidate.scope.toLowerCase()}|${candidate.guidance.toLowerCase()}`; const existing = preferenceByKey.get(key); preferenceByKey.set(key, existing ? { ...existing, sourceRefs: [...new Set([...existing.sourceRefs, ...candidate.sourceRefs])] } : candidate); }
