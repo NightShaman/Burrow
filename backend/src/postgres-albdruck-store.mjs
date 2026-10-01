@@ -1,3 +1,4 @@
+import { isChatMessage } from './session-entry.mjs';
 import { resolveAlbdruckConfig } from './config.mjs';
 import { assertConversationDeletionAllowed } from './postgres-session-store.mjs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -128,7 +129,7 @@ export class PostgresAlbdruckStore {
       const ref = validateOriginalRef(source);
       if (input.scope !== 'global' && ref.agentId !== String(input.agentId)) throw new Error('albdruck_evidence_scope_mismatch');
       const entry = await this.resolveOriginal(ref);
-      if (!entry || entry.type !== 'message' || !['user','assistant'].includes(entry.role) || typeof entry.content !== 'string') throw new Error('albdruck_original_evidence_unavailable');
+      if (!isChatMessage(entry) || typeof entry.content !== 'string') throw new Error('albdruck_original_evidence_unavailable');
       evidence.push({ ref, key: JSON.stringify(canonical(ref)), excerpt: entry.content });
     }
     return withPostgresTransaction(this.pool, async client => {
