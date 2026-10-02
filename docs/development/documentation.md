@@ -33,7 +33,9 @@ On Linux systems missing browser libraries, Playwright's `python -m playwright i
 
 - **Strict build:** fails on configuration, missing navigation pages, unlisted pages, broken Markdown targets, and missing anchors.
 - **HTML check:** traverses every built HTML file and checks local links, anchors, and referenced assets, including the GitHub Pages `/Burrow/` base path.
-- **Mermaid check:** serves the built site on loopback, opens every diagram-bearing page in Chromium, requires generated SVG diagrams, and fails on JavaScript or Mermaid errors. A code block alone is not a rendering pass.
+- **Mermaid check:** serves the built site on loopback, opens every diagram-bearing page in Chromium, requires one nonempty, nonzero-size SVG for each source diagram, and fails on JavaScript or Mermaid errors. It inspects Material's closed shadow roots without changing their mode. A code block alone is not a rendering pass.
+
+For visual review and failure diagnostics, run `python scripts/docs/check_mermaid.py site --artifacts docs-browser-artifacts`. The directory contains homepage and diagram-page screenshots plus JSON reports with SVG dimensions, browser errors, and failed network requests. CI uploads these artifacts even when the rendering check fails.
 
 Material loads Mermaid from its configured distribution when rendering diagrams. Browser checks therefore need network access to the Mermaid CDN as well as the local test server. A network-blocked test must be reported as blocked, not passed. The ordinary Python build does not render diagrams.
 
