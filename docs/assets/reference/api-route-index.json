@@ -1,0 +1,1643 @@
+{
+  "baseline": "2d979fecca8434fe02a6ed2e8225c46eb4690098",
+  "openapiVersion": "2026.08.25",
+  "description": "Coverage index of unchanged pinned OpenAPI operations plus explicitly documented core source additions. Dynamic installed-mod routes and general static UI assets are not enumerated. Schema and source differences are explained in reference/api.md.",
+  "operations": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "operationId": "getHealth",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "operationId": "getApiHealth",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/observability-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/status",
+      "operationId": "getStatus",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/observability-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/metrics",
+      "operationId": "getMetrics",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/observability-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/diagnostics/inventory",
+      "operationId": "getDiagnosticsInventory",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents",
+      "operationId": "listAgents",
+      "page": "reference/api/agents.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/agent-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents",
+      "operationId": "createAgent",
+      "page": "reference/api/agents.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/agent-routes.mjs"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/agents/{agentId}",
+      "operationId": "updateAgent",
+      "page": "reference/api/agents.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/agent-routes.mjs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agents/{agentId}",
+      "operationId": "deleteAgent",
+      "page": "reference/api/agents.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/agent-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat",
+      "operationId": "runChat",
+      "page": "reference/api/chat.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/chat-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/runs/active",
+      "operationId": "listActiveChatRuns",
+      "page": "reference/api/chat.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/observability-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/{runId}/cancel",
+      "operationId": "cancelChatRun",
+      "page": "reference/api/chat.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/chat-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "operationId": "listSessions",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/{sessionId}",
+      "operationId": "getSession",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sessions/{sessionId}/reset",
+      "operationId": "resetSession",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/traces",
+      "operationId": "listTraces",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/observability-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/traces/{runId}",
+      "operationId": "getTrace",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/observability-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/task-board/statuses",
+      "operationId": "listTaskStatuses",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/task-board-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/task-board/priorities",
+      "operationId": "listTaskPriorities",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/task-board-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/task-board/projects",
+      "operationId": "listProjects",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/task-board-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/task-board/projects",
+      "operationId": "createProject",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/task-board-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/task-board/tasks",
+      "operationId": "listTasks",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/task-board-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/task-board/tasks",
+      "operationId": "createTask",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/task-board-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/files",
+      "operationId": "listWorkspaceFiles",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/observability-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/file",
+      "operationId": "readWorkspaceFile",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/observability-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/file",
+      "operationId": "writeWorkspaceFile",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/observability-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/session/continuity-scope",
+      "operationId": "getContinuityScope",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/session/continuity-scope",
+      "operationId": "setContinuityScope",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/session/continuity-scope",
+      "operationId": "clearContinuityScope",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/session/handoff",
+      "operationId": "readSessionHandoff",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/session/handoff",
+      "operationId": "writeSessionHandoff",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/session/handoff-candidate",
+      "operationId": "writeSessionHandoffCandidate",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks",
+      "operationId": "listWorkItems",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/workbench-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks",
+      "operationId": "createWorkItem",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/workbench-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/{id}",
+      "operationId": "getWorkItem",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/workbench-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks/{id}/step",
+      "operationId": "runWorkItemStep",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/workbench-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks/{id}/continue",
+      "operationId": "continueWorkItem",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/workbench-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks/{id}/archive",
+      "operationId": "archiveWorkItem",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/workbench-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workbench",
+      "operationId": "planWorkbenchTurn",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/workbench-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workbench/run",
+      "operationId": "runWorkbenchStep",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/workbench-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/scheduled-jobs",
+      "operationId": "listScheduledJobs",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/scheduled-channel-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/scheduled-jobs",
+      "operationId": "createScheduledJob",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/scheduled-channel-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/scheduled-jobs/{jobId}",
+      "operationId": "getScheduledJob",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/scheduled-channel-routes.mjs"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/scheduled-jobs/{jobId}",
+      "operationId": "updateScheduledJob",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/scheduled-channel-routes.mjs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/scheduled-jobs/{jobId}",
+      "operationId": "deleteScheduledJob",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/scheduled-channel-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/scheduled-jobs/{jobId}/runs",
+      "operationId": "listScheduledJobRuns",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/scheduled-channel-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/scheduled-jobs/{jobId}/trigger",
+      "operationId": "triggerScheduledJob",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/scheduled-channel-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/group-channels",
+      "operationId": "listGroupChannels",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/scheduled-channel-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/group-channels",
+      "operationId": "createGroupChannel",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/scheduled-channel-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/group-channels/{channelId}",
+      "operationId": "getGroupChannel",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/scheduled-channel-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/group-channels/{channelId}/messages",
+      "operationId": "postGroupChannelMessage",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/scheduled-channel-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/group-channels/{channelId}/runs/{runId}/cancel",
+      "operationId": "cancelGroupChannelRun",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/scheduled-channel-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-status",
+      "operationId": "getAgentStatus",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/agent-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/archive/sessions",
+      "operationId": "listArchivedSessions",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/archive/sessions/{agentId}/{sessionId}",
+      "operationId": "getArchivedSession",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sessions/{sessionId}/rename",
+      "operationId": "renameSession",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sessions/{sessionId}/archive",
+      "operationId": "archiveSession",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sessions/{sessionId}/unarchive",
+      "operationId": "unarchiveSession",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sessions/{sessionId}/fork",
+      "operationId": "forkSession",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/{sessionId}/authority",
+      "operationId": "listSessionAuthority",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/{sessionId}/authority/latest",
+      "operationId": "getLatestSessionAuthority",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/session/context",
+      "operationId": "getSessionContext",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/context",
+      "operationId": "getContext",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/session/context-status",
+      "operationId": "getContextStatus",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/session/search",
+      "operationId": "searchSession",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/traces/{runId}/authority",
+      "operationId": "getTraceAuthority",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/observability-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/identities",
+      "operationId": "getIdentities",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/settings/identities",
+      "operationId": "updateIdentities",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/curator",
+      "operationId": "getCuratorSettings",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/settings/curator",
+      "operationId": "updateCuratorSettings",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/ui-auth",
+      "operationId": "getUiAuthSettings",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/settings/ui-auth",
+      "operationId": "updateUiAuthSettings",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/execution-boundaries",
+      "operationId": "getExecutionBoundaries",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/settings/execution-boundaries",
+      "operationId": "updateExecutionBoundaries",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/model-connections",
+      "operationId": "listModelConnections",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/model-connections",
+      "operationId": "saveModelConnection",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/mcp-connections",
+      "operationId": "listMcpConnections",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/mcp-connections",
+      "operationId": "saveMcpConnection",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/model-connections/discover",
+      "operationId": "discoverModels",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/model-connections/claude-cli-credential",
+      "operationId": "getClaudeCliCredential",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/model-connections/import-claude-cli-credential",
+      "operationId": "importClaudeCliCredential",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/settings/model-connections/{id}",
+      "operationId": "deleteModelConnection",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/mcp-connections/discover",
+      "operationId": "discoverMcpTools",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/settings/mcp-connections/{id}",
+      "operationId": "deleteMcpConnection",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/retention",
+      "operationId": "getRetention",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/retention/cleanup",
+      "operationId": "runRetentionCleanup",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/brain-promotion-candidates",
+      "operationId": "listBrainPromotionCandidates",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/memory/brain-promotion-candidates",
+      "operationId": "updateBrainPromotionCandidate",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/export/catalog",
+      "operationId": "getExportCatalog",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/export-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/export",
+      "operationId": "createExport",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/export-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/export/import/preview",
+      "operationId": "previewExportImport",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/export-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/export/import",
+      "operationId": "importExport",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/export-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/session",
+      "operationId": "getAuthSession",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/auth-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/codex-lb/accounts",
+      "operationId": "listCodexLbAccounts",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/observability-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/anthropic/oauth/usage",
+      "operationId": "getAnthropicOauthUsage",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/observability-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/openai/oauth/usage",
+      "operationId": "getOpenaiOauthUsage",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/observability-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agentId}/profile-documents",
+      "operationId": "getAgentProfileDocuments",
+      "page": "reference/api/agents.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/agent-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agents/{agentId}/profile-documents",
+      "operationId": "updateAgentProfileDocuments",
+      "page": "reference/api/agents.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/agent-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agentId}/model-selection",
+      "operationId": "getAgentModelSelection",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agents/{agentId}/model-selection",
+      "operationId": "updateAgentModelSelection",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agentId}/mcp-tools",
+      "operationId": "getAgentMcpTools",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agents/{agentId}/mcp-tools",
+      "operationId": "updateAgentMcpTools",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/task-board/tasks/{id}/execute",
+      "operationId": "executeTaskBoardTask",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/task-board-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/model-connections/openai-oauth/start",
+      "operationId": "startOpenaiOauthLogin",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/model-connections/openai-oauth/{id}",
+      "operationId": "getOpenaiOauthLogin",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/model-connections/openai-oauth/{id}/submit-code",
+      "operationId": "submitOpenaiOauthCode",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/model-connections/openai-oauth/{id}/cancel",
+      "operationId": "cancelOpenaiOauthLogin",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/model-connections/claude-code-login/start",
+      "operationId": "startClaudeCodeLogin",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/model-connections/claude-code-login/{id}",
+      "operationId": "getClaudeCodeLogin",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/model-connections/claude-code-login/{id}/submit-code",
+      "operationId": "submitClaudeCodeLoginCode",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/model-connections/claude-code-login/{id}/cancel",
+      "operationId": "cancelClaudeCodeLogin",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/model-connections/claude-code-login/{id}/import",
+      "operationId": "importClaudeCodeLogin",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/scheduled-jobs/{jobId}/runs/{runId}/cancel",
+      "operationId": "cancelScheduledJobRun",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/scheduled-channel-routes.mjs"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/task-board/projects/{projectId}",
+      "operationId": "updateTaskBoardProject",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/task-board-routes.mjs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/task-board/projects/{projectId}",
+      "operationId": "deleteTaskBoardProject",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/task-board-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/task-board/tasks/{taskId}",
+      "operationId": "getTaskBoardTask",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/task-board-routes.mjs"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/task-board/tasks/{taskId}",
+      "operationId": "updateTaskBoardTask",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/task-board-routes.mjs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/task-board/tasks/{taskId}",
+      "operationId": "deleteTaskBoardTask",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/task-board-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/tiddle",
+      "operationId": "getTiddleStatus",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tiddle/cards",
+      "operationId": "listTiddleCards",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tiddle/history",
+      "operationId": "getTiddleHistory",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/attachments",
+      "operationId": "listSessionAttachments",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/attachments/{agentId}/{artifactPath}",
+      "operationId": "getAttachmentArtifact",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/attachments/{agentId}/{artifactPath}",
+      "operationId": "deleteAttachmentArtifact",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/archive/dreams",
+      "operationId": "listArchiveDreams",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/archive/dreams/{agentId}/{entryId}",
+      "operationId": "getArchiveDream",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agentId}/archive-summary-model-selection",
+      "operationId": "getArchiveSummaryModelSelection",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agents/{agentId}/archive-summary-model-selection",
+      "operationId": "updateArchiveSummaryModelSelection",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/archive/continuity/cards",
+      "operationId": "listArchiveContinuityCards",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/archive/continuity/cards/{agentId}/{cardId}",
+      "operationId": "getArchiveContinuityCard",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/retention",
+      "operationId": "getRetentionPolicy",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/settings/retention",
+      "operationId": "updateRetentionPolicy",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/retention/preview",
+      "operationId": "previewRetentionCleanup",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/retention/run",
+      "operationId": "runManagedRetentionCleanup",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/general-settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/archive/runs",
+      "operationId": "listArchiveRuns",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/archive/runs/{runId}",
+      "operationId": "getArchiveRun",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/{sessionId}/export",
+      "operationId": "exportSessionTranscript",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mods",
+      "operationId": "listMods",
+      "page": "reference/api/mods.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/src/mod-runtime.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/setup/status",
+      "operationId": "getSetupStatus",
+      "page": "reference/api/agents.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/setup/complete",
+      "operationId": "completeSetup",
+      "page": "reference/api/agents.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/mcp-connections/diagnose",
+      "operationId": "diagnoseMcpConnection",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/overview",
+      "operationId": "getAgentOverview",
+      "page": "reference/api/agents.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/agent-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mod-management",
+      "operationId": "listModManagement",
+      "page": "reference/api/mods.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/src/mod-distribution.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mod-management/source-refresh",
+      "operationId": "getModSourceRefreshConfig",
+      "page": "reference/api/mods.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/src/mod-distribution.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/mod-management/source-refresh",
+      "operationId": "updateModSourceRefreshConfig",
+      "page": "reference/api/mods.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/src/mod-distribution.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mod-management/sources",
+      "operationId": "createModSource",
+      "page": "reference/api/mods.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/src/mod-distribution.mjs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/mod-management/sources/{sourceId}",
+      "operationId": "deleteModSource",
+      "page": "reference/api/mods.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/src/mod-distribution.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mod-management/refresh",
+      "operationId": "refreshModSources",
+      "page": "reference/api/mods.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/src/mod-distribution.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mod-management/{modId}/install",
+      "operationId": "installMod",
+      "page": "reference/api/mods.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/src/mod-distribution.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mod-management/{modId}/enable",
+      "operationId": "enableMod",
+      "page": "reference/api/mods.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/src/mod-distribution.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mod-management/{modId}/disable",
+      "operationId": "disableMod",
+      "page": "reference/api/mods.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/src/mod-distribution.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mod-management/{modId}/uninstall",
+      "operationId": "uninstallMod",
+      "page": "reference/api/mods.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/src/mod-distribution.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/task-board/conversation-project",
+      "operationId": "getConversationProject",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/task-board-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/task-board/conversation-project",
+      "operationId": "setConversationProject",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/task-board-routes.mjs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/task-board/conversation-project",
+      "operationId": "clearConversationProject",
+      "page": "reference/api/work.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/task-board-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/api-tokens",
+      "operationId": "listApiTokens",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/api-tokens",
+      "operationId": "createApiToken",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/settings/api-tokens/{tokenId}",
+      "operationId": "revokeApiToken",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/diagnostics/mods",
+      "operationId": "listDiagnosticMods",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/diagnostics/mods/{modId}/jobs",
+      "operationId": "listDiagnosticModJobs",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/diagnostics/mods/{modId}/jobs/{jobId}",
+      "operationId": "getDiagnosticModJob",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/diagnostics/mods/{modId}/pending",
+      "operationId": "getModPendingOperations",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/skills",
+      "operationId": "listSkills",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/skills",
+      "operationId": "createSkill",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/skills/{id}",
+      "operationId": "getSkill",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/settings/skills/{id}",
+      "operationId": "updateSkill",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/settings/skills/{id}",
+      "operationId": "deleteSkill",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agentId}/skills",
+      "operationId": "getAgentSkills",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agents/{agentId}/skills",
+      "operationId": "saveAgentSkills",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/generated-artifacts/{agentId}/{storageReference}",
+      "operationId": "getGeneratedArtifact",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/forge/catalog",
+      "operationId": "getForgeCatalog",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/forge-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/forge/jobs",
+      "operationId": "listForgeJobs",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/forge-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/forge/jobs",
+      "operationId": "createForgeJob",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/forge-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/forge/jobs/{id}",
+      "operationId": "getForgeJob",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/forge-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/forge/jobs/{id}/attach",
+      "operationId": "attachForgeArtifact",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/forge-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/forge/jobs/{id}/artifacts/{artifactId}",
+      "operationId": "getForgeArtifact",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/forge-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/forge/selections",
+      "operationId": "getForgeSelections",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/forge-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/forge/selections",
+      "operationId": "setForgeSelection",
+      "page": "reference/api/artifacts.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/forge-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/diagnostics/postgres",
+      "operationId": "getDiagnosticsPostgres",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/diagnostics/forge/jobs",
+      "operationId": "listDiagnosticForgeJobs",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/diagnostics/forge/jobs/{jobId}",
+      "operationId": "getDiagnosticForgeJob",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/archive/calendar",
+      "operationId": "listArchiveCalendarDates",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/timezone",
+      "operationId": "getOperatorTimezone",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/settings/timezone",
+      "operationId": "saveOperatorTimezone",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/albdruck/knowledge",
+      "operationId": "getAlbdruckKnowledge",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/albdruck-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/albdruck/knowledge/{id}",
+      "operationId": "getAlbdruckKnowledgeDetail",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/albdruck-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/albdruck/knowledge/{id}",
+      "operationId": "putAlbdruckKnowledgeDetail",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/albdruck-routes.mjs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/albdruck/knowledge/{id}",
+      "operationId": "deleteAlbdruckKnowledgeDetail",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/albdruck-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/albdruck/recall",
+      "operationId": "postAlbdruckRecall",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/albdruck-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/albdruck/retention",
+      "operationId": "getAlbdruckRetention",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/albdruck-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/albdruck/retention",
+      "operationId": "putAlbdruckRetention",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/albdruck-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/albdruck/history",
+      "operationId": "postAlbdruckHistory",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/albdruck-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/albdruck/purge-conversation",
+      "operationId": "purgeAlbdruckConversation",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": true,
+      "routeFamilySource": "backend/scripts/ui/albdruck-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agentId}/dream-settings",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/ui/dream-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agents/{agentId}/dream-settings",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/ui/dream-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agentId}/dream-diary",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/ui/dream-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/{agentId}/dream-diary",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/ui/dream-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/{agentId}/dream-memory/consolidate",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/ui/dream-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agentId}/dream-cycle",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/ui/dream-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/{agentId}/dream-cycle",
+      "page": "reference/api/memory.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/ui/dream-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/auth/oidc/login",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/ui/auth-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/auth/oidc/callback",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/ui/auth-routes.mjs"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/logout",
+      "page": "reference/api/diagnostics.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/ui/auth-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/openapi.json",
+      "page": "reference/api.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/docs",
+      "page": "reference/api.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/docs/{asset}",
+      "page": "reference/api.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    }
+  ],
+  "contractArtifactSourceBaseline": "d6490825401405ce719e007fd96a487c5b0cde56"
+}

@@ -1,0 +1,135 @@
+site_name: BURROW
+site_description: Operator and developer documentation for the BURROW agent runtime
+site_url: https://nightshaman.github.io/Burrow/
+repo_url: https://github.com/NightShaman/Burrow
+repo_name: NightShaman/Burrow
+edit_uri: edit/main/docs/
+strict: true
+copyright: BURROW · NightShaman · MIT
+
+theme:
+  name: material
+  language: en
+  logo: assets/burrow-logo.png
+  favicon: assets/burrow-logo.png
+  font: false
+  palette:
+    - media: '(prefers-color-scheme: light)'
+      scheme: default
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: '(prefers-color-scheme: dark)'
+      scheme: slate
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: warn
+    unrecognized_links: warn
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+nav:
+  - Home: index.md
+  - Start:
+      - Core concepts: concepts/core-concepts.md
+      - Installation: getting-started/installation.md
+      - Initial setup: getting-started/initial-setup.md
+      - Interface guide: concepts/interface.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Runtime: architecture/runtime.md
+      - Execution flow: architecture/execution-flow.md
+      - Persistence: architecture/persistence.md
+      - Agents and Minions: concepts/agents-minions.md
+      - Workers and tasks: concepts/workers-tasks.md
+      - Tools: concepts/tools.md
+      - MCP: concepts/mcp.md
+      - Models and providers: concepts/models.md
+      - Memory: concepts/memory.md
+      - Dreams: concepts/dreams.md
+      - Conversation history: concepts/conversation-history.md
+  - Operate:
+      - Deployment: operations/deployment.md
+      - Containers: operations/containers.md
+      - Upgrades: operations/upgrades.md
+      - Backup and recovery: operations/backup-recovery.md
+      - Logging and observability: operations/observability.md
+      - Procedures: operations/procedures.md
+      - Troubleshooting: operations/troubleshooting.md
+  - Security:
+      - Authentication: security/authentication.md
+      - Permissions: security/permissions.md
+      - Trust boundaries: security/trust-boundaries.md
+  - Reference:
+      - Configuration: reference/configuration.md
+      - Environment variables: reference/environment.md
+      - CLI: reference/cli.md
+      - API:
+          - Overview: reference/api.md
+          - Chat and cancellation: reference/api/chat.md
+          - Agents and profiles: reference/api/agents.md
+          - Settings and connections: reference/api/settings.md
+          - Sessions and archives: reference/api/sessions.md
+          - Memory and Dreams: reference/api/memory.md
+          - Work and scheduling: reference/api/work.md
+          - Artifacts and Forge: reference/api/artifacts.md
+          - Diagnostics: reference/api/diagnostics.md
+          - Mod host contracts: reference/api/mods.md
+      - Storage schema: reference/storage-schema.md
+  - Develop:
+      - Developer setup: development/setup.md
+      - Repository structure: development/repository.md
+      - Extensions: development/extensions.md
+      - Releases and versioning: development/releases.md
+      - Documentation development: development/documentation.md
+  - Project:
+      - Source and coverage: project/source-map.md
+      - Known limitations: project/known-limitations.md

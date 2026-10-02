@@ -1,0 +1,6 @@
+# Documentation build outputs and local environment
+/site/
+/.venv-docs/
+/.cache/
+__pycache__/
+*.pyc
