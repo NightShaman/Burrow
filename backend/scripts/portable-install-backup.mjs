@@ -98,7 +98,7 @@ const RESTORED_INSTALL_PATHS = Object.freeze({
   BURROW_CLAUDE_BIN: (root) => path.join(root, 'integrations', 'claude-code', 'node_modules', '.bin', 'claude'),
 });
 
-async function rebaseRestoredEnvironment(installRoot) {
+async function rebaseRestoredEnvironment(installRoot, finalRoot = installRoot) {
   const envPath = path.join(installRoot, 'burrow.env');
   const original = await fs.readFile(envPath, 'utf8');
   const lines = original.split('\n');
@@ -108,7 +108,7 @@ async function rebaseRestoredEnvironment(installRoot) {
     const key = line.slice(0, separator);
     const resolvePath = RESTORED_INSTALL_PATHS[key];
     if (!resolvePath) return line;
-    const resolved = resolvePath(installRoot);
+    const resolved = resolvePath(finalRoot);
     return resolved === null ? null : `${key}=${resolved}`;
   }).filter((line) => line !== null);
   await fs.writeFile(envPath, rebased.join('\n'), { mode: 0o600 });
@@ -145,6 +145,7 @@ export async function planPortableInstallRestore({ archive, home = process.env.H
 export async function restorePortableInstall({ archive, home = process.env.HOME || os.homedir(), replace = false, runTar = execFileAsync, runCommand = execFileAsync } = {}) {
   const plan = await planPortableInstallRestore({ archive, home, replace, runTar });
   const staging = await fs.mkdtemp(path.join(plan.targetHome, '.burrow-restore-'));
+  let preserveStaging = false;
   try {
     await runTar('tar', ['-xzf', plan.archive, '-C', staging, '--no-same-owner', '--same-permissions'], { timeout: 300_000 });
     const stagedRoot = path.join(staging, ARCHIVE_ROOT);
@@ -152,14 +153,32 @@ export async function restorePortableInstall({ archive, home = process.env.HOME 
     if (!await exists(manifestPath)) throw new Error('archive is missing portable install manifest');
     const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
     if (manifest?.format !== 1 || manifest?.archiveRoot !== ARCHIVE_ROOT) throw new Error('archive has an unsupported portable install manifest');
-    if (plan.targetExists) await fs.rm(plan.target, { recursive: true, force: true });
-    await fs.rename(stagedRoot, plan.target);
-    await fs.rm(path.join(plan.target, MANIFEST), { force: true });
-    await rebaseRestoredEnvironment(plan.target);
-    await installRestoredIntegrations(plan.target, runCommand);
-    if (process.getuid?.() !== plan.owner.uid || process.getgid?.() !== plan.owner.gid) await applyOwnership(plan.target, plan.owner);
+    // Preparation must not remove or mutate the previous installation (OPS-002).
+    await fs.rm(manifestPath, { force: true });
+    await rebaseRestoredEnvironment(stagedRoot, plan.target);
+    await installRestoredIntegrations(stagedRoot, runCommand);
+    if (process.getuid?.() !== plan.owner.uid || process.getgid?.() !== plan.owner.gid) await applyOwnership(stagedRoot, plan.owner);
+    const previousRoot = path.join(staging, 'previous-install');
+    let previousMoved = false;
+    if (plan.targetExists) {
+      await fs.rename(plan.target, previousRoot);
+      previousMoved = true;
+    }
+    try {
+      await fs.rename(stagedRoot, plan.target);
+    } catch (activationError) {
+      if (previousMoved) {
+        try { await fs.rename(previousRoot, plan.target); }
+        catch (rollbackError) {
+          // Never let staging cleanup destroy the only remaining old installation.
+          preserveStaging = true;
+          throw new AggregateError([activationError, rollbackError], `Restore activation and rollback failed; previous installation retained at ${previousRoot}`);
+        }
+      }
+      throw activationError;
+    }
     return { ...plan, dryRun: false, restored: true, serviceCommand: `${path.join(plan.target, 'bin', 'burrow')} service install` };
-  } finally { await fs.rm(staging, { recursive: true, force: true }); }
+  } finally { if (!preserveStaging) await fs.rm(staging, { recursive: true, force: true }); }
 }
 
 export function formatPortableInstallResult(result) {

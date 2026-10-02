@@ -136,7 +136,7 @@ async function completeSession(session, code, { persistAuth, fetchImpl = fetch, 
   try {
     const auth = await exchangeOpenAiOAuthCode({ code, verifier: session.verifier, redirectUri: session.redirectUri, tokenUrl, fetchImpl, nowMs });
     session.credential = auth;
-    if (typeof persistAuth === 'function' && session.connectionId) session.connection = persistAuth(auth);
+    if (typeof persistAuth === 'function' && session.connectionId) session.connection = await persistAuth(auth);
     session.status = 'authorized';
   } catch (error) {
     session.status = 'failed';
