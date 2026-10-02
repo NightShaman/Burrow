@@ -420,7 +420,85 @@ CREATE OR REPLACE VIEW conversation_original_rows AS
  FROM conversation_archive_entries;
 `;
 
-export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL;
+// Appended migration: originals remain json, candidate extraction may decode scalars.
+export const POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL = `
+CREATE OR REPLACE FUNCTION burrow_search_grams(payload text) RETURNS text[]
+LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE decoded text; runs text[]; bytes bytea; grams text[];
+BEGIN
+ -- jsonb decoding is confined to an individual string, never the original.
+ IF json_typeof(payload::json) <> 'string' THEN RETURN NULL; END IF;
+ BEGIN decoded := payload::jsonb #>> '{}';
+ EXCEPTION WHEN OTHERS THEN RETURN NULL;
+ END;
+ -- ECMAScript lowercase introduces ASCII only for U+0130 and U+212A.
+ -- The combining dot in U+0130 breaks the ASCII run after i.
+ decoded := replace(replace(decoded,chr(304),'i' || chr(775)),chr(8490),'k');
+ decoded := translate(decoded,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz');
+ -- Split once, before byte slicing: never build UTF8 fragments across non-ASCII.
+ IF octet_length(decoded)=length(decoded) THEN runs := ARRAY[decoded];
+ ELSE runs := regexp_split_to_array(decoded COLLATE "C",'[^\\x01-\\x7F]+'); END IF;
+ grams := ARRAY[]::text[];
+ FOR decoded IN SELECT DISTINCT r FROM unnest(runs) r WHERE octet_length(r)>=3 LOOP
+  bytes := convert_to(decoded,'UTF8');
+  SELECT array_agg(DISTINCT convert_from(substring(bytes FROM n FOR 3),'UTF8')) INTO runs
+  FROM generate_series(1,octet_length(bytes)-2) n;
+  grams := grams || runs;
+ END LOOP;
+ RETURN grams;
+EXCEPTION WHEN OTHERS THEN RETURN NULL;
+END $$;
+CREATE OR REPLACE FUNCTION burrow_entry_search_grams(payload json) RETURNS text[]
+LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE item record; tokens json[]; part text[]; result text[] := ARRAY[]::text[];
+BEGIN
+ IF json_typeof(payload) <> 'object' THEN RETURN NULL; END IF;
+ -- json_each decodes keys. Duplicate relevant keys are uncertain (JS last wins,
+ -- lexical lookup first wins), so bypass; escaped keys must also bypass.
+ IF EXISTS (SELECT 1 FROM json_each(payload) WHERE key IN ('id','role','type','visibility','content') GROUP BY key HAVING count(*)>1) THEN RETURN NULL; END IF;
+ tokens := burrow_json_metadata(payload);
+ FOR item IN SELECT key,value FROM json_each(payload) WHERE key IN ('id','role','type','visibility','content') LOOP
+  IF tokens[array_position(ARRAY['id','role','type','visibility','content'],item.key)] IS NULL THEN RETURN NULL; END IF;
+  part := burrow_search_grams(item.value::text);
+  IF part IS NULL THEN RETURN NULL; END IF;
+  result := result || part;
+ END LOOP;
+ RETURN ARRAY(SELECT DISTINCT g FROM unnest(result) g);
+EXCEPTION WHEN OTHERS THEN RETURN NULL;
+END $$;
+CREATE OR REPLACE FUNCTION burrow_project_native_metadata() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE tokens json[]; part text[]; grams text[] := ARRAY[]::text[]; k int;
+BEGIN
+ IF TG_OP = 'UPDATE' THEN
+  IF OLD.has_payload_id IS NOT NULL AND NEW.entry::text IS NOT DISTINCT FROM OLD.entry::text THEN
+   NEW.has_payload_id := OLD.has_payload_id;
+   NEW.has_compression_summary := OLD.has_compression_summary;
+   NEW.search_projection := OLD.search_projection;
+   NEW.search_grams := OLD.search_grams;
+   IF TG_TABLE_NAME = 'conversation_entries' THEN
+    IF OLD.has_payload_id THEN NEW.entry_key := OLD.entry_key;
+    ELSE NEW.entry_key := to_json(NEW.entry_id)::text; END IF;
+   ELSE NEW.entry_key := OLD.entry_key; END IF;
+   RETURN NEW;
+  END IF;
+ END IF;
+ tokens := burrow_json_metadata(NEW.entry);
+ NEW.has_payload_id := tokens[1] IS NOT NULL;
+ NEW.entry_key := tokens[1]::text;
+ IF TG_TABLE_NAME = 'conversation_entries' THEN
+  NEW.entry_key := COALESCE(NEW.entry_key,to_json(NEW.entry_id)::text);
+ END IF;
+ NEW.search_projection := COALESCE(tokens[5]::text,'');
+ NEW.has_compression_summary := tokens[7] IS NOT NULL;
+ NEW.search_grams := burrow_entry_search_grams(NEW.entry);
+ RETURN NEW;
+END $$;
+-- Invalidate the no-payload-change shortcut to recompute existing rows.
+UPDATE conversation_entries SET has_payload_id=NULL;
+UPDATE conversation_archive_entries SET has_payload_id=NULL;
+`;
+
+export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL;
 
 const text = (value) => String(value ?? '');
 const required = (value, name) => { const result = text(value).trim(); if (!result) throw new Error(`${name} is required`); return result; };
@@ -835,6 +913,7 @@ export class PostgresSessionStore {
       await client.query(`INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at) SELECT agent_id,$3,entry_id,idempotency_key,entry,created_at FROM conversation_entries WHERE agent_id=$1 AND session_id=$2`, [agentId, source, target]);
       await client.query(`INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,metadata,created_at) SELECT agent_id,$3,archive_id,generation,kind,metadata,created_at FROM conversation_archives WHERE agent_id=$1 AND session_id=$2`, [agentId, source, target]);
       await client.query(`INSERT INTO conversation_archive_entries
+        (agent_id,session_id,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation,search_grams,entry_id,idempotency_key)
         SELECT agent_id,$3,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation,search_grams,entry_id,idempotency_key
         FROM conversation_archive_entries WHERE agent_id=$1 AND session_id=$2`, [agentId,source,target]);
       await client.query('DELETE FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [agentId, source]);
