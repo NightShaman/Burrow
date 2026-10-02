@@ -1,4 +1,4 @@
-import { readRollingCards, writeRollingCard, rollingCardActive } from './postgres-rolling-continuity-store.mjs';
+import { readRollingCards, writeRollingCard, rollingCardActive, pruneRollingCards } from './postgres-rolling-continuity-store.mjs';
 import { createHash } from "node:crypto";
 import {
   closePostgresPool,
@@ -514,6 +514,13 @@ export class PostgresWorkingMemoryStore {
       return card;
     });
   }
+  async pruneRollingContinuityCards(client = this.pool) {
+    const policy = typeof this.retentionSource === 'function' ? await this.retentionSource() : this.retention;
+    const {rows} = await client.query('SELECT DISTINCT agent_id FROM rolling_continuity_cards');
+    let removed=0;
+    for (const row of rows) removed += await pruneRollingCards(client,row.agent_id,this.clock(),policy?.rollingContinuityTtlDays ?? 90);
+    return removed;
+  }
   async listRollingContinuityCards({
     agentId,
     project = null,
@@ -523,6 +530,7 @@ export class PostgresWorkingMemoryStore {
     if (!text(agentId)) return [];
     if (!text(project))
       return this.listAllRollingContinuityCards({ agentId, limit });
+    await this.pruneRollingContinuityCards();
     const v = { cards: await readRollingCards(this.pool, agentId, project) };
     return (v?.cards || [])
       .filter((x) => rollingCardActive(x, this.clock()))
@@ -532,6 +540,7 @@ export class PostgresWorkingMemoryStore {
   async listAllRollingContinuityCards({ agentId, limit = 20 } = {}) {
     await this.ready();
     if (!text(agentId)) return [];
+    await this.pruneRollingContinuityCards();
     return (await readRollingCards(this.pool, agentId))
       .filter(
         (x) =>

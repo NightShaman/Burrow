@@ -24,10 +24,10 @@ export async function readTiddle(client,key) {
 }
 export async function writeTiddle(client,key,value,at) {
  const field=collection(key); if(field) throw new Error('tiddle_collection_requires_append');
- await client.query('INSERT INTO tiddle_envelopes(key,value_json,updated_at,next_run_at) VALUES($1,$2,$3,$4) ON CONFLICT(key) DO UPDATE SET value_json=tiddle_envelopes.value_json||EXCLUDED.value_json,updated_at=EXCLUDED.updated_at,next_run_at=EXCLUDED.next_run_at',[key,value,at,value.nextRunAt||null]);
+ await client.query('INSERT INTO tiddle_envelopes(key,value_json,updated_at,next_run_at) VALUES($1,$2,$3,$4) ON CONFLICT(key) DO UPDATE SET value_json=burrow_json_merge(tiddle_envelopes.value_json,EXCLUDED.value_json),updated_at=EXCLUDED.updated_at,next_run_at=EXCLUDED.next_run_at',[key,value,at,value.nextRunAt||null]);
 }
 export async function appendTiddle(client,key,item,envelope,at,cutoff) {
- await client.query('INSERT INTO tiddle_envelopes(key,value_json,updated_at) VALUES($1,$2,$3) ON CONFLICT(key) DO UPDATE SET value_json=tiddle_envelopes.value_json||EXCLUDED.value_json,updated_at=EXCLUDED.updated_at',[key,envelope,at]);
+ await client.query('INSERT INTO tiddle_envelopes(key,value_json,updated_at) VALUES($1,$2,$3) ON CONFLICT(key) DO UPDATE SET value_json=burrow_json_merge(tiddle_envelopes.value_json,EXCLUDED.value_json),updated_at=EXCLUDED.updated_at',[key,envelope,at]);
  await client.query('DELETE FROM tiddle_entries WHERE key=$1 AND (entry_at < $2 OR ($3::text IS NOT NULL AND ref=$3))',[key,cutoff,key.startsWith('tiddle-residue:')?item.ref:null]);
  await client.query('INSERT INTO tiddle_entries(key,position,value_json,entry_at,ref) SELECT $1,COALESCE(min(position),0)-1,$2,$3,$4 FROM tiddle_entries WHERE key=$1',[key,item,item.at||null,item.ref||null]);
 }

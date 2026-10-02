@@ -89,6 +89,30 @@ export class PostgresAlbdruckStore {
       for (const kind of ['ledger', 'preload', 'scope_review']) {
         derived[`dream_${kind}_entries`] = (await client.query(`DELETE FROM dream_${kind}_entries d USING dream_state_envelopes e WHERE d.key=e.key AND e.metadata->>'agentId'=$1 AND strpos(d.payload::text,$2)>0`, [agentId, `session:${sessionId}:`])).rowCount;
       }
+      // Native continuity payloads may contain NUL/surrogates: inspect decoded
+      // JSON in JS rather than casting payloads through jsonb or text extraction.
+      const prefix = `session:${sessionId}:`;
+      const references = value => {
+        if (typeof value === 'string') return value.startsWith(prefix);
+        if (Array.isArray(value)) return value.some(references);
+        if (value && typeof value === 'object') return (value.sessionId === sessionId) || Object.values(value).some(references);
+        return false;
+      };
+      await client.query('LOCK TABLE rolling_continuity_cards,rolling_continuity_envelopes,tiddle_entries,tiddle_envelopes IN SHARE ROW EXCLUSIVE MODE');
+      derived.rolling_continuity_cards = 0;
+      const cards = await client.query('SELECT project,card_id,card_json,legacy_card_json FROM rolling_continuity_cards WHERE agent_id=$1', [agentId]);
+      for (const row of cards.rows) if (references(row.card_json) || references(row.legacy_card_json)) {
+        derived.rolling_continuity_cards += (await client.query('DELETE FROM rolling_continuity_cards WHERE agent_id=$1 AND project=$2 AND card_id=$3', [agentId,row.project,row.card_id])).rowCount;
+      }
+      // Conservatively remove matching legacy envelopes and Tiddle aggregates.
+      const envelopes = await client.query('SELECT legacy_source,legacy_key,envelope_agent_id,extra_metadata FROM rolling_continuity_envelopes');
+      for (const row of envelopes.rows) if ((row.envelope_agent_id === agentId || row.legacy_key.startsWith(`rolling-continuity:${agentId}:`)) && references(row.extra_metadata)) await client.query('DELETE FROM rolling_continuity_envelopes WHERE legacy_source=$1 AND legacy_key=$2',[row.legacy_source,row.legacy_key]);
+      derived.tiddle_entries = 0;
+      const entries = await client.query('SELECT id,key,value_json FROM tiddle_entries');
+      const owned = row => row.value_json?.agentId === agentId || row.key.startsWith(`tiddle-residue:${agentId}:`) || row.key === `tiddle-history:${agentId}`;
+      for (const row of entries.rows) if (owned(row) && references(row.value_json)) derived.tiddle_entries += (await client.query('DELETE FROM tiddle_entries WHERE id=$1',[row.id])).rowCount;
+      const tiddle = await client.query('SELECT key,value_json FROM tiddle_envelopes');
+      for (const row of tiddle.rows) if ((owned(row) || row.key.startsWith(`tiddle-pass:${agentId}`) || row.key.startsWith(`tiddle-synthesis:${agentId}`)) && references(row.value_json)) await client.query('DELETE FROM tiddle_envelopes WHERE key=$1',[row.key]);
       const conversation = (await client.query('DELETE FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [agentId, sessionId])).rowCount;
       return { agentId, sessionId, deleted: conversation === 1, removed: { evidence, knowledge, revisions, ...derived } };
     });

@@ -1,3 +1,4 @@
+import { applyLegacyContinuity } from './postgres-lossless-continuity.mjs';
 import { migrationChecksum, migrationLockKey, withPostgresTransaction } from './postgres-foundation.mjs';
 import { POSTGRES_APPLICATION_SCHEMA_MANIFEST } from './postgres-application-schema.mjs';
 
@@ -57,7 +58,8 @@ export async function migratePostgres(pool, { migrations = POSTGRES_MIGRATIONS, 
         if (existing.checksum !== checksum || existing.name !== migration.name) throw new Error(`Incompatible PostgreSQL migration ledger at version ${migration.version}`);
         continue;
       }
-      await client.query(migration.sql);
+      if ([18,26].includes(migration.version) && migration === POSTGRES_MIGRATIONS[migration.version-1]) await applyLegacyContinuity(client, migration);
+      else await client.query(migration.sql);
       await client.query('INSERT INTO burrow_schema_migrations(version,name,checksum) VALUES($1,$2,$3)', [migration.version, migration.name, checksum]);
     }
     return { applied: ordered.filter((migration) => !byVersion.has(migration.version)).map((migration) => migration.version), currentVersion: highest };

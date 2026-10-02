@@ -1,5 +1,5 @@
 import { isTiddleKey, readTiddle, writeTiddle, appendTiddle, tiddleRows } from './postgres-tiddle-store.mjs';
-import { readRollingCards, writeRollingCard } from './postgres-rolling-continuity-store.mjs';
+import { readRollingCards, writeRollingCard, pruneRollingCards } from './postgres-rolling-continuity-store.mjs';
 import { withPostgresTransaction } from './postgres-foundation.mjs';
 
 // Small effect runner lets legacy synchronous readers and async server callers
@@ -28,6 +28,8 @@ export function tiddlePersistence({ stores } = {}) {
       dueIds: at => client.query("SELECT a.id FROM tiddle_envelopes t JOIN agents a ON t.key='tiddle-pass:'||a.id WHERE t.key LIKE 'tiddle-pass:%' AND t.next_run_at <= $1 AND a.enabled=TRUE UNION ALL SELECT a.id FROM agents a WHERE a.enabled=TRUE AND NOT EXISTS (SELECT 1 FROM tiddle_envelopes t WHERE t.key='tiddle-pass:'||a.id AND t.next_run_at IS NOT NULL)",[at]).then(r=>r.rows.map(r=>r.id)),
       transaction: (agentId, operation) => withPostgresTransaction(pool, async tx => {
         await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`tiddle:${agentId}`]);
+        const ttl = await adapter(tx, true).rollingTtlDays();
+        await pruneRollingCards(tx, agentId, new Date().toISOString(), ttl);
         return runAsync(operation(adapter(tx, true)));
       }),
       rollingTtlDays: async () => { if (stores.workingMemoryRetention?.read) return (await stores.workingMemoryRetention.read()).rollingContinuityTtlDays; const r = await client.query("SELECT value_json FROM working_memory_retention_settings WHERE owner_id='default'"); return Number(r.rows[0]?.value_json?.rollingContinuityTtlDays || 90); },

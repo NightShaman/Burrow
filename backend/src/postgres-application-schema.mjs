@@ -1,3 +1,4 @@
+import { LOSSLESS_CONTINUITY_SQL } from './postgres-lossless-continuity.mjs';
 import { POSTGRES_TIDDLE_SCHEMA_SQL } from './postgres-tiddle-store.mjs';
 import { POSTGRES_DREAM_STATE_SCHEMA_SQL } from './postgres-dream-state-schema.mjs';
 import { POSTGRES_MCP_PROVIDER_STATE_SCHEMA_SQL } from './postgres-mcp-provider-state-store.mjs';
@@ -74,4 +75,5 @@ ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS effective_timezone TEXT;` },
   { version: 24, name: 'mcp-provider-lifecycle-state', sql: POSTGRES_MCP_PROVIDER_STATE_SCHEMA_SQL },
   { version: 25, name: 'native-dream-state-entries', sql: POSTGRES_DREAM_STATE_SCHEMA_SQL },
   { version: 26, name: 'native-tiddle-entries-and-scheduling', sql: POSTGRES_TIDDLE_SCHEMA_SQL },
+  { version: 27, name: 'lossless-continuity-payloads', sql: LOSSLESS_CONTINUITY_SQL },
 ]);

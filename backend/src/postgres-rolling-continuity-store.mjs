@@ -77,10 +77,22 @@ export async function readRollingCards(client, agentId, project = null) {
  return result.rows.map(row => row.card_json);
 }
 export async function writeRollingCard(client, card, at) {
- await client.query(`INSERT INTO rolling_continuity_cards(agent_id,project,card_id,card_json,updated_at) VALUES($1,$2,$3,$4::jsonb,$5)
+ await client.query(`INSERT INTO rolling_continuity_cards(agent_id,project,card_id,card_json,updated_at) VALUES($1,$2,$3,$4::json,$5)
  ON CONFLICT(agent_id,project,card_id) DO UPDATE SET card_json=EXCLUDED.card_json,updated_at=EXCLUDED.updated_at`,[card.agentId,card.project,card.id,JSON.stringify(card),at]);
 }
 
 export function rollingCardActive(card, at) {
  return !card.expiresAt || new Date(card.expiresAt).getTime() >= new Date(at).getTime();
+}
+
+// Physical retention is unbounded; presentation limits never govern deletion.
+export async function pruneRollingCards(client, agentId, at, ttlDays = 90) {
+ const {rows} = await client.query('SELECT project,card_id,card_json,updated_at FROM rolling_continuity_cards WHERE agent_id=$1',[agentId]);
+ let removed = 0;
+ for (const row of rows) {
+  const card=row.card_json;
+  const deadline=card.expiresAt ? new Date(card.expiresAt).getTime() : new Date(card.lastSeen || row.updated_at).getTime() + ttlDays * 86400000;
+  if (deadline < new Date(at).getTime()) removed += (await client.query('DELETE FROM rolling_continuity_cards WHERE agent_id=$1 AND project=$2 AND card_id=$3 AND updated_at=$4',[agentId,row.project,row.card_id,row.updated_at])).rowCount;
+ }
+ return removed;
 }
