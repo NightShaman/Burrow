@@ -33,11 +33,16 @@ export async function planRuntimeBackup({ root = process.cwd(), workspaceRoot = 
 export async function createRuntimeBackup({ runCommand = execFileAsync, runTar = execFileAsync, ...options } = {}) {
   const plan = await planRuntimeBackup(options); await fs.mkdir(path.dirname(plan.archive), { recursive: true });
   const staging = await fs.mkdtemp(path.join(path.dirname(plan.archive), '.burrow-backup-'));
+  const pendingArchive = path.join(staging, 'archive.tar.gz');
   try {
     const dump = path.join(staging, POSTGRES_BACKUP_PATH); await fs.mkdir(path.dirname(dump), { recursive: true, mode: 0o700 });
     await runCommand('pg_dump', ['--format=custom', '--file', dump, process.env.BURROW_POSTGRES_URL || 'postgresql://postgres@127.0.0.1:5432/postgres'], { timeout: 300_000 });
     for (const entry of plan.workspaceEntries) await fs.cp(path.join(entry.root, entry.path), path.join(staging, entry.archivePath), { recursive: true, dereference: false });
-    await runTar('tar', ['-czf', plan.archive, '-C', staging, 'postgres', ...(plan.workspaceEntries.length ? ['workspaces'] : [])], { timeout: 300_000 });
+    const outputHandle = await fs.open(pendingArchive, 'wx', 0o600);
+    await outputHandle.close();
+    await runTar('tar', ['-czf', pendingArchive, '-C', staging, 'postgres', ...(plan.workspaceEntries.length ? ['workspaces'] : [])], { timeout: 300_000 });
+    await fs.chmod(pendingArchive, 0o600);
+    await fs.rename(pendingArchive, plan.archive);
   } finally { await fs.rm(staging, { recursive: true, force: true }); }
   return { ...plan, dryRun: false, created: true };
 }
