@@ -104,7 +104,169 @@ BEGIN
 END $$;
 `;
 
-export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL;
+// Append-only migration: originals are indexed lexical rows, never jsonb.
+// Occurrence keys preserve duplicate IDs and archive order without inventing IDs.
+export const POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL = `
+-- Install the linear byte scanner before backfilling adopted schema 15.
+CREATE OR REPLACE FUNCTION burrow_json_member(payload json, member text) RETURNS json
+LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+DECLARE s bytea := convert_to(payload::text,'UTF8'); i int := 1; start_at int;
+ depth int := 0; quoted boolean := false; escaped boolean := false;
+ key_start int := 0; wanted boolean := false; c text;
+BEGIN
+ WHILE i <= octet_length(s) LOOP
+  c := chr(get_byte(s,i-1));
+  IF quoted THEN
+   IF escaped THEN escaped := false;
+   ELSIF c = chr(92) THEN escaped := true;
+   ELSIF c = '"' THEN
+    quoted := false;
+    IF depth = 1 AND key_start > 0 THEN
+     wanted := convert_from(substring(s FROM key_start FOR i-key_start+1),'UTF8') = to_json(member)::text;
+     key_start := 0;
+    END IF;
+   END IF;
+  ELSE
+   IF c = '"' THEN
+    quoted := true;
+    IF depth = 1 AND start_at IS NULL THEN key_start := i; END IF;
+   ELSIF c = ':' AND depth = 1 THEN
+    IF wanted THEN
+     start_at := i+1;
+     -- Scan the value lexically through the next top-level delimiter.
+    END IF;
+   ELSIF c IN ('{','[') THEN depth := depth+1;
+   ELSIF c IN ('}',']') THEN
+    depth := depth-1;
+    IF depth = 0 AND start_at IS NOT NULL THEN RETURN convert_from(substring(s FROM start_at FOR i-start_at),'UTF8')::json; END IF;
+   ELSIF c = ',' AND depth = 1 THEN
+    IF start_at IS NOT NULL THEN RETURN convert_from(substring(s FROM start_at FOR i-start_at),'UTF8')::json; END IF;
+    wanted := false;
+   END IF;
+  END IF;
+  i := i+1;
+ END LOOP;
+ RETURN NULL;
+END $$;
+CREATE TABLE IF NOT EXISTS conversation_original_rows (
+ agent_id text NOT NULL,
+ session_id text NOT NULL,
+ source_store text NOT NULL CHECK (source_store IN ('live','archive')),
+ source_id text NOT NULL,
+ ordinal bigint NOT NULL,
+ entry_key text,
+ entry json NOT NULL,
+ search_projection text NOT NULL,
+ created_at text NOT NULL,
+ archive_kind text,
+ generation bigint,
+ PRIMARY KEY (agent_id,session_id,source_store,source_id,ordinal),
+ FOREIGN KEY (agent_id,session_id) REFERENCES conversation_sessions(agent_id,session_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS conversation_original_rows_lookup_idx
+ ON conversation_original_rows(agent_id,session_id,entry_key,source_store,source_id DESC,ordinal);
+CREATE INDEX IF NOT EXISTS conversation_original_rows_order_idx
+ ON conversation_original_rows(agent_id,session_id,source_store,source_id,ordinal);
+-- JSON lexical strings are safe PostgreSQL text even when decoded strings are not.
+CREATE OR REPLACE FUNCTION burrow_sync_original_rows() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+ IF TG_TABLE_NAME = 'conversation_entries' THEN
+  IF TG_OP <> 'INSERT' THEN
+   DELETE FROM conversation_original_rows WHERE agent_id=OLD.agent_id AND session_id=OLD.session_id
+    AND source_store='live' AND source_id=OLD.sequence::text;
+  END IF;
+  IF TG_OP <> 'DELETE' THEN
+   INSERT INTO conversation_original_rows
+    (agent_id,session_id,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at)
+   VALUES (NEW.agent_id,NEW.session_id,'live',NEW.sequence::text,NEW.sequence,
+    COALESCE(burrow_json_member(NEW.entry,'id')::text,to_json(NEW.entry_id)::text),NEW.entry,
+    COALESCE(burrow_json_member(NEW.entry,'content')::text,''),NEW.created_at);
+  END IF;
+ ELSE
+  IF TG_OP <> 'INSERT' THEN
+   DELETE FROM conversation_original_rows WHERE agent_id=OLD.agent_id AND session_id=OLD.session_id
+    AND source_store='archive' AND source_id=OLD.archive_id;
+  END IF;
+  IF TG_OP <> 'DELETE' THEN
+   INSERT INTO conversation_original_rows
+    (agent_id,session_id,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation)
+   SELECT NEW.agent_id,NEW.session_id,'archive',NEW.archive_id,e.ordinal,
+    burrow_json_member(e.value,'id')::text,e.value,
+    COALESCE(burrow_json_member(e.value,'content')::text,''),NEW.created_at,NEW.kind,NEW.generation
+   FROM json_array_elements(NEW.entries) WITH ORDINALITY AS e(value,ordinal);
+  END IF;
+ END IF;
+ RETURN NULL;
+END $$;
+-- The schema runner executes this migration transactionally. Block writers until
+-- both backfill and hooks are installed, so no concurrent turn can be omitted.
+LOCK TABLE conversation_entries,conversation_archives IN SHARE ROW EXCLUSIVE MODE;
+DROP TRIGGER IF EXISTS burrow_original_entries ON conversation_entries;
+CREATE TRIGGER burrow_original_entries AFTER INSERT OR UPDATE OR DELETE ON conversation_entries
+ FOR EACH ROW EXECUTE FUNCTION burrow_sync_original_rows();
+DROP TRIGGER IF EXISTS burrow_original_archives ON conversation_archives;
+CREATE TRIGGER burrow_original_archives AFTER INSERT OR UPDATE OR DELETE ON conversation_archives
+ FOR EACH ROW EXECUTE FUNCTION burrow_sync_original_rows();
+INSERT INTO conversation_original_rows
+ (agent_id,session_id,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at)
+ SELECT agent_id,session_id,'live',sequence::text,sequence,
+ COALESCE(burrow_json_member(entry,'id')::text,to_json(entry_id)::text),entry,
+ COALESCE(burrow_json_member(entry,'content')::text,''),created_at FROM conversation_entries
+ ON CONFLICT DO NOTHING;
+INSERT INTO conversation_original_rows
+ (agent_id,session_id,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation)
+ SELECT a.agent_id,a.session_id,'archive',a.archive_id,e.ordinal,
+ burrow_json_member(e.value,'id')::text,e.value,
+ COALESCE(burrow_json_member(e.value,'content')::text,''),a.created_at,a.kind,a.generation
+ FROM conversation_archives a CROSS JOIN LATERAL json_array_elements(a.entries) WITH ORDINALITY e(value,ordinal)
+ ON CONFLICT DO NOTHING;
+`;
+
+// Search is a conservative candidate index; JS remains the matching authority.
+// Unsafe/non-ASCII lexical strings bypass filtering, preserving JS Unicode and
+// NUL/surrogate semantics without ever decoding the lossless original in SQL.
+export const POSTGRES_SESSION_SEARCH_SCHEMA_SQL = `
+CREATE OR REPLACE FUNCTION burrow_search_grams(payload text) RETURNS text[]
+LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE decoded text; bytes bytea; grams text[];
+BEGIN
+ IF payload ~ '[^ -~]' OR strpos(payload,chr(92)||'u') > 0 THEN RETURN NULL; END IF;
+ BEGIN decoded := lower((payload::jsonb #>> '{}'));
+ EXCEPTION WHEN OTHERS THEN RETURN NULL;
+ END;
+ -- ASCII only: bytea offsets are constant-time, unlike UTF8 text substr.
+ bytes := convert_to(decoded,'UTF8');
+ SELECT array_agg(DISTINCT convert_from(substring(bytes FROM n FOR 3),'UTF8')) INTO grams
+ FROM generate_series(1,octet_length(bytes)-2) n;
+ RETURN COALESCE(grams,ARRAY[]::text[]);
+END $$;
+CREATE OR REPLACE FUNCTION burrow_entry_search_grams(payload json) RETURNS text[]
+LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE k text; part text[]; result text[] := ARRAY[]::text[];
+BEGIN
+ FOREACH k IN ARRAY ARRAY['id','role','type','visibility','content'] LOOP
+  part := burrow_search_grams(COALESCE(burrow_json_member(payload,k)::text,'""'));
+  IF part IS NULL THEN RETURN NULL; END IF;
+  result := result || part;
+ END LOOP;
+ -- Summary rows are excluded by canonical history. Ordinary metadata does not
+ -- contribute to matchesQuery, and must not disable the candidate index.
+ RETURN result;
+END $$;
+ALTER TABLE conversation_original_rows ADD COLUMN IF NOT EXISTS search_grams text[];
+CREATE OR REPLACE FUNCTION burrow_project_search() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN NEW.search_grams := burrow_entry_search_grams(NEW.entry); RETURN NEW; END $$;
+DROP TRIGGER IF EXISTS burrow_search_projection ON conversation_original_rows;
+CREATE TRIGGER burrow_search_projection BEFORE INSERT OR UPDATE ON conversation_original_rows
+ FOR EACH ROW EXECUTE FUNCTION burrow_project_search();
+UPDATE conversation_original_rows SET search_grams=burrow_entry_search_grams(entry);
+CREATE INDEX IF NOT EXISTS conversation_original_rows_search_idx ON conversation_original_rows USING gin(search_grams);
+CREATE INDEX IF NOT EXISTS conversation_original_rows_search_fallback_idx ON conversation_original_rows(agent_id)
+ WHERE search_grams IS NULL;
+`;
+
+export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL;
 
 
 const text = (value) => String(value ?? '');
@@ -173,7 +335,7 @@ export class PostgresSessionStore {
       const key = [row.agent_id, row.session_id, entryId];
       if ((after && compare(key, after) <= 0) || !matchesQuery(entry, query.trim())) return;
       const id = JSON.stringify(key);
-      if (!originals.has(id)) originals.set(id, { key, item: {
+      if (!originals.has(id) || provenance.store === 'live' || originals.get(id).item.provenance.store !== 'live') originals.set(id, { key, item: {
         agentId: row.agent_id, sessionId: row.session_id, entryId,
         timestamp: entry.timestamp ?? row.created_at, role: entry.role, content: entry.content,
         sourceRef: { kind: 'conversation_entry', agentId: row.agent_id, sessionId: row.session_id, entryId },
@@ -185,25 +347,35 @@ export class PostgresSessionStore {
         originals.delete(largest[0]);
       }
     };
+    const terms = [...new Set(query.toLowerCase().match(/[a-z0-9][a-z0-9._-]*/gu)?.filter(t => t.length >= 3) || [])];
+    // OR is intentionally broader than the two-term coverage rule; exact phrase
+    // and cross-field matches must not be lost. Final matchesQuery removes noise.
+    const grams = terms.map(term => [...new Set(Array.from({ length: term.length - 2 }, (_, i) => term.slice(i, i + 3)))]);
+    const candidate = grams.length ? `AND (search_grams IS NULL OR ${grams.map((_, i) => `search_grams @> $${i + 7}::text[]`).join(' OR ')})` : '';
     // One repeatable-read snapshot keeps reset/compaction from hiding a turn during scanning.
     return withPostgresTransaction(this.pool, async client => {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-      let sequence = '0';
+      let position = null;
       for (;;) {
-        const { rows } = await client.query(`SELECT agent_id,session_id,entry_id,entry,created_at,sequence FROM conversation_entries
-          WHERE ($1::text IS NULL OR agent_id=$1) AND sequence>$2::bigint ORDER BY sequence LIMIT 256`, [scope === 'agent' ? agentId : null, sequence]);
-        for (const row of rows) consider(row, row.entry, { store: 'live', reset: false });
+        const { rows } = await client.query(`SELECT * FROM conversation_original_rows r
+          WHERE ($1::text IS NULL OR agent_id=$1)
+          AND ($2::text IS NULL OR (agent_id,session_id,source_store,source_id,ordinal)>($2,$3,$4,$5,$6::bigint))
+          ${candidate}
+          AND NOT EXISTS (SELECT 1 FROM conversation_original_rows newer
+            WHERE newer.agent_id=r.agent_id AND newer.session_id=r.session_id AND newer.entry_key=r.entry_key
+            AND (newer.source_store>r.source_store OR
+              (newer.source_store=r.source_store AND
+                (CASE WHEN r.source_store='live' THEN newer.ordinal>r.ordinal ELSE
+                  newer.source_id>r.source_id OR (newer.source_id=r.source_id AND newer.ordinal<r.ordinal) END))))
+          ORDER BY agent_id,session_id,source_store,source_id,ordinal LIMIT 256`,
+        [scope === 'agent' ? agentId : null, ...(position || [null,null,null,null,null]), ...grams]);
+        for (const row of rows) consider(row, row.entry, row.source_store === 'live'
+          ? { store: 'live', reset: false }
+          : { store: 'archive', reset: row.archive_kind === 'reset', archiveId: row.source_id,
+            kind: row.archive_kind, generation: Number(row.generation), archivedAt: row.created_at });
         if (rows.length < 256) break;
-        sequence = String(rows.at(-1).sequence);
-      }
-      let archiveKey = null;
-      for (;;) {
-        const { rows } = await client.query(`SELECT agent_id,session_id,archive_id,entries,generation,kind,created_at FROM conversation_archives
-          WHERE ($1::text IS NULL OR agent_id=$1) AND ($2::text IS NULL OR (agent_id,session_id,archive_id)>($2,$3,$4))
-          ORDER BY agent_id,session_id,archive_id LIMIT 64`, [scope === 'agent' ? agentId : null, ...(archiveKey || [null,null,null])]);
-        for (const row of rows) for (const entry of row.entries) consider(row, entry, { store: 'archive', reset: row.kind === 'reset', archiveId: row.archive_id, kind: row.kind, generation: Number(row.generation), archivedAt: row.created_at });
-        if (rows.length < 64) break;
-        const last = rows.at(-1); archiveKey = [last.agent_id,last.session_id,last.archive_id];
+        const last = rows.at(-1);
+        position = [last.agent_id,last.session_id,last.source_store,last.source_id,String(last.ordinal)];
       }
       const ordered = [...originals.values()].sort((a,b) => compare(a.key,b.key));
       const page = ordered.slice(0,pageSize);
@@ -211,25 +383,45 @@ export class PostgresSessionStore {
     });
   }
 
-  async resolveOriginal({ agentId, sessionId, entryId }) {
-    const { rows } = entryId.includes('\u0000') ? { rows: [] } : await this.pool.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND entry_id=$3', [agentId, sessionId, entryId]);
-    if (rows[0]) return rows[0].entry;
-    // Project only lexical JSON IDs: even -> can decode unrelated NUL strings.
-    // Decode IDs in JS, then fetch just the matching lexical JSON element.
-    // Archive ordering and first duplicate within a snapshot match the old scan.
-    let before = null;
-    for (;;) {
-      const { rows: archives } = await this.pool.query(`SELECT archive_id, (SELECT json_agg(burrow_json_member(value,'id') ORDER BY ordinal) FROM json_array_elements(entries) WITH ORDINALITY AS e(value,ordinal)) AS entry_ids FROM conversation_archives WHERE agent_id=$1 AND session_id=$2 AND ($3::text IS NULL OR archive_id<$3) ORDER BY archive_id DESC LIMIT 64`, [agentId, sessionId, before]);
-      for (const archive of archives) {
-        const index = (archive.entry_ids || []).findIndex(id => id === entryId);
-        if (index !== -1) {
-          const result = await this.pool.query('SELECT (SELECT value FROM json_array_elements(entries) WITH ORDINALITY AS e(value,ordinal) WHERE ordinal=$4::int+1) AS entry FROM conversation_archives WHERE agent_id=$1 AND session_id=$2 AND archive_id=$3', [agentId, sessionId, archive.archive_id, index]);
-          if (result.rows[0]) return result.rows[0].entry;
+  // Shared original-history projection for Dream and conversation context.
+  // Live wins over snapshots; snapshot precedence matches resolveOriginal.
+  async listOriginalEntries({ agentId: rawAgentId, sessionId: rawSessionId } = {}) {
+    const agentId = required(rawAgentId, 'agentId');
+    const sessionId = required(rawSessionId, 'sessionId');
+    return withPostgresTransaction(this.pool, async client => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const entries = []; const seen = new Set(); let position = null;
+      for (;;) {
+        const { rows } = await client.query(`SELECT source_store,source_id,ordinal,entry,created_at
+          FROM conversation_original_rows WHERE agent_id=$1 AND session_id=$2
+          AND ($3::text IS NULL OR
+            (source_store,source_id,-ordinal)<($3::text,$4::text,-$5::bigint))
+          ORDER BY source_store DESC,source_id DESC,ordinal ASC LIMIT 256`,
+        [agentId, sessionId, ...(position || [null, null, null])]);
+        // source_store DESC puts live before archive. Within a snapshot retain
+        // the earliest duplicate occurrence, as resolveOriginal does.
+        for (const row of rows) {
+          const entry = row.entry;
+          if (entry?.id && seen.has(entry.id)) continue;
+          if (entry?.id) seen.add(entry.id);
+          entries.push({ entry, ordinal: BigInt(row.ordinal), createdAt: row.created_at, store: row.source_store });
         }
+        if (rows.length < 256) break;
+        const last = rows.at(-1);
+        position = [last.source_store, last.source_id, String(last.ordinal)];
       }
-      if (archives.length < 64) return null;
-      before = archives.at(-1).archive_id;
-    }
+      return entries.sort((a,b) => String(a.entry.timestamp ?? a.entry.ts ?? a.createdAt).localeCompare(String(b.entry.timestamp ?? b.entry.ts ?? b.createdAt)) || (a.store === b.store ? (a.ordinal < b.ordinal ? -1 : a.ordinal > b.ordinal ? 1 : 0) : a.store === 'archive' ? -1 : 1)).map(row => row.entry);
+    });
+  }
+
+  async resolveOriginal({ agentId, sessionId, entryId }) {
+    // Match the lexical JSON spelling, never decoded PostgreSQL text. JSON.stringify
+    // safely represents NUL and lone surrogates in the bound lookup key.
+    const { rows } = await this.pool.query(`SELECT entry FROM conversation_original_rows
+      WHERE agent_id=$1 AND session_id=$2 AND entry_key=$3
+      ORDER BY CASE WHEN source_store='live' THEN 0 ELSE 1 END,CASE WHEN source_store='live' THEN ordinal END DESC,source_id DESC,ordinal LIMIT 1`,
+    [agentId, sessionId, JSON.stringify(entryId)]);
+    return rows[0]?.entry || null;
   }
 
   async append({ agentId: rawAgentId, sessionId: rawSessionId, entry, idempotencyKey = null } = {}) {
@@ -297,27 +489,18 @@ export class PostgresSessionStore {
       const at = new Date(entry.ts);
       if (Number.isFinite(at.getTime()) && (!newest || at > newest)) newest = at;
     };
-    let beforeAt = null; let beforeSequence = null;
-    // Decode JSON in JS: PostgreSQL JSON extraction can fail on escaped NUL.
-    // Compaction moves messages to archives, so active entries alone are not
-    // sufficient. Walk both sources without a history depth cutoff.
+    // Decode lossless JSON in JS; never unpack archive blobs or decode in SQL.
+    let position = null;
     for (;;) {
-      const rows = (await this.pool.query(`SELECT sequence,entry,created_at FROM conversation_entries
-        WHERE agent_id=$1 AND ($2::text IS NULL OR (created_at,sequence)<($2::text,$3::bigint))
-        ORDER BY created_at DESC,sequence DESC LIMIT 256`, [agentId, beforeAt, beforeSequence])).rows;
+      const { rows } = await this.pool.query(`SELECT session_id,source_store,source_id,ordinal,entry
+        FROM conversation_original_rows WHERE agent_id=$1
+        AND ($2::text IS NULL OR (session_id,source_store,source_id,ordinal)>($2,$3,$4,$5::bigint))
+        ORDER BY session_id,source_store,source_id,ordinal LIMIT 256`,
+      [agentId, ...(position || [null,null,null,null])]);
       for (const row of rows) consider(row.entry);
       if (rows.length < 256) break;
-      beforeAt = rows.at(-1).created_at;
-      beforeSequence = String(rows.at(-1).sequence);
-    }
-    let beforeArchive = null;
-    for (;;) {
-      const rows = (await this.pool.query(`SELECT archive_id,entries FROM conversation_archives
-        WHERE agent_id=$1 AND ($2::text IS NULL OR archive_id<$2::text)
-        ORDER BY archive_id DESC LIMIT 64`, [agentId, beforeArchive])).rows;
-      for (const row of rows) for (const entry of row.entries || []) consider(entry);
-      if (rows.length < 64) break;
-      beforeArchive = rows.at(-1).archive_id;
+      const last = rows.at(-1);
+      position = [last.session_id,last.source_store,last.source_id,String(last.ordinal)];
     }
     return newest?.toISOString() || null;
   }

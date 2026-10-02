@@ -375,20 +375,26 @@ export async function sessionWindow({ rootDir, phase, generatedAt, conversationS
     ).map(session => session.sessionId));
     for (const sessionId of conversationSessionIds) {
       if (childIds.has(sessionId) || String(sessionId).startsWith('subagent-')) continue;
-      let after = '0';
-      if (typeof conversationStore.page === 'function') {
-        do {
-          const page = await conversationStore.page({ agentId: conversationAgentId, sessionId, after, limit: 256 });
-          addEntries(page.entries, sessionId);
-          after = page.next;
-          if (!page.hasMore) break;
-        } while (after);
-      } else throw new Error('dream_conversation_pagination_required');
-      // A reset removes active rows; include immutable archive snapshots as the
-      // authoritative history, rather than treating row wrappers as turns.
-      if (typeof conversationStore.listArchives === 'function') {
-        for (const archive of await conversationStore.listArchives({ agentId: conversationAgentId, sessionId, limit: null })) {
-          addEntries(archive.entries, sessionId);
+      if (typeof conversationStore.listOriginalEntries === 'function') {
+        addEntries(await conversationStore.listOriginalEntries({ agentId: conversationAgentId, sessionId }), sessionId);
+      } else {
+        // Compatibility for legacy injected stores only. Production originals
+        // and context are owned by the shared conversation-store projection.
+        let after = '0';
+        if (typeof conversationStore.page === 'function') {
+          do {
+            const page = await conversationStore.page({ agentId: conversationAgentId, sessionId, after, limit: 256 });
+            addEntries(page.entries, sessionId);
+            after = page.next;
+            if (!page.hasMore) break;
+          } while (after);
+        } else throw new Error('dream_conversation_pagination_required');
+        // A reset removes active rows; include immutable archive snapshots as the
+        // authoritative history, rather than treating row wrappers as turns.
+        if (typeof conversationStore.listArchives === 'function') {
+          for (const archive of await conversationStore.listArchives({ agentId: conversationAgentId, sessionId, limit: null })) {
+            addEntries(archive.entries, sessionId);
+          }
         }
       }
     }
