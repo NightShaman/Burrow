@@ -20,7 +20,7 @@ import { POSTGRES_SKILL_SETTINGS_SCHEMA_SQL } from './postgres-skill-settings-st
 import { POSTGRES_SETUP_STATE_SCHEMA_SQL } from './postgres-setup-state-store.mjs';
 import { POSTGRES_RETENTION_SETTINGS_SCHEMA_SQL } from './postgres-retention-settings-store.mjs';
 import { POSTGRES_WORKING_MEMORY_RETENTION_SCHEMA_SQL } from './postgres-working-memory-retention-settings-store.mjs';
-import { POSTGRES_SESSION_SCHEMA_SQL, POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL, POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL, POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL, POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL, POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL, POSTGRES_SESSION_SEARCH_SCHEMA_SQL, POSTGRES_SESSION_NATIVE_SCHEMA_SQL } from './postgres-session-store.mjs';
+import { POSTGRES_SESSION_SCHEMA_SQL, POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL, POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL, POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL, POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL, POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL, POSTGRES_SESSION_SEARCH_SCHEMA_SQL, POSTGRES_SESSION_NATIVE_SCHEMA_SQL, POSTGRES_SESSION_METADATA_SCHEMA_SQL } from './postgres-session-store.mjs';
 import { POSTGRES_UI_AUTH_SECRET_SCHEMA_SQL } from './postgres-ui-auth-secret-store.mjs';
 
 // Version 1 and its component SQL are immutable after adoption. Schema changes
@@ -62,4 +62,5 @@ ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS effective_timezone TEXT;` },
   { version: 17, name: 'conversation-search-candidates', sql: POSTGRES_SESSION_SEARCH_SCHEMA_SQL },
   { version: 18, name: 'unified-rolling-continuity', sql: POSTGRES_ROLLING_CONTINUITY_SCHEMA_SQL },
   { version: 19, name: 'native-conversation-archive-payloads', sql: POSTGRES_SESSION_NATIVE_SCHEMA_SQL },
+  { version: 20, name: 'native-conversation-extracted-metadata', sql: POSTGRES_SESSION_METADATA_SCHEMA_SQL },
 ]);

@@ -298,7 +298,129 @@ CREATE VIEW conversation_original_rows AS
 DROP FUNCTION burrow_sync_original_rows();
 `;
 
-export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL;
+// Persist lexical metadata once per payload change. Never cast the original to jsonb.
+export const POSTGRES_SESSION_METADATA_SCHEMA_SQL = `
+-- Extract all required lexical tokens in one byte traversal. First literal key
+-- wins, including JSON null; escaped key spellings intentionally do not match.
+CREATE OR REPLACE FUNCTION burrow_json_metadata(payload json) RETURNS json[]
+LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+DECLARE s bytea := convert_to(payload::text,'UTF8'); i int := 1; n int := octet_length(s);
+ depth int := 0; quoted boolean := false; escaped boolean := false; c int;
+ key_start int := 0; key_text text; slot int := 0; value_start int;
+ nested_key_start int := 0; nested_wanted boolean := false; nested_start int;
+ result json[] := array_fill(NULL::json,ARRAY[7]);
+BEGIN
+ WHILE i <= n LOOP
+  c := get_byte(s,i-1);
+  IF quoted THEN
+   IF escaped THEN escaped := false;
+   ELSIF c = 92 THEN escaped := true;
+   ELSIF c = 34 THEN
+    quoted := false;
+    IF key_start > 0 THEN
+     key_text := convert_from(substring(s FROM key_start FOR i-key_start+1),'UTF8');
+     slot := CASE key_text WHEN '"id"' THEN 1 WHEN '"role"' THEN 2
+      WHEN '"type"' THEN 3 WHEN '"visibility"' THEN 4 WHEN '"content"' THEN 5
+      WHEN '"metadata"' THEN 6 ELSE 0 END;
+     IF slot > 0 AND result[slot] IS NOT NULL THEN slot := 0; END IF;
+     key_start := 0;
+    ELSIF nested_key_start > 0 THEN
+     nested_wanted := convert_from(substring(s FROM nested_key_start FOR i-nested_key_start+1),'UTF8') = '"compressionSummary"' AND result[7] IS NULL;
+     nested_key_start := 0;
+    END IF;
+   END IF;
+  ELSE
+   IF c = 34 THEN
+    quoted := true;
+    IF depth = 1 AND value_start IS NULL THEN key_start := i;
+    ELSIF depth = 2 AND slot = 6 AND nested_start IS NULL THEN nested_key_start := i; END IF;
+   ELSIF c = 58 THEN
+    IF depth = 1 AND slot > 0 THEN value_start := i+1;
+    ELSIF depth = 2 AND slot = 6 AND nested_wanted THEN nested_start := i+1; END IF;
+   ELSIF c IN (123,91) THEN depth := depth+1;
+   ELSIF c IN (125,93) THEN
+    depth := depth-1;
+    IF depth = 1 AND nested_start IS NOT NULL THEN
+     result[7] := convert_from(substring(s FROM nested_start FOR i-nested_start),'UTF8')::json;
+     nested_start := NULL;
+    END IF;
+    IF depth = 0 AND value_start IS NOT NULL THEN
+     result[slot] := convert_from(substring(s FROM value_start FOR i-value_start),'UTF8')::json;
+     value_start := NULL;
+    END IF;
+   ELSIF c = 44 THEN
+    IF depth = 1 THEN
+     IF value_start IS NOT NULL THEN result[slot] := convert_from(substring(s FROM value_start FOR i-value_start),'UTF8')::json; END IF;
+     value_start := NULL; slot := 0; nested_wanted := false;
+    ELSIF depth = 2 AND slot = 6 THEN
+     IF nested_start IS NOT NULL THEN result[7] := convert_from(substring(s FROM nested_start FOR i-nested_start),'UTF8')::json; END IF;
+     nested_start := NULL; nested_wanted := false;
+    END IF;
+   END IF;
+  END IF;
+  i := i+1;
+ END LOOP;
+ RETURN result;
+END $$;
+ALTER TABLE conversation_entries ADD COLUMN entry_key text;
+ALTER TABLE conversation_entries ADD COLUMN search_projection text;
+ALTER TABLE conversation_entries ADD COLUMN has_payload_id boolean;
+ALTER TABLE conversation_entries ADD COLUMN has_compression_summary boolean;
+ALTER TABLE conversation_archive_entries ADD COLUMN has_payload_id boolean;
+ALTER TABLE conversation_archive_entries ADD COLUMN has_compression_summary boolean;
+CREATE OR REPLACE FUNCTION burrow_project_native_metadata() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE tokens json[]; part text[]; grams text[] := ARRAY[]::text[]; k int;
+BEGIN
+ IF TG_OP = 'UPDATE' THEN
+  IF OLD.has_payload_id IS NOT NULL AND NEW.entry::text IS NOT DISTINCT FROM OLD.entry::text THEN
+   NEW.has_payload_id := OLD.has_payload_id;
+   NEW.has_compression_summary := OLD.has_compression_summary;
+   NEW.search_projection := OLD.search_projection;
+   NEW.search_grams := OLD.search_grams;
+   IF TG_TABLE_NAME = 'conversation_entries' THEN
+    IF OLD.has_payload_id THEN NEW.entry_key := OLD.entry_key;
+    ELSE NEW.entry_key := to_json(NEW.entry_id)::text; END IF;
+   ELSE NEW.entry_key := OLD.entry_key; END IF;
+   RETURN NEW;
+  END IF;
+ END IF;
+ tokens := burrow_json_metadata(NEW.entry);
+ NEW.has_payload_id := tokens[1] IS NOT NULL;
+ NEW.entry_key := tokens[1]::text;
+ IF TG_TABLE_NAME = 'conversation_entries' THEN
+  NEW.entry_key := COALESCE(NEW.entry_key,to_json(NEW.entry_id)::text);
+ END IF;
+ NEW.search_projection := COALESCE(tokens[5]::text,'');
+ NEW.has_compression_summary := tokens[7] IS NOT NULL;
+ FOR k IN 1..5 LOOP
+  part := burrow_search_grams(COALESCE(tokens[k]::text,'""'));
+  IF part IS NULL THEN grams := NULL; EXIT; END IF;
+  grams := grams || part;
+ END LOOP;
+ NEW.search_grams := grams;
+ RETURN NEW;
+END $$;
+DROP TRIGGER burrow_native_live_search ON conversation_entries;
+DROP TRIGGER burrow_search_projection ON conversation_archive_entries;
+CREATE TRIGGER burrow_native_metadata BEFORE INSERT OR UPDATE ON conversation_entries
+ FOR EACH ROW EXECUTE FUNCTION burrow_project_native_metadata();
+CREATE TRIGGER burrow_native_metadata BEFORE INSERT OR UPDATE ON conversation_archive_entries
+ FOR EACH ROW EXECUTE FUNCTION burrow_project_native_metadata();
+-- The new columns are NULL, forcing extraction without modifying payload bytes.
+UPDATE conversation_entries SET has_payload_id=NULL;
+UPDATE conversation_archive_entries SET has_payload_id=NULL;
+CREATE OR REPLACE VIEW conversation_original_rows AS
+ SELECT agent_id,session_id,'live'::text AS source_store,sequence::text AS source_id,
+ sequence AS ordinal,entry_key,entry,search_projection,created_at,
+ NULL::text AS archive_kind,NULL::bigint AS generation,search_grams,has_payload_id,has_compression_summary
+ FROM conversation_entries
+ UNION ALL
+ SELECT agent_id,session_id,source_store,source_id,ordinal,entry_key,entry,search_projection,
+ created_at,archive_kind,generation,search_grams,has_payload_id,has_compression_summary
+ FROM conversation_archive_entries;
+`;
+
+export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL;
 
 const text = (value) => String(value ?? '');
 const required = (value, name) => { const result = text(value).trim(); if (!result) throw new Error(`${name} is required`); return result; };
@@ -517,7 +639,7 @@ export class PostgresSessionStore {
   async searchEvidencePage({ agentId, sessionId, query = '', includeResetHistory = false, after = null, limit = 256 } = {}) {
     const terms = [...new Set(query.toLowerCase().match(/[a-z0-9][a-z0-9._-]*/gu)?.filter(t => t.length >= 3) || [])];
     const grams = terms.map(t => [...new Set(Array.from({ length: t.length - 2 }, (_, i) => t.slice(i,i+3)))]);
-    const candidate = grams.length ? `AND (burrow_json_member(burrow_json_member(r.entry,'metadata'),'compressionSummary') IS NOT NULL OR r.search_grams IS NULL OR ${grams.map((_,i) => `r.search_grams @> $${i+7}::text[]`).join(' OR ')})` : '';
+    const candidate = grams.length ? `AND (r.has_compression_summary OR r.search_grams IS NULL OR ${grams.map((_,i) => `r.search_grams @> $${i+7}::text[]`).join(' OR ')})` : '';
     const { rows } = await this.pool.query(`SELECT r.*, (r.archive_kind='reset' OR r.generation <= COALESCE((SELECT max(a.generation) FROM conversation_archives a WHERE a.agent_id=r.agent_id AND a.session_id=r.session_id AND a.kind='reset'),-1) OR (s.metadata->>'resetAt' IS NOT NULL AND r.created_at<=s.metadata->>'resetAt')) AS reset_archive FROM conversation_original_rows r
       JOIN conversation_sessions s USING(agent_id,session_id)
       WHERE r.agent_id=$1 AND r.session_id=$2
@@ -528,7 +650,7 @@ export class PostgresSessionStore {
         AND (s.metadata->>'resetAt' IS NULL OR r.created_at>s.metadata->>'resetAt')))
       AND NOT EXISTS (SELECT 1 FROM conversation_original_rows newer
         WHERE newer.agent_id=r.agent_id AND newer.session_id=r.session_id
-        AND newer.entry_key=r.entry_key AND burrow_json_member(r.entry,'id') IS NOT NULL
+        AND newer.entry_key=r.entry_key AND r.has_payload_id
         AND (newer.source_store>r.source_store OR
           (newer.source_store=r.source_store AND
             (CASE WHEN r.source_store='live' THEN newer.ordinal>r.ordinal ELSE
