@@ -530,12 +530,22 @@ Candidates: ${JSON.stringify(items)}`;
   }
 }
 
+/** Bounded by one caller-owned read phase, never shared with write validation. */
+export function scopedOriginalResolver(resolveOriginal) {
+  const reads = new Map();
+  return ref => {
+    const key = JSON.stringify([ref.agentId, ref.sessionId, ref.entryId]);
+    if (!reads.has(key)) reads.set(key, Promise.resolve().then(() => resolveOriginal(ref)));
+    return reads.get(key);
+  };
+}
+
 /** Reconcile one lossless extracted document against every active scoped record.
  * No generated claim is accepted: the model selects relationships only. */
-export async function reconcileExistingDreamKnowledge({ store, agentId, document, sourceRefs, modelAdapter, modelConfig, traceLogger, onProgress }) {
+export async function reconcileExistingDreamKnowledge({ store, agentId, document, sourceRefs, modelAdapter, modelConfig, traceLogger, onProgress, resolveOriginal = ref => store.resolveOriginal(ref) }) {
   const originals = [];
   for (const ref of sourceRefs) {
-    const entry = await store.resolveOriginal(ref);
+    const entry = await resolveOriginal(ref);
     if (!entry || typeof entry.content !== 'string') throw new Error('dream_albdruck_original_unavailable');
     originals.push({ ref, role: entry.role, content: entry.content });
   }
@@ -569,7 +579,7 @@ Existing: ${JSON.stringify(records)}`;
     for (const row of page.items) {
       sawRecord = true;
       // Include original provenance for existing assertions, never excerpts as authority.
-      const detail = await store.detail({ agentId, id: row.id });
+      const detail = await store.detail({ agentId, id: row.id, resolveOriginal });
       const record = { id: row.id, fingerprint: row.fingerprint, document: row.document, evidence: detail.evidence.filter(item => item.status === 'live_original') };
       if (!fitsPrompt(prompt([...group, record]), modelConfig)) {
         if (!group.length) throw new Error('dream_existing_reconciliation_budget_exceeded');
@@ -642,6 +652,8 @@ async function adjudicatePreferencesAsync({ agentId, profileStore, metadataStore
 
 export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now(), runId: requestedRunId = null, scheduledFor = null, trigger = null, limit = DEFAULT_LIMIT, modelAdapter = null, modelConfig = null, traceLogger = null, stores } = {}) {
   const id = text(agentId); if (!id) throw new Error('dream_cycle_agent_required');
+  // Read-only reconciliation reuse is cycle-local; writes still revalidate authority.
+  const resolveReconciliationOriginal = scopedOriginalResolver(ref => stores.albdruck.resolveOriginal(ref));
   if (!stores) throw new Error('dream_cycle_stores_required');
   const { dreamSettings, profiles: profileStore, dreamDiary: diaryStore, dreamCycles: cycleStore, workingMemory: memoryStore, metadata: metadataStore } = stores || {};
   if (!dreamSettings || !profileStore || !diaryStore || !cycleStore || !memoryStore || !metadataStore) throw new Error('dream_cycle_stores_required');
@@ -710,7 +722,7 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
               refs.push({ kind: 'conversation_entry', agentId: id, sessionId: message.sessionId, entryId: message.entryId });
             }
             await progress({ knowledgeCompleted: albdruckDiagnostics.length });
-            await reconcileExistingDreamKnowledge({ store: stores.albdruck, agentId: id, document: { claim: candidate.content, rationale: candidate.rationale, alternatives: candidate.alternatives, constraints: candidate.constraints, relationships: candidate.relationships }, sourceRefs: refs, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress });
+            await reconcileExistingDreamKnowledge({ store: stores.albdruck, resolveOriginal: resolveReconciliationOriginal, agentId: id, document: { claim: candidate.content, rationale: candidate.rationale, alternatives: candidate.alternatives, constraints: candidate.constraints, relationships: candidate.relationships }, sourceRefs: refs, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress });
             albdruckDiagnostics.push({ operation: 'reinforce', ok: true, sourceRefs: refs });
           } catch (error) {
             // Knowledge maintenance is optional; validation and inactive-record

@@ -210,13 +210,13 @@ export class PostgresAlbdruckStore {
     const items = rows.slice(0,pageSize);
     return { items, nextCursor: hasMore ? items.at(-1).id : null };
   }
-  async detail({ id, agentId, scope = 'agent' }) {
+  async detail({ id, agentId, scope = 'agent', resolveOriginal = this.resolveOriginal }) {
     const { rows: [record] } = await this.pool.query('SELECT * FROM albdruck_knowledge WHERE id=$1 AND scope=$2', [id, scopeKey({agentId,scope})]);
     if (!record) return null;
     const { rows: sources } = await this.pool.query('SELECT source_ref,excerpt FROM albdruck_evidence WHERE knowledge_id=$1 ORDER BY evidence_key', [id]);
     const evidence = [];
     for (const source of sources) {
-      const original = await this.resolveOriginal(source.source_ref);
+      const original = await resolveOriginal(source.source_ref);
       evidence.push({ sourceRef: source.source_ref, status: original ? 'live_original' : source.excerpt ? 'preserved_excerpt' : 'unavailable', content: original?.content ?? (source.excerpt || null) });
     }
     const { rows: revisions } = await this.pool.query('SELECT * FROM albdruck_revisions WHERE knowledge_id=$1 ORDER BY id', [id]);

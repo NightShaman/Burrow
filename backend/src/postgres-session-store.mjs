@@ -60,7 +60,51 @@ ALTER TABLE conversation_archives ALTER COLUMN entries SET DEFAULT '[]'::json;
 
 export const POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL = `CREATE INDEX IF NOT EXISTS conversation_entries_agent_recent_idx ON conversation_entries(agent_id, created_at DESC, sequence DESC);`;
 
-export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL;
+export const POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL = `
+-- Lexical top-level member scanner: no JSON string is decoded into PostgreSQL text.
+CREATE OR REPLACE FUNCTION burrow_json_member(payload json, member text) RETURNS json
+LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+DECLARE s text := payload::text; i int := 1; start_at int;
+ depth int := 0; quoted boolean := false; escaped boolean := false;
+ key_start int := 0; wanted boolean := false; c text;
+BEGIN
+ WHILE i <= length(s) LOOP
+  c := substr(s,i,1);
+  IF quoted THEN
+   IF escaped THEN escaped := false;
+   ELSIF c = chr(92) THEN escaped := true;
+   ELSIF c = '"' THEN
+    quoted := false;
+    IF depth = 1 AND key_start > 0 THEN
+     wanted := substr(s,key_start,i-key_start+1) = to_json(member)::text;
+     key_start := 0;
+    END IF;
+   END IF;
+  ELSE
+   IF c = '"' THEN
+    quoted := true;
+    IF depth = 1 AND start_at IS NULL THEN key_start := i; END IF;
+   ELSIF c = ':' AND depth = 1 THEN
+    IF wanted THEN
+     start_at := i+1;
+     -- Scan the value lexically through the next top-level delimiter.
+    END IF;
+   ELSIF c IN ('{','[') THEN depth := depth+1;
+   ELSIF c IN ('}',']') THEN
+    depth := depth-1;
+    IF depth = 0 AND start_at IS NOT NULL THEN RETURN substr(s,start_at,i-start_at)::json; END IF;
+   ELSIF c = ',' AND depth = 1 THEN
+    IF start_at IS NOT NULL THEN RETURN substr(s,start_at,i-start_at)::json; END IF;
+    wanted := false;
+   END IF;
+  END IF;
+  i := i+1;
+ END LOOP;
+ RETURN NULL;
+END $$;
+`;
+
+export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL;
 
 
 const text = (value) => String(value ?? '');
@@ -168,15 +212,20 @@ export class PostgresSessionStore {
   }
 
   async resolveOriginal({ agentId, sessionId, entryId }) {
-    const { rows } = await this.pool.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND entry_id=$3', [agentId, sessionId, entryId]);
+    const { rows } = entryId.includes('\u0000') ? { rows: [] } : await this.pool.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND entry_id=$3', [agentId, sessionId, entryId]);
     if (rows[0]) return rows[0].entry;
-    // Read original JSON values without SQL JSON extraction (lossless numbers).
+    // Project only lexical JSON IDs: even -> can decode unrelated NUL strings.
+    // Decode IDs in JS, then fetch just the matching lexical JSON element.
+    // Archive ordering and first duplicate within a snapshot match the old scan.
     let before = null;
     for (;;) {
-      const { rows: archives } = await this.pool.query('SELECT archive_id,entries FROM conversation_archives WHERE agent_id=$1 AND session_id=$2 AND ($3::text IS NULL OR archive_id<$3) ORDER BY archive_id DESC LIMIT 64', [agentId, sessionId, before]);
+      const { rows: archives } = await this.pool.query(`SELECT archive_id, (SELECT json_agg(burrow_json_member(value,'id') ORDER BY ordinal) FROM json_array_elements(entries) WITH ORDINALITY AS e(value,ordinal)) AS entry_ids FROM conversation_archives WHERE agent_id=$1 AND session_id=$2 AND ($3::text IS NULL OR archive_id<$3) ORDER BY archive_id DESC LIMIT 64`, [agentId, sessionId, before]);
       for (const archive of archives) {
-        const entry = (archive.entries || []).find(value => value.id === entryId);
-        if (entry) return entry;
+        const index = (archive.entry_ids || []).findIndex(id => id === entryId);
+        if (index !== -1) {
+          const result = await this.pool.query('SELECT (SELECT value FROM json_array_elements(entries) WITH ORDINALITY AS e(value,ordinal) WHERE ordinal=$4::int+1) AS entry FROM conversation_archives WHERE agent_id=$1 AND session_id=$2 AND archive_id=$3', [agentId, sessionId, archive.archive_id, index]);
+          if (result.rows[0]) return result.rows[0].entry;
+        }
       }
       if (archives.length < 64) return null;
       before = archives.at(-1).archive_id;
