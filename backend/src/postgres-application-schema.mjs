@@ -1,3 +1,4 @@
+import { POSTGRES_ROLLING_CONTINUITY_SCHEMA_SQL } from './postgres-rolling-continuity-store.mjs';
 import { POSTGRES_DREAM_EXTRACTION_SCHEMA_SQL } from './postgres-dream-extraction-store.mjs';
 import { POSTGRES_ALBDRUCK_SCHEMA_SQL } from './postgres-albdruck-store.mjs';
 import { POSTGRES_MOD_DISTRIBUTION_SCHEMA_SQL } from './postgres-mod-distribution-repository.mjs';
@@ -59,4 +60,5 @@ ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS effective_timezone TEXT;` },
   { version: 15, name: 'lexical-original-lookup', sql: POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL },
   { version: 16, name: 'original-occurrence-rows', sql: POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL },
   { version: 17, name: 'conversation-search-candidates', sql: POSTGRES_SESSION_SEARCH_SCHEMA_SQL },
+  { version: 18, name: 'unified-rolling-continuity', sql: POSTGRES_ROLLING_CONTINUITY_SCHEMA_SQL },
 ]);

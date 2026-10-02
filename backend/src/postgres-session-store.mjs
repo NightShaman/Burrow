@@ -330,7 +330,9 @@ export class PostgresSessionStore {
     const originals = new Map();
     const consider = (row, entry, provenance) => {
       if (entry?.type !== 'message' || entry.metadata?.compressionSummary || !['user','assistant','agent'].includes(entry.role) || typeof entry.content !== 'string') return;
-      const entryId = entry.id || row.entry_id;
+      // The indexed authority carries generated identity separately from original
+      // JSON. Do not inject it into entry: exports must retain original bytes.
+      const entryId = entry.id || (row.entry_key ? JSON.parse(row.entry_key) : null);
       if (typeof entryId !== 'string' || !entryId) return;
       const key = [row.agent_id, row.session_id, entryId];
       if ((after && compare(key, after) <= 0) || !matchesQuery(entry, query.trim())) return;

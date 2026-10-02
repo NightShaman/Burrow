@@ -1,4 +1,5 @@
 import { runSync, runAsync, tiddlePersistence } from './tiddle-persistence.mjs';
+import { rollingCardActive } from './postgres-rolling-continuity-store.mjs';
 import { randomUUID } from 'node:crypto';
 import { completeCurator, curatorRoot, readCuratorSelection } from './curator-runtime.mjs';
 import { appendPreferenceSignal, appendPreferenceSignalAsync, normalizePreferenceSignal } from './preference-learning.mjs';
@@ -8,9 +9,9 @@ const LOOKBACK_MS = 24 * 60 * 60 * 1_000;
 const SYNTHESIS_WINDOW_MS = 21 * 24 * 60 * 60 * 1_000;
 const MAX_SYNTHESIS_CANDIDATES = 120;
 const GLOBAL_SCOPE = 'global';
-const CARD_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+
 const MAX_RESIDUE = 240;
-const MAX_CARDS = 100;
+
 export const TIDDLE_HISTORY_RETENTION_DAYS = 180;
 const HISTORY_RETENTION_MS = TIDDLE_HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1_000;
 
@@ -31,7 +32,7 @@ function* meta(db, key, fallback = null) { return (yield () => db.get(key)) ?? f
 function* setMeta(db, key, value, at) { return yield () => db.set(key, value, at); }
 function* activeCards(db, agentId, scope, at) {
   const value = yield* meta(db, cardKey(agentId, scope), { cards: [] });
-  return (Array.isArray(value?.cards) ? value.cards : []).filter((card) => !card.expiresAt || card.expiresAt >= at);
+  return (Array.isArray(value?.cards) ? value.cards : []).filter((card) => rollingCardActive(card, at));
 }
 function* appendHistory(db, { agentId, entry, at }) {
   const current = yield* meta(db, historyKey(agentId), { version: 1, agentId, entries: [] });
@@ -172,8 +173,8 @@ function* upsertGlobalCluster(db, { agentId, cluster, at }) {
   const id = existing?.id || `warm-global:${randomUUID()}`;
   const sourceCardIds = [...new Set([...(existing?.sourceCardIds || []), ...cluster.sourceCardIds])].slice(-100);
   const scopes = [...new Set([...(existing?.scopes || []), ...cluster.scopes])];
-  const card = { id, agentId, project: GLOBAL_SCOPE, title: cluster.title, summary: cluster.summary, firstSeen: existing?.firstSeen || at, lastSeen: at, recurrence: Number(existing?.recurrence || 0) + 1, sourceCardIds, scopes, confidence: cluster.confidence, evidence: 'cross-scope-synthesis', reason: bounded(cluster.reason, 240), expiresAt: iso(new Date(new Date(at).getTime() + CARD_TTL_MS)) };
-  yield* setMeta(db, globalCardKey(agentId), { version: 1, agentId, project: GLOBAL_SCOPE, cards: [card, ...cards.filter((entry) => entry.id !== id)].slice(0, MAX_CARDS), updatedAt: at }, at);
+  const card = { id, agentId, project: GLOBAL_SCOPE, title: cluster.title, summary: cluster.summary, firstSeen: existing?.firstSeen || at, lastSeen: at, recurrence: Number(existing?.recurrence || 0) + 1, sourceCardIds, scopes, confidence: cluster.confidence, evidence: 'cross-scope-synthesis', reason: bounded(cluster.reason, 240), expiresAt: iso(new Date(new Date(at).getTime() + (yield () => db.rollingTtlDays()) * 24 * 60 * 60 * 1000)) };
+  yield* setMeta(db, globalCardKey(agentId), { version: 1, agentId, project: GLOBAL_SCOPE, cards: [card, ...cards.filter((entry) => entry.id !== id)], updatedAt: at }, at);
   return { card, prior: existing || null };
 }
 
@@ -204,8 +205,8 @@ function* upsertCard(db, { agentId, scope, proposal, residue, at }) {
   if (proposal.targetId && !existing) throw new Error('tiddle_card_target_invalid');
   const id = existing?.id || `warm:${randomUUID()}`;
   const refs = [...new Set([...(existing?.recentRefs || []), ...residue.map((item) => item.ref)])].slice(-20);
-  const card = { id, agentId, project: scope, title: proposal.title, summary: proposal.summary, firstSeen: existing?.firstSeen || at, lastSeen: at, recurrence: Number(existing?.recurrence || 0) + 1, recentRefs: refs, evidence: 'windowed-conversation', reason: proposal.reason, expiresAt: iso(new Date(at).getTime() + CARD_TTL_MS) };
-  yield* setMeta(db, cardKey(agentId, scope), { version: 1, agentId, project: scope, cards: [card, ...cards.filter((entry) => entry.id !== id)].slice(0, MAX_CARDS), updatedAt: at }, at);
+  const card = { id, agentId, project: scope, title: proposal.title, summary: proposal.summary, firstSeen: existing?.firstSeen || at, lastSeen: at, recurrence: Number(existing?.recurrence || 0) + 1, recentRefs: refs, evidence: 'windowed-conversation', reason: proposal.reason, expiresAt: iso(new Date(at).getTime() + (yield () => db.rollingTtlDays()) * 24 * 60 * 60 * 1000) };
+  yield* setMeta(db, cardKey(agentId, scope), { version: 1, agentId, project: scope, cards: [card, ...cards.filter((entry) => entry.id !== id)], updatedAt: at }, at);
   return { card, prior: existing || null };
 }
 
@@ -277,7 +278,7 @@ function* listTiddleCardsOperation({ agentId, scope = null, stores = null, limit
   try {
     const keys = scope ? [cardKey(id, text(scope))] : (yield () => db.rows(`rolling-continuity:${id}:`)).map((row) => row.key);
     const allCards = []; for (const key of keys) allCards.push(...((yield* meta(db, key, { cards: [] }))?.cards || []));
-    const cards = allCards.filter((card) => !card.expiresAt || card.expiresAt >= at).sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen))).slice(0, limit === null ? undefined : Math.max(1, Math.min(500, Number(limit) || 100)));
+    const cards = allCards.filter((card) => rollingCardActive(card, at)).sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen))).slice(0, limit === null ? undefined : Math.max(1, Math.min(500, Number(limit) || 100)));
     return { ok: true, agentId: id, scope: text(scope) || null, cards };
   } finally { db.close(); }
 }

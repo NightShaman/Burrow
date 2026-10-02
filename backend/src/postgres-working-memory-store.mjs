@@ -1,3 +1,4 @@
+import { readRollingCards, writeRollingCard, rollingCardActive } from './postgres-rolling-continuity-store.mjs';
 import { createHash } from "node:crypto";
 import {
   closePostgresPool,
@@ -469,10 +470,9 @@ export class PostgresWorkingMemoryStore {
     if (text(content || "").length > MAX_COMPACT_CONTENT_CHARS)
       throw Error("rolling_continuity_summary_too_large");
     return withPostgresTransaction(this.pool, async (c) => {
-      const key = `rolling-continuity:${agentId}:${project}`;
-      await c.query("SELECT pg_advisory_xact_lock(hashtext($1))", [key]);
-      const v = await this.metaGet(key, c),
-        cards = v?.cards || [],
+      await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`tiddle:${agentId}`]);
+      const v = { cards: await readRollingCards(c, agentId, project) },
+        cards = (v?.cards || []).filter(card => rollingCardActive(card, this.clock())),
         refs = sourceRefs.map(text).filter(Boolean),
         existing =
           cards.find((x) => sharedRefs(x.recentRefs, refs)) ||
@@ -500,24 +500,10 @@ export class PostgresWorkingMemoryStore {
           ].slice(-20),
           evidence: bounded(evidence, 80),
           reason: bounded(reason, 360) || null,
-          expiresAt: expiry(ttlDays ?? this.retention.rollingContinuityTtlDays),
+          expiresAt: new Date(new Date(stamp).getTime() + Math.max(1, Number(ttlDays ?? (typeof this.retentionSource === "function" ? (await this.retentionSource()).rollingContinuityTtlDays : this.retention.rollingContinuityTtlDays)) || DEFAULT_RETENTION.rollingContinuityTtlDays) * 86400000).toISOString(),
         };
-      return this.metaSet(
-        key,
-        {
-          version: 1,
-          agentId,
-          project,
-          cards: [
-            card,
-            ...cards.filter(
-              (x) => x.id !== card.id && (!x.expiresAt || x.expiresAt >= stamp),
-            ),
-          ].slice(0, 100),
-          updatedAt: stamp,
-        },
-        c,
-      ).then(() => card);
+      await writeRollingCard(c, card, stamp);
+      return card;
     });
   }
   async listRollingContinuityCards({
@@ -529,28 +515,23 @@ export class PostgresWorkingMemoryStore {
     if (!text(agentId)) return [];
     if (!text(project))
       return this.listAllRollingContinuityCards({ agentId, limit });
-    const v = await this.metaGet(`rolling-continuity:${agentId}:${project}`);
+    const v = { cards: await readRollingCards(this.pool, agentId, project) };
     return (v?.cards || [])
-      .filter((x) => !x.expiresAt || x.expiresAt >= this.clock())
+      .filter((x) => rollingCardActive(x, this.clock()))
       .sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen)))
-      .slice(0, clamp(limit, 1, 100, 20));
+      .slice(0, clamp(limit, 1, Number.MAX_SAFE_INTEGER, 20));
   }
   async listAllRollingContinuityCards({ agentId, limit = 20 } = {}) {
     await this.ready();
     if (!text(agentId)) return [];
-    const q = await this.pool.query(
-      "SELECT value_json FROM working_memory_meta WHERE key LIKE $1",
-      [`rolling-continuity:${agentId}:%`],
-    );
-    return q.rows
-      .flatMap((x) => parse(x.value_json)?.cards || [])
+    return (await readRollingCards(this.pool, agentId))
       .filter(
         (x) =>
           x.agentId === text(agentId) &&
-          (!x.expiresAt || x.expiresAt >= this.clock()),
+          (rollingCardActive(x, this.clock())),
       )
       .sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen)))
-      .slice(0, clamp(limit, 1, 100, 20));
+      .slice(0, clamp(limit, 1, Number.MAX_SAFE_INTEGER, 20));
   }
   async searchRollingContinuityCards({
     agentId,
@@ -564,7 +545,7 @@ export class PostgresWorkingMemoryStore {
       .split(/[^a-z0-9_-]+/u)
       .filter((token) => token.length >= 2);
     return (
-      await this.listRollingContinuityCards({ agentId, project, limit: 100 })
+      await this.listRollingContinuityCards({ agentId, project, limit: Number.MAX_SAFE_INTEGER })
     )
       .map((card) => {
         const haystack =
