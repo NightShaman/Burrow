@@ -1,3 +1,4 @@
+import { POSTGRES_HISTORY_KEYSET_SQL } from './postgres-history-keyset.mjs';
 import { POSTGRES_RESET_INSTANT_SQL } from './postgres-reset-instant.mjs';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { POSTGRES_CONTINUITY_STATE_SCHEMA_SQL } from './postgres-continuity-state-store.mjs';
@@ -501,7 +502,7 @@ UPDATE conversation_entries SET has_payload_id=NULL;
 UPDATE conversation_archive_entries SET has_payload_id=NULL;
 `;
 
-export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL + POSTGRES_RESET_INSTANT_SQL;
+export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL + POSTGRES_RESET_INSTANT_SQL + POSTGRES_HISTORY_KEYSET_SQL;
 
 const text = (value) => String(value ?? '');
 const required = (value, name) => { const result = text(value).trim(); if (!result) throw new Error(`${name} is required`); return result; };
@@ -549,7 +550,7 @@ export class PostgresSessionStore {
   async close() { await closeContinuityOwners(this.pool); if (this.ownsPool) await closePostgresPool(this.pool); }
 
   /** Original JSON is decoded in JS: SQL JSON extraction is not lossless for NUL. */
-  async history({ agentId, scope = 'agent', query, cursor = '', pageSize = Math.min(50, resolveAlbdruckConfig().maxPageSize) } = {}) {
+  async history({ agentId, scope = 'agent', query, cursor = '', signal, pageSize = Math.min(50, resolveAlbdruckConfig().maxPageSize) } = {}) {
     if (!['agent', 'global'].includes(scope) || (scope === 'agent' && (typeof agentId !== 'string' || !agentId.trim()))) throw new Error('albdruck_scope_invalid');
     if (typeof query !== 'string' || !query.trim()) throw new Error('albdruck_query_required');
     if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > resolveAlbdruckConfig().maxPageSize) throw new Error('albdruck_page_size_invalid');
@@ -562,62 +563,72 @@ export class PostgresSessionStore {
         after = value.key;
       } catch { throw new Error('albdruck_cursor_invalid'); }
     } else if (typeof cursor !== 'string') throw new Error('albdruck_cursor_invalid');
-    const compare = (a, b) => { for (let i = 0; i < 3; i++) { if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; } return 0; };
-    const originals = new Map();
-    const consider = (row, entry, provenance) => {
+    signal?.throwIfAborted();
+    const originals = [];
+    const sortKey = value => Array.from({ length: value.length }, (_, i) => value.charCodeAt(i).toString(16).padStart(4, '0')).join('');
+    const consider = row => {
+      const entry = row.entry;
       if (entry?.type !== 'message' || entry.metadata?.compressionSummary || !['user','assistant','agent'].includes(entry.role) || typeof entry.content !== 'string') return;
-      // The indexed authority carries generated identity separately from original
-      // JSON. Do not inject it into entry: exports must retain original bytes.
       const entryId = entry.id || (row.entry_key ? JSON.parse(row.entry_key) : null);
-      if (typeof entryId !== 'string' || !entryId) return;
-      const key = [row.agent_id, row.session_id, entryId];
-      if ((after && compare(key, after) <= 0) || !matchesQuery(entry, query.trim())) return;
-      const id = JSON.stringify(key);
-      if (!originals.has(id) || provenance.store === 'live' || originals.get(id).item.provenance.store !== 'live') originals.set(id, { key, item: {
+      if (typeof entryId !== 'string' || !entryId || !matchesQuery(entry, query.trim())) return;
+      originals.push({ key: [row.agent_id, row.session_id, entryId], item: {
         agentId: row.agent_id, sessionId: row.session_id, entryId,
         timestamp: entry.timestamp ?? row.created_at, role: entry.role, content: entry.content,
         sourceRef: { kind: 'conversation_entry', agentId: row.agent_id, sessionId: row.session_id, entryId },
-        provenance,
+        provenance: row.source_store === 'live' ? { store: 'live', reset: false } :
+          { store: 'archive', reset: row.archive_kind === 'reset', archiveId: row.source_id,
+            kind: row.archive_kind, generation: Number(row.generation), archivedAt: row.created_at },
       } });
-      // Retain only the smallest page plus lookahead while scanning authority.
-      if (originals.size > pageSize + 1) {
-        const largest = [...originals.entries()].reduce((a,b) => compare(a[1].key,b[1].key) > 0 ? a : b);
-        originals.delete(largest[0]);
-      }
     };
     const terms = [...new Set(query.toLowerCase().match(/[a-z0-9][a-z0-9._-]*/gu)?.filter(t => t.length >= 3) || [])];
     // OR is intentionally broader than the two-term coverage rule; exact phrase
     // and cross-field matches must not be lost. Final matchesQuery removes noise.
     const grams = terms.map(term => [...new Set(Array.from({ length: term.length - 2 }, (_, i) => term.slice(i, i + 3)))]);
-    const candidate = grams.length ? `AND (search_grams IS NULL OR ${grams.map((_, i) => `search_grams @> $${i + 7}::text[]`).join(' OR ')})` : '';
+    const candidate = grams.length ? `AND (search_grams IS NULL OR ${grams.map((_, i) => `search_grams @> $${i + 5}::text[]`).join(' OR ')})` : '';
     // One repeatable-read snapshot keeps reset/compaction from hiding a turn during scanning.
     return withPostgresTransaction(this.pool, async client => {
-      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-      let position = null;
-      for (;;) {
-        const { rows } = await client.query(`SELECT * FROM conversation_original_rows r
-          WHERE ($1::text IS NULL OR agent_id=$1)
-          AND ($2::text IS NULL OR (agent_id,session_id,source_store,source_id,ordinal)>($2,$3,$4,$5,$6::bigint))
-          ${candidate}
-          AND NOT EXISTS (SELECT 1 FROM conversation_original_rows newer
-            WHERE newer.agent_id=r.agent_id AND newer.session_id=r.session_id AND newer.entry_key=r.entry_key
-            AND (newer.source_store>r.source_store OR
-              (newer.source_store=r.source_store AND
-                (CASE WHEN r.source_store='live' THEN newer.ordinal>r.ordinal ELSE
-                  newer.source_id>r.source_id OR (newer.source_id=r.source_id AND newer.ordinal<r.ordinal) END))))
-          ORDER BY agent_id,session_id,source_store,source_id,ordinal LIMIT 256`,
-        [scope === 'agent' ? agentId : null, ...(position || [null,null,null,null,null]), ...grams]);
-        for (const row of rows) consider(row, row.entry, row.source_store === 'live'
-          ? { store: 'live', reset: false }
-          : { store: 'archive', reset: row.archive_kind === 'reset', archiveId: row.source_id,
-            kind: row.archive_kind, generation: Number(row.generation), archivedAt: row.created_at });
-        if (rows.length < 256) break;
-        const last = rows.at(-1);
-        position = [last.agent_id,last.session_id,last.source_store,last.source_id,String(last.ordinal)];
-      }
-      const ordered = [...originals.values()].sort((a,b) => compare(a.key,b.key));
-      const page = ordered.slice(0,pageSize);
-      return { items: page.map(x => x.item), nextCursor: ordered.length > pageSize ? Buffer.from(JSON.stringify({ v: 1, binding, key: page.at(-1).key })).toString('base64url') : null };
+      signal?.throwIfAborted();
+      // Disconnecting the dedicated transaction socket cancels active server work
+      // without requiring a second pool connection (which may itself be exhausted).
+      const abort = () => { void client.end?.(); };
+      signal?.addEventListener('abort', abort, { once: true });
+      try {
+        await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+        let position = after?.map(sortKey) || null;
+        for (;;) {
+          signal?.throwIfAborted();
+          const branch = store => `SELECT r.agent_id,r.session_id,'${store}'::text AS source_store,
+            ${store === 'live' ? "r.sequence::text AS source_id,r.sequence AS ordinal,r.entry_key,r.entry,r.search_projection,r.created_at,NULL::text AS archive_kind,NULL::bigint AS generation,r.search_grams" : "r.source_id,r.ordinal,r.entry_key,r.entry,r.search_projection,r.created_at,r.archive_kind,r.generation,r.search_grams"}
+            FROM ${store === 'live' ? 'conversation_entries' : 'conversation_archive_entries'} r
+            WHERE ($1::text IS NULL OR agent_id=$1)
+            AND ($2::text IS NULL OR
+              (burrow_history_text(agent_id) COLLATE "C",burrow_history_text(session_id) COLLATE "C",burrow_history_key(entry_key) COLLATE "C") > ($2,$3,$4))
+            AND burrow_history_key(entry_key) IS NOT NULL
+            ${candidate}
+            AND NOT EXISTS (SELECT 1 FROM conversation_original_rows newer
+              WHERE newer.agent_id=r.agent_id AND newer.session_id=r.session_id AND newer.entry_key=r.entry_key
+              AND (newer.source_store>'${store}' OR
+                (newer.source_store='${store}' AND
+                  (CASE WHEN '${store}'='live' THEN newer.ordinal>${store === 'live' ? 'r.sequence' : 'r.ordinal'} ELSE
+                    newer.generation>${store === 'live' ? 'NULL::bigint' : 'r.generation'} OR (newer.generation=${store === 'live' ? 'NULL::bigint' : 'r.generation'} AND
+                      (newer.source_id>${store === 'live' ? 'r.sequence::text' : 'r.source_id'} OR (newer.source_id=${store === 'live' ? 'r.sequence::text' : 'r.source_id'} AND newer.ordinal<${store === 'live' ? 'r.sequence' : 'r.ordinal'}))) END))))
+            ORDER BY burrow_history_text(agent_id) COLLATE "C",burrow_history_text(session_id) COLLATE "C",burrow_history_key(entry_key) COLLATE "C" LIMIT 256`;
+          const order = `burrow_history_text(agent_id) COLLATE "C",burrow_history_text(session_id) COLLATE "C",burrow_history_key(entry_key) COLLATE "C"`;
+          const { rows } = await client.query(`SELECT * FROM ((${branch('live')}) UNION ALL (${branch('archive')})) candidates ORDER BY ${order} LIMIT 256`,
+          [scope === 'agent' ? agentId : null, ...(position || [null,null,null]), ...grams]);
+          for (const row of rows) {
+            signal?.throwIfAborted();
+            consider(row);
+            if (originals.length > pageSize) break;
+          }
+          if (originals.length > pageSize || rows.length < 256) break;
+          const last = rows.at(-1);
+          position = [last.agent_id,last.session_id,JSON.parse(last.entry_key)].map(sortKey);
+        }
+        const ordered = originals;
+        const page = ordered.slice(0,pageSize);
+        return { items: page.map(x => x.item), nextCursor: ordered.length > pageSize ? Buffer.from(JSON.stringify({ v: 1, binding, key: page.at(-1).key })).toString('base64url') : null };
+      } finally { signal?.removeEventListener('abort', abort); }
     });
   }
 

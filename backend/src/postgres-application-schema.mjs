@@ -1,3 +1,4 @@
+import { POSTGRES_HISTORY_KEYSET_SQL } from './postgres-history-keyset.mjs';
 import { POSTGRES_RESET_INSTANT_SQL } from './postgres-reset-instant.mjs';
 import { POSTGRES_REQUIRED_TIMESTAMPS_SQL } from './postgres-required-timestamps.mjs';
 import { POSTGRES_NATIVE_TIMESTAMPS_SQL } from './postgres-native-timestamps.mjs';
@@ -93,4 +94,5 @@ ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS effective_timezone TEXT;` },
   { version: 34, name: 'native-timestamps-and-agent-identities', sql: POSTGRES_NATIVE_TIMESTAMPS_SQL },
   { version: 35, name: 'restore-required-instant-contracts', sql: POSTGRES_REQUIRED_TIMESTAMPS_SQL },
   { version: 36, name: 'safe-session-reset-instant', sql: POSTGRES_RESET_INSTANT_SQL },
+  { version: 37, name: 'history-keyset-order-and-precedence', sql: POSTGRES_HISTORY_KEYSET_SQL },
 ]);
