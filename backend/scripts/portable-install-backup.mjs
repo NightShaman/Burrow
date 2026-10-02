@@ -82,10 +82,38 @@ async function archiveEntries(archive, runTar) {
   return entries;
 }
 
+// Validate before any manifest read, environment write, integration removal, or chown.
+// Relative links within the install remain portable; external/absolute links do not.
+async function validateRestoredTree(root) {
+  const rootStat = await fs.lstat(root);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('unsafe restore root');
+  const controls = new Set([MANIFEST, 'burrow.env', 'integrations', 'integrations/mcporter', 'integrations/claude-code']);
+  const inside = (target) => target === root || target.startsWith(`${root}${path.sep}`);
+  const walk = async (current) => {
+    const stat = await fs.lstat(current);
+    const relative = path.relative(root, current);
+    if (stat.isSymbolicLink()) {
+      const link = await fs.readlink(current);
+      if (controls.has(relative) || path.isAbsolute(link) || !inside(path.resolve(path.dirname(current), link))) {
+        throw new Error(`unsafe restore link: ${relative}`);
+      }
+      let resolved;
+      try { resolved = await fs.realpath(current); }
+      catch { throw new Error(`unsafe restore unresolved link: ${relative}`); }
+      if (!inside(resolved)) throw new Error(`unsafe restore link: ${relative}`);
+    } else if (stat.isDirectory()) {
+      for (const entry of await fs.readdir(current)) await walk(path.join(current, entry));
+    } else if (!stat.isFile() || stat.nlink > 1) {
+      throw new Error(`unsafe restore special or hard-linked file: ${relative}`);
+    }
+  };
+  await walk(root);
+}
+
 async function applyOwnership(root, owner) {
   const walk = async (current) => {
     const stat = await fs.lstat(current);
-    await fs.chown(current, owner.uid, owner.gid);
+    await fs.lchown(current, owner.uid, owner.gid);
     if (stat.isDirectory()) for (const entry of await fs.readdir(current)) await walk(path.join(current, entry));
   };
   await walk(root);
@@ -149,6 +177,7 @@ export async function restorePortableInstall({ archive, home = process.env.HOME 
   try {
     await runTar('tar', ['-xzf', plan.archive, '-C', staging, '--no-same-owner', '--same-permissions'], { timeout: 300_000 });
     const stagedRoot = path.join(staging, ARCHIVE_ROOT);
+    await validateRestoredTree(stagedRoot);
     const manifestPath = path.join(stagedRoot, MANIFEST);
     if (!await exists(manifestPath)) throw new Error('archive is missing portable install manifest');
     const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
