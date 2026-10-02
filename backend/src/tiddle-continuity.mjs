@@ -10,7 +10,7 @@ const SYNTHESIS_WINDOW_MS = 21 * 24 * 60 * 60 * 1_000;
 const MAX_SYNTHESIS_CANDIDATES = 120;
 const GLOBAL_SCOPE = 'global';
 
-const MAX_RESIDUE = 240;
+
 
 export const TIDDLE_HISTORY_RETENTION_DAYS = 180;
 const HISTORY_RETENTION_MS = TIDDLE_HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1_000;
@@ -35,10 +35,8 @@ function* activeCards(db, agentId, scope, at) {
   return (Array.isArray(value?.cards) ? value.cards : []).filter((card) => rollingCardActive(card, at));
 }
 function* appendHistory(db, { agentId, entry, at }) {
-  const current = yield* meta(db, historyKey(agentId), { version: 1, agentId, entries: [] });
   const cutoff = iso(new Date(at).getTime() - HISTORY_RETENTION_MS);
-  const entries = [entry, ...(Array.isArray(current?.entries) ? current.entries : []).filter((item) => item?.at >= cutoff)];
-  yield* setMeta(db, historyKey(agentId), { version: 1, agentId, entries, updatedAt: at }, at);
+  yield () => db.append(historyKey(agentId), entry, { version: 1, agentId, updatedAt: at }, at, cutoff);
   return entry;
 }
 async function commitScopePass(db, { agentId, scope, at, entry, cardUpdate = null }) {
@@ -73,7 +71,7 @@ function residueUpdate(current, { agentId, scope, sessionId, conversationId, run
       tools: (Array.isArray(toolResults) ? toolResults : []).filter((tool) => tool?.ok === true).slice(0, 8).map((tool) => ({ tool: bounded(tool.tool, 120), path: bounded(tool.filePath || tool.path, 240) || null, command: bounded(tool.command, 240) || null })),
     };
     const cutoff = iso(new Date(at).getTime() - LOOKBACK_MS);
-    const items = [item, ...(Array.isArray(current?.items) ? current.items : []).filter((entry) => entry?.at >= cutoff && entry?.ref !== item.ref)].slice(0, MAX_RESIDUE);
+    const items = [item, ...(Array.isArray(current?.items) ? current.items : []).filter((entry) => entry?.at >= cutoff && entry?.ref !== item.ref)];
     return { item, value: { version: 1, agentId: text(agentId), items, updatedAt: at } };
 }
 
@@ -83,11 +81,7 @@ export async function appendTiddleResidueAsync({ metadataStore, ...input } = {})
   const { agentId, scope, sessionId, runId, answerText } = input;
   if (!text(agentId) || !text(scope) || !text(sessionId) || !text(runId) || !text(answerText)) return null;
   const at = input.at || iso();
-  let item;
-  await metadataStore.atomicUpdate(residueKey(agentId), current => {
-    const update = residueUpdate(current, { ...input, at }); item = update.item; return update.value;
-  }, at);
-  return item;
+  return runAsync(appendTiddleResidueOperation({ ...input, at, stores: { ...input.stores, metadata: metadataStore } }));
 }
 
 /** Cheap terminal residue only: no model call, no warm-card mutation. */
@@ -95,9 +89,8 @@ function* appendTiddleResidueOperation({ stores = null, agentId, scope, sessionI
   if (!text(agentId) || !text(scope) || !text(sessionId) || !text(runId) || !text(answerText)) return null;
   const db = tiddlePersistence({ stores });
   try {
-    const current = (yield* meta(db, residueKey(agentId), { version: 1, agentId, items: [] }));
-    const { item, value } = residueUpdate(current, { agentId, scope, sessionId, conversationId, runId, message, answerText, toolResults, at });
-    yield* setMeta(db, residueKey(agentId), value, at);
+    const { item } = residueUpdate(null, { agentId, scope, sessionId, conversationId, runId, message, answerText, toolResults, at });
+    yield () => db.transaction(agentId, function* (tx) { yield () => tx.append(residueKey(agentId), item, { version: 1, agentId, updatedAt: at }, at, iso(new Date(at).getTime() - LOOKBACK_MS)); });
     return item;
   } finally { db.close(); }
 }
@@ -308,7 +301,7 @@ function* listDueTiddlePassesOperation({ stores = null, at = iso() } = {}) {
   if (!stores?.agents) throw new Error('tiddle_agent_store_required');
   const agents = stores.agents;
   const db = tiddlePersistence({ stores });
-  try { const due = []; for (const agent of (yield () => agents.list({ includeDisabled: false }))) { const state = yield* meta(db, passKey(agent.id), {}); if (!state.nextRunAt || state.nextRunAt <= at) due.push(agent); } return due; }
+  try { const ids = new Set(yield () => db.dueIds(at)); return (yield () => agents.list({ includeDisabled: false })).filter(agent => ids.has(agent.id)); }
   finally { db.close(); if (!stores?.agents) agents.close(); }
 }
 
@@ -348,7 +341,3 @@ export function tiddleHistory(options = {}) { return (options.stores?.metadata ?
 export function tiddleStatus(options = {}) { return (options.stores?.metadata ? runAsync : runSync)(tiddleStatusOperation(options)); }
 
 export function listDueTiddlePasses(options = {}) { return (options.stores?.metadata ? runAsync : runSync)(listDueTiddlePassesOperation(options)); }
-
-export function upsertTiddleCard(db, input) {
-  return runSync(upsertCard({ get: key => parse(db.prepare('SELECT value_json FROM settings_meta WHERE key=?').get(key)?.value_json), set: (key,value,at) => db.prepare('INSERT INTO settings_meta(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at').run(key,JSON.stringify(value),at) }, input));
-}

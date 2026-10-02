@@ -1,3 +1,4 @@
+import { isTiddleKey, readTiddle, writeTiddle } from './postgres-tiddle-store.mjs';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 
 export const POSTGRES_SETTINGS_METADATA_SCHEMA_SQL = `
@@ -20,12 +21,14 @@ export class PostgresSettingsMetadataStore {
   }
   async close() { if (this.ownsPool) await closePostgresPool(this.pool); }
   async get(key) {
+    if (isTiddleKey(key)) return readTiddle(this.pool,key);
     const result = await this.pool.query('SELECT value_json FROM settings_meta WHERE key=$1', [String(key)]);
     if (!result.rows[0]) return null;
     try { return JSON.parse(result.rows[0].value_json); } catch { return null; }
   }
   /** Serialize metadata read/modify/write, including the first insertion. */
   async atomicUpdate(key, update, at = this.clock()) {
+    if (isTiddleKey(key)) throw new Error('tiddle_native_writer_required');
     const id = String(key);
     return withPostgresTransaction(this.pool, async (client) => {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`settings-meta:${id}`]);
@@ -39,6 +42,7 @@ export class PostgresSettingsMetadataStore {
     });
   }
   async set(key, value) {
+    if (isTiddleKey(key)) { await writeTiddle(this.pool,key,value,this.clock()); return value; }
     const valueJson = JSON.stringify(value);
     await this.pool.query(`INSERT INTO settings_meta(key,value_json,updated_at) VALUES($1,$2,$3)
       ON CONFLICT(key) DO UPDATE SET value_json=EXCLUDED.value_json,updated_at=EXCLUDED.updated_at`, [String(key), valueJson, this.clock()]);

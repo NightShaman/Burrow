@@ -1,3 +1,8 @@
+import { POSTGRES_TIDDLE_SCHEMA_SQL } from './postgres-tiddle-store.mjs';
+import { POSTGRES_DREAM_STATE_SCHEMA_SQL } from './postgres-dream-state-schema.mjs';
+import { POSTGRES_MCP_PROVIDER_STATE_SCHEMA_SQL } from './postgres-mcp-provider-state-store.mjs';
+import { POSTGRES_CONTINUITY_STATE_SCHEMA_SQL } from './postgres-continuity-state-store.mjs';
+import { POSTGRES_FORGE_NATIVE_SCHEMA_SQL } from './postgres-forge-native-schema.mjs';
 import { POSTGRES_ROLLING_CONTINUITY_SCHEMA_SQL } from './postgres-rolling-continuity-store.mjs';
 import { POSTGRES_DREAM_EXTRACTION_SCHEMA_SQL } from './postgres-dream-extraction-store.mjs';
 import { POSTGRES_ALBDRUCK_SCHEMA_SQL } from './postgres-albdruck-store.mjs';
@@ -64,4 +69,9 @@ ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS effective_timezone TEXT;` },
   { version: 19, name: 'native-conversation-archive-payloads', sql: POSTGRES_SESSION_NATIVE_SCHEMA_SQL },
   { version: 20, name: 'native-conversation-extracted-metadata', sql: POSTGRES_SESSION_METADATA_SCHEMA_SQL },
   { version: 21, name: 'ascii-run-search-candidates', sql: POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL },
+  { version: 22, name: 'forge-native-status-and-identity', sql: POSTGRES_FORGE_NATIVE_SCHEMA_SQL },
+  { version: 23, name: 'native-continuity-log-and-queue', sql: POSTGRES_CONTINUITY_STATE_SCHEMA_SQL },
+  { version: 24, name: 'mcp-provider-lifecycle-state', sql: POSTGRES_MCP_PROVIDER_STATE_SCHEMA_SQL },
+  { version: 25, name: 'native-dream-state-entries', sql: POSTGRES_DREAM_STATE_SCHEMA_SQL },
+  { version: 26, name: 'native-tiddle-entries-and-scheduling', sql: POSTGRES_TIDDLE_SCHEMA_SQL },
 ]);

@@ -1,3 +1,4 @@
+import { POSTGRES_CONTINUITY_STATE_SCHEMA_SQL } from './postgres-continuity-state-store.mjs';
 import { resolveAlbdruckConfig } from './config.mjs';
 import { matchesQuery } from './session-search.mjs';
 import { closeContinuityOwners } from './postgres-continuity-owner.mjs';
@@ -498,7 +499,7 @@ UPDATE conversation_entries SET has_payload_id=NULL;
 UPDATE conversation_archive_entries SET has_payload_id=NULL;
 `;
 
-export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL;
+export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL;
 
 const text = (value) => String(value ?? '');
 const required = (value, name) => { const result = text(value).trim(); if (!result) throw new Error(`${name} is required`); return result; };
@@ -535,6 +536,8 @@ export class PostgresSessionStore {
       // never eligible even if a retention plan was built before a new run.
       const selected = await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sessionId]);
       if (!selected.rows.length) return {deleted:false};
+      const active = await client.query('SELECT head_state,queue_status FROM continuity_state WHERE agent_id=$1 AND session_id=$2',[agentId,sessionId]);
+      if (['running','finalizing'].includes(active.rows[0]?.head_state) || active.rows[0]?.queue_status==='running') throw new Error('session_retention_active');
       assertConversationDeletionAllowed(sessionId, selected.rows[0].metadata);
       const result = await client.query('DELETE FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [agentId, sessionId]);
       return {deleted:result.rowCount === 1};
@@ -768,8 +771,8 @@ export class PostgresSessionStore {
 
   async listSessions({ agentId: rawAgentId, includeArchived = true } = {}) {
     const agentId = required(rawAgentId, 'agentId');
-    const result = await this.pool.query(`SELECT session_id,metadata,created_at,updated_at FROM conversation_sessions WHERE agent_id=$1 ${includeArchived ? '' : "AND COALESCE((metadata->>'archived')::boolean,false)=false"} ORDER BY updated_at DESC`, [agentId]);
-    return result.rows.map((row) => ({ ...row.metadata, sessionId: row.session_id, createdAt: row.created_at, updatedAt: row.updated_at }));
+    const result = await this.pool.query(`SELECT session_id,metadata,created_at,updated_at,(SELECT head FROM continuity_state c WHERE c.agent_id=conversation_sessions.agent_id AND c.session_id=conversation_sessions.session_id) AS continuity_head FROM conversation_sessions WHERE agent_id=$1 ${includeArchived ? '' : "AND COALESCE((metadata->>'archived')::boolean,false)=false"} ORDER BY updated_at DESC`, [agentId]);
+    return result.rows.map((row) => ({ ...row.metadata, ...(row.continuity_head ? {continuityHead:row.continuity_head} : {}), sessionId: row.session_id, createdAt: row.created_at, updatedAt: row.updated_at }));
   }
 
   // A single statement gives metadata, retained generations and active entries one
@@ -916,6 +919,8 @@ export class PostgresSessionStore {
         (agent_id,session_id,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation,search_grams,entry_id,idempotency_key)
         SELECT agent_id,$3,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation,search_grams,entry_id,idempotency_key
         FROM conversation_archive_entries WHERE agent_id=$1 AND session_id=$2`, [agentId,source,target]);
+      await client.query('UPDATE continuity_state SET session_id=$3 WHERE agent_id=$1 AND session_id=$2',[agentId,source,target]);
+      await client.query('UPDATE continuity_log SET session_id=$3 WHERE agent_id=$1 AND session_id=$2',[agentId,source,target]);
       await client.query('DELETE FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [agentId, source]);
       return { ok: true, agentId, sessionId: source, targetSessionId: target };
     });

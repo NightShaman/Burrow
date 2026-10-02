@@ -58,7 +58,7 @@ import { resolveGeneratedArtifact } from '../src/generated-artifact-store.mjs';
 import { TASK_PRIORITIES, TASK_STATUSES } from '../src/task-board-store.mjs';
 import { createScheduledJobScheduler } from '../src/scheduled-job-scheduler.mjs';
 import { backgroundSchedulersEnabled } from '../src/background-scheduler-policy.mjs';
-import { diagnoseMcpConnection as diagnoseMcpConnectionRuntime, discoverMcpTools, hydrateMcpProviderStates, reconcilePersistentMcpConnection } from '../src/mcporter-adapter.mjs';
+import { diagnoseMcpConnection as diagnoseMcpConnectionRuntime, discoverMcpTools, configureMcpProviderStateStore, hydrateMcpProviderStates, reconcilePersistentMcpConnection } from '../src/mcporter-adapter.mjs';
 import { createRuntimeMetricsCollector } from '../src/runtime-metrics.mjs';
 import { createRuntimeServerLogger } from '../src/runtime-server-log.mjs';
 import { latestProviderRequest } from '../src/provider-request-inspection.mjs';
@@ -161,6 +161,7 @@ const postgresApplication = await createPostgresApplication({
   connections: async () => postgresApplication.stores.models.list(),
   resolveConfig: (connectionId, modelId) => resolveModelConfig({ stores: postgresApplication.stores, modelConnectionId: connectionId, model: modelId }),
 });
+configureMcpProviderStateStore(postgresApplication.stores.mcpProviderStates);
 await hydrateMcpProviderStates({ runtimeRoot: process.env.BURROW_MCPORTER_ROOT || path.join(runtimeRoot, 'integrations', 'mcporter') }).catch((error) => serverLogger.event('mcp_provider_state_hydration_failed', { error: String(error?.message || error) }));
 const runtimeMetrics = createRuntimeMetricsCollector({
   runtimeRoot: process.env.BURROW_DATA_ROOT || '/mnt/local/burrow',

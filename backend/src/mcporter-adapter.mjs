@@ -27,6 +27,8 @@ const text = (value) => String(value ?? '').trim();
 const DEFAULT_STREAM_CAPTURE_BYTES = 256 * 1024;
 const PROVIDER_EVENT_LIMIT = 200;
 const providerStates = new Map();
+let providerStateStore = null;
+export function configureMcpProviderStateStore(store = null) { providerStateStore = store; providerStates.clear(); }
 
 function providerId(connection) { return text(connection?.id) || 'connection'; }
 function providerEvent(connection, status, { runtimeRoot = null, error = null } = {}) {
@@ -34,6 +36,7 @@ function providerEvent(connection, status, { runtimeRoot = null, error = null } 
   const event = { ts: new Date().toISOString(), providerId: providerId(connection), status };
   if (error) event.error = publicMcpError(error);
   providerStates.set(event.providerId, event);
+  if (providerStateStore) return providerStateStore.append(event).catch(() => {});
   const root = runtimeRoot || resolveMcporterRuntime({ runtimeRoot }).root;
   const directory = path.join(root, 'runtime');
   const eventPath = path.join(directory, 'mcp-provider-events.jsonl');
@@ -50,6 +53,12 @@ function providerEvent(connection, status, { runtimeRoot = null, error = null } 
 
 export async function hydrateMcpProviderStates({ runtimeRoot = null } = {}) {
   const root = runtimeRoot || resolveMcporterRuntime({ runtimeRoot }).root;
+  if (providerStateStore) {
+    await providerStateStore.migrateLegacy(root);
+    const events = await providerStateStore.list();
+    for (const event of events) providerStates.set(String(event.providerId), { ...event, lastKnown: true });
+    return events.length;
+  }
   let lines; try { lines = (await readFile(path.join(root, 'runtime', 'mcp-provider-events.jsonl'), 'utf8')).split('\n').filter(Boolean).slice(-PROVIDER_EVENT_LIMIT); } catch (error) { if (error?.code === 'ENOENT') return 0; throw error; }
   let loaded = 0; for (const line of lines) { try { const event = JSON.parse(line); if (!event?.providerId || !event?.status || !event?.ts) continue; providerStates.set(String(event.providerId), { ...event, lastKnown: true }); loaded += 1; } catch {} } return loaded;
 }

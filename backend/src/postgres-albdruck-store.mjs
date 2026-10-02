@@ -69,6 +69,8 @@ export class PostgresAlbdruckStore {
       // Serialize evidence writes with purge; no content-bearing audit is written.
       await client.query('LOCK TABLE albdruck_knowledge, albdruck_evidence, albdruck_revisions IN SHARE ROW EXCLUSIVE MODE');
       const { rows } = await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sessionId]);
+      const active = await client.query('SELECT head_state,queue_status FROM continuity_state WHERE agent_id=$1 AND session_id=$2', [agentId, sessionId]);
+      if (['running','finalizing'].includes(active.rows[0]?.head_state) || active.rows[0]?.queue_status === 'running') throw new Error('albdruck_purge_session_retention_active');
       try { if (rows.length) assertConversationDeletionAllowed(sessionId, rows[0].metadata); }
       catch (error) { throw new Error(`albdruck_purge_${error.message}`); }
       const affected = await client.query("SELECT DISTINCT knowledge_id FROM albdruck_evidence WHERE source_ref->>'agentId'=$1 AND source_ref->>'sessionId'=$2", [agentId, sessionId]);
@@ -84,6 +86,9 @@ export class PostgresAlbdruckStore {
       // Aggregates lack reliable per-entry provenance: conservatively discard any
       // aggregate containing a reference to this conversation rather than redact.
       derived.working_memory_meta = (await client.query("DELETE FROM working_memory_meta WHERE value_json->>'agentId'=$1 AND strpos(value_json::text,$2)>0", [agentId, `session:${sessionId}:`])).rowCount;
+      for (const kind of ['ledger', 'preload', 'scope_review']) {
+        derived[`dream_${kind}_entries`] = (await client.query(`DELETE FROM dream_${kind}_entries d USING dream_state_envelopes e WHERE d.key=e.key AND e.metadata->>'agentId'=$1 AND strpos(d.payload::text,$2)>0`, [agentId, `session:${sessionId}:`])).rowCount;
+      }
       const conversation = (await client.query('DELETE FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [agentId, sessionId])).rowCount;
       return { agentId, sessionId, deleted: conversation === 1, removed: { evidence, knowledge, revisions, ...derived } };
     });

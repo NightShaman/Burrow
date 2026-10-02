@@ -267,12 +267,30 @@ export class PostgresWorkingMemoryStore {
     );
     return value;
   }
+  async dreamRead(key, kind, client = this.pool) {
+    const field = kind === 'ledger' ? 'entries' : 'items';
+    const result = await client.query(`SELECT e.metadata, coalesce((SELECT jsonb_agg(payload ORDER BY position) FROM dream_${kind}_entries WHERE key=e.key),'[]'::jsonb) AS entries FROM dream_state_envelopes e WHERE key=$1`, [key]);
+    return result.rows[0] ? { ...result.rows[0].metadata, [field]: result.rows[0].entries } : null;
+  }
+  async dreamWrite(key, kind, value, client = null, append = false) {
+    if (!client) return withPostgresTransaction(this.pool, c => this.dreamWrite(key, kind, value, c, append));
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [key]);
+    const field = kind === 'ledger' ? 'entries' : 'items';
+    const { [field]: entries, ...metadata } = value;
+    await client.query(`INSERT INTO dream_state_envelopes(key,kind,metadata,updated_at) VALUES($1,$2,$3::jsonb,$4) ON CONFLICT(key) DO UPDATE SET metadata=dream_state_envelopes.metadata || EXCLUDED.metadata,updated_at=EXCLUDED.updated_at`, [key,kind,JSON.stringify(metadata),this.clock()]);
+    let start = 1;
+    if (append) {
+      const result = await client.query(`SELECT min(position) AS first FROM dream_${kind}_entries WHERE key=$1`, [key]);
+      start = Number(result.rows[0].first ?? 1) - entries.length;
+    } else await client.query(`DELETE FROM dream_${kind}_entries WHERE key=$1`, [key]);
+    await client.query(`INSERT INTO dream_${kind}_entries(key,position,payload) SELECT $1,$2::bigint+ordinality-1,value FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY`, [key,start,JSON.stringify(entries)]);
+    return this.dreamRead(key, kind, client);
+  }
   async replaceDreamPreload({ agentId, project, items = [], expiresAt } = {}) {
     await this.ready();
     if (!text(agentId) || !text(project))
       throw Error("dream_preload_scope_required");
     const normalized = (Array.isArray(items) ? items : [])
-      .slice(0, 5)
       .map((i) => {
         if (text(i.content).length > MAX_COMPACT_CONTENT_CHARS)
           throw Error("dream_preload_content_too_large");
@@ -282,14 +300,13 @@ export class PostgresWorkingMemoryStore {
           content: text(i.content),
           sourceRefs: (i.sourceRefs || [])
             .map(text)
-            .filter(Boolean)
-            .slice(0, 12),
+            .filter(Boolean),
         };
       })
       .filter((i) => i.id && i.title && i.content && i.sourceRefs.length);
     return withPostgresTransaction(this.pool, (c) =>
-      this.metaSet(
-        `dream-preload:${agentId}:${project}`,
+      this.dreamWrite(
+        `dream-preload:${agentId}:${project}`, 'preload',
         {
           version: 1,
           agentId,
@@ -305,7 +322,7 @@ export class PostgresWorkingMemoryStore {
   async getDreamPreload({ agentId, project } = {}) {
     await this.ready();
     if (!text(agentId) || !text(project)) return null;
-    const v = await this.metaGet(`dream-preload:${agentId}:${project}`);
+    const v = await this.dreamRead(`dream-preload:${agentId}:${project}`, 'preload');
     return v?.expiresAt && v.expiresAt < this.clock() ? null : v;
   }
   async appendDreamLedger({ agentId, project, mode, entries = [] } = {}) {
@@ -316,9 +333,7 @@ export class PostgresWorkingMemoryStore {
       await c.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
         `dream-ledger:${agentId}:${project}`,
       ]);
-      const old = await this.metaGet(`dream-ledger:${agentId}:${project}`, c);
       const normalized = (Array.isArray(entries) ? entries : [])
-        .slice(0, 32)
         .map((e) => ({
           action: text(e.action),
           candidateKey: text(e.candidateKey),
@@ -326,29 +341,28 @@ export class PostgresWorkingMemoryStore {
           recordId: text(e.recordId) || null,
           sourceRefs: (e.sourceRefs || [])
             .map(text)
-            .filter(Boolean)
-            .slice(0, 12),
+            .filter(Boolean),
           reason: bounded(e.reason, 240) || null,
           ts: text(e.ts) || this.clock(),
         }))
         .filter((e) => e.action && e.candidateKey);
-      return this.metaSet(
-        `dream-ledger:${agentId}:${project}`,
+      return this.dreamWrite(
+        `dream-ledger:${agentId}:${project}`, 'ledger',
         {
           version: 1,
           agentId,
           project,
-          entries: [...normalized, ...(old?.entries || [])].slice(0, 100),
+          entries: normalized,
           updatedAt: this.clock(),
         },
-        c,
+        c, true,
       );
     });
   }
   async getDreamLedger({ agentId, project } = {}) {
     await this.ready();
     if (!text(agentId) || !text(project)) return null;
-    return this.metaGet(`dream-ledger:${agentId}:${project}`);
+    return this.dreamRead(`dream-ledger:${agentId}:${project}`, 'ledger');
   }
   async supersedeDreamRecords({ agentId, project, keepIds = [] } = {}) {
     const keep = new Set((keepIds || []).map(text));
@@ -368,12 +382,11 @@ export class PostgresWorkingMemoryStore {
     await this.ready();
     if (!text(agentId)) throw Error("dream_scope_review_agent_required");
     const items = (Array.isArray(candidates) ? candidates : [])
-      .slice(0, 8)
       .map((c) => ({
         kind: text(c.kind || c.type),
         title: bounded(c.title, 240),
         content: text(c.content),
-        sourceRefs: (c.sourceRefs || []).map(text).filter(Boolean).slice(0, 12),
+        sourceRefs: (c.sourceRefs || []).map(text).filter(Boolean),
         confidence: Number(c.confidence),
       }))
       .filter(
@@ -386,7 +399,7 @@ export class PostgresWorkingMemoryStore {
       );
     if (items.some((c) => c.content.length > MAX_COMPACT_CONTENT_CHARS))
       throw Error("dream_scope_review_content_too_large");
-    return this.metaSet(`dream-scope-review:${agentId}`, {
+    return this.dreamWrite(`dream-scope-review:${agentId}`, 'scope_review', {
       version: 1,
       agentId,
       mode: text(mode),
@@ -399,7 +412,7 @@ export class PostgresWorkingMemoryStore {
   async getDreamScopeReviewQueue({ agentId } = {}) {
     await this.ready();
     if (!text(agentId)) return null;
-    const v = await this.metaGet(`dream-scope-review:${agentId}`);
+    const v = await this.dreamRead(`dream-scope-review:${agentId}`, 'scope_review');
     return v?.expiresAt && v.expiresAt < this.clock() ? null : v;
   }
   async assignDreamScopeReview({ agentId, index, project } = {}) {
@@ -408,18 +421,16 @@ export class PostgresWorkingMemoryStore {
       throw Error("dream_scope_review_project_invalid");
     await this.ready();
     return withPostgresTransaction(this.pool, async (c) => {
-      const q = await c.query(
-        "SELECT value_json FROM working_memory_meta WHERE key=$1 FOR UPDATE",
-        [`dream-scope-review:${agentId}`],
-      );
-      const queue = q.rows[0] ? parse(q.rows[0].value_json) : null;
+      const key = `dream-scope-review:${agentId}`;
+      await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [key]);
+      const queue = await this.dreamRead(key, 'scope_review', c);
       if (!queue || (queue.expiresAt && queue.expiresAt < this.clock()))
         throw Error("dream_scope_review_not_found");
       const n = Number(index);
       if (!Number.isInteger(n) || n < 0 || n >= queue.items.length)
         throw Error("dream_scope_review_index_invalid");
       const item = queue.items[n];
-      const id = `dream-${createHash("sha256").update([agentId, project, item.kind, item.title].join("\0")).digest("hex").slice(0, 32)}`;
+      const id = `dream-${createHash("sha256").update([agentId, project, item.kind, item.title].join("\0")).digest("hex")}`;
       const stamp = this.clock();
       const expiresAt = queue.expiresAt || expiry();
       const refs = json(item.sourceRefs);
@@ -440,16 +451,13 @@ export class PostgresWorkingMemoryStore {
         ],
       );
       const record = row(inserted.rows[0]);
-      const remaining = queue.items.filter((_, i) => i !== n);
-      await this.metaSet(
-        `dream-scope-review:${agentId}`,
-        { ...queue, items: remaining, updatedAt: this.clock() },
-        c,
-      );
+      const deleted = await c.query(`DELETE FROM dream_scope_review_entries WHERE key=$1 AND position=(SELECT position FROM dream_scope_review_entries WHERE key=$1 ORDER BY position OFFSET $2 LIMIT 1) RETURNING position`, [key,n]);
+      if (deleted.rowCount !== 1) throw Error('dream_scope_review_index_invalid');
+      await c.query("UPDATE dream_state_envelopes SET metadata=jsonb_set(metadata,'{updatedAt}',to_jsonb($2::text)),updated_at=$2::timestamptz WHERE key=$1", [key,this.clock()]);
       return {
         record,
         assignedIndex: n,
-        remainingCount: remaining.length,
+        remainingCount: queue.items.length - 1,
         disposition: "assigned_local_only",
       };
     });

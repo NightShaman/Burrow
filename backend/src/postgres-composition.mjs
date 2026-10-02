@@ -1,3 +1,4 @@
+import { PostgresMcpProviderStateStore } from './postgres-mcp-provider-state-store.mjs';
 import { PostgresDreamExtractionStore } from './postgres-dream-extraction-store.mjs';
 import { PostgresAlbdruckStore } from './postgres-albdruck-store.mjs';
 import { createPostgresModDistributionRepository } from './postgres-mod-distribution-repository.mjs';
@@ -55,6 +56,7 @@ export async function createPostgresApplication({
     agents: new PostgresAgentRegistryStore({ ...common, bootstrapSampleIdentities }),
     profiles: new PostgresAgentProfileStore({ ...common, ...(clock ? { clock } : {}) }),
     models: new PostgresModelSettingsStore({ ...common, key: encryptionKey, ...(clock ? { clock } : {}), ...(bootstrapSampleIdentities !== undefined ? { bootstrapSampleIdentities } : {}) }),
+    mcpProviderStates: new PostgresMcpProviderStateStore(common),
     mcp: new PostgresMcpSettingsStore({ ...common, key: encryptionKey }),
     tasks: new PostgresTaskBoardStore({ ...common, ...(clock ? { clock } : {}) }),
     scheduledJobs: new PostgresScheduledJobStore({ ...common, ...(clock ? { clock } : {}) }),

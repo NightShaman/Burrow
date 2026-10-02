@@ -1,17 +1,19 @@
 import { RECOVERY_TRANSCRIPT_MAX_MESSAGES, assessInterruptedRunRecovery } from './recovery-resume-policy.mjs';
 import { isChatMessage } from './session-entry.mjs';
+import { continuityStateStore } from './postgres-continuity-state-store.mjs';
 import { continuityOwner } from './postgres-continuity-owner.mjs';
 
 // Runtime identity is not a PID: independent hosts may reuse the same PID.
 const runtimeOwner = 'runtime';
 export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clock = () => new Date().toISOString() }) {
+ const state = continuityStateStore(store, agentId, clock);
  const owner = continuityOwner(store.pool, ownerId);
  ownerId = owner.id;
  const scope = sessionId => ({agentId,sessionId});
  const matches = (head,args,state='running') => head?.state===state && head.runId===String(args.runId) && Number(head.generation)===Number(args.generation) && head.ownerId===ownerId;
  const updateMetadata = async args => {
   await owner.ready();
-  return store.updateMetadata({...args, update: async metadata => {
+  return state.update({...args, update: async metadata => {
    await owner.ready();
    return args.update(metadata);
   }});
@@ -33,7 +35,7 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
     return {...metadata,interruptedRun:manifest,recoveryQueue:{version:1,key:`${manifest.runId}:${manifest.generation}`,status:'pending',decision:assessment.action,decisionReason:assessment.reason,autoResume:assessment.autoResume,transcriptMessages:assessment.transcriptMessages,queuedAt:clock(),attempts:Number(queue?.attempts||0)},...(abandoned?{continuityHead:{...head,state:'interrupted',interruptedAt:clock()}}:{})};
    }});
   },
-  async read({sessionId}) {return (await store.getMetadata(scope(sessionId)))?.continuityHead || null;},
+  async read({sessionId}) {return (await state.read(sessionId))?.continuityHead || null;},
   async current(args) {await owner.ready();return matches(await this.read(args),args);},
   async claim({sessionId,runId,objective=null}) {
    await this.reconcile({sessionId});
@@ -61,9 +63,9 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
    }});return manifest;
   },
   async pending({limit=100}={}) {
-   let sessions=await store.listSessions({agentId,includeArchived:true});
+   let sessions=await state.sessions();
    for(const session of sessions) await this.reconcile({sessionId:session.sessionId});
-   sessions=await store.listSessions({agentId,includeArchived:true});
+   sessions=await state.sessions({pending:true,limit});
    return sessions.map(session=>({sessionId:session.sessionId,manifest:session.interruptedRun,continuation:session.recoveryQueue})).filter(item=>item.manifest?.status==='interrupted' && item.continuation?.autoResume && item.continuation.status==='pending').sort((a,b)=>String(a.continuation.queuedAt).localeCompare(String(b.continuation.queuedAt))).slice(0,limit);
   },
   async claimRecovery({sessionId,recoveryRunId}) {

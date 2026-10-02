@@ -24,10 +24,6 @@ function receiptState(agentId, runId) { return `dream-cycle-receipt:${agentId}:$
 function occurrenceState(agentId, scheduledFor) { return `dream-cycle-occurrence:${agentId}:${scheduledFor}`; }
 const dreamRuntimeInstanceId = randomUUID();
 const activeDreamRunIds = new Set();
-function writeReceipt(db, receipt, at) {
-  db.prepare(`INSERT INTO settings_meta (key,value_json,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`)
-    .run(receiptState(receipt.agentId, receipt.runId), json(receipt), at);
-}
 function entryId(agentId, phase, title, content) { return `dream-${phase}-${Buffer.from(`${agentId}\0${title}\0${content}`).toString('base64url').slice(0, 40)}`; }
 function clamp(value, limit) { const source = text(value).replace(/\s+/g, ' '); return source.length <= limit ? source : `${source.slice(0, limit).trim()}…`; }
 function safeModelError(value, config = {}) {
