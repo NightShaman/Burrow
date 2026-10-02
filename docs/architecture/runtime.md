@@ -11,7 +11,7 @@ sequenceDiagram
     participant Runtime
     participant Store as PostgreSQL continuity
     participant Context
-    participant Loop as Model/tool loop
+    participant Orchestrator as Model/tool loop
     Client->>Controller: Message, session, attachments
     Controller->>Runtime: Normalized turn and trusted agent context
     Runtime->>Runtime: Serialize this session's turns
@@ -22,8 +22,8 @@ sequenceDiagram
     Runtime->>Store: Persist originating user turn
     Runtime->>Context: Assemble and inspect final prompt
     Runtime->>Store: Check ownership before execution
-    Runtime->>Loop: Provider-ready input and tool schemas
-    Loop-->>Runtime: Answer, evidence, artifacts
+    Runtime->>Orchestrator: Provider-ready input and tool schemas
+    Orchestrator-->>Runtime: Answer, evidence, artifacts
     Runtime->>Store: Check ownership after execution
     Runtime->>Store: Transactional terminal commit
     Store-->>Runtime: Current or superseded

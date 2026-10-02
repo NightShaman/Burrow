@@ -49,13 +49,13 @@ jobs:
         run: python scripts/docs/check_mermaid.py site --artifacts docs-browser-artifacts
       - name: Upload browser verification artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: documentation-browser-checks
           path: docs-browser-artifacts
           if-no-files-found: ignore
       - name: Upload site for review
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: documentation-site
           path: site
