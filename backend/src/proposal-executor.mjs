@@ -115,7 +115,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
           const mcp = executionContext?.stores?.mcp;
           if (!mcp) return false;
           const connection = await mcp.get(entry.providerId);
-          const grants = await mcp.agentTools(agentId);
+          const grants = await mcp.agentTools(agentId, {availableOnly:true});
           return Boolean(connection?.enabled && (mod.tools.find((tool) => tool.name === entry.toolName)?.availability === 'mod-authorized' || grants.some((grant) => grant.connectionId === entry.providerId && grant.toolName === entry.toolName && grant.enabled)));
         },
       });
@@ -314,7 +314,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
           const liveMod = activeModToolConnection(selected.connection.id);
           const connection = await mcp.get(selected.connection.id);
           if (!liveMod || liveMod !== selected.connection.mod || !liveMod.tools.some((tool) => tool.name === action.mcpToolName) || !connection?.enabled) throw new Error('mcp_provider_not_available');
-          const grants = await mcp.agentTools(agentId);
+          const grants = await mcp.agentTools(agentId, {availableOnly:true});
           if (liveMod.tools.find((tool) => tool.name === action.mcpToolName)?.availability !== 'mod-authorized' && !grants.some((grant) => grant.connectionId === selected.connection.id && grant.toolName === action.mcpToolName && grant.enabled)) throw new Error('mcp_tool_not_granted');
         }
         const output = selected.connection.transport === 'mod'

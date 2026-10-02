@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { createHash } from 'node:crypto';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 
@@ -37,7 +38,7 @@ function parseRefs(value) { if (Array.isArray(value)) return value; if (typeof v
 function publicRow(row) { return row && { id: row.id, agentId: row.agent_id, entryDate: row.entry_date instanceof Date ? row.entry_date.toISOString().slice(0, 10) : row.entry_date, phase: row.phase, narrative: row.narrative, sourceRefs: parseRefs(row.source_refs), createdAt: iso(row.created_at), updatedAt: iso(row.updated_at) }; }
 
 export class PostgresDreamDiaryStore {
-  constructor({ pool, ownsPool = false } = {}) { if (!pool?.query || !pool?.connect) throw new Error('dream_diary_postgres_pool_required'); this.pool = pool; this.ownsPool = ownsPool; }
+  constructor({ pool, ownsPool = false } = {}) { if (!pool?.query || !pool?.connect) throw new Error('dream_diary_postgres_pool_required'); this.pool = normalizePostgresPool(pool); this.ownsPool = ownsPool; }
   async close() { if (this.ownsPool) await closePostgresPool(this.pool); }
   async append(agent, input = {}) {
     const agentId = text(agent || input.agentId); if (!agentId) throw new Error('dream_diary_agent_required');

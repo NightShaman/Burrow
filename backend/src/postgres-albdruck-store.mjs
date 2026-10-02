@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { isChatMessage } from './session-entry.mjs';
 import { resolveAlbdruckConfig } from './config.mjs';
 import { assertConversationDeletionAllowed } from './postgres-session-store.mjs';
@@ -60,7 +61,7 @@ export class PostgresAlbdruckStore {
   constructor({ pool, resolveOriginal, searchHistory, maxPageSize = resolveAlbdruckConfig().maxPageSize }) {
     if (!pool || typeof resolveOriginal !== 'function') throw new Error('albdruck_dependencies_required');
     if (!Number.isInteger(maxPageSize) || maxPageSize < 1) throw new Error('albdruck_page_bound_invalid');
-    this.searchHistory = searchHistory; this.pool = pool; this.resolveOriginal = resolveOriginal; this.maxPageSize = maxPageSize;
+    this.searchHistory = searchHistory; this.pool = normalizePostgresPool(pool); this.resolveOriginal = resolveOriginal; this.maxPageSize = maxPageSize;
   }
   async purgeConversation({ agentId, sessionId, reason } = {}) {
     if ([agentId, sessionId, reason].some(value => typeof value !== 'string' || !value.trim())) throw new Error('albdruck_purge_invalid');
@@ -87,7 +88,7 @@ export class PostgresAlbdruckStore {
       // aggregate containing a reference to this conversation rather than redact.
       derived.working_memory_meta = (await client.query("DELETE FROM working_memory_meta WHERE value_json->>'agentId'=$1 AND strpos(value_json::text,$2)>0", [agentId, `session:${sessionId}:`])).rowCount;
       for (const kind of ['ledger', 'preload', 'scope_review']) {
-        derived[`dream_${kind}_entries`] = (await client.query(`DELETE FROM dream_${kind}_entries d USING dream_state_envelopes e WHERE d.key=e.key AND e.metadata->>'agentId'=$1 AND strpos(d.payload::text,$2)>0`, [agentId, `session:${sessionId}:`])).rowCount;
+        derived[`dream_${kind}_entries`] = (await client.query(`DELETE FROM dream_${kind}_entries d USING dream_state_envelopes e WHERE d.envelope_id=e.envelope_id AND e.agent_id=$1 AND d.source_sessions @> ARRAY[$2]::text[]`, [agentId, sessionId])).rowCount;
       }
       // Native continuity payloads may contain NUL/surrogates: inspect decoded
       // JSON in JS rather than casting payloads through jsonb or text extraction.
@@ -107,12 +108,8 @@ export class PostgresAlbdruckStore {
       // Conservatively remove matching legacy envelopes and Tiddle aggregates.
       const envelopes = await client.query('SELECT legacy_source,legacy_key,envelope_agent_id,extra_metadata FROM rolling_continuity_envelopes');
       for (const row of envelopes.rows) if ((row.envelope_agent_id === agentId || row.legacy_key.startsWith(`rolling-continuity:${agentId}:`)) && references(row.extra_metadata)) await client.query('DELETE FROM rolling_continuity_envelopes WHERE legacy_source=$1 AND legacy_key=$2',[row.legacy_source,row.legacy_key]);
-      derived.tiddle_entries = 0;
-      const entries = await client.query('SELECT id,key,value_json FROM tiddle_entries');
-      const owned = row => row.value_json?.agentId === agentId || row.key.startsWith(`tiddle-residue:${agentId}:`) || row.key === `tiddle-history:${agentId}`;
-      for (const row of entries.rows) if (owned(row) && references(row.value_json)) derived.tiddle_entries += (await client.query('DELETE FROM tiddle_entries WHERE id=$1',[row.id])).rowCount;
-      const tiddle = await client.query('SELECT key,value_json FROM tiddle_envelopes');
-      for (const row of tiddle.rows) if ((owned(row) || row.key.startsWith(`tiddle-pass:${agentId}`) || row.key.startsWith(`tiddle-synthesis:${agentId}`)) && references(row.value_json)) await client.query('DELETE FROM tiddle_envelopes WHERE key=$1',[row.key]);
+      derived.tiddle_entries = (await client.query('DELETE FROM tiddle_entries t USING tiddle_envelopes e WHERE t.envelope_id=e.envelope_id AND e.agent_id=$1 AND t.source_sessions @> ARRAY[$2]::text[]',[agentId,sessionId])).rowCount;
+      await client.query('DELETE FROM tiddle_envelopes WHERE agent_id=$1 AND source_sessions @> ARRAY[$2]::text[]',[agentId,sessionId]);
       const conversation = (await client.query('DELETE FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [agentId, sessionId])).rowCount;
       return { agentId, sessionId, deleted: conversation === 1, removed: { evidence, knowledge, revisions, ...derived } };
     });

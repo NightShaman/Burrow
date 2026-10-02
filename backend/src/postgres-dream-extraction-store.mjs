@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { randomUUID } from 'node:crypto';
 
 export const POSTGRES_DREAM_EXTRACTION_SCHEMA_SQL = `
@@ -18,7 +19,7 @@ CREATE INDEX IF NOT EXISTS dream_extraction_batches_agent_idx ON dream_extractio
 export class PostgresDreamExtractionStore {
   constructor({ pool } = {}) {
     if (!pool?.query) throw new Error('dream_extraction_postgres_pool_required');
-    this.pool = pool;
+    this.pool = normalizePostgresPool(pool);
   }
   async list({ agentId }) {
     const result = await this.pool.query('SELECT batch_id,contract_version,sources,candidates FROM dream_extraction_batches WHERE agent_id=$1 ORDER BY completed_at,batch_id', [agentId]);

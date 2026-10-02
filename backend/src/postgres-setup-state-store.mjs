@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 export const POSTGRES_SETUP_STATE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS installation_setup_state (
   owner_id TEXT PRIMARY KEY,
@@ -29,7 +30,7 @@ export class PostgresSetupStateStore {
   constructor({ pool, ownerId = 'default', clock = () => new Date().toISOString() } = {}) {
     if (!pool?.query || !pool?.connect) throw new Error('setup_state_postgres_pool_required');
     if (!text(ownerId)) throw new Error('setup_state_owner_id_required');
-    this.pool = pool; this.ownerId = text(ownerId); this.clock = clock;
+    this.pool = normalizePostgresPool(pool); this.ownerId = text(ownerId); this.clock = clock;
   }
   async readStatus() {
     const { rows } = await this.pool.query('SELECT value_json FROM installation_setup_state WHERE owner_id=$1', [this.ownerId]);

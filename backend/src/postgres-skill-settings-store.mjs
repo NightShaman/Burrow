@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { createHash } from 'node:crypto';
 export const POSTGRES_SKILL_SETTINGS_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY,name TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',content TEXT NOT NULL,lifecycle TEXT NOT NULL DEFAULT 'available',created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
@@ -11,7 +12,7 @@ const life = (v) => { const x = text(v || 'available'); if (!['available', 'expe
 const rec = (r) => !r ? null : ({ id: r.id, name: r.name, description: r.description, content: r.content, version: digest(r.content), bytes: Buffer.byteLength(r.content, 'utf8'), lifecycle: r.lifecycle, available: r.lifecycle !== 'disabled', global: Boolean(r.global_assignment), createdAt: r.created_at, updatedAt: r.updated_at, source: 'postgres' });
 const select = `SELECT s.*, EXISTS(SELECT 1 FROM skill_global_assignments g WHERE g.skill_id=s.id) global_assignment FROM skills s`;
 export class PostgresSkillSettingsStore {
- constructor({ pool, clock = stamp } = {}) { if (!pool) throw new Error('pool_required'); this.pool = pool; this.clock = clock; }
+ constructor({ pool, clock = stamp } = {}) { if (!pool) throw new Error('pool_required'); this.pool = normalizePostgresPool(pool); this.clock = clock; }
  async list() { const { rows } = await this.pool.query(`${select} ORDER BY s.id`); return rows.map(rec); }
  async get(id) { const { rows } = await this.pool.query(`${select} WHERE s.id=$1`, [text(id)]); return rec(rows[0]); }
  async create(i = {}) { const id = validId(i.id), name = text(i.name || id).trim(), content = text(i.content), description = text(i.description), state = life(i.lifecycle), ts = this.clock(); if (!name) throw Object.assign(new Error('skill_name_required'), { statusCode: 400 }); const c = await this.pool.connect(); try { await c.query('BEGIN'); await c.query('INSERT INTO skills(id,name,description,content,lifecycle,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$6)', [id, name, description, content, state, ts]); if (i.global === true) await c.query('INSERT INTO skill_global_assignments(skill_id,created_at) VALUES($1,$2)', [id, ts]); await c.query('COMMIT'); } catch (e) { await c.query('ROLLBACK'); if (e.code === '23505') throw Object.assign(new Error('skill_already_exists'), { statusCode: 409 }); throw e; } finally { c.release(); } return this.get(id); }

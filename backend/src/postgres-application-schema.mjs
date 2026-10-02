@@ -1,6 +1,13 @@
+import { POSTGRES_REQUIRED_TIMESTAMPS_SQL } from './postgres-required-timestamps.mjs';
+import { POSTGRES_NATIVE_TIMESTAMPS_SQL } from './postgres-native-timestamps.mjs';
+import { POSTGRES_REMAINING_JSON_SQL } from './postgres-remaining-json.mjs';
+import { POSTGRES_NATIVE_CATALOGS_SQL } from './postgres-native-catalogs.mjs';
+import { POSTGRES_TYPED_BOUNDARY_SQL } from './postgres-typed-boundary.mjs';
+import { POSTGRES_NATIVE_DREAM_TIDDLE_IDENTITY_SQL } from './postgres-native-dream-tiddle-identity.mjs';
+import { POSTGRES_FORGE_MCP_BOUNDARY_SCHEMA_SQL } from './postgres-forge-mcp-boundary-migration.mjs';
 import { LOSSLESS_CONTINUITY_SQL } from './postgres-lossless-continuity.mjs';
 import { POSTGRES_TIDDLE_SCHEMA_SQL } from './postgres-tiddle-store.mjs';
-import { POSTGRES_DREAM_STATE_SCHEMA_SQL } from './postgres-dream-state-schema.mjs';
+import { POSTGRES_DREAM_STATE_SCHEMA_SQL, POSTGRES_DREAM_SCOPE_IDENTITY_SQL } from './postgres-dream-state-schema.mjs';
 import { POSTGRES_MCP_PROVIDER_STATE_SCHEMA_SQL } from './postgres-mcp-provider-state-store.mjs';
 import { POSTGRES_CONTINUITY_STATE_SCHEMA_SQL } from './postgres-continuity-state-store.mjs';
 import { POSTGRES_FORGE_NATIVE_SCHEMA_SQL } from './postgres-forge-native-schema.mjs';
@@ -76,4 +83,12 @@ ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS effective_timezone TEXT;` },
   { version: 25, name: 'native-dream-state-entries', sql: POSTGRES_DREAM_STATE_SCHEMA_SQL },
   { version: 26, name: 'native-tiddle-entries-and-scheduling', sql: POSTGRES_TIDDLE_SCHEMA_SQL },
   { version: 27, name: 'lossless-continuity-payloads', sql: LOSSLESS_CONTINUITY_SQL },
+  { version: 28, name: 'forge-mcp-native-persistence-boundaries', sql: POSTGRES_FORGE_MCP_BOUNDARY_SCHEMA_SQL },
+  { version: 29, name: 'stable-dream-scope-review-identity', sql: POSTGRES_DREAM_SCOPE_IDENTITY_SQL },
+  { version: 30, name: 'native-dream-tiddle-identity', sql: POSTGRES_NATIVE_DREAM_TIDDLE_IDENTITY_SQL },
+  { version: 31, name: 'typed-mod-lifecycle-boundary', sql: POSTGRES_TYPED_BOUNDARY_SQL },
+  { version: 32, name: 'native-model-mcp-catalogs', sql: POSTGRES_NATIVE_CATALOGS_SQL },
+  { version: 33, name: 'lossless-settings-json', sql: POSTGRES_REMAINING_JSON_SQL },
+  { version: 34, name: 'native-timestamps-and-agent-identities', sql: POSTGRES_NATIVE_TIMESTAMPS_SQL },
+  { version: 35, name: 'restore-required-instant-contracts', sql: POSTGRES_REQUIRED_TIMESTAMPS_SQL },
 ]);

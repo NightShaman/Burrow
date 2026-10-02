@@ -22,7 +22,7 @@ export async function loadRuntimeMcpCapabilities({ agentId, stores } = {}) {
       const persisted = await mcpStore.get(connection.id);
       if (persisted?.enabled) mcpConnections.set(connection.id, { ...persisted, ...connection });
     }
-    for (const grant of (await mcpStore.agentTools(agentId)).filter((item) => item.enabled)) {
+    for (const grant of (await mcpStore.agentTools(agentId, {availableOnly:true})).filter((item) => item.enabled)) {
       const connection = mcpConnections.get(grant.connectionId);
       if (connection) mcpTools.set(`${grant.connectionId}:${grant.toolName}`, { ...grant, connection, apiKey: connection.apiKey });
     }

@@ -62,7 +62,10 @@ export function postgresConfig(env = process.env) {
 }
 
 export function createPostgresPool({ config = postgresConfig(), PoolClass = Pool } = {}) {
-  return new PoolClass(config);
+  return new PoolClass({ ...config, types: { getTypeParser(oid, format) {
+    if (oid === 1184 && format !== 'binary') return value => new Date(value).toISOString();
+    return pg.types.getTypeParser(oid, format);
+  } } });
 }
 
 const transactionClients = new WeakMap();
@@ -129,4 +132,32 @@ export function migrationChecksum(sql) {
 export function migrationLockKey(namespace = 'burrow-schema') {
   const bytes = createHash('sha256').update(namespace).digest();
   return bytes.readBigInt64BE(0).toString();
+}
+
+// Normalize driver-native instants at the store boundary, including borrowed pools.
+// Do not alter JSON payloads or mutate the caller's pool/type parser configuration.
+const normalizedPools = new WeakMap();
+export function normalizePostgresPool(pool) {
+  if (!pool || normalizedPools.has(pool)) return normalizedPools.get(pool) || pool;
+  const result = value => {
+    if (Array.isArray(value)) return value.map(result);
+    if (value?.rows) return { ...value, rows: value.rows.map(row => Object.fromEntries(Object.entries(row).map(([key, item]) => [key, item instanceof Date ? item.toISOString() : item]))) };
+    return value;
+  };
+  const proxy = new Proxy(pool, { get(target, key) {
+    if (key === 'query') return (...args) => {
+      if (typeof args.at(-1) === 'function') {
+        const callback = args.pop();
+        return target.query(...args, (error, value) => callback(error, result(value)));
+      }
+      const value = target.query(...args);
+      return value?.then ? value.then(result) : value;
+    };
+    if (key === 'connect') return async (...args) => normalizePostgresPool(await target.connect(...args));
+    const value = Reflect.get(target, key, target);
+    return typeof value === 'function' ? value.bind(target) : value;
+  } });
+  normalizedPools.set(pool, proxy);
+  normalizedPools.set(proxy, proxy);
+  return proxy;
 }

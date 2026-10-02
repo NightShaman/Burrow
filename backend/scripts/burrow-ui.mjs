@@ -158,7 +158,7 @@ const postgresApplication = await createPostgresApplication({
   runtimeRoot,
   resolveAgent: async (agentId) => resolveAgentRuntime(agentId),
   resolveOperator: async () => ({ operatorId: 'operator', agentWorkspaceRoot: runtimeRoot }),
-  connections: async () => postgresApplication.stores.models.list(),
+  connections: async (filter) => postgresApplication.stores.models.list(filter),
   resolveConfig: (connectionId, modelId) => resolveModelConfig({ stores: postgresApplication.stores, modelConnectionId: connectionId, model: modelId }),
 });
 configureMcpProviderStateStore(postgresApplication.stores.mcpProviderStates);

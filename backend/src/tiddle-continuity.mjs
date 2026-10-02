@@ -1,4 +1,4 @@
-import { runSync, runAsync, tiddlePersistence } from './tiddle-persistence.mjs';
+import { runAsync, tiddlePersistence } from './tiddle-persistence.mjs';
 import { rollingCardActive } from './postgres-rolling-continuity-store.mjs';
 import { randomUUID } from 'node:crypto';
 import { completeCurator, curatorRoot, readCuratorSelection } from './curator-runtime.mjs';
@@ -19,13 +19,13 @@ const text = (value) => String(value ?? '').trim();
 const bounded = (value, limit) => { const source = text(value); return source.length <= limit ? source : source.slice(0, limit).trim(); };
 const parse = (value, fallback = null) => { try { return JSON.parse(value); } catch { return fallback; } };
 const iso = (value = Date.now()) => new Date(value).toISOString();
-const residueKey = (agentId) => `tiddle-residue:${agentId}`;
-const passKey = (agentId) => `tiddle-pass:${agentId}`;
-const scopePassKey = (agentId, scope) => `tiddle-pass-scope:${agentId}:${scope}`;
-const receiptKey = (agentId, runId) => `tiddle-pass-receipt:${agentId}:${runId}`;
+const residueKey = (agentId) => ({ agentId, kind: 'tiddle-residue' });
+const passKey = (agentId) => ({ agentId, kind: 'tiddle-pass' });
+const scopePassKey = (agentId, scope) => ({ agentId, kind: 'tiddle-pass-scope', scope });
+const receiptKey = (agentId, runId) => ({ agentId, kind: 'tiddle-pass-receipt', scope: runId });
 const cardKey = (agentId, scope) => `rolling-continuity:${agentId}:${scope}`;
-const historyKey = (agentId) => `tiddle-history:${agentId}`;
-const synthesisKey = (agentId) => `tiddle-synthesis:${agentId}`;
+const historyKey = (agentId) => ({ agentId, kind: 'tiddle-history' });
+const synthesisKey = (agentId) => ({ agentId, kind: 'tiddle-synthesis' });
 const globalCardKey = (agentId) => cardKey(agentId, GLOBAL_SCOPE);
 
 function* meta(db, key, fallback = null) { return (yield () => db.get(key)) ?? fallback; }
@@ -291,7 +291,7 @@ function* tiddleStatusOperation({ agentId, stores = null, limit = 10 } = {}) {
   const db = tiddlePersistence({ stores });
   try {
     const state = id ? (yield* meta(db, passKey(id), null)) : null;
-    const rows = (yield () => db.rows(id ? `tiddle-pass-receipt:${id}:` : 'tiddle-pass-receipt:')).slice(0, Math.max(1, Math.min(100, Number(limit) || 10)));
+    const rows = (yield () => db.rows({ agentId: id || null, kind: 'tiddle-pass-receipt' })).slice(0, Math.max(1, Math.min(100, Number(limit) || 10)));
     const selection = yield () => readCuratorSelection({ stores, root: curatorRoot() });
     return { ok: true, agentId: id || null, cadenceHours: 4, lookbackHours: 24, cardTtlDays: 30, temperature: selection?.temperature ?? 0, state, receipts: rows.map((row) => parse(row.value_json, {})) };
   } finally { db.close(); }
@@ -332,12 +332,12 @@ export function createTiddleScheduler({ stores = null, intervalMs = 60_000, cloc
   return { start, stop, tick };
 }
 
-export function appendTiddleResidue(options = {}) { return options.stores?.metadata ? appendTiddleResidueAsync(options) : runSync(appendTiddleResidueOperation(options)); }
+export function appendTiddleResidue(options = {}) { return appendTiddleResidueAsync(options); }
 
-export function listTiddleCards(options = {}) { return (options.stores?.metadata ? runAsync : runSync)(listTiddleCardsOperation(options)); }
+export function listTiddleCards(options = {}) { return runAsync(listTiddleCardsOperation(options)); }
 
-export function tiddleHistory(options = {}) { return (options.stores?.metadata ? runAsync : runSync)(tiddleHistoryOperation(options)); }
+export function tiddleHistory(options = {}) { return runAsync(tiddleHistoryOperation(options)); }
 
-export function tiddleStatus(options = {}) { return (options.stores?.metadata ? runAsync : runSync)(tiddleStatusOperation(options)); }
+export function tiddleStatus(options = {}) { return runAsync(tiddleStatusOperation(options)); }
 
-export function listDueTiddlePasses(options = {}) { return (options.stores?.metadata ? runAsync : runSync)(listDueTiddlePassesOperation(options)); }
+export function listDueTiddlePasses(options = {}) { return runAsync(listDueTiddlePassesOperation(options)); }

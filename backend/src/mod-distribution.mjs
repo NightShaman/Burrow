@@ -349,7 +349,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       try {
         await recoveryDb.transaction((tx) => tx.restoreMetadata(journal));
       } finally { await recoveryDb.close(); }
-      await onLifecycleChange?.({ modId: journal.modId, enabled: journal.lifecycle?.enabled === 1, installed: true, action: 'uninstall-recovery' });
+      await onLifecycleChange?.({ modId: journal.modId, enabled: [true, 1].includes(journal.lifecycle?.enabled), installed: true, action: 'uninstall-recovery' });
       await removeDurably(journalPath);
     }
     await fs.rmdir(recoveryRoot).catch((error) => { if (error?.code !== 'ENOENT' && error?.code !== 'ENOTEMPTY') throw error; });
@@ -430,7 +430,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
         const record = installed.get(mod.id); const source = sourceByMod.get(mod.id) || (record?.source_id ? sources.find((item) => item.id === record.source_id) : null);
         const version = record?.version || normalizeVersion(mod.manifest?.version || '') || undefined;
         const latestVersion = source?.latest_version || undefined;
-        const enabled = lifecycle.get(mod.id)?.enabled !== 0;
+        const enabled = ![false, 0].includes(lifecycle.get(mod.id)?.enabled);
         return { id: mod.id, name: mod.name, version, status: mod.status === 'failed' ? 'failed' : 'installed', enabled, system: mod.manifest?.system === true, source: source?.url, latestVersion, updateAvailable: Boolean(version && latestVersion && VERSION.test(version) && VERSION.test(latestVersion) && compareVersions(latestVersion, version) > 0), canInstall: source?.status === 'ready', ...(source?.error ? { reason: source.error } : {}) };
       });
       for (const source of sources) if (source.mod_id && !mods.some((mod) => mod.id === source.mod_id)) mods.push({ id: source.mod_id, name: source.mod_name || source.mod_id, status: 'available', source: source.url, latestVersion: source.latest_version || undefined, canInstall: source.status === 'ready', ...(source.error ? { reason: source.error } : {}) });
@@ -497,7 +497,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       if (prepared.id !== id && source.mod_id) throw new Error('mod_manifest_id_mismatch');
       const target = path.join(modsRoot, prepared.id); const digest = await archiveSha256(archive);
       const wasInstalled = Boolean(await db.installationExists(prepared.id));
-      const enabled = (await db.lifecycle(prepared.id))?.enabled === 1;
+      const enabled = [true, 1].includes((await db.lifecycle(prepared.id))?.enabled);
       // Reject already-active work before touching the files used by the live
       // registry. transitionMod checks again after candidate activation to close
       // the race with work that starts during staging.
@@ -591,7 +591,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
           catch (recoveryError) { error.databaseRecoveryError = recoveryError; }
         }
         if (runtimeRemoved) {
-          try { await onLifecycleChange?.({ modId: id, enabled: lifecycle?.enabled === 1, installed: true, action: 'uninstall-recovery' }); }
+          try { await onLifecycleChange?.({ modId: id, enabled: [true, 1].includes(lifecycle?.enabled), installed: true, action: 'uninstall-recovery' }); }
           catch (recoveryError) { error.runtimeRecoveryError = recoveryError; }
         }
         if (!error.filesystemRecoveryError && !error.databaseRecoveryError && !error.runtimeRecoveryError) {

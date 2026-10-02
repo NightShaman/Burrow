@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { randomUUID } from 'node:crypto';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
@@ -13,7 +14,7 @@ const now = () => new Date().toISOString();
 export class PostgresUiAuthSecretStore {
   constructor({ pool, key, encryptionKey, clock = now, ownsPool = false } = {}) {
     if (!pool) throw new Error('pool_required');
-    this.pool = pool; this.key = key || encryptionKey || settingsKeyFromEnvironment(); this.clock = clock; this.ownsPool = ownsPool;
+    this.pool = normalizePostgresPool(pool); this.key = key || encryptionKey || settingsKeyFromEnvironment(); this.clock = clock; this.ownsPool = ownsPool;
     if (!Buffer.isBuffer(this.key) || this.key.length !== 32) throw new Error('settings_encryption_key_invalid');
   }
   async close() { if (this.ownsPool) await closePostgresPool(this.pool); }

@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { operatorTimezone } from './timezone.mjs';
 import { PostgresSettingsMetadataStore } from './postgres-settings-metadata-store.mjs';
 import { randomUUID } from 'node:crypto';
@@ -39,7 +40,7 @@ export const DREAM_CYCLE_RECEIPT_SCHEMA_SQL = POSTGRES_DREAM_CYCLE_RECEIPT_SCHEM
 export class PostgresDreamCycleReceiptStore {
   constructor({ pool, ownsPool = false, clock = () => new Date().toISOString(), runtimeInstanceId = randomUUID() } = {}) {
     if (!pool?.query || !pool?.connect) throw new Error('dream_cycle_postgres_pool_required');
-    this.pool = pool; this.ownsPool = ownsPool; this.clock = clock; this.runtimeInstanceId = runtimeInstanceId;
+    this.pool = normalizePostgresPool(pool); this.ownsPool = ownsPool; this.clock = clock; this.runtimeInstanceId = runtimeInstanceId;
   }
   async close() { if (this.ownsPool) await closePostgresPool(this.pool); }
   async getState(agentId, client = this.pool) {

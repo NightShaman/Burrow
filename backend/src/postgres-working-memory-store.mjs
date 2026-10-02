@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { readRollingCards, writeRollingCard, rollingCardActive, pruneRollingCards } from './postgres-rolling-continuity-store.mjs';
 import { createHash } from "node:crypto";
 import {
@@ -126,7 +127,7 @@ export class PostgresWorkingMemoryStore {
   } = {}) {
     if (!pool?.query || !pool?.connect)
       throw Error("working_memory_postgres_pool_required");
-    this.pool = pool;
+    this.pool = normalizePostgresPool(pool);
     this.ownsPool = ownsPool;
     this.clock = clock;
     // Retention is injected because the operator policy is owned by the
@@ -267,24 +268,29 @@ export class PostgresWorkingMemoryStore {
     );
     return value;
   }
-  async dreamRead(key, kind, client = this.pool) {
+  async dreamRead(identity, kind, client = this.pool) {
     const field = kind === 'ledger' ? 'entries' : 'items';
-    const result = await client.query(`SELECT e.metadata, coalesce((SELECT jsonb_agg(payload ORDER BY position) FROM dream_${kind}_entries WHERE key=e.key),'[]'::jsonb) AS entries FROM dream_state_envelopes e WHERE key=$1`, [key]);
-    return result.rows[0] ? { ...result.rows[0].metadata, [field]: result.rows[0].entries } : null;
+    const envelope = await client.query("SELECT envelope_id,metadata FROM dream_state_envelopes WHERE agent_id=$1 AND project=$2 AND kind=$3 AND scope=''", [identity.agentId,identity.project || '',kind]);
+    if (!envelope.rows.length) return null;
+    const entries = await client.query(`SELECT payload${kind === 'scope_review' ? ',entry_id::text' : ''} FROM dream_${kind}_entries WHERE envelope_id=$1 ORDER BY position`,[envelope.rows[0].envelope_id]);
+    return {...envelope.rows[0].metadata,[field]:entries.rows.map(row=>kind === 'scope_review' ? {...row.payload,entryId:row.entry_id} : row.payload)};
   }
-  async dreamWrite(key, kind, value, client = null, append = false) {
-    if (!client) return withPostgresTransaction(this.pool, c => this.dreamWrite(key, kind, value, c, append));
-    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [key]);
+
+  async dreamWrite(identity, kind, value, client = null, append = false) {
+    if (!client) return withPostgresTransaction(this.pool, c => this.dreamWrite(identity, kind, value, c, append));
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [JSON.stringify([identity.agentId,identity.project || '',kind])]);
     const field = kind === 'ledger' ? 'entries' : 'items';
     const { [field]: entries, ...metadata } = value;
-    await client.query(`INSERT INTO dream_state_envelopes(key,kind,metadata,updated_at) VALUES($1,$2,$3::jsonb,$4) ON CONFLICT(key) DO UPDATE SET metadata=dream_state_envelopes.metadata || EXCLUDED.metadata,updated_at=EXCLUDED.updated_at`, [key,kind,JSON.stringify(metadata),this.clock()]);
+    const envelope = await client.query(`INSERT INTO dream_state_envelopes(agent_id,project,kind,scope,metadata,updated_at) VALUES($1,$2,$3,'',$4::json,$5) ON CONFLICT(agent_id,project,kind,scope) DO UPDATE SET updated_at=EXCLUDED.updated_at RETURNING envelope_id,metadata`, [identity.agentId,identity.project || '',kind,JSON.stringify(metadata),this.clock()]);
+    const id = envelope.rows[0].envelope_id;
+    await client.query('UPDATE dream_state_envelopes SET metadata=$2::json WHERE envelope_id=$1',[id,JSON.stringify({...envelope.rows[0].metadata,...metadata})]);
     let start = 1;
     if (append) {
-      const result = await client.query(`SELECT min(position) AS first FROM dream_${kind}_entries WHERE key=$1`, [key]);
+      const result = await client.query(`SELECT min(position) AS first FROM dream_${kind}_entries WHERE envelope_id=$1`, [id]);
       start = Number(result.rows[0].first ?? 1) - entries.length;
-    } else await client.query(`DELETE FROM dream_${kind}_entries WHERE key=$1`, [key]);
-    await client.query(`INSERT INTO dream_${kind}_entries(key,position,payload) SELECT $1,$2::bigint+ordinality-1,value FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY`, [key,start,JSON.stringify(entries)]);
-    return this.dreamRead(key, kind, client);
+    } else await client.query(`DELETE FROM dream_${kind}_entries WHERE envelope_id=$1`, [id]);
+    await client.query(`INSERT INTO dream_${kind}_entries(envelope_id,position,payload) SELECT $1,$2::bigint+ordinality-1,value FROM json_array_elements($3::json) WITH ORDINALITY`, [id,start,JSON.stringify(entries)]);
+    return this.dreamRead(identity, kind, client);
   }
   async replaceDreamPreload({ agentId, project, items = [], expiresAt } = {}) {
     await this.ready();
@@ -306,7 +312,7 @@ export class PostgresWorkingMemoryStore {
       .filter((i) => i.id && i.title && i.content && i.sourceRefs.length);
     return withPostgresTransaction(this.pool, (c) =>
       this.dreamWrite(
-        `dream-preload:${agentId}:${project}`, 'preload',
+        { agentId, project }, 'preload',
         {
           version: 1,
           agentId,
@@ -322,7 +328,7 @@ export class PostgresWorkingMemoryStore {
   async getDreamPreload({ agentId, project } = {}) {
     await this.ready();
     if (!text(agentId) || !text(project)) return null;
-    const v = await this.dreamRead(`dream-preload:${agentId}:${project}`, 'preload');
+    const v = await this.dreamRead({ agentId, project }, 'preload');
     return v?.expiresAt && v.expiresAt < this.clock() ? null : v;
   }
   async appendDreamLedger({ agentId, project, mode, entries = [] } = {}) {
@@ -331,7 +337,7 @@ export class PostgresWorkingMemoryStore {
       throw Error("dream_ledger_scope_required");
     return withPostgresTransaction(this.pool, async (c) => {
       await c.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
-        `dream-ledger:${agentId}:${project}`,
+        { agentId, project },
       ]);
       const normalized = (Array.isArray(entries) ? entries : [])
         .map((e) => ({
@@ -347,7 +353,7 @@ export class PostgresWorkingMemoryStore {
         }))
         .filter((e) => e.action && e.candidateKey);
       return this.dreamWrite(
-        `dream-ledger:${agentId}:${project}`, 'ledger',
+        { agentId, project }, 'ledger',
         {
           version: 1,
           agentId,
@@ -362,7 +368,7 @@ export class PostgresWorkingMemoryStore {
   async getDreamLedger({ agentId, project } = {}) {
     await this.ready();
     if (!text(agentId) || !text(project)) return null;
-    return this.dreamRead(`dream-ledger:${agentId}:${project}`, 'ledger');
+    return this.dreamRead({ agentId, project }, 'ledger');
   }
   async supersedeDreamRecords({ agentId, project, keepIds = [] } = {}) {
     const keep = new Set((keepIds || []).map(text));
@@ -399,7 +405,7 @@ export class PostgresWorkingMemoryStore {
       );
     if (items.some((c) => c.content.length > MAX_COMPACT_CONTENT_CHARS))
       throw Error("dream_scope_review_content_too_large");
-    return this.dreamWrite(`dream-scope-review:${agentId}`, 'scope_review', {
+    return this.dreamWrite({ agentId }, 'scope_review', {
       version: 1,
       agentId,
       mode: text(mode),
@@ -412,22 +418,25 @@ export class PostgresWorkingMemoryStore {
   async getDreamScopeReviewQueue({ agentId } = {}) {
     await this.ready();
     if (!text(agentId)) return null;
-    const v = await this.dreamRead(`dream-scope-review:${agentId}`, 'scope_review');
+    const v = await this.dreamRead({ agentId }, 'scope_review');
     return v?.expiresAt && v.expiresAt < this.clock() ? null : v;
   }
-  async assignDreamScopeReview({ agentId, index, project } = {}) {
+  async assignDreamScopeReview({ agentId, entryId, index, project } = {}) {
+    // Positional-only requests cannot prove which queue revision was reviewed.
+    if (!text(entryId)) throw Error("dream_scope_review_entry_id_required");
     if (!text(agentId)) throw Error("dream_scope_review_agent_required");
     if (!PROJECTS.has(text(project)))
       throw Error("dream_scope_review_project_invalid");
     await this.ready();
     return withPostgresTransaction(this.pool, async (c) => {
-      const key = `dream-scope-review:${agentId}`;
-      await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [key]);
+      const key = { agentId };
+      await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [JSON.stringify([agentId,'','scope_review'])]);
       const queue = await this.dreamRead(key, 'scope_review', c);
       if (!queue || (queue.expiresAt && queue.expiresAt < this.clock()))
         throw Error("dream_scope_review_not_found");
-      const n = Number(index);
-      if (!Number.isInteger(n) || n < 0 || n >= queue.items.length)
+      const n = queue.items.findIndex(item => item.entryId === text(entryId));
+      if (n < 0) throw Error("dream_scope_review_entry_not_found");
+      if (index !== undefined && (!Number.isInteger(Number(index)) || Number(index) !== n))
         throw Error("dream_scope_review_index_invalid");
       const item = queue.items[n];
       const id = `dream-${createHash("sha256").update([agentId, project, item.kind, item.title].join("\0")).digest("hex")}`;
@@ -451,12 +460,13 @@ export class PostgresWorkingMemoryStore {
         ],
       );
       const record = row(inserted.rows[0]);
-      const deleted = await c.query(`DELETE FROM dream_scope_review_entries WHERE key=$1 AND position=(SELECT position FROM dream_scope_review_entries WHERE key=$1 ORDER BY position OFFSET $2 LIMIT 1) RETURNING position`, [key,n]);
-      if (deleted.rowCount !== 1) throw Error('dream_scope_review_index_invalid');
-      await c.query("UPDATE dream_state_envelopes SET metadata=jsonb_set(metadata,'{updatedAt}',to_jsonb($2::text)),updated_at=$2::timestamptz WHERE key=$1", [key,this.clock()]);
+      const deleted = await c.query(`DELETE FROM dream_scope_review_entries d USING dream_state_envelopes e WHERE d.envelope_id=e.envelope_id AND e.agent_id=$1 AND e.kind='scope_review' AND e.project='' AND e.scope='' AND d.entry_id::text=$2 RETURNING entry_id`, [agentId,item.entryId]);
+      if (deleted.rowCount !== 1) throw Error('dream_scope_review_entry_not_found');
+      await c.query("UPDATE dream_state_envelopes SET metadata=$3::json,updated_at=$2::timestamptz WHERE agent_id=$1 AND kind='scope_review' AND project='' AND scope=''", [agentId,this.clock(),JSON.stringify({...queue,items:undefined,updatedAt:this.clock()})]);
       return {
         record,
         assignedIndex: n,
+        assignedEntryId: item.entryId,
         remainingCount: queue.items.length - 1,
         disposition: "assigned_local_only",
       };

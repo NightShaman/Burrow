@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { randomUUID } from 'node:crypto';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 import {
@@ -51,7 +52,7 @@ export class PostgresModelSettingsStore {
   constructor({ pool, key, ownsPool = false, clock = now, bootstrapSampleIdentities = process.env.BURROW_BOOTSTRAP_SAMPLE_IDENTITIES } = {}) {
     if (!pool?.query || !pool?.connect) throw new Error('model_settings_postgres_pool_required');
     if (!Buffer.isBuffer(key) || key.length !== 32) throw new Error('settings_encryption_key_invalid');
-    this.pool = pool; this.key = key; this.ownsPool = ownsPool; this.clock = clock;
+    this.pool = normalizePostgresPool(pool); this.key = key; this.ownsPool = ownsPool; this.clock = clock;
     this.bootstrapSampleIdentities = ["1", "true", "yes", "on"].includes(String(bootstrapSampleIdentities ?? "0").trim().toLowerCase());
   }
   async close() { if (this.ownsPool) await closePostgresPool(this.pool); }
@@ -79,13 +80,13 @@ export class PostgresModelSettingsStore {
       return this.identitySnapshot(client);
     });
   }
-  selectSql(where = '') { return `SELECT c.*, legacy.id AS secret_id, auth.id AS auth_secret_id, p.value_json AS auth_preview_json FROM model_connections c LEFT JOIN model_connection_secrets legacy ON legacy.connection_id=c.id AND legacy.name='${API_KEY}' LEFT JOIN model_connection_secrets auth ON auth.connection_id=c.id AND auth.name='${AUTH}' LEFT JOIN model_auth_previews p ON p.connection_id=c.id ${where}`; }
-  async list() { const r = await this.pool.query(`${this.selectSql()} ORDER BY c.updated_at DESC`); return r.rows.map(publicConnection); }
+  selectSql(where = '') { return `SELECT c.*, c.accepted_input_json::text AS accepted_input_json, c.models_json::text AS models_json, legacy.id AS secret_id, auth.id AS auth_secret_id, p.value_json::text AS auth_preview_json FROM model_connections c LEFT JOIN model_connection_secrets legacy ON legacy.connection_id=c.id AND legacy.name='${API_KEY}' LEFT JOIN model_connection_secrets auth ON auth.connection_id=c.id AND auth.name='${AUTH}' LEFT JOIN model_auth_previews p ON p.connection_id=c.id ${where}`; }
+  async list({ agentId = null } = {}) { const r = await this.pool.query(`${this.selectSql()} ORDER BY c.updated_at DESC`); return Promise.all(r.rows.map(async row => { const connection = publicConnection(row); if (agentId) { const native = await this.pool.query('SELECT model_id FROM model_catalog WHERE connection_id=$1 AND available', [row.id]); const ids = new Set(native.rows.map(x => x.model_id)); connection.models = connection.models.filter(x => ids.has(x.id)); } return connection; })); }
   async get(id) { const r = await this.pool.query(`${this.selectSql('WHERE c.id=$1')}`, [id]); return publicConnection(r.rows[0]); }
   async secret(id, name) { const r = await this.pool.query('SELECT * FROM model_connection_secrets WHERE connection_id=$1 AND name=$2', [id, name]); return r.rows[0] ? decrypt(this.key, r.rows[0]) : null; }
   async apiKey(id) { return this.secret(id, API_KEY); }
   async cacheGet(key) {
-    const result = await this.pool.query('SELECT value_json FROM model_settings_cache WHERE cache_key=$1', [String(key)]);
+    const result = await this.pool.query('SELECT value_json::text AS value_json FROM model_settings_cache WHERE cache_key=$1', [String(key)]);
     return result.rows[0] ? json(result.rows[0].value_json, {}) : {};
   }
   async cacheSet(key, value, timestamp = this.clock()) {
@@ -117,7 +118,7 @@ export class PostgresModelSettingsStore {
       const duplicate = await client.query(`SELECT id FROM model_connections WHERE translate(provider,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')=translate($1,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') AND id<>$2 FOR UPDATE`, [connection.provider, id]);
       if (duplicate.rows[0]) throw new Error('provider_label_duplicate');
       const stamp = this.clock();
-      const priorRow = existing.rows[0] ? await client.query('SELECT models_json FROM model_connections WHERE id=$1', [id]) : null;
+      const priorRow = existing.rows[0] ? await client.query('SELECT models_json::text AS models_json FROM model_connections WHERE id=$1', [id]) : null;
       const existingModels = normalizeModels(json(priorRow?.rows[0]?.models_json, []), { provider: connection.provider, apiType: connection.apiType });
       const submittedModels = normalizeModels(input.models, { provider: connection.provider, apiType: connection.apiType });
       const priorById = new Map(existingModels.map((model) => [model.id, model]));
@@ -149,7 +150,8 @@ export class PostgresModelSettingsStore {
       if (!connectionRow.rows[0]) throw new Error('model_connection_not_found');
       const connectionResult = await client.query(this.selectSql('WHERE c.id=$1'), [id]);
       const connection = publicConnection(connectionResult.rows[0]);
-      const enabled = connection.models.find((item) => item.id === modelId && item.selected !== false);
+      const native = await client.query('SELECT metadata FROM model_catalog WHERE connection_id=$1 AND model_id=$2 AND available FOR SHARE', [id, modelId]);
+      const enabled = native.rows[0]?.metadata?.selected !== false ? native.rows[0]?.metadata : null;
       if (!enabled) throw new Error('model_not_enabled_for_connection');
       if (!await this.authWithClient(client, id, connection.provider)) throw new Error('model_connection_auth_required');
       const effort = normalizeReasoningEffort(reasoningEffort);

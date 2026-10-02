@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { randomUUID } from "node:crypto";
 import { TASK_STATUSES, TASK_PRIORITIES } from "./task-board-store.mjs";
 export { TASK_STATUSES, TASK_PRIORITIES };
@@ -199,7 +200,7 @@ export class PostgresTaskBoardStore {
   constructor({ pool, ownsPool = false, clock = now } = {}) {
     if (!pool?.query || !pool?.connect)
       throw new Error("task_board_postgres_pool_required");
-    this.pool = pool;
+    this.pool = normalizePostgresPool(pool);
     this.ownsPool = ownsPool;
     this.clock = clock;
   }

@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { POSTGRES_CONTINUITY_STATE_SCHEMA_SQL } from './postgres-continuity-state-store.mjs';
 import { resolveAlbdruckConfig } from './config.mjs';
 import { matchesQuery } from './session-search.mjs';
@@ -526,7 +527,7 @@ export function assertConversationDeletionAllowed(sessionId, metadata = {}) {
 export class PostgresSessionStore {
   constructor({ pool, ownsPool = false, clock = stamp } = {}) {
     if (!pool?.query || !pool?.connect) throw new Error('session_postgres_pool_required');
-    this.pool = pool; this.ownsPool = ownsPool; this.clock = clock;
+    this.pool = normalizePostgresPool(pool); this.ownsPool = ownsPool; this.clock = clock;
   }
   async deleteSession({agentId: rawAgentId, sessionId: rawSessionId} = {}) {
     const agentId = required(rawAgentId, 'agentId');

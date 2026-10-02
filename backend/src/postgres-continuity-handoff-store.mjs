@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 
 const MAX_TITLE_CHARS = 240;
@@ -75,7 +76,7 @@ const UPSERT_SQL = `INSERT INTO continuity_handoffs
 export class PostgresContinuityHandoffStore {
   constructor({ pool, ownsPool = false } = {}) {
     if (!pool || typeof pool.query !== 'function' || typeof pool.connect !== 'function') throw new Error('continuity_handoff_postgres_pool_required');
-    this.pool = pool;
+    this.pool = normalizePostgresPool(pool);
     this.ownsPool = ownsPool;
   }
   async close() { if (this.ownsPool) await closePostgresPool(this.pool); }

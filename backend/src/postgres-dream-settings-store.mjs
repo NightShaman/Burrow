@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { operatorTimezone } from './timezone.mjs';
 import { PostgresSettingsMetadataStore } from './postgres-settings-metadata-store.mjs';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
@@ -31,7 +32,7 @@ function parseModels(value) { if (Array.isArray(value)) return value; try { retu
 function publicRow(row) { return row && { agentId: row.agent_id, enabled: Boolean(row.enabled), cron: row.cron_expression, timezone: row.timezone, prompt: row.prompt, modelConnectionId: row.model_connection_id || null, model: row.model || null, createdAt: timestamp(row.created_at), updatedAt: timestamp(row.updated_at) }; }
 
 export class PostgresDreamSettingsStore {
-  constructor({ pool, ownsPool = false } = {}) { if (!pool?.query || !pool?.connect) throw new Error('dream_settings_postgres_pool_required'); this.pool = pool; this.ownsPool = ownsPool; }
+  constructor({ pool, ownsPool = false } = {}) { if (!pool?.query || !pool?.connect) throw new Error('dream_settings_postgres_pool_required'); this.pool = normalizePostgresPool(pool); this.ownsPool = ownsPool; }
   async resolved(row, client = this.pool) { const value = publicRow(row); return value && { ...value, effectiveTimezone: value.timezone ?? await operatorTimezone(new PostgresSettingsMetadataStore({ pool: client })) }; }
   async close() { if (this.ownsPool) await closePostgresPool(this.pool); }
   async get(agent) {
@@ -56,7 +57,7 @@ export class PostgresDreamSettingsStore {
       const next = { enabled: bool(input.enabled, current?.enabled ?? true), cron: cron(input.cron ?? current?.cron ?? '0 4 * * *'), timezone: timezone(input.timezone === undefined ? current?.timezone ?? null : input.timezone), prompt: prompt(input.prompt ?? current?.prompt ?? DEFAULT_DREAM_PROMPT), modelConnectionId: input.modelConnectionId === undefined && input.connectionId === undefined ? (current?.modelConnectionId ?? null) : modelId(input.modelConnectionId ?? input.connectionId), model: input.model === undefined && input.modelId === undefined ? (current?.model ?? null) : modelId(input.model ?? input.modelId) };
       if (next.modelConnectionId || next.model) {
         if (!next.modelConnectionId || !next.model) throw new Error('dream_settings_model_selection_incomplete');
-        const connection = await client.query('SELECT models_json FROM model_connections WHERE id=$1', [next.modelConnectionId]);
+        const connection = await client.query('SELECT models_json::text AS models_json FROM model_connections WHERE id=$1', [next.modelConnectionId]);
         if (!connection.rows[0] || !parseModels(connection.rows[0].models_json).some((model) => model && model.selected !== false && text(model.id) === next.model)) throw new Error('dream_settings_model_selection_invalid');
       }
       const at = new Date().toISOString();

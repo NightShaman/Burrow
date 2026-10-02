@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 import {
   AGENT_PROFILE_KINDS,
@@ -27,7 +28,7 @@ function document(row) { return row && { kind: row.kind, markdown: row.markdown,
 export class PostgresAgentProfileStore {
   constructor({ pool, ownsPool = false, clock = now } = {}) {
     if (!pool?.query || !pool?.connect) throw new Error('agent_profile_postgres_pool_required');
-    this.pool = pool; this.ownsPool = ownsPool; this.clock = clock;
+    this.pool = normalizePostgresPool(pool); this.ownsPool = ownsPool; this.clock = clock;
   }
   async close() { if (this.ownsPool) await closePostgresPool(this.pool); }
   async list(agent) {
@@ -82,7 +83,7 @@ export class PostgresAgentProfileStore {
       if (!found.rows[0]) throw new Error('agent_not_found');
       const profileResult = await client.query('SELECT kind,markdown,created_at,updated_at FROM agent_profile_documents WHERE agent_id=$1 AND kind=$2 FOR UPDATE', [id, 'PREFERENCES']);
       const current = document(profileResult.rows[0]);
-      const readMeta = async (key) => { const result = await client.query('SELECT value_json FROM settings_meta WHERE key=$1 FOR UPDATE', [key]); try { return JSON.parse(result.rows[0]?.value_json || 'null'); } catch { return null; } };
+      const readMeta = async (key) => { const result = await client.query('SELECT value_json::text AS value_json FROM settings_meta WHERE key=$1 FOR UPDATE', [key]); try { return JSON.parse(result.rows[0]?.value_json || 'null'); } catch { return null; } };
       for (const key of [stateKey, auditKey].sort()) await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`settings-meta:${key}`]);
       const priorState = await readMeta(stateKey);
       const priorAudit = await readMeta(auditKey);

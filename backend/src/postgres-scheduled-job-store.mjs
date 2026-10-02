@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { operatorTimezone } from './timezone.mjs';
 import { PostgresSettingsMetadataStore } from './postgres-settings-metadata-store.mjs';
 import { randomUUID } from "node:crypto";
@@ -162,7 +163,7 @@ export class PostgresScheduledJobStore {
   } = {}) {
     if (!pool?.query || !pool?.connect)
       throw new Error("scheduled_job_postgres_pool_required");
-    this.pool = pool;
+    this.pool = normalizePostgresPool(pool);
     this.ownsPool = ownsPool;
     this.clock = clock;
   }
@@ -185,7 +186,7 @@ export class PostgresScheduledJobStore {
     if (!job.modelConnectionId || !job.model)
       throw new Error("scheduled_job_model_pair_required");
     const result = await queryable.query(
-      "SELECT models_json FROM model_connections WHERE id=$1",
+      "SELECT models_json::text AS models_json FROM model_connections WHERE id=$1",
       [job.modelConnectionId],
     );
     const models = parseJson(result.rows[0]?.models_json);

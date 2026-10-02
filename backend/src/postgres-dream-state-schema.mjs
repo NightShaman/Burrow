@@ -24,3 +24,9 @@ DO $$ DECLARE r RECORD; k TEXT; field TEXT; BEGIN
  DELETE FROM working_memory_meta WHERE starts_with(key,'dream-ledger:') OR starts_with(key,'dream-preload:') OR starts_with(key,'dream-scope-review:');
 END $$;
 `;
+
+// Successor migration: generated identities are never reused on queue replacement.
+export const POSTGRES_DREAM_SCOPE_IDENTITY_SQL = `
+ALTER TABLE dream_scope_review_entries ADD COLUMN entry_id BIGSERIAL NOT NULL;
+CREATE UNIQUE INDEX dream_scope_review_entry_identity ON dream_scope_review_entries(entry_id);
+`;

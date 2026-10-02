@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 import {
   closePostgresPool,
   withPostgresTransaction,
@@ -61,7 +62,7 @@ export class PostgresAgentRegistryStore {
   } = {}) {
     if (!pool?.query || !pool?.connect)
       throw Error("agent_registry_postgres_pool_required");
-    this.pool = pool;
+    this.pool = normalizePostgresPool(pool);
     this.ownsPool = ownsPool;
     this.bootstrapSampleIdentities = ["1", "true", "yes", "on"].includes(
       String(bootstrapSampleIdentities ?? "0")

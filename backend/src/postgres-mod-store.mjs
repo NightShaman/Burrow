@@ -1,3 +1,4 @@
+import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { closePostgresPool } from './postgres-foundation.mjs';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
@@ -39,11 +40,11 @@ export class PostgresModSettingsStore {
     if (!this.modId) throw new Error('mod_id_required');
     if (!pool?.query || !pool?.connect) throw new Error('mod_settings_postgres_pool_required');
     if (!Buffer.isBuffer(key) || key.length !== 32) throw new Error('settings_encryption_key_invalid');
-    this.pool = pool; this.key = key; this.ownsPool = ownsPool; this.clock = clock;
+    this.pool = normalizePostgresPool(pool); this.key = key; this.ownsPool = ownsPool; this.clock = clock;
   }
   async close() { if (this.ownsPool) await closePostgresPool(this.pool); }
   async get(name, fallback = null) {
-    const result = await this.pool.query('SELECT value_json FROM mod_settings WHERE mod_id=$1 AND name=$2', [this.modId, String(name)]);
+    const result = await this.pool.query('SELECT value_json::text AS value_json FROM mod_settings WHERE mod_id=$1 AND name=$2', [this.modId, String(name)]);
     if (!result.rows[0]) return fallback;
     try { return JSON.parse(result.rows[0].value_json); } catch { return fallback; }
   }
@@ -72,7 +73,7 @@ export function postgresModStoreFactory({ pool, key, ownsPool = false, clock } =
 }
 
 export async function disabledPostgresMods(pool) {
-  const { rows } = await pool.query('SELECT mod_id FROM mod_lifecycle WHERE enabled=0');
+  const { rows } = await pool.query('SELECT mod_id FROM mod_lifecycle WHERE enabled=FALSE');
   return rows.map(row => row.mod_id);
 }
 

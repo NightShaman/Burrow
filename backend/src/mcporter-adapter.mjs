@@ -1,4 +1,4 @@
-import { appendFile, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { redactProtectedText } from './redaction.mjs';
@@ -25,7 +25,6 @@ export const MCPORTER_ROOT = process.env.BURROW_MCPORTER_ROOT || (process.env.BU
 export const MCPORTER_BIN = process.env.BURROW_MCPORTER_BIN || (MCPORTER_ROOT ? path.join(MCPORTER_ROOT, 'node_modules', '.bin', 'mcporter') : null);
 const text = (value) => String(value ?? '').trim();
 const DEFAULT_STREAM_CAPTURE_BYTES = 256 * 1024;
-const PROVIDER_EVENT_LIMIT = 200;
 const providerStates = new Map();
 let providerStateStore = null;
 export function configureMcpProviderStateStore(store = null) { providerStateStore = store; providerStates.clear(); }
@@ -37,30 +36,18 @@ function providerEvent(connection, status, { runtimeRoot = null, error = null } 
   if (error) event.error = publicMcpError(error);
   providerStates.set(event.providerId, event);
   if (providerStateStore) return providerStateStore.append(event).catch(() => {});
-  const root = runtimeRoot || resolveMcporterRuntime({ runtimeRoot }).root;
-  const directory = path.join(root, 'runtime');
-  const eventPath = path.join(directory, 'mcp-provider-events.jsonl');
-  // This is deliberately a bounded public lifecycle receipt, not child stderr
-  // or provider output. A failed observability write must never break MCP use.
-  return mkdir(directory, { recursive: true, mode: 0o700 })
-    .then(async () => {
-      await appendFile(eventPath, `${JSON.stringify(event)}\n`, { mode: 0o600 });
-      const lines = (await readFile(eventPath, 'utf8')).trimEnd().split('\n');
-      if (lines.length > PROVIDER_EVENT_LIMIT) await writeFile(eventPath, `${lines.slice(-PROVIDER_EVENT_LIMIT).join('\n')}\n`, { mode: 0o600 });
-    })
-    .catch(() => {});
+  return Promise.resolve();
 }
 
 export async function hydrateMcpProviderStates({ runtimeRoot = null } = {}) {
   const root = runtimeRoot || resolveMcporterRuntime({ runtimeRoot }).root;
   if (providerStateStore) {
     await providerStateStore.migrateLegacy(root);
-    const events = await providerStateStore.list();
+    const events = await providerStateStore.current();
     for (const event of events) providerStates.set(String(event.providerId), { ...event, lastKnown: true });
     return events.length;
   }
-  let lines; try { lines = (await readFile(path.join(root, 'runtime', 'mcp-provider-events.jsonl'), 'utf8')).split('\n').filter(Boolean).slice(-PROVIDER_EVENT_LIMIT); } catch (error) { if (error?.code === 'ENOENT') return 0; throw error; }
-  let loaded = 0; for (const line of lines) { try { const event = JSON.parse(line); if (!event?.providerId || !event?.status || !event?.ts) continue; providerStates.set(String(event.providerId), { ...event, lastKnown: true }); loaded += 1; } catch {} } return loaded;
+  return 0;
 }
 
 export function mcpProviderState(connection) {
