@@ -1,3 +1,4 @@
+import { POSTGRES_RESET_INSTANT_SQL } from './postgres-reset-instant.mjs';
 import { POSTGRES_REQUIRED_TIMESTAMPS_SQL } from './postgres-required-timestamps.mjs';
 import { POSTGRES_NATIVE_TIMESTAMPS_SQL } from './postgres-native-timestamps.mjs';
 import { POSTGRES_REMAINING_JSON_SQL } from './postgres-remaining-json.mjs';
@@ -91,4 +92,5 @@ ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS effective_timezone TEXT;` },
   { version: 33, name: 'lossless-settings-json', sql: POSTGRES_REMAINING_JSON_SQL },
   { version: 34, name: 'native-timestamps-and-agent-identities', sql: POSTGRES_NATIVE_TIMESTAMPS_SQL },
   { version: 35, name: 'restore-required-instant-contracts', sql: POSTGRES_REQUIRED_TIMESTAMPS_SQL },
+  { version: 36, name: 'safe-session-reset-instant', sql: POSTGRES_RESET_INSTANT_SQL },
 ]);
