@@ -198,11 +198,34 @@ async function sessionMatchesForAgent({ conversationStore = null, agent = {}, ro
   return { matches: matches.slice(0, parseLimit(limit)), searchedSessionCount: records.length, totalMatches };
 }
 
+async function indexedEvidenceTranscript({ conversationStore, agentId, sessionId, query, includeResetHistory = false }) {
+  const candidates = []; let after = null;
+  // Candidate pages bound payload transfer, without imposing a ranking cutoff.
+  // Summary source-ID reports remain complete even when a query excludes them.
+  do {
+    const page = await conversationStore.searchEvidencePage({ agentId, sessionId, query, includeResetHistory, after });
+    candidates.push(...page.rows); after = page.next;
+  } while (after);
+  candidates.sort((a,b) => a.source_store === b.source_store
+    ? Number(a.generation || 0)-Number(b.generation || 0) || Number(a.ordinal)-Number(b.ordinal)
+    : a.source_store === 'live' ? 1 : -1);
+  const seen = new Set(); const entries = [];
+  for (const row of candidates.reverse()) {
+    const entry = row.entry;
+    if (entry.id && seen.has(entry.id)) continue;
+    if (entry.id) seen.add(entry.id);
+    entries.push(row.source_store === 'live' ? entry : { ...entry, metadata: { ...entry.metadata, resetArchive: Boolean(row.reset_archive) } });
+  }
+  return entries.reverse().sort((a,b) => String(a.ts || '').localeCompare(String(b.ts || '')));
+}
+
 export async function searchSessionEvidence({ conversationStore = null, agentId = null, rootDir, sessionId = 'default', query = '', role = 'any', sourceId = null, includeSummaries = true, limit = 50, since = null, until = null } = {}) {
   // Reset snapshots are archive-only human history. Session search may retain
   // compacted predecessors for the active conversation, but never traverses a
   // prior reset generation.
-  const transcript = await evidenceTranscript({ conversationStore, agentId, rootDir, sessionId, includeResetHistory: false });
+  const transcript = typeof conversationStore?.searchEvidencePage === 'function'
+    ? await indexedEvidenceTranscript({ conversationStore, agentId, sessionId, query })
+    : await evidenceTranscript({ conversationStore, agentId, rootDir, sessionId, includeResetHistory: false });
   const max = parseLimit(limit);
   const entries = transcript
     .filter((entry) => includeSummaries || !entry.metadata?.compressionSummary)
@@ -256,7 +279,9 @@ export async function searchAgentSessionEvidence({ conversationStore = null, con
   const seenEvidence = new Set();
   const matches = [];
   for (const candidate of orderedSessions) {
-    const transcript = await evidenceTranscript({ conversationStore, agentId, rootDir: candidate.rootDir, sessionId: candidate.sessionId, includeResetHistory: true });
+    const transcript = typeof conversationStore?.searchEvidencePage === 'function'
+      ? await indexedEvidenceTranscript({ conversationStore, agentId, sessionId: candidate.sessionId, query, includeResetHistory: true })
+      : await evidenceTranscript({ conversationStore, agentId, rootDir: candidate.rootDir, sessionId: candidate.sessionId, includeResetHistory: true });
     for (const entry of transcript) {
       const entryKey = `${candidate.rootDir}:${entry.id || `${entry.ts}:${entry.role}:${entry.content}`}`;
       if (seenEntries.has(entryKey) || !recallEligible(entry) || (!includeSummaries && entry.metadata?.compressionSummary) || !matchesRole(entry, role) || !matchesQuery(entry, query)) continue;

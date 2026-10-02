@@ -266,8 +266,39 @@ CREATE INDEX IF NOT EXISTS conversation_original_rows_search_fallback_idx ON con
  WHERE search_grams IS NULL;
 `;
 
-export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL;
 
+
+// Native archive payloads replace the aggregate blob; live payloads already have
+// occurrence granularity. The compatibility view is read-only, not a projection.
+export const POSTGRES_SESSION_NATIVE_SCHEMA_SQL = `
+LOCK TABLE conversation_entries,conversation_archives,conversation_original_rows IN ACCESS EXCLUSIVE MODE;
+DROP TRIGGER burrow_original_entries ON conversation_entries;
+DROP TRIGGER burrow_original_archives ON conversation_archives;
+ALTER TABLE conversation_original_rows RENAME TO conversation_archive_entries;
+DELETE FROM conversation_archive_entries WHERE source_store='live';
+ALTER TABLE conversation_archive_entries ADD COLUMN entry_id text;
+ALTER TABLE conversation_archive_entries ADD COLUMN idempotency_key text;
+UPDATE conversation_archive_entries SET entry_id=NULL;
+ALTER TABLE conversation_archive_entries ADD CONSTRAINT native_archive_owner FOREIGN KEY(agent_id,session_id,source_id) REFERENCES conversation_archives(agent_id,session_id,archive_id) ON DELETE CASCADE;
+ALTER TABLE conversation_entries ADD COLUMN search_grams text[];
+CREATE TRIGGER burrow_native_live_search BEFORE INSERT OR UPDATE ON conversation_entries
+ FOR EACH ROW EXECUTE FUNCTION burrow_project_search();
+UPDATE conversation_entries SET search_grams=burrow_entry_search_grams(entry);
+CREATE INDEX conversation_entries_search_idx ON conversation_entries USING gin(search_grams);
+ALTER TABLE conversation_archives DROP COLUMN entries;
+CREATE VIEW conversation_original_rows AS
+ SELECT agent_id,session_id,'live'::text AS source_store,sequence::text AS source_id,
+ sequence AS ordinal,COALESCE(burrow_json_member(entry,'id')::text,to_json(entry_id)::text) AS entry_key,
+ entry,COALESCE(burrow_json_member(entry,'content')::text,'') AS search_projection,
+ created_at,NULL::text AS archive_kind,NULL::bigint AS generation,search_grams
+ FROM conversation_entries
+ UNION ALL
+ SELECT agent_id,session_id,source_store,source_id,ordinal,entry_key,entry,search_projection,
+ created_at,archive_kind,generation,search_grams FROM conversation_archive_entries;
+DROP FUNCTION burrow_sync_original_rows();
+`;
+
+export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL;
 
 const text = (value) => String(value ?? '');
 const required = (value, name) => { const result = text(value).trim(); if (!result) throw new Error(`${name} is required`); return result; };
@@ -482,6 +513,34 @@ export class PostgresSessionStore {
     return { entries: rows.map(rowEntry), next: hasMore ? String(rows.at(-1).sequence) : null, hasMore };
   }
 
+  // Indexed candidate pages; final query/ranking/filter semantics stay in JS.
+  async searchEvidencePage({ agentId, sessionId, query = '', includeResetHistory = false, after = null, limit = 256 } = {}) {
+    const terms = [...new Set(query.toLowerCase().match(/[a-z0-9][a-z0-9._-]*/gu)?.filter(t => t.length >= 3) || [])];
+    const grams = terms.map(t => [...new Set(Array.from({ length: t.length - 2 }, (_, i) => t.slice(i,i+3)))]);
+    const candidate = grams.length ? `AND (burrow_json_member(burrow_json_member(r.entry,'metadata'),'compressionSummary') IS NOT NULL OR r.search_grams IS NULL OR ${grams.map((_,i) => `r.search_grams @> $${i+7}::text[]`).join(' OR ')})` : '';
+    const { rows } = await this.pool.query(`SELECT r.*, (r.archive_kind='reset' OR r.generation <= COALESCE((SELECT max(a.generation) FROM conversation_archives a WHERE a.agent_id=r.agent_id AND a.session_id=r.session_id AND a.kind='reset'),-1) OR (s.metadata->>'resetAt' IS NOT NULL AND r.created_at<=s.metadata->>'resetAt')) AS reset_archive FROM conversation_original_rows r
+      JOIN conversation_sessions s USING(agent_id,session_id)
+      WHERE r.agent_id=$1 AND r.session_id=$2
+      AND ($3::text IS NULL OR (r.source_store,r.source_id,r.ordinal)>($3,$4,$5::bigint))
+      AND (${includeResetHistory ? 'true' : 'false'} OR r.source_store='live' OR (r.archive_kind <> 'reset'
+        AND r.generation > COALESCE((SELECT max(a.generation) FROM conversation_archives a
+          WHERE a.agent_id=r.agent_id AND a.session_id=r.session_id AND a.kind='reset'),-1)
+        AND (s.metadata->>'resetAt' IS NULL OR r.created_at>s.metadata->>'resetAt')))
+      AND NOT EXISTS (SELECT 1 FROM conversation_original_rows newer
+        WHERE newer.agent_id=r.agent_id AND newer.session_id=r.session_id
+        AND newer.entry_key=r.entry_key AND burrow_json_member(r.entry,'id') IS NOT NULL
+        AND (newer.source_store>r.source_store OR
+          (newer.source_store=r.source_store AND
+            (CASE WHEN r.source_store='live' THEN newer.ordinal>r.ordinal ELSE
+              newer.generation>r.generation OR (newer.generation=r.generation AND
+                (newer.source_id>r.source_id OR (newer.source_id=r.source_id AND newer.ordinal>r.ordinal))) END))))
+      ${candidate}
+      ORDER BY r.source_store,r.source_id,r.ordinal LIMIT $6`,
+      [required(agentId,'agentId'),required(sessionId,'sessionId'),...(after || [null,null,null]),limit,...grams]);
+    const last = rows.at(-1);
+    return { rows, next: rows.length === limit ? [last.source_store,last.source_id,String(last.ordinal)] : null };
+  }
+
   async lastOperatorMessageAt({ agentId: rawAgentId } = {}) {
     const agentId = required(rawAgentId, 'agentId');
     let newest = null;
@@ -518,7 +577,7 @@ export class PostgresSessionStore {
   async exportTranscript({ agentId, sessionId } = {}) {
     const result = await this.pool.query(`
       SELECT s.metadata,s.created_at,s.updated_at,
-        COALESCE((SELECT json_agg(a.entries ORDER BY a.generation,a.created_at,a.archive_id)
+        COALESCE((SELECT json_agg((SELECT COALESCE(json_agg(e.entry ORDER BY e.ordinal),'[]'::json) FROM conversation_archive_entries e WHERE e.agent_id=a.agent_id AND e.session_id=a.session_id AND e.source_id=a.archive_id) ORDER BY a.generation,a.created_at,a.archive_id)
           FROM conversation_archives a WHERE a.agent_id=s.agent_id AND a.session_id=s.session_id
           AND a.kind='compacted' AND a.generation >= COALESCE(
             (s.metadata->>'resetGeneration')::bigint,
@@ -579,15 +638,20 @@ export class PostgresSessionStore {
       await client.query(`INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,'{}'::jsonb,$3,$3) ON CONFLICT DO NOTHING`, [agentId, sid, now]);
       const session = await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sid]);
       const prior = session.rows[0]?.metadata || {};
-      const old = await client.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence', [agentId, sid]);
+      const old = await client.query('SELECT sequence,entry,entry_id,idempotency_key FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence', [agentId, sid]);
       const archiveId = old.rows.length ? randomUUID() : null;
       const generation = Number(prior.generation || 0) + 1;
-      if (archiveId) await client.query('INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,entries,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6::json,$7::jsonb,$8)', [agentId, sid, archiveId, generation - 1, 'compacted', JSON.stringify(old.rows.map((row) => row.entry)), JSON.stringify({ ...prior, compressionSummary: summary }), now]);
+      if (archiveId) await client.query('INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)', [agentId, sid, archiveId, generation - 1, 'compacted', JSON.stringify({ ...prior, compressionSummary: summary }), now]);
+      if (archiveId) await client.query(`INSERT INTO conversation_archive_entries
+        (agent_id,session_id,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation,entry_id,idempotency_key)
+        SELECT agent_id,session_id,'archive',$3,sequence,to_json(entry_id)::text,entry,
+          COALESCE(burrow_json_member(entry,'content')::text,''),created_at,$4,$5,entry_id,idempotency_key
+        FROM conversation_entries WHERE agent_id=$1 AND session_id=$2`, [agentId,sid,archiveId,'compacted',generation-1]);
       await client.query('DELETE FROM conversation_entries WHERE agent_id=$1 AND session_id=$2', [agentId, sid]);
       const summaryEntry = { id: randomUUID(), ts: now, sessionId: sid, type: 'summary', role: null, content: String(summary.text), visibility: 'debug', entersPrompt: false, metadata: { compressionSummary: summary } };
       const retained = (Array.isArray(tailEntries) ? tailEntries : []).map((entry) => ({ ...entry, sessionId: sid, metadata: { ...(entry.metadata || {}) } }));
       for (const entry of [summaryEntry, ...retained]) {
-        await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,entry,created_at) VALUES($1,$2,$3,$4::json,$5)', [agentId, sid, text(entry.id).trim() || randomUUID(), JSON.stringify(entry), now]);
+        await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,entry,created_at) VALUES($1,$2,$3,$4::json,$5)', [agentId, sid, text(entry.id).trim() || old.rows.find(row => (entry.sequence && String(row.sequence) === String(entry.sequence)) || JSON.stringify({ ...row.entry, sessionId: sid, metadata: { ...(row.entry.metadata || {}) } }) === JSON.stringify(entry))?.entry_id || randomUUID(), JSON.stringify(entry), now]);
       }
       const next = { ...prior, generation, archived: false, transcriptGeneration: randomUUID(), activeTranscript: 'postgres', archiveId, updatedAt: now, turnCount: 1 + retained.length, chatTurnCount: retained.filter((entry) => entry.type === 'message' && ['user','assistant','agent'].includes(entry.role)).length };
       await client.query('UPDATE conversation_sessions SET metadata=$3::jsonb,updated_at=$4 WHERE agent_id=$1 AND session_id=$2', [agentId, sid, JSON.stringify(next), now]);
@@ -604,7 +668,12 @@ export class PostgresSessionStore {
       const rows = await client.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence', [agentId, sid]);
       const archiveId = rows.rows.length ? randomUUID() : null;
       const generation = Number(prior.generation || 0) + 1;
-      if (archiveId) await client.query('INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,entries,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6::json,$7::jsonb,$8)', [agentId, sid, archiveId, generation - 1, 'reset', JSON.stringify(rows.rows.map((row) => row.entry)), JSON.stringify({ ...prior, ...metadata }), now]);
+      if (archiveId) await client.query('INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)', [agentId, sid, archiveId, generation - 1, 'reset', JSON.stringify({ ...prior, ...metadata }), now]);
+      if (archiveId) await client.query(`INSERT INTO conversation_archive_entries
+        (agent_id,session_id,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation,entry_id,idempotency_key)
+        SELECT agent_id,session_id,'archive',$3,sequence,to_json(entry_id)::text,entry,
+          COALESCE(burrow_json_member(entry,'content')::text,''),created_at,$4,$5,entry_id,idempotency_key
+        FROM conversation_entries WHERE agent_id=$1 AND session_id=$2`, [agentId,sid,archiveId,'reset',generation-1]);
       await client.query('DELETE FROM conversation_entries WHERE agent_id=$1 AND session_id=$2', [agentId, sid]);
       const next = { ...prior, ...metadata, generation, resetGeneration: generation, archived: false, resetAt: now, archiveId, turnCount: 0, chatTurnCount: 0 };
       await client.query('UPDATE conversation_sessions SET metadata=$3::jsonb,updated_at=$4 WHERE agent_id=$1 AND session_id=$2', [agentId, sid, JSON.stringify(next), now]);
@@ -623,9 +692,10 @@ export class PostgresSessionStore {
       // concurrent forks and the old upsert/delete path could overwrite the winner.
       const reservation = await client.query(`INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,$3::jsonb,$4,$4) ON CONFLICT(agent_id,session_id) DO NOTHING RETURNING session_id`, [targetAgent, target, JSON.stringify({ forkedFrom: source, forkedAt: now, generation: 0 }), now]);
       if (!reservation.rows[0]) throw new Error('fork_target_exists');
-      const sourceRows = await client.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence DESC LIMIT $3', [sourceAgent, source, size]);
-      const entries = sourceRows.rows.reverse().map((row) => row.entry);
-      for (const entry of entries) { const value = { ...entry, metadata: { ...(entry.metadata || {}), forkedFrom: source } }; await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,entry,created_at) VALUES($1,$2,$3,$4::json,$5)', [targetAgent, target, text(value.id).trim() || randomUUID(), JSON.stringify(value), now]); }
+      const sourceRows = await client.query('SELECT entry,entry_id FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence DESC LIMIT $3', [sourceAgent, source, size]);
+      const sourceEntries = sourceRows.rows.reverse();
+      const entries = sourceEntries.map((row) => row.entry);
+      for (const entry of entries) { const value = { ...entry, metadata: { ...(entry.metadata || {}), forkedFrom: source } }; await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,entry,created_at) VALUES($1,$2,$3,$4::json,$5)', [targetAgent, target, text(value.id).trim() || sourceEntries.find(row => row.entry === entry)?.entry_id || randomUUID(), JSON.stringify(value), now]); }
       return { ok: true, sourceAgentId: sourceAgent, targetAgentId: targetAgent, sourceSessionId: source, targetSessionId: target, copiedEntries: entries.length };
     });
   }
@@ -641,7 +711,10 @@ export class PostgresSessionStore {
       const reserved = await client.query('INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,$3::jsonb,$4,$5) ON CONFLICT DO NOTHING RETURNING session_id', [agentId, target, JSON.stringify({ ...sourceRow.rows[0].metadata, sessionId: target }), sourceRow.rows[0].created_at, sourceRow.rows[0].updated_at]);
       if (!reserved.rows[0]) throw new Error('rename_target_exists');
       await client.query(`INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at) SELECT agent_id,$3,entry_id,idempotency_key,entry,created_at FROM conversation_entries WHERE agent_id=$1 AND session_id=$2`, [agentId, source, target]);
-      await client.query(`INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,entries,metadata,created_at) SELECT agent_id,$3,archive_id,generation,kind,entries,metadata,created_at FROM conversation_archives WHERE agent_id=$1 AND session_id=$2`, [agentId, source, target]);
+      await client.query(`INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,metadata,created_at) SELECT agent_id,$3,archive_id,generation,kind,metadata,created_at FROM conversation_archives WHERE agent_id=$1 AND session_id=$2`, [agentId, source, target]);
+      await client.query(`INSERT INTO conversation_archive_entries
+        SELECT agent_id,$3,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation,search_grams,entry_id,idempotency_key
+        FROM conversation_archive_entries WHERE agent_id=$1 AND session_id=$2`, [agentId,source,target]);
       await client.query('DELETE FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [agentId, source]);
       return { ok: true, agentId, sessionId: source, targetSessionId: target };
     });
@@ -661,13 +734,13 @@ export class PostgresSessionStore {
     if (rawSessionId != null) { params.push(required(rawSessionId, 'sessionId')); where += ` AND session_id=$${params.length}`; }
     const unbounded = limit === null;
     if (!unbounded) params.push(limitValue(limit));
-    const result = await this.pool.query(`SELECT archive_id,session_id,generation,kind,entries,metadata,created_at FROM conversation_archives WHERE ${where} ORDER BY created_at DESC, archive_id DESC${unbounded ? '' : ` LIMIT $${params.length}`}`, params);
+    const result = await this.pool.query(`SELECT archive_id,session_id,generation,kind,COALESCE((SELECT json_agg(e.entry ORDER BY e.ordinal) FROM conversation_archive_entries e WHERE e.agent_id=conversation_archives.agent_id AND e.session_id=conversation_archives.session_id AND e.source_id=conversation_archives.archive_id),'[]'::json) AS entries,metadata,created_at FROM conversation_archives WHERE ${where} ORDER BY created_at DESC, archive_id DESC${unbounded ? '' : ` LIMIT $${params.length}`}`, params);
     return result.rows.map((row) => ({ archiveId: row.archive_id, sessionId: row.session_id, generation: Number(row.generation), kind: row.kind, entries: row.entries, metadata: row.metadata, createdAt: row.created_at }));
   }
 
   async readArchive({ agentId: rawAgentId, sessionId: rawSessionId, archiveId } = {}) {
     const agentId = required(rawAgentId, 'agentId'); const sid = required(rawSessionId, 'sessionId'); const id = required(archiveId, 'archiveId');
-    const result = await this.pool.query('SELECT archive_id,session_id,generation,kind,entries,metadata,created_at FROM conversation_archives WHERE agent_id=$1 AND session_id=$2 AND archive_id=$3', [agentId, sid, id]);
+    const result = await this.pool.query(`SELECT archive_id,session_id,generation,kind,COALESCE((SELECT json_agg(e.entry ORDER BY e.ordinal) FROM conversation_archive_entries e WHERE e.agent_id=conversation_archives.agent_id AND e.session_id=conversation_archives.session_id AND e.source_id=conversation_archives.archive_id),'[]'::json) AS entries,metadata,created_at FROM conversation_archives WHERE agent_id=$1 AND session_id=$2 AND archive_id=$3`, [agentId, sid, id]);
     const row = result.rows[0];
     return row ? { archiveId: row.archive_id, sessionId: row.session_id, generation: Number(row.generation), kind: row.kind, entries: row.entries, metadata: row.metadata, createdAt: row.created_at } : null;
   }
