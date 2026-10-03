@@ -43,36 +43,43 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     setSelectedModelId(null);
     setManualModel('');
     setConnected(false);
+    setRequestState('idle');
     setRequestError('');
     resetClaudeLogin();
     resetOpenAiOAuth();
   };
 
-  const connect = async () => {
-    if (!provider.trim() || !url.trim()) return availableModels;
+  const connect = async (connection?: OpenAiOAuthConnection, isCurrent = () => true) => {
+    const discoveryProvider = connection ? connection.provider ?? 'OpenAI' : provider;
+    const discoveryUrl = connection ? connection.baseUrl ?? 'https://chatgpt.com/backend-api' : url;
+    if (!discoveryProvider.trim() || !discoveryUrl.trim()) return availableModels;
     setRequestState('connecting');
     setRequestError('');
     try {
       const result = await modelConnectionsApi.discover({
-        ...(editingId ? { id: editingId } : {}),
-        provider: provider.trim(),
-        apiType,
-        baseUrl: url.trim(),
-        apiKey,
-        models: availableModels,
+        ...((connection?.id ?? editingId) ? { id: connection?.id ?? editingId! } : {}),
+        provider: discoveryProvider.trim(),
+        apiType: connection ? connection.apiType ?? 'openai-responses' : apiType,
+        baseUrl: discoveryUrl.trim(),
+        apiKey: connection ? '' : apiKey,
+        models: connection ? selectedRuntimeModels(connection.models) : availableModels,
       });
+      if (!isCurrent()) return [];
+      if (connection && (result.discovery?.status === 'error' || result.discovery?.error)) throw new Error(result.discovery.error || 'Discovery failed');
       setAvailableModels(result.models);
       setSelectedModelId(result.models[0]?.id ?? null);
       setConnected(true);
       return result.models;
     } catch (error) {
+      if (!isCurrent()) return [];
       setConnected(true);
       setRequestError(error instanceof Error
         ? `Could not discover models: ${error.message}. Add model IDs manually.`
         : 'Could not discover models. Add model IDs manually.');
+      if (connection) throw error;
       return availableModels;
     } finally {
-      setRequestState('idle');
+      if (isCurrent()) setRequestState('idle');
     }
   };
 
@@ -119,9 +126,11 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
 
   const openAiFlow = useOpenAiOAuthConnectionFlow({
     onConnection: applyOAuthConnection,
-    onAuthorized: async () => {
-      await saveProvider();
-      setOauthModal(null);
+    onAuthorized: async (connection, isCurrent) => {
+      await connect(connection, isCurrent);
+      if (!isCurrent()) return;
+      await onModelConnectionsChanged();
+      if (isCurrent()) setOauthModal(null);
     },
   });
   const claudeFlow = useClaudeCodeLoginFlow({
@@ -247,7 +256,10 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     }
   };
 
-  const openOpenAiOAuth = () => setOauthModal('openai');
+  const openOpenAiOAuth = () => {
+    resetProvider();
+    setOauthModal('openai');
+  };
   const openAnthropicOAuth = () => {
     setApiType('anthropic-messages');
     setOauthModal('anthropic');

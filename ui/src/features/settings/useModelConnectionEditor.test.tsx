@@ -35,7 +35,8 @@ const savedProvider: SavedProvider = {
 
 describe('useModelConnectionEditor', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    vi.restoreAllMocks();
     confirmMock.mockResolvedValue(true);
   });
 
@@ -79,6 +80,98 @@ describe('useModelConnectionEditor', () => {
     expect(onModelConnectionsChanged).toHaveBeenCalledOnce();
     expect(result.current.provider).toBe('');
     expect(result.current.savedProvidersOpen).toBe(true);
+  });
+
+  it('retains the authorized OpenAI connection for discovery and manual selection', async () => {
+    const connection = { id: 'oauth-1', provider: 'OpenAI', apiType: 'openai-responses', baseUrl: 'https://chatgpt.com/backend-api', authConfigured: true, models: [] };
+    vi.spyOn(modelConnectionsApi, 'startOpenAiOAuth').mockResolvedValue({ connection, login: { id: 'login-1', status: 'waiting_for_code' } });
+    vi.spyOn(modelConnectionsApi, 'submitOpenAiOAuthCode').mockResolvedValue({ login: { id: 'login-1', status: 'authorized', connection } });
+    const discover = vi.spyOn(modelConnectionsApi, 'discover').mockRejectedValue(new Error('unavailable'));
+    const { result, onModelConnectionsChanged } = renderEditor();
+    // Deliberately populate stale editor data before authorization.
+    act(() => result.current.editProvider(savedProvider));
+    act(() => result.current.openOpenAiOAuth());
+    await act(() => result.current.openAiFlow.start());
+    act(() => result.current.openAiFlow.setCode('callback'));
+    await act(() => result.current.openAiFlow.submit());
+
+    expect(result.current.editingId).toBe('oauth-1');
+    expect(result.current.provider).toBe('OpenAI');
+    expect(result.current.connected).toBe(true);
+    expect(result.current.apiKeyConfigured).toBe(true);
+    expect(result.current.availableModels).toEqual([]);
+    expect(apiMock).not.toHaveBeenCalled();
+    expect(onModelConnectionsChanged).not.toHaveBeenCalled();
+    expect(result.current.oauthModal).toBe('openai');
+    expect(result.current.openAiFlow.error).toContain('unavailable');
+
+    await act(() => result.current.connect());
+    expect(discover).toHaveBeenCalledWith({ id: 'oauth-1', provider: 'OpenAI', apiType: 'openai-responses', baseUrl: connection.baseUrl, apiKey: '', models: [] });
+    expect(result.current.requestError).toContain('Add model IDs manually');
+    act(() => result.current.setManualModel('gpt-manual'));
+    act(() => result.current.addManualModel());
+    apiMock.mockRejectedValueOnce(new Error('save failed'));
+    await act(() => result.current.saveProvider());
+    expect(result.current.editingId).toBe('oauth-1');
+    expect(result.current.availableModels[0].id).toBe('gpt-manual');
+    expect(result.current.requestError).toContain('save failed');
+    apiMock.mockResolvedValueOnce({});
+    await act(() => result.current.saveProvider());
+    const payload = JSON.parse(apiMock.mock.calls.at(-1)![1]!.body as string);
+    expect(payload).toEqual(expect.objectContaining({ id: 'oauth-1', provider: 'OpenAI', apiType: 'openai-responses', baseUrl: connection.baseUrl, models: [expect.objectContaining({ id: 'gpt-manual', selected: true })] }));
+    expect(payload).not.toHaveProperty('apiKey');
+    expect(result.current.editingId).toBeNull();
+  });
+
+  it('does not close OpenAI authorization when refreshing connections fails', async () => {
+    const connection = { id: 'oauth-1', authConfigured: true, models: [] };
+    vi.spyOn(modelConnectionsApi, 'startOpenAiOAuth').mockResolvedValue({ connection, login: { id: 'login-1', status: 'waiting_for_code' } });
+    vi.spyOn(modelConnectionsApi, 'submitOpenAiOAuthCode').mockResolvedValue({ login: { id: 'login-1', status: 'authorized', connection } });
+    vi.spyOn(modelConnectionsApi, 'discover').mockResolvedValue({ models: [{ id: 'gpt-test', selected: true }] });
+    const { result } = renderEditor(vi.fn().mockRejectedValue(new Error('refresh failed')));
+    act(() => result.current.openOpenAiOAuth());
+    await act(() => result.current.openAiFlow.start());
+    act(() => result.current.openAiFlow.setCode('callback'));
+    await act(() => result.current.openAiFlow.submit());
+    expect(result.current.oauthModal).toBe('openai');
+    expect(result.current.editingId).toBe('oauth-1');
+    expect(result.current.openAiFlow.error).toContain('refresh failed');
+  });
+
+  it('automatically discovers authorized models and isolates sequential accounts and stale discovery', async () => {
+    const first = { id: 'account-a', authConfigured: true, models: [] };
+    const second = { id: 'account-b', authConfigured: true, models: [] };
+    vi.spyOn(modelConnectionsApi, 'startOpenAiOAuth')
+      .mockResolvedValueOnce({ connection: first, login: { id: 'login-a', status: 'waiting_for_code' } })
+      .mockResolvedValueOnce({ connection: second, login: { id: 'login-b', status: 'waiting_for_code' } });
+    vi.spyOn(modelConnectionsApi, 'submitOpenAiOAuthCode')
+      .mockResolvedValueOnce({ login: { id: 'login-a', status: 'authorized', connection: first } })
+      .mockResolvedValueOnce({ login: { id: 'login-b', status: 'authorized', connection: second } });
+    let resolveFirst!: (value: { models: Array<{ id: string; selected: boolean }> }) => void;
+    const discover = vi.spyOn(modelConnectionsApi, 'discover')
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce({ models: [{ id: 'model-b', selected: true }] });
+    const { result } = renderEditor();
+    act(() => result.current.editProvider(savedProvider));
+    act(() => result.current.openOpenAiOAuth());
+    await act(() => result.current.openAiFlow.start());
+    act(() => result.current.openAiFlow.setCode('a'));
+    let pending!: Promise<void>;
+    await act(async () => { pending = result.current.openAiFlow.submit(); await Promise.resolve(); });
+    act(() => result.current.openOpenAiOAuth());
+    expect(result.current.availableModels).toEqual([]);
+    await act(() => result.current.openAiFlow.start());
+    act(() => result.current.openAiFlow.setCode('b'));
+    await act(() => result.current.openAiFlow.submit());
+    expect(discover.mock.calls.map(([payload]) => payload.id)).toEqual(['account-a', 'account-b']);
+    expect(discover.mock.calls[1][0]).toEqual({ id: 'account-b', provider: 'OpenAI', apiType: 'openai-responses', baseUrl: 'https://chatgpt.com/backend-api', apiKey: '', models: [] });
+    expect(result.current.oauthModal).toBeNull();
+    expect(result.current.connected).toBe(true);
+    expect(result.current.availableModels).toEqual([{ id: 'model-b', selected: true }]);
+    await act(async () => { resolveFirst({ models: [{ id: 'model-a', selected: true }] }); await pending; });
+    expect(result.current.editingId).toBe('account-b');
+    expect(result.current.availableModels).toEqual([{ id: 'model-b', selected: true }]);
+    expect(apiMock).not.toHaveBeenCalled();
   });
 
   it('keeps manual model IDs unique and updates capability overrides', () => {

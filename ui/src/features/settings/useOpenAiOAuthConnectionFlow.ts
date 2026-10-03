@@ -5,7 +5,7 @@ type RequestState = 'idle' | 'starting' | 'submitting' | 'cancelling';
 
 type Options = {
   onConnection: (connection: OpenAiOAuthConnection) => void;
-  onAuthorized: () => Promise<void>;
+  onAuthorized: (connection: OpenAiOAuthConnection, isCurrent: () => boolean) => Promise<void>;
 };
 
 const pollingStatuses = new Set(['starting', 'waiting_for_callback', 'waiting_for_code', 'exchanging']);
@@ -35,9 +35,12 @@ export function useOpenAiOAuthConnectionFlow({ onConnection, onAuthorized }: Opt
 
   const completeAuthorizedLogin = async (nextLogin: OpenAiOAuthLogin) => {
     if (nextLogin.status !== 'authorized' || completedLoginId.current === nextLogin.id) return;
+    if (!nextLogin.connection) throw new Error('Authorized login did not return a connection');
+    const generation = actionGeneration.current;
+    const isCurrent = () => mounted.current && generation === actionGeneration.current;
     completedLoginId.current = nextLogin.id;
-    if (nextLogin.connection) onConnectionRef.current(nextLogin.connection);
-    await onAuthorizedRef.current();
+    onConnectionRef.current(nextLogin.connection);
+    await onAuthorizedRef.current(nextLogin.connection, isCurrent);
   };
 
   useEffect(() => {
@@ -54,7 +57,7 @@ export function useOpenAiOAuthConnectionFlow({ onConnection, onAuthorized }: Opt
         if (result.login.error) setError(result.login.error);
         await completeAuthorizedLogin(result.login);
       } catch (cause) {
-        if (!cancelled && mounted.current && generation === actionGeneration.current) setError(errorMessage('refresh ChatGPT login', cause));
+        if (mounted.current && generation === actionGeneration.current) setError(errorMessage('refresh ChatGPT login', cause));
       } finally {
         if (!cancelled && mounted.current && generation === actionGeneration.current) timer = window.setTimeout(poll, pollDelay);
       }
