@@ -35,7 +35,7 @@ export function continuityOwner(pool, label = 'runtime') {
       const result = await client.query(`SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' AND database=(SELECT oid FROM pg_database WHERE datname=current_database()) AND classid=$1::oid AND objid=$2::oid AND objsubid=1 AND granted) AS alive`, [String(key >> 32n), String(key & 0xffffffffn)]);
       return result.rows[0].alive;
     },
-    async guard(work) {
+    async guard(work, boundaryKey = null) {
       await this.ready();
       const connection = new pg.Client(pool.options);
       connection.on('error', () => {});
@@ -44,6 +44,9 @@ export function continuityOwner(pool, label = 'runtime') {
         // Retain liveness while a terminal callback is in flight even if the
         // dedicated heartbeat connection fails. Process loss drops both locks.
         await connection.query('SELECT pg_advisory_lock_shared($1::bigint)', [keyFor(id)]);
+        // Reset takes the same boundary before touching session state.
+        // Keep it across the callback: its persistence uses separate clients.
+        if (boundaryKey) await connection.query('SELECT pg_advisory_lock($1::bigint)', [boundaryKey]);
         await this.ready();
         return await work();
       } finally {

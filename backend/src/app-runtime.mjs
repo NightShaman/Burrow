@@ -221,10 +221,10 @@ async function runAskChatUnserialized({
   });
   const logger = createTraceLogger({ rootDir: traceRoot, runId: resolvedRunId, sessionId: resolvedSessionId, onRecord: onTraceRecord });
   const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, testHooks });
-  const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, inboundEntryId }) => {
+  const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, inboundEntryId, parentSignal = null }) => {
     const nestedRunId = `${resolvedRunId}-reply-${recipientRuntime.agentId}`;
     const lifecycle = typeof registerNestedAgentRun === 'function'
-      ? registerNestedAgentRun({ agentRuntime: recipientRuntime, sessionId: recipientSessionId, runId: nestedRunId, message: content, source: 'a2a', parentAgentId: runtimeState.agentId, parentRunId: resolvedRunId, parentSessionId: resolvedSessionId, messageMode: 'request_reply', senderAgentId, sourceSessionId, sourceRunId, inboundEntryId })
+      ? registerNestedAgentRun({ agentRuntime: recipientRuntime, sessionId: recipientSessionId, runId: nestedRunId, message: content, source: 'a2a', parentSignal, parentAgentId: runtimeState.agentId, parentRunId: resolvedRunId, parentSessionId: resolvedSessionId, messageMode: 'request_reply', senderAgentId, sourceSessionId, sourceRunId, inboundEntryId })
       : null;
     try {
       const reply = await runAskChat({
@@ -246,7 +246,7 @@ async function runAskChatUnserialized({
         onModelTextDelta: lifecycle?.onModelTextDelta || null,
         onModelThoughtDelta: lifecycle?.onModelThoughtDelta || null,
         onModelContextUsage: lifecycle?.onModelContextUsage || null,
-        args: lifecycle?.signal ? { abort_signal: lifecycle.signal } : {},
+        args: { abort_signal: lifecycle?.signal || parentSignal || normalizedArgs.abort_signal || null },
       });
       return { answerText: reply.answerText || null, runId: reply.runId || null, recipientReplyEntryId: reply.assistantTurn?.id || null, error: reply.error || null };
     } finally {
@@ -254,7 +254,7 @@ async function runAskChatUnserialized({
     }
   };
   const { mcpTools, mcpConnections } = await loadRuntimeMcpCapabilities({ agentId: runtimeState.agentId, stores });
-  const executionContext = createRuntimeExecutionContext({ stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId });
+  const executionContext = createRuntimeExecutionContext({ stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, abortSignal: normalizedArgs.abort_signal || null });
   const effectiveSkillCatalog = await loadEffectiveSkillCatalog({
     workspaceRoot: runtimeState.workspaceRoot,
     agentId: runtimeState.agentId,

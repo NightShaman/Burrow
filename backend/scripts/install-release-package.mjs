@@ -182,6 +182,18 @@ function envTemplate({ installDir, settingsKey = '', host = '0.0.0.0', port = 42
   return `# Burrow single-directory runtime environment.\nBURROW_SOURCE_ROOT=${installDir}\nBURROW_RUNTIME_ROOT=${installDir}\nBURROW_WORKSPACE_ROOT=${installDir}/workspace\nBURROW_CACHE_ROOT=${installDir}/cache\nBURROW_UI_HOST=${host}\nBURROW_UI_PORT=${port}\n# Base64-encoded 32-byte PostgreSQL secret-encryption key.\nBURROW_SETTINGS_KEY=${settingsKey}\n`;
 }
 
+// Refresh generated defaults without rotating keys or dropping operator DB settings.
+export function mergeRuntimeEnv(template, original = '') {
+  const refreshed = new Set(['BURROW_SOURCE_ROOT', 'BURROW_RUNTIME_ROOT', 'BURROW_WORKSPACE_ROOT', 'BURROW_CACHE_ROOT', 'BURROW_UI_HOST', 'BURROW_UI_PORT']);
+  const preserved = original.split(/\r?\n/).filter(line => {
+    const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=/.exec(line);
+    if (match?.[1] === 'BURROW_SETTINGS_KEY' && /^\s*(?:export\s+)?BURROW_SETTINGS_KEY=\s*(?:""|'')?\s*$/.test(line)) return false;
+    return !match || !refreshed.has(match[1]);
+  }).join('\n');
+  if (/^\s*(?:export\s+)?BURROW_SETTINGS_KEY=.+$/m.test(original)) template = template.replace(/^BURROW_SETTINGS_KEY=.*\n/m, '');
+  return template + (preserved.trim() ? '\n# Preserved operator settings.\n' + preserved + '\n' : '');
+}
+
 async function smokeInstall({ installDir, port, timeoutMs }) {
   const logPath = path.join(os.tmpdir(), `burrow-install-smoke-${path.basename(installDir)}-${process.pid}.log`);
   const runtimeEnv = await readEnvFile(path.join(installDir, 'burrow.env'));
@@ -227,7 +239,7 @@ export async function installReleasePackage(args = {}) {
   const smokePort = normalizePort(args.smokePort ?? (args.port ? port : DEFAULT_SMOKE_PORT));
   const existingEnv = envExists ? await readEnvFile(envPath) : {};
   const generateSettingsKey = args.generateSettingsKey === null || args.generateSettingsKey === undefined ? Boolean(args.apply && (!envExists || args.forceEnv) && !existingEnv.BURROW_SETTINGS_KEY) : Boolean(args.generateSettingsKey);
-  const settingsKey = generateSettingsKey ? randomBytes(32).toString('base64') : (existingEnv.BURROW_SETTINGS_KEY || '');
+  const settingsKey = existingEnv.BURROW_SETTINGS_KEY || (generateSettingsKey ? randomBytes(32).toString('base64') : '');
   const startedAt = new Date().toISOString();
   const report = { ok: false, applied: false, installDir, archivePath, checksumPath, startedAt, completedAt: null, durationMs: null, stages: [], planned: [], warnings: [], options: { apply: Boolean(args.apply), forceEnv: Boolean(args.forceEnv), generateSettingsKey, smoke: Boolean(args.smoke), host, port, smokePort } };
   const finish = async (ok) => {
@@ -241,6 +253,7 @@ export async function installReleasePackage(args = {}) {
     }
     return report;
   };
+  let rollback = null;
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'burrow-install-package-'));
   try {
     if (args.apply) await assertInstallTargetWritable(installDir);
@@ -263,17 +276,52 @@ export async function installReleasePackage(args = {}) {
 
     await fs.mkdir(installDir, { recursive: true });
     for (const dir of RUNTIME_DIRECTORIES) await fs.mkdir(path.join(installDir, dir), { recursive: true });
-    for (const dir of APP_DIRECTORIES) if (await exists(path.join(packageRoot, dir))) { await fs.rm(path.join(installDir, dir), { recursive: true, force: true }); await copyTree(path.join(packageRoot, dir), path.join(installDir, dir)); }
-    for (const file of APP_FILES) if (await exists(path.join(packageRoot, file))) { await fs.rm(path.join(installDir, file), { force: true }); await fs.copyFile(path.join(packageRoot, file), path.join(installDir, file)); }
-    report.ui = await writeProductUiTitle(installDir);
-    report.globalWorkspace = await ensureDefaultGlobalWorkspace({ installDir });
+    // Prepare all release-owned files before changing the target. Keep durable
+    // runtime state in place and journal each replacement for rollback.
+    const backup = await fs.mkdtemp(path.join(installDir, '.install-rollback-'));
+    report.rollbackPath = backup;
+    const staged = path.join(backup, '.staged');
+    await copyTree(packageRoot, staged);
+    report.ui = await writeProductUiTitle(staged);
+    const journal = [];
+    rollback = async () => {
+      for (const skill of report.globalWorkspace?.seededSkills || []) await fs.rm(path.join(installDir, 'workspace', 'global', 'skills', skill), { recursive: true, force: true });
+      for (const { name, existed } of [...journal].reverse()) {
+        await fs.rm(path.join(installDir, name), { recursive: true, force: true });
+        if (existed) await fs.rename(path.join(backup, name), path.join(installDir, name));
+      }
+      await fs.rm(backup, { recursive: true, force: true });
+    };
+    report.rollbackPath = backup;
+    for (const name of [...APP_DIRECTORIES, ...APP_FILES, 'burrow.env']) {
+      if (name !== 'burrow.env' && !(await exists(path.join(staged, name)))) continue;
+      const existed = await exists(path.join(installDir, name));
+      if (existed) {
+        if (name === 'burrow.env') await fs.copyFile(envPath, path.join(backup, name));
+        else await fs.rename(path.join(installDir, name), path.join(backup, name));
+      }
+      journal.push({ name, existed });
+      if (name !== 'burrow.env') await fs.rename(path.join(staged, name), path.join(installDir, name));
+    }
+    report.globalWorkspace = await ensureDefaultGlobalWorkspace({ installDir, filesystemOnly: true });
     report.stages.push('installed-files', 'global-workspace');
     if (await exists(envPath) && !args.forceEnv) report.stages.push('env-preserved');
-    else { await fs.writeFile(envPath, envTemplate({ installDir, settingsKey, host, port }), { mode: 0o600 }); report.stages.push('env-written'); }
+    else {
+      const original = envExists ? await fs.readFile(envPath, 'utf8') : '';
+      await fs.writeFile(envPath, mergeRuntimeEnv(envTemplate({ installDir, settingsKey, host, port }), original), { mode: 0o600 });
+      await fs.chmod(envPath, 0o600); report.stages.push('env-written'); }
     if (args.smoke) { report.smoke = await smokeInstall({ installDir, port: smokePort, timeoutMs: args.healthTimeoutMs }); report.stages.push('smoked'); }
+    await fs.rm(report.rollbackPath, { recursive: true, force: true });
+    rollback = null;
+    delete report.rollbackPath;
     report.applied = true;
     return finish(true);
   } catch (error) {
+    if (rollback) {
+      try { await rollback(); report.stages.push('rolled-back'); delete report.rollbackPath; }
+      catch (rollbackError) { report.rollbackError = String(rollbackError?.message || rollbackError); }
+    }
+    if (!rollback && report.rollbackPath) await fs.rm(report.rollbackPath, { recursive: true, force: true }).catch(() => {});
     report.error = String(error?.message || error);
     await finish(false);
     throw Object.assign(error instanceof Error ? error : new Error(String(error)), { report });

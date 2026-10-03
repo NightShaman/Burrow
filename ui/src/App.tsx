@@ -66,7 +66,7 @@ function AppContent() {
   const { tabs, setTabs, activeTabId, setActiveTabId } = useAppTabs();
   const { leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed, leftSplit, setLeftSplit, rightSplit, setRightSplit, leftTopPanel, setLeftTopPanel, leftBottomPanel, setLeftBottomPanel, rightTopPanel, setRightTopPanel, rightBottomPanel, setRightBottomPanel, leftRailLayout, setLeftRailLayout, rightRailLayout, setRightRailLayout, leftSinglePanel, setLeftSinglePanel, rightSinglePanel, setRightSinglePanel } = usePersistedLayout();
   const workspacePanelVisible = page === 'chat' && !leftCollapsed && (leftRailLayout === 'divided' ? leftTopPanel === 'workspace' || leftBottomPanel === 'workspace' : leftSinglePanel === 'workspace');
-  const { workspaceFiles, openFile, saveFile } = useWorkspaceFiles({ selectedAgentId, targets: activeTargets, setTabs, setActiveTabId, pollingEnabled: workspacePanelVisible });
+  const { workspaceFiles, openFile, saveFile } = useWorkspaceFiles({ selectedAgentId, targets: apiTargets, setTabs, setActiveTabId, pollingEnabled: workspacePanelVisible });
   const { attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation, draft, setDraft, refreshSessions, refreshConversation, selectSession: selectChatSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun, a2aActivities, runtimeRun, runtimeChildActivities, cancelRuntimeRun } = useChatSession(selectedAgentId, activeTargets);
   const [isResettingSession, setIsResettingSession] = useState(false);
   const runtimeProviders = useRef([]);

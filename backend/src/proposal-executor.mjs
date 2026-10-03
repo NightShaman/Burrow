@@ -42,6 +42,7 @@ function withExecutionProvenance(result, target, executionContext, toolCallId) {
 }
 
 export async function executeReviewedProposalActions({ conversationStore = null, actions = [], reviews = [], workspaceRoot = null, rootDir = null, dataRoot = null, sessionId = null, conversationId = null, agentId = null, agentRuntime = null, resolveAgentRuntime = null, runAgentReply = null, workingMemoryStore = null, executionPolicy = null, modelConfig = null, traceLogger = null, artifactPrefix = null, observedToolResults = [], executionContext = null, abortSignal = null, invokeMcp = invokeMcpTool } = {}) {
+  abortSignal = abortSignal || executionContext?.abortSignal || null;
   agentId = agentId || executionContext?.agentId || null;
   const resolvedConversationId = conversationId || executionContext?.conversationId || null;
   // Agent home is the normal-chat default. Explicit internal/delegated
@@ -61,6 +62,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       if (tool === 'files_search') return searchFilesEnvelope(args);
       if (tool === 'files_write') return writeFileEnvelope(args);
       if (tool === 'files_edit') return editFileEnvelope(args);
+      if (tool === 'files_patch') return applyPatchEnvelope(args);
       throw new Error('native_filesystem_tool_unsupported');
     },
     remoteController: executionContext?.processExecutionController || null,
@@ -75,7 +77,25 @@ export async function executeReviewedProposalActions({ conversationStore = null,
     return withExecutionProvenance(result, target, executionContext, action.toolCallId);
   };
 
+  // Validate the whole batch before dispatch: conflicting immutable IDs must
+  // not partially execute, and identical repeats are one provider operation.
+  const callsById = new Map();
+  actions = actions.filter((action) => {
+    if (!action.toolCallId) return true;
+    const { index, ...operation } = action;
+    const signature = JSON.stringify(Object.fromEntries(Object.entries(operation).sort(([a], [b]) => a.localeCompare(b))));
+    if (!callsById.has(action.toolCallId)) { callsById.set(action.toolCallId, signature); return true; }
+    if (callsById.get(action.toolCallId) !== signature) throw new Error('model_tool_call_conflict');
+    return false;
+  });
+
   for (const action of actions) {
+    const resultStart = toolResults.length;
+    try {
+    if (abortSignal?.aborted) {
+      skipped.push({ index: action.index, tool: action.tool, toolCallId: action.toolCallId || null, status: 'cancelled' });
+      continue;
+    }
     const suppliedReview = reviews.find((item) => item.index === action.index) || null;
     if (suppliedReview?.status !== 'allowed') {
       const status = suppliedReview?.status || 'unreviewed';
@@ -477,7 +497,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
     }
 
     if (action.tool === 'files_patch') {
-      toolResults.push(await applyPatchEnvelope({
+      toolResults.push(await executeFilesystem(action, {
         patch: action.patch,
         workspaceRoot: executionRoot,
         baseRoot: executionRoot,
@@ -493,7 +513,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       const started = await traceLogger?.toolStart?.({ tool: 'agent_send_message', recipientAgentId: action.recipientAgentId, targetSessionId: action.targetSessionId || 'default', messageMode: action.messageMode || 'request_reply' });
       let result;
       try {
-        result = await sendAgentMessage({ conversationStore: conversationStore || executionContext?.conversationStore || executionContext?.stores?.conversations, senderRuntime: agentRuntime || executionContext?.agentRuntime, resolveRecipientRuntime: resolveAgentRuntime || executionContext?.resolveAgentRuntime, runRecipientReply: runAgentReply || executionContext?.runAgentReply, recipientAgentId: action.recipientAgentId, targetSessionId: action.targetSessionId || 'default', content: action.content, messageMode: action.messageMode || 'request_reply', runId: traceLogger?.runId || null, sourceSessionId: sessionId });
+        result = await sendAgentMessage({ conversationStore: conversationStore || executionContext?.conversationStore || executionContext?.stores?.conversations, senderRuntime: agentRuntime || executionContext?.agentRuntime, resolveRecipientRuntime: resolveAgentRuntime || executionContext?.resolveAgentRuntime, runRecipientReply: runAgentReply || executionContext?.runAgentReply, recipientAgentId: action.recipientAgentId, targetSessionId: action.targetSessionId || 'default', content: action.content, messageMode: action.messageMode || 'request_reply', runId: traceLogger?.runId || null, sourceSessionId: sessionId, abortSignal });
       } catch (error) {
         result = { tool: 'agent_send_message', ok: false, recipientAgentId: action.recipientAgentId || null, targetSessionId: action.targetSessionId || 'default', error: error?.message || String(error), autoExecuted: false };
       }
@@ -532,6 +552,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
             activityId: started?.payload?.activityId || null,
           },
           executionContext,
+          abortSignal,
           rootDir,
           dataRoot,
           sessionId,
@@ -553,6 +574,11 @@ export async function executeReviewedProposalActions({ conversationStore = null,
     }
 
     skipped.push({ index: action.index, tool: action.tool, status: 'unsupported_executor_tool' });
+    } finally {
+      for (let i = resultStart; i < toolResults.length; i += 1) {
+        toolResults[i] = { ...toolResults[i], toolCallId: action.toolCallId || null };
+      }
+    }
   }
 
   // Raw results remain local to this executor while an action is running.

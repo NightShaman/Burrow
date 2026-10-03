@@ -27,7 +27,7 @@ export function activeChatRunSummaries(activeChatRuns, { agentId = null, session
     .map(activeChatRunSummary);
 }
 
-export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'default', runId, message = '', source = 'internal', a2a = null } = {}) {
+export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'default', runId, message = '', source = 'internal', a2a = null, parentSignal = null } = {}) {
   if (!agentId || !runId) throw new Error('active_agent_run_identity_required');
   const controller = new AbortController();
   const record = {
@@ -38,7 +38,16 @@ export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'd
   const key = activeChatRunKey(record.agentId, record.runId);
   activeChatRuns.set(key, record);
   const parent = a2a?.parentAgentId && a2a?.parentRunId ? activeChatRuns.get(activeChatRunKey(a2a.parentAgentId, a2a.parentRunId)) : null;
-  const activity = parent ? { id: `a2a:${record.agentId}:${record.runId}`, status: 'running', startedAt: record.startedAt, updatedAt: record.startedAt, recipient: { agentId: record.agentId, sessionId: record.sessionId, runId: record.runId }, messageMode: a2a.messageMode || 'request_reply', progress: [] } : null;
+  // The explicit dependency survives removal of the parent from the active map.
+  const inheritedSignal = parentSignal || a2a?.parentSignal || parent?.controller?.signal;
+  const abortFromParent = () => {
+    record.cancelled = true;
+    record.reason = String(inheritedSignal.reason?.message || inheritedSignal.reason || 'parent cancelled');
+    controller.abort(inheritedSignal.reason);
+  };
+  if (inheritedSignal?.aborted) abortFromParent();
+  else inheritedSignal?.addEventListener('abort', abortFromParent, { once: true });
+  const activity = parent ? { id: `a2a:${record.agentId}:${record.runId}`, status: controller.signal.aborted ? 'cancelled' : 'running', startedAt: record.startedAt, updatedAt: record.startedAt, recipient: { agentId: record.agentId, sessionId: record.sessionId, runId: record.runId }, messageMode: a2a.messageMode || 'request_reply', progress: [] } : null;
   if (parent && activity) parent.a2aActivities = [...(parent.a2aActivities || []), activity].slice(-12);
   const updateActivity = (patch = {}) => {
     if (!parent || !activity) return;
@@ -63,7 +72,7 @@ export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'd
     onModelTextDelta() { record.phase = 'streaming'; updateActivity({ status: 'streaming' }); },
     onModelThoughtDelta() { record.phase = 'streaming'; },
     onModelContextUsage(usage) { if (usage && typeof usage === 'object') record.contextUsage = usage; },
-    finish() { updateActivity({ status: record.controller.signal.aborted ? 'cancelled' : 'replied', completedAt: new Date().toISOString() }); if (activeChatRuns.get(key) === record) activeChatRuns.delete(key); },
+    finish() { inheritedSignal?.removeEventListener('abort', abortFromParent); updateActivity({ status: record.controller.signal.aborted ? 'cancelled' : 'replied', completedAt: new Date().toISOString() }); if (activeChatRuns.get(key) === record) activeChatRuns.delete(key); },
   };
 }
 
@@ -82,11 +91,11 @@ export function cancelActiveChatRun(activeChatRuns, runId, { body = {}, agentId 
     if (!candidate || candidate.controller?.signal?.aborted) return;
     candidate.cancelled = true;
     candidate.reason = reason;
-    candidate.controller.abort(new Error(reason));
     cancelledRuns.push({ runId: candidate.runId, agentId: candidate.agentId, sessionId: candidate.sessionId });
     for (const child of activeChatRuns.values()) {
       if (child.a2a?.parentAgentId === candidate.agentId && child.a2a?.parentRunId === candidate.runId) cancelTree(child);
     }
+    candidate.controller.abort(new Error(reason));
   };
   cancelTree(record);
   return { ok: true, runId, agentId: record.agentId, sessionId: record.sessionId, status: 'cancelled', reason, cancelledRuns };

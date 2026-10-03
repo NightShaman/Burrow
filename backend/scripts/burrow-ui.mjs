@@ -255,18 +255,18 @@ function taskExecutionMessage(task, project) {
 
 async function executeBoardTask(taskId) {
   const dispatch = await withTaskBoard(async (store) => {
-    const task = store.getTask(taskId);
+    const task = await store.getTask(taskId);
     if (!task) return { ok: false, error: 'task_not_found' };
     if (!task.assignedAgentId) return { ok: false, error: 'task_assigned_agent_required', task };
     if (['done', 'cancelled'].includes(task.status)) return { ok: false, error: 'task_not_executable', task };
-    const project = store.getProject(task.projectId);
+    const project = await store.getProject(task.projectId);
     const agentRuntime = await resolveAgentRuntime(task.assignedAgentId);
     // Board tasks deliberately execute where Rob works: the assigned agent's
     // main/default conversation. The task record, not a task-specific session,
     // is the durable execution owner.
     const sessionId = 'default';
     const runId = createChatTurnRunId({ sessionId, prefix: 'task' });
-    const updated = store.startExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId });
+    const updated = await store.startExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId });
     return { ok: true, task, project, agentRuntime, sessionId, runId, updated };
   });
   if (!dispatch.ok) return dispatch;

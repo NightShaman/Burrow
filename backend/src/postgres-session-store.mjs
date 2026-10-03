@@ -1,3 +1,4 @@
+import { retentionSessionCandidate } from './retention.mjs';
 import { POSTGRES_HISTORY_KEYSET_SQL } from './postgres-history-keyset.mjs';
 import { POSTGRES_RESET_INSTANT_SQL } from './postgres-reset-instant.mjs';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
@@ -6,7 +7,7 @@ import { resolveAlbdruckConfig } from './config.mjs';
 import { matchesQuery } from './session-search.mjs';
 import { closeContinuityOwners } from './postgres-continuity-owner.mjs';
 import { randomUUID } from 'node:crypto';
-import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
+import { closePostgresPool, withPostgresTransaction, migrationLockKey } from './postgres-foundation.mjs';
 
 export const POSTGRES_SESSION_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS conversation_sessions (
@@ -531,17 +532,29 @@ export class PostgresSessionStore {
     if (!pool?.query || !pool?.connect) throw new Error('session_postgres_pool_required');
     this.pool = normalizePostgresPool(pool); this.ownsPool = ownsPool; this.clock = clock;
   }
-  async deleteSession({agentId: rawAgentId, sessionId: rawSessionId} = {}) {
+  async deleteSession({agentId: rawAgentId, sessionId: rawSessionId, retentionPolicy = null} = {}) {
     const agentId = required(rawAgentId, 'agentId');
     const sessionId = required(rawSessionId, 'sessionId');
     return withPostgresTransaction(this.pool, async client => {
       // Lock the authority row before cascaded deletion; active continuity is
       // never eligible even if a retention plan was built before a new run.
-      const selected = await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sessionId]);
+      const selected = await client.query('SELECT metadata,updated_at FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sessionId]);
       if (!selected.rows.length) return {deleted:false};
       const active = await client.query('SELECT head_state,queue_status FROM continuity_state WHERE agent_id=$1 AND session_id=$2',[agentId,sessionId]);
       if (['running','finalizing'].includes(active.rows[0]?.head_state) || active.rows[0]?.queue_status==='running') throw new Error('session_retention_active');
       assertConversationDeletionAllowed(sessionId, selected.rows[0].metadata);
+      const metadata = selected.rows[0].metadata;
+      // Retention must re-evaluate age, kind and terminal task ownership under
+      // locks, not trust a plan made before a task reopen or metadata edit.
+      if (retentionPolicy) {
+        const taskStore = { getTask: async taskId => {
+          const result = await client.query('SELECT status,metadata_json FROM task_board_tasks WHERE id=$1 FOR UPDATE', [taskId]);
+          return result.rows[0] && { status: result.rows[0].status, metadata: result.rows[0].metadata_json };
+        } };
+        if (!await retentionSessionCandidate({ record: { ...metadata, updatedAt: selected.rows[0].updated_at, id: sessionId }, taskStore, ...retentionPolicy, agentId })) return { deleted: false };
+      } else if (metadata.kind === 'task' || (metadata.kind && metadata.kind !== 'main' && !metadata.completedAt)) {
+        throw new Error('session_retention_eligibility_required');
+      }
       const result = await client.query('DELETE FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [agentId, sessionId]);
       return {deleted:result.rowCount === 1};
     });
@@ -878,9 +891,16 @@ export class PostgresSessionStore {
   async reset({ agentId: rawAgentId, sessionId: rawSessionId, metadata = {} } = {}) {
     const agentId = required(rawAgentId, 'agentId'); const sid = required(rawSessionId, 'sessionId'); const now = this.clock();
     return withPostgresTransaction(this.pool, async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock($1::bigint)', [migrationLockKey(`burrow-session-boundary:${JSON.stringify([agentId,sid])}`)]);
       await client.query(`INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,'{}'::jsonb,$3,$3) ON CONFLICT DO NOTHING`, [agentId, sid, now]);
       const session = await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sid]);
       const prior = session.rows[0]?.metadata || {};
+      // Keep the head generation monotonic, but revoke all old ownership and recovery.
+      await client.query(`UPDATE continuity_state SET head=(head::jsonb || jsonb_build_object('state','reset','ownerId',NULL))::json,
+        head_state='reset',owner_id=NULL,manifest=NULL,queue=NULL,queue_status=NULL,auto_resume=false,queued_at=NULL,updated_at=$3
+        WHERE agent_id=$1 AND session_id=$2`, [agentId,sid,now]);
+      await client.query(`INSERT INTO continuity_log(agent_id,session_id,head,manifest,queue,created_at)
+        SELECT agent_id,session_id,head,manifest,queue,$3 FROM continuity_state WHERE agent_id=$1 AND session_id=$2`, [agentId,sid,now]);
       const rows = await client.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence', [agentId, sid]);
       const archiveId = rows.rows.length ? randomUUID() : null;
       const generation = Number(prior.generation || 0) + 1;

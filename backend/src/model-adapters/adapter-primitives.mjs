@@ -224,6 +224,35 @@ function nativeToolReceipt(result = {}) {
   for (const key of ['totalCount']) if (typeof result?.[key] === 'number') receipt[key] = result[key];
   if (result?.task && typeof result.task === 'object') receipt.task = result.task;
   if (result?.artifacts && typeof result.artifacts === 'object') receipt.artifacts = result.artifacts;
+  // Native result contracts, not arbitrary runtime objects. These fields are
+  // already tool-selected public evidence; retain them without a second size
+  // policy. prepareNativeToolContinuation owns the actual provider budget.
+  const nativeFields = {
+    scheduled_jobs_list: ['jobs'],
+    scheduled_jobs_read: ['job'],
+    scheduled_jobs_create: ['job'],
+    scheduled_jobs_update: ['job'],
+    scheduled_jobs_delete: ['job'],
+    scheduled_job_runs: ['job', 'runs'],
+    scheduled_jobs_run_now: ['job', 'run'],
+    memory_working_search: ['project', 'agentId', 'results'],
+    memory_rolling_search: ['project', 'agentId', 'owner', 'entersPrompt', 'results'],
+    memory_working_write: ['record'],
+    session_write_handoff: ['handoff'],
+    files_read: ['encoding', 'bytes', 'modifiedAt', 'offsetBytes', 'returnedBytes', 'nextOffsetBytes'],
+    files_write: ['encoding', 'created', 'overwrote', 'bytesWritten'],
+    files_edit: ['replaced', 'changedFiles'],
+    files_patch: ['touchedFiles', 'failureClass', 'gitApplyExitCode'],
+    files_inspect: ['exists', 'type', 'size', 'modifiedAt', 'symlinkTarget'],
+    shell_exec: ['cwd', 'exitCode', 'signal', 'timedOut', 'cancelled', 'killed', 'stdoutTruncated', 'stderrTruncated', 'stdoutOriginalChars', 'stderrOriginalChars'],
+    git_status: ['exitCode'],
+    git_diff: ['exitCode'],
+    spawn_subagent: ['status', 'spawned', 'reused', 'evidence', 'blockers', 'verification', 'verificationTarget', 'childRun', 'target', 'childSessionId'],
+    finish_subagent: ['status', 'verification', 'blockers'],
+  };
+  for (const key of nativeFields[result?.tool] || []) {
+    if (result[key] !== undefined) receipt[key] = result[key];
+  }
   return receipt;
 }
 

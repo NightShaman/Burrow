@@ -334,7 +334,8 @@ export async function finalizePlainChatRuntimeResult({
   const workbenchStatus = null;
 
   const result = {
-    ok: model ? Boolean(model.ok) : true,
+    ok: model ? Boolean(model.ok) && decision === 'answered' : true,
+    transportOk: model ? Boolean(model.ok) : null,
     mode: 'ask',
     command,
     decision,

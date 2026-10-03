@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { localExecutionTarget, remoteExecutionTarget, resolveProcessExecutionTarget } from './process-execution-router.mjs';
 
-const TOOLS = new Set(['files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_write', 'files_edit']);
+const TOOLS = new Set(['files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_write', 'files_edit', 'files_patch']);
 
 function failure(tool, args, error) {
   const code = String(error?.code || error?.message || 'native_filesystem_failed').split(':')[0];
@@ -37,7 +37,7 @@ export function createNativeFilesystemExecutionRouter({ localExecute, remoteCont
       catch (error) { return failure(operation?.tool || 'native_filesystem', operation?.arguments || {}, error); }
     }
     if (target.kind !== 'remote') throw new Error('execution_target_invalid');
-    if (!remoteController || typeof remoteController.executeNativeFilesystem !== 'function') throw new Error('remote_native_filesystem_controller_unavailable');
+    if (!remoteController || typeof remoteController.executeNativeFilesystem !== 'function') return failure(request.operation?.tool || 'native_filesystem', request.operation?.arguments || {}, new Error('remote_native_filesystem_controller_unavailable'));
     const operation = request.operation || {};
     const tool = required(operation.tool, 'tool');
     if (!TOOLS.has(tool)) throw new Error('native_filesystem_tool_unsupported');

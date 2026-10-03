@@ -114,6 +114,8 @@ function reusedSubagentResult({ record, task, target, request } = {}) {
     receiptRefs: child.receiptRefs || [],
     retention: child.retention || null,
     evidence: result.evidence || [],
+    ...(result.verification ? { verification: result.verification } : {}),
+    verificationTarget: result.verificationTarget || target.root,
     blockers: result.blockers || [],
     warnings: [...(result.warnings || []), 'subagent_exact_request_reused'],
     summary: result.summary || 'Reused existing minion receipt.',
@@ -186,6 +188,7 @@ export async function executeSpawnSubagentTool({
   modelConfig = null,
   executionPolicy: executionPolicyInput = null,
   childRunner = null,
+  abortSignal = executionContext?.abortSignal || null,
 } = {}) {
   const activityId = compactString(args.activityId) || null;
   const task = compactString(args.task || args.purpose || args.reason);
@@ -314,9 +317,10 @@ export async function executeSpawnSubagentTool({
   const remoteExecution = resolveNativeFilesystemExecutionTarget(executionContext || {}).kind === 'remote';
   let childRun;
   try {
+    abortSignal?.throwIfAborted();
     childRun = remoteExecution || childRunner
-      ? { ok: true, spawned: true, exitCode: 0, durationMs: null, result: await (childRunner || runSpawnSubagentChild)({ id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy, parentExecutionContext: executionContext, signal: executionContext?.abortSignal || null }) }
-      : await runSubagentProcess({ args: { id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy }, signal: executionContext?.abortSignal || null });
+      ? { ok: true, spawned: true, exitCode: 0, durationMs: null, result: await (childRunner || runSpawnSubagentChild)({ id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy, parentExecutionContext: executionContext, signal: abortSignal }) }
+      : await runSubagentProcess({ args: { id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy }, signal: abortSignal });
   } catch (error) {
     const code = compactString(error?.code || error?.message || 'subagent_child_dispatch_failed').split(':')[0];
     childRun = {
@@ -374,6 +378,7 @@ export async function executeSpawnSubagentTool({
     receiptRefs: child.receiptRefs,
     retention: child.retention,
     evidence: result.evidence,
+    ...(result.verification ? { verification: result.verification } : {}),
     verificationTarget: result.verificationTarget,
     blockers: result.blockers,
     warnings: result.warnings,

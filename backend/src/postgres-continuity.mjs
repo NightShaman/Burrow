@@ -1,3 +1,4 @@
+import { migrationLockKey } from './postgres-foundation.mjs';
 import { RECOVERY_TRANSCRIPT_MAX_MESSAGES, assessInterruptedRunRecovery } from './recovery-resume-policy.mjs';
 import { isChatMessage } from './session-entry.mjs';
 import { continuityStateStore } from './postgres-continuity-state-store.mjs';
@@ -105,7 +106,7 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
     return {...metadata,continuityHead:head,completedAt:at,retentionEligibleAt:at};
    }});
    return {ok:completed,stale:!completed,head,value};
-   });
+   }, migrationLockKey(`burrow-session-boundary:${JSON.stringify([agentId,args.sessionId])}`));
   },
  };
 }

@@ -76,6 +76,7 @@ export function createExecutionContext({
   processExecutionController = null,
   processExecutionRouter = null,
   parentRunId = null,
+  abortSignal = null,
 } = {}) {
   const resolvedAgentWorkspaceRoot = optionalAbsolute(agentWorkspaceRoot, 'agent_workspace_root');
   const resolvedAgentDataRoot = optionalAbsolute(agentDataRoot, 'agent_data_root');
@@ -112,7 +113,7 @@ export function createExecutionContext({
     processExecutionRouter: typeof processExecutionRouter === 'function' ? processExecutionRouter : null,
     parentRunId: parentRunId == null ? null : String(parentRunId),
   };
-  Object.defineProperties(context, { conversationStore: { value: conversationStore, enumerable: false }, stores: { value: stores, enumerable: false } });
+  Object.defineProperties(context, { conversationStore: { value: conversationStore, enumerable: false }, stores: { value: stores, enumerable: false }, abortSignal: { value: abortSignal, enumerable: false } });
   return freeze(context);
 }
 

@@ -9,10 +9,13 @@ const MODES = new Set(['deliver', 'request_reply', 'request_reply_complete']);
 // nested reply execution for that session; concurrent A2A deliveries remain
 // attributed transcript ingress, but cannot supersede each other's replies.
 const replyQueues = new Map();
-async function serializeRecipientReply({ rootDir, sessionId, operation }) {
+async function serializeRecipientReply({ rootDir, sessionId, operation, abortSignal = null }) {
   const key = `${String(rootDir)}:${String(sessionId)}`;
   const previous = replyQueues.get(key) || Promise.resolve();
-  const current = previous.catch(() => {}).then(operation);
+  const current = previous.catch(() => {}).then(() => {
+    abortSignal?.throwIfAborted();
+    return operation();
+  });
   replyQueues.set(key, current);
   try { return await current; }
   finally { if (replyQueues.get(key) === current) replyQueues.delete(key); }
@@ -83,7 +86,7 @@ async function appendAgentMessage({ conversationStore, agentId: transcriptAgentI
 
 // An agent message is a first-class, attributed transcript turn. It is not a
 // user turn; attribution identifies where the message came from.
-export async function sendAgentMessage({ conversationStore = null, senderRuntime, resolveRecipientRuntime, runRecipientReply = null, recipientAgentId, targetSessionId = 'default', content, messageMode = 'request_reply', runId = null, sourceSessionId = null } = {}) {
+export async function sendAgentMessage({ conversationStore = null, senderRuntime, resolveRecipientRuntime, runRecipientReply = null, recipientAgentId, targetSessionId = 'default', content, messageMode = 'request_reply', runId = null, sourceSessionId = null, abortSignal = null } = {}) {
   if (!conversationStore) throw new Error('conversation_store_required');
   const sender = agentId(senderRuntime?.agentId, 'agent_message_sender');
   const requestedRecipient = agentId(recipientAgentId, 'agent_message_recipient');
@@ -138,9 +141,12 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
     exchange = await serializeRecipientReply({
       rootDir: recipientRuntime.agentWorkspaceRoot,
       sessionId: session,
+      abortSignal,
       operation: async () => {
+        abortSignal?.throwIfAborted();
         const delivery = await deliver();
-        const response = await runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, inboundEntryId: delivery.recipientEntry.id });
+        abortSignal?.throwIfAborted();
+        const response = await runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, inboundEntryId: delivery.recipientEntry.id, parentSignal: abortSignal });
         return { ...delivery, reply: response };
       },
     });

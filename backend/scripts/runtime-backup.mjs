@@ -4,6 +4,9 @@ import path from 'node:path';
 import process from 'node:process';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { resolvePostgresRuntimeEnv } from '../src/postgres-startup.mjs';
+import { postgresConfig } from '../src/postgres-foundation.mjs';
+import pg from 'pg';
 import { resolveRuntimeStateConfig } from '../src/config.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -18,7 +21,7 @@ export function parseArgs(argv = []) {
 export function usage() { return 'Usage: node scripts/runtime-backup.mjs [--root DIR] [--workspace-root DIR] [--output FILE] [--confirm] [--json]\n\nCreates a PostgreSQL dump plus file-backed workspace artifacts. Dry-run by default.\n'; }
 function timestampFor(date = new Date()) { return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z'); }
 async function exists(file) { try { await fs.access(file); return true; } catch { return false; } }
-export async function planRuntimeBackup({ root = process.cwd(), workspaceRoot = null, output = null, now = new Date() } = {}) {
+export async function planRuntimeBackup({ root = process.cwd(), workspaceRoot = null, output = null, now = new Date(), env = process.env } = {}) {
   const sourceRoot = path.resolve(root);
   const runtimeState = resolveRuntimeStateConfig({ rootDir: sourceRoot, args: { runtime_root: sourceRoot, ...(workspaceRoot ? { workspace_root: workspaceRoot } : {}) } });
   const agents = await fs.readdir(runtimeState.workspaceRoot, { withFileTypes: true }).catch(() => []);
@@ -28,15 +31,45 @@ export async function planRuntimeBackup({ root = process.cwd(), workspaceRoot = 
     if (await exists(source)) workspaceEntries.push({ agentId: agent.name, root: path.join(runtimeState.workspaceRoot, agent.name), path: relative, archivePath: path.posix.join('workspaces', agent.name, relative) });
   }
   const archive = path.resolve(runtimeState.archiveRoot, output || `burrow-runtime-${timestampFor(now)}.tar.gz`);
-  return { ok: true, dryRun: true, sourceRoot, archive, postgres: { archivePath: POSTGRES_BACKUP_PATH }, workspaceEntries, included: [], missing: [] };
+  return { ok: true, dryRun: true, sourceRoot, archive, postgres: { archivePath: POSTGRES_BACKUP_PATH, target: runtimeBackupPostgres({ env, root: sourceRoot }).target }, workspaceEntries, included: [], missing: [] };
 }
+/** Translate the authoritative runtime config to libpq; never put credentials in argv. */
+export function runtimeBackupPostgres({ env = process.env, root } = {}) {
+  const runtimeEnv = resolvePostgresRuntimeEnv({ env, runtimeRoot: env.BURROW_RUNTIME_ROOT || root });
+  const config = postgresConfig(runtimeEnv);
+  let parameters;
+  try { parameters = new pg.Client(config).connectionParameters; }
+  catch { throw new Error('Invalid PostgreSQL backup configuration'); }
+  const childEnv = { ...env };
+  // Ambient libpq settings must not redirect the application's destination.
+  for (const key of Object.keys(childEnv)) if (key.startsWith('PG')) delete childEnv[key];
+  Object.assign(childEnv, { PGHOST: parameters.host, PGPORT: String(parameters.port), PGDATABASE: parameters.database, PGUSER: parameters.user });
+  if (parameters.password) childEnv.PGPASSWORD = parameters.password;
+  if (runtimeEnv.BURROW_POSTGRES_SSL_MODE) {
+    childEnv.PGSSLMODE = runtimeEnv.BURROW_POSTGRES_SSL_MODE;
+    if (runtimeEnv.BURROW_POSTGRES_SSL_CA_FILE) childEnv.PGSSLROOTCERT = runtimeEnv.BURROW_POSTGRES_SSL_CA_FILE;
+  } else if (config.connectionString) {
+    const url = new URL(config.connectionString);
+    for (const [key, value] of url.searchParams) {
+      const map = { sslmode: 'PGSSLMODE', sslrootcert: 'PGSSLROOTCERT', sslcert: 'PGSSLCERT', sslkey: 'PGSSLKEY' };
+      if (map[key]) childEnv[map[key]] = value;
+    }
+    if (!childEnv.PGSSLMODE) childEnv.PGSSLMODE = parameters.ssl ? 'require' : 'disable';
+  } else childEnv.PGSSLMODE = 'disable';
+  return { env: childEnv, target: { host: parameters.host, port: parameters.port, database: parameters.database, user: parameters.user } };
+}
+
 export async function createRuntimeBackup({ runCommand = execFileAsync, runTar = execFileAsync, ...options } = {}) {
-  const plan = await planRuntimeBackup(options); await fs.mkdir(path.dirname(plan.archive), { recursive: true });
+  const connection = runtimeBackupPostgres(options);
+  const plan = await planRuntimeBackup(options);
+  plan.postgres.target = connection.target; await fs.mkdir(path.dirname(plan.archive), { recursive: true });
   const staging = await fs.mkdtemp(path.join(path.dirname(plan.archive), '.burrow-backup-'));
   const pendingArchive = path.join(staging, 'archive.tar.gz');
   try {
     const dump = path.join(staging, POSTGRES_BACKUP_PATH); await fs.mkdir(path.dirname(dump), { recursive: true, mode: 0o700 });
-    await runCommand('pg_dump', ['--format=custom', '--file', dump, process.env.BURROW_POSTGRES_URL || 'postgresql://postgres@127.0.0.1:5432/postgres'], { timeout: 300_000 });
+    try {
+      await runCommand('pg_dump', ['--format=custom', '--file', dump], { timeout: 300_000, env: connection.env });
+    } catch { throw new Error('PostgreSQL backup failed'); }
     for (const entry of plan.workspaceEntries) await fs.cp(path.join(entry.root, entry.path), path.join(staging, entry.archivePath), { recursive: true, dereference: false });
     const outputHandle = await fs.open(pendingArchive, 'wx', 0o600);
     await outputHandle.close();

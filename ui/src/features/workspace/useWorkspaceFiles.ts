@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { apiForTarget } from '../../app/api';
-import { targetForResource, type ApiTarget } from '../../app/apiTargets';
+import { parseOwnedResourceId, targetForResource, type ApiTarget } from '../../app/apiTargets';
 import type { FileNode, Tab } from '../../app/types';
 import { usePolling } from '../../app/usePolling';
 
@@ -58,13 +58,17 @@ export function useWorkspaceFiles({ selectedAgentId, targets, setTabs, setActive
 
   const saveFile = useCallback(async (tab: Tab, content: string) => {
     if (!tab.workspaceAgentId || !tab.path) throw new Error('No agent workspace file is selected.');
-    const owner = ownerFor(tab.workspaceAgentId);
+    const parsed = parseOwnedResourceId(tab.workspaceAgentId);
+    if (!tab.targetId || tab.targetId !== parsed.targetId) throw new Error('Workspace file owner is missing or inconsistent.');
+    const target = targets.find((item) => item.id === tab.targetId && item.enabled);
+    if (!target) throw new Error(`Workspace file target ${tab.targetId} is unavailable.`);
+    const owner = { target, resourceId: parsed.resourceId };
     const result = await apiForTarget<{ content: string }>(owner.target, '/api/workspace/file', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ agentId: owner.resourceId, scope: 'agent', path: tab.path, content }),
     });
     setTabs((all) => all.map((item) => item.id === tab.id ? { ...item, content: result.content } : item));
-  }, [ownerFor, setTabs]);
+  }, [targets, setTabs]);
 
   return { workspaceFiles, refreshWorkspaceFiles, openFile, saveFile };
 }

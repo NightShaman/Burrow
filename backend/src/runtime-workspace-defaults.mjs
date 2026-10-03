@@ -53,12 +53,13 @@ async function syncBundledTextSkill({ skillRoot, skillId, skillStore = null }) {
 
 /**
  * Creates the shared workspace roots every runtime needs. Bundled text-only
- * skills are synchronized into PostgreSQL on install and startup. Shipped IDs are
+ * skills are synchronized into PostgreSQL by startup composition. Offline installers
+ * pass filesystemOnly to prepare asset roots without a database. Shipped IDs are
  * release-owned; operator-created IDs and assignments are untouched. Asset-bearing
  * packages retain their existing filesystem lifecycle.
  */
-export async function ensureDefaultGlobalWorkspace({ installDir, workspaceRoot, defaultsRoot, skillStore = null } = {}) {
-  if (!skillStore?.get || !skillStore?.update || !skillStore?.create) throw new Error('skill_store_required');
+export async function ensureDefaultGlobalWorkspace({ installDir, workspaceRoot, defaultsRoot, skillStore = null, filesystemOnly = false } = {}) {
+  if (!filesystemOnly && (!skillStore?.get || !skillStore?.update || !skillStore?.create)) throw new Error('skill_store_required');
   const root = path.resolve(installDir || '');
   const workspace = path.resolve(workspaceRoot || path.join(root, 'workspace'));
   const globalRoot = path.join(workspace, 'global');
@@ -79,6 +80,8 @@ export async function ensureDefaultGlobalWorkspace({ installDir, workspaceRoot, 
     const sourceSkill = path.join(source, entry.name);
     if (!(await exists(path.join(sourceSkill, 'SKILL.md')))) continue;
     if (await bundledSkillKind(sourceSkill) === 'text') {
+      // Offline installers prepare assets only; startup owns PostgreSQL sync.
+      if (filesystemOnly) continue;
       if (await syncBundledTextSkill({ skillRoot: sourceSkill, skillId: entry.name, skillStore })) seededDatabaseSkills.push(entry.name);
       // Retire the old shipped text copy only after PostgreSQL synchronization succeeds.
       // Asset packages and agent-local overrides are not part of this release sync.

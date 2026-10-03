@@ -140,14 +140,16 @@ async function appendChildToolRound({ authority, rootDir, sessionId, runId, trac
   return sequence;
 }
 
-async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSessionId, conversationId = null, traceLogger = null, executionPolicy: executionPolicyInput = null, modelConfig = null, observedToolResults = [], parentExecutionContext = null } = {}) {
+async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSessionId, conversationId = null, traceLogger = null, executionPolicy: executionPolicyInput = null, modelConfig = null, observedToolResults = [], parentExecutionContext = null, signal = null } = {}) {
   const executionPolicy = normalizeExecutionPolicyInput(executionPolicyInput);
+  toolCalls = toolCalls.map((call, index) => ({ ...call, id: call.id || `tool-call-${index}` }));
   const proposal = proposalFromNativeToolCalls(toolCalls);
   const reviews = reviewProposalActions({ actions: proposal.actions, workspaceRoot: target.root });
   const executionContext = createExecutionContext({
     conversationStore: parentExecutionContext?.conversationStore || parentExecutionContext?.stores?.conversations,
     stores: parentExecutionContext?.stores,
     agentId: parentExecutionContext?.agentId,
+    abortSignal: signal,
     sessionId: childSessionId, conversationId, workspaceRoot: target.root, target, dataRoot, cacheRoot: traceLogger?.traceDir || null,
     executionEnvironment: parentExecutionContext?.executionEnvironment?.kind === 'remote' ? parentExecutionContext.executionEnvironment : null,
     processExecutionTarget: parentExecutionContext?.processExecutionTarget?.kind === 'remote' ? parentExecutionContext.processExecutionTarget : (parentExecutionContext?.executionEnvironment?.kind === 'remote' ? parentExecutionContext.executionEnvironment : null),
@@ -159,9 +161,19 @@ async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSes
     actions: proposal.actions, reviews: reviews.reviews, workspaceRoot: target.root, rootDir: target.root,
     dataRoot, sessionId: childSessionId, traceLogger, executionPolicy, modelConfig,
     allowMutations: executionPolicyAllowsMutation(executionPolicy),
-    observedToolResults, executionContext,
+    observedToolResults, executionContext, abortSignal: signal,
   });
-  return { results: execution.toolResults, skipped: execution.skipped };
+  const resultsByCallId = new Map((execution.nativeToolResults || execution.toolResults).map((result, index) => [result.toolCallId, { ...execution.toolResults[index], toolCallId: result.toolCallId }]));
+  const results = toolCalls.map((call, index) => {
+    const executed = resultsByCallId.get(call.id);
+    if (executed) return executed;
+    const skipped = execution.skipped.find(item => item.index === index);
+    const review = reviews.reviews.find(item => item.index === index);
+    const status = skipped?.status || review?.status || 'not_executed';
+    return { tool: call.name || null, toolCallId: call.id, ok: false, status,
+      error: status === 'cancelled' ? 'cancelled' : (skipped?.blockers || review?.blockers || ['tool_call_not_executed']).join(', ') };
+  });
+  return { results, skipped: execution.skipped };
 }
 
 function continuationToolCallsForTruncatedEvidence(toolResults = [], continuationCounts = new Map()) {
@@ -510,7 +522,7 @@ export async function runSpawnSubagentChild({
     }
     await progress?.({ type: 'subagent-progress', phase: 'tool-request', id, toolCallCount: toolCalls.length });
     await recordLiveActivity({ kind: 'tool', phase: 'tool-request', label: `Starting ${toolCalls.length} tool${toolCalls.length === 1 ? '' : 's'}`, tool: toolCalls[0]?.name || null, counts: { toolCalls: toolCalls.length } }, 'tool_request');
-    const batch = await runSubagentToolCalls({ toolCalls, target, dataRoot, childSessionId, conversationId: owner.conversationId || null, traceLogger: modelTrace, executionPolicy: executionPolicyInput, modelConfig, observedToolResults: toolResults, parentExecutionContext });
+    const batch = await runSubagentToolCalls({ toolCalls, target, dataRoot, childSessionId, conversationId: owner.conversationId || null, traceLogger: modelTrace, executionPolicy: executionPolicyInput, modelConfig, observedToolResults: toolResults, parentExecutionContext, signal });
     const batchOk = batch.results.every((result) => result?.ok !== false);
     await progress?.({ type: 'subagent-progress', phase: 'tool-result', id, resultCount: batch.results.length });
     await recordLiveActivity({ kind: 'tool', phase: 'tool-result', label: `Finished ${batch.results.length} tool result${batch.results.length === 1 ? '' : 's'}`, status: batchOk ? 'completed' : 'error', tool: batch.results[0]?.tool || toolCalls[0]?.name || null, error: batchOk ? null : (batch.results.find((result) => result?.ok === false)?.error || 'tool_failed'), counts: { toolResults: batch.results.length } }, batchOk ? 'tool_result' : 'tool_error');
@@ -630,4 +642,4 @@ export async function runSpawnSubagentChild({
 
 }
 
-export const __subagentWorkerRunner__ = Object.freeze({ childPrompt, proposalFromNativeToolCalls, boundedEvidenceLedger, compactEvidenceItem, compactEvidenceForHandoff, followupPromptWithEvidence, finalSynthesisPrompt, terminalResultFromToolCalls, subagentEmptyFinalResult, subagentTerminalMissingResult });
+export const __subagentWorkerRunner__ = Object.freeze({ runSubagentToolCalls, childPrompt, proposalFromNativeToolCalls, boundedEvidenceLedger, compactEvidenceItem, compactEvidenceForHandoff, followupPromptWithEvidence, finalSynthesisPrompt, terminalResultFromToolCalls, subagentEmptyFinalResult, subagentTerminalMissingResult });

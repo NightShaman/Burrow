@@ -59,10 +59,13 @@ function compactResponseToolOutput(output = []) {
 }
 
 function mergeResponseFunctionCall(calls, fragment = {}) {
-  const outputIndex = Number.isInteger(fragment.output_index) ? fragment.output_index : Number.isInteger(fragment.index) ? fragment.index : calls.length;
+  let outputIndex = Number.isInteger(fragment.output_index) ? fragment.output_index : Number.isInteger(fragment.index) ? fragment.index : calls.length;
   if (outputIndex < 0) return false;
   const callId = fragment.call_id || fragment.item?.call_id || fragment.item?.id || fragment.id || `tool-call-${outputIndex}`;
-  const providerItemId = fragment.item?.id || fragment.id || callId;
+  const explicitCallId = fragment.call_id || fragment.item?.call_id;
+  const matchingIndex = explicitCallId ? calls.findIndex((call) => call?.call_id === explicitCallId) : -1;
+  if (matchingIndex >= 0) outputIndex = matchingIndex;
+  const providerItemId = fragment.providerItemId || fragment.item?.id || fragment.id || callId;
   const prior = calls[outputIndex] || { type: 'function_call', id: callId, call_id: callId, providerItemId, name: null, arguments: '' };
   const name = fragment.name || fragment.item?.name || fragment.function?.name || prior.name;
   const argumentFragment = typeof fragment.delta === 'string'
@@ -75,6 +78,9 @@ function mergeResponseFunctionCall(calls, fragment = {}) {
           ? fragment.function.arguments
           : '';
   const replaceArguments = typeof fragment.arguments === 'string' || typeof fragment.item?.arguments === 'string' || typeof fragment.function?.arguments === 'string';
+  if (explicitCallId && calls[outputIndex] && prior.call_id !== explicitCallId) return false;
+  if (prior.name && name && prior.name !== name) return false;
+  if (replaceArguments && prior.arguments && !argumentFragment.startsWith(prior.arguments)) return false;
   const nextArguments = replaceArguments ? argumentFragment : `${prior.arguments || ''}${argumentFragment}`;
   calls[outputIndex] = {
     type: 'function_call',
@@ -249,6 +255,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   let streamError = null;
   let streamErrorDetails = null;
   let finishReason = null;
+  let terminalSeen = false;
   let usage = null;
   const toolCalls = [];
   const responseToolCalls = [];
@@ -276,31 +283,38 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
     const raw = dataLines.join('\n');
     dataLines = [];
     dataChars = 0;
-    if (!raw || raw === '[DONE]') return;
+    if (!raw) return;
+    if (raw === '[DONE]') {
+      if (mode !== 'openai-responses') terminalSeen = true;
+      return;
+    }
     let event;
-    try { event = JSON.parse(raw); } catch { return; }
+    try { event = JSON.parse(raw); } catch { streamError = 'model_stream_malformed_event'; return; }
     if (mode === 'openai-responses') {
       if (event?.type === 'response.output_text.delta' && typeof event.delta === 'string') await emit(event.delta);
       if ((event?.type === 'response.reasoning.delta' || event?.type === 'response.reasoning_summary_text.delta') && typeof event.delta === 'string') await emitThought(event.delta);
       if ((event?.type === 'response.output_item.added' || event?.type === 'response.output_item.done') && (event.item?.type === 'function_call' || event.item?.type === 'tool_call')) {
         recordToolCallFailure(responseFunctionCallFailure(responseToolCalls, event));
-        if (!toolCallFailure && !mergeResponseFunctionCall(responseToolCalls, event)) recordToolCallFailure('model_tool_call_invalid');
+        if (!toolCallFailure && !mergeResponseFunctionCall(responseToolCalls, event)) recordToolCallFailure('model_tool_call_conflict');
       }
       if (event?.type === 'response.function_call_arguments.delta') {
         recordToolCallFailure(responseFunctionCallFailure(responseToolCalls, event));
-        if (!toolCallFailure && !mergeResponseFunctionCall(responseToolCalls, event)) recordToolCallFailure('model_tool_call_invalid');
+        if (!toolCallFailure && !mergeResponseFunctionCall(responseToolCalls, event)) recordToolCallFailure('model_tool_call_conflict');
       }
       if (event?.type === 'response.function_call_arguments.done') {
         recordToolCallFailure(responseFunctionCallFailure(responseToolCalls, event));
-        if (!toolCallFailure && !mergeResponseFunctionCall(responseToolCalls, event)) recordToolCallFailure('model_tool_call_invalid');
+        if (!toolCallFailure && !mergeResponseFunctionCall(responseToolCalls, event)) recordToolCallFailure('model_tool_call_conflict');
       }
       if (event?.type === 'response.completed' && event.response && typeof event.response === 'object') {
+        terminalSeen = event.response.status === 'completed';
         finalData = compactResponseCompletion(event.response);
         usage = finalData.usage || usage;
         if (!text && finalData.output_text) await emit(finalData.output_text);
         for (const call of (finalData.output || [])) {
-          const outputIndex = responseToolCalls.length;
-          responseToolCalls[outputIndex] ||= call;
+          const prior = responseToolCalls.find((item) => item?.call_id === call.call_id);
+          if (prior && ((prior.name && prior.name !== call.name) || (prior.arguments && prior.arguments !== call.arguments))) {
+            recordToolCallFailure('model_tool_call_conflict');
+          } else if (!mergeResponseFunctionCall(responseToolCalls, { ...call, output_index: responseToolCalls.length })) recordToolCallFailure('model_tool_call_conflict');
         }
       }
       if (event?.type === 'response.failed' || event?.type === 'error') {
@@ -330,7 +344,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
     if (typeof choice.delta?.reasoning === 'string') await emitThought(choice.delta.reasoning);
     for (const call of choice.delta?.tool_calls || []) {
       recordToolCallFailure(streamToolCallFailure(toolCalls, call));
-      if (!toolCallFailure && !mergeStreamToolCall(toolCalls, call)) recordToolCallFailure('model_tool_call_invalid');
+      if (!toolCallFailure && !mergeStreamToolCall(toolCalls, call)) recordToolCallFailure('model_tool_call_conflict');
     }
     if (choice.finish_reason) finishReason = choice.finish_reason;
     if (event.usage) usage = event.usage;
@@ -342,16 +356,6 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
       bytes += value?.byteLength ?? value?.length ?? 0;
       if (bytes > limit) {
         await reader.cancel();
-        // A streamed response may already contain a useful, bounded answer or
-        // valid tool calls. Preserve that normalized result instead of turning
-        // a successful provider response into a failed turn because a verbose
-        // tail crossed the transport guard.
-        // A partial tool-call protocol is not an answer: preserve the hard
-        // failure unless we have actual text or a completed Responses result.
-        if (text || finalData) {
-          streamError = null;
-          break;
-        }
         return { ok: false, bytes, error: `model_response_too_large:${bytes}>${limit}`, data: null, streamedTextChars: text.length };
       }
       buffer += decoder.decode(value, { stream: true });
@@ -395,6 +399,8 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   } finally {
     reader.releaseLock?.();
   }
+  if (!streamError && (!terminalSeen || (mode !== 'openai-responses' && !finishReason))) streamError = 'model_stream_incomplete';
+  if (streamError) return { ok: false, bytes, error: streamError, errorDetails: streamErrorDetails, data: null, streamedTextChars: text.length };
   const data = mode === 'openai-responses'
     ? (finalData ? { ...finalData, ...(text ? { output_text: text } : {}), ...(responseToolCalls.length ? { output: responseToolCalls.filter(Boolean) } : finalData.output ? { output: finalData.output } : {}) } : { status: streamError ? 'failed' : 'completed', output_text: text, output: responseToolCalls.filter(Boolean) })
     : { choices: [{ index: 0, finish_reason: finishReason, message: { role: 'assistant', content: text, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) } }], usage };

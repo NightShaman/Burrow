@@ -90,6 +90,31 @@ function traceCandidates(runs, { maxAgeDays = null, maxBytes = null, nowMs = Dat
   return [...selected.values()].sort((a, b) => a.mtimeMs - b.mtimeMs || a.id.localeCompare(b.id));
 }
 
+export async function retentionSessionCandidate({ record, taskStore, sessionPolicies, nowMs, agentId }) {
+  const meta = record.metadata || record;
+  const kind = meta.kind || 'main';
+  if (['running', 'finalizing'].includes(meta.continuityHead?.state)) return null;
+  if (kind === 'main' && isCurrentMain(record)) return null;
+  // Task retention is anchored to the owning board task reaching a terminal
+  // status, not merely to the end of a chat run. Missing or active ownership
+  // is fail-closed so an orphan cannot be deleted accidentally.
+  let eligibility = meta.retentionEligibleAt || meta.completedAt || meta.archivedAt || record.updatedAt;
+  if (kind === 'task') {
+    if (!meta.ownerTaskId) return null;
+    const task = await taskStore?.getTask(meta.ownerTaskId);
+    if (!task || !['done', 'cancelled'].includes(task.status)) return null;
+    eligibility = task.terminalAt || task.metadata?.terminalAt || null;
+  } else if (kind !== 'main' && !meta.completedAt) {
+    return null;
+  }
+  if (!eligibility) return null;
+  const completed = new Date(eligibility).getTime();
+  const days = sessionPolicies[kind];
+  return Number.isFinite(completed) && Number.isFinite(days) && completed <= nowMs - days * 86400000
+    ? { id: record.id, agentId, sessionId: record.id, kind, reasons: ['age'] }
+    : null;
+}
+
 export async function planRetentionCleanup({ dataRoot, conversationStore, taskStore, agentId, traceRoot = null, retention = {}, now = new Date() } = {}) {
   if (!dataRoot) throw new Error('dataRoot is required');
   const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
@@ -100,29 +125,8 @@ export async function planRetentionCleanup({ dataRoot, conversationStore, taskSt
   const sessions = sessionRetentionEnabled ? (await conversationStore.listSessions({agentId,includeArchived:true})).map(record=>({...record,id:record.sessionId})) : [];
   const sessionPolicies = { main: retention.conversationDays ?? retention.mainMaxAgeDays ?? 60, task: retention.conversationDays ?? retention.taskMaxAgeDays ?? 30, subagent: retention.conversationDays ?? retention.subagentMaxAgeDays ?? 7 };
   const nowDate = new Date(nowMs);
-  const taskBoard = taskStore;
   const sessionCandidates = (await Promise.all(sessions.map(async (record) => {
-    const meta = record.metadata || {};
-    const kind = meta.kind || 'main';
-    if (['running', 'finalizing'].includes(meta.continuityHead?.state)) return null;
-    if (kind === 'main' && isCurrentMain(record)) return null;
-    // Task retention is anchored to the owning board task reaching a terminal
-    // status, not merely to the end of a chat run. Missing or active ownership
-    // is fail-closed so an orphan cannot be deleted accidentally.
-    let eligibility = meta.retentionEligibleAt || meta.completedAt || meta.archivedAt || record.updatedAt;
-    if (kind === 'task') {
-      if (!meta.ownerTaskId) return null;
-      const task = await taskBoard?.getTask(meta.ownerTaskId);
-      if (!task || !['done', 'cancelled'].includes(task.status)) return null;
-      eligibility = task.terminalAt || task.metadata?.terminalAt || null;
-    } else if (kind !== 'main' && !meta.completedAt) {
-      return null;
-    }
-    const completed = new Date(eligibility).getTime();
-    const days = sessionPolicies[kind];
-    return Number.isFinite(completed) && Number.isFinite(days) && completed <= nowMs - days * 86400000
-      ? { id: record.id, agentId, sessionId: record.id, kind, reasons: ['age'] }
-      : null;
+    return retentionSessionCandidate({ record, taskStore, sessionPolicies, nowMs, agentId });
   }))).filter(Boolean);
   const traceMaxAgeDays = retention.traceMaxAgeDays ?? retention.maxAgeDays ?? null;
   const traceMaxBytes = retention.traceMaxBytes ?? null;
@@ -245,8 +249,10 @@ export async function runRetentionCleanup({ dataRoot, conversationStore, taskSto
       const metadata = await conversationStore.getMetadata({ agentId, sessionId: entry.id });
       if (isCurrentMain(metadata, entry.id)) throw new Error('retention_refused_current_main');
       if (typeof conversationStore.deleteSession !== 'function') throw new Error('conversation_store_retention_unsupported');
-      await conversationStore.deleteSession({agentId,sessionId:entry.id});
-      deletedSessions.push(entry.id);
+      const eligible = await retentionSessionCandidate({ record: { ...metadata, id: entry.id }, taskStore, sessionPolicies: plan.retention.sessionPolicies, nowMs: new Date(now).getTime(), agentId });
+      if (!eligible) continue;
+      const result = await conversationStore.deleteSession({agentId,sessionId:entry.id, retentionPolicy: { sessionPolicies: plan.retention.sessionPolicies, nowMs: new Date(now).getTime() }});
+      if (result?.deleted !== false) deletedSessions.push(entry.id);
     }
     const deletedTraces = [];
     for (const entry of plan.delete.traces) {

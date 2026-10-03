@@ -98,7 +98,8 @@ export async function runSubagentProcess({
       stdio: ['ignore', 'pipe', 'pipe'],
       env: childEnv(),
     });
-    const abortChild = () => { if (!settled) child.kill('SIGTERM'); };
+    let cancelled = Boolean(signal?.aborted);
+    const abortChild = () => { cancelled = true; if (!settled) child.kill('SIGTERM'); };
     if (signal?.aborted) abortChild();
     else signal?.addEventListener?.('abort', abortChild, { once: true });
     const finish = async (payload) => {
@@ -133,13 +134,14 @@ export async function runSubagentProcess({
         };
       }
       await finish({
-        ok: code === 0 && Boolean(parsed.ok),
+        ...parsed,
+        ok: code === 0 && !signal && !cancelled && Boolean(parsed.ok),
+        cancelled,
         spawned: true,
         timedOut: false,
         exitCode: code,
         signal,
         ...streams(),
-        ...parsed,
       });
     });
   });

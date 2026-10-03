@@ -30,7 +30,7 @@ export async function loadRuntimeMcpCapabilities({ agentId, stores } = {}) {
   return { mcpTools, mcpConnections };
 }
 
-export function createRuntimeExecutionContext({ stores = null, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId = null } = {}) {
+export function createRuntimeExecutionContext({ stores = null, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId = null, abortSignal = null } = {}) {
   const includeAgentChat = Boolean(agentRuntime && typeof resolveAgentRuntime === 'function');
   const includeTaskBoard = Boolean(runtimeState.agentId);
   return createExecutionContext({
@@ -61,5 +61,6 @@ export function createRuntimeExecutionContext({ stores = null, runtimeState, res
     executionEnvironment: agentRuntime?.executionEnvironment || { kind: 'local', workspaceRoot: resolvedWorkingRoot },
     processExecutionController: agentRuntime?.processExecutionController || null,
     parentRunId,
+    abortSignal,
   });
 }

@@ -46,7 +46,7 @@ export function createSettingsRoutes({ timezoneSettings, saveTimezoneSettings, r
     if (req.method === 'POST' && url.pathname === '/api/settings/mcp-connections/discover') return resultResponse(res, await discoverMcpConnection(await readJsonBody(req)));
     if (req.method === 'POST' && url.pathname === '/api/settings/mcp-connections/diagnose') return resultResponse(res, await diagnoseMcpConnection(await readJsonBody(req)));
     if (req.method === 'POST' && url.pathname === '/api/settings/mcp-connections') return resultResponse(res, await saveMcpConnection(await readJsonBody(req)));
-    if (req.method === 'DELETE' && url.pathname.startsWith('/api/settings/mcp-connections/')) { const id = decodeURIComponent(url.pathname.slice('/api/settings/mcp-connections/'.length)); sendJson(res, 200, { ok: removeMcpConnection(id) }); return true; }
+    if (req.method === 'DELETE' && url.pathname.startsWith('/api/settings/mcp-connections/')) { const id = decodeURIComponent(url.pathname.slice('/api/settings/mcp-connections/'.length)); sendJson(res, 200, { ok: await removeMcpConnection(id) }); return true; }
     if (url.pathname.startsWith('/api/agents/') && url.pathname.endsWith('/mcp-tools')) {
       const agentId = decodeURIComponent(url.pathname.slice('/api/agents/'.length, -'/mcp-tools'.length));
       if (req.method === 'GET') return resultResponse(res, await agentMcpTools(agentId));

@@ -68,7 +68,7 @@ export class PostgresAgentProfileStore {
       const values = new Map(AGENT_PROFILE_KINDS.map(k => [k, markdown(byKind.get(k) || '')]));
       const stamp = this.clock();
       for (const documentKind of AGENT_PROFILE_KINDS) {
-        await client.query(`INSERT INTO agent_profile_documents (agent_id,kind,markdown,created_at,updated_at) VALUES ($1,$2,$3,$4,$4) ON CONFLICT (agent_id,kind) DO UPDATE SET markdown=EXCLUDED.markdown,updated_at=EXCLUDED.updated_at`, [id, documentKind, values.get(documentKind), stamp]);
+        await client.query(`INSERT INTO agent_profile_documents (agent_id,kind,markdown,created_at,updated_at) VALUES ($1,$2,$3,$4,$4) ON CONFLICT (agent_id,kind) DO NOTHING`, [id, documentKind, values.get(documentKind), stamp]);
       }
       const rows = await client.query('SELECT kind,markdown,created_at,updated_at FROM agent_profile_documents WHERE agent_id=$1 ORDER BY ' + order, [id]);
       return rows.rows.map(document);

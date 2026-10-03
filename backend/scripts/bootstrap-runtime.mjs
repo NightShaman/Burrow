@@ -2,7 +2,7 @@
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { installReleasePackage } from './install-release-package.mjs';
+import { installReleasePackage, mergeRuntimeEnv } from './install-release-package.mjs';
 import { ensureDefaultGlobalWorkspace } from '../src/runtime-workspace-defaults.mjs';
 import { fileURLToPath } from 'node:url';
 
@@ -77,9 +77,14 @@ export async function bootstrapRuntime(args = {}) {
 
     await fs.mkdir(installDir, { recursive: true });
     for (const dir of RUNTIME_DIRECTORIES) await fs.mkdir(path.join(installDir, dir), { recursive: true });
-    report.globalWorkspace = await ensureDefaultGlobalWorkspace({ installDir, defaultsRoot: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'global-skills') });
+    report.globalWorkspace = await ensureDefaultGlobalWorkspace({ installDir, filesystemOnly: true, defaultsRoot: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'global-skills') });
     if (await exists(envPath) && !args.forceEnv) report.stages.push('env-preserved');
-    else { await fs.writeFile(envPath, envTemplate({ installDir, generateSettingsKey, host, port }), { mode: 0o600 }); report.stages.push('env-written'); }
+    else {
+      const existing = envExists ? await fs.readFile(envPath, 'utf8') : '';
+      const hasKey = /^\s*(?:export\s+)?BURROW_SETTINGS_KEY=.+$/m.test(existing);
+      const template = envTemplate({ installDir, generateSettingsKey: generateSettingsKey && !hasKey, host, port });
+      await fs.writeFile(envPath, mergeRuntimeEnv(template, existing), { mode: 0o600 });
+      await fs.chmod(envPath, 0o600); report.stages.push('env-written'); }
     report.stages.unshift('global-workspace');
     report.stages.unshift('runtime-directories');
 
