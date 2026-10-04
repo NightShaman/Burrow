@@ -31,12 +31,17 @@ jobs:
         env:
           EVENT_SOURCE: ${{ github.event.client_payload.source_repository }}
           EVENT_SHA: ${{ github.event.client_payload.source_sha }}
+          EVENT_REF: ${{ github.event.client_payload.source_ref }}
           INPUT_BACKEND_SHA: ${{ inputs.backend_sha }}
           INPUT_UI_SHA: ${{ inputs.ui_sha }}
           EVENT_NODE_GOBLIN_VERSION: ${{ github.event.client_payload.node_goblin_version }}
           GH_TOKEN: ${{ secrets.BURROW_SOURCE_TOKEN }}
         run: |
           set -eu
+          if [ "${{ github.event_name }}" = "repository_dispatch" ] && [ "$EVENT_REF" != "main" ]; then
+            echo 'Automatic assembly requires source_ref=main' >&2
+            exit 1
+          fi
           backend_ref="$INPUT_BACKEND_SHA"
           ui_ref="$INPUT_UI_SHA"
           if [ "$EVENT_SOURCE" = "NightShaman/Burrow-Backend" ] && [ -n "$EVENT_SHA" ]; then backend_ref="$EVENT_SHA"; fi
