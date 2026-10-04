@@ -74,7 +74,21 @@ jobs:
           cache-dependency-path: |
             backend-source/package-lock.json
             ui-source/package-lock.json
+      - name: Install PostgreSQL 17 and pgvector for disposable integration fixtures
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y wget ca-certificates gnupg
+          sudo install -d /usr/share/postgresql-common/pgdg
+          wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-17 postgresql-client-17 postgresql-17-pgvector
       - name: Verify sources
+        env:
+          BURROW_TEST_TIMEOUT_MS: '600000'
+          BURROW_TEST_DISPOSABLE_POSTGRES: '1'
         run: |
           set -eu
           (cd backend-source && npm ci && npm test)
