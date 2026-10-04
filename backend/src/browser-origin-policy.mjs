@@ -2,7 +2,16 @@ export function browserRequestPolicy(req, url, { allowedOrigins = [] } = {}) {
   const origin = req.headers?.origin;
   if (origin) {
     const trusted = new Set([url.origin, ...allowedOrigins]);
-    if (!trusted.has(origin)) return { status: 403, error: 'browser_origin_not_allowed' };
+    // The server URL uses HTTP behind TLS-terminating proxies. Host is the
+    // request authority; do not infer browser scheme from the backend socket
+    // or trust arbitrary forwarded host headers.
+    let sameAuthority = false;
+    try {
+      const browserUrl = new URL(origin);
+      sameAuthority = ['http:', 'https:'].includes(browserUrl.protocol)
+        && browserUrl.origin === origin && browserUrl.host === url.host;
+    } catch {}
+    if (!trusted.has(origin) && !sameAuthority) return { status: 403, error: 'browser_origin_not_allowed' };
   }
   const mutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
   if (mutation && url.pathname.startsWith('/api/')) {
