@@ -30,10 +30,10 @@ export async function loadRuntimeMcpCapabilities({ agentId, stores } = {}) {
   return { mcpTools, mcpConnections };
 }
 
-export function createRuntimeExecutionContext({ stores = null, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId = null, abortSignal = null } = {}) {
+export function createRuntimeExecutionContext({ stores = null, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId = null, abortSignal = null, skillOverrides = {} } = {}) {
   const includeAgentChat = Boolean(agentRuntime && typeof resolveAgentRuntime === 'function');
   const includeTaskBoard = Boolean(runtimeState.agentId);
-  return createExecutionContext({
+  const context = createExecutionContext({
     stores,
     conversationStore: stores?.conversations,
     sessionId: resolvedSessionId,
@@ -63,4 +63,9 @@ export function createRuntimeExecutionContext({ stores = null, runtimeState, res
     parentRunId,
     abortSignal,
   });
+  // Preserve non-enumerable live dependencies; object spread silently drops them.
+  return Object.freeze(Object.defineProperties({}, {
+    ...Object.getOwnPropertyDescriptors(context),
+    skillOverrides: { value: skillOverrides, enumerable: true },
+  }));
 }

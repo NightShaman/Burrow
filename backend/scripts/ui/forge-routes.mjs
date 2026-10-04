@@ -1,3 +1,4 @@
+import { artifactResponseHeaders } from '../../src/artifact-response-policy.mjs';
 import { promises as fs } from 'node:fs';
 export function createForgeRoutes({ store, readJsonBody, sendJson }) {
   return async ({ req, res, url }) => {
@@ -15,7 +16,7 @@ export function createForgeRoutes({ store, readJsonBody, sendJson }) {
         const [, id, action, artifactId] = match;
         if (req.method === 'GET' && !action) { await forge.owner(); sendJson(res, 200, { ok: true, job: forge.public(await forge.get(id)) }); }
         else if (req.method === 'POST' && action === 'attach') sendJson(res, 200, { ok: true, attachment: await forge.attach(id, await readJsonBody(req)) });
-        else if (req.method === 'GET' && action === 'artifacts' && artifactId) { const { artifact, resolved } = await forge.artifact(id, artifactId); const bytes = await fs.readFile(resolved.filePath); res.writeHead(200, { 'content-type': artifact.mimeType, 'content-length': bytes.length, 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff', 'content-disposition': `${url.searchParams.get('download') === '1' ? 'attachment' : 'inline'}; filename="${artifact.name}"` }); res.end(bytes); }
+        else if (req.method === 'GET' && action === 'artifacts' && artifactId) { const { artifact, resolved } = await forge.artifact(id, artifactId); const bytes = await fs.readFile(resolved.filePath); res.writeHead(200, { 'content-type': artifact.mimeType, 'content-length': bytes.length, ...artifactResponseHeaders({ name: artifact.name, mimeType: artifact.mimeType, download: url.searchParams.get('download') === '1' }) }); res.end(bytes); }
         else sendJson(res, 405, { ok: false, error: 'method_not_allowed' });
       }
     } catch (error) { sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'forge_unavailable' }); }

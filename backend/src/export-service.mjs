@@ -15,7 +15,7 @@ export const EXPORT_CATEGORIES = Object.freeze([
   { id: 'settings', label: 'Settings', containsSecrets: false, description: 'Portable non-secret runtime settings and preferences.' },
   { id: 'model-connections', label: 'Model connections', containsSecrets: true, description: 'Connection metadata and encrypted provider credentials.' },
   { id: 'mcp-connections', label: 'MCP connections', containsSecrets: true, description: 'MCP connection metadata, API keys, and per-agent tool grants.' },
-  { id: 'ui-auth', label: 'UI authentication', containsSecrets: true, description: 'UI auth configuration and OIDC/basic credentials.' },
+  { id: 'ui-auth', label: 'UI authentication', containsSecrets: true, description: 'UI auth configuration and OIDC credentials. Basic passwords are nonportable and require deliberate reconfiguration.' },
   { id: 'task-board', label: 'Task board and work items', containsSecrets: false, description: 'Projects, tasks, and work-item state.' },
 ]);
 
@@ -76,6 +76,9 @@ export async function buildExport({ request, data = {}, sourceFiles = {} } = {})
   for (const id of selected.categories) {
     const value = data[id] ?? sourceFiles[id] ?? null;
     categories[id] = selected.includesSecrets ? value : redacted(value);
+    if (id === 'ui-auth' && value?.auth?.basic) {
+      categories[id] = { ...value, auth: { ...value.auth, basic: { ...value.auth.basic, password: undefined, passwordHash: undefined } }, basicCredentialsPortable: false };
+    }
   }
   const manifest = {
     format: EXPORT_FORMAT,

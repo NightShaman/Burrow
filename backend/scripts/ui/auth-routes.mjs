@@ -18,7 +18,7 @@ export function createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCook
       res.end();
       return true;
     }
-    if (req.method === 'POST' && url.pathname === '/auth/logout') { const runtime = await runtimeConfig(); clearOidcCookies(res, runtime); const cookies = res.getHeader('set-cookie'); res.setHeader('set-cookie', [...(Array.isArray(cookies) ? cookies : [cookies].filter(Boolean)), 'hc_basic_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0']); sendJson(res, 200, { ok: true }); return true; }
+    if (req.method === 'POST' && url.pathname === '/auth/logout') { const runtime = await runtimeConfig(); clearOidcCookies(res, runtime); const cookies = res.getHeader('set-cookie'); res.setHeader('set-cookie', [...(Array.isArray(cookies) ? cookies : [cookies].filter(Boolean)), `hc_basic_session=; HttpOnly;${runtime?.ui?.basic?.insecureCookies === true ? '' : ' Secure;'} SameSite=Lax; Path=/; Max-Age=0`]); sendJson(res, 200, { ok: true }); return true; }
     if (req.method === 'GET' && url.pathname === '/api/auth/session') {
       const runtime = await runtimeConfig();
       const session = oidcSessionFromRequest(req, runtime);

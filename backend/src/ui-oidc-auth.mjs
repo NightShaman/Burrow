@@ -1,5 +1,5 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
-import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
+import { randomBytes, createHmac, createHash, timingSafeEqual } from 'node:crypto';
 
 const COOKIE_NAME = 'burrow_oidc_session';
 const STATE_COOKIE_NAME = 'burrow_oidc_state';
@@ -67,15 +67,39 @@ export function clearOidcCookies(res, runtime = null) {
   ]);
 }
 
+export function oidcAuthorizationRevision(runtime) {
+  const oidc = runtime?.ui?.oidc || {};
+  return createHash('sha256').update(JSON.stringify({
+    mode: runtime?.ui?.authMode || 'oidc',
+    issuer: text(oidc.issuer).replace(/\/+$/, ''), clientId: text(oidc.clientId),
+    redirectUri: text(oidc.redirectUri),
+    allowedEmails: (oidc.allowedEmails || []).map(value => text(value).toLowerCase()).sort(),
+    allowedDomains: (oidc.allowedDomains || []).map(value => text(value).toLowerCase()).sort(),
+  })).digest('hex');
+}
+
+export function assertOidcEmailAuthorization(claims, oidc = {}) {
+  const emails = (oidc.allowedEmails || []).map(value => text(value).toLowerCase()).filter(Boolean);
+  const domains = (oidc.allowedDomains || []).map(value => text(value).toLowerCase()).filter(Boolean);
+  if (!emails.length && !domains.length) return;
+  if (claims.email_verified !== true) throw new Error('oidc_verified_email_required');
+  const email = text(claims.email).toLowerCase();
+  if (emails.length && !emails.includes(email)) throw new Error('oidc_email_not_allowed');
+  if (domains.length && !domains.includes(email.includes('@') ? email.split('@').pop() : '')) throw new Error('oidc_domain_not_allowed');
+}
+
 export function oidcSessionFromRequest(req, runtime) {
   const cookies = parseCookies(req.headers.cookie || '');
   const cookie = cookies.get(COOKIE_NAME);
   if (!cookie) return null;
-  return verifySessionCookie(cookie, sessionSecret(runtime));
+  const session = verifySessionCookie(cookie, sessionSecret(runtime));
+  if (!session || session.authorizationRevision !== oidcAuthorizationRevision(runtime)) return null;
+  try { assertOidcEmailAuthorization({ email: session.email, email_verified: session.emailVerified }, runtime.ui.oidc); } catch { return null; }
+  return session;
 }
 
 export function sendOidcSessionCookie(res, session, runtime) {
-  res.setHeader('set-cookie', `${COOKIE_NAME}=${encodeURIComponent(signSessionCookie(session, sessionSecret(runtime)))}; ${cookieOptions({ maxAge: DEFAULT_TTL_SECONDS, secure: oidcSecureCookies(runtime) })}`);
+  res.setHeader('set-cookie', `${COOKIE_NAME}=${encodeURIComponent(signSessionCookie({ ...session, authorizationRevision: oidcAuthorizationRevision(runtime) }, sessionSecret(runtime)))}; ${cookieOptions({ maxAge: DEFAULT_TTL_SECONDS, secure: oidcSecureCookies(runtime) })}`);
 }
 
 export async function oidcDiscovery(issuer) {
@@ -149,13 +173,9 @@ export async function completeOidcCallback(req, url, runtime, origin) {
   const verified = await jwtVerify(tokens.id_token, jwks, { issuer: text(oidc.issuer).replace(/\/+$/, ''), audience: oidc.clientId });
   if (verified.payload.nonce !== saved.nonce) throw new Error('oidc_nonce_invalid');
   const email = text(verified.payload.email).toLowerCase();
-  const allowedEmails = (oidc.allowedEmails || []).map((item) => text(item).toLowerCase()).filter(Boolean);
-  const allowedDomains = (oidc.allowedDomains || []).map((item) => text(item).toLowerCase()).filter(Boolean);
-  if (allowedEmails.length && !allowedEmails.includes(email)) throw new Error('oidc_email_not_allowed');
-  const domain = email.includes('@') ? email.split('@').pop() : '';
-  if (allowedDomains.length && !allowedDomains.includes(domain)) throw new Error('oidc_domain_not_allowed');
+  assertOidcEmailAuthorization(verified.payload, oidc);
   const expiresAt = new Date(Math.min((verified.payload.exp || 0) * 1000 || Date.now() + DEFAULT_TTL_SECONDS * 1000, Date.now() + DEFAULT_TTL_SECONDS * 1000)).toISOString();
-  return { subject: text(verified.payload.sub), email, name: text(verified.payload.name || verified.payload.preferred_username || email), expiresAt, returnTo: safeReturnTo(saved.returnTo) };
+  return { subject: text(verified.payload.sub), email, emailVerified: verified.payload.email_verified === true, authorizationRevision: oidcAuthorizationRevision(runtime), name: text(verified.payload.name || verified.payload.preferred_username || email), expiresAt, returnTo: safeReturnTo(saved.returnTo) };
 }
 
 export const OIDC_COOKIE_NAME = COOKIE_NAME;

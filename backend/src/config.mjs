@@ -182,6 +182,7 @@ export async function resolveUiConfig(args = {}) {
     basic: {
       username: text(args.ui_auth_basic_username ?? env('BURROW_UI_AUTH_BASIC_USERNAME') ?? settings.basic?.username) || null,
       passwordHash: text(args.ui_auth_basic_password_hash ?? env('BURROW_UI_AUTH_BASIC_PASSWORD_HASH') ?? settings.basic?.passwordHash) || null,
+      insecureCookies: String(args.ui_auth_basic_insecure_cookies ?? env('BURROW_UI_AUTH_BASIC_INSECURE_COOKIES') ?? settings.basic?.insecureCookies ?? '').toLowerCase() === 'true',
       sessionTtlSeconds: Math.max(60, Number(args.ui_auth_basic_session_ttl_seconds ?? env('BURROW_UI_AUTH_BASIC_SESSION_TTL_SECONDS') ?? settings.basic?.sessionTtlSeconds ?? 12 * 60 * 60) || 12 * 60 * 60),
     },
     oidc: {

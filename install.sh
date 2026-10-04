@@ -220,6 +220,8 @@ runtime_endpoint() {
   host=${host:-127.0.0.1}
   port=${port:-42817}
   [ "$host" = "0.0.0.0" ] && host=127.0.0.1
+  [ "$host" = "::" ] && host=::1
+  case "$host" in *:*) host="[$host]" ;; esac
 }
 
 verify_restarted_runtime() {
@@ -232,25 +234,28 @@ verify_restarted_runtime() {
   verbose_log "waiting for new service invocation after ${previous_invocation:-none}; expected build $expected_version"
   last_unit_state=unknown
   last_health=unreachable
-  for attempt in $(seq 1 15); do
+  # Database migrations can legitimately outlast a short HTTP-start deadline.
+  readiness_seconds=${BURROW_UPDATE_READINESS_SECONDS:-1800}
+  case "$readiness_seconds" in ''|*[!0-9]*|0) echo "BURROW_UPDATE_READINESS_SECONDS must be a positive integer" >&2; exit 1 ;; esac
+  for attempt in $(seq 1 "$readiness_seconds"); do
     last_unit_state=$(user_systemctl is-active burrow.service 2>/dev/null || true)
     current_invocation=$(user_systemctl show burrow.service -p InvocationID --value 2>/dev/null || true)
     if [ "$last_unit_state" = active ] && { [ -z "$previous_invocation" ] || [ "$current_invocation" != "$previous_invocation" ]; }; then
       last_health=$(curl -fsS --max-time 2 "http://$host:$port/api/health" 2>/dev/null || true)
       health_version=$(printf '%s' "$last_health" | node -e 'let body=""; process.stdin.on("data", chunk => { body += chunk; }).on("end", () => { try { process.stdout.write(String(JSON.parse(body).version || "")); } catch {} });')
-      verbose_log "start check $attempt/15: invocation=${current_invocation:-unknown}; health_version=${health_version:-none}"
+      verbose_log "start check $attempt/$readiness_seconds: invocation=${current_invocation:-unknown}; health_version=${health_version:-none}"
       [ "$health_version" = "$expected_version" ] && { verbose_log "service healthy on build $health_version"; return 0; }
     fi
     sleep 1
   done
   if [ "$last_unit_state" != active ]; then
-    echo "Burrow update: burrow.service is $last_unit_state after start; expected a new service invocation within 15 seconds." >&2
+    echo "Burrow update: burrow.service is $last_unit_state after start; expected a new service invocation within $readiness_seconds seconds." >&2
   elif [ -n "$previous_invocation" ] && [ "$current_invocation" = "$previous_invocation" ]; then
     echo "Burrow update: burrow.service remained on invocation $current_invocation after start; expected a new runtime." >&2
   elif [ -n "$health_version" ]; then
-    echo "Burrow update: new service invocation $current_invocation is active but health reported version $health_version, expected $expected_version within 15 seconds." >&2
+    echo "Burrow update: new service invocation $current_invocation is active but health reported version $health_version, expected $expected_version within $readiness_seconds seconds." >&2
   else
-    echo "Burrow update: new service invocation $current_invocation is active but health at http://$host:$port/api/health was unreachable within 15 seconds." >&2
+    echo "Burrow update: new service invocation $current_invocation is active but health at http://$host:$port/api/health was unreachable within $readiness_seconds seconds." >&2
   fi
   user_systemctl status burrow.service --no-pager -n 20 >&2 || true
   exit 1

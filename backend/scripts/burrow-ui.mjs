@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { browserRequestPolicy } from '../src/browser-origin-policy.mjs';
+import { artifactResponseHeaders } from '../src/artifact-response-policy.mjs';
 import { postgresTransactionContext, withPostgresTransaction } from '../src/postgres-foundation.mjs';
 import { readJsonBody } from '../src/request-resource-budgets.mjs';
 import { createAlbdruckRoutes } from './ui/albdruck-routes.mjs';
@@ -685,6 +687,7 @@ function normalizeUiAuthRecord(record = {}) {
       username: String(basic.username || '').trim(),
       passwordHash: String(basic.passwordHash || '').trim(),
       sessionTtlSeconds,
+      insecureCookies: basic.insecureCookies === true,
     },
     oidc: {
       issuer: String(record.oidc?.issuer || '').trim().replace(/\/+$/, ''),
@@ -708,6 +711,7 @@ function safeUiAuthSettings(record = {}) {
       username: normalized.basic.username,
       passwordConfigured: Boolean(normalized.basic.passwordHash),
       sessionTtlSeconds: normalized.basic.sessionTtlSeconds,
+      insecureCookies: normalized.basic.insecureCookies,
     },
     oidc: {
       issuer: normalized.oidc.issuer,
@@ -753,6 +757,7 @@ function planUiAuthSettings(body, existing) {
         username: basicInput.username ?? existing.basic.username,
         passwordHash: basicInput.password !== undefined ? hashBasicPassword(basicInput.password) : existing.basic.passwordHash,
         sessionTtlSeconds: basicInput.sessionTtlSeconds ?? existing.basic.sessionTtlSeconds,
+        insecureCookies: basicInput.insecureCookies ?? existing.basic.insecureCookies,
       },
       oidc: {
         issuer: oidcInput.issuer ?? existing.oidc.issuer,
@@ -1424,7 +1429,7 @@ function verifyBasicSessionCookie(value, auth, nowMs = Date.now()) {
 function setBasicSessionCookie(res, auth) {
   const ttlSeconds = Math.max(60, Number(auth.basic?.sessionTtlSeconds) || 12 * 60 * 60);
   const cookie = signBasicSession({ username: auth.basic.username, passwordHash: auth.basic.passwordHash, ttlSeconds });
-  res.setHeader('set-cookie', `${BASIC_SESSION_COOKIE}=${encodeURIComponent(cookie)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${ttlSeconds}`);
+  res.setHeader('set-cookie', `${BASIC_SESSION_COOKIE}=${encodeURIComponent(cookie)}; HttpOnly;${auth.basic?.insecureCookies === true ? '' : ' Secure;'} SameSite=Lax; Path=/; Max-Age=${ttlSeconds}`);
 }
 
 function verifyScryptPassword(password, encoded) {
@@ -1542,15 +1547,20 @@ function sendJson(res, status, body) {
 }
 
 function applyApiCors(req, res, url) {
-  if (!url.pathname.startsWith('/api/')) return false;
-  res.setHeader('access-control-allow-origin', '*');
-  res.setHeader('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('access-control-allow-headers', 'authorization, content-type');
-  res.setHeader('access-control-max-age', '600');
-  if (req.method !== 'OPTIONS') return false;
-  res.writeHead(204);
-  res.end();
-  return true;
+  if (!url.pathname.startsWith('/api/') && !url.pathname.startsWith('/auth/')) return false;
+  const allowedOrigins = String(process.env.BURROW_UI_ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean);
+  const policy = browserRequestPolicy(req, url, { allowedOrigins });
+  if (policy.error) { sendJson(res, policy.status, { ok: false, error: policy.error }); return true; }
+  if (policy.origin) {
+    res.setHeader('access-control-allow-origin', policy.origin);
+    res.setHeader('vary', 'Origin');
+    res.setHeader('access-control-allow-credentials', 'true');
+    res.setHeader('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('access-control-allow-headers', 'authorization, content-type');
+    res.setHeader('access-control-max-age', '600');
+  }
+  if (policy.status !== 204) return false;
+  res.writeHead(204); res.end(); return true;
 }
 
 
@@ -1564,10 +1574,11 @@ async function importPreview(decoded, conflictPolicy) {
     const existing = await readUiAuthRecord();
     const secret = category.oidcClientSecret;
     const input = secret && secret !== '[redacted]' ? { ...category.auth, oidc: { ...category.auth.oidc, clientSecret: secret } } : category.auth;
-    const plan = planUiAuthSettings(input, existing);
+    const basicReconfigurationRequired = input.mode === 'basic' && input.basic?.password === undefined;
+    const plan = planUiAuthSettings(basicReconfigurationRequired ? { ...input, mode: existing.mode, basic: existing.basic } : input, existing);
     if (!plan.ok) throw Object.assign(new Error(plan.error), { statusCode: plan.status });
     const summary = record => ({ mode: record.mode, enabled: record.mode !== 'none', basicPasswordConfigured: Boolean(record.basic.passwordHash), oidcClientSecretConfigured: Boolean(record.oidc.clientSecretConfigured || record.oidc.clientSecret) });
-    uiAuth = { before: summary(existing), after: summary(plan.next) };
+    uiAuth = { before: summary(existing), after: summary(plan.next), basicCredentialsPortable: false, requiresBasicReconfiguration: basicReconfigurationRequired, warning: basicReconfigurationRequired ? 'Basic credentials are not portable. Existing authentication will be preserved; configure Basic credentials deliberately after import.' : null };
   }
   return { ok: true, format: decoded.payload.manifest.format, encrypted: decoded.encrypted, categories: decoded.categories, supported, unsupported, conflictPolicy, requiresConfirmation: true, redacted: Boolean(decoded.payload.manifest.redacted), uiAuth };
 }
@@ -1699,7 +1710,8 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
     }
   } else if (Array.isArray(categories['mcp-connections'])) for (const connection of categories['mcp-connections']) { if (connection.apiKey === '[redacted]' || (conflictPolicy === 'skip' && conflicts.some(c => c.category === 'mcp-connections' && c.id === connection.id))) continue; const { environmentVariables, ...portableConnection } = connection; await write(`mcp-connections:${connection.id}`, () => mcpStore().save(portableConnection)); imported.push(`mcp-connections:${connection.id}`); }
   if (categories['ui-auth'] && typeof categories['ui-auth'] === 'object') {
-    const auth = categories['ui-auth'].auth;
+    const importedAuth = categories['ui-auth'].auth;
+    const auth = importedAuth?.mode === 'basic' && importedAuth.basic?.password === undefined ? null : importedAuth;
     const secret = categories['ui-auth'].oidcClientSecret;
     if (auth && typeof auth === 'object' && secret !== '[redacted]' && secret) {
       const result = await write('ui-auth:oidc-secret', () => saveUiAuthSettings({ ...auth, oidc: { ...(auth.oidc || {}), clientSecret: secret } }));
@@ -1856,7 +1868,7 @@ async function sendStaticFile(res, filePath, { downloadName = null } = {}) {
     'content-type': MIME_TYPES.get(path.extname(filePath).toLowerCase()) || 'application/octet-stream',
     'content-length': data.byteLength,
     'cache-control': path.basename(filePath) === 'index.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
-    ...(downloadName ? { 'content-disposition': `inline; filename="${String(downloadName).replace(/["\\]/g, '_')}"` } : {}),
+    ...(downloadName ? artifactResponseHeaders({ name: downloadName, mimeType: MIME_TYPES.get(path.extname(filePath).toLowerCase()) || 'application/octet-stream' }) : {}),
   });
   res.end(data);
 }
@@ -3194,7 +3206,7 @@ const server = createServer(async (req, res) => {
     const origin = `${url.protocol}//${url.host}`;
     if (applyApiCors(req, res, url)) return;
     if (await authRoute({ req, res, url, origin })) return;
-    if (req.method === 'GET' && url.pathname === '/health') return sendJson(res, 200, await runtimeStatus(url.searchParams.get('agentId')));
+    if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/api/health')) return sendJson(res, 200, { ok: true, runtime: 'burrow', version: releaseVersion });
     if (!(await authorizeRequest(req, res, url))) return;
     if (await forgeRoute({ req, res, url })) return;
     if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {

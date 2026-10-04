@@ -23,9 +23,9 @@ const parse = (v, fallback = null) => {
     return fallback;
   }
 };
-const expiry = (days = DEFAULT_TTL_DAYS) =>
+const expiry = (days = DEFAULT_TTL_DAYS, stamp = new Date().toISOString()) =>
   new Date(
-    Date.now() + Math.max(1, Number(days) || DEFAULT_TTL_DAYS) * 86400000,
+    new Date(stamp).getTime() + Math.max(1, Number(days) || DEFAULT_TTL_DAYS) * 86400000,
   ).toISOString();
 const warmKey = (v) =>
   createHash("sha256")
@@ -164,6 +164,7 @@ export class PostgresWorkingMemoryStore {
   }
   async record(input = {}) {
     await this.ready();
+    const policy = typeof this.retentionSource === "function" ? { ...DEFAULT_RETENTION, ...await this.retentionSource() } : this.retention;
     const r = validate(input),
       stamp = this.clock();
     return withPostgresTransaction(this.pool, async (c) => {
@@ -188,7 +189,7 @@ export class PostgresWorkingMemoryStore {
           Boolean(old.pinned) !== r.pinned,
         ].some(Boolean);
       const expiresAt = material
-        ? input.expiresAt || expiry(input.ttlDays ?? this.retention.workingMemoryTtlDays)
+        ? input.expiresAt || expiry(input.ttlDays ?? policy.workingMemoryTtlDays, stamp)
         : old.expires_at;
       const written = await c.query(
         `INSERT INTO working_memory(id,agent_id,session_id,conversation_id,project,kind,state,title,content,source_refs,pinned,created_at,updated_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$12,$13) ON CONFLICT(id) DO UPDATE SET session_id=EXCLUDED.session_id,conversation_id=EXCLUDED.conversation_id,project=EXCLUDED.project,kind=EXCLUDED.kind,state=EXCLUDED.state,title=EXCLUDED.title,content=EXCLUDED.content,source_refs=EXCLUDED.source_refs,pinned=EXCLUDED.pinned,updated_at=EXCLUDED.updated_at,expires_at=EXCLUDED.expires_at WHERE working_memory.agent_id=EXCLUDED.agent_id RETURNING id`,
