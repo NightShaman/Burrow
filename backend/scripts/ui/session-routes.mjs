@@ -174,7 +174,7 @@ export function createSessionRoutes({
       if (req.method === 'GET' && action === 'authority' && parts[2] === 'latest') { sendJson(res, 200, { ok: true, ...(await latestAuthorityExplanationForSession({ conversationStore, agentId: resolvedAgentId, rootDir, sessionId })) }); return true; }
       if (req.method === 'GET' && action === 'authority' && !parts[2]) { sendJson(res, 200, { ok: true, ...(await listAuthorityExplanationsForSession({ conversationStore, agentId: resolvedAgentId, rootDir, sessionId, limit: url.searchParams.get('limit') || 20 })) }); return true; }
       if (req.method === 'GET' && action === 'export' && !parts[2]) {
-        const exported = await conversationStore.exportTranscript({ agentId: resolvedAgentId, sessionId });
+        const exported = await (url.searchParams.get('format') === 'raw' ? conversationStore.exportRawEvidence({ agentId: resolvedAgentId, sessionId }) : conversationStore.exportTranscript({ agentId: resolvedAgentId, sessionId }));
         sendJson(res, exported ? 200 : 404, exported ? { ok: true, ...exported } : { ok: false, error: 'not_found' });
         return true;
       }

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { apiForTarget } from '../../app/api';
-import { targetForResource, type ApiTarget } from '../../app/apiTargets';
+import { api } from '../../app/api';
 import type { SavedProvider } from '../../app/types';
 import { useConfirm } from '../../app/ConfirmDialog';
 import { Field, SettingSection } from './SettingsPrimitives';
@@ -23,9 +22,9 @@ function unavailableModelLabel(model: JobModel) {
   return model.modelConnectionId && model.model ? `Unavailable override · ${model.modelConnectionId} · ${model.model}` : '';
 }
 
-export function AgentSchedules({ agentId, targets, savedProviders, overflowTarget }: { agentId: string; targets: ApiTarget[]; savedProviders: SavedProvider[]; overflowTarget?: HTMLElement | null }) {
-  const owner = targetForResource(targets, agentId);
-  const request = <T,>(path: string, init?: RequestInit) => apiForTarget<T>(owner.target, path, init);
+export function AgentSchedules({ agentId, savedProviders, overflowTarget }: { agentId: string; savedProviders: SavedProvider[]; overflowTarget?: HTMLElement | null }) {
+  const resourceId = agentId.includes('::') ? agentId.slice(agentId.indexOf('::') + 2) : agentId;
+  const request = <T,>(path: string, init?: RequestInit) => api<T>(path, init);
   const confirm = useConfirm();
   const modelOptions: ModelOption[] = savedProviders.flatMap((provider) => provider.models.map((model) => ({ value: modelValue(provider.id, model), label: `${provider.provider} · ${provider.modelLabels?.[model] ?? model}` })));
   const [jobs, setJobs] = useState<ScheduledJob[]>([]);
@@ -40,7 +39,7 @@ export function AgentSchedules({ agentId, targets, savedProviders, overflowTarge
   const nameInput = useRef<HTMLInputElement>(null);
   const load = async (signal?: AbortSignal, version = requestVersion.current) => {
     try {
-      const result = await request<{ jobs: ScheduledJob[] }>(`/api/scheduled-jobs?agentId=${encodeURIComponent(owner.resourceId)}`, { signal });
+      const result = await request<{ jobs: ScheduledJob[] }>(`/api/scheduled-jobs?agentId=${encodeURIComponent(resourceId)}`, { signal });
       if (!signal?.aborted && version === requestVersion.current) setJobs(result.jobs ?? []);
     } catch (cause) {
       if (!signal?.aborted && version === requestVersion.current) setError(cause instanceof Error ? `Could not load schedules: ${cause.message}` : 'Could not load schedules.');
@@ -56,7 +55,7 @@ export function AgentSchedules({ agentId, targets, savedProviders, overflowTarge
     }).catch(() => { if (!controller.signal.aborted) setError('Could not load default timezone; enter a timezone explicitly.'); });
     void load(controller.signal, version);
     return () => controller.abort();
-  }, [owner.target.id, owner.resourceId]);
+  }, [agentId]);
   const reset = () => { setEditingId(null); setViewingManagedId(null); setName(''); setPrompt(''); setCron('0 9 * * *'); setTimezone(null); setEnabled(true); setJobModel({ modelConnectionId: null, model: null }); setError(''); };
   const edit = (job: ScheduledJob) => { setViewingManagedId(null); setEditingId(job.id); setName(job.name); setPrompt(job.prompt); setCron(job.cron); setTimezone(job.timezone); setEnabled(job.enabled); setJobModel({ modelConnectionId: job.modelConnectionId ?? null, model: job.model ?? null }); setError(''); nameInput.current?.focus(); };
   const viewManaged = (job: ScheduledJob) => { setEditingId(null); setViewingManagedId(job.id); setError(''); };
@@ -65,7 +64,7 @@ export function AgentSchedules({ agentId, targets, savedProviders, overflowTarge
     if (!name.trim() || !prompt.trim() || !cron.trim() || (timezone !== null && !timezone.trim())) { setError('Name, prompt, cron, and timezone are required.'); return; }
     setState('saving'); setError('');
     try {
-      await request(editingId ? `/api/scheduled-jobs/${encodeURIComponent(editingId)}` : '/api/scheduled-jobs', { method: editingId ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...(editingId ? {} : { agentId: owner.resourceId }), name: name.trim(), prompt: prompt.trim(), cron: cron.trim(), timezone: timezone === null ? null : timezone.trim(), enabled, modelConnectionId: jobModel.modelConnectionId ?? null, model: jobModel.model ?? null }) });
+      await request(editingId ? `/api/scheduled-jobs/${encodeURIComponent(editingId)}` : '/api/scheduled-jobs', { method: editingId ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...(editingId ? {} : { agentId: resourceId }), name: name.trim(), prompt: prompt.trim(), cron: cron.trim(), timezone: timezone === null ? null : timezone.trim(), enabled, modelConnectionId: jobModel.modelConnectionId ?? null, model: jobModel.model ?? null }) });
       await load(); reset();
     } catch (cause) { setError(cause instanceof Error ? `Could not save schedule: ${cause.message}` : 'Could not save schedule.'); setState('idle'); }
   };

@@ -2,8 +2,7 @@ import { rovingKeys } from '../../app/keyboardWidgets';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { SavedProvider } from '../../app/types';
-import { apiForTarget } from '../../app/api';
-import { targetForResource, type ApiTarget } from '../../app/apiTargets';
+import { api } from '../../app/api';
 import { Field, SettingSection } from './SettingsPrimitives';
 
 type DreamModel = { modelConnectionId?: string | null; model?: string | null };
@@ -64,9 +63,9 @@ function DreamModelSelect({ value, model, options, onChange, disabled }: { value
   </div>;
 }
 
-export function AgentDreams({ agentId, targets, savedProviders, overflowTarget }: { agentId: string; targets: ApiTarget[]; savedProviders: SavedProvider[]; overflowTarget?: HTMLElement | null }) {
-  const owner = targetForResource(targets, agentId);
-  const request = <T,>(path: string, init?: RequestInit) => apiForTarget<T>(owner.target, path, init);
+export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agentId: string; savedProviders: SavedProvider[]; overflowTarget?: HTMLElement | null }) {
+  const resourceId = agentId.includes('::') ? agentId.slice(agentId.indexOf('::') + 2) : agentId;
+  const request = <T,>(path: string, init?: RequestInit) => api<T>(path, init);
   const dreamModels = savedProviders.flatMap((provider) => provider.models.map((model) => ({ connectionId: provider.id, model, label: `${provider.provider} · ${provider.modelLabels?.[model] ?? model}` })));
   const [settings, setSettings] = useState<DreamSettings>({ enabled: false, cron: '0 4 * * *', timezone: null, prompt: '', modelConnectionId: null, model: null });
   const selectedDreamModel = settingsModelValue(settings);
@@ -84,8 +83,8 @@ export function AgentDreams({ agentId, targets, savedProviders, overflowTarget }
     const controller = new AbortController();
     setState('loading'); setError(''); setSettings({ enabled: false, cron: '0 4 * * *', timezone: null, prompt: '', modelConnectionId: null, model: null }); setEffectiveModel(null); setModelResolutionError(null); setReceiptError(''); setReceipts([]);
     Promise.all([
-      request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(owner.resourceId)}/dream-settings`, { signal: controller.signal }),
-      request<DreamCycleResponse>(`/api/agents/${encodeURIComponent(owner.resourceId)}/dream-cycle?limit=5`, { signal: controller.signal }).catch((cause) => {
+      request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-settings`, { signal: controller.signal }),
+      request<DreamCycleResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-cycle?limit=5`, { signal: controller.signal }).catch((cause) => {
         if (!controller.signal.aborted && version === requestVersion.current) setReceiptError(cause instanceof Error ? `Could not load recent dream activity: ${cause.message}` : 'Could not load recent dream activity.');
         return { receipts: [] };
       }),
@@ -102,13 +101,13 @@ export function AgentDreams({ agentId, targets, savedProviders, overflowTarget }
       setState('error');
     });
     return () => controller.abort();
-  }, [owner.target.id, owner.target.baseUrl, owner.resourceId, retry]);
+  }, [agentId, retry]);
   const save = async () => {
     if (state !== 'idle') return;
     const version = requestVersion.current;
     setState('saving'); setError('');
     try {
-      const result = await request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(owner.resourceId)}/dream-settings`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: settings.enabled, cron: settings.cron, timezone: settings.timezone, prompt: settings.prompt, modelConnectionId: settings.modelConnectionId ?? null, model: settings.model ?? null }) });
+      const result = await request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-settings`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: settings.enabled, cron: settings.cron, timezone: settings.timezone, prompt: settings.prompt, modelConnectionId: settings.modelConnectionId ?? null, model: settings.model ?? null }) });
       if (version !== requestVersion.current) return;
       setSettings(result.settings);
       setEffectiveModel(result.effectiveModel ?? null);

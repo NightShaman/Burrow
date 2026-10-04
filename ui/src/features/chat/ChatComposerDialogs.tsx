@@ -21,7 +21,6 @@ type GroupComposer = {
   close: () => void;
   toggleAgent: (agentId: string) => void;
   create: () => Promise<void>;
-  targetId: string;
   rooms: Array<{ id: string; name: string; participantAgentIds: string[] }>;
   roomsLoading: boolean;
   roomsError: string;
@@ -41,7 +40,7 @@ export function ChatComposerDialogs({ agents, session, group }: { agents: Agent[
           <h3>Create a room</h3>
           <label htmlFor="new-group-name">Group name</label>
           <input id="new-group-name" autoFocus value={group.name} onChange={(event) => group.setName(event.target.value)} placeholder="Design review" maxLength={80} disabled={group.isCreating} />
-          <fieldset className="group-participants"><legend>Participants</legend><div className="group-participant-grid">{agents.filter((agent) => (agent.targetId ?? 'local') === group.targetId).map((agent) => <label className="group-participant" key={agent.id}><input type="checkbox" checked={group.agentIds.includes(agent.id)} onChange={() => group.toggleAgent(agent.id)} disabled={group.isCreating} /><span>{agent.name}</span></label>)}</div></fieldset>
+          <fieldset className="group-participants"><legend>Participants</legend><div className="group-participant-grid">{agents.map((agent) => <label className="group-participant" key={agent.id}><input type="checkbox" checked={group.agentIds.includes(agent.id)} onChange={() => group.toggleAgent(agent.id)} disabled={group.isCreating} /><span>{agent.name}</span></label>)}</div></fieldset>
           {group.error && <p className="session-dialog-error" role="alert">{group.error}</p>}
           <footer><button className="secondary" type="button" onClick={group.close} disabled={group.isCreating}>Cancel</button><button className="primary" type="submit" disabled={group.isCreating}>{group.isCreating ? 'Creating…' : 'Create group chat'}</button></footer>
         </form>

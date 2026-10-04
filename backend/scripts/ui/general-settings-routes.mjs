@@ -1,3 +1,4 @@
+import { normalizeRetentionPolicy } from '../../src/retention-settings.mjs';
 export function createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings, tiddleCards, tiddleHistory, uiAuthSettings, saveUiAuthSettings, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup } = {}) {
   const resultResponse = (res, result, success = 200) => {
     sendJson(res, result.ok === false ? (result.status || 500) : success, result);
@@ -36,8 +37,17 @@ export function createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdenti
       if (req.method === 'GET') { sendJson(res, 200, await retentionPolicySettings()); return true; }
       if (req.method === 'PUT') return resultResponse(res, await saveRetentionPolicySettings(await readJsonBody(req)));
     }
-    if (req.method === 'POST' && url.pathname === '/api/settings/retention/preview') { sendJson(res, 200, await retentionCleanup({ confirm: false, requireEnabled: false, policy: (await readJsonBody(req)).policy })); return true; }
-    if (req.method === 'POST' && url.pathname === '/api/settings/retention/run') return resultResponse(res, await retentionCleanup({ confirm: true }));
+    if (req.method === 'POST' && ['/api/settings/retention/preview', '/api/settings/retention/run'].includes(url.pathname)) {
+      const body = await readJsonBody(req);
+      const saved = await retentionPolicySettings();
+      let policy;
+      try { policy = normalizeRetentionPolicy(body.policy, saved.policy); }
+      catch (error) { return resultResponse(res, { ok: false, status: 400, error: error.message }); }
+      if (!body.policy || JSON.stringify(policy) !== JSON.stringify(normalizeRetentionPolicy(saved.policy))) {
+        return resultResponse(res, { ok: false, status: 409, error: 'retention_policy_changed', policy: saved.policy });
+      }
+      return resultResponse(res, await retentionCleanup({ confirm: url.pathname.endsWith('/run'), requireEnabled: false, policy }));
+    }
     // Compatibility aliases for existing callers. New clients use /api/settings/retention/*.
     if (req.method === 'GET' && url.pathname === '/api/retention') { sendJson(res, 200, await retentionPolicySettings()); return true; }
     if (req.method === 'POST' && url.pathname === '/api/retention/cleanup') return resultResponse(res, await retentionCleanup(await readJsonBody(req)));

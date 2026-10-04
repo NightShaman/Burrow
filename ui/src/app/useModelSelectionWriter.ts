@@ -1,16 +1,15 @@
 import { useRef } from 'react';
-import { apiForTarget } from './api';
-import { targetForResource, type ApiTarget } from './apiTargets';
+import { api } from './api';
 import type { Agent, SavedProvider } from './types';
 
 type Entry = { next: Agent; version: number; running: boolean };
 /** Serialize full-selection writes per captured owner; merge rapid partial intents
  * before acknowledgements, and never render an acknowledgement for older intent. */
-export function useModelSelectionWriter(targets: ApiTarget[], providers: SavedProvider[], commit: (id: string, patch: Partial<Agent>) => void, report: (message: string) => void) {
+export function useModelSelectionWriter(providers: SavedProvider[], commit: (id: string, patch: Partial<Agent>) => void, report: (message: string) => void) {
   const entries = useRef(new Map<string, Entry>());
   return async (selected: Agent, patch: Partial<Agent>) => {
-    const owner = targetForResource(targets, selected.id);
-    const key = JSON.stringify([owner.target.id, owner.target.baseUrl, owner.resourceId]);
+    const resourceId = selected.resourceId ?? selected.id;
+    const key = JSON.stringify(['local', resourceId]);
     let entry = entries.current.get(key);
     const next = { ...(entry?.running ? entry.next : selected), ...patch };
     if (!providers.some(item => item.provider === next.provider && item.models.includes(next.model))) return;
@@ -24,7 +23,7 @@ export function useModelSelectionWriter(targets: ApiTarget[], providers: SavedPr
         const connection = providers.find(item => item.provider === intent.provider && item.models.includes(intent.model));
         if (!connection) return;
         try {
-          const { selection } = await apiForTarget<{ selection: { model: string; reasoningEffort: string; temperature?: number } }>(owner.target, `/api/agents/${encodeURIComponent(owner.resourceId)}/model-selection`, {
+          const { selection } = await api<{ selection: { model: string; reasoningEffort: string; temperature?: number } }>(`/api/agents/${encodeURIComponent(resourceId)}/model-selection`, {
             method: 'PUT', headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ connectionId: connection.id, model: intent.model, reasoningEffort: intent.effort, temperature: intent.temperature }),
           });

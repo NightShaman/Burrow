@@ -543,6 +543,12 @@ export class PostgresWorkingMemoryStore {
       return card;
     });
   }
+  async pruneExpiredWorkingMemory() {
+    await this.ready();
+    // Expiration is physical, not merely a read filter. Pins remain protected.
+    const result = await this.pool.query('DELETE FROM working_memory WHERE expires_at <= $1 AND pinned=false', [this.clock()]);
+    return result.rowCount;
+  }
   async pruneRollingContinuityCards(client = this.pool) {
     const policy = typeof this.retentionSource === 'function' ? await this.retentionSource() : this.retention;
     const {rows} = await client.query('SELECT DISTINCT agent_id FROM rolling_continuity_cards');

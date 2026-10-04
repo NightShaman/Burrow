@@ -66,6 +66,14 @@ export const DEFAULT_CONTEXT_COMPRESSION_CONFIG = Object.freeze({
 });
 
 export function normalizeContextCompressionConfig(config = {}) {
+  for (const key of ['summaryModel', 'maxSweepIterations', 'sweepDeadlineMs']) {
+    const value = config[key];
+    if (value === undefined || value === null || value === '') continue;
+    const normalized = key === 'summaryModel' ? (String(value).trim() || null) : Number(value);
+    if (normalized !== DEFAULT_CONTEXT_COMPRESSION_CONFIG[key]) {
+      throw new Error(`unsupported_context_compression_setting:${key}`);
+    }
+  }
   return {
     contextThreshold: normalizeThreshold(config.contextThreshold, DEFAULT_CONTEXT_COMPRESSION_CONFIG.contextThreshold),
     freshTailCount: normalizePositiveInteger(config.freshTailCount, DEFAULT_CONTEXT_COMPRESSION_CONFIG.freshTailCount),

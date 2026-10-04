@@ -1,13 +1,13 @@
 import { act, renderHook } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { useRuntimeDashboard } from '../../app/useRuntimeDashboard';
-import { apiForTarget, api } from '../../app/api';
+import { api } from '../../app/api';
 import { useModelConnectionEditor } from './useModelConnectionEditor';
-vi.mock('../../app/api', async (original) => ({ ...await original<typeof import('../../app/api')>(), apiForTarget: vi.fn(), api: vi.fn() }));
+vi.mock('../../app/api', async (original) => ({ ...await original<typeof import('../../app/api')>(), api: vi.fn() }));
 vi.mock('../../app/ConfirmDialog', () => ({ useConfirm: () => vi.fn() }));
 it('FE009 preserves full unchecked and manual records through dashboard edit and save', async () => {
  const models = [{id:'off',selected:false,discoveredContextWindow:100,contextWindow:100}, {id:'manual',selected:true,manual:true,contextWindow:42,contextWindowOverride:42,acceptedInputOverride:[],acceptedOutputOverride:[]}];
- vi.mocked(apiForTarget).mockImplementation(async (_target, path) => path === '/api/settings/model-connections' ? {connections:[{id:'p',provider:'P',apiType:'openai-responses',baseUrl:'https://example.test',models}]} : {} as any);
+ vi.mocked(api).mockImplementation(async (path) => path === '/api/settings/model-connections' ? {connections:[{id:'p',provider:'P',apiType:'openai-responses',baseUrl:'https://example.test',models}]} : {} as any);
  const runtimeProviders = {current:[]};
  const setAgents = vi.fn(); const reportError = vi.fn();
  const dashboard = renderHook(() => useRuntimeDashboard({setAgents,runtimeProviders,reportError}));
@@ -26,7 +26,7 @@ it('FE009 preserves full unchecked and manual records through dashboard edit and
 it('FE010 API key authentication is not OAuth', async () => {
  const { isOpenAiOAuthConnection } = await import('../../app/useRuntimeDashboard');
  const setAgents = vi.fn(), reportError = vi.fn(), runtimeProviders = {current:[]};
- vi.mocked(apiForTarget).mockImplementation(async (_target,path) => path === '/api/settings/model-connections' ? {connections:[{id:'key',provider:'OpenAI',apiType:'openai-responses',baseUrl:'https://example.test',authConfigured:true,auth:{type:'api_key'},models:[{id:'m'}]}]} : {} as any);
+ vi.mocked(api).mockImplementation(async (path) => path === '/api/settings/model-connections' ? {connections:[{id:'key',provider:'OpenAI',apiType:'openai-responses',baseUrl:'https://example.test',authConfigured:true,auth:{type:'api_key'},models:[{id:'m'}]}]} : {} as any);
  const hook = renderHook(() => useRuntimeDashboard({setAgents,reportError,runtimeProviders}));
  await act(async () => {await hook.result.current.refreshModelConnections();});
  expect(isOpenAiOAuthConnection(hook.result.current.savedProviders[0])).toBe(false);

@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { usePersistedAgentSelection, usePersistedLayout, usePersistedTargetSelection, usePersistedTheme } from './usePersistedLayout';
+import { usePersistedAgentSelection, usePersistedLayout, usePersistedTheme } from './usePersistedLayout';
 
 beforeEach(() => localStorage.clear());
 
@@ -17,14 +17,9 @@ describe('persisted layout state', () => {
     expect(JSON.parse(localStorage.getItem('hc.selectedAgentId') ?? '{}')).toEqual({ version: 1, value: 'node-1::smatchet' });
   });
 
-  it('rejects invalid themes and outdated target selections', () => {
+  it('rejects invalid themes', () => {
     localStorage.setItem('hc.theme', JSON.stringify({ version: 1, value: 'ultraviolet-chaos' }));
-    localStorage.setItem('hc.selectedTargetId', JSON.stringify({ version: 0, value: 'node-1' }));
-    const theme = renderHook(() => usePersistedTheme());
-    const target = renderHook(() => usePersistedTargetSelection());
-
-    expect(theme.result.current[0]).toBe('smatchet');
-    expect(target.result.current[0]).toBe('local');
+    expect(renderHook(() => usePersistedTheme()).result.current[0]).toBe('smatchet');
   });
 
   it('validates legacy layout bounds and panel IDs', () => {
@@ -54,11 +49,6 @@ describe('persisted layout state', () => {
     expect(result.current.leftBottomPanel).toBe('workspace');
   });
 
-  it('persists state updates in versioned payloads', async () => {
-    const { result } = renderHook(() => usePersistedTargetSelection());
-    act(() => result.current[1]('node-1'));
-    await waitFor(() => expect(JSON.parse(localStorage.getItem('hc.selectedTargetId') ?? '{}')).toEqual({ version: 1, value: 'node-1' }));
-  });
 });
 
 it('keeps single selection separate from remembered divided selections and split across reload', () => {

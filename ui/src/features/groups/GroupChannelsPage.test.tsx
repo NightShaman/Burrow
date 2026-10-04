@@ -1,19 +1,18 @@
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { apiForTarget } from '../../app/api';
-import { localApiTarget } from '../../app/apiTargets';
+import { api } from '../../app/api';
 import { GroupChannelsPage } from './GroupChannelsPage';
 
 vi.mock('../../app/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../app/api')>()),
-  apiForTarget: vi.fn(),
+  api: vi.fn(),
 }));
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 it('shows the persisted session-store time for historical group turns, not Now', async () => {
   const ts = '2026-09-22T14:23:00.000Z';
-  vi.mocked(apiForTarget).mockImplementation(async (_target, path) => {
+  vi.mocked(api).mockImplementation(async (path) => {
     if (path === '/api/settings/identities') return {};
     return {
       ok: true,
@@ -27,7 +26,7 @@ it('shows the persisted session-store time for historical group turns, not Now',
     };
   });
 
-  render(<GroupChannelsPage channelId="room-1" target={localApiTarget} agents={[]} />);
+  render(<GroupChannelsPage channelId="room-1" agents={[]} />);
   await waitFor(() => expect(screen.getByText('Last night')).toBeTruthy());
 
   const expectedTime = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(ts)).toUpperCase();
@@ -45,14 +44,14 @@ it('FE017 external idle refresh wins over an older overlapping response', async 
   let finishOld!: (value: unknown) => void;
   let reads = 0;
   const payload = (content: string) => ({ channel: { id: 'room-1', name: 'Group room', participantAgentIds: [] }, turns: [{ type: 'message', role: 'user', content }], runs: [] });
-  vi.mocked(apiForTarget).mockImplementation(async (_target, path) => {
+  vi.mocked(api).mockImplementation(async (path) => {
     if (path === '/api/settings/identities') return {};
     reads++;
     if (reads === 2) return new Promise(resolve => { finishOld = resolve; });
     return payload(reads === 1 ? 'Initial idle' : 'External new message');
   });
   try {
-    render(<GroupChannelsPage channelId="room-1" target={localApiTarget} agents={[]} />);
+    render(<GroupChannelsPage channelId="room-1" agents={[]} />);
     await screen.findByText('Initial idle');
     await act(async () => { tick(); });
     await act(async () => { tick(); });

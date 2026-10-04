@@ -52,9 +52,6 @@ export function usePersistedTheme() {
 export function usePersistedAgentSelection() {
   return useStoredState('hc.selectedAgentId', '', isString, (raw) => raw);
 }
-export function usePersistedTargetSelection() {
-  return useStoredState('hc.selectedTargetId', 'local', isString, (raw) => raw);
-}
 
 export function usePersistedLayout() {
   migrateRightPanelDefaults();

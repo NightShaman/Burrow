@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiForTarget, type AnthropicUsage, type ModelConnection, type OpenAiUsage } from './api';
-import type { ApiTarget } from './apiTargets';
+import { api, type AnthropicUsage, type ModelConnection, type OpenAiUsage } from './api';
 import { readAccountOrder, writeAccountOrder } from './accountOrderStorage';
 import type { Account, AccountMeter, Agent, SavedProvider } from './types';
 import { mergeVisibleOrder } from './useAgentRailPreferences';
@@ -27,7 +26,6 @@ type RuntimeDashboardOptions = {
   setAgents: React.Dispatch<React.SetStateAction<Agent[]>>;
   runtimeProviders: React.MutableRefObject<SavedProvider[]>;
   reportError: (message: string) => void;
-  target?: ApiTarget;
 };
 
 export const codexAccountOrderKey = 'hc.codexLbAccountOrder';
@@ -106,7 +104,7 @@ const asSavedProvider = (connection: ModelConnection): SavedProvider => ({
   modelOutputOverrides: Object.fromEntries(connection.models.flatMap((model) => model.acceptedOutputOverride ? [[model.id, model.acceptedOutputOverride]] : [])),
 });
 
-export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProviders, reportError, target }: RuntimeDashboardOptions) {
+export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProviders, reportError }: RuntimeDashboardOptions) {
   const [savedProviders, setSavedProviders] = useState<SavedProvider[]>([]);
   const [modelConnectionsLoaded, setModelConnectionsLoaded] = useState(false);
   const [providerConnectionStatus, setProviderConnectionStatus] = useState<ProviderConnectionStatus>('checking');
@@ -115,9 +113,7 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [operatorProfile, setOperatorProfile] = useState<OperatorProfile>({ name: 'Operator', avatar: 'OP' });
   const codexAccountOrder = useRef(readAccountOrder(codexAccountOrderKey));
-  const scopeKey = JSON.stringify([target?.id ?? 'local', target?.baseUrl ?? '']);
-  const scope = useRef({ key: scopeKey, generation: 0 });
-  if (scope.current.key !== scopeKey) scope.current = { key: scopeKey, generation: scope.current.generation + 1 };
+  const scope = useRef({ generation: 0 });
   const generation = scope.current.generation;
 
   const reorderAccounts = useCallback((draggedId: string, targetId: string) => {
@@ -134,7 +130,7 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
 
   const refreshModelConnections = useCallback(async () => {
     if (scope.current.generation !== generation) return;
-    const { connections } = await apiForTarget<{ connections: ModelConnection[] }>(target, '/api/settings/model-connections');
+    const { connections } = await api<{ connections: ModelConnection[] }>( '/api/settings/model-connections');
     if (scope.current.generation !== generation) return;
     const providers = connections.map(asSavedProvider).filter((provider) => provider.models.length);
     runtimeProviders.current = providers;
@@ -147,21 +143,21 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
       const efforts = ['off', ...(provider.modelEfforts?.[model] ?? []).filter((item) => item !== 'off')];
       return { ...agent, provider: provider.provider, model, effort: efforts.includes(agent.effort) ? agent.effort : provider.defaultEfforts?.[model] ?? 'off' };
     }));
-  }, [setAgents, target, generation]);
+  }, [setAgents, generation]);
 
   useEffect(() => {
     let cancelled = false;
     setOperatorProfile({ name: 'Operator', avatar: 'OP' });
-    apiForTarget<{ operator: OperatorProfile }>(target, '/api/settings/identities')
+    api<{ operator: OperatorProfile }>( '/api/settings/identities')
       .then(({ operator }) => { if (!cancelled && scope.current.generation === generation) setOperatorProfile(operator); })
       .catch((error: Error) => { if (!cancelled && scope.current.generation === generation) reportError(`Could not load operator profile: ${error.message}`); });
     return () => { cancelled = true; };
-  }, [reportError, target, generation]);
-  useEffect(() => { let cancelled = false; setModelConnectionsLoaded(false); setSavedProviders([]); runtimeProviders.current = []; refreshModelConnections().catch((error: Error) => !cancelled && reportError(`Could not load model connections: ${error.message}`)); return () => { cancelled = true; }; }, [refreshModelConnections, reportError, target]);
+  }, [reportError, generation]);
+  useEffect(() => { let cancelled = false; setModelConnectionsLoaded(false); setSavedProviders([]); runtimeProviders.current = []; refreshModelConnections().catch((error: Error) => !cancelled && reportError(`Could not load model connections: ${error.message}`)); return () => { cancelled = true; }; }, [refreshModelConnections, reportError]);
 
-  usePolling(async (isCancelled) => {
+  usePolling(async (isCancelled, signal) => {
     try {
-      const { accounts: nextAccounts } = await apiForTarget<{ accounts: CodexLbAccount[] }>(target, '/api/codex-lb/accounts');
+      const { accounts: nextAccounts } = await api<{ accounts: CodexLbAccount[] }>( '/api/codex-lb/accounts', { signal });
       if (isCancelled()) return;
       setAccounts(() => {
         const next = (nextAccounts ?? []).map(asCodexAccount);
@@ -170,10 +166,10 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
         return next.sort((a, b) => codexAccountOrder.current.indexOf(a.id) - codexAccountOrder.current.indexOf(b.id));
       });
     } catch { if (!isCancelled()) setAccounts([]); }
-  }, 15_000, true, target?.id ?? 'local');
+  }, 15_000, true, 'local');
 
   const selectedConnection = savedProviders.find((provider) => provider.provider === selectedProvider) ?? savedProviders[0];
-  usePolling(async (isCancelled) => {
+  usePolling(async (isCancelled, signal) => {
     const provider = selectedConnection; const isAnthropicMessages = provider?.apiType === 'anthropic-messages';
     // OpenAI OAuth connections can have operator-defined display names. Auth
     // metadata, not the label, identifies the usage endpoint they support.
@@ -181,17 +177,17 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
     if (!isAnthropicMessages && !isOpenAiOAuth) { setAnthropicUsage(null); setOpenAiUsage(null); return; }
     setAnthropicUsage(null); setOpenAiUsage(null);
     try {
-      if (isAnthropicMessages) { const result = await apiForTarget<{ usage?: AnthropicUsage }>(target, `/api/anthropic/oauth/usage?connectionId=${encodeURIComponent(provider.id)}`); if (!isCancelled()) setAnthropicUsage(result.usage ?? null); }
-      else { const result = await apiForTarget<{ usage?: OpenAiUsage }>(target, `/api/openai/oauth/usage?connectionId=${encodeURIComponent(provider.id)}`); if (!isCancelled()) setOpenAiUsage(result.usage ?? null); }
+      if (isAnthropicMessages) { const result = await api<{ usage?: AnthropicUsage }>( `/api/anthropic/oauth/usage?connectionId=${encodeURIComponent(provider.id)}`, { signal }); if (!isCancelled()) setAnthropicUsage(result.usage ?? null); }
+      else { const result = await api<{ usage?: OpenAiUsage }>( `/api/openai/oauth/usage?connectionId=${encodeURIComponent(provider.id)}`, { signal }); if (!isCancelled()) setOpenAiUsage(result.usage ?? null); }
     } catch { if (!isCancelled()) { setAnthropicUsage(null); setOpenAiUsage(null); } }
-  }, 300_000, true, `${target?.id ?? 'local'}:${selectedConnection?.id ?? ''}`);
+  }, 300_000, true, `${'local'}:${selectedConnection?.id ?? ''}`);
 
-  usePolling(async (isCancelled) => {
+  usePolling(async (isCancelled, signal) => {
     const provider = selectedConnection;
     if (!provider?.apiKeyConfigured) { if (!isCancelled()) setProviderConnectionStatus('disconnected'); return; }
-    try { await apiForTarget(target, '/api/settings/model-connections/discover', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: provider.id, apiType: provider.apiType, baseUrl: provider.url }) }); if (!isCancelled()) setProviderConnectionStatus('connected'); }
+    try { await api( '/api/settings/model-connections/discover', { signal, method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: provider.id, apiType: provider.apiType, baseUrl: provider.url }) }); if (!isCancelled()) setProviderConnectionStatus('connected'); }
     catch { if (!isCancelled()) setProviderConnectionStatus('disconnected'); }
-  }, 30_000, modelConnectionsLoaded, `${target?.id ?? 'local'}:${selectedConnection?.id ?? ''}`);
+  }, 30_000, modelConnectionsLoaded, `${'local'}:${selectedConnection?.id ?? ''}`);
 
   return { accounts, anthropicUsage, modelConnectionsLoaded, openAiUsage, operatorProfile, providerConnectionStatus, refreshModelConnections, reorderAccounts, runtimeProviders, savedProviders, setOperatorProfile };
 }

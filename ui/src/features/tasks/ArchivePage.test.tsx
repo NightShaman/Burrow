@@ -107,13 +107,13 @@ describe('Paginated chat history', () => {
   });
 });
 
-it('resolves qualified Archive filters on the captured remote owner', async () => {
+it('passes selected agent filter through the local archive repository', async () => {
   const sessions = vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([]));
   vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([]));
   vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([]));
   vi.spyOn(archiveRepository, 'listCalendarAvailability').mockImplementation(async (kind, month) => ({ ok: true, kind, month, dates: [] }));
-  const agent = { id: 'a::same', resourceId: 'same', targetId: 'a', name: 'Remote' } as any;
-  render(<Archive agents={[agent]} target={{ id: 'a', name: 'A', baseUrl: 'https://a.invalid', enabled: true }} repository={archiveRepository} />);
+  const agent = { id: 'same', name: 'Local' } as any;
+  render(<Archive agents={[agent]} repository={archiveRepository} />);
   fireEvent.change(screen.getByLabelText('Filter by agent'), { target: { value: agent.id } });
   await waitFor(() => expect(sessions).toHaveBeenLastCalledWith('', expect.anything(), null, undefined, 'same'));
 });
@@ -155,9 +155,7 @@ it('FE-023 displays cold loading, failure, retry and successful empty states', a
 
 it('FE-023 keeps scoped cache visibly stale on failed revalidation and retries', async () => {
   const { archiveQueryCacheKey, writeArchiveSessionCache } = await import('./archiveCache');
-  const { targetOwnerKey } = await import('../../app/useOwnedApi');
-  const { localApiTarget } = await import('../../app/apiTargets');
-  writeArchiveSessionCache(archiveQueryCacheKey({ target: targetOwnerKey(localApiTarget), agent: '', query: '', date: '', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, kind: 'chat' }), []);
+  writeArchiveSessionCache(archiveQueryCacheKey({ target: 'local', agent: '', query: '', date: '', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, kind: 'chat' }), []);
   vi.spyOn(archiveRepository, 'listSessions').mockRejectedValueOnce(new Error('Revalidation offline')).mockResolvedValue(collectionPage([]));
   vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([]));
   vi.spyOn(archiveRepository, 'listCalendarAvailability').mockResolvedValue({ ok: true, kind: 'sessions', month: '2026-09', dates: [] });

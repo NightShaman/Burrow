@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { apiForTarget } from '../../app/api';
-import type { ApiTarget } from '../../app/apiTargets';
+import { api } from '../../app/api';
+import { clearConversationCache } from '../chat/chatConversationCache';
+import { clearArchiveCaches } from '../tasks/archiveCache';
 
 type Conversation = { agentId: string; sessionId: string };
 type PurgeResult = Conversation & { deleted: boolean; removed: { evidence: number; knowledge: number; revisions: number; working_memory: number; continuity_handoffs: number; conversation_project_bindings: number; dream_diary_entries: number; working_memory_meta: number } };
 
-export function ConversationPurge({ conversation, target, onClose, onPurged }: { conversation: Conversation; target?: ApiTarget; onClose: () => void; onPurged: () => void }) {
+export function ConversationPurge({ conversation, onClose, onPurged }: { conversation: Conversation; onClose: () => void; onPurged: () => void }) {
   const [reason, setReason] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [busy, setBusy] = useState(false);
@@ -15,8 +16,8 @@ export function ConversationPurge({ conversation, target, onClose, onPurged }: {
     if (busy || result || !reason.trim() || confirmation !== conversation.sessionId) return;
     setBusy(true); setError('');
     try {
-      const response = await apiForTarget<PurgeResult>(target, '/api/albdruck/purge-conversation', { method: 'POST', body: JSON.stringify({ ...conversation, reason: reason.trim() }) });
-      setResult(response); onPurged();
+      const response = await api<PurgeResult>('/api/albdruck/purge-conversation', { method: 'POST', body: JSON.stringify({ ...conversation, reason: reason.trim() }) });
+      clearConversationCache(); clearArchiveCaches(); setResult(response); onPurged();
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   }

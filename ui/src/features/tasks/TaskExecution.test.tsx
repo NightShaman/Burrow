@@ -2,7 +2,6 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, expect, it, vi } from 'vitest';
 import { Tasks } from './TasksPage';
 import { ConfirmProvider } from '../../app/ConfirmDialog';
-import { setActiveApiTarget } from '../../app/api';
 const task = { id: 't', projectId: 'p', title: 'Original', description: '', status: 'todo', priority: 'normal', assignedAgentId: 'a', metadata: {}, createdAt: '2026-01-01', updatedAt: '2026-01-01' };
 const response = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
 function fixture(delayed = false) {
@@ -21,12 +20,12 @@ function fixture(delayed = false) {
  render(<ConfirmProvider><Tasks agents={[]} /></ConfirmProvider>);
  return { calls, resolve };
 }
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); setActiveApiTarget(undefined); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 it('FE032 commits a delayed terminal refresh before retiring execution, on its captured node', async () => {
  const f = fixture(true); fireEvent.click(await screen.findByText('Original'));
  fireEvent.click(screen.getByRole('button', { name: /Execute/ }));
  await waitFor(() => expect(f.calls.some(c => c.url.endsWith('/tasks/t'))).toBe(true));
- setActiveApiTarget({ id: 'other', name: 'Other', enabled: true, baseUrl: 'https://other.invalid' });
+
  await act(async () => { f.resolve(response({ task: { ...task, title: 'Terminal title', status: 'done' } })); });
  await screen.findByText('Terminal title');
  expect(screen.queryByLabelText('Task execution progress')).toBeNull();

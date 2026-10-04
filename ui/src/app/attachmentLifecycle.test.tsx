@@ -39,7 +39,7 @@ describe('attachment navigation and send lifecycle', () => {
       const session = {
         attached: [currentAttachment], clearAttachment: vi.fn(), sessionId: 's-b', draft: '', setDraft: vi.fn(), clearError: vi.fn(), reportError: vi.fn(), leaveNewSessionForMessage: vi.fn(), appendTurn: vi.fn(), storeToolActivity: vi.fn(), toolActivityForRun: vi.fn(), refreshSessions: vi.fn().mockResolvedValue(undefined), refreshConversation: vi.fn().mockResolvedValue(undefined),
       };
-      const { result } = renderHook(() => useChatRun({ selectedAgentId: 'b', selected: undefined, savedProviders: [], selectedTarget: { id: 'b', name: 'B', baseUrl: 'http://b.invalid', enabled: true, resourceAgentId: 'b', sessionId: 's-b' } as never, session, setAgentActivity: vi.fn() }));
+      const { result } = renderHook(() => useChatRun({ selectedAgentId: 'b', selected: undefined, savedProviders: [], session, setAgentActivity: vi.fn() }));
       await act(async () => { await result.current.sendMessage(); });
       expect(streamMock).toHaveBeenCalledWith(expect.objectContaining({ requestBody: expect.objectContaining({ agentId: 'b', sessionId: 's-b', attachments: [currentAttachment] }) }));
     } finally { globalThis.FileReader = OriginalReader; }
@@ -49,7 +49,7 @@ describe('attachment navigation and send lifecycle', () => {
     const attachment = await readAttachment(new File(['same'], 'same.txt', { type: 'text/plain' }), 'same.txt');
     streamMock.mockResolvedValue({ terminalType: 'run.completed', finalResult: { ok: true, answerText: 'sent' } });
     const session = { attached: [attachment], clearAttachment: vi.fn(), sessionId: 's-2', draft: '', setDraft: vi.fn(), clearError: vi.fn(), reportError: vi.fn(), leaveNewSessionForMessage: vi.fn(), appendTurn: vi.fn(), storeToolActivity: vi.fn(), toolActivityForRun: vi.fn(), refreshSessions: vi.fn().mockResolvedValue(undefined), refreshConversation: vi.fn().mockResolvedValue(undefined) };
-    const { result } = renderHook(() => useChatRun({ selectedAgentId: 'same', selected: undefined, savedProviders: [], selectedTarget: { id: 'same', name: 'Same', baseUrl: 'http://same.invalid', enabled: true, resourceAgentId: 'same', sessionId: 's-2' } as never, session, setAgentActivity: vi.fn() }));
+    const { result } = renderHook(() => useChatRun({ selectedAgentId: 'same', selected: undefined, savedProviders: [], session, setAgentActivity: vi.fn() }));
     await act(async () => { await result.current.sendMessage(); });
     expect(streamMock).toHaveBeenCalledWith(expect.objectContaining({ requestBody: expect.objectContaining({ agentId: 'same', sessionId: 's-2', attachments: [attachment] }) }));
   });

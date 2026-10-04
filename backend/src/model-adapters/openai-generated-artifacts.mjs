@@ -1,3 +1,4 @@
+import { fetchProviderImage } from './provider-image-url.mjs';
 import { mediaBudgets, mediaBytes, decodeMedia } from './generated-media-budgets.mjs';
 import { redactStructuredJsonText } from '../redaction.mjs';
 import { randomUUID } from 'node:crypto';
@@ -106,7 +107,7 @@ function validBase64(value) {
   return normalized && normalized.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(normalized) ? normalized : null;
 }
 
-async function imageBytes(item, { fetchImpl, signal, secrets, limit }) {
+async function imageBytes(item, { fetchImpl, signal, secrets, limit, trusted, lookupImpl }) {
   const encoded = validBase64(item?.b64_json);
   if (encoded) return { bytes: decodeMedia(encoded, limit), contentType: '' };
   const url = text(item?.url);
@@ -116,7 +117,7 @@ async function imageBytes(item, { fetchImpl, signal, secrets, limit }) {
   if (!['https:', 'http:'].includes(parsed.protocol)) throw new Error('image response URL protocol is unsupported');
   // Provider asset URLs are fetched without model credentials. Signed URLs carry
   // their own authorization and must never inherit an API key or bearer token.
-  const response = await fetchImpl(parsed.href, { method: 'GET', ...(signal ? { signal } : {}) });
+  const response = await fetchProviderImage(parsed.href, { fetchImpl, signal, trusted, lookupImpl });
   if (!response.ok) { const failure = await providerError(response, secrets); throw Object.assign(new Error(`image URL retrieval failed: ${failure.message}`), { errorDetails: { ...failure, stage: 'artifact_retrieval' } }); }
   return { bytes: await mediaBytes(response, limit), contentType: response.headers?.get?.('content-type') || '' };
 }
@@ -134,7 +135,7 @@ export function generatedArtifactKind(config = {}) {
   return null;
 }
 
-export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = globalThis.fetch, clock = () => new Date().toISOString(), idFactory = randomUUID } = {}) {
+export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = globalThis.fetch, lookupImpl, clock = () => new Date().toISOString(), idFactory = randomUUID } = {}) {
   if (!fetchImpl) throw new Error('fetch implementation is required');
   const budgets = mediaBudgets(config);
   const kind = generatedArtifactKind(config);
@@ -185,7 +186,7 @@ export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = 
       outputArtifacts = [];
       let remaining = budgets.total;
       for (let index = 0; index < data.data.length; index += 1) {
-        const resolved = await imageBytes(data.data[index], { fetchImpl, signal: options.signal, secrets: [config.apiKey], limit: Math.min(budgets.asset, remaining) });
+        const resolved = await imageBytes(data.data[index], { fetchImpl, lookupImpl, trusted: config.trustProviderImageUrls === true, signal: options.signal, secrets: [config.apiKey], limit: Math.min(budgets.asset, remaining) });
         remaining -= resolved.bytes.length;
         const mimeType = imageMime(resolved.bytes, resolved.contentType);
         outputArtifacts.push({ kind: 'image', name: `image-${requestId}-${index + 1}.${imageExtension(mimeType)}`, mimeType, sizeBytes: resolved.bytes.length, source: { bytes: resolved.bytes } });

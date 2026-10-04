@@ -1,20 +1,19 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useOwnedApi } from './useOwnedApi';
-const target = { id: 'a', name: 'A', enabled: true, baseUrl: 'https://a.invalid' };
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 it.each([true, false])('fences in-flight completion (%s) and delayed follow-up after retirement', async (success) => {
  let resolve!: (response: Response) => void;
  const fetch = vi.fn(() => new Promise<Response>(r => { resolve = r; }));
  vi.stubGlobal('fetch', fetch);
- const view = renderHook(() => useOwnedApi(target));
+ const view = renderHook(() => useOwnedApi());
  const owner = view.result.current;
  const result = owner.api('/api/forge/jobs').catch(e => e);
  const signal = fetch.mock.calls[0] as unknown as [string, RequestInit];
  view.unmount(); expect(signal[1].signal?.aborted).toBe(true);
  await act(async () => resolve(new Response(JSON.stringify({ jobs: [] }), { status: success ? 200 : 500 })));
  expect(await result).toBeInstanceOf(Error);
- await expect(owner.api('/api/task-board/tasks/same', { method: 'DELETE' })).rejects.toThrow('Runtime owner unavailable');
- await expect(owner.fetch('/api/forge/media')).rejects.toThrow('Runtime owner unavailable');
+ await expect(owner.api('/api/task-board/tasks/same', { method: 'DELETE' })).rejects.toThrow('Local runtime unavailable');
+ await expect(owner.fetch('/api/forge/media')).rejects.toThrow('Local runtime unavailable');
  expect(fetch).toHaveBeenCalledTimes(1);
 });

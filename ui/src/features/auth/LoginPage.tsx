@@ -3,11 +3,11 @@ import { api } from '../../app/api';
 import { setBasicCredentials } from '../../app/auth';
 import './login.css';
 
-type LoginPageProps = { onAuthenticated: () => void };
+type LoginPageProps = { onAuthenticated: () => void; overlay?: boolean };
 
 type AuthProbe = { auth?: { required?: boolean; mode?: string } };
 
-export function LoginPage({ onAuthenticated }: LoginPageProps) {
+export function LoginPage({ onAuthenticated, overlay = false }: LoginPageProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -34,7 +34,7 @@ export function LoginPage({ onAuthenticated }: LoginPageProps) {
   }
 
   const disabled = isSubmitting || !username.trim() || !password;
-  return <main className="login-page">
+  return <main className={`login-page${overlay ? ' login-page-overlay' : ''}`}>
     <div className="login-orbit login-orbit-one" aria-hidden="true" />
     <div className="login-orbit login-orbit-two" aria-hidden="true" />
     <section className="login-card" aria-labelledby="login-title">

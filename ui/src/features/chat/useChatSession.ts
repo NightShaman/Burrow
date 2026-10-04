@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { apiForTarget, textFromChatValue, type ActiveA2AActivity, type ActiveChatRun, type ActiveChatRunsResponse, type ActiveSubagent, type ChatAttachment, type ProgressEntry, type SessionSummary, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
-import { targetOwnerKey } from '../../app/useOwnedApi';
-import { localApiTarget, targetForResource, type ApiTarget } from '../../app/apiTargets';
+import { api, textFromChatValue, type ActiveA2AActivity, type ActiveChatRun, type ActiveChatRunsResponse, type ActiveSubagent, type ChatAttachment, type ProgressEntry, type SessionSummary, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
 import { conversationCacheKey, readConversationCache, writeConversationCache, type ConversationCache } from './chatConversationCache';
 import { readDraftCache, writeDraftCache, type DraftCache } from './chatDraftCache';
 import { reconcileSessionTurns } from './chatTurnReconciliation';
@@ -10,7 +8,6 @@ import { createChatSessionRepository, readSessionListCache } from './chatSession
 
 export { conversationCacheKey } from './chatConversationCache';
 
-const defaultApiTargets = [localApiTarget];
 
 type RuntimeRunForSelection = {
   targetId: string;
@@ -101,16 +98,15 @@ function runtimeRunForSubagent(child: ActiveSubagent | undefined, targetId: stri
 }
 
 /** Owns durable chat-session state, draft retention, and runtime reconciliation. */
-export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = defaultApiTargets) {
-  const sessionRepository = useMemo(() => createChatSessionRepository(targets), [targets]);
+export function useChatSession(selectedAgentId: string) {
+  const sessionRepository = useMemo(() => createChatSessionRepository(), []);
   const [draftCache, setDraftCache] = useState<DraftCache>(readDraftCache);
   const [attachmentState, setAttachmentState] = useState<{ scope: object; files: ChatAttachment[] } | null>(null);
   const [isNewSession, setIsNewSession] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionId, setSessionId] = useState('');
   const [turns, setTurns] = useState<SessionTurn[]>([]);
-  const attachmentOwner = targetForResource(targets, selectedAgentId);
-  const attachmentKey = JSON.stringify([targetOwnerKey(attachmentOwner.target), attachmentOwner.resourceId, sessionId]);
+  const attachmentKey = JSON.stringify([selectedAgentId, sessionId]);
   const attachmentScopeRef = useRef({ key: attachmentKey });
   if (attachmentScopeRef.current.key !== attachmentKey) attachmentScopeRef.current = { key: attachmentKey };
   const attachmentScope = attachmentScopeRef.current;
@@ -314,21 +310,21 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
     const isChildSession = childSessionsRef.current.has(conversationCacheKey(selectedAgentId, sessionId));
     const poll = async () => {
       try {
-        const owner = targetForResource(targets, selectedAgentId);
-        const response = await apiForTarget<ActiveChatRunsResponse>(owner.target, `/api/chat/runs/active?agentId=${encodeURIComponent(owner.resourceId)}&sessionId=${encodeURIComponent(sessionId)}`);
+        const resourceId = selectedAgentId;
+        const response = await api<ActiveChatRunsResponse>(`/api/chat/runs/active?agentId=${encodeURIComponent(resourceId)}&sessionId=${encodeURIComponent(sessionId)}`);
         if (cancelled || selectedChatRef.current.agentId !== selectedAgentId || selectedChatRef.current.sessionId !== sessionId) return;
-        const selectedRuntimeRun = response.runs?.find((run) => run.agentId === owner.resourceId && run.sessionId === sessionId);
+        const selectedRuntimeRun = response.runs?.find((run) => run.agentId === resourceId && run.sessionId === sessionId);
         const matchingLiveSubagents = (response.subagents ?? []).filter((child) => {
           const traceChildSessionId = child.trace && 'childSessionId' in child.trace && typeof child.trace.childSessionId === 'string' ? child.trace.childSessionId : '';
           const childAgentId = child.agentId || '';
           const parentRunId = child.parentRunId || (child.trace && 'runId' in child.trace && typeof child.trace.runId === 'string' ? child.trace.runId : '');
           return !child.final
             && (child.parentSessionId === sessionId || (isChildSession && (child.sessionId === sessionId || traceChildSessionId === sessionId)))
-            && (!childAgentId || childAgentId === owner.resourceId)
+            && (!childAgentId || childAgentId === resourceId)
             && (!parentRunId || !selectedRuntimeRun || parentRunId === selectedRuntimeRun.runId);
         });
         const childActivities = matchingLiveSubagents.map((child) => subagentToolActivity(child));
-        const projectedRuntimeRun = runtimeRunForSelection(selectedRuntimeRun, owner.target.id) ?? runtimeRunForSubagent(isChildSession ? matchingLiveSubagents[0] : undefined, owner.target.id);
+        const projectedRuntimeRun = runtimeRunForSelection(selectedRuntimeRun, 'local') ?? runtimeRunForSubagent(isChildSession ? matchingLiveSubagents[0] : undefined, 'local');
         if (selectedRuntimeRun) recoveredProgressByRunRef.current[selectedRuntimeRun.runId] = projectedRuntimeRun?.progress ?? [];
         setRuntimeRun(projectedRuntimeRun);
         setRuntimeChildActivities(childActivities);
@@ -372,7 +368,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
     };
     void poll();
     return () => { cancelled = true; if (timer !== undefined) window.clearTimeout(timer); };
-  }, [isNewSession, selectedAgentId, sessionId, targets, sessionRepository]);
+  }, [isNewSession, selectedAgentId, sessionId, sessionRepository]);
 
   const selectSession = useCallback((targetSessionId: string) => {
     setRuntimeRun(null);
@@ -452,13 +448,11 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   const cancelRuntimeRun = useCallback(async (run: RuntimeRunForSelection) => {
     try {
       // Recovered runs carry raw backend IDs, not UI-qualified resource IDs.
-      const target = targets.find((candidate) => candidate.id === run.targetId && candidate.enabled);
-      if (!target) throw new Error('Owning target is unavailable.');
-      await apiForTarget(target, `/api/chat/${encodeURIComponent(run.runId)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: run.agentId, reason: 'Stopped by operator' }) });
+      await api( `/api/chat/${encodeURIComponent(run.runId)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: run.agentId, reason: 'Stopped by operator' }) });
     } catch (error) {
       setChatError(error instanceof Error ? `Could not stop run: ${error.message}` : 'Could not stop run.');
     }
-  }, [targets]);
+  }, []);
   const reportError = useCallback((message: string) => setChatError(message), []);
   const clearError = useCallback(() => setChatError(''), []);
 

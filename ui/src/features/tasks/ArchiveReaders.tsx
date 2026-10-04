@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { markdownPlugins, MarkdownTable } from '../../app/markdownTables';
-import { textFromChatValue, type SessionTurn } from '../../app/api';
+import { markdownPlugins, MarkdownImage, MarkdownTable } from '../../app/markdownTables';
+import { generatedArtifactPath, textFromChatValue, type SessionTurn } from '../../app/api';
+import { ChatMessage } from '../chat/ChatTranscript';
 import { archiveDate, archiveSessionDate, dreamText } from './archiveDerivations';
 import type { ArchiveDetail, ArchiveSession, ContinuityCardGroup, DreamGroup } from './archiveTypes';
 
@@ -59,7 +60,10 @@ export function archiveTurnText(turn: SessionTurn, sessionAgentName: string, age
   const speaker = archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName);
   const text = textFromChatValue(turn.content);
   const date = formatTurnDate(turn.ts);
-  return text ? `## ${speaker}${date ? ` · ${date}` : ''}\n\n${text}` : '';
+  const attachments = (turn.metadata?.attachments ?? []).map((item) => `- Attachment: ${item.name} (${item.type})${item.artifactPath ? ` — /api/attachments/${item.artifactPath}` : ''}`).join('\n');
+  const artifacts = (turn.metadata?.outputArtifacts ?? []).map((item) => `- Generated ${item.kind}: ${item.name || item.storageReference || 'artifact'}${item.storageReference ? ` — ${generatedArtifactPath(turn.metadata?.fromAgentId || '', item.storageReference)}` : ''}`).join('\n');
+  const body = [text, attachments, artifacts].filter(Boolean).join('\n\n');
+  return body ? `## ${speaker}${date ? ` · ${date}` : ''}\n\n${body}` : '';
 }
 
 function ArchiveReaderToolbar({ eyebrow, title, detail, value, copyLabel }: { eyebrow: string; title: string; detail: string; value: string; copyLabel: string }) {
@@ -100,7 +104,7 @@ function Placeholder({ title, detail }: { title: string; detail: string }) {
   return <section className="archive-empty-state archive-reader-placeholder"><div className="archive-empty-mark" aria-hidden="true">⌁</div><div><h3>{title}</h3><p>{detail}</p></div></section>;
 }
 
-export function ChatArchiveReader({ session, detail, loading, error, earlierLoading, earlierError, historyUnavailable, onLoadEarlier, onRestart, agentNames = new Map(), operatorName = 'Operator' }: { session: ArchiveSession | null; detail: ArchiveDetail | null; loading: boolean; error: string; earlierLoading: boolean; earlierError: string; historyUnavailable: boolean; onLoadEarlier: () => void; onRestart: () => void; agentNames?: ReadonlyMap<string, string>; operatorName?: string }) {
+export function ChatArchiveReader({ session, detail, loading, error, earlierLoading, earlierError, historyUnavailable, onLoadEarlier, onRestart, agentNames = new Map(), operatorName = 'Operator', attachmentAgentId }: { session: ArchiveSession | null; detail: ArchiveDetail | null; loading: boolean; error: string; earlierLoading: boolean; earlierError: string; historyUnavailable: boolean; onLoadEarlier: () => void; onRestart: () => void; agentNames?: ReadonlyMap<string, string>; operatorName?: string; attachmentAgentId?: string }) {
   const readerRef = useRef<HTMLDivElement>(null);
   const pendingScroll = useRef<{ height: number; top: number } | null>(null);
   const activeSession = `${session?.agentId}:${session?.sessionId}`;
@@ -141,7 +145,7 @@ export function ChatArchiveReader({ session, detail, loading, error, earlierLoad
           {earlierError ? <div><span>Earlier messages could not be loaded: {earlierError}</span> <button type="button" onClick={load}>Retry</button> <button type="button" onClick={onRestart}>Restart from latest</button></div> : null}
         </div>
         <div className="archive-reader-summary">{session.summary || 'A mysterious little shelf item.'}</div>
-        {turns.length ? turns.map((turn, index) => { const role = ['user', 'operator', 'human'].includes((turn.role || '').toLowerCase()) ? 'operator' : 'agent'; const text = textFromChatValue(turn.content); return <article className={`archive-turn ${role}`} key={`${turn.ts || 'turn'}-${index}`}><div className="archive-turn-meta"><strong>{archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName)}</strong><span>{formatTurnDate(turn.ts)}</span></div>{text ? <div className="archive-turn-body"><ReactMarkdown remarkPlugins={markdownPlugins} components={{ table: MarkdownTable }}>{text}</ReactMarkdown></div> : null}</article>; }) : <p className="archive-reader-empty">This conversation has no readable chat turns.</p>}
+        {turns.length ? turns.map((turn, index) => { const role = ['user', 'operator', 'human'].includes((turn.role || '').toLowerCase()) ? 'operator' : 'agent'; const text = textFromChatValue(turn.content); const artifacts = turn.metadata?.outputArtifacts ?? []; const attachments = turn.metadata?.attachments ?? []; const ownerId = attachmentAgentId || turn.metadata?.fromAgentId || session.agentId || ''; return <article className={`archive-turn ${role}`} key={`${turn.ts || 'turn'}-${index}`}><div className="archive-turn-meta"><strong>{archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName)}</strong><span>{formatTurnDate(turn.ts)}</span></div>{text ? <div className="archive-turn-body"><ReactMarkdown remarkPlugins={markdownPlugins} components={{ table: MarkdownTable, img: MarkdownImage }}>{text}</ReactMarkdown></div> : null}{attachments.length || artifacts.length ? <ChatMessage side={role} name={archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName)} avatar="" time={formatTurnDate(turn.ts)} text="" attachments={attachments} outputArtifacts={artifacts} attachmentAgentId={ownerId} /> : null}</article>; }) : <p className="archive-reader-empty">This conversation has no readable chat turns.</p>}
       </div> : null}
     </div>
   </>;
@@ -155,7 +159,7 @@ export function DreamArchiveReader({ group, loading, error }: { group: DreamGrou
     <div className="archive-content-body archive-reader-body">
       {loading ? <LoadingState title="Opening the full dreams." detail="Gathering every remembered state." /> : null}
       {error ? <ErrorState title="Could not open these dreams." error={error} /> : null}
-      {!loading && !error ? <div className="archive-reader dream-archive-stack">{group.entries.map((entry) => <article className="archive-reader-summary dream-archive-entry" key={entry.id}><div className="archive-turn-meta"><strong>{entry.phase}</strong><span>{formatArchiveDate(entry.createdAt)}</span></div><ReactMarkdown remarkPlugins={markdownPlugins} components={{ table: MarkdownTable }}>{dreamText(entry)}</ReactMarkdown><div className="dream-archive-entry-actions"><DreamCopyButton text={dreamMarkdown(entry)} /></div></article>)}</div> : null}
+      {!loading && !error ? <div className="archive-reader dream-archive-stack">{group.entries.map((entry) => <article className="archive-reader-summary dream-archive-entry" key={entry.id}><div className="archive-turn-meta"><strong>{entry.phase}</strong><span>{formatArchiveDate(entry.createdAt)}</span></div><ReactMarkdown remarkPlugins={markdownPlugins} components={{ table: MarkdownTable, img: MarkdownImage }}>{dreamText(entry)}</ReactMarkdown><div className="dream-archive-entry-actions"><DreamCopyButton text={dreamMarkdown(entry)} /></div></article>)}</div> : null}
     </div>
   </>;
 }

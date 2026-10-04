@@ -3,8 +3,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { asCodexAccount } from '../../app/useRuntimeDashboard';
 import { AccountStatus } from './AccountStatus';
 import { SystemPanel } from '../workspace/WorkspaceRail';
-import { api, apiForTarget } from '../../app/api';
-vi.mock('../../app/api', () => ({ api: vi.fn(), apiForTarget: vi.fn() }));
+import { api } from '../../app/api';
+vi.mock('../../app/api', () => ({ api: vi.fn() }));
 afterEach(cleanup);
 it('preserves unknown quota and numeric zero', () => {
  expect(asCodexAccount({usagePercent:null,quotaWindows:{primary:{percent:null}}},0)).toMatchObject({used:null,meters:[{remainingPercent:null}]});
@@ -25,14 +25,13 @@ it('does not call pending account checks connected; distinguishes success and fa
  render(<AccountStatus providers={providers}/>); await screen.findByText('Disconnected');
 });
 it('runtime dot is not green while pending or failed and is green only on success', async () => {
- const target = {id:'fixture',name:'Fixture',baseUrl:'',enabled:true};
- vi.mocked(apiForTarget).mockImplementation(() => new Promise(() => {}));
- const view = render(<SystemPanel target={target} provider="p" providerConnectionStatus="connected"/>);
+  vi.mocked(api).mockImplementation(() => new Promise(() => {}));
+ const view = render(<SystemPanel provider="p" providerConnectionStatus="connected"/>);
  expect(view.container.querySelector('.system-status.checking')).toBeTruthy(); view.unmount();
- vi.mocked(apiForTarget).mockResolvedValue({ok:true});
- const ready = render(<SystemPanel target={target} provider="p" providerConnectionStatus="connected"/>);
+ vi.mocked(api).mockResolvedValue({ok:true});
+ const ready = render(<SystemPanel provider="p" providerConnectionStatus="connected"/>);
  await waitFor(() => expect(ready.container.querySelector('.system-status.connected')).toBeTruthy()); ready.unmount();
- vi.mocked(apiForTarget).mockRejectedValue(new Error('offline'));
- const failed = render(<SystemPanel target={target} provider="p" providerConnectionStatus="connected"/>);
+ vi.mocked(api).mockRejectedValue(new Error('offline'));
+ const failed = render(<SystemPanel provider="p" providerConnectionStatus="connected"/>);
  await waitFor(() => expect(failed.container.querySelector('.system-status.disconnected')).toBeTruthy());
 });

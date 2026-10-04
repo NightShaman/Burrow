@@ -1,5 +1,4 @@
-import { apiForTarget, type ChatSession, type SessionSummary } from '../../app/api';
-import { targetForResource, type ApiTarget } from '../../app/apiTargets';
+import { api, type ChatSession, type SessionSummary } from '../../app/api';
 import { readStoredValue, writeStoredValue } from '../../app/browserStorage';
 
 export const sessionListCacheStorageKey = 'hc.chatSessions.v1';
@@ -51,25 +50,20 @@ export type ChatSessionRepository = {
   resetSession: (agentId: string, sessionId: string) => Promise<void>;
 };
 
-/** Provides target-owned chat session requests without exposing routing details to UI state. */
-export function createChatSessionRepository(targets: ApiTarget[]): ChatSessionRepository {
-  const ownerFor = (agentId: string) => targetForResource(targets, agentId);
-
+/** Provides local-runtime chat session requests. */
+export function createChatSessionRepository(): ChatSessionRepository {
   return {
     async listSessions(agentId) {
-      const owner = ownerFor(agentId);
-      const response = await apiForTarget<{ sessions: SessionSummary[] }>(owner.target, `/api/sessions?agentId=${encodeURIComponent(owner.resourceId)}`);
+      const response = await api<{ sessions: SessionSummary[] }>(`/api/sessions?agentId=${encodeURIComponent(agentId)}`);
       writeSessionListCache(agentId, response.sessions);
       return response.sessions;
     },
     async loadSession(agentId, sessionId) {
-      const owner = ownerFor(agentId);
-      const response = await apiForTarget<{ session: ChatSession }>(owner.target, `/api/sessions/${encodeURIComponent(sessionId)}?agentId=${encodeURIComponent(owner.resourceId)}`);
+      const response = await api<{ session: ChatSession }>(`/api/sessions/${encodeURIComponent(sessionId)}?agentId=${encodeURIComponent(agentId)}`);
       return response.session;
     },
     async resetSession(agentId, sessionId) {
-      const owner = ownerFor(agentId);
-      await apiForTarget(owner.target, `/api/sessions/${encodeURIComponent(sessionId)}/reset?agentId=${encodeURIComponent(owner.resourceId)}`, { method: 'POST' });
+      await api(`/api/sessions/${encodeURIComponent(sessionId)}/reset?agentId=${encodeURIComponent(agentId)}`, { method: 'POST' });
     },
   };
 }

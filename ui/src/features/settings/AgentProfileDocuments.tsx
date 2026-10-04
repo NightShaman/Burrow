@@ -1,16 +1,15 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useState } from 'react';
-import { apiForTarget } from '../../app/api';
-import { targetForResource, type ApiTarget } from '../../app/apiTargets';
+import { api } from '../../app/api';
 import { Field, SettingSection } from './SettingsPrimitives';
 
 type ProfileDocument = { kind: 'SOUL' | 'RULES' | 'ORIENTATION' | 'PREFERENCES' | 'TOOLS' | 'DREAM_MEMORY'; markdown: string };
 const profileDocumentKinds: ProfileDocument['kind'][] = ['SOUL', 'RULES', 'ORIENTATION', 'PREFERENCES', 'TOOLS', 'DREAM_MEMORY'];
 const profileDocumentLabels: Record<ProfileDocument['kind'], string> = { SOUL: 'SOUL.md', RULES: 'RULES.md', ORIENTATION: 'ORIENTATION.md', PREFERENCES: 'PREFERENCES.md', TOOLS: 'TOOLS.md', DREAM_MEMORY: 'DreamMemory.md' };
 
-export function AgentProfileDocuments({ agentId, targets, overflowTarget }: { agentId: string; targets: ApiTarget[]; overflowTarget?: HTMLElement | null }) {
-  const owner = targetForResource(targets, agentId);
-  const request = <T,>(path: string, init?: RequestInit) => apiForTarget<T>(owner.target, path, init);
+export function AgentProfileDocuments({ agentId, overflowTarget }: { agentId: string; overflowTarget?: HTMLElement | null }) {
+  const resourceId = agentId.includes('::') ? agentId.slice(agentId.indexOf('::') + 2) : agentId;
+  const request = <T,>(path: string, init?: RequestInit) => api<T>(path, init);
   const [documents, setDocuments] = useState<ProfileDocument[]>(profileDocumentKinds.map(kind => ({ kind, markdown: '' })));
   const [selectedKind, setSelectedKind] = useState<ProfileDocument['kind']>('SOUL');
   const [state, setState] = useState<'loading' | 'idle' | 'saving' | 'error'>('loading');
@@ -20,7 +19,7 @@ export function AgentProfileDocuments({ agentId, targets, overflowTarget }: { ag
   useEffect(() => {
     const controller = new AbortController();
     setState('loading'); setError(''); setDocuments(profileDocumentKinds.map(kind => ({ kind, markdown: '' })));
-    request<{ documents: ProfileDocument[] }>(`/api/agents/${encodeURIComponent(owner.resourceId)}/profile-documents`, { signal: controller.signal }).then(result => {
+    request<{ documents: ProfileDocument[] }>(`/api/agents/${encodeURIComponent(resourceId)}/profile-documents`, { signal: controller.signal }).then(result => {
       if (controller.signal.aborted) return;
       const byKind = new Map((result.documents ?? []).map(document => [document.kind, document.markdown]));
       setDocuments(profileDocumentKinds.map(kind => ({ kind, markdown: byKind.get(kind) ?? '' })));
@@ -31,11 +30,11 @@ export function AgentProfileDocuments({ agentId, targets, overflowTarget }: { ag
       setState('error');
     });
     return () => controller.abort();
-  }, [owner.target.id, owner.target.baseUrl, owner.resourceId, retry]);
+  }, [agentId, retry]);
   const save = async () => {
     if (state !== 'idle') return;
     setState('saving'); setError('');
-    try { await request(`/api/agents/${encodeURIComponent(owner.resourceId)}/profile-documents`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ documents }) }); }
+    try { await request(`/api/agents/${encodeURIComponent(resourceId)}/profile-documents`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ documents }) }); }
     catch (cause) { setError(cause instanceof Error ? `Could not save profile documents: ${cause.message}` : 'Could not save profile documents.'); }
     finally { setState('idle'); }
   };

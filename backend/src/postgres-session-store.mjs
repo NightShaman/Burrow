@@ -1,3 +1,4 @@
+import { exportSessionRawEvidence } from './session-evidence-export.mjs';
 import { POSTGRES_LOGICAL_MEMBER_SQL, POSTGRES_ARCHIVE_RELATIONAL_ID_SQL, POSTGRES_CATALOG_SCALAR_ID_SQL, POSTGRES_LOGICAL_LOOKUP_INDEX_SQL } from './postgres-lexical-identity.mjs';
 import { retentionSessionCandidate } from './retention.mjs';
 import { POSTGRES_HISTORY_KEYSET_SQL } from './postgres-history-keyset.mjs';
@@ -876,6 +877,10 @@ export class PostgresSessionStore {
 
   // A single statement gives metadata, retained generations and active entries one
   // MVCC snapshot. Reset documents are separate exports, never active history.
+  async exportRawEvidence({ agentId, sessionId } = {}) {
+    return exportSessionRawEvidence({ pool: this.pool, agentId: required(agentId, 'agentId'), sessionId: required(sessionId, 'sessionId') });
+  }
+
   async exportTranscript({ agentId, sessionId } = {}) {
     const result = await this.pool.query(`
       SELECT s.metadata,s.created_at,s.updated_at,
@@ -1015,10 +1020,10 @@ export class PostgresSessionStore {
       // concurrent forks and the old upsert/delete path could overwrite the winner.
       const reservation = await client.query(`INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,$3::jsonb,$4,$4) ON CONFLICT(agent_id,session_id) DO NOTHING RETURNING session_id`, [targetAgent, target, JSON.stringify({ forkedFrom: source, forkedAt: now, generation: 0 }), now]);
       if (!reservation.rows[0]) throw new Error('fork_target_exists');
-      const sourceRows = await client.query('SELECT entry,entry_id FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence DESC LIMIT $3', [sourceAgent, source, size]);
+      const sourceRows = await client.query('SELECT entry,entry::text AS raw_entry,entry_id FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence DESC LIMIT $3', [sourceAgent, source, size]);
       const sourceEntries = sourceRows.rows.reverse();
       const entries = sourceEntries.map((row) => row.entry);
-      for (const entry of entries) { const value = { ...entry, metadata: { ...(entry.metadata || {}), forkedFrom: source } }; await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,entry,created_at) VALUES($1,$2,$3,$4::json,$5)', [targetAgent, target, text(value.id).trim() || sourceEntries.find(row => row.entry === entry)?.entry_id || randomUUID(), JSON.stringify(value), now]); }
+      for (const row of sourceEntries) await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,entry,created_at) VALUES($1,$2,$3,$4::json,$5)', [targetAgent, target, row.entry_id || randomUUID(), row.raw_entry, now]);
       return { ok: true, sourceAgentId: sourceAgent, targetAgentId: targetAgent, sourceSessionId: source, targetSessionId: target, copiedEntries: entries.length };
     });
   }

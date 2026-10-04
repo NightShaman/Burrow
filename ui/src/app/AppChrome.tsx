@@ -40,7 +40,7 @@ function UsageMeter({ label, usedPercent, resetAt }: UsageMeterProps) {
   </span>;
 }
 
-export function AppStatusBar({ anthropicUsage, openAiUsage, runtimeVersion, registryStale }: { anthropicUsage: AnthropicUsage | null; openAiUsage: OpenAiUsage | null; runtimeVersion: string | null; registryStale?: boolean }) {
+export function AppStatusBar({ anthropicUsage, openAiUsage, runtimeVersion, registryStale }: { anthropicUsage: AnthropicUsage | null; openAiUsage: OpenAiUsage | null; runtimeVersion?: string | null; registryStale?: boolean }) {
   return <footer className="status-bar">
     {registryStale && <span className="registry-stale" role="status" title="Agent registry refresh failed; showing the last known agents.">Agents stale</span>}
     {anthropicUsage?.windows

@@ -1,5 +1,4 @@
-import { answerFromChatResult, fetchApiForTarget } from '../../app/api';
-import type { ApiTarget } from '../../app/apiTargets';
+import { answerFromChatResult, fetchApi } from '../../app/api';
 
 export type ChatStreamResult = {
   terminalType: string;
@@ -7,14 +6,13 @@ export type ChatStreamResult = {
 };
 
 type ChatStreamOptions = {
-  target?: ApiTarget;
   requestBody: unknown;
   signal: AbortSignal;
   onEvent: (event: unknown) => void;
 };
 
-export async function streamChat({ target, requestBody, signal, onEvent }: ChatStreamOptions): Promise<ChatStreamResult> {
-  const response = await fetchApiForTarget(target, '/api/chat', {
+export async function streamChat({ requestBody, signal, onEvent }: ChatStreamOptions): Promise<ChatStreamResult> {
+  const response = await fetchApi('/api/chat', {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/x-ndjson' },
     body: JSON.stringify(requestBody),

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { apiForTarget } from '../../app/api';
-import type { ApiTarget } from '../../app/apiTargets';
+import { api } from '../../app/api';
 import type { Agent } from '../../app/types';
 import './albdruck.css';
 import { ConversationPurge } from './ConversationPurge';
@@ -25,7 +24,7 @@ export function parseDays(text: string): number | null {
 }
 const json = (value: unknown) => JSON.stringify(value, null, 2);
 const localTime = (value: string) => new Date(value).toLocaleString();
-export function Albdruck({ agents, target }: { agents: Agent[]; target?: ApiTarget }) {
+export function Albdruck({ agents }: { agents: Agent[] }) {
   const [purgeConversation, setPurgeConversation] = useState<{agentId: string; sessionId: string} | null>(null);
   const [scope, setScope] = useState('agent'); const [agentId, setAgentId] = useState('');
   const [mode, setMode] = useState('knowledge'); const [query, setQuery] = useState(''); const [search, setSearch] = useState('');
@@ -35,10 +34,10 @@ export function Albdruck({ agents, target }: { agents: Agent[]; target?: ApiTarg
   const [reason, setReason] = useState(''); const [editor, setEditor] = useState(''); const [operation, setOperation] = useState('correct');
   const [refresh, setRefresh] = useState(0); const sequence = useRef(0); const detailSequence = useRef(0);
   const [policy, setPolicy] = useState<Record<string,string> | null>(null); const [retentionBusy, setRetentionBusy] = useState(false); const retentionSequence = useRef(0);
-  const available = agents.filter(a => !target || a.targetId === target.id || (!a.targetId && target.id === 'local'));
+  const available = agents;
   const selectedId = agentId || available[0]?.resourceId || available[0]?.id || '';
   const params = new URLSearchParams(scope === 'global' ? { scope } : { scope, agentId: selectedId });
-  const suffix = `?${params}`; const request = <T,>(path: string, init?: RequestInit) => apiForTarget<T>(target, `/api/albdruck/${path}`, init);
+  const suffix = `?${params}`; const request = <T,>(path: string, init?: RequestInit) => api<T>(`/api/albdruck/${path}`, init);
   useEffect(() => {
     const token = ++sequence.current; ++detailSequence.current; setDetail(null); setReason(''); setError(''); setResults({items:[],nextCursor:null}); setHistory({items:[],nextCursor:null});
     if (scope === 'agent' && !selectedId) { setBusy(false); return; }
@@ -49,12 +48,12 @@ export function Albdruck({ agents, target }: { agents: Agent[]; target?: ApiTarg
     const init = recall ? {method:'POST', body:JSON.stringify({query:search, ...(cursor ? {cursor} : {}),pageSize:50})} : undefined;
     void (recall ? request<HistoryResults>(path, init).then(r => { if (token === sequence.current) setHistory(r); }) : request<Results>(path).then(r => { if (token === sequence.current) setResults(r); })).catch(e => { if (token === sequence.current) setError(String(e.message)); }).finally(() => { if (token === sequence.current) setBusy(false); });
     return () => { ++sequence.current; ++detailSequence.current; };
-  }, [target?.id, target?.baseUrl, suffix, mode, search, cursor, refresh]);
+  }, [suffix, mode, search, cursor, refresh]);
   useEffect(() => {
     const token = ++retentionSequence.current; setPolicy(null);
     void request<Policy>('retention').then(p => { if (token === retentionSequence.current) setPolicy(Object.fromEntries(retentionKeys.map(k => [k,p[k] === null ? '' : String(p[k])]))); }).catch(e => { if (token === retentionSequence.current) setError(e.message); });
     return () => { ++retentionSequence.current; };
-  }, [target?.id, target?.baseUrl]);
+  }, []);
   async function open(id: string) {
     const token = ++detailSequence.current; setDetail(null); setError(''); setReason('');
     try { const d = await request<RecordItem>(`knowledge/${encodeURIComponent(id)}${suffix}`); if (token === detailSequence.current) { setDetail(d); setEditor(json(d.document)); } } catch(e) { if (token === detailSequence.current) setError((e as Error).message); }
@@ -85,7 +84,7 @@ export function Albdruck({ agents, target }: { agents: Agent[]; target?: ApiTarg
       <h3>Revisions</h3>{detail.revisions?.map(r=><article key={r.id}><p>{r.operation} · {localTime(r.created_at)}</p><pre>{json(r.document)}</pre></article>)}
       {detail.state === 'active' && <form onSubmit={e=>{e.preventDefault();void review();}}><h3>Review knowledge</h3><label>Operation <select value={operation} onChange={e=>setOperation(e.target.value)}><option value="correct">Correct</option><option value="supersede">Supersede</option><option value="delete">Archive</option></select></label>{operation === 'correct' && <label>Replacement document (JSON)<textarea rows={14} value={editor} onChange={e=>setEditor(e.target.value)} /></label>}<label>Reason (required)<textarea required value={reason} onChange={e=>setReason(e.target.value)} /></label><p>Supersede marks this record inactive; it does not create a replacement. Archive is a soft deletion with a revision, not full erasure. Both disappear from list and recall; archived knowledge remains accessible in detail until retention.</p><button disabled={busy || !reason.trim()}>Apply {operation === 'delete' ? 'archive' : operation}</button></form>}
     </section>}</div>}
-    {purgeConversation && <ConversationPurge key={`${purgeConversation.agentId}:${purgeConversation.sessionId}`} conversation={purgeConversation} target={target} onClose={() => setPurgeConversation(null)} onPurged={() => { setCursor(''); setRefresh(r => r+1); }} />}
+    {purgeConversation && <ConversationPurge key={`${purgeConversation.agentId}:${purgeConversation.sessionId}`} conversation={purgeConversation} onClose={() => setPurgeConversation(null)} onPurged={() => { setCursor(''); setRefresh(r => r+1); }} />}
     <section><h2>Independent retention</h2><p>Blank disables that domain’s Albdruck age cleanup. Defaults: knowledge, evidence, revisions and conversations unlimited; operational traces have no Albdruck age limit but the existing Dreams trace policy may apply; attachments 30 days. These limits are independent of working memory and other conversation retention. Saving does not run pruning. Evidence expiry clears preserved excerpts, not original references; revision expiry removes old audit rows; knowledge expiry also removes its derived evidence and revisions. Conversation expiry preserves durable knowledge and evidence, and skips current or active sessions. Attachment ingestion uses the saved attachment limit.</p>{policy && <form onSubmit={e=>{e.preventDefault();void saveRetention();}}><div className="albdruck-controls">{retentionKeys.map(k=><label key={k}>{retentionLabels[k]} <input type="number" min="1" step="1" placeholder="Unlimited" value={policy[k]} onChange={e=>setPolicy({...policy,[k]:e.target.value})}/></label>)}</div><button disabled={retentionBusy}>Save retention</button></form>}</section>
   </div>;
 }

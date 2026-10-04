@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { modsChangedEvent } from '../../app/modPanels';
-import { apiTargetsChangedEvent, modContributionsChangedEvent } from '../../app/apiTargets';
+import { modContributionsChangedEvent } from '../../app/apiTargets';
 import { Field } from './SettingsPrimitives';
 import { defaultSourceRefresh, isModBusyError, loadModManagement, loadSourceRefreshConfig, modLifecyclePath, modManagementAction, saveSourceRefreshConfig, type ModRecord, type ModSource, type NormalizedModManagement, type SourceRefreshConfig } from './modManagementApi';
 
@@ -102,7 +102,6 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
     try {
       const result = await modManagementAction(path, init);
       window.dispatchEvent(new Event(modsChangedEvent));
-      window.dispatchEvent(new Event(apiTargetsChangedEvent));
       window.dispatchEvent(new Event(modContributionsChangedEvent));
       onSubmitted?.();
       const next = await loadModManagement();

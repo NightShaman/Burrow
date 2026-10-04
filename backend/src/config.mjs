@@ -113,6 +113,8 @@ export async function resolveModelConfig(args = {}) {
     providerName: connection.provider,
     api: connection.apiType,
     baseUrl: connection.baseUrl,
+    // Deployment-owned explicit connection allowlist; never inferred from API host.
+    trustProviderImageUrls: splitCsv(process.env.BURROW_TRUSTED_IMAGE_URL_CONNECTION_IDS).includes(connection.id),
     apiKey: auth.token,
     auth,
     model: model.id,

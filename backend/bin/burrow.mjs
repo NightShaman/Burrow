@@ -326,7 +326,7 @@ async function main() {
   if (command === 'install-restore') {
     if (!args.archive) throw new Error('--archive is required');
     if (args.replace && !args.confirm) throw new Error('--replace requires --confirm');
-    const result = args.confirm ? await restorePortableInstall({ archive: args.archive, home: args.home, replace: args.replace }) : await planPortableInstallRestore({ archive: args.archive, home: args.home, replace: args.replace });
+    const result = args.confirm ? await restorePortableInstall({ archive: args.archive, home: args.home, replace: args.replace, mappingFile: args.mapping_file }) : await planPortableInstallRestore({ archive: args.archive, home: args.home, replace: args.replace });
     console.log(args.json ? JSON.stringify(result, null, 2) : formatPortableInstallResult(result));
     return;
   }

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { apiForTarget, attachmentDisplayName } from '../../app/api';
-import type { ApiTarget } from '../../app/apiTargets';
+import { api, attachmentDisplayName } from '../../app/api';
 import type { Agent } from '../../app/types';
 import type { ChatAttachment, RunProgress, SessionTurn, ToolActivity } from '../../app/api';
 import { ChatComposer, ChatMessage } from '../chat/ChatPage';
 import { useComposerHistory } from '../chat/useComposerHistory';
+import { isWithinAttachmentBudget } from '../chat/attachmentValidation';
 
 type GroupTurn = { id: string; content: string; createdAt?: string; authorName: string; authorId?: string; role?: string; metadata?: Record<string, unknown> };
 type GroupRun = { runId: string; agentId: string; status?: string; sessionId?: string };
@@ -69,7 +69,7 @@ export function insertMention(value: string, mentionStart: number, queryLength: 
 
 type OperatorProfile = { id?: string; name: string; avatar: string };
 
-export function GroupChannelsPage({ channelId, target, agents, operator }: { channelId: string; target: ApiTarget; agents: Agent[]; operator?: OperatorProfile }) {
+export function GroupChannelsPage({ channelId, agents, operator }: { channelId: string; agents: Agent[]; operator?: OperatorProfile }) {
   const [channel, setChannel] = useState<GroupChannel | null>(null);
   const [identityAvatars, setIdentityAvatars] = useState<Record<string, string>>({});
   const [operatorIdentity, setOperatorIdentity] = useState<OperatorProfile | undefined>(operator);
@@ -80,8 +80,8 @@ export function GroupChannelsPage({ channelId, target, agents, operator }: { cha
   const [attached, setAttached] = useState<ChatAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
-  const scope = useRef({ channelId, target });
-  if (scope.current.channelId !== channelId || scope.current.target !== target) scope.current = { channelId, target };
+  const scope = useRef({ channelId });
+  if (scope.current.channelId !== channelId) scope.current = { channelId };
   const requestNumber = useRef(0);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -89,14 +89,14 @@ export function GroupChannelsPage({ channelId, target, agents, operator }: { cha
     const owner = scope.current;
     const request = ++requestNumber.current;
     if (!channelId) return;
-    const response = await apiForTarget<{ channel?: unknown; turns?: unknown; runs?: unknown }>(target, `/api/group-channels/${encodeURIComponent(channelId)}`);
+    const response = await api<{ channel?: unknown; turns?: unknown; runs?: unknown }>(`/api/group-channels/${encodeURIComponent(channelId)}`);
     if (!mounted.current || scope.current !== owner || request !== requestNumber.current) return;
     const channelValue = record(response.channel ?? response);
     setChannel(normalizeChannel({ ...channelValue, turns: channelValue.turns ?? response.turns, runs: channelValue.runs ?? response.runs }));
-  }, [channelId, target]);
+  }, [channelId]);
   useEffect(() => { setError(''); load().catch((reason: Error) => setError(`Could not load group chat: ${reason.message}`)); }, [load]);
   useEffect(() => {
-    apiForTarget<{ operator?: unknown; agents?: Array<{ id?: string; avatar?: string }> }>(target, '/api/settings/identities')
+    api<{ operator?: unknown; agents?: Array<{ id?: string; avatar?: string }> }>('/api/settings/identities')
       .then((response) => {
         const persistedOperator = record(response.operator);
         if (persistedOperator.id || persistedOperator.name || persistedOperator.avatar) {
@@ -105,13 +105,13 @@ export function GroupChannelsPage({ channelId, target, agents, operator }: { cha
         setIdentityAvatars(Object.fromEntries(array(response.agents).map((item) => [text(record(item).id), text(record(item).avatar)]).filter(([id, avatar]) => id && avatar)));
       })
       .catch(() => undefined);
-  }, [operator, target]);
+  }, [operator]);
   useEffect(() => {
     if (!channelId) return;
     const timer = window.setInterval(() => { void load().catch((reason: Error) => setError(`Could not refresh group chat: ${reason.message}`)); }, 2_000);
     return () => window.clearInterval(timer);
   }, [channelId, load]);
-  const agentById = useMemo(() => new Map(agents.filter((agent) => (agent.targetId ?? 'local') === target.id).map((agent) => [agent.resourceId ?? agent.id, agent])), [agents, target.id]);
+  const agentById = useMemo(() => new Map(agents.map((agent) => [agent.resourceId ?? agent.id, agent])), [agents]);
   const mentionCandidates = useMemo(() => {
     if (mentionQuery === null || !channel) return [];
     const query = mentionQuery.toLowerCase();
@@ -148,14 +148,14 @@ export function GroupChannelsPage({ channelId, target, agents, operator }: { cha
     if (!content.trim() || sending) return;
     setSending(true); setError('');
     try {
-      await apiForTarget<{ ok: true; channelId: string; operatorTurn?: unknown; runs?: GroupRun[] }>(target, `/api/group-channels/${encodeURIComponent(channelId)}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: content, ...(attached.length ? { attachments: attached } : {}) }) });
+      await api<{ ok: true; channelId: string; operatorTurn?: unknown; runs?: GroupRun[] }>(`/api/group-channels/${encodeURIComponent(channelId)}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: content, ...(attached.length ? { attachments: attached } : {}) }) });
       setMessage(''); setAttached([]); await load();
     } catch (reason) { setError(`Could not send message: ${(reason as Error).message}`); }
     finally { setSending(false); }
   }
   function attachImage(files: File[]) { files.forEach((file, index) => {
     const supported = file.type.startsWith('image/') || file.type.startsWith('text/') || ['application/json', 'application/xml', 'application/rtf'].includes(file.type) || /\.(txt|md|markdown|json|csv|xml|html?|css|js|ts|tsx|jsx|py|rb|go|rs|java|c|cpp|h|yaml|yml|rtf)$/i.test(file.name);
-    if (!supported || file.size > 22_000_000) return;
+    if (!supported || !isWithinAttachmentBudget(attached.map((item) => item.size), file.size)) return;
     const reader = new FileReader();
     reader.onload = () => { const content = reader.result; if (typeof content === 'string') setAttached((current) => [...current, { name: attachmentDisplayName(file, index + 1), type: file.type, size: file.size, encoding: 'data-url', content }]); };
     reader.readAsDataURL(file);
@@ -175,7 +175,7 @@ export function GroupChannelsPage({ channelId, target, agents, operator }: { cha
 
   async function cancel(run: GroupRun) {
     try {
-      await apiForTarget(target, `/api/group-channels/${encodeURIComponent(channelId)}/runs/${encodeURIComponent(run.runId)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) });
+      await api(`/api/group-channels/${encodeURIComponent(channelId)}/runs/${encodeURIComponent(run.runId)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) });
       await load();
     } catch (reason) { setError(`Could not cancel run: ${(reason as Error).message}`); }
   }

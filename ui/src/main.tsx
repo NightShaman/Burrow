@@ -4,6 +4,7 @@ import { App } from './App';
 import { ErrorBoundary } from './app/ErrorBoundary';
 import { ConfirmProvider } from './app/ConfirmDialog';
 import { LoginPage } from './features/auth/LoginPage';
+import { ReauthGate } from './features/auth/ReauthGate';
 import './app.css';
 
 type HealthResponse = {
@@ -43,7 +44,7 @@ function Root() {
 
   if (authState === 'checking') return <div className="app-loading" aria-label="Loading">Loading…</div>;
   if (authState === 'login') return <LoginPage onAuthenticated={() => setAuthState('open')} />;
-  return <App />;
+  return <ReauthGate><App /></ReauthGate>;
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

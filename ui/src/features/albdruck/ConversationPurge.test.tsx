@@ -1,12 +1,16 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { apiForTarget } from '../../app/api';
+import { api } from '../../app/api';
 import { ConversationPurge } from './ConversationPurge';
-vi.mock('../../app/api', () => ({ apiForTarget: vi.fn() }));
+import { clearConversationCache } from '../chat/chatConversationCache';
+import { clearArchiveCaches } from '../tasks/archiveCache';
+vi.mock('../../app/api', () => ({ api: vi.fn() }));
+vi.mock('../chat/chatConversationCache', () => ({ clearConversationCache: vi.fn() }));
+vi.mock('../tasks/archiveCache', () => ({ clearArchiveCaches: vi.fn() }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 it('requires deliberate confirmation and nonblank reason; posts exact contract and shows counts', async () => {
   const done = vi.fn();
-  vi.mocked(apiForTarget).mockResolvedValue({agentId:'a',sessionId:'s',deleted:false,removed:{evidence:2,knowledge:1,revisions:3,working_memory:4,continuity_handoffs:0,conversation_project_bindings:0,dream_diary_entries:0,working_memory_meta:1}});
+  vi.mocked(api).mockResolvedValue({agentId:'a',sessionId:'s',deleted:false,removed:{evidence:2,knowledge:1,revisions:3,working_memory:4,continuity_handoffs:0,conversation_project_bindings:0,dream_diary_entries:0,working_memory_meta:1}});
   render(<ConversationPurge conversation={{agentId:'a',sessionId:'s'}} onClose={vi.fn()} onPurged={done}/>);
   const button = screen.getByText('Confirm permanent purge');
   expect(button).toHaveProperty('disabled',true);
@@ -16,12 +20,13 @@ it('requires deliberate confirmation and nonblank reason; posts exact contract a
   fireEvent.change(screen.getByLabelText('Purge reason (required)'),{target:{value:' remove '}});
   fireEvent.click(button);
   await screen.findByText('evidence: 2');
-  expect(apiForTarget).toHaveBeenCalledWith(undefined,'/api/albdruck/purge-conversation',{method:'POST',body:JSON.stringify({agentId:'a',sessionId:'s',reason:'remove'})});
+  expect(api).toHaveBeenCalledWith('/api/albdruck/purge-conversation',{method:'POST',body:JSON.stringify({agentId:'a',sessionId:'s',reason:'remove'})});
   expect(screen.getByText(/already absent/)).toBeTruthy(); expect(done).toHaveBeenCalledOnce();
+  expect(clearConversationCache).toHaveBeenCalledOnce(); expect(clearArchiveCaches).toHaveBeenCalledOnce();
 });
 it('surfaces protection errors without claiming success and allows retry/cancel', async () => {
   const done = vi.fn(), close = vi.fn();
-  vi.mocked(apiForTarget).mockRejectedValue(new Error('409 albdruck_purge_current_main'));
+  vi.mocked(api).mockRejectedValue(new Error('409 albdruck_purge_current_main'));
   render(<ConversationPurge conversation={{agentId:'a',sessionId:'s'}} onClose={close} onPurged={done}/>);
   fireEvent.change(screen.getByLabelText(/Type the exact/),{target:{value:'s'}});
   fireEvent.change(screen.getByLabelText('Purge reason (required)'),{target:{value:'remove'}});

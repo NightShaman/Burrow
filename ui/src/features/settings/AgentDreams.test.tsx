@@ -1,12 +1,12 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { apiForTarget } from '../../app/api';
+import { api } from '../../app/api';
 import { AgentDreams } from './AgentDreams';
-vi.mock('../../app/api', () => ({ apiForTarget: vi.fn() }));
+vi.mock('../../app/api', () => ({ api: vi.fn() }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 function show(receipts: unknown[]) {
-  vi.mocked(apiForTarget).mockImplementation(async (_target, path) => path.includes('dream-settings') ? { settings: { enabled: true, cron: '0 4 * * *', timezone: 'UTC', prompt: '' } } : { receipts });
-  render(<AgentDreams agentId="nigel" targets={[{ id: 'local', name: 'Local', baseUrl: '', enabled: true }]} savedProviders={[]} />);
+  vi.mocked(api).mockImplementation(async (path) => path.includes('dream-settings') ? { settings: { enabled: true, cron: '0 4 * * *', timezone: 'UTC', prompt: '' } } : { receipts });
+  render(<AgentDreams agentId="nigel" savedProviders={[]} />);
 }
 it('shows phase, provider, model, HTTP status and provider message as plain text', async () => {
   show([{ runId: 'new', status: 'failed', phases: [{ phase: 'rem', modelResponses: [{ ok: false, provider: 'anthropic', model: 'opus', status: '400', error: '<script>Invalid model</script>' }, { ok: true, provider: 'anthropic', model: 'good', status: '200' }] }] }]);

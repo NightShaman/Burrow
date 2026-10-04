@@ -3,8 +3,7 @@ import { isValidElement, memo, useEffect, useLayoutEffect, useRef, useState } fr
 import type { HTMLAttributes, ReactNode, SyntheticEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { markdownPlugins, MarkdownTable } from '../../app/markdownTables';
-import { fetchApiForTarget, generatedArtifactPath, textFromChatValue, type GeneratedArtifact, type ProgressEntry, type RunProgress, type SessionAttachment, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
-import type { ApiTarget } from '../../app/apiTargets';
+import { fetchApi, generatedArtifactPath, textFromChatValue, type GeneratedArtifact, type ProgressEntry, type RunProgress, type SessionAttachment, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
 import type { Agent, Subagent } from '../../app/types';
 import { toolDisplayName } from '../../app/toolDisplayName';
 
@@ -30,11 +29,10 @@ type ChatTranscriptProps = {
   a2aActivities?: import('../../app/api').ActiveA2AActivity[];
   runtimeUserMessage?: string;
   runtimeChildActivities?: ToolActivity[];
-  attachmentTarget?: ApiTarget;
   attachmentAgentId?: string;
 };
 
-export const ChatTranscript = memo(function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, a2aActivities = [], runtimeUserMessage = '', runtimeChildActivities = [], attachmentTarget, attachmentAgentId }: ChatTranscriptProps) {
+export const ChatTranscript = memo(function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, a2aActivities = [], runtimeUserMessage = '', runtimeChildActivities = [], attachmentAgentId }: ChatTranscriptProps) {
   const isSubagent = 'stream' in selected;
   const messages = turns.filter((turn) => turn.type === 'message' && turn.metadata?.visibility !== 'debug' && turn.metadata?.kind !== 'subagent-runtime-context' && turn.metadata?.kind !== 'subagent-task' && (turn.content || turn.metadata?.attachments?.length || turn.metadata?.outputArtifacts?.length) && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && isChatCommand(textFromChatValue(turn.content))));
   const activityByRun = new Map<string, ToolActivity>();
@@ -78,7 +76,7 @@ export const ChatTranscript = memo(function ChatTranscript({ selected, parent, o
         const messageName = isAgentMessage ? `${senderName} → ${recipientName}` : selected.name;
         const persistedActivity = turn.metadata?.toolActivity;
         const isPersistedTerminalTurn = turn.role === 'assistant' && turn.runId === activeRunId && Boolean(turn.metadata?.progress || persistedActivity || turn.content);
-        return <ChatMessage key={`${turn.runId ?? 'turn'}-${index}`} side={turn.role === 'user' || (isAgentMessage && !fromCurrentAgent) ? 'operator' : 'agent'} name={turn.role === 'user' ? userName : isAgentMessage ? messageName : selected.name} avatar={turn.role === 'user' ? userAvatar : isAgentMessage && !fromCurrentAgent ? senderName.slice(0, 1).toUpperCase() : selected.avatar} time={formatTime(turn.ts)} text={textFromChatValue(turn.content)} activity={turn.role === 'assistant' ? (persistedActivity ?? (turn.runId === activeRunId ? activeActivity : activityByRun.get(turn.runId ?? ''))) : undefined} progress={turn.role === 'assistant' ? turn.metadata?.progress : undefined} streamedAnswer={turn.role === 'assistant' ? turn.metadata?.streamedAnswer : undefined} activityLive={turn.role === 'assistant' && turn.runId === activeRunId && !isPersistedTerminalTurn} attachments={turn.metadata?.attachments} outputArtifacts={turn.role === 'assistant' ? turn.metadata?.outputArtifacts : undefined} attachmentTarget={attachmentTarget} attachmentAgentId={attachmentAgentId ?? parent.id} />;
+        return <ChatMessage key={`${turn.runId ?? 'turn'}-${index}`} side={turn.role === 'user' || (isAgentMessage && !fromCurrentAgent) ? 'operator' : 'agent'} name={turn.role === 'user' ? userName : isAgentMessage ? messageName : selected.name} avatar={turn.role === 'user' ? userAvatar : isAgentMessage && !fromCurrentAgent ? senderName.slice(0, 1).toUpperCase() : selected.avatar} time={formatTime(turn.ts)} text={textFromChatValue(turn.content)} activity={turn.role === 'assistant' ? (persistedActivity ?? (turn.runId === activeRunId ? activeActivity : activityByRun.get(turn.runId ?? ''))) : undefined} progress={turn.role === 'assistant' ? turn.metadata?.progress : undefined} streamedAnswer={turn.role === 'assistant' ? turn.metadata?.streamedAnswer : undefined} activityLive={turn.role === 'assistant' && turn.runId === activeRunId && !isPersistedTerminalTurn} attachments={turn.metadata?.attachments} outputArtifacts={turn.role === 'assistant' ? turn.metadata?.outputArtifacts : undefined} attachmentAgentId={attachmentAgentId ?? parent.id} />;
       })}
       {a2aActivities.length > 0 && <section className="a2a-activity-list" aria-label="Agent-to-agent activity">{a2aActivities.map((activity) => <A2AActivityCard key={activity.id} activity={activity} selectedName={selected.name} />)}</section>}
       {visibleRuntimeChildActivities.length > 0 && <section className="a2a-activity-list" aria-label="Minion activity">{visibleRuntimeChildActivities.map((activity) => <ToolActivityCard key={activity.runId} activity={activity} live={activity.status === 'running'} />)}</section>}
@@ -199,7 +197,7 @@ function parseModelError(text: string): ModelErrorDetails | null {
   return { overloaded: /overloaded|try again later|rate limit|temporar/i.test(message), message };
 }
 
-function MessageAttachment({ attachment, target, agentId }: { attachment: SessionAttachment; target?: ApiTarget; agentId?: string }) {
+function MessageAttachment({ attachment, agentId }: { attachment: SessionAttachment; agentId?: string }) {
   const isImage = /^image\/(?:png|jpeg|gif|webp)$/i.test(attachment.type);
   const path = attachment.artifactPath;
   const [source, setSource] = useState<string | null>(null);
@@ -210,7 +208,7 @@ function MessageAttachment({ attachment, target, agentId }: { attachment: Sessio
     if (!url || downloadState === 'downloading') return;
     setDownloadState('downloading');
     try {
-      const response = await fetchApiForTarget(target, url);
+      const response = await fetchApi(url);
       if (!response.ok) throw new Error('Attachment unavailable');
       const objectUrl = URL.createObjectURL(await response.blob());
       const link = document.createElement('a');
@@ -226,14 +224,14 @@ function MessageAttachment({ attachment, target, agentId }: { attachment: Sessio
     let objectUrl: string | undefined;
     setSource(null); setFailed(false);
     const url = `/api/attachments/${encodeURIComponent(agentId)}/${path.split('/').map(encodeURIComponent).join('/')}`;
-    void fetchApiForTarget(target, url, { signal: controller.signal, headers: { accept: 'image/*' } }).then(async (response) => {
+    void fetchApi(url, { signal: controller.signal, headers: { accept: 'image/*' } }).then(async (response) => {
       if (!response.ok) throw new Error('Attachment unavailable');
       const blob = await response.blob();
       if (!blob.type.startsWith('image/')) throw new Error('Not an image');
       if (!controller.signal.aborted) { objectUrl = URL.createObjectURL(blob); setSource(objectUrl); }
     }).catch(() => { if (!controller.signal.aborted) setFailed(true); });
     return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [agentId, isImage, path, target?.baseUrl]);
+  }, [agentId, isImage, path]);
   const imageSource = isImage && !failed ? source ?? attachment.preview ?? null : null;
   return <div className="message-attachment-card">{imageSource
     ? <figure className="message-attachment-image"><ImagePreview src={imageSource} alt={attachment.name} loading="lazy" onError={() => setFailed(true)} /><figcaption>{attachment.name}</figcaption></figure>
@@ -253,7 +251,7 @@ function formatArtifactSize(value?: number) {
   return `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${unit}`;
 }
 
-function GeneratedArtifactCard({ artifact, target, agentId }: { artifact: GeneratedArtifact; target?: ApiTarget; agentId?: string }) {
+function GeneratedArtifactCard({ artifact, agentId }: { artifact: GeneratedArtifact; agentId?: string }) {
   const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'failed'>('idle');
   const reference = artifact.storageReference?.trim();
   const canDownload = Boolean(reference && agentId);
@@ -264,19 +262,19 @@ function GeneratedArtifactCard({ artifact, target, agentId }: { artifact: Genera
     let cancelled = false;
     let url = '';
     setPreviewUrl('');
-    void fetchApiForTarget(target, generatedArtifactPath(agentId, reference), { headers: { accept: artifact.mimeType || 'image/*' } })
+    void fetchApi(generatedArtifactPath(agentId, reference), { headers: { accept: artifact.mimeType || 'image/*' } })
       .then(response => { if (!response.ok) throw new Error('Preview unavailable'); return response.blob(); })
       .then(blob => { if (!cancelled) { url = URL.createObjectURL(blob); setPreviewUrl(url); } })
       .catch(() => {});
     return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
-  }, [reference, agentId, target, artifact.kind, artifact.mimeType]);
+  }, [reference, agentId, artifact.kind, artifact.mimeType]);
   const details = [artifact.kind, artifact.mimeType, formatArtifactSize(artifact.sizeBytes)].filter(Boolean).join(' · ');
   const provenance = [artifact.provenance?.provider, artifact.provenance?.model].filter(Boolean).join(' · ');
   const download = async () => {
     if (!reference || !agentId || downloadState === 'downloading') return;
     setDownloadState('downloading');
     try {
-      const response = await fetchApiForTarget(target, generatedArtifactPath(agentId, reference), { headers: { accept: artifact.mimeType || 'application/octet-stream' } });
+      const response = await fetchApi(generatedArtifactPath(agentId, reference), { headers: { accept: artifact.mimeType || 'application/octet-stream' } });
       if (!response.ok) throw new Error('Generated artifact unavailable');
       const objectUrl = URL.createObjectURL(await response.blob());
       const link = document.createElement('a');
@@ -300,7 +298,7 @@ function GeneratedArtifactCard({ artifact, target, agentId }: { artifact: Genera
   </article>;
 }
 
-export function ChatMessage({ side, name, avatar, time, text, activity, progress, streamedAnswer, activityLive, attachments = [], outputArtifacts = [], attachmentTarget, attachmentAgentId }: { side: 'agent' | 'operator'; name: string; avatar: string; time: string; text: string; activity?: ToolActivity; progress?: RunProgress; streamedAnswer?: string; activityLive?: boolean; attachments?: SessionAttachment[]; outputArtifacts?: GeneratedArtifact[]; attachmentTarget?: ApiTarget; attachmentAgentId?: string }) {
+export function ChatMessage({ side, name, avatar, time, text, activity, progress, streamedAnswer, activityLive, attachments = [], outputArtifacts = [], attachmentAgentId }: { side: 'agent' | 'operator'; name: string; avatar: string; time: string; text: string; activity?: ToolActivity; progress?: RunProgress; streamedAnswer?: string; activityLive?: boolean; attachments?: SessionAttachment[]; outputArtifacts?: GeneratedArtifact[]; attachmentAgentId?: string }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const image = avatarSource(avatar);
   const modelError = side === 'agent' ? parseModelError(text) : null;
@@ -311,7 +309,7 @@ export function ChatMessage({ side, name, avatar, time, text, activity, progress
     window.setTimeout(() => setCopyState('idle'), 1500);
   };
   const copyLabel = copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : '';
-  return <article className={`message ${side}${modelError ? ' model-error-message' : ''}`}><div className="message-avatar" aria-label={`${name} avatar`}>{image ? <img src={image} alt="" /> : avatar}</div><div className="message-content"><small>{name.toUpperCase()} · {time.toUpperCase()}</small>{attachments.length ? <div className="message-attachments" aria-label={`${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`}>{attachments.map((attachment, index) => <MessageAttachment key={`${attachment.index ?? index}-${attachment.name}`} attachment={attachment} target={attachmentTarget} agentId={attachmentAgentId} />)}</div> : null}{outputArtifacts.length ? <section className="generated-artifacts" aria-label={`${outputArtifacts.length} generated artifact${outputArtifacts.length === 1 ? '' : 's'}`}>{outputArtifacts.map((artifact, index) => <GeneratedArtifactCard key={`${artifact.storageReference ?? artifact.name ?? artifact.kind}-${index}`} artifact={artifact} target={attachmentTarget} agentId={attachmentAgentId} />)}</section> : null}{streamedAnswer ? <StreamedAnswerCard text={streamedAnswer} /> : null}{activity && <ToolActivityCard activity={activity} live={activityLive} />}{progress?.items?.length ? <ProgressCard items={progress.items} status={progress.status} /> : null}{modelError ? <div className="message-bubble model-error-card" role="alert"><div className="model-error-sigil" aria-hidden="true">⚠</div><div><strong>{modelError.overloaded ? 'The model servers are throwing goblets' : modelErrorTitle}</strong><p>{modelError.message}</p><span>The chat is fine. The upstream model is being stupid.</span></div></div> : text && <div className="message-bubble final-answer"><Markdown>{text}</Markdown></div>}{text && <button className="copy-message" onClick={copy} aria-label={`Copy ${name} message as Markdown`} title={copyState === 'copied' ? 'Copied Markdown' : copyState === 'failed' ? 'Copy failed' : 'Copy Markdown'}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg><span aria-live="polite">{copyLabel}</span></button>}</div></article>;
+  return <article className={`message ${side}${modelError ? ' model-error-message' : ''}`}><div className="message-avatar" aria-label={`${name} avatar`}>{image ? <img src={image} alt="" /> : avatar}</div><div className="message-content"><small>{name.toUpperCase()} · {time.toUpperCase()}</small>{attachments.length ? <div className="message-attachments" aria-label={`${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`}>{attachments.map((attachment, index) => <MessageAttachment key={`${attachment.index ?? index}-${attachment.name}`} attachment={attachment} agentId={attachmentAgentId} />)}</div> : null}{outputArtifacts.length ? <section className="generated-artifacts" aria-label={`${outputArtifacts.length} generated artifact${outputArtifacts.length === 1 ? '' : 's'}`}>{outputArtifacts.map((artifact, index) => <GeneratedArtifactCard key={`${artifact.storageReference ?? artifact.name ?? artifact.kind}-${index}`} artifact={artifact} agentId={attachmentAgentId} />)}</section> : null}{streamedAnswer ? <StreamedAnswerCard text={streamedAnswer} /> : null}{activity && <ToolActivityCard activity={activity} live={activityLive} />}{progress?.items?.length ? <ProgressCard items={progress.items} status={progress.status} /> : null}{modelError ? <div className="message-bubble model-error-card" role="alert"><div className="model-error-sigil" aria-hidden="true">⚠</div><div><strong>{modelError.overloaded ? 'The model servers are throwing goblets' : modelErrorTitle}</strong><p>{modelError.message}</p><span>The chat is fine. The upstream model is being stupid.</span></div></div> : text && <div className="message-bubble final-answer"><Markdown>{text}</Markdown></div>}{text && <button className="copy-message" onClick={copy} aria-label={`Copy ${name} message as Markdown`} title={copyState === 'copied' ? 'Copied Markdown' : copyState === 'failed' ? 'Copy failed' : 'Copy Markdown'}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg><span aria-live="polite">{copyLabel}</span></button>}</div></article>;
 }
 
 function agentDisplayName(value: string) {

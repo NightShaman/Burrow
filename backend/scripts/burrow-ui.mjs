@@ -220,6 +220,7 @@ function retentionPolicyScheduler() {
       const stores = postgresApplication.stores;
       const policy = await stores.albdruck.readRetention();
       await stores.albdruck.prune();
+      await stores.workingMemory.pruneExpiredWorkingMemory();
       if (policy.operationalDays !== null) {
         const runtime = await runtimeConfig();
         await runRetentionCleanup({ dataRoot: runtime.runtimeState.agentDataRoot, traceRoot: path.join(runtime.runtimeState.cacheRoot, 'traces'), retention: { traceMaxAgeDays: policy.operationalDays }, confirm: true });

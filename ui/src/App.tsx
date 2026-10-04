@@ -1,15 +1,13 @@
 import { readAttachment } from './app/readAttachment';
+import { isWithinAttachmentBudget } from './features/chat/attachmentValidation';
 import { useModelSelectionWriter } from './app/useModelSelectionWriter';
 import { useConfirm } from './app/ConfirmDialog';
-import { targetOwnerKey } from './app/useOwnedApi';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { PointerEvent } from 'react';
 import type { Agent, Page, PanelId, SettingsTab } from './app/types';
 import { api, attachmentDisplayName, type SetupStatus } from './app/api';
-import { targetForResource, useApiTargets } from './app/apiTargets';
 import { loadModPanels, modsChangedEvent, type ModPanel } from './app/modPanels';
 import { ModPanelHost } from './features/mods/ModPanelHost';
-import { TargetSelector } from './features/navigation/TargetSelector';
 import { clampRailSplit, listenResize, usePersistedTheme, usePersistedLayout } from './app/usePersistedLayout';
 import { useAgentRailPreferences } from './app/useAgentRailPreferences';
 import { useAppTabs } from './app/useAppTabs';
@@ -51,7 +49,7 @@ function AppContent() {
     if (firstRun) { setPage('settings'); setSettingsTab('agents'); }
   }, [firstRun]);
   const completeFirstRun = () => { setSetupStatus((status) => status ? { ...status, wizardStep: 'ready', configured: true } : status); setPage('chat'); };
-  const { targets: apiTargets, loaded: apiTargetsLoaded } = useApiTargets();
+  // Burrow is a single local runtime. Node Goblin integrations are explicit mod-owned APIs.
   const [modPanels, setModPanels] = useState<ModPanel[]>([]);
   const [modsLoaded, setModsLoaded] = useState(false);
   const [activeModId, setActiveModId] = useState<string | null>(null);
@@ -66,17 +64,16 @@ function AppContent() {
   }, []);
   const activeMod = modPanels.find((mod) => mod.modId === activeModId);
   useEffect(() => { if (modsLoaded && activeModId && !activeMod) { setActiveModId(null); setPage('chat'); } }, [activeModId, activeMod, modsLoaded]);
-  const { activeTarget, activeTargets, expandedAgents, runtimeVersion, selectedAgentId, selectedStreamId, selectChildStream, selectParentStream, selectTarget, setSelectedAgentId, setSelectedStreamId, showParentStream, toggleAgentExpanded } = useRuntimeSelection({ targets: apiTargets, targetsLoaded: apiTargetsLoaded });
+  const { expandedAgents, selectedAgentId, selectedStreamId, selectChildStream, selectParentStream, setSelectedAgentId, setSelectedStreamId, showParentStream, toggleAgentExpanded } = useRuntimeSelection();
   const { tabs, setTabs, activeTabId, setActiveTabId } = useAppTabs();
   const { leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed, leftSplit, setLeftSplit, rightSplit, setRightSplit, leftTopPanel, setLeftTopPanel, leftBottomPanel, setLeftBottomPanel, rightTopPanel, setRightTopPanel, rightBottomPanel, setRightBottomPanel, leftRailLayout, setLeftRailLayout, rightRailLayout, setRightRailLayout, leftSinglePanel, setLeftSinglePanel, rightSinglePanel, setRightSinglePanel } = usePersistedLayout();
   const workspacePanelVisible = page === 'chat' && !leftCollapsed && (leftRailLayout === 'divided' ? leftTopPanel === 'workspace' || leftBottomPanel === 'workspace' : leftSinglePanel === 'workspace');
-  const { workspaceFiles, openFile, saveFile } = useWorkspaceFiles({ tabs, selectedAgentId, targets: apiTargets, setTabs, setActiveTabId, pollingEnabled: workspacePanelVisible });
-  const { isAttachmentScopeCurrent, attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation, draft, setDraft, refreshSessions, refreshConversation, selectSession: selectChatSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun, a2aActivities, runtimeRun, runtimeChildActivities, cancelRuntimeRun } = useChatSession(selectedAgentId, activeTargets);
+  const { workspaceFiles, openFile, saveFile } = useWorkspaceFiles({ tabs, selectedAgentId, setTabs, setActiveTabId, pollingEnabled: workspacePanelVisible });
+  const { isAttachmentScopeCurrent, attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation, draft, setDraft, refreshSessions, refreshConversation, selectSession: selectChatSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun, a2aActivities, runtimeRun, runtimeChildActivities, cancelRuntimeRun } = useChatSession(selectedAgentId);
   const [isResettingSession, setIsResettingSession] = useState(false);
   const runtimeProviders = useRef([]);
   const { agents, setAgents, refreshAgents, registryState, registryError, registryStale } = useRuntimeAgents({
     selectedAgentId,
-    targets: activeTargets,
     setSelectedAgentId,
     parentSessionIdForAgent,
     runtimeProviders,
@@ -92,8 +89,8 @@ function AppContent() {
   // Settings must remain reachable when the first agent has not been created yet.
   // The placeholder is only used for the settings form; chat still waits for a real agent.
   const selected = loadedSelected ?? { id: '', name: '', avatar: '', activity: 'Disabled', context: null, provider: '', model: '', effort: '', temperature: 0.7, workspace: '', files: [], subagents: [] };
-  const { accounts, anthropicUsage, openAiUsage, operatorProfile, providerConnectionStatus, refreshModelConnections, reorderAccounts, savedProviders, setOperatorProfile } = useRuntimeDashboard({ selectedProvider: selected.provider, setAgents, runtimeProviders, reportError, target: activeTarget });
-  const visibleTabs = tabs.filter((tab) => tab.kind !== 'group' || (tab.targetId ?? 'local') === activeTarget.id);
+  const { accounts, anthropicUsage, openAiUsage, operatorProfile, providerConnectionStatus, refreshModelConnections, reorderAccounts, savedProviders, setOperatorProfile } = useRuntimeDashboard({ selectedProvider: selected.provider, setAgents, runtimeProviders, reportError });
+  const visibleTabs = tabs;
   const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0];
   const railAgents = agents;
   // The NDJSON stream is the authority for a live run. Polling traces here used
@@ -126,7 +123,7 @@ function AppContent() {
     selectChildSession(agentId, subagent.resourceId ?? subagent.id);
     setActiveTabId('chat');
   };
-  const writeModelSelection = useModelSelectionWriter(apiTargets, savedProviders,
+  const writeModelSelection = useModelSelectionWriter(savedProviders,
     (id, patch) => setAgents(all => all.map(agent => agent.id === id ? { ...agent, ...patch } : agent)), reportError);
   const updateAgent = async (patch: Partial<Agent>) => {
     if (selected) await writeModelSelection(selected, patch);
@@ -154,7 +151,7 @@ function AppContent() {
   const attachImage = (files: File[]) => {
     const accepted = files.filter((file) => {
       if (!isSupportedAttachment(file)) { reportError(`${file.name}: Attach an image or text document. PDF extraction is not supported.`); return false; }
-      if (file.size > 22_000_000) { reportError(`${file.name}: Attachment is too large. Maximum file size is 22 MB.`); return false; }
+      if (!isWithinAttachmentBudget(attached.map((item) => item.size), file.size)) { reportError(`${file.name}: Attachment exceeds the client file, count, or batch safety budget.`); return false; }
       return true;
     });
     if (!accepted.length) return;
@@ -163,11 +160,10 @@ function AppContent() {
   const setParentActivity = (agentId: string, status: string) => {
     setAgents((current) => current.map((agent) => agent.id === agentId ? { ...agent, activity: formatAgentActivity(status.toLowerCase()) } : agent));
   };
-  const selectedTarget = targetForResource(apiTargets, selectedAgentId).target;
-  const { activeRunForSelection, activeRunId, sendMessage, cancelRun, liveProgress, liveAnswer } = useChatRun({ selectedAgentId, selected, selectedTarget, savedProviders, session: { attached, clearAttachment, sessionId, draft, setDraft, clearError, reportError, leaveNewSessionForMessage, appendTurn, storeToolActivity, toolActivityForRun, refreshSessions, refreshConversation }, setAgentActivity: setParentActivity });
+  const { activeRunForSelection, activeRunId, sendMessage, cancelRun, liveProgress, liveAnswer } = useChatRun({ selectedAgentId, selected, savedProviders, session: { attached, clearAttachment, sessionId, draft, setDraft, clearError, reportError, leaveNewSessionForMessage, appendTurn, storeToolActivity, toolActivityForRun, refreshSessions, refreshConversation }, setAgentActivity: setParentActivity });
   const displayedRun = activeRunForSelection ?? runtimeRun;
   const cancelDisplayedRun = activeRunForSelection ? cancelRun : runtimeRun ? () => cancelRuntimeRun(runtimeRun) : () => {};
-  const composers = useChatComposers({ sessionId, selectedAgentId, activeRunId, sessions, targets: apiTargets, activeTarget, refreshSessions, selectSession, reportError, clearError, tabs, setTabs, setActiveTabId });
+  const composers = useChatComposers({ sessionId, selectedAgentId, activeRunId, sessions, refreshSessions, selectSession, reportError, clearError, tabs, setTabs, setActiveTabId });
   const resizeVertical = (kind: 'left' | 'right', event: PointerEvent) => { const start = event.clientY; const initial = kind === 'left' ? leftSplit : rightSplit; const host = (event.currentTarget as HTMLElement).parentElement?.getBoundingClientRect(); if (!host) return; const move = (e: globalThis.PointerEvent) => { const next = initial + ((e.clientY - start) / host.height) * 100; if (kind === 'left') setLeftSplit(clampRailSplit(next)); else setRightSplit(clampRailSplit(next)); }; listenResize(move); };
   const style = { '--left': leftCollapsed ? '38px' : '320px', '--right': rightCollapsed ? '38px' : '320px', '--left-split': `${leftSplit}%`, '--right-split': `${rightSplit}%` } as React.CSSProperties;
   // An empty registry is a valid configured state: keep the cockpit visible so
@@ -176,13 +172,13 @@ function AppContent() {
   // genuinely unavailable.
   if (!loadedSelected && registryState !== 'empty' && page !== 'settings' && page !== 'archive' && page !== 'albdruck' && !activeMod) {
     const registryMessage = registryState === 'unavailable'
-      ? `${activeTarget.name} is unavailable${registryError ? `: ${registryError}` : '.'}`
+      ? `Local runtime is unavailable${registryError ? `: ${registryError}` : '.'}`
       : 'Loading Burrow agents…';
     return <main className="cockpit loading-app" data-theme={theme}><p role={registryState === 'unavailable' ? 'alert' : 'status'}>{registryMessage}</p>{registryState !== 'loading' && <button type="button" onClick={() => setPage('settings')}>Open settings</button>}</main>;
   }
   const renderRailPanel = (panel: PanelId) => {
     if (panel === 'agents') return <AgentsPanel agents={railAgents} view={agentRailPreferences.view} order={agentRailPreferences.order} selectedStreamId={selectedStreamId} expandedAgents={expandedAgents} onToggleAgent={toggleAgentExpanded} onSelectAgent={selectAgent} onSelectSubagent={selectSubagent} />;
-    if (panel === 'system') return <SystemPanel target={activeTarget} provider={selected.provider} providerConnectionStatus={providerConnectionStatus} />;
+    if (panel === 'system') return <SystemPanel provider={selected.provider} providerConnectionStatus={providerConnectionStatus} />;
     if (panel === 'workspace') return <WorkspacePanel selected={{ ...selected, files: workspaceFiles }} onOpenFile={openFile} />;
     if (panel === 'codex') return <CodexAccounts accounts={accounts} onReorder={reorderAccounts} />;
     if (panel === 'accounts') return <AccountStatus providers={savedProviders} />;
@@ -198,7 +194,6 @@ function AppContent() {
   };
   return <main className={`cockpit ${page === 'tasks' || page === 'archive' || page === 'albdruck' ? 'tasks-mode' : page === 'forge' ? 'forge-mode' : page === 'settings' ? 'settings-mode' : activeMod ? 'mod-mode' : ''}`} data-theme={theme} style={style}>
     <header className="app-header">
-      {apiTargets.length > 1 && <TargetSelector targets={apiTargets} selectedId={activeTarget?.id ?? 'local'} onChange={selectTarget} />}
       <nav className="page-tabs" aria-label="Primary navigation">
         {(['chat', 'tasks', 'archive', 'albdruck', 'forge'] as Page[]).map((item) => <button className={!activeMod && page === item ? 'active' : ''} onClick={() => changePage(item)} key={item} aria-current={!activeMod && page === item ? 'page' : undefined}>{item === 'albdruck' ? 'Albdruck' : item === 'forge' ? 'Forge' : item}</button>)}
         {modPanels.map((mod) => <button type="button" key={mod.modId} className={activeModId === mod.modId ? 'active' : ''} aria-current={activeModId === mod.modId ? 'page' : undefined} onClick={() => setActiveModId(mod.modId)}>{mod.name}</button>)}
@@ -206,10 +201,10 @@ function AppContent() {
       </nav>
     </header>
     {page === 'chat' && !activeMod && <WorkspaceRail collapsed={leftCollapsed} topPanel={leftTopPanel} bottomPanel={leftBottomPanel} layout={leftRailLayout} singlePanel={leftSinglePanel} renderPanel={renderRailPanel} onExpand={() => setLeftCollapsed(false)} onCollapse={() => setLeftCollapsed(true)} split={leftSplit} onSplitChange={setLeftSplit} onResizeSplit={(event) => resizeVertical('left', event)} />}
-    <section className={`workspace ${page === 'tasks' || page === 'archive' || page === 'albdruck' ? 'tasks-workspace' : page === 'forge' ? 'forge-workspace' : page === 'settings' ? 'settings-workspace' : activeMod ? 'mod-workspace' : ''}`}><div className="workspace-watermark" aria-hidden="true"><img src="/burrow-logo.png" alt="" /></div><Suspense fallback={<div className="page-loading" role="status">Loading page…</div>}>{activeMod ? <ModPanelHost key={activeMod.modId + activeMod.controlUrl + (activeMod.version ?? '')} panel={activeMod} /> : page === 'tasks' ? <Tasks key={targetOwnerKey(activeTarget)} target={activeTarget ?? null} agents={agents} /> : page === 'albdruck' ? <Albdruck key={activeTarget?.id ?? 'local'} agents={agents} target={activeTarget} /> : page === 'archive' ? <Archive key={targetOwnerKey(activeTarget)} target={activeTarget ?? null} agents={agents} operatorName={operatorProfile.name} /> : page === 'forge' ? <Forge key={targetOwnerKey(activeTarget)} target={activeTarget ?? null} agents={agents} selectedAgentId={selectedAgentId} sessionId={sessionId} /> : page === 'settings' ? <Settings key={activeTarget?.id ?? 'local'} tab={settingsTab} setTab={setSettingsTab} agents={agents} selected={selected} targets={apiTargets} onOperatorProfileChanged={setOperatorProfile} onFirstRunComplete={completeFirstRun} savedProviders={savedProviders} onModelConnectionsChanged={refreshModelConnections} onAgentsChanged={refreshAgents} leftTopPanel={leftTopPanel} setLeftTopPanel={setLeftTopPanel} leftBottomPanel={leftBottomPanel} setLeftBottomPanel={setLeftBottomPanel} rightTopPanel={rightTopPanel} setRightTopPanel={setRightTopPanel} rightBottomPanel={rightBottomPanel} setRightBottomPanel={setRightBottomPanel} leftSinglePanel={leftSinglePanel} setLeftSinglePanel={setLeftSinglePanel} rightSinglePanel={rightSinglePanel} setRightSinglePanel={setRightSinglePanel} leftRailLayout={leftRailLayout} setLeftRailLayout={setLeftRailLayout} rightRailLayout={rightRailLayout} setRightRailLayout={setRightRailLayout} theme={theme} setTheme={setTheme} agentRailPreferences={agentRailPreferences} setAgentRailPreferences={setAgentRailPreferences} previewFirstRun={previewFirstRun} /> : <><DocumentTabs tabs={visibleTabs} activeTabId={activeTab.id} onSelect={setActiveTabId} onClose={closeTab} /><ChatModelSelector selected={selected} savedProviders={savedProviders} updateAgent={updateAgent} sessions={sessions} sessionId={sessionId} onSessionChange={selectSession} onNewSession={startNewSession} onNewNamedSession={composers.session.open} onCreateGroup={composers.group.open} locked={Boolean(displayedRun)} />{activeTab.kind === 'file' ? <Editor tab={activeTab} setTabs={setTabs} onSave={saveFile} /> : activeTab.kind === 'group' && activeTab.channelId ? <GroupChannelsPage key={`${activeTarget.id}:${activeTab.channelId}`} channelId={activeTab.channelId} target={activeTarget} agents={agents} operator={operatorProfile} /> : <Chat key={`${selectedAgentId}:${sessionId}`} selected={selected} parent={selected} operator={operatorProfile} draft={draft} setDraft={setDraft} attached={attached} onAttach={attachImage} onRemoveAttachment={removeAttachment} isNewSession={isNewSession} turns={turns} isLoading={isLoadingConversation} error={chatError} isSending={Boolean(displayedRun)} activeRunId={displayedRun?.runId ?? ''} activeToolActivity={activeRunForSelection ? toolActivityForRun(activeRunForSelection.runId) : runtimeRun?.toolActivity} runtimeChildActivities={runtimeChildActivities} liveProgress={activeRunForSelection ? liveProgress : runtimeRun?.progress ?? []} liveAnswer={activeRunForSelection ? liveAnswer : ''} a2aActivities={a2aActivities} runtimeUserMessage={runtimeRun && !activeRunForSelection ? runtimeRun.latestUserMessage : ''} onSend={sendMessage} onCancel={cancelDisplayedRun} selectedAgentId={selectedAgentId} resourceAgentId={selected?.resourceId ?? selectedAgentId} sessionId={sessionId} apiTarget={activeTarget} />}</>}</Suspense></section>
+    <section className={`workspace ${page === 'tasks' || page === 'archive' || page === 'albdruck' ? 'tasks-workspace' : page === 'forge' ? 'forge-workspace' : page === 'settings' ? 'settings-workspace' : activeMod ? 'mod-workspace' : ''}`}><div className="workspace-watermark" aria-hidden="true"><img src="/burrow-logo.png" alt="" /></div><Suspense fallback={<div className="page-loading" role="status">Loading page…</div>}>{activeMod ? <ModPanelHost key={activeMod.modId + activeMod.controlUrl + (activeMod.version ?? '')} panel={activeMod} /> : page === 'tasks' ? <Tasks agents={agents} /> : page === 'albdruck' ? <Albdruck agents={agents} /> : page === 'archive' ? <Archive agents={agents} operatorName={operatorProfile.name} /> : page === 'forge' ? <Forge agents={agents} selectedAgentId={selectedAgentId} sessionId={sessionId} /> : page === 'settings' ? <Settings key="local" tab={settingsTab} setTab={setSettingsTab} agents={agents} selected={selected} onOperatorProfileChanged={setOperatorProfile} onFirstRunComplete={completeFirstRun} savedProviders={savedProviders} onModelConnectionsChanged={refreshModelConnections} onAgentsChanged={refreshAgents} leftTopPanel={leftTopPanel} setLeftTopPanel={setLeftTopPanel} leftBottomPanel={leftBottomPanel} setLeftBottomPanel={setLeftBottomPanel} rightTopPanel={rightTopPanel} setRightTopPanel={setRightTopPanel} rightBottomPanel={rightBottomPanel} setRightBottomPanel={setRightBottomPanel} leftSinglePanel={leftSinglePanel} setLeftSinglePanel={setLeftSinglePanel} rightSinglePanel={rightSinglePanel} setRightSinglePanel={setRightSinglePanel} leftRailLayout={leftRailLayout} setLeftRailLayout={setLeftRailLayout} rightRailLayout={rightRailLayout} setRightRailLayout={setRightRailLayout} theme={theme} setTheme={setTheme} agentRailPreferences={agentRailPreferences} setAgentRailPreferences={setAgentRailPreferences} previewFirstRun={previewFirstRun} /> : <><DocumentTabs tabs={visibleTabs} activeTabId={activeTab.id} onSelect={setActiveTabId} onClose={closeTab} /><ChatModelSelector selected={selected} savedProviders={savedProviders} updateAgent={updateAgent} sessions={sessions} sessionId={sessionId} onSessionChange={selectSession} onNewSession={startNewSession} onNewNamedSession={composers.session.open} onCreateGroup={composers.group.open} locked={Boolean(displayedRun)} />{activeTab.kind === 'file' ? <Editor tab={activeTab} setTabs={setTabs} onSave={saveFile} /> : activeTab.kind === 'group' && activeTab.channelId ? <GroupChannelsPage key={activeTab.channelId} channelId={activeTab.channelId} agents={agents} operator={operatorProfile} /> : <Chat key={`${selectedAgentId}:${sessionId}`} selected={selected} parent={selected} operator={operatorProfile} draft={draft} setDraft={setDraft} attached={attached} onAttach={attachImage} onRemoveAttachment={removeAttachment} isNewSession={isNewSession} turns={turns} isLoading={isLoadingConversation} error={chatError} isSending={Boolean(displayedRun)} activeRunId={displayedRun?.runId ?? ''} activeToolActivity={activeRunForSelection ? toolActivityForRun(activeRunForSelection.runId) : runtimeRun?.toolActivity} runtimeChildActivities={runtimeChildActivities} liveProgress={activeRunForSelection ? liveProgress : runtimeRun?.progress ?? []} liveAnswer={activeRunForSelection ? liveAnswer : ''} a2aActivities={a2aActivities} runtimeUserMessage={runtimeRun && !activeRunForSelection ? runtimeRun.latestUserMessage : ''} onSend={sendMessage} onCancel={cancelDisplayedRun} selectedAgentId={selectedAgentId} resourceAgentId={selected?.resourceId ?? selectedAgentId} sessionId={sessionId}  />}</>}</Suspense></section>
     {page === 'chat' && !activeMod && <RightRail collapsed={rightCollapsed} topPanel={rightTopPanel} bottomPanel={rightBottomPanel} layout={rightRailLayout} singlePanel={rightSinglePanel} renderPanel={renderRailPanel} onExpand={() => setRightCollapsed(false)} onCollapse={() => setRightCollapsed(true)} split={rightSplit} onSplitChange={setRightSplit} onResizeSplit={(event) => resizeVertical('right', event)} />}
     <ChatComposerDialogs agents={agents} session={composers.session} group={composers.group} />
-    <AppStatusBar anthropicUsage={anthropicUsage} openAiUsage={openAiUsage} runtimeVersion={runtimeVersion} registryStale={registryStale} />
+    <AppStatusBar anthropicUsage={anthropicUsage} openAiUsage={openAiUsage} registryStale={registryStale} />
   </main>;
 }
 

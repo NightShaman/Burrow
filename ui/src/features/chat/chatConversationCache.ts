@@ -1,4 +1,5 @@
 import type { SessionTurn } from '../../app/api';
+import { clientBudgets } from '../../app/clientBudgets';
 import { readStoredValue, writeStoredValue } from '../../app/browserStorage';
 
 export type ConversationCache = Record<string, SessionTurn[]>;
@@ -7,12 +8,19 @@ type StoredConversationCache = Record<string, ConversationCacheEntry>;
 
 export const conversationCacheStorageKey = 'hc.chatConversations.v1';
 const conversationCacheVersion = 1;
-const conversationCacheLimit = 24;
+const conversationCacheLimit = clientBudgets.conversationCacheEntries;
 
 function isCacheEntry(value: unknown): value is ConversationCacheEntry {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const entry = value as Record<string, unknown>;
-  return typeof entry.savedAt === 'number' && Number.isFinite(entry.savedAt) && Array.isArray(entry.turns);
+  if (typeof entry.savedAt !== 'number' || !Number.isFinite(entry.savedAt) || !Array.isArray(entry.turns) || entry.turns.length > clientBudgets.conversationCacheTurnsPerEntry) return false;
+  return entry.turns.every((turn) => {
+    if (!turn || typeof turn !== 'object' || Array.isArray(turn)) return false;
+    const record = turn as Record<string, unknown>;
+    if ('content' in record && typeof record.content !== 'string') return false;
+    if (typeof record.content === 'string' && new TextEncoder().encode(record.content).byteLength > clientBudgets.conversationCacheTextBytesPerTurn) return false;
+    return !('metadata' in record) || Boolean(record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata));
+  });
 }
 
 function isStoredConversationCache(value: unknown): value is StoredConversationCache {
@@ -35,6 +43,11 @@ export function conversationCacheKey(agentId: string, sessionId: string) {
   return `${agentId}:${sessionId}`;
 }
 
+/** Purge invalidation is explicit: no stale conversation can resurrect from browser storage. */
+export function clearConversationCache(storage?: Storage | null) {
+  try { storage?.removeItem(conversationCacheStorageKey); } catch { /* unavailable storage is already empty for this owner */ }
+}
+
 export function readConversationCache(storage?: Storage | null): ConversationCache {
   return Object.fromEntries(Object.entries(readEntries(storage))
     .sort(([, a], [, b]) => b.savedAt - a.savedAt)
@@ -49,7 +62,8 @@ export function writeConversationCache(cache: ConversationCache, touchedKey?: st
   Object.entries(cache).forEach(([key, turns]) => {
     // Optimistic image previews may be multi-megabyte data URLs. Keep them in
     // memory for the send-to-artifact handoff, not in browser storage.
-    const storedTurns = turns.map((turn) => turn.metadata?.attachments?.some((item) => item.preview)
+    const boundedTurns = turns.slice(-clientBudgets.conversationCacheTurnsPerEntry).filter((turn) => new TextEncoder().encode(typeof turn.content === 'string' ? turn.content : '').byteLength <= clientBudgets.conversationCacheTextBytesPerTurn);
+    const storedTurns = boundedTurns.map((turn) => turn.metadata?.attachments?.some((item) => item.preview)
       ? { ...turn, metadata: { ...turn.metadata, attachments: turn.metadata.attachments.map(({ preview: _preview, ...item }) => item) } }
       : turn);
     next[key] = { savedAt: key === touchedKey ? now : next[key]?.savedAt ?? now, turns: storedTurns };

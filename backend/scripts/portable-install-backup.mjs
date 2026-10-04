@@ -7,6 +7,7 @@ import process from 'node:process';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { coldBackupPolicy, restoreInventory } from './portable-backup-policy.mjs';
 const execFileAsync = promisify(execFile);
 const ARCHIVE_ROOT = 'burrow-install';
 const REQUIRED = ['app', 'bin', 'burrow.env', 'config', 'workspace', 'integrations'];
@@ -36,26 +37,27 @@ export function parseArgs(argv = []) {
 }
 
 export function usage() {
-  return `Usage:\n  burrow install-backup --output FILE [--root DIR] [--overwrite] [--confirm] [--json]\n  burrow install-restore --archive FILE [--home DIR] [--replace] [--confirm] [--json]\n\nCreates/restores a complete portable Burrow install. Backup is dry-run by default. Restore targets <home>/.burrow, preserves modes, and assigns ownership to the target home owner.\n`;
+  return `Usage:\n  burrow install-backup --output FILE [--root DIR] [--overwrite] [--confirm] [--json]\n  burrow install-restore --archive FILE [--home DIR] [--replace] [--confirm] [--json]\n\nCreates/restores a complete portable Burrow install. Backup is dry-run by default. Restore targets <home>/.burrow, requires explicit --mapping-file JSON for retained absolute paths/database settings, preserves modes, and assigns ownership to the target home owner.\n`;
 }
 
 async function exists(file) { try { await fs.lstat(file); return true; } catch (error) { if (error?.code === 'ENOENT') return false; throw error; } }
 async function directoryIsEmpty(dir) { try { return (await fs.readdir(dir)).length === 0; } catch (error) { if (error?.code === 'ENOENT') return true; throw error; } }
 
-export async function planPortableInstallBackup({ root, output, overwrite = false, now = new Date() } = {}) {
+export async function planPortableInstallBackup({ root, output, overwrite = false, now = new Date(), runCommand = execFileAsync } = {}) {
   const installRoot = path.resolve(nonEmpty(root, '--root'));
   const archive = path.resolve(nonEmpty(output, '--output'));
   if (await exists(archive) && !overwrite) throw new Error('backup output exists; pass --overwrite to replace it');
   const stat = await fs.stat(installRoot);
   if (!stat.isDirectory()) throw new Error(`install root is not a directory: ${installRoot}`);
   if (archive === installRoot || archive.startsWith(`${installRoot}${path.sep}`)) throw new Error('backup archive must be outside the install root');
+  const policy = await exists(path.join(installRoot, 'burrow.env')) ? await coldBackupPolicy(installRoot, runCommand) : null;
   const required = [...REQUIRED];
   const present = await Promise.all(required.map(async (entry) => ({ entry, exists: await exists(path.join(installRoot, entry)) })));
-  return { ok: present.every((entry) => entry.exists), dryRun: true, installRoot, archive, required, missing: present.filter((entry) => !entry.exists).map((entry) => entry.entry), createdAt: now.toISOString() };
+  return { ok: present.every((entry) => entry.exists), dryRun: true, installRoot, archive, policy, required, missing: present.filter((entry) => !entry.exists).map((entry) => entry.entry), createdAt: now.toISOString() };
 }
 
-export async function createPortableInstallBackup({ root, output, overwrite = false, now = new Date(), runTar = execFileAsync } = {}) {
-  const plan = await planPortableInstallBackup({ root, output, overwrite, now });
+export async function createPortableInstallBackup({ root, output, overwrite = false, now = new Date(), runTar = execFileAsync, runCommand = execFileAsync } = {}) {
+  const plan = await planPortableInstallBackup({ root, output, overwrite, now, runCommand });
   if (!plan.ok) return { ...plan, dryRun: false, created: false, error: 'incomplete_install_root' };
   await fs.mkdir(path.dirname(plan.archive), { recursive: true });
   const staging = await fs.mkdtemp(path.join(path.dirname(plan.archive), '.burrow-portable-backup-'));
@@ -69,10 +71,11 @@ export async function createPortableInstallBackup({ root, output, overwrite = fa
       preserveTimestamps: true,
       filter: (source) => source === plan.installRoot || !path.basename(source).startsWith('.app-staging-'),
     });
-    await fs.writeFile(path.join(stagedRoot, MANIFEST), `${JSON.stringify({ format: 1, createdAt: plan.createdAt, archiveRoot: ARCHIVE_ROOT, required: plan.required, checksums: await inventory(stagedRoot) }, null, 2)}\n`, { mode: 0o600 });
+    await fs.writeFile(path.join(stagedRoot, MANIFEST), `${JSON.stringify({ format: 1, policy: plan.policy, createdAt: plan.createdAt, archiveRoot: ARCHIVE_ROOT, required: plan.required, checksums: await inventory(stagedRoot) }, null, 2)}\n`, { mode: 0o600 });
     const outputHandle = await fs.open(pendingArchive, 'wx', 0o600);
     await outputHandle.close();
     await runTar('tar', ['-czf', pendingArchive, '-C', staging, ARCHIVE_ROOT], { timeout: 300_000 });
+    await coldBackupPolicy(plan.installRoot, runCommand);
     await fs.chmod(pendingArchive, 0o600);
     await validateArchive(pendingArchive, runTar);
     if (overwrite) await fs.rename(pendingArchive, plan.archive);
@@ -169,6 +172,11 @@ async function validateArchive(archive, runTar) {
   return entries;
 }
 
+async function previewEnvironment(archive, runTar) {
+  const { stdout } = await runTar('tar', ['-xOzf', archive, `${ARCHIVE_ROOT}/burrow.env`], { maxBuffer: TAR_LIST_MAX_BUFFER });
+  return restoreInventory(stdout);
+}
+
 async function applyOwnership(root, owner) {
   const walk = async (current) => {
     const stat = await fs.lstat(current);
@@ -185,7 +193,7 @@ const RESTORED_INSTALL_PATHS = Object.freeze({
   BURROW_CLAUDE_BIN: (root) => path.join(root, 'integrations', 'claude-code', 'node_modules', '.bin', 'claude'),
 });
 
-async function rebaseRestoredEnvironment(installRoot, finalRoot = installRoot) {
+async function rebaseRestoredEnvironment(installRoot, finalRoot = installRoot, mapping = {}) {
   const envPath = path.join(installRoot, 'burrow.env');
   const original = await fs.readFile(envPath, 'utf8');
   const lines = original.split('\n');
@@ -193,6 +201,7 @@ async function rebaseRestoredEnvironment(installRoot, finalRoot = installRoot) {
     const separator = line.indexOf('=');
     if (separator < 1) return line;
     const key = line.slice(0, separator);
+    if (Object.hasOwn(mapping, key)) return `${key}=${mapping[key]}`;
     const resolvePath = RESTORED_INSTALL_PATHS[key];
     if (!resolvePath) return line;
     const resolved = resolvePath(finalRoot);
@@ -227,11 +236,14 @@ export async function planPortableInstallRestore({ archive, home = process.env.H
   const targetEmpty = targetExists ? await directoryIsEmpty(target) : true;
   if (targetExists && !targetEmpty && !replace) throw new Error(`restore target exists: ${target}; pass --replace with --confirm to replace it`);
   const entries = await validateArchive(sourceArchive, runTar);
-  return { ok: true, dryRun: true, archive: sourceArchive, targetHome, target, replace: Boolean(replace), targetExists, archiveEntries: entries.length, owner: { uid: homeStat.uid, gid: homeStat.gid } };
+  return { ok: true, dryRun: true, archive: sourceArchive, targetHome, target, replace: Boolean(replace), targetExists, archiveEntries: entries.length, environmentInventory: await previewEnvironment(sourceArchive, runTar), owner: { uid: homeStat.uid, gid: homeStat.gid } };
 }
 
-export async function restorePortableInstall({ archive, home = process.env.HOME || os.homedir(), replace = false, runTar = execFileAsync, runCommand = execFileAsync } = {}) {
+export async function restorePortableInstall({ archive, home = process.env.HOME || os.homedir(), replace = false, mappingFile = null, runTar = execFileAsync, runCommand = execFileAsync } = {}) {
   const plan = await planPortableInstallRestore({ archive, home, replace, runTar });
+  const mapping = mappingFile ? JSON.parse(await fs.readFile(mappingFile, 'utf8')) : {};
+  if (!mapping || Array.isArray(mapping) || typeof mapping !== 'object' || Object.entries(mapping).some(([key, value]) => !/^[A-Z_][A-Z0-9_]*$/.test(key) || typeof value !== 'string' || /[\r\n]/.test(value))) throw new Error('invalid restore mapping');
+  for (const entry of plan.environmentInventory) if (entry.requiresMapping && !Object.hasOwn(mapping, entry.key)) throw new Error(`restore requires explicit mapping for ${entry.key}; use --mapping-file JSON`);
   const staging = await fs.mkdtemp(path.join(plan.targetHome, '.burrow-restore-'));
   let preserveStaging = false;
   try {
@@ -244,7 +256,10 @@ export async function restorePortableInstall({ archive, home = process.env.HOME 
     if (manifest?.format !== 1 || manifest?.archiveRoot !== ARCHIVE_ROOT) throw new Error('archive has an unsupported portable install manifest');
     // Preparation must not remove or mutate the previous installation (OPS-002).
     await fs.rm(manifestPath, { force: true });
-    await rebaseRestoredEnvironment(stagedRoot, plan.target);
+    if (manifest.policy?.databaseMode === 'managed' && Object.hasOwn(mapping, 'BURROW_POSTGRES_LIFECYCLE') && mapping.BURROW_POSTGRES_LIFECYCLE !== 'managed') throw new Error('physical managed archive cannot switch database lifecycle during restore');
+    if (manifest.policy?.databaseMode === 'managed' && (manifest.policy.sourceOwner !== os.userInfo().username || manifest.policy.sourceUid !== plan.owner.uid)) throw new Error('managed physical restore requires same OS owner; use logical PostgreSQL role migration separately');
+    if (!manifest.policy && plan.environmentInventory.some(entry => entry.databaseIdentity)) throw new Error('legacy database archive lacks source owner evidence; create a new cold backup');
+    await rebaseRestoredEnvironment(stagedRoot, plan.target, mapping);
     await installRestoredIntegrations(stagedRoot, runCommand);
     if (process.getuid?.() !== plan.owner.uid || process.getgid?.() !== plan.owner.gid) await applyOwnership(stagedRoot, plan.owner);
     const previousRoot = path.join(staging, 'previous-install');
@@ -272,7 +287,7 @@ export async function restorePortableInstall({ archive, home = process.env.HOME 
 
 export function formatPortableInstallResult(result) {
   if (result.restored) return `Burrow portable install restored to: ${result.target}\nOwnership: ${result.owner.uid}:${result.owner.gid}\nRecreate the user service: ${result.serviceCommand}`;
-  if (result.created) return `Burrow portable install backup created: ${result.archive}`;
-  if (result.dryRun && result.target) return `Burrow portable install restore planned: ${result.archive} → ${result.target}\nDry run only. Re-run with --confirm to restore.`;
-  return `Burrow portable install backup ${result.ok ? 'planned' : 'failed'}: ${result.archive}\n${result.dryRun ? 'Dry run only. Re-run with --confirm to create the archive.' : ''}`;
+  if (result.created) return `Burrow cold install-tree backup created: ${result.archive}\nExclusions: ${result.policy.exclusions.join('; ')}`;
+  if (result.dryRun && result.target) return `Burrow portable install restore planned: ${result.archive} → ${result.target}\nRetained environment inventory: ${JSON.stringify(result.environmentInventory)}\nDry run only. Re-run with --confirm to restore.`;
+  return `Burrow cold install-tree backup ${result.ok ? 'planned' : 'failed'}: ${result.archive}\nExclusions: ${result.policy?.exclusions.join('; ') || '(incomplete source)'}\n${result.dryRun ? 'Dry run only. Re-run with --confirm to create the archive.' : ''}`;
 }

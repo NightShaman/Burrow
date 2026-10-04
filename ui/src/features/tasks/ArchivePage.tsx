@@ -1,6 +1,3 @@
-import { ownedAgentResource } from '../../app/ownedAgent';
-import { useOwnedApi, targetOwnerKey } from '../../app/useOwnedApi';
-import { localApiTarget, type ApiTarget } from '../../app/apiTargets';
 import { loadModArchives, modsChangedEvent, type ModArchive } from '../../app/modPanels';
 import { ModArchiveHost } from '../mods/ModArchiveHost';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -25,23 +22,12 @@ function formatDreamGroupDay(value: string) {
   return month && day && year ? `${month}-${day}-${year}` : value;
 }
 
-export function Archive({ agents, operatorName = 'Operator', target = localApiTarget, repository }: { agents: Agent[]; operatorName?: string; target?: ApiTarget | null; repository?: ArchiveRepository }) {
-  const owned = useOwnedApi(target);
-  const [capturedTarget] = useState(() => target && { ...target });
+export function Archive({ agents, operatorName = 'Operator', repository }: { agents: Agent[]; operatorName?: string; repository?: ArchiveRepository }) {
   const archiveRepository = useMemo(() => {
-    const base = repository ?? createArchiveRepository(owned.api);
-    const positions: Record<string, number> = { listSessions: 4, listDreams: 3, listContinuityCards: 0, listRuns: 0, listCalendarAvailability: 2 };
-    return new Proxy(base, { get(object, key) {
-      const method = object[key as keyof typeof object];
-      if (typeof key !== 'string' || !(key in positions)) return method;
-      return async (...args: any[]) => {
-        const index = positions[key];
-        if (args[index]) args[index] = ownedAgentResource(agents, args[index], capturedTarget);
-        return (method as Function)(...args);
-      };
-    } });
-  }, [owned, repository, agents, capturedTarget]);
-  const cacheOwner = targetOwnerKey(target);
+    const base = repository ?? createArchiveRepository();
+    return base;
+  }, [repository]);
+  const cacheOwner = 'local';
   const agentNames = useMemo(() => new Map(agents.map((agent) => [agent.id, agent.name])), [agents]);
   const [modArchives, setModArchives] = useState<ModArchive[]>([]);
   const [modId, setModId] = useState('');
@@ -364,7 +350,7 @@ export function Archive({ agents, operatorName = 'Operator', target = localApiTa
                 <div className="archive-session-list">{visibleSessions.map((session) => <button type="button" key={`${session.agentId || 'agent'}:${session.sessionId}`} className={`archive-session-card${selectedSession && session.sessionId === selectedSession.sessionId && session.agentId === selectedSession.agentId ? ' selected' : ''}`} onClick={() => { selectionRef.current = ""; earlierAbort.current?.abort(); setSelectedSession(session); }}><div className="archive-session-main"><div className="archive-session-meta"><span>{session.agentName || session.agentId || 'Unknown agent'}</span><span>{formatArchiveDate(archiveSessionDate(session))}</span></div><h3>{archiveSessionTitle(session)}</h3><p>{session.summary || 'No summary is available yet.'}</p></div><div className="archive-session-side"><strong>{session.chatTurnCount ?? session.turnCount ?? 0}</strong><span>turns</span>{session.archived ? <em>Archived</em> : <em>Active</em>}</div></button>)}{sessionsHasMore ? <button type="button" className="archive-load-more" disabled={sessionsMoreLoading} onClick={() => void loadMoreSessions()}>{sessionsMoreLoading ? 'Loading more conversations…' : 'Load more conversations'}</button> : null}</div>
               </section>
               <section className="archive-reader-pane">
-                <ChatArchiveReader session={selectedSession} detail={detail} loading={detailLoading} error={detailError} earlierLoading={earlierLoading} earlierError={earlierError} historyUnavailable={historyUnavailable} onLoadEarlier={loadEarlier} onRestart={() => setSelectedSession((current) => current ? { ...current } : null)} agentNames={agentNames} operatorName={operatorName} />
+                <ChatArchiveReader session={selectedSession} detail={detail} loading={detailLoading} error={detailError} earlierLoading={earlierLoading} earlierError={earlierError} historyUnavailable={historyUnavailable} onLoadEarlier={loadEarlier} onRestart={() => setSelectedSession((current) => current ? { ...current } : null)} agentNames={agentNames} operatorName={operatorName} attachmentAgentId={selectedSession?.agentId ?? undefined} />
               </section>
             </div>
           ) : kind === 'dreams' ? (

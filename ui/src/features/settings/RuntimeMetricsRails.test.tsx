@@ -1,13 +1,12 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { api, apiForTarget } from '../../app/api';
+import { api } from '../../app/api';
 import { SystemPanel } from '../workspace/WorkspaceRail';
 import { SystemStatsRail } from './SystemStatsRail';
 
 vi.mock('../../app/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../app/api')>()),
   api: vi.fn(),
-  apiForTarget: vi.fn(),
 }));
 
 afterEach(cleanup);
@@ -21,10 +20,10 @@ it('renders both system rails when metrics omit the retired settings database fo
   };
   const health = { ok: true, version: 'dev', traces: { logicalBytes: 0, count: 0 } };
   vi.mocked(api).mockImplementation(async (path) => path === '/api/metrics' ? metrics : health);
-  vi.mocked(apiForTarget).mockImplementation(async (_target, path) => path === '/api/metrics' ? metrics : health);
-  render(<><SystemPanel target={{ id: 'local', name: 'Dev', baseUrl: '', enabled: true }} provider="Test" providerConnectionStatus="connected" /><SystemStatsRail active /></>);
+
+  render(<><SystemPanel provider="Test" providerConnectionStatus="connected" /><SystemStatsRail active /></>);
   expect(await screen.findByText('Healthy')).toBeTruthy();
   expect(screen.getAllByText('Trace storage')).toHaveLength(2);
-  expect(screen.getByText('Dev runtime')).toBeTruthy();
+  expect(screen.getByText('Local runtime')).toBeTruthy();
   expect(screen.queryByText('Settings database')).toBeNull();
 });

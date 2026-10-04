@@ -1,7 +1,6 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useState } from 'react';
-import { apiForTarget } from '../../app/api';
-import { targetForResource, type ApiTarget } from '../../app/apiTargets';
+import { api } from '../../app/api';
 import { SettingSection } from './SettingsPrimitives';
 
 type McpTool = { name: string; description?: string | null; inputSchema?: Record<string, unknown>; availability?: 'grant-required' | 'mod-authorized' | string };
@@ -10,9 +9,9 @@ type McpConnection = { id: string; name: string; transport: 'http' | 'stdio' | '
 export const isModAuthorizedTool = (connection: Pick<McpConnection, 'transport'>, tool: Pick<McpTool, 'availability'>) => connection.transport === 'mod' && tool.availability === 'mod-authorized';
 export const grantableTools = (connection: McpConnection) => connection.tools.filter(tool => !isModAuthorizedTool(connection, tool));
 
-export function AgentMcpTools({ agentId, targets, overflowTarget }: { agentId: string; targets: ApiTarget[]; overflowTarget?: HTMLElement | null }) {
-  const owner = targetForResource(targets, agentId);
-  const request = <T,>(path: string, init?: RequestInit) => apiForTarget<T>(owner.target, path, init);
+export function AgentMcpTools({ agentId, overflowTarget }: { agentId: string; overflowTarget?: HTMLElement | null }) {
+  const resourceId = agentId.includes('::') ? agentId.slice(agentId.indexOf('::') + 2) : agentId;
+  const request = <T,>(path: string, init?: RequestInit) => api<T>(path, init);
   const [connections, setConnections] = useState<McpConnection[]>([]);
   const [selectedConnectionId, setSelectedConnectionId] = useState('');
   const [enabled, setEnabled] = useState<Set<string>>(new Set());
@@ -25,7 +24,7 @@ export function AgentMcpTools({ agentId, targets, overflowTarget }: { agentId: s
     setState('loading'); setError(''); setConnections([]); setEnabled(new Set()); setHistoricalModGrants([]); setSelectedConnectionId('');
     Promise.all([
       request<{ connections: McpConnection[] }>('/api/settings/mcp-connections', { signal: controller.signal }),
-      request<{ tools: { connectionId: string; toolName: string; enabled: boolean }[] }>(`/api/agents/${encodeURIComponent(owner.resourceId)}/mcp-tools`, { signal: controller.signal }),
+      request<{ tools: { connectionId: string; toolName: string; enabled: boolean }[] }>(`/api/agents/${encodeURIComponent(resourceId)}/mcp-tools`, { signal: controller.signal }),
     ]).then(([catalog, grants]) => {
       if (controller.signal.aborted) return;
       const nextConnections = catalog.connections ?? [];
@@ -41,7 +40,7 @@ export function AgentMcpTools({ agentId, targets, overflowTarget }: { agentId: s
       setState('error');
     });
     return () => controller.abort();
-  }, [owner.target.id, owner.target.baseUrl, owner.resourceId, retry]);
+  }, [agentId, retry]);
   const toggleConnection = (connection: McpConnection) => setEnabled(current => {
     const keys = grantableTools(connection).map(tool => `${connection.id}:${tool.name}`);
     const selectAll = !keys.every(key => current.has(key));
@@ -59,7 +58,7 @@ export function AgentMcpTools({ agentId, targets, overflowTarget }: { agentId: s
     });
   };
   const save = async () => {
-    if (state !== 'idle') return; setState('saving'); setError(''); try { const tools = [...historicalModGrants, ...connections.flatMap(connection => grantableTools(connection).filter(tool => enabled.has(`${connection.id}:${tool.name}`)).map(tool => ({ connectionId: connection.id, toolName: tool.name, enabled: true })))]; await request(`/api/agents/${encodeURIComponent(owner.resourceId)}/mcp-tools`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tools }) }); } catch (cause) { setError(cause instanceof Error ? `Could not save MCP tools: ${cause.message}` : 'Could not save MCP tools.'); } finally { setState('idle'); } };
+    if (state !== 'idle') return; setState('saving'); setError(''); try { const tools = [...historicalModGrants, ...connections.flatMap(connection => grantableTools(connection).filter(tool => enabled.has(`${connection.id}:${tool.name}`)).map(tool => ({ connectionId: connection.id, toolName: tool.name, enabled: true })))]; await request(`/api/agents/${encodeURIComponent(resourceId)}/mcp-tools`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tools }) }); } catch (cause) { setError(cause instanceof Error ? `Could not save MCP tools: ${cause.message}` : 'Could not save MCP tools.'); } finally { setState('idle'); } };
   const grantableConnections = connections.filter(connection => grantableTools(connection).length > 0);
   const selectedConnection = grantableConnections.find(connection => connection.id === selectedConnectionId) ?? grantableConnections[0];
   const toolOptions = (connection: McpConnection) => {

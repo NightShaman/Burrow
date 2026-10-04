@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react';
-import { answerFromChatResult, apiForTarget, createRunId, type ChatAttachment, type ProgressEntry, type RunProgress, type SessionTurn, type ToolActivityItem } from '../../app/api';
-import { localApiTarget, type ApiTarget } from '../../app/apiTargets';
+import { answerFromChatResult, api, createRunId, type ChatAttachment, type ProgressEntry, type RunProgress, type SessionTurn, type ToolActivityItem } from '../../app/api';
 import type { Agent, SavedProvider } from '../../app/types';
 import { streamChat } from './chatStream';
 import { appendThoughtDelta, finalizeThoughtProgress } from './chatThoughtProgress';
@@ -27,7 +26,6 @@ type ChatRunSession = {
 type UseChatRunOptions = {
   selectedAgentId: string;
   selected: Agent | undefined;
-  selectedTarget?: ApiTarget;
   savedProviders: SavedProvider[];
   session: ChatRunSession;
   setAgentActivity: (agentId: string, status: string) => void;
@@ -52,7 +50,7 @@ export function trimStreamedAnswer(streamedAnswer: string, finalAnswer: string) 
 }
 
 /** Owns one-to-one chat run state, stream lifecycle, and cancellation. */
-export function useChatRun({ selectedAgentId, selected, selectedTarget = localApiTarget, savedProviders, session, setAgentActivity }: UseChatRunOptions) {
+export function useChatRun({ selectedAgentId, selected, savedProviders, session, setAgentActivity }: UseChatRunOptions) {
   const [activeRuns, setActiveRuns] = useState<Record<string, ActiveRun>>({});
   const [liveProgressByRun, setLiveProgressByRun] = useState<Record<string, ProgressEntry[]>>({});
   const [liveAnswerByRun, setLiveAnswerByRun] = useState<Record<string, string>>({});
@@ -68,7 +66,7 @@ export function useChatRun({ selectedAgentId, selected, selectedTarget = localAp
     const provider = savedProviders.find((item) => item.provider === selected?.provider) ?? savedProviders[0];
     const model = selected?.model || provider?.models[0];
     const attachments = session.attached;
-    const requestBody = { agentId: target.resourceAgentId, sessionId: target.sessionId, runId, message, ...(attachments.length ? { attachments } : {}), reasoningEffort: selected?.effort, temperature: selected?.temperature, ...(model && provider && !selectedTarget.baseUrl ? { model, modelConnectionId: provider.id } : {}) };
+    const requestBody = { agentId: target.resourceAgentId, sessionId: target.sessionId, runId, message, ...(attachments.length ? { attachments } : {}), reasoningEffort: selected?.effort, temperature: selected?.temperature, ...(model && provider ? { model, modelConnectionId: provider.id } : {}) };
     const abortController = new AbortController();
     const targetKey = runKey(target.agentId, target.sessionId);
     streamAbortRef.current[targetKey] = abortController;
@@ -114,7 +112,7 @@ export function useChatRun({ selectedAgentId, selected, selectedTarget = localAp
           session.storeToolActivity({ runId, items, status: hasError ? 'warn' : hasPending ? 'running' : 'ok' });
         }
       };
-      const { terminalType, finalResult } = await streamChat({ target: selectedTarget, requestBody, signal: abortController.signal, onEvent: handleEvent });
+      const { terminalType, finalResult } = await streamChat({ requestBody, signal: abortController.signal, onEvent: handleEvent });
       if (frame) { cancelAnimationFrame(frame); flushLiveText(); }
       const runStatus: NonNullable<RunProgress['status']> = terminalType === 'run.failed' ? 'failed' : terminalType === 'run.cancelled' ? 'cancelled' : terminalType === 'run.superseded' ? 'superseded' : 'complete';
       const terminalError = runStatus === 'complete' ? '' : answerFromChatResult(finalResult);
@@ -155,7 +153,7 @@ export function useChatRun({ selectedAgentId, selected, selectedTarget = localAp
     if (!activeRunForSelection) return;
     const targetKey = runKey(activeRunForSelection.agentId, activeRunForSelection.sessionId);
     streamAbortRef.current[targetKey]?.abort();
-    try { await apiForTarget(selectedTarget, `/api/chat/${encodeURIComponent(activeRunForSelection.runId)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: selected?.resourceId ?? activeRunForSelection.agentId, reason: 'Stopped by operator' }) }); }
+    try { await api(`/api/chat/${encodeURIComponent(activeRunForSelection.runId)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: selected?.resourceId ?? activeRunForSelection.agentId, reason: 'Stopped by operator' }) }); }
     catch (error) { session.reportError(error instanceof Error ? `Could not stop run: ${error.message}` : 'Could not stop run.'); }
   };
 

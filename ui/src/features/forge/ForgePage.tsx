@@ -1,7 +1,5 @@
 import { rovingKeys } from '../../app/keyboardWidgets';
-import { ownedAgentResource } from '../../app/ownedAgent';
 import { useOwnedApi } from '../../app/useOwnedApi';
-import { localApiTarget, type ApiTarget } from '../../app/apiTargets';
 import { ImagePreview } from '../../app/ImagePreview';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -132,10 +130,9 @@ export function ArtifactOutput({ artifact, fetchMedia }: { artifact: Artifact; f
   </>;
 }
 
-export function Forge({ target = localApiTarget, agents = [], selectedAgentId, sessionId }: { target?: ApiTarget | null; agents?: Agent[]; selectedAgentId: string; sessionId: string }) {
-  const owned = useOwnedApi(target);
+export function Forge({ selectedAgentId, sessionId }: { agents?: Agent[]; selectedAgentId: string; sessionId: string }) {
+  const owned = useOwnedApi();
   const api = owned.api;
-  const [capturedTarget] = useState(() => target && { ...target });
   const [mode, setMode] = useState<'image' | 'video' | 'audio' | 'music'>('image');
   const [showRecents, setShowRecents] = useState(false);
   const [models, setModels] = useState<ForgeModel[]>([]);
@@ -249,7 +246,7 @@ export function Forge({ target = localApiTarget, agents = [], selectedAgentId, s
   const attach = async (artifact: Artifact) => {
     const agentAtStart = selectedAgentId;
     if (!selectedJob || !sessionId || !agentAtStart) return;
-    try { const resourceAgentId = ownedAgentResource(agents, agentAtStart, capturedTarget); await api(`/api/forge/jobs/${encodeURIComponent(selectedJob.id)}/attach`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: resourceAgentId, sessionId, artifactId: artifact.id }) }); if (activeAgentRef.current === agentAtStart) setNotice('Attached to the current conversation.'); } catch (e) { if (activeAgentRef.current === agentAtStart) setError(`Could not attach artifact: ${(e as Error).message}`); }
+    try { const resourceAgentId = agentAtStart; await api(`/api/forge/jobs/${encodeURIComponent(selectedJob.id)}/attach`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: resourceAgentId, sessionId, artifactId: artifact.id }) }); if (activeAgentRef.current === agentAtStart) setNotice('Attached to the current conversation.'); } catch (e) { if (activeAgentRef.current === agentAtStart) setError(`Could not attach artifact: ${(e as Error).message}`); }
   };
   return <main className="forge-page">
     <header className="forge-heading"><div><h1>The Phantasm Forge</h1><p>Manufacture sights, sounds, and moving lies.</p></div>

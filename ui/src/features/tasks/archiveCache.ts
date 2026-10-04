@@ -1,11 +1,19 @@
 import { readStoredValue, writeStoredValue } from '../../app/browserStorage';
 import type { ArchiveDetail, ArchiveSession } from './archiveTypes';
+import { clientBudgets } from '../../app/clientBudgets';
 
 export const archiveSessionsCacheStorageKey = 'hc.archiveSessions.v1';
 export const archiveDetailsCacheStorageKey = 'hc.archiveDetails.v1';
+
+export function clearArchiveCaches(storage?: Storage | null) {
+  try {
+    storage?.removeItem(archiveSessionsCacheStorageKey);
+    storage?.removeItem(archiveDetailsCacheStorageKey);
+  } catch { /* unavailable storage is already empty for this owner */ }
+}
 const archiveCacheVersion = 1;
-const archiveSessionsCacheLimit = 12;
-const archiveDetailsCacheLimit = 24;
+const archiveSessionsCacheLimit = clientBudgets.archiveSessionCacheEntries;
+const archiveDetailsCacheLimit = clientBudgets.archiveDetailCacheEntries;
 
 type ArchiveSessionCache = { savedAt: number; sessions: ArchiveSession[] };
 type ArchiveDetailCache = { savedAt: number; detail: ArchiveDetail };
@@ -26,11 +34,12 @@ function isArchiveSession(value: unknown): value is ArchiveSession {
 
 function isArchiveSessionCache(value: unknown): value is ArchiveSessionCache {
   return isObject(value) && typeof value.savedAt === 'number' && Number.isFinite(value.savedAt)
-    && Array.isArray(value.sessions) && value.sessions.every(isArchiveSession);
+    && Array.isArray(value.sessions) && value.sessions.length <= clientBudgets.archiveSessionRowsPerQuery && value.sessions.every(isArchiveSession);
 }
 
 function isArchiveDetailCache(value: unknown): value is ArchiveDetailCache {
-  return isObject(value) && typeof value.savedAt === 'number' && Number.isFinite(value.savedAt) && isObject(value.detail);
+  return isObject(value) && typeof value.savedAt === 'number' && Number.isFinite(value.savedAt) && isObject(value.detail)
+    && JSON.stringify(value.detail).length <= clientBudgets.conversationCacheTotalTextBytes;
 }
 
 function isArchiveSessionEntries(value: unknown): value is ArchiveSessionEntries {

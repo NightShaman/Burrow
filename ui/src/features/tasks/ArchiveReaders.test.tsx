@@ -60,3 +60,20 @@ it('FE024 recipient metadata never replaces sender in rendered or actual clipboa
   fireEvent.click(screen.getByRole('button',{name:'Copy loaded chat as Markdown'}));
   await waitFor(() => expect(writeText).toHaveBeenCalledWith('## Hatchet\n\nSender report'));
 });
+
+
+it('FE-025 renders attachment-only and generated-artifact turns instead of dropping empty text', () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new Blob(['media'], { type: 'image/png' }), { status: 200, headers: { 'content-type': 'image/png' } })));
+  const session = {agentId:'smatchet',agentName:'Smatchet',sessionId:'media',id:'media',title:'Media',summary:'',turnCount:2,chatTurnCount:2,createdAt:null,updatedAt:null,archived:true,archivedAt:null,kind:null,lastRole:null,lastRunId:null} as ArchiveSession;
+  const turns = [
+    { role: 'user', content: '', metadata: { attachments: [{ name: 'photo.png', type: 'image/png', artifactPath: 'artifacts/photo.png' }] } },
+    { role: 'assistant', content: '', metadata: { outputArtifacts: [{ kind: 'image', name: 'generated.png', mimeType: 'image/png', storageReference: 'generated/generated.png' }] } },
+  ];
+  const { container } = render(<ChatArchiveReader session={session} detail={{ turns }} loading={false} error="" earlierLoading={false} earlierError="" historyUnavailable={false} onLoadEarlier={() => {}} onRestart={() => {}} agentNames={names} operatorName="Rob" />);
+  expect(container.querySelectorAll('.message-attachment-card')).toHaveLength(1);
+  expect(container.querySelectorAll('.generated-artifact')).toHaveLength(1);
+  expect(container.textContent).toContain('photo.png');
+  expect(container.textContent).toContain('generated.png');
+  expect(archiveTurnText(turns[0], 'Smatchet', names, 'Rob')).toContain('Attachment: photo.png');
+  expect(archiveTurnText(turns[1], 'Smatchet', names, 'Rob')).toContain('Generated image: generated.png');
+});

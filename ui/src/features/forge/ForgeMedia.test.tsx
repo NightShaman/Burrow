@@ -2,13 +2,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ArtifactOutput } from './ForgePage';
 import { useOwnedApi } from '../../app/useOwnedApi';
-import type { ApiTarget } from '../../app/apiTargets';
 const request = vi.hoisted(() => vi.fn());
-vi.mock('../../app/api', () => ({ apiForTarget: vi.fn(), fetchApiForTarget: request }));
+vi.mock('../../app/api', () => ({ fetchApi: request }));
 const artifact = { id: 'first', kind: 'image', name: 'small.png', mimeType: 'image/png', sizeBytes: 3, previewUrl: '/media/first', downloadUrl: '/media/first' };
-const owner = { id: 'remote-a', baseUrl: 'https://a.invalid', enabled: true } as ApiTarget;
-function Fixture({ target = owner, file = artifact }) {
-  const owned = useOwnedApi(target);
+function Fixture({ file = artifact }) {
+  const owned = useOwnedApi();
   return <ArtifactOutput artifact={file} fetchMedia={owned.fetch} />;
 }
 beforeEach(() => {
@@ -38,13 +36,13 @@ it('does not fetch download-only output eagerly; click and retry retain the capt
   const file = { ...artifact, previewUrl: '', downloadUrl: '/media/download' };
   const view = render(<Fixture file={file} />);
   expect(request).not.toHaveBeenCalled();
-  view.rerender(<Fixture file={file} target={{ ...owner, id: 'remote-b', baseUrl: 'https://b.invalid' }} />);
+  view.rerender(<Fixture file={file} />);
   fireEvent.click(screen.getByRole('button', { name: 'Download' }));
   await screen.findByText('Download failed.');
   fireEvent.click(screen.getByRole('button', { name: 'Retry download' }));
   await waitFor(() => expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledTimes(1));
   expect(request).toHaveBeenCalledTimes(2);
-  for (const call of request.mock.calls) { expect(call[0]).toEqual(owner); expect(call[1]).toBe('/media/download'); }
+  for (const call of request.mock.calls) { expect(call[0]).toBe('/media/download'); }
 });
 it('fetches a distinct download only on demand', async () => {
   request.mockImplementation(async () => success());
@@ -53,5 +51,5 @@ it('fetches a distinct download only on demand', async () => {
   expect(request).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button', { name: 'Download' }));
   await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
-  expect(request.mock.calls[1][1]).toBe('/media/original');
+  expect(request.mock.calls[1][0]).toBe('/media/original');
 });

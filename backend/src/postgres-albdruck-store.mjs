@@ -76,13 +76,22 @@ export class PostgresAlbdruckStore {
       catch (error) { throw new Error(`albdruck_purge_${error.message}`); }
       const affected = await client.query("SELECT DISTINCT knowledge_id FROM albdruck_evidence WHERE source_ref->>'agentId'=$1 AND source_ref->>'sessionId'=$2", [agentId, sessionId]);
       const ids = affected.rows.map(row => row.knowledge_id);
-      const revisions = (await client.query('DELETE FROM albdruck_revisions WHERE knowledge_id=ANY($1::text[])', [ids])).rowCount;
+      // Revisions belong to knowledge, not to an individual source. Preserve them
+      // whenever the knowledge survives with independent supporting evidence.
+      const revisions = 0;
       const evidence = (await client.query("DELETE FROM albdruck_evidence WHERE source_ref->>'agentId'=$1 AND source_ref->>'sessionId'=$2", [agentId, sessionId])).rowCount;
-      const knowledge = (await client.query('DELETE FROM albdruck_knowledge k WHERE id=ANY($1::text[]) AND NOT EXISTS (SELECT 1 FROM albdruck_evidence e WHERE e.knowledge_id=k.id)', [ids])).rowCount;
+      const knowledge = (await client.query(`DELETE FROM albdruck_knowledge k WHERE id=ANY($1::text[]) AND NOT EXISTS (SELECT 1 FROM albdruck_evidence e WHERE e.knowledge_id=k.id) AND NOT EXISTS (SELECT 1 FROM albdruck_revisions r WHERE r.knowledge_id=k.id AND r.operation='correct')`, [ids])).rowCount;
       const derived = {};
-      for (const table of ['working_memory', 'continuity_handoffs', 'conversation_project_bindings']) {
-        derived[table] = (await client.query(`DELETE FROM ${table} WHERE agent_id=$1 AND (session_id=$2${table === 'conversation_project_bindings' ? '' : " OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(source_refs) ref WHERE starts_with(ref, $3))"})`, table === 'conversation_project_bindings' ? [agentId, sessionId] : [agentId, sessionId, `session:${sessionId}:`])).rowCount;
+      for (const table of ['working_memory', 'continuity_handoffs']) {
+        derived[table] = (await client.query(`DELETE FROM ${table} WHERE agent_id=$1
+          AND (session_id=$2 OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(source_refs) ref WHERE starts_with(ref,$3)))
+          AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(source_refs) ref WHERE NOT starts_with(ref,$3))
+          ${table === 'working_memory' ? 'AND pinned=false' : ''}`, [agentId,sessionId,`session:${sessionId}:`])).rowCount;
+        await client.query(`UPDATE ${table} SET source_refs=(SELECT coalesce(jsonb_agg(ref),'[]'::jsonb) FROM jsonb_array_elements_text(source_refs) ref WHERE NOT starts_with(ref,$2)) WHERE agent_id=$1 AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(source_refs) ref WHERE starts_with(ref,$2))`,[agentId,`session:${sessionId}:`]);
       }
+      derived.conversation_project_bindings=(await client.query('DELETE FROM conversation_project_bindings WHERE agent_id=$1 AND session_id=$2',[agentId,sessionId])).rowCount;
+      // Extraction batches are checkpoints tied to their original sources.
+      derived.dream_extraction_batches = (await client.query("DELETE FROM dream_extraction_batches WHERE agent_id=$1 AND EXISTS (SELECT 1 FROM jsonb_array_elements(sources) source WHERE source->>'sessionId'=$2 OR source->>'session_id'=$2 OR starts_with(source->>'sourceRef','session:' || $2 || ':'))", [agentId, sessionId])).rowCount;
       derived.dream_diary_entries = (await client.query("DELETE FROM dream_diary_entries WHERE agent_id=$1 AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(source_refs) ref WHERE starts_with(ref,$2))", [agentId, `session:${sessionId}:`])).rowCount;
       // Aggregates lack reliable per-entry provenance: conservatively discard any
       // aggregate containing a reference to this conversation rather than redact.
@@ -117,6 +126,25 @@ export class PostgresAlbdruckStore {
         WHERE table_name = ANY($3::text[])
           AND row_identity->>'agent_id'=$1 AND row_identity->>'session_id'=$2`,
         [agentId, sessionId, ['conversation_sessions', 'conversation_entries', 'conversation_archives', 'conversation_archive_entries', 'conversation_original_rows']])).rowCount;
+      // Generated DreamMemory bullets carry citations; remove solely dependent
+      // bullets, retain independently cited or citation-free human text.
+      const profiles = await client.query("SELECT markdown FROM agent_profile_documents WHERE agent_id=$1 AND kind='DREAM_MEMORY' FOR UPDATE",[agentId]);
+      if (profiles.rows[0]) {
+        const original=profiles.rows[0].markdown;
+        const cleaned=original.split('\n').filter(line=>{
+          const refs=line.match(/session:[^\s,]+/g) || [];
+          return !refs.length || !refs.some(ref=>ref.startsWith(prefix)) || refs.some(ref=>!ref.startsWith(prefix));
+        }).join('\n');
+        if(cleaned!==original) await client.query("UPDATE agent_profile_documents SET markdown=$2,updated_at=now() WHERE agent_id=$1 AND kind='DREAM_MEMORY'",[agentId,cleaned]);
+      }
+      // Preference signals are derived evidence, not operator-authored guidance.
+      const signalKey=`preference-signals:${agentId}`;
+      const signalRows=await client.query('SELECT value_json::text AS value FROM settings_meta WHERE key=$1 FOR UPDATE',[signalKey]);
+      if(signalRows.rows[0]) {
+        const value=JSON.parse(signalRows.rows[0].value);
+        value.signals=(value.signals || []).filter(signal=>!references(signal.sourceRefs));
+        await client.query('UPDATE settings_meta SET value_json=$2::json,updated_at=now() WHERE key=$1',[signalKey,JSON.stringify(value)]);
+      }
       const conversation = (await client.query('DELETE FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [agentId, sessionId])).rowCount;
       return { agentId, sessionId, deleted: conversation === 1, removed: { evidence, knowledge, revisions, ...derived } };
     });

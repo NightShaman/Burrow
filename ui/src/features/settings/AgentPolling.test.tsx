@@ -1,15 +1,15 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { apiForTarget } from '../../app/api';
+import { api } from '../../app/api';
 import { ConfirmProvider } from '../../app/ConfirmDialog';
 import type { Agent } from '../../app/types';
 import { AgentSettings } from './AgentSettings';
-vi.mock('../../app/api', async original => ({ ...await original<typeof import('../../app/api')>(), apiForTarget: vi.fn() }));
+vi.mock('../../app/api', async original => ({ ...await original<typeof import('../../app/api')>(), api: vi.fn() }));
 afterEach(cleanup);
 it('preserves name enabled and avatar drafts on fresh same-owner registry objects but resets on owner switch', async () => {
- vi.mocked(apiForTarget).mockResolvedValue({});
+ vi.mocked(api).mockResolvedValue({});
  const agent = { id: 'a', name: 'Alpha', avatar: 'data:image/png;base64,AA', activity: 'Idle' } as Agent;
- const view = (selected: Agent) => <ConfirmProvider><AgentSettings selected={selected} targets={[]} savedProviders={[]} onAgentsChanged={async () => {}} section="details" /></ConfirmProvider>;
+ const view = (selected: Agent) => <ConfirmProvider><AgentSettings selected={selected} savedProviders={[]} onAgentsChanged={async () => {}} section="details" /></ConfirmProvider>;
  const { rerender } = render(view(agent));
  fireEvent.change(screen.getByDisplayValue('Alpha'), { target: { value: 'Draft' } });
  fireEvent.click(screen.getByRole('checkbox', { name: 'Enabled' }));
@@ -19,8 +19,8 @@ it('preserves name enabled and avatar drafts on fresh same-owner registry object
  expect((screen.getByRole('checkbox', { name: 'Enabled' }) as HTMLInputElement).checked).toBe(false);
  expect(screen.queryByRole('button', { name: 'Remove image' })).toBeNull();
  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
- expect(vi.mocked(apiForTarget)).toHaveBeenCalledWith(expect.anything(), '/api/agents/a', expect.objectContaining({method:'PATCH',body:JSON.stringify({name:'Draft',enabled:false})}));
- expect(vi.mocked(apiForTarget)).toHaveBeenCalledWith(expect.anything(), '/api/settings/identities', expect.objectContaining({method:'PUT',body:JSON.stringify({kind:'agent',id:'a',name:'Draft',avatar:''})}));
+ expect(vi.mocked(api)).toHaveBeenCalledWith('/api/agents/a', expect.objectContaining({method:'PATCH',body:JSON.stringify({name:'Draft',enabled:false})}));
+ expect(vi.mocked(api)).toHaveBeenCalledWith('/api/settings/identities', expect.objectContaining({method:'PUT',body:JSON.stringify({kind:'agent',id:'a',name:'Draft',avatar:''})}));
  rerender(view({ ...agent, id: 'b', name: 'Beta' }));
  expect(screen.getByDisplayValue('Beta')).toBeTruthy();
 });

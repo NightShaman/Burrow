@@ -1,6 +1,5 @@
 import { AccessibleModal } from '../../app/AccessibleModal';
-import { useOwnedApi } from '../../app/useOwnedApi';
-import { localApiTarget, type ApiTarget } from '../../app/apiTargets';
+import { api } from '../../app/api';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { type ProgressEntry } from '../../app/api';
 import { toolDisplayName } from '../../app/toolDisplayName';
@@ -85,9 +84,7 @@ const statusLabel = (status: string) => status.replaceAll('_', ' ').replace(/\b\
 const priorityLabel = (priority: string) => priority.replace(/\b\w/g, (letter) => letter.toUpperCase());
 const formatTaskDate = (value: string) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 
-export function Tasks({ target = localApiTarget, agents }: { target?: ApiTarget | null; agents: Agent[] }) {
-  const owned = useOwnedApi(target);
-  const api = owned.api;
+export function Tasks({ agents }: { agents: Agent[] }) {
   const confirm = useConfirm();
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<BoardTask[]>([]);

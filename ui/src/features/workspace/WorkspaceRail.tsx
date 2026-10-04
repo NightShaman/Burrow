@@ -1,8 +1,7 @@
 import { useEffect, useState, type PointerEvent, type ReactNode } from 'react';
 import type { Agent, FileNode, PanelId } from '../../app/types';
 import type { RailLayout } from '../../app/usePersistedLayout';
-import { apiForTarget, type RuntimeHealth, type RuntimeMetrics } from '../../app/api';
-import type { ApiTarget } from '../../app/apiTargets';
+import { api, type RuntimeHealth, type RuntimeMetrics } from '../../app/api';
 import type { ProviderConnectionStatus } from '../../app/useRuntimeDashboard';
 import { getPanelTitle } from '../../app/panelRegistry';
 import { orderAgents, type AgentRailView } from '../../app/useAgentRailPreferences';
@@ -44,20 +43,20 @@ function formatUptime(seconds?: number | null) {
  return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
-export function SystemPanel({ target, provider, providerConnectionStatus }: { target: ApiTarget; provider: string; providerConnectionStatus: ProviderConnectionStatus }) {
+export function SystemPanel({ provider, providerConnectionStatus }: { provider: string; providerConnectionStatus: ProviderConnectionStatus }) {
  const [now, setNow] = useState(() => new Date());
  const [runtimeStatus, setRuntimeStatus] = useState<ProviderConnectionStatus>('checking');
  const [health, setHealth] = useState<RuntimeHealth | null>(null);
  const [metrics, setMetrics] = useState<RuntimeMetrics | null>(null);
  useEffect(() => { const timer = window.setInterval(() => setNow(new Date()), 1000); return () => window.clearInterval(timer); }, []);
- useEffect(() => { let active = true; setRuntimeStatus('checking'); setHealth(null); setMetrics(null); const load = () => { void Promise.all([apiForTarget<RuntimeHealth>(target, '/api/health'), apiForTarget<RuntimeMetrics>(target, '/api/metrics')]).then(([nextHealth, nextMetrics]) => { if (active) { setHealth(nextHealth); setMetrics(nextMetrics); setRuntimeStatus(nextHealth.ok ? 'connected' : 'disconnected'); } }).catch(() => { if (active) { setHealth(null); setMetrics(null); setRuntimeStatus('disconnected'); } }); }; load(); const timer = window.setInterval(load, 10000); return () => { active = false; window.clearInterval(timer); }; }, [target]);
+ useEffect(() => { let active = true; setRuntimeStatus('checking'); setHealth(null); setMetrics(null); const load = () => { void Promise.all([api<RuntimeHealth>('/api/health'), api<RuntimeMetrics>('/api/metrics')]).then(([nextHealth, nextMetrics]) => { if (active) { setHealth(nextHealth); setMetrics(nextMetrics); setRuntimeStatus(nextHealth.ok ? 'connected' : 'disconnected'); } }).catch(() => { if (active) { setHealth(null); setMetrics(null); setRuntimeStatus('disconnected'); } }); }; load(); const timer = window.setInterval(load, 10000); return () => { active = false; window.clearInterval(timer); }; }, []);
  const traces = health?.traces;
  const process = metrics?.process;
  const heap = process?.heapUsedBytes == null || process?.heapTotalBytes == null ? 'Unavailable' : `${formatBytes(process.heapUsedBytes)} / ${formatBytes(process.heapTotalBytes)}`;
  const stats = [['CPU', process?.cpu.percent == null ? 'Unavailable' : `${process.cpu.percent.toFixed(1)}%`], ['RSS', formatBytes(process?.rssBytes)], ['Heap', heap], ['Uptime', formatUptime(process?.uptimeSeconds)], ['Trace storage', traces ? `${formatBytes(traces.logicalBytes)} · ${traces.count ?? '—'} runs` : runtimeStatus === 'checking' ? 'Loading…' : 'Unavailable']];
  const providerLabel = provider.trim() || 'Provider';
  const providerStatusLabel = providerConnectionStatus === 'checking' ? 'Checking provider connection' : providerConnectionStatus === 'connected' ? `${providerLabel} provider` : `${providerLabel} unavailable`;
- return <section className="system-pane"><div className="system-clock">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div><div className="system-date">{now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</div><div className={`system-status ${runtimeStatus}`}><i /> <span>{target.name} runtime</span> · {runtimeStatus === 'checking' ? 'Checking' : runtimeStatus === 'connected' ? 'Available' : 'Unavailable'}</div><div className={`system-provider-status ${providerConnectionStatus}`} title={providerStatusLabel}><i /> <span>{providerLabel}</span></div><div className="system-stats">{stats.map(([label, value]) => <div className="system-stat" key={label}><span>{label}</span><b>{value}</b></div>)}</div></section>;
+ return <section className="system-pane"><div className="system-clock">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div><div className="system-date">{now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</div><div className={`system-status ${runtimeStatus}`}><i /> <span>Local runtime</span> · {runtimeStatus === 'checking' ? 'Checking' : runtimeStatus === 'connected' ? 'Available' : 'Unavailable'}</div><div className={`system-provider-status ${providerConnectionStatus}`} title={providerStatusLabel}><i /> <span>{providerLabel}</span></div><div className="system-stats">{stats.map(([label, value]) => <div className="system-stat" key={label}><span>{label}</span><b>{value}</b></div>)}</div></section>;
 }
 
 

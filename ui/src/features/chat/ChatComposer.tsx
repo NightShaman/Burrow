@@ -1,7 +1,6 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent } from 'react';
-import { apiForTarget, textFromChatValue, type ChatAttachment, type SessionTurn } from '../../app/api';
-import type { ApiTarget } from '../../app/apiTargets';
+import { api, textFromChatValue, type ChatAttachment, type SessionTurn } from '../../app/api';
 const EmojiPicker = lazy(() => import('./EmojiPicker').then(({ EmojiPicker }) => ({ default: EmojiPicker })));
 
 type ProjectOption = { id: string; name: string; description?: string };
@@ -43,7 +42,6 @@ type ChatComposerProps = {
   selectedAgentId?: string;
   resourceAgentId?: string;
   sessionId?: string;
-  apiTarget?: ApiTarget;
   assistantName?: string;
   operatorName?: string;
   agentNames?: ReadonlyMap<string, string>;
@@ -64,7 +62,6 @@ export function ChatComposer({
   selectedAgentId = '',
   resourceAgentId = selectedAgentId,
   sessionId = '',
-  apiTarget,
   assistantName = 'Assistant',
   operatorName = 'You',
   agentNames = new Map(),
@@ -109,14 +106,14 @@ export function ChatComposer({
   const projectQuery = projectContextQuery(draft);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   useEffect(() => {
-    if (!selectedAgentId || !sessionId || !apiTarget) return;
-    void apiForTarget<{ ok: boolean; project?: ProjectOption | null }>(apiTarget, `/api/task-board/conversation-project?agentId=${encodeURIComponent(resourceAgentId)}&sessionId=${encodeURIComponent(sessionId)}`)
+    if (!selectedAgentId || !sessionId) return;
+    void api<{ ok: boolean; project?: ProjectOption | null }>(`/api/task-board/conversation-project?agentId=${encodeURIComponent(resourceAgentId)}&sessionId=${encodeURIComponent(sessionId)}`)
       .then((result) => setProjectContext(result.project ?? null)).catch(() => setProjectContext(null));
-  }, [apiTarget, resourceAgentId, selectedAgentId, sessionId]);
+  }, [resourceAgentId, selectedAgentId, sessionId]);
   useEffect(() => {
     if (projectQuery === null) return;
-    void apiForTarget<{ projects: ProjectOption[] }>(apiTarget, '/api/task-board/projects').then((result) => setProjects(result.projects)).catch(() => setProjects([]));
-  }, [apiTarget, projectQuery]);
+    void api<{ projects: ProjectOption[] }>('/api/task-board/projects').then((result) => setProjects(result.projects)).catch(() => setProjects([]));
+  }, [projectQuery]);
   const visibleProjects = projectQuery === null ? [] : projects.filter((project) => !projectQuery || project.name.toLowerCase().includes(projectQuery.toLowerCase()));
   const chooseCommand = (name: string) => setDraft(`/${name}${name === 'context' ? ' ' : ''}`);
   const submit = () => {
@@ -128,12 +125,12 @@ export function ChatComposer({
     onSend();
   };
   const chooseProject = async (project: ProjectOption | null) => {
-    if (!selectedAgentId || !sessionId || !apiTarget || projectBusy) return;
+    if (!selectedAgentId || !sessionId || projectBusy) return;
     setProjectBusy(true); setProjectError('');
     try {
       const path = `/api/task-board/conversation-project?agentId=${encodeURIComponent(resourceAgentId)}&sessionId=${encodeURIComponent(sessionId)}`;
-      if (project) await apiForTarget(apiTarget, path, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: resourceAgentId, sessionId, projectId: project.id }) });
-      else await apiForTarget(apiTarget, path, { method: 'DELETE' });
+      if (project) await api(path, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: resourceAgentId, sessionId, projectId: project.id }) });
+      else await api(path, { method: 'DELETE' });
       setProjectContext(project); setDraft('');
     } catch (error) { setProjectError(error instanceof Error ? error.message : 'Could not update project context.'); }
     finally { setProjectBusy(false); }

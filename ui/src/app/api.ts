@@ -1,5 +1,5 @@
 import { getBasicAuthHeader } from './auth';
-import type { ApiTarget } from './apiTargets';
+import { clientBudgets } from './clientBudgets';
 
 export type SetupStatus = {
   ok: boolean;
@@ -337,46 +337,48 @@ export function generatedArtifactPath(agentId: string, storageReference: string)
   return `/api/generated-artifacts/${encodeURIComponent(agentId)}/${encodeURIComponent(storageReference)}`;
 }
 
-export function apiUrl(target: Pick<ApiTarget, 'baseUrl'> | undefined, path: string): string {
-  if (!target?.baseUrl) return path;
-  if (!path.startsWith('/')) throw new Error('API paths must start with /.');
-  return `${target.baseUrl.replace(/\/$/, '')}${path}`;
+/** All ordinary requests have a bounded deadline composed with caller cancellation; only interactive chat streams are exempt. */
+export async function fetchApi(path: string, init: RequestInit = {}): Promise<Response> {
+  // Chat NDJSON is intentionally unbounded. Other raw bodies retain their budget until consumed.
+  if (path.startsWith('/api/chat')) return fetch(path, { ...init, headers: createRequestHeaders(init.headers) });
+  const controller = new AbortController();
+  const signal = init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
+  const timeout = window.setTimeout(() => controller.abort(new DOMException('Request deadline exceeded', 'TimeoutError')), clientBudgets.requestDeadlineMs);
+  try {
+    const response = await fetch(path, { ...init, signal, headers: createRequestHeaders(init.headers) });
+    if (!response.body) { window.clearTimeout(timeout); return response; }
+    const reader = response.body.getReader();
+    const body = new ReadableStream<Uint8Array>({
+      async pull(stream) {
+        try {
+          const { done, value } = await reader.read();
+          if (done) { window.clearTimeout(timeout); stream.close(); }
+          else stream.enqueue(value);
+        } catch (error) { window.clearTimeout(timeout); stream.error(error); }
+      },
+      async cancel(reason) { window.clearTimeout(timeout); await reader.cancel(reason); },
+    });
+    return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
+  } catch (error) { window.clearTimeout(timeout); throw error; }
 }
 
-let activeApiTarget: ApiTarget | undefined;
-
-export function setActiveApiTarget(target: ApiTarget | undefined) {
-  activeApiTarget = target?.baseUrl ? target : undefined;
-}
-
-export function fetchApi(path: string, init: RequestInit = {}): Promise<Response> {
-  return activeApiTarget ? fetchApiForTarget(activeApiTarget, path, init) : fetch(path, { ...init, headers: createRequestHeaders(init.headers) });
-}
-
-export function fetchApiForTarget(target: Pick<ApiTarget, 'baseUrl'> | undefined, path: string, init: RequestInit = {}): Promise<Response> {
-  if (!target?.baseUrl) return fetch(path, { ...init, headers: createRequestHeaders(init.headers) });
-  const headers = new Headers(init.headers);
-  if (!headers.has('accept')) headers.set('accept', 'application/json');
-  // V1 targets have no credential contract. Never leak the local Burrow Basic
-  // credential to another origin; target authentication can be added later as
-  // an explicit contribution rather than inherited accidentally.
-  headers.delete('authorization');
-  return fetch(apiUrl(target, path), { ...init, headers });
-}
-
-export async function apiLocal<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, { ...init, headers: createRequestHeaders(init.headers) });
-  return parseApiResponse<T>(response);
-}
+export async function apiLocal<T>(path: string, init: RequestInit = {}): Promise<T> { return api<T>(path, init); }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetchApi(path, init);
-  return parseApiResponse<T>(response);
+  if (path.startsWith('/api/chat')) return parseApiResponse<T>(await fetchApi(path, init));
+  const controller = new AbortController();
+  const signal = init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
+  const timeout = window.setTimeout(() => controller.abort(new DOMException('Request deadline exceeded', 'TimeoutError')), clientBudgets.requestDeadlineMs);
+  try {
+    const response = await fetch(path, { ...init, signal, headers: createRequestHeaders(init.headers) });
+    return await parseApiResponse<T>(response);
+  } finally { window.clearTimeout(timeout); }
 }
 
 async function parseApiResponse<T>(response: Response): Promise<T> {
   if (response.status === 204) return undefined as T;
 
+  if (response.status === 401) window.dispatchEvent(new CustomEvent('burrow:auth-required'));
   const text = await response.text();
   const contentType = response.headers.get('content-type') ?? '';
   const responseExcerpt = text.length > 500 ? `${text.slice(0, 500)}…` : text;
@@ -409,10 +411,6 @@ async function parseApiResponse<T>(response: Response): Promise<T> {
   return body as T;
 }
 
-export async function apiForTarget<T>(target: Pick<ApiTarget, 'baseUrl'> | undefined, path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetchApiForTarget(target, path, init);
-  return parseApiResponse<T>(response);
-}
 
 export async function downloadExport(categories: string[], password?: string): Promise<{ blob: Blob; filename: string }> {
   const response = await fetchApi('/api/export', {

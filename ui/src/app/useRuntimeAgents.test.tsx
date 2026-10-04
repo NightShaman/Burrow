@@ -1,17 +1,16 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { MutableRefObject } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiForTarget } from './api';
-import { localApiTarget } from './apiTargets';
+import { api } from './api';
 import type { SavedProvider } from './types';
 import { useRuntimeAgents } from './useRuntimeAgents';
 
 vi.mock('./api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./api')>()),
-  apiForTarget: vi.fn(),
+  api: vi.fn(),
 }));
 
-const apiForTargetMock = vi.mocked(apiForTarget);
+const apiMock = vi.mocked(api);
 const runtimeProviders = { current: [] } as MutableRefObject<SavedProvider[]>;
 const setSelectedAgentId = vi.fn();
 const setSelectedStreamId = vi.fn();
@@ -21,8 +20,7 @@ const reportError = vi.fn();
 function renderRuntimeAgents() {
   return renderHook(() => useRuntimeAgents({
     selectedAgentId: '',
-    targets: [localApiTarget],
-    setSelectedAgentId,
+        setSelectedAgentId,
     parentSessionIdForAgent: () => 'default',
     runtimeProviders,
     setSelectedStreamId,
@@ -33,7 +31,7 @@ function renderRuntimeAgents() {
 
 describe('useRuntimeAgents registry state', () => {
   beforeEach(() => {
-    apiForTargetMock.mockReset();
+    apiMock.mockReset();
     setSelectedAgentId.mockReset();
     setSelectedStreamId.mockReset();
     onNoAgents.mockReset();
@@ -41,7 +39,7 @@ describe('useRuntimeAgents registry state', () => {
   });
 
   it('reports a successful empty registry as empty', async () => {
-    apiForTargetMock.mockImplementation(async (_target, path) => {
+    apiMock.mockImplementation(async (path) => {
       if (path === '/api/agents') return { agents: [] };
       if (path === '/api/agents/overview') return { agents: [] };
       throw new Error(`Unexpected path: ${path}`);
@@ -56,7 +54,7 @@ describe('useRuntimeAgents registry state', () => {
   });
 
   it('reports an unreachable runtime as unavailable instead of empty', async () => {
-    apiForTargetMock.mockImplementation(async (_target, path) => {
+    apiMock.mockImplementation(async (path) => {
       if (path === '/api/agents') return { agents: [] };
       if (path === '/api/agents/overview') throw new Error('Connection refused');
       throw new Error(`Unexpected path: ${path}`);
@@ -72,7 +70,7 @@ describe('useRuntimeAgents registry state', () => {
 
   it('keeps the last good registry and marks a failed refresh stale', async () => {
     let overviewCalls = 0;
-    apiForTargetMock.mockImplementation(async (_target, path) => {
+    apiMock.mockImplementation(async (path) => {
       if (path === '/api/agents') return { agents: [{ id: 'smatchet', name: 'Smatchet', enabled: true }] };
       if (path !== '/api/agents/overview') throw new Error(`Unexpected path: ${path}`);
       overviewCalls += 1;
@@ -96,8 +94,8 @@ describe('useRuntimeAgents registry state', () => {
     expect(reportError).not.toHaveBeenCalled();
   });
 
-  it('hydrates parent and child state with one request per target', async () => {
-    apiForTargetMock.mockImplementation(async (_target, path) => {
+  it('hydrates parent and child state with one local registry overview request', async () => {
+    apiMock.mockImplementation(async (path) => {
       if (path === '/api/agents') return { agents: [{ id: 'smatchet', name: 'Smatchet', enabled: true }] };
       if (path !== '/api/agents/overview') throw new Error(`Unexpected path: ${path}`);
       return { agents: [{
@@ -119,9 +117,9 @@ describe('useRuntimeAgents registry state', () => {
     const { result } = renderRuntimeAgents();
 
     await waitFor(() => expect(result.current.registryState).toBe('ready'));
-    expect(apiForTargetMock).toHaveBeenCalledTimes(2);
-    expect(apiForTargetMock).toHaveBeenNthCalledWith(1, localApiTarget, '/api/agents');
-    expect(apiForTargetMock).toHaveBeenNthCalledWith(2, localApiTarget, '/api/agents/overview', expect.objectContaining({ method: 'POST' }));
+    expect(apiMock).toHaveBeenCalledTimes(2);
+    expect(apiMock).toHaveBeenNthCalledWith(1, '/api/agents', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(apiMock).toHaveBeenNthCalledWith(2, '/api/agents/overview', expect.objectContaining({ method: 'POST', signal: expect.any(AbortSignal) }));
     expect(result.current.agents[0]).toMatchObject({ name: 'Smatchet UI', activity: 'Thinking', context: 42 });
     expect(result.current.agents[0].subagents[0]).toMatchObject({ name: 'CSS audit', activity: 'Verifying', context: 12 });
   });

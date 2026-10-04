@@ -1,18 +1,12 @@
-/// <reference types="vite/client" />
 import { describe, expect, it } from 'vitest';
-import app from '../../App.tsx?raw';
-import composer from './ChatComposer.tsx?raw';
+import { isWithinAttachmentBudget } from './attachmentValidation';
 
 describe('attachment batch validation', () => {
-  it('skips rejected-only reads', () => {
-    expect(app).toContain('if (!accepted.length) return;');
-  });
-  it('preserves mixed batch errors after successful reads', () => {
-    expect(app).toContain('if (accepted.length === files.length) clearError();');
-  });
-  it('does not advertise binary PDF extraction unsupported by backend', () => {
-    expect(app).not.toContain("'application/pdf'");
-    expect(app).not.toContain('|pdf)');
-    expect(composer).not.toContain('.pdf');
-  });
+ it('enforces documented per-file, aggregate and count budgets before reading', () => {
+  expect(isWithinAttachmentBudget([], 8 * 1024 * 1024)).toBe(true);
+  expect(isWithinAttachmentBudget([], 8 * 1024 * 1024 + 1)).toBe(false);
+  expect(isWithinAttachmentBudget([8 * 1024 * 1024, 8 * 1024 * 1024], 1)).toBe(false);
+  expect(isWithinAttachmentBudget(Array(8).fill(0), 1)).toBe(false);
+  expect(isWithinAttachmentBudget([], Number.NaN)).toBe(false);
+ });
 });

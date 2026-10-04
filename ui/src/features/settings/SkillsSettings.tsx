@@ -1,7 +1,6 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
-import { apiForTarget } from '../../app/api';
-import { targetForResource, type ApiTarget } from '../../app/apiTargets';
+import { api } from '../../app/api';
 import type { Agent } from '../../app/types';
 import { Field, SettingSection } from './SettingsPrimitives';
 
@@ -11,9 +10,9 @@ type Draft = { id: string; name: string; description: string; content: string; l
 const empty: Draft = { id: '', name: '', description: '', content: '', lifecycle: 'available', global: false };
 const body = (value: unknown, method = 'PUT'): RequestInit => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) });
 
-export function SkillsSettings({ agents, agentId, targets, configurationTarget, overflowTarget, agentView = false }: { agents: Agent[]; agentId: string; targets: ApiTarget[]; configurationTarget?: HTMLElement | null; overflowTarget?: HTMLElement | null; agentView?: boolean }) {
-  const owner = targetForResource(targets, agentId);
-  const request = <T,>(path: string, init?: RequestInit) => apiForTarget<T>(owner.target, path, init);
+export function SkillsSettings({ agents, agentId, configurationTarget, overflowTarget, agentView = false }: { agents: Agent[]; agentId: string; configurationTarget?: HTMLElement | null; overflowTarget?: HTMLElement | null; agentView?: boolean }) {
+  const resourceId = agentId.includes('::') ? agentId.slice(agentId.indexOf('::') + 2) : agentId;
+  const request = <T,>(path: string, init?: RequestInit) => api<T>(path, init);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [assignments, setAssignments] = useState<Record<string, Grants>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -26,15 +25,15 @@ export function SkillsSettings({ agents, agentId, targets, configurationTarget, 
   const importInputRef = useRef<HTMLInputElement>(null);
   const selectedAgent = agents.find(agent => agent.id === agentId) ?? agents[0];
   const selectedGrants = selectedAgent ? assignments[selectedAgent.id] : undefined;
-  const registryKey = JSON.stringify(agents.map(agent => { const located = targetForResource(targets, agent.id); return [agent.id, located.resourceId, located.target.id, located.target.baseUrl]; }).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+  const registryKey = JSON.stringify(agents.map(agent => [agent.id, agent.resourceId ?? agent.id]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
   useEffect(() => {
     const controller = new AbortController();
     setLoaded(false); setError('');
     Promise.all([
       request<{ skills: Skill[] }>('/api/settings/skills', { signal: controller.signal }),
       Promise.all(agents.map(async agent => {
-        const located = targetForResource(targets, agent.id);
-        const grants = await apiForTarget<Grants>(located.target, `/api/agents/${encodeURIComponent(located.resourceId)}/skills`, { signal: controller.signal });
+        const locatedResourceId = agent.resourceId ?? agent.id;
+        const grants = await api<Grants>( `/api/agents/${encodeURIComponent(locatedResourceId)}/skills`, { signal: controller.signal });
         return [agent.id, grants] as const;
       })),
     ]).then(([catalog, rows]) => {
@@ -43,11 +42,11 @@ export function SkillsSettings({ agents, agentId, targets, configurationTarget, 
       setSelectedId(current => current && catalog.skills.some(skill => skill.id === current) ? current : null);
     }).catch(cause => { if (!controller.signal.aborted) { setError(cause instanceof Error ? cause.message : 'Could not load skills.'); setLoaded(true); } });
     return () => controller.abort();
-  }, [owner.target.id, owner.target.baseUrl, owner.resourceId, registryKey, revision]);
+  }, [agentId, resourceId, registryKey, revision]);
 
   const selected = skills.find(skill => skill.id === selectedId);
   const draftBaseline = useRef<{ owner: string; value: Draft } | null>(null);
-  const draftOwner = JSON.stringify([owner.target.id, owner.target.baseUrl, owner.resourceId]);
+  const draftOwner = JSON.stringify(['local', resourceId]);
   useEffect(() => {
     const next: Draft = selected ? { id: selected.id, name: selected.name, description: selected.description, content: selected.content, lifecycle: selected.lifecycle, global: selected.global } : empty;
     const previous = draftBaseline.current;
@@ -66,8 +65,8 @@ export function SkillsSettings({ agents, agentId, targets, configurationTarget, 
   const toggleAssignment = (agent: Agent, skillId: string) => act(async () => {
     const grants = assignments[agent.id]; if (!grants) return;
     const next = new Set(grants.assignedSkillIds); next.has(skillId) ? next.delete(skillId) : next.add(skillId);
-    const located = targetForResource(targets, agent.id);
-    await apiForTarget(located.target, `/api/agents/${encodeURIComponent(located.resourceId)}/skills`, body({ skillIds: [...next] }));
+    const locatedResourceId = agent.resourceId ?? agent.id;
+    await api(`/api/agents/${encodeURIComponent(locatedResourceId)}/skills`, body({ skillIds: [...next] }));
   });
   const importText = async (file: File | undefined) => {
     if (!file) return;

@@ -54,6 +54,7 @@ export function buildCompressionSummaryRecord({ sessionId = 'default', transcrip
   if (!sourceMessages.length) throw new Error('compression summary has no source entries');
   const summaryText = String(text ?? structuredCompressionSummary(sourceMessages, { maxChars, retainedStates: contextStatesFromTranscript(transcript) })).trim();
   if (!summaryText) throw new Error('compression summary text is required');
+  if (summaryText.length > maxChars) throw Object.assign(new Error('compression_preservation_budget_exceeded'), { code: 'compression_preservation_budget_exceeded' });
   const first = sourceMessages.at(0);
   const last = sourceMessages.at(-1);
   return {
@@ -61,7 +62,8 @@ export function buildCompressionSummaryRecord({ sessionId = 'default', transcrip
     version: 1,
     sessionId: String(sessionId || 'default'),
     createdAt: clock(),
-    source: 'deterministic-summary',
+    source: 'preserved-source-handoff',
+    preservation: 'all-eligible-prose-in-chronological-order',
     text: summaryText,
     textChars: summaryText.length,
     sourceTurnCount: sourceMessages.length,
@@ -82,79 +84,27 @@ export function buildCompressionSummaryRecord({ sessionId = 'default', transcrip
 
 export function structuredCompressionSummary(messages = [], { maxChars = 6000, retainedStates = [] } = {}) {
   const source = (Array.isArray(messages) ? messages : []).filter(isCompressionEntry);
-  const users = source.filter((message) => isPromptChatMessage(message) && message.role === 'user');
-  const assistants = source.filter((message) => isPromptChatMessage(message) && ['assistant', 'agent'].includes(message.role));
-  const latestUser = users.at(-1);
-  const priorUser = users.slice(0, -1).at(-1);
-  const latestAssistant = assistants.at(-1);
-  const render = (message) => message ? compressionEntryText(message) : 'None recorded.';
-  const preservedStates = Array.isArray(retainedStates) ? retainedStates : contextStatesFromTranscript(messages);
-  // Prose is not classified later by keyword folklore. Outside the fresh tail,
-  // only explicit typed state survives as structured context; older prose is
-  // summarized as non-authoritative context.
-  const retainedState = preservedStates.length
-    ? `${preservedStates.length} explicit lifecycle-managed record${preservedStates.length === 1 ? '' : 's'} remain active; current prompt context renders them separately.`
-    : 'None recorded.';
-  const executionEvidenceLines = source.filter(isExecutionDigest).slice().reverse().map(render);
-  const executionEvidenceBudget = Math.max(0, Math.floor(Math.max(0, Number(maxChars) || 6000) * 0.32));
-  const executionEvidence = [];
-  let executionEvidenceChars = 0;
-  for (const line of executionEvidenceLines) {
-    const separator = executionEvidence.length ? 1 : 0;
-    if (executionEvidence.length && executionEvidenceChars + separator + line.length > executionEvidenceBudget) break;
-    if (!executionEvidence.length && line.length > executionEvidenceBudget) {
-      executionEvidence.push(line.slice(0, executionEvidenceBudget));
-      break;
-    }
-    executionEvidence.push(line);
-    executionEvidenceChars += separator + line.length;
-  }
-  const boundedExecutionEvidence = executionEvidence.join('\n') || 'None recorded.';
+  // Preserve every eligible utterance, in order: heuristic extraction cannot
+  // establish which early facts or instructions remain material.
   const text = [
     '# Compacted Conversation Handoff',
-    '',
-    'This is older conversational context, not verified evidence. The current user request overrides it.',
-    '',
-    '## Latest unresolved user ask',
-    render(latestUser),
-    '',
-    '## Goal and constraints',
-    priorUser ? render(priorUser) : 'Infer only from the retained conversation; no separate runtime authority is implied.',
-    '',
-    '## Completed actions and active state',
-    render(latestAssistant),
-    '',
+    'Older conversational context, not independently verified evidence. Later corrections override earlier statements.',
+    '## Goal and constraints / Completed actions and active state',
+    '## Latest unresolved user ask (see chronological source below)',
+    ...source.map(compressionEntryText),
     '## Explicit retained state',
-    retainedState,
-    '',
-    '## Canonical execution evidence',
-    boundedExecutionEvidence,
+    `${retainedStates.length} lifecycle-managed records rendered separately.`,
   ].join('\n');
-  if (text.length <= maxChars) return text;
-  const marker = '\n\n[older compacted context truncated]';
-  return `${text.slice(0, Math.max(0, maxChars - marker.length)).trim()}${marker}`;
-}
-
-function mergedSummaryExcerpt(label, value, budget) {
-  const source = String(value || '').trim();
-  if (!source) return '';
-  if (source.length <= budget) return `${label}:\n${source}`;
-  const markerFor = (included) => `\n[${label.toLowerCase()} excerpt: ${included} of ${source.length} chars; condensed during summary merge]`;
-  let included = Math.max(0, budget - label.length - 2 - markerFor(0).length);
-  for (let index = 0; index < 3; index += 1) included = Math.max(0, budget - label.length - 2 - markerFor(included).length);
-  return `${label}:\n${source.slice(0, included).trim()}${markerFor(included)}`;
+  if (text.length > maxChars) throw Object.assign(new Error('compression_preservation_budget_exceeded'), { code: 'compression_preservation_budget_exceeded' });
+  return text;
 }
 
 export function mergeCompressionSummaries({ previousSummary = '', nextSummary = '', maxChars = 6000 } = {}) {
   const prior = String(previousSummary || '').trim();
   const next = String(nextSummary || '').trim();
-  if (!prior) return next;
-  if (!next) return prior;
-  const header = '# Re-condensed Conversation Handoff\nEarlier and newer summaries were deliberately merged; this is context, not verified evidence.\n\n';
-  const available = Math.max(0, Number(maxChars) || 0) - header.length - 2;
-  const priorBudget = Math.floor(available / 2);
-  const nextBudget = available - priorBudget;
-  return `${header}${mergedSummaryExcerpt('Prior summary', prior, priorBudget)}\n\n${mergedSummaryExcerpt('Newer summary', next, nextBudget)}`;
+  const merged = [prior, next].filter(Boolean).join('\n\n');
+  if (merged.length > maxChars) throw Object.assign(new Error('compression_preservation_budget_exceeded'), { code: 'compression_preservation_budget_exceeded' });
+  return merged;
 }
 
 function tokenTargetToCharBudget(tokens, fallback = 6000) {
@@ -205,7 +155,16 @@ export async function runSessionCompression({ rootDir, sessionId = 'default', co
     await logger?.event?.('context-compression-skip', result);
     return result;
   }
-  const { entry, summary, rotation } = await appendCompressionSummary({ rootDir, sessionId, transcript, plan, maxChars: maxChars ?? tokenTargetToCharBudget(config.summaryTargetTokens, 6000), conversation: authority });
+  let appended;
+  try {
+    appended = await appendCompressionSummary({ rootDir, sessionId, transcript, plan, maxChars: maxChars ?? tokenTargetToCharBudget(config.summaryTargetTokens, 6000), conversation: authority });
+  } catch (error) {
+    if (error.code !== 'compression_preservation_budget_exceeded') throw error;
+    const skipped = { ...result, reason: error.code };
+    await logger?.event?.('context-compression-skip', skipped);
+    return skipped;
+  }
+  const { entry, summary, rotation } = appended;
   const completed = { ...result, compressed: true, entryId: entry.id, summary, rotation: { archiveName: rotation.archiveName, retainedCount: rotation.retainedCount } };
   await logger?.event?.('context-compression', { compressed: true, entryId: entry.id, summary: { ...summary, text: undefined } });
   return completed;
