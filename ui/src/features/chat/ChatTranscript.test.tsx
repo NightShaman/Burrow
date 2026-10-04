@@ -222,3 +222,8 @@ it('still hides debug attachment turns and truly empty messages', () => {
   expect(screen.queryByText('secret.png')).toBeNull();
   expect(document.querySelector('.message')).toBeNull();
 });
+
+it.each([true, false])('shows errors with an empty transcript (new=%s)', (isNewSession) => {
+  render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={isNewSession} turns={[]} isLoading={false} error="Attachment rejected" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" />);
+  expect(screen.getByRole('alert').textContent).toBe('Attachment rejected');
+});

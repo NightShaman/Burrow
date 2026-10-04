@@ -15,7 +15,7 @@ export function archivePage(rows, { limit = 100, cursor = null, scope = '', time
     } catch { throw new Error('archive_cursor_invalid'); }
   }
   const ordered = rows.map((row) => ({ row, t: String(timestamp(row) || ''), i: String(identity(row) || '') }))
-    .sort((a, b) => b.t.localeCompare(a.t) || b.i.localeCompare(a.i));
+    .sort((a, b) => (a.t < b.t ? 1 : a.t > b.t ? -1 : a.i < b.i ? 1 : a.i > b.i ? -1 : 0));
   const remaining = boundary ? ordered.filter(({ t, i }) => t < boundary.t || (t === boundary.t && i < boundary.i)) : ordered;
   const page = remaining.slice(0, size);
   const hasMore = remaining.length > size;

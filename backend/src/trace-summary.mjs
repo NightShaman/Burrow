@@ -46,6 +46,24 @@ function dataRootFromTraceRoot(traceRoot) {
   return resolved;
 }
 
+export function validTraceRunId(runId) {
+  return typeof runId === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(runId);
+}
+
+async function containedTraceDirectory(traceRoot, runId) {
+  const traceDir = path.join(traceRoot, runId);
+  try {
+    const [root, directory] = await Promise.all([fs.realpath(traceRoot), fs.realpath(traceDir)]);
+    const relative = path.relative(root, directory);
+    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new Error('trace_path_outside_root');
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  return traceDir;
+}
+
 async function traceBaseRoot(rootDir, runId = null) {
   const resolved = path.resolve(rootDir);
   if (!runId) return resolved;
@@ -364,10 +382,11 @@ export function authorityExplanationFromTraceSummary(traceSummary = {}) {
 export async function summarizeTrace({ rootDir, conversationStore, agentId, runId, includeToolOutput = false, maxOutputChars = 1000, includeRelatedWorkTrace = true } = {}) {
   if (!rootDir) throw new Error('rootDir is required');
   if (!runId) throw new Error('runId is required');
+  if (!validTraceRunId(runId)) throw new Error('trace_run_id_invalid');
   if (!conversationStore) throw new Error('conversation_store_required');
 
   const traceRoot = await traceBaseRoot(rootDir, runId);
-  const traceDir = path.join(traceRoot, runId);
+  const traceDir = await containedTraceDirectory(traceRoot, runId);
   const [events, router, tools, memory, model, verifier] = await Promise.all([
     readJsonl(path.join(traceDir, 'events.jsonl')),
     readJsonl(path.join(traceDir, 'router.jsonl')),

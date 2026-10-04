@@ -18,7 +18,9 @@ export function postgresLifecycleConfig({ env = process.env, runtimeRoot = env.B
   if (mode === 'disabled') return Object.freeze({ mode });
   const expectedMajor = Number(env.BURROW_POSTGRES_MAJOR || 17);
   if (!Number.isInteger(expectedMajor) || expectedMajor < 1) throw new Error('BURROW_POSTGRES_MAJOR must be a positive integer');
-  if (mode === 'external') return Object.freeze({ mode, expectedMajor, poolConfig: postgresConfig(env) });
+  const timeoutMs = Number(env.BURROW_POSTGRES_LIFECYCLE_TIMEOUT_MS || 30_000);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('BURROW_POSTGRES_LIFECYCLE_TIMEOUT_MS must be positive');
+  if (mode === 'external') return Object.freeze({ mode, expectedMajor, timeoutMs, poolConfig: postgresConfig(env) });
   return Object.freeze({
     mode,
     expectedMajor,
@@ -28,7 +30,7 @@ export function postgresLifecycleConfig({ env = process.env, runtimeRoot = env.B
     initdb: env.BURROW_POSTGRES_INITDB || 'initdb',
     pgCtl: env.BURROW_POSTGRES_PG_CTL || 'pg_ctl',
     postgres: env.BURROW_POSTGRES_BIN || 'postgres',
-    timeoutMs: Number(env.BURROW_POSTGRES_LIFECYCLE_TIMEOUT_MS || 30_000),
+    timeoutMs,
   });
 }
 
@@ -37,9 +39,9 @@ export function createPostgresLifecycleFromEnv(options = {}) {
   const config = postgresLifecycleConfig(options);
   if (config.mode === 'disabled') return null;
   if (config.mode === 'external') {
-    const query = options.query || options.client?.query?.bind(options.client);
-    if (!query) throw new Error('External PostgreSQL lifecycle requires query or client');
-    return createExternalPostgresLifecycle({ ...config, query });
+    const query = options.query;
+    if (!query && !options.pool && !options.client) throw new Error('External PostgreSQL lifecycle requires query or client');
+    return createExternalPostgresLifecycle({ ...config, query, pool: options.pool, client: options.client, cancel: options.cancel });
   }
   return createPostgresLifecycle(config);
 }
@@ -50,14 +52,17 @@ export async function startPostgresLifecycle(options = {}) {
   if (!lifecycle) return Object.freeze({ enabled: false, lifecycle: null, close: async () => {} });
   await lifecycle.start();
   let closed = false;
+  let closing;
   return Object.freeze({
     enabled: true,
     lifecycle,
     status: () => lifecycle.status(),
     async close() {
       if (closed) return;
-      closed = true;
-      await lifecycle.stop();
+      if (!closing) {
+        closing = Promise.resolve().then(() => lifecycle.stop()).then(() => { closed = true; }).finally(() => { closing = undefined; });
+      }
+      await closing;
     },
   });
 }

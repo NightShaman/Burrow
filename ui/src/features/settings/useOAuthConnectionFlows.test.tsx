@@ -1,3 +1,4 @@
+import { StrictMode, type ReactNode } from 'react';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { modelConnectionsApi, type ClaudeCodeLogin, type OpenAiOAuthLogin } from './modelConnectionsApi';
@@ -116,4 +117,23 @@ describe('OAuth connection flow polling', () => {
     expect(modelConnectionsApi.importClaudeCodeLogin).toHaveBeenCalledOnce();
     expect(onImported).toHaveBeenCalledOnce();
   });
+});
+
+it.each(['openai', 'claude'])('FE027 %s accepts StrictMode setup and rejects reset response', async kind => {
+ const start = kind === 'openai' ? modelConnectionsApi.startOpenAiOAuth : modelConnectionsApi.startClaudeCodeLogin;
+ vi.mocked(start).mockResolvedValue({connection:{id:'p'},login:{id:'l',status:'waiting_for_code'}});
+ const onConnection = vi.fn();
+ const {result} = renderHook(() => kind === 'openai'
+   ? useOpenAiOAuthConnectionFlow({onConnection,onAuthorized:vi.fn()})
+   : useClaudeCodeLoginFlow({onConnection,onImported:vi.fn(),autoImport:false}),
+   {reactStrictMode:true,wrapper:({children}:{children:ReactNode}) => <StrictMode>{children}</StrictMode>});
+ await act(() => result.current.start());
+ expect(result.current.requestState).toBe('idle');
+ expect(result.current.login?.id).toBe('l');
+ expect(onConnection).toHaveBeenCalledOnce();
+ const pending = deferred<any>(); vi.mocked(start).mockReturnValue(pending.promise);
+ let work!:Promise<void>; act(() => {work=result.current.start();});
+ act(() => result.current.reset());
+ await act(async () => {pending.resolve({connection:{id:'stale'},login:{id:'old',status:'waiting_for_code'}});await work;});
+ expect(result.current.login).toBeNull(); expect(onConnection).toHaveBeenCalledOnce();
 });

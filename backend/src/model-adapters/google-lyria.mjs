@@ -1,3 +1,4 @@
+import { mediaBudgets, mediaBytes, decodeMedia } from './generated-media-budgets.mjs';
 import { randomUUID } from 'node:crypto';
 import { readProviderError } from '../forge-diagnostics.mjs';
 
@@ -28,6 +29,7 @@ function audioData(data) {
 }
 export function createGoogleLyriaAdapter({ config = {}, fetchImpl = globalThis.fetch, idFactory = randomUUID } = {}) {
   if (!fetchImpl || !googleLyriaSupported(config)) throw new Error('google_lyria_contract_unsupported');
+  const budgets = mediaBudgets(config);
   const url = endpoint(config.baseUrl);
   const model = canonicalModel(config.model);
   return { provider: config.provider || 'google', api: 'google-interactions', model, url, outputKind: 'audio', complete: async ({ prompt, signal } = {}) => {
@@ -41,10 +43,10 @@ export function createGoogleLyriaAdapter({ config = {}, fetchImpl = globalThis.f
       const details = { ...bounded, httpStatus: response.status, ...(providerRequestId ? { requestId: providerRequestId } : {}) };
       return { ok: false, requestId, provider: 'google', api: 'google-interactions', model, status: response.status, outputArtifacts: [], error: details.message, errorDetails: details };
     }
-    let data; try { data = await response.json(); } catch { return { ok: false, requestId, provider: 'google', api: 'google-interactions', model, status: response.status, outputArtifacts: [], error: 'Google returned invalid JSON' }; }
+    let data; try { data = JSON.parse((await mediaBytes(response, budgets.metadata)).toString('utf8')); } catch { return { ok: false, requestId, provider: 'google', api: 'google-interactions', model, status: response.status, outputArtifacts: [], error: 'Google returned invalid JSON' }; }
     const encoded = audioData(data);
     if (!encoded || !/^[A-Za-z0-9+/]+=*$/.test(encoded)) return { ok: false, requestId, provider: 'google', api: 'google-interactions', model, status: response.status, outputArtifacts: [], error: 'Google returned no audio data' };
-    const bytes = Buffer.from(encoded, 'base64');
+    const bytes = decodeMedia(encoded, Math.min(budgets.asset, budgets.total));
     return { ok: true, requestId, provider: 'google', api: 'google-interactions', model, status: response.status, outputArtifacts: [{ kind: 'audio', name: `lyria-${requestId}.mp3`, mimeType: 'audio/mpeg', sizeBytes: bytes.length, source: { bytes } }] };
   } };
 }

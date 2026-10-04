@@ -1,7 +1,12 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { withTraceGuard as withRetentionLeaseGuard } from './trace-guard.mjs';
 import { randomUUID } from 'node:crypto';
 import { writeTraceRetentionState } from './trace-observability.mjs';
+
+async function traceTerminal(dir) {
+  try { return JSON.parse(await fs.readFile(path.join(dir, 'terminal.json'), 'utf8')).terminal === true; } catch { return false; }
+}
 
 function finitePositive(value) {
   const n = Number(value);
@@ -21,10 +26,12 @@ function isCurrentMain(recordOrMetadata, sessionId = null) {
 async function directoryUsage(root) {
   let logicalBytes = 0;
   let allocatedBytes = 0;
+  let latestMs = 0;
   async function walk(filePath) {
     let stat;
     try { stat = await fs.lstat(filePath); } catch (error) { if (error?.code === 'ENOENT') return; throw error; }
     if (stat.isSymbolicLink()) return;
+    if (stat.isFile()) latestMs = Math.max(latestMs, stat.mtimeMs);
     logicalBytes += stat.isFile() ? stat.size : 0;
     allocatedBytes += Number.isFinite(stat.blocks) ? stat.blocks * 512 : stat.isFile() ? stat.size : 0;
     if (!stat.isDirectory()) return;
@@ -33,7 +40,7 @@ async function directoryUsage(root) {
     for (const entry of entries) await walk(path.join(filePath, entry.name));
   }
   await walk(root);
-  return { logicalBytes, allocatedBytes };
+  return { logicalBytes, allocatedBytes, latestMs };
 }
 
 async function listTraceRuns(traceRoot) {
@@ -42,8 +49,9 @@ async function listTraceRuns(traceRoot) {
     let entries = [];
     try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch (error) { if (error?.code === 'ENOENT') return; throw error; }
     if (entries.some((entry) => entry.isFile() && entry.name === 'events.jsonl')) {
-      const stat = await fs.stat(dir);
-      runs.push({ id: path.relative(traceRoot, dir) || '.', path: dir, mtimeMs: stat.mtimeMs, updatedAt: new Date(stat.mtimeMs).toISOString(), ...(await directoryUsage(dir)) });
+      const usage = await directoryUsage(dir);
+      const eligible = await traceTerminal(dir);
+      runs.push({ id: path.relative(traceRoot, dir) || '.', path: dir, mtimeMs: usage.latestMs, updatedAt: new Date(usage.latestMs).toISOString(), eligible, ...usage });
       return;
     }
     for (const entry of entries) if (entry.isDirectory()) await walk(path.join(dir, entry.name));
@@ -75,14 +83,14 @@ function traceCandidates(runs, { maxAgeDays = null, maxBytes = null, nowMs = Dat
   const cutoff = ageCutoffMs(maxAgeDays, nowMs);
   const selected = new Map();
   for (const run of runs) {
-    if (cutoff && run.mtimeMs < cutoff) selected.set(run.path, { ...run, reasons: ['age'] });
+    if (run.eligible && cutoff && run.mtimeMs < cutoff) selected.set(run.path, { ...run, reasons: ['age'] });
   }
   const quota = finitePositive(maxBytes);
   if (quota) {
     let retainedBytes = runs.filter((run) => !selected.has(run.path)).reduce((total, run) => total + run.allocatedBytes, 0);
     for (const run of [...runs].reverse()) {
       if (retainedBytes <= quota) break;
-      if (selected.has(run.path)) continue;
+      if (!run.eligible || selected.has(run.path)) continue;
       selected.set(run.path, { ...run, reasons: ['quota'] });
       retainedBytes -= run.allocatedBytes;
     }
@@ -187,44 +195,36 @@ async function readRetentionLeaseOwner(lockPath) {
   catch { return null; }
 }
 
-// mkdir is the cross-process atomic primitive. Publish from a fully initialized
-// pending directory so contenders do not remove a just-created owner record.
-// A lease left by a dead process is recovered on the next attempt.
 export async function acquireRetentionCleanupLease(traceRoot) {
   if (!traceRoot) throw new Error('traceRoot is required');
   const lockPath = retentionCleanupLeasePath(traceRoot);
   await fs.mkdir(path.dirname(lockPath), { recursive: true });
-  const token = randomUUID();
-  const pendingPath = `${lockPath}.${process.pid}.${token}.pending`;
-  const owner = { pid: process.pid, token, acquiredAt: new Date().toISOString() };
-  try {
-    await fs.mkdir(pendingPath);
-    await fs.writeFile(path.join(pendingPath, 'owner.json'), `${JSON.stringify(owner)}\n`, 'utf8');
-    await fs.rename(pendingPath, lockPath);
-    let released = false;
-    return {
-      acquired: true,
-      lockPath,
-      owner,
-      async release() {
-        if (released) return;
-        released = true;
-        // Never remove a lock that was recovered/replaced after this owner.
-        const current = await readRetentionLeaseOwner(lockPath);
-        if (current?.token === token) await fs.rm(lockPath, { recursive: true, force: true });
-      },
-    };
-  } catch (error) {
-    await fs.rm(pendingPath, { recursive: true, force: true });
-    if (error?.code !== 'EEXIST' && error?.code !== 'ENOTEMPTY') throw error;
+  return withRetentionLeaseGuard(lockPath, async () => {
     const current = await readRetentionLeaseOwner(lockPath);
     if (current && processIsAlive(current.pid)) return { acquired: false, lockPath, owner: current, reason: 'already_running' };
-    // An incomplete legacy lock or a dead owner cannot make cleanup permanent.
-    // Removal is safe only after a failed atomic publication proves we are not
-    // the owner; retry once to acquire the newly vacant lease.
+    // Re-read owner/token while holding the same guard used by all publishers.
+    // No contender can replace the observed stale owner between compare/remove.
+    const observedToken = current?.token;
+    const checked = await readRetentionLeaseOwner(lockPath);
+    if (checked?.token !== observedToken) return { acquired: false, lockPath, owner: checked, reason: 'already_running' };
     await fs.rm(lockPath, { recursive: true, force: true });
-    return acquireRetentionCleanupLease(traceRoot);
-  }
+    const token = randomUUID();
+    const owner = { pid: process.pid, token, acquiredAt: new Date().toISOString() };
+    await fs.mkdir(lockPath);
+    await fs.writeFile(path.join(lockPath, 'owner.json'), `${JSON.stringify(owner)}\n`, 'utf8');
+    let released = false;
+    return {
+      acquired: true, lockPath, owner,
+      async release() {
+        if (released) return;
+        await withRetentionLeaseGuard(lockPath, async () => {
+          const current = await readRetentionLeaseOwner(lockPath);
+          if (current?.token === token) await fs.rm(lockPath, { recursive: true, force: true });
+        });
+        released = true;
+      },
+    };
+  });
 }
 
 export async function runRetentionCleanup({ dataRoot, conversationStore, taskStore, agentId, traceRoot = null, retention = {}, confirm = false, now = new Date() } = {}) {
@@ -256,8 +256,13 @@ export async function runRetentionCleanup({ dataRoot, conversationStore, taskSto
     }
     const deletedTraces = [];
     for (const entry of plan.delete.traces) {
-      await validatedTraceRunPath(plan.traceRoot, entry.path);
-      deletedTraces.push(await rmDir(entry.path));
+      await withRetentionLeaseGuard(`${entry.path}.writer`, async () => {
+        await validatedTraceRunPath(plan.traceRoot, entry.path);
+        if (!await traceTerminal(entry.path)) return;
+        const current = (await listTraceRuns(plan.traceRoot));
+        if (!traceCandidates(current, { maxAgeDays: plan.retention.traceMaxAgeDays, maxBytes: plan.retention.traceMaxBytes, nowMs: new Date(now).getTime() }).some(run => run.path === entry.path)) return;
+        deletedTraces.push(await rmDir(entry.path));
+      });
     }
     const result = {
       ...plan,

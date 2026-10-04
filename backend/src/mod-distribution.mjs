@@ -436,7 +436,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       for (const source of sources) if (source.mod_id && !mods.some((mod) => mod.id === source.mod_id)) mods.push({ id: source.mod_id, name: source.mod_name || source.mod_id, status: 'available', source: source.url, latestVersion: source.latest_version || undefined, canInstall: source.status === 'ready', ...(source.error ? { reason: source.error } : {}) });
       const refreshConfig = await refreshSettings(db);
       const stale = sources.some((row) => !row.last_checked_at || Date.now() - Date.parse(row.last_checked_at) >= refreshConfig.staleMs);
-      if (refreshConfig.enabled && stale && !refreshPromise) queueMicrotask(() => { void refresh(); });
+      if (refreshConfig.enabled && stale && !refreshPromise) queueMicrotask(() => { void refresh().catch((error) => { failureCount += 1; logger.error?.(`Burrow mod source refresh failed: ${String(error?.message || error)}`); }); });
       return { ok: true, restartRequired: false, sourceRefresh: { enabled: Boolean(refreshConfig.enabled), intervalMs: refreshConfig.intervalMs, staleMs: refreshConfig.staleMs, concurrency: refreshConfig.concurrency, maxBackoffMs: refreshConfig.maxBackoffMs, refreshing: Boolean(refreshPromise), failures: failureCount }, mods, sources: sources.map((row) => ({ id: row.id, url: row.url, status: row.status, ...(row.error ? { error: row.error } : {}), ...(row.last_checked_at ? { lastCheckedAt: row.last_checked_at } : {}) })) };
     } finally { await db.close(); }
   }
@@ -479,8 +479,9 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
     await ready;
     const id = String(modId || '').trim(); if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id))) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
-    locks.add(id); const db = await repositoryFactory(); let scratch;
+    locks.add(id); let db = null; let scratch;
     try {
+      db = await repositoryFactory();
       let source = await db.sourceByMod(id);
       if (!source) throw new Error('mod_source_not_resolved');
       scratch = await fs.mkdtemp(path.join(runtimeRoot, `.mod-staging-${process.pid}-`));
@@ -505,23 +506,35 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       const swap = await swapMod(target, prepared.root);
       try {
         if (wasInstalled && enabled) await onLifecycleChange?.({ modId: prepared.id, enabled: true, installed: true, action: 'update' });
+        const timestamp = now();
+        await db.transaction((tx) => tx.saveInstallation(source, prepared, version, digest, timestamp));
+        // Keep the prior directory until metadata is durable. On failure the
+        // existing update transition can reload the restored prior files.
         await swap.commit();
       } catch (error) {
-        await swap.rollback();
+        try { await swap.rollback(); }
+        catch (recoveryError) { error.filesystemRecoveryError = recoveryError; }
+        if (wasInstalled && enabled && !error.filesystemRecoveryError) {
+          try { await onLifecycleChange?.({ modId: prepared.id, enabled: true, installed: true, action: 'update' }); }
+          catch (recoveryError) { error.runtimeRecoveryError = recoveryError; }
+        }
         throw error;
       }
-      const timestamp = now();
-      await db.transaction((tx) => tx.saveInstallation(source, prepared, version, digest, timestamp));
       restart?.();
       return { ok: true, modId: prepared.id, version, archiveSha256: digest, restartRequired: Boolean(restart) };
-    } finally { await db.close(); if (scratch) await fs.rm(scratch, { recursive: true, force: true }); locks.delete(id); }
+    } finally {
+      try { await db?.close(); } finally {
+        try { if (scratch) await fs.rm(scratch, { recursive: true, force: true }); } finally { locks.delete(id); }
+      }
+    }
   }
   async function setEnabled(modId, enabled) {
     await ready;
     const id = String(modId || '').trim(); if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id))) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
-    locks.add(id); const db = await repositoryFactory();
+    locks.add(id); let db = null;
     try {
+      db = await repositoryFactory();
       const discovered = await discoverMods({ runtimeRoot, logger });
       if (!discovered.some((entry) => entry.id === id)) throw Object.assign(new Error('mod_not_found'), { statusCode: 404 });
       const timestamp = now();
@@ -534,14 +547,15 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       }
       restart?.();
       return { ok: true, modId: id, enabled: Boolean(enabled), restartRequired: Boolean(restart) };
-    } finally { await db.close(); locks.delete(id); }
+    } finally { try { await db?.close(); } finally { locks.delete(id); } }
   }
   async function uninstall(modId) {
     await ready;
     const id = String(modId || '').trim(); if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id))) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
-    locks.add(id); const db = await repositoryFactory();
+    locks.add(id); let db = null;
     try {
+      db = await repositoryFactory();
       const discovered = await discoverMods({ runtimeRoot, logger });
       const mod = discovered.find((entry) => entry.id === id);
       if (!mod) throw Object.assign(new Error('mod_not_found'), { statusCode: 404 });
@@ -601,7 +615,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       }
       restart?.();
       return { ok: true, modId: id, uninstalled: true, settingsPreserved: true, restartRequired: Boolean(restart) };
-    } finally { await db.close(); locks.delete(id); }
+    } finally { try { await db?.close(); } finally { locks.delete(id); } }
   }
   const pollingReady = ready.then(() => schedulePoll());
   void pollingReady.catch((error) => logger.error?.(`Burrow mod source polling failed: ${String(error?.message || error)}`));

@@ -270,5 +270,5 @@ export function resolveAlbdruckConfig() {
     if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Invalid ${name}: expected a positive safe integer`);
     return value;
   };
-  return { promptMaxChars: positiveInteger('BURROW_ALBDRUCK_PROMPT_MAX_CHARS', 4000), maxPageSize: positiveInteger('BURROW_ALBDRUCK_MAX_PAGE_SIZE', 200) };
+  return { promptMaxChars: positiveInteger('BURROW_ALBDRUCK_PROMPT_MAX_CHARS', 4000), maxPageSize: positiveInteger('BURROW_ALBDRUCK_MAX_PAGE_SIZE', 200), historyBudgetMs: positiveInteger('BURROW_HISTORY_QUERY_BUDGET_MS', 15000), historyLockTimeoutMs: positiveInteger('BURROW_HISTORY_LOCK_TIMEOUT_MS', 1000) };
 }

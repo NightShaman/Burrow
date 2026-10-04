@@ -26,6 +26,7 @@ export function SkillsSettings({ agents, agentId, targets, configurationTarget, 
   const importInputRef = useRef<HTMLInputElement>(null);
   const selectedAgent = agents.find(agent => agent.id === agentId) ?? agents[0];
   const selectedGrants = selectedAgent ? assignments[selectedAgent.id] : undefined;
+  const registryKey = JSON.stringify(agents.map(agent => { const located = targetForResource(targets, agent.id); return [agent.id, located.resourceId, located.target.id, located.target.baseUrl]; }).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
   useEffect(() => {
     const controller = new AbortController();
     setLoaded(false); setError('');
@@ -42,10 +43,19 @@ export function SkillsSettings({ agents, agentId, targets, configurationTarget, 
       setSelectedId(current => current && catalog.skills.some(skill => skill.id === current) ? current : null);
     }).catch(cause => { if (!controller.signal.aborted) { setError(cause instanceof Error ? cause.message : 'Could not load skills.'); setLoaded(true); } });
     return () => controller.abort();
-  }, [owner.target.id, owner.resourceId, agents, targets, revision]);
+  }, [owner.target.id, owner.target.baseUrl, owner.resourceId, registryKey, revision]);
 
   const selected = skills.find(skill => skill.id === selectedId);
-  useEffect(() => { setDraft(selected ? { id: selected.id, name: selected.name, description: selected.description, content: selected.content, lifecycle: selected.lifecycle, global: selected.global } : empty); }, [selected]);
+  const draftBaseline = useRef<{ owner: string; value: Draft } | null>(null);
+  const draftOwner = JSON.stringify([owner.target.id, owner.target.baseUrl, owner.resourceId]);
+  useEffect(() => {
+    const next: Draft = selected ? { id: selected.id, name: selected.name, description: selected.description, content: selected.content, lifecycle: selected.lifecycle, global: selected.global } : empty;
+    const previous = draftBaseline.current;
+    setDraft(current => previous?.owner === draftOwner && previous.value.id === next.id
+      ? Object.fromEntries(Object.entries(next).map(([key, value]) => [key, current[key as keyof Draft] !== previous.value[key as keyof Draft] ? current[key as keyof Draft] : value])) as Draft
+      : next);
+    draftBaseline.current = { owner: draftOwner, value: next };
+  }, [selected, draftOwner]);
   const act = async (operation: () => Promise<unknown>) => { setBusy(true); setError(''); try { await operation(); setRevision(value => value + 1); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save skills.'); } finally { setBusy(false); } };
   const save = () => act(async () => {
     const url = selected ? `/api/settings/skills/${encodeURIComponent(selected.id)}` : '/api/settings/skills';

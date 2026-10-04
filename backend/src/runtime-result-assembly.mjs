@@ -291,6 +291,8 @@ export function compactAskChatResult(result = {}) {
     mode: result.mode,
     command: result.command,
     decision: result.decision,
+    blockedReason: result.blockedReason,
+    blockers: result.blockers,
     runId: result.runId,
     dataRoot: result.dataRoot,
     traceDir: result.traceDir,

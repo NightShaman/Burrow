@@ -1,4 +1,4 @@
-import { normalizePostgresPool } from './postgres-foundation.mjs';
+import { normalizePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 export const POSTGRES_SETUP_STATE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS installation_setup_state (
   owner_id TEXT PRIMARY KEY,
@@ -39,24 +39,22 @@ export class PostgresSetupStateStore {
     return status(record, await requirements(this.pool));
   }
   async completeSetup() {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
+    const incomplete = {};
+    return withPostgresTransaction(this.pool, async (client) => {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`setup-state:${this.ownerId}`]);
       const { rows } = await client.query('SELECT value_json FROM installation_setup_state WHERE owner_id=$1 FOR UPDATE', [this.ownerId]);
       const prior = rows[0]?.value_json || null;
-      if (prior?.configured === true) { await client.query('COMMIT'); return status(prior); }
+      if (prior?.configured === true) { return status(prior); }
       const readiness = await requirements(client);
       if (readiness.blockers.length) {
-        await client.query('ROLLBACK');
-        return { ...status(prior, readiness), ok: false, status: 409, error: 'setup_incomplete' };
+        incomplete.result = { ...status(prior, readiness), ok: false, status: 409, error: 'setup_incomplete' };
+        throw incomplete;
       }
       const completedAt = this.clock();
       const value = { version: 1, installed: true, configured: true, completedAt };
       await client.query(`INSERT INTO installation_setup_state(owner_id,value_json,updated_at) VALUES($1,$2::jsonb,$3) ON CONFLICT(owner_id) DO UPDATE SET value_json=EXCLUDED.value_json,updated_at=EXCLUDED.updated_at`, [this.ownerId, JSON.stringify(value), completedAt]);
-      await client.query('COMMIT');
       return status(value);
-    } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }).catch(error => { if (error === incomplete) return incomplete.result; throw error; });
   }
 }
 export default PostgresSetupStateStore;

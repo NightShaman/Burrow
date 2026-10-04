@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { withTraceGuard } from './trace-guard.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createSubagentRecord, findSubagentBySpawnRequestKey, updateSubagentStatus, subagentVisibilitySummary } from './subagent-store.mjs';
@@ -76,7 +78,7 @@ function normalizeTaskForSpawnRequest(value) {
   return compactString(value).replace(/\s+/g, ' ');
 }
 
-function spawnRequestIdentity({ parentSessionId, parentConversationId, parentRunId, targetRoot, capability, modelProfile, task } = {}) {
+function spawnRequestIdentity({ parentSessionId, parentConversationId, parentRunId, targetRoot, capability, model, resolvedModel, resolvedConnectionId, modelProfile, task } = {}) {
   // Transparent deterministic identity from explicit request fields. This is
   // deliberately mechanical: it must not infer semantic task equivalence.
   return JSON.stringify({
@@ -85,6 +87,9 @@ function spawnRequestIdentity({ parentSessionId, parentConversationId, parentRun
     parentRunId: compactString(parentRunId) || null,
     targetRoot: compactString(targetRoot) || null,
     capability: compactString(capability) || 'spawn_subagent',
+    model: compactString(model) || null,
+    resolvedModel: compactString(resolvedModel) || null,
+    resolvedConnectionId: compactString(resolvedConnectionId) || null,
     modelProfile: compactString(modelProfile) || null,
     task: normalizeTaskForSpawnRequest(task),
   });
@@ -208,6 +213,7 @@ export async function executeSpawnSubagentTool({
     requestedProfile: requestedModelProfile,
     resolvedProfile: requestedModelProfile,
     resolvedModel: childModelConfig?.model || null,
+    resolvedConnectionId: childModelConfig?.connectionId || null,
   };
 
   let target = null;
@@ -264,6 +270,8 @@ export async function executeSpawnSubagentTool({
     targetRoot: target.root,
     capability,
     model: requestedModel,
+    resolvedModel: modelSelection.resolvedModel,
+    resolvedConnectionId: modelSelection.resolvedConnectionId,
     modelProfile: modelSelection.requestedProfile,
     task: normalizeTaskForSpawnRequest(task),
   };
@@ -271,12 +279,6 @@ export async function executeSpawnSubagentTool({
   const conversationStore = executionContext?.conversationStore || executionContext?.stores?.conversations;
   if (!conversationStore) throw new Error('conversation_store_required');
   if (typeof executionContext?.agentId !== 'string' || !executionContext.agentId.trim()) throw new Error('agent_id_required');
-  const existing = await findSubagentBySpawnRequestKey({ dataRoot, key: spawnRequest.key });
-  if (existing) {
-    const reused = reusedSubagentResult({ record: existing, task, target, request: spawnRequest });
-    await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'spawn_subagent', ...(activityId ? { activityId } : {}), ok: reused.ok, id: reused.id, childSessionId: reused.childSessionId, status: reused.status, reused: true, spawnRequestKey: spawnRequest.key, record: reused.record });
-    return reused;
-  }
   const id = safeId(args.id || `subagent-${Date.now()}`);
   const childSessionId = subagentChildSessionId(id);
   const owner = { agentId: executionContext.agentId, sessionId: parentSessionId, conversationId: parentConversationId, turnId: parentRunId, parentRunId, requestedBy: 'model-tool' };
@@ -296,20 +298,35 @@ export async function executeSpawnSubagentTool({
   };
   const traceDir = traceLogger?.traceDir ? path.join(traceLogger.traceDir, 'subagents', id) : null;
 
-  const queued = await createSubagentRecord({
-    dataRoot,
-    id,
-    owner,
-    purpose: task,
-    label,
-    scope,
-    permissions,
-    status: 'queued',
-    trace: { runId: id, childSessionId, traceDir },
-    spawnRequest,
-    model: modelSelection,
-    provenance: ['spawn-subagent-tool', 'context:isolated'],
+  // Claim only lookup + durable queued receipt, never the paid child run.
+  const claimRoot = path.join(dataRoot, 'subagents');
+  await fs.mkdir(claimRoot, { recursive: true });
+  const claim = await withTraceGuard(path.join(claimRoot, `request-${createHash('sha256').update(spawnRequest.key).digest('hex')}`), async () => {
+    const existing = await findSubagentBySpawnRequestKey({ dataRoot, key: spawnRequest.key });
+    if (existing) return { existing };
+    return { queued: await createSubagentRecord({
+      dataRoot,
+      id,
+      owner,
+      purpose: task,
+      label,
+      scope,
+      permissions,
+      status: 'queued',
+      trace: { runId: id, childSessionId, traceDir },
+      spawnRequest,
+      model: modelSelection,
+      provenance: ['spawn-subagent-tool', 'context:isolated'],
+    }) };
   });
+  const existing = claim.existing;
+  // Exact retries reuse all statuses, including failures/in-flight work; never duplicate dispatch.
+  if (existing) {
+    const reused = reusedSubagentResult({ record: existing, task, target, request: spawnRequest });
+    await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'spawn_subagent', ...(activityId ? { activityId } : {}), ok: reused.ok, id: reused.id, childSessionId: reused.childSessionId, status: reused.status, reused: true, spawnRequestKey: spawnRequest.key, record: reused.record });
+    return reused;
+  }
+  const queued = claim.queued;
   await startSubagentChildSession({ dataRoot, id, workerProfile: 'spawn_subagent', purpose: task, owner, trace: { runId: id, childSessionId, traceDir }, model: modelSelection, conversationStore });
   const spawnedAt = new Date().toISOString();
   const running = await updateSubagentStatus({ dataRoot, id, status: 'running', phase: 'spawned', trace: { runId: id, childSessionId, traceDir }, activity: { kind: 'run', status: 'running', phase: 'spawned', label: 'Subagent spawned', sequence: 0, startedAt: spawnedAt, lastActualActivityAt: spawnedAt }, provenance: { source: 'spawn-subagent-tool', reason: 'spawned' } });
@@ -320,7 +337,7 @@ export async function executeSpawnSubagentTool({
     abortSignal?.throwIfAborted();
     childRun = remoteExecution || childRunner
       ? { ok: true, spawned: true, exitCode: 0, durationMs: null, result: await (childRunner || runSpawnSubagentChild)({ id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy, parentExecutionContext: executionContext, signal: abortSignal }) }
-      : await runSubagentProcess({ args: { id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy }, signal: abortSignal });
+      : await runSubagentProcess({ args: { id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy, executionBoundaries: executionContext?.executionBoundaries || null }, signal: abortSignal });
   } catch (error) {
     const code = compactString(error?.code || error?.message || 'subagent_child_dispatch_failed').split(':')[0];
     childRun = {
@@ -332,7 +349,7 @@ export async function executeSpawnSubagentTool({
     };
   }
   const childResult = childRun.result || { ok: false, summary: 'Minion returned no result.', blockers: ['subagent_result_missing'], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
-  const status = childRun.ok && childResult.ok ? 'succeeded' : 'failed';
+  const status = abortSignal?.aborted || childRun.cancelled ? 'cancelled' : childRun.ok && childResult.ok ? 'succeeded' : 'failed';
   const receiptRef = traceDir ? path.join(traceDir, 'receipt.json') : null;
   if (receiptRef) {
     await fs.mkdir(path.dirname(receiptRef), { recursive: true });
@@ -348,7 +365,7 @@ export async function executeSpawnSubagentTool({
     artifacts: [...(childResult.artifacts || []), ...(receiptRef ? [{ type: 'subagent-receipt', path: receiptRef }] : [])],
     changedFiles: childResult.changedFiles || [],
     memoryWrites: childResult.memoryWrites || [],
-    sideEffectsApplied: Boolean(childResult.sideEffectsApplied),
+    sideEffectsApplied: childResult.sideEffectsApplied === true ? true : (childResult.sideEffectsApplied === false ? false : null),
     ...(childResult.verification ? { verification: childResult.verification } : {}),
     verificationTarget: childResult.verificationTarget || target.root,
     child,

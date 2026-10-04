@@ -363,6 +363,25 @@ export function changedPathsFromToolResults(toolResults = []) {
   return changed;
 }
 
+// All-run consequence indexes contain no prompt text or raw tool output. History
+// remains bounded independently; unique consequences must not expire with it.
+export function accumulateToolConsequences(aggregate, results = []) {
+  aggregate ||= { executed: 0, successful: 0, failed: 0, changedFiles: [], artifacts: [], successfulTools: [] };
+  for (const result of results) {
+    aggregate.executed++;
+    if (result?.ok === true) {
+      aggregate.successful++;
+      if (!aggregate.successfulTools.includes(result.tool)) aggregate.successfulTools.push(result.tool);
+    }
+    if (result?.ok === false) aggregate.failed++;
+    for (const value of changedPathsFromToolResults([result])) if (!aggregate.changedFiles.includes(value)) aggregate.changedFiles.push(value);
+    for (const value of [result?.attachmentId, result?.attachedArtifactId, ...(result?.job?.artifacts || []).map(item => item?.id)].filter(Boolean)) {
+      if (!aggregate.artifacts.includes(value)) aggregate.artifacts.push(value);
+    }
+  }
+  return aggregate;
+}
+
 function discoveryOnlyFromToolResults(toolResults = []) {
   const successful = (toolResults || []).filter((result) => result?.ok);
   if (!successful.some((result) => result.tool === 'shell_exec')) return false;
@@ -373,8 +392,8 @@ export function buildOutcome({ decision = null, sessionId = null, session = null
   const toolResults = workResult?.proposalExecution?.toolResults || chatToolLoop?.toolResults || [];
   const execution = workResult?.proposalExecution
     ? compactExecution(workResult.proposalExecution)
-    : { executed: chatToolLoop?.toolResults?.length ?? 0, skipped: skippedActionsFromChatToolLoop(chatToolLoop), tools: summarizeToolResults(chatToolLoop?.toolResults || []) };
-  const changedFiles = recentFiles.length ? recentFiles.map((file) => file.path) : changedPathsFromToolResults(toolResults);
+    : { executed: chatToolLoop?.consequences?.executed ?? chatToolLoop?.toolResults?.length ?? 0, skipped: skippedActionsFromChatToolLoop(chatToolLoop), tools: summarizeToolResults(chatToolLoop?.toolResults || []) };
+  const changedFiles = [...recentFiles.map((file) => file.path), ...(workResult?.proposalExecution ? changedPathsFromToolResults(toolResults) : chatToolLoop?.consequences?.changedFiles || changedPathsFromToolResults(toolResults))];
   return {
     decision,
     sessionId: sessionId || null,
@@ -392,7 +411,8 @@ export function buildOutcome({ decision = null, sessionId = null, session = null
       executedActions: execution.executed || 0,
       skippedActions: execution.skipped || [],
       changedFiles: [...new Set(changedFiles.filter(Boolean))],
-      discoveryOnly: discoveryOnlyFromToolResults(toolResults),
+      discoveryOnly: chatToolLoop?.consequences && !workResult?.proposalExecution ? discoveryOnlyFromToolResults(chatToolLoop.consequences.successfulTools.map(tool => ({ tool, ok: true }))) : discoveryOnlyFromToolResults(toolResults),
+      ...(chatToolLoop?.consequences && !workResult?.proposalExecution ? { failedActions: chatToolLoop.consequences.failed, artifacts: chatToolLoop.consequences.artifacts, omittedToolResults: chatToolLoop.omittedToolResults || 0 } : {}),
       mutationRepair: execution.mutationRepair,
     },
     verification: workResult?.verification || null,

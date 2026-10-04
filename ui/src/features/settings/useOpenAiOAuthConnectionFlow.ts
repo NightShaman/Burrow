@@ -28,9 +28,12 @@ export function useOpenAiOAuthConnectionFlow({ onConnection, onAuthorized }: Opt
   onConnectionRef.current = onConnection;
   onAuthorizedRef.current = onAuthorized;
 
-  useEffect(() => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
     mounted.current = false;
     actionGeneration.current += 1;
+    };
   }, []);
 
   const completeAuthorizedLogin = async (nextLogin: OpenAiOAuthLogin) => {

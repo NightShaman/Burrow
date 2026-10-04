@@ -24,7 +24,8 @@ function projectValue(value, { maxChars, artifactRef = null } = {}) {
   }
   if (Array.isArray(value)) return value.map((item) => projectValue(item, { maxChars, artifactRef }));
   if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, projectValue(item, { maxChars, artifactRef })]));
+  // Receipt locators are identities, not excerpts: never clip the recovery path.
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, key === 'artifacts' || key === 'artifactRef' ? item : projectValue(item, { maxChars, artifactRef })]));
 }
 
 function projectToolFields(messages = [], maxChars = 0) {

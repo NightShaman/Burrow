@@ -37,7 +37,7 @@ export function ChatModelSelector({ selected, savedProviders, updateAgent, sessi
   return <div className="workspace-toolbar"><label htmlFor="chat-provider">Provider <select id="chat-provider" name="provider" value={provider?.provider ?? ''} onChange={(e) => chooseProvider(e.target.value)} disabled={locked || !savedProviders.length}>{!savedProviders.length && <option value="">Configured runtime</option>}{savedProviders.map((item) => <option value={item.provider} key={item.id}>{item.provider}</option>)}</select></label><label htmlFor="chat-model">Model <select id="chat-model" name="model" value={model} onChange={(e) => chooseModel(e.target.value)} disabled={locked || !models.length}>{!models.length && <option value="">Configured runtime</option>}{models.map((item) => <option key={item} value={item}>{provider?.modelLabels?.[item] ?? item}</option>)}</select></label><label htmlFor="chat-effort">Effort <select id="chat-effort" name="effort" value={effort} onChange={(e) => updateAgent({ effort: e.target.value })} disabled={locked || !efforts.length}>{!efforts.length && <option value="">Not configured</option>}{efforts.map((item) => <option key={item}>{item}</option>)}</select></label><label className="temperature-control" htmlFor="chat-temperature">Temp <span>{temperature.toFixed(1)}</span><input id="chat-temperature" name="temperature" type="range" min="0" max="2" step="0.1" value={temperature} onChange={(e) => chooseTemperature(e.target.value)} disabled={locked || !provider} /></label><div className="session-controls"><button className="new-session group-chat-trigger" onClick={onCreateGroup} disabled={locked}>Group Chat</button><button className="new-session" onClick={onNewNamedSession} disabled={locked}>New session</button><label htmlFor="chat-session"><span className="sr-only">Session</span><select id="chat-session" name="session" value={sessionId} onChange={(e) => onSessionChange(e.target.value)} disabled={locked || !sessions.length}>{selectableSessions.map((session) => <option key={session.id} value={session.id}>{session.id}</option>)}</select></label><button className="new-session" onClick={onNewSession} disabled={locked}>Reset Session</button></div></div>;
 }
 
-export function Chat({ selected, parent, operator, draft, setDraft, attached, onAttach, onRemoveAttachment, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, runtimeChildActivities, liveProgress, liveAnswer, a2aActivities, runtimeUserMessage, onSend, onCancel, selectedAgentId, resourceAgentId, sessionId, apiTarget }: { selected: Agent | Subagent; parent: Agent; operator: OperatorProfile; draft: string; setDraft: (value: string) => void; attached: ChatAttachment[]; onAttach: (files: File[]) => void; onRemoveAttachment: (index: number) => void; isNewSession: boolean; turns: SessionTurn[]; isLoading: boolean; error: string; isSending: boolean; activeRunId: string; activeToolActivity?: ToolActivity; runtimeChildActivities?: ToolActivity[]; liveProgress: ProgressEntry[]; liveAnswer: string; a2aActivities?: import('../../app/api').ActiveA2AActivity[]; runtimeUserMessage?: string; onSend: (draft?: string) => void; onCancel: () => void; selectedAgentId?: string; resourceAgentId?: string; sessionId?: string; apiTarget?: import('../../app/apiTargets').ApiTarget }) {
+export function Chat({ selected, parent, operator, draft, setDraft, attached, onAttach, onRemoveAttachment, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, runtimeChildActivities, liveProgress, liveAnswer, a2aActivities, runtimeUserMessage, onSend, onCancel, selectedAgentId, resourceAgentId, sessionId, apiTarget }: { selected: Agent | Subagent; parent: Agent; operator: OperatorProfile; draft: string; setDraft: (value: string) => void; attached: ChatAttachment[]; onAttach: (files: File[]) => void; onRemoveAttachment: (index: number) => void; isNewSession: boolean; turns: SessionTurn[]; isLoading: boolean; error: string; isSending: boolean; activeRunId: string; activeToolActivity?: ToolActivity; runtimeChildActivities?: ToolActivity[]; liveProgress: ProgressEntry[]; liveAnswer: string; a2aActivities?: import('../../app/api').ActiveA2AActivity[]; runtimeUserMessage?: string; onSend: (draft?: string, onAccepted?: () => void) => void; onCancel: () => void; selectedAgentId?: string; resourceAgentId?: string; sessionId?: string; apiTarget?: import('../../app/apiTargets').ApiTarget }) {
   const draftContext = `${apiTarget?.id ?? 'local'}:${selectedAgentId ?? ''}:${sessionId ?? ''}`;
   const [localDraft, setLocalDraft] = useState(draft);
   const localDraftRef = useRef(localDraft);
@@ -78,10 +78,11 @@ export function Chat({ selected, parent, operator, draft, setDraft, attached, on
   const composerHistory = useComposerHistory(localDraft, turns.filter((turn) => turn.role === 'user').map((turn) => turn.content ?? ''), updateLocalDraft);
   const sendLocalDraft = useCallback(() => {
     const value = localDraftRef.current;
-    setDraft('');
-    localDraftRef.current = '';
-    setLocalDraft('');
-    onSend(value);
+    onSend(value, () => {
+      setDraft('');
+      localDraftRef.current = '';
+      setLocalDraft('');
+    });
   }, [onSend, setDraft]);
 
   return <div className="chat-view">
@@ -94,7 +95,9 @@ export function Editor({ tab, setTabs, onSave }: { tab: Tab; setTabs: Dispatch<S
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const loaded = tab.fileLoaded === true && !tab.fileLoading && !tab.fileError;
   const save = async () => {
+    if (!loaded) return;
     setSaving(true);
     setError('');
     try {
@@ -106,5 +109,5 @@ export function Editor({ tab, setTabs, onSave }: { tab: Tab; setTabs: Dispatch<S
       setSaving(false);
     }
   };
-  return <div className="editor-view"><div className="editor-toolbar"><span>{tab.path ?? tab.id}</span><button className={editing ? 'save' : ''} onClick={editing ? save : () => setEditing(true)} disabled={saving}>{saving ? 'Saving…' : editing ? 'Save' : 'Edit'}</button></div>{error && <p className="error" role="alert">{error}</p>}<textarea className="editor" value={tab.content} readOnly={!editing || saving} onChange={(event) => setTabs((all) => all.map((item) => item.id === tab.id ? { ...item, content: event.target.value } : item))} spellCheck={false} aria-label={`Edit ${tab.label}`} /></div>;
+  return <div className="editor-view"><div className="editor-toolbar"><span>{tab.path ?? tab.id}</span><button className={editing ? 'save' : ''} onClick={editing ? save : () => setEditing(true)} disabled={saving || !loaded}>{saving ? 'Saving…' : editing ? 'Save' : 'Edit'}</button></div>{tab.fileLoading && <p role="status">Loading…</p>}{tab.fileError && <p className="error" role="alert">{tab.fileError}</p>}{error && <p className="error" role="alert">{error}</p>}<textarea className="editor" value={tab.content} readOnly={!editing || saving || !loaded} onChange={(event) => setTabs((all) => all.map((item) => item.id === tab.id ? { ...item, content: event.target.value } : item))} spellCheck={false} aria-label={`Edit ${tab.label}`} /></div>;
 }

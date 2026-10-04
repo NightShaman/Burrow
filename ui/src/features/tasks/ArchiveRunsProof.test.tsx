@@ -95,3 +95,27 @@ it('lazy-loads and expands full redacted tool evidence from the trace API', asyn
   expect(await screen.findByText(/"output": "\[REDACTED\]"/)).toBeTruthy();
   expect(trace).toHaveBeenCalledWith('shared', 'smatchet', 'proof-session', expect.any(AbortSignal));
 });
+
+it('copies archived proof with real Markdown newlines while preserving literal request text', async () => {
+  const value = run();
+  value.request = 'Keep literal \\n in user text';
+  value.finalAnswer = 'Finished';
+  value.evidence.changes = [{ status: 'validated', text: 'First', sourceRefs: [] }, { status: 'validated', text: 'Second', sourceRefs: [] }] as ArchiveRunDetail['evidence']['changes'];
+  vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue(runsPage([value]));
+  vi.spyOn(archiveRepository, 'loadRun').mockResolvedValue(value);
+  const copy = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal('isSecureContext', true);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copy } });
+  render(<ArchiveRunsProof selectedAgent="" search="" />);
+  fireEvent.click(await screen.findByRole('button', { name: /smatchet objective/ }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Copy proof as Markdown' }));
+  expect(copy).toHaveBeenCalledOnce();
+  const text = copy.mock.calls[0][0] as string;
+  expect(text).toContain('# smatchet objective\n- Agent: smatchet\n- Status: Completed');
+  expect(text).toContain('## Request\n\nKeep literal \\n in user text');
+  expect(text).toContain('## Final outcome\n\nFinished');
+  expect(text).toContain('### Actions / changes\n- **validated** First\n- **validated** Second');
+  expect(text).toContain('## Timeline\n_No timeline evidence recorded._');
+  expect(text.replace(value.request, '')).not.toContain('\\n');
+  vi.unstubAllGlobals();
+});

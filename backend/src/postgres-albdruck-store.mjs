@@ -110,6 +110,13 @@ export class PostgresAlbdruckStore {
       for (const row of envelopes.rows) if ((row.envelope_agent_id === agentId || row.legacy_key.startsWith(`rolling-continuity:${agentId}:`)) && references(row.extra_metadata)) await client.query('DELETE FROM rolling_continuity_envelopes WHERE legacy_source=$1 AND legacy_key=$2',[row.legacy_source,row.legacy_key]);
       derived.tiddle_entries = (await client.query('DELETE FROM tiddle_entries t USING tiddle_envelopes e WHERE t.envelope_id=e.envelope_id AND e.agent_id=$1 AND t.source_sessions @> ARRAY[$2]::text[]',[agentId,sessionId])).rowCount;
       await client.query('DELETE FROM tiddle_envelopes WHERE agent_id=$1 AND source_sessions @> ARRAY[$2]::text[]',[agentId,sessionId]);
+      // Migration quarantine contains verbatim original conversation rows.
+      // Erase only authority-owned raw rows; unrelated and derived stores are
+      // deliberately outside this narrow source-erasure boundary.
+      derived.legacy_timestamp_values = (await client.query(`DELETE FROM legacy_timestamp_values
+        WHERE table_name = ANY($3::text[])
+          AND row_identity->>'agent_id'=$1 AND row_identity->>'session_id'=$2`,
+        [agentId, sessionId, ['conversation_sessions', 'conversation_entries', 'conversation_archives', 'conversation_archive_entries', 'conversation_original_rows']])).rowCount;
       const conversation = (await client.query('DELETE FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [agentId, sessionId])).rowCount;
       return { agentId, sessionId, deleted: conversation === 1, removed: { evidence, knowledge, revisions, ...derived } };
     });

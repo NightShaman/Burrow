@@ -127,6 +127,9 @@ function normalizeSpawnRequest(spawnRequest = null) {
     parentRunId: compactString(spawnRequest.parentRunId) || null,
     targetRoot: compactString(spawnRequest.targetRoot) || null,
     capability: compactString(spawnRequest.capability) || null,
+    model: compactString(spawnRequest.model) || null,
+    resolvedModel: compactString(spawnRequest.resolvedModel) || null,
+    resolvedConnectionId: compactString(spawnRequest.resolvedConnectionId) || null,
     modelProfile: compactString(spawnRequest.modelProfile) || null,
     task: compactString(spawnRequest.task) || null,
   };
@@ -134,10 +137,12 @@ function normalizeSpawnRequest(spawnRequest = null) {
 
 function normalizeModelSelection(model = null) {
   if (!model || typeof model !== 'object') return null;
+  const requestedModel = compactString(model.requestedModel) || null;
+  const resolvedConnectionId = compactString(model.resolvedConnectionId) || null;
   const requestedProfile = compactString(model.requestedProfile) || null;
   const resolvedProfile = compactString(model.resolvedProfile) || null;
   const resolvedModel = compactString(model.resolvedModel) || null;
-  return requestedProfile || resolvedProfile || resolvedModel ? { requestedProfile, resolvedProfile, resolvedModel } : null;
+  return requestedModel || requestedProfile || resolvedProfile || resolvedModel ? { requestedModel, resolvedConnectionId, requestedProfile, resolvedProfile, resolvedModel } : null;
 }
 
 function normalizeActivity(activity = null) {
@@ -191,7 +196,7 @@ function normalizeResult(result = null) {
     memoryWrites: Array.isArray(result.memoryWrites) ? result.memoryWrites : [],
     ...(verification ? { verification } : {}),
     ...(result.child && typeof result.child === 'object' ? { child: result.child } : {}),
-    sideEffectsApplied: Boolean(result.sideEffectsApplied),
+    sideEffectsApplied: result.sideEffectsApplied === true ? true : (result.sideEffectsApplied === false ? false : null),
   };
 }
 

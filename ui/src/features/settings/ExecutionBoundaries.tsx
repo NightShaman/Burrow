@@ -39,21 +39,24 @@ export const executionBoundariesApi = {
 export function ExecutionBoundaries({ overflowTarget }: { overflowTarget?: HTMLElement | null } = {}) {
   const [hardBlocks, setHardBlocks] = useState<ExecutionBoundary[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [status, setStatus] = useState<'loading' | 'idle' | 'saving'>('loading');
+  const [status, setStatus] = useState<'loading' | 'idle' | 'saving' | 'error'>('loading');
   const [error, setError] = useState('');
 
+  const [retry, setRetry] = useState(0);
   useEffect(() => {
+    setStatus('loading'); setError('');
     const controller = new AbortController();
     void executionBoundariesApi.load(controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
       setHardBlocks(result.boundaries.hardBlocks);
+      setStatus('idle');
     }).catch((cause) => {
       if (controller.signal.aborted) return;
+      setStatus('error');
       setError(cause instanceof Error ? `Could not load execution boundaries: ${cause.message}` : 'Could not load execution boundaries.');
-    }).finally(() => {
-      if (!controller.signal.aborted) setStatus('idle');
     });
     return () => controller.abort();
-  }, []);
+  }, [retry]);
 
   const update = (index: number, changes: Partial<ExecutionBoundary>) => setHardBlocks((rules) => rules.map((rule, ruleIndex) => ruleIndex === index ? { ...rule, ...changes } : rule));
   const toggleOperation = (index: number, operation: BoundaryOperation) => setHardBlocks((rules) => rules.map((rule, ruleIndex) => ruleIndex !== index ? rule : {
@@ -61,6 +64,7 @@ export function ExecutionBoundaries({ overflowTarget }: { overflowTarget?: HTMLE
     operations: rule.operations.includes(operation) ? rule.operations.filter((item) => item !== operation) : [...rule.operations, operation],
   }));
   const save = async () => {
+    if (status !== 'idle') return;
     setStatus('saving');
     setError('');
     try {
@@ -107,6 +111,7 @@ export function ExecutionBoundaries({ overflowTarget }: { overflowTarget?: HTMLE
       <button className="secondary" type="button" onClick={() => { setHardBlocks((rules) => { setSelectedIndex(rules.length); return [...rules, newBoundary()]; }); }} disabled={status !== 'idle'}>Add hard block</button>
       <button className="primary" type="button" onClick={() => void save()} disabled={status !== 'idle'}>{status === 'saving' ? 'Saving…' : 'Save boundaries'}</button>
     </div>
+    {status === 'error' && <button onClick={() => setRetry(value => value + 1)}>Retry</button>}
     {error && <p className="settings-request-error" role="alert">{error}</p>}
     {!overflowTarget && inventory}
   </SettingSection>{overflowTarget && createPortal(inventory, overflowTarget)}</>;

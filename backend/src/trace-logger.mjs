@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { withTraceGuard } from './trace-guard.mjs';
 import { randomUUID } from 'node:crypto';
 
 function nowIso() {
@@ -75,7 +76,10 @@ export function createTraceLogger({ rootDir, runId, sessionId, clock = nowIso, o
   }
 
   async function append(fileName, event) {
+    await fs.mkdir(rootDir, { recursive: true });
+    return withTraceGuard(`${traceDir}.writer`, async () => {
     await ensureDir();
+    await fs.rm(path.join(traceDir, 'terminal.json'), { force: true });
     const record = {
       ts: clock(),
       runId: resolvedRunId,
@@ -94,6 +98,7 @@ export function createTraceLogger({ rootDir, runId, sessionId, clock = nowIso, o
       if (notification && typeof notification.then === 'function') void notification.catch(() => {});
     } catch {}
     return record;
+    });
   }
 
   async function event(type, payload = {}) {
@@ -130,10 +135,14 @@ export function createTraceLogger({ rootDir, runId, sessionId, clock = nowIso, o
   }
 
   async function artifact(name, content, { encoding = 'utf8' } = {}) {
-    await ensureDir();
+    await fs.mkdir(rootDir, { recursive: true });
     const cleanName = safeId(name);
     const filePath = path.join(traceDir, 'artifacts', cleanName);
-    await fs.writeFile(filePath, content, encoding);
+    await withTraceGuard(`${traceDir}.writer`, async () => {
+      await ensureDir();
+      await fs.rm(path.join(traceDir, 'terminal.json'), { force: true });
+      await fs.writeFile(filePath, content, encoding);
+    });
     await event('artifact', { name: cleanName, path: filePath });
     return filePath;
   }
@@ -151,6 +160,13 @@ export function createTraceLogger({ rootDir, runId, sessionId, clock = nowIso, o
     toolEnd,
     verifier,
     artifact,
+    async terminal() {
+      await fs.mkdir(rootDir, { recursive: true });
+      await withTraceGuard(`${traceDir}.writer`, async () => {
+        await ensureDir();
+        await fs.writeFile(path.join(traceDir, 'terminal.json'), JSON.stringify({ terminal: true, ts: clock() }));
+      });
+    },
   };
 }
 

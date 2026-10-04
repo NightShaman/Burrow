@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react';
 import type { Agent } from '../../app/types';
-import { completeAgentOrder, orderAgents, type AgentRailPreferences, type AgentRailView } from '../../app/useAgentRailPreferences';
+import { completeAgentOrder, mergeVisibleOrder, orderAgents, type AgentRailPreferences, type AgentRailView } from '../../app/useAgentRailPreferences';
 import { Field, SettingSection } from './SettingsPrimitives';
 
 export function AgentSidebarSettings({ agents, preferences, setPreferences }: { agents: Agent[]; preferences: AgentRailPreferences; setPreferences: (next: AgentRailPreferences | ((current: AgentRailPreferences) => AgentRailPreferences)) => void }) {
@@ -23,7 +23,7 @@ export function AgentSidebarSettings({ agents, preferences, setPreferences }: { 
     if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return;
     next.splice(sourceIndex, 1);
     next.splice(targetIndex, 0, sourceId);
-    setPreferences((current) => ({ ...current, order: next }));
+    setPreferences((current) => ({ ...current, order: mergeVisibleOrder(current.order, next) }));
   };
   const drop = (event: DragEvent<HTMLElement>, targetId: string) => {
     event.preventDefault();
@@ -44,10 +44,10 @@ export function AgentSidebarSettings({ agents, preferences, setPreferences }: { 
       <span className="field-label">Order</span>
       <p className="hint">Drag agents into the order you want them shown in the sidebar.</p>
       <div className="agent-sidebar-order-list">
-        {orderedAgents.map((agent) => <div key={agent.id} draggable className={`${draggedId === agent.id ? 'dragging' : ''} ${dropTargetId === agent.id && draggedId !== agent.id ? 'drop-target' : ''}`} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', agent.id); setDraggedId(agent.id); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTargetId(agent.id); }} onDragLeave={() => setDropTargetId((current) => current === agent.id ? null : current)} onDrop={(event) => drop(event, agent.id)} onDragEnd={clearDrag}>
+        {orderedAgents.map((agent, index) => <div key={agent.id} draggable className={`${draggedId === agent.id ? 'dragging' : ''} ${dropTargetId === agent.id && draggedId !== agent.id ? 'drop-target' : ''}`} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', agent.id); setDraggedId(agent.id); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTargetId(agent.id); }} onDragLeave={() => setDropTargetId((current) => current === agent.id ? null : current)} onDrop={(event) => drop(event, agent.id)} onDragEnd={clearDrag}>
           <span className="agent-sidebar-order-handle" aria-hidden="true">⠿</span>
           <span className="avatar">{agent.avatar.startsWith('data:image/') ? <img src={agent.avatar} alt="" /> : agent.avatar}</span>
-          <b>{agent.name}</b>
+          <b>{agent.name}</b><button type="button" aria-label={`Move ${agent.name} up`} disabled={index === 0} onClick={() => reorder(agent.id, orderedAgents[index - 1].id)}>↑</button><button type="button" aria-label={`Move ${agent.name} down`} disabled={index === orderedAgents.length - 1} onClick={() => reorder(agent.id, orderedAgents[index + 1].id)}>↓</button>
         </div>)}
       </div>
     </div>

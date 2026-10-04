@@ -1,3 +1,5 @@
+import { mediaBudgets, mediaBytes, decodeMedia } from './generated-media-budgets.mjs';
+import { redactStructuredJsonText } from '../redaction.mjs';
 import { randomUUID } from 'node:crypto';
 import { redactHeaders } from './adapter-primitives.mjs';
 import { googleCompatibleWireModel } from './google-wire.mjs';
@@ -104,9 +106,9 @@ function validBase64(value) {
   return normalized && normalized.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(normalized) ? normalized : null;
 }
 
-async function imageBytes(item, { fetchImpl, signal, secrets }) {
+async function imageBytes(item, { fetchImpl, signal, secrets, limit }) {
   const encoded = validBase64(item?.b64_json);
-  if (encoded) return { bytes: Buffer.from(encoded, 'base64'), contentType: '' };
+  if (encoded) return { bytes: decodeMedia(encoded, limit), contentType: '' };
   const url = text(item?.url);
   if (!url) throw new Error('image response item did not contain b64_json or url');
   let parsed;
@@ -116,11 +118,11 @@ async function imageBytes(item, { fetchImpl, signal, secrets }) {
   // their own authorization and must never inherit an API key or bearer token.
   const response = await fetchImpl(parsed.href, { method: 'GET', ...(signal ? { signal } : {}) });
   if (!response.ok) { const failure = await providerError(response, secrets); throw Object.assign(new Error(`image URL retrieval failed: ${failure.message}`), { errorDetails: { ...failure, stage: 'artifact_retrieval' } }); }
-  return { bytes: Buffer.from(await response.arrayBuffer()), contentType: response.headers?.get?.('content-type') || '' };
+  return { bytes: await mediaBytes(response, limit), contentType: response.headers?.get?.('content-type') || '' };
 }
 
-async function traceRequest(traceLogger, { requestId, provider, model, url, headers, body, clock }) {
-  const providerRequestArtifact = await traceLogger?.artifact?.(`provider-request-${requestId}.json`, JSON.stringify(body)) || null;
+async function traceRequest(traceLogger, { requestId, provider, model, url, headers, body, clock, protectedValues }) {
+  const providerRequestArtifact = await traceLogger?.artifact?.(`provider-request-${requestId}.json`, redactStructuredJsonText(JSON.stringify(body), { protectedValues })) || null;
   await traceLogger?.model?.({ stage: 'model-request', requestId, provider, api: 'openai-generated-artifact', model, url, headers: redactHeaders(headers), providerRequestArtifact, ts: clock() });
 }
 
@@ -134,6 +136,7 @@ export function generatedArtifactKind(config = {}) {
 
 export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = globalThis.fetch, clock = () => new Date().toISOString(), idFactory = randomUUID } = {}) {
   if (!fetchImpl) throw new Error('fetch implementation is required');
+  const budgets = mediaBudgets(config);
   const kind = generatedArtifactKind(config);
   if (!kind) throw new Error('generated artifact output capability is required');
   const model = text(config.model);
@@ -151,7 +154,7 @@ export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = 
     const body = kind === 'image'
       ? { model: wireModel, prompt, n: 1, ...artifactOptions }
       : { model: wireModel, input: prompt, voice: 'alloy', response_format: 'mp3', ...artifactOptions };
-    await traceRequest(options.traceLogger, { requestId, provider, model, url, headers, body, clock });
+    await traceRequest(options.traceLogger, { requestId, provider, model, url, headers, body, clock, protectedValues: options.protectedValues || [] });
     const response = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(body), ...(options.signal ? { signal: options.signal } : {}) });
     if (!response.ok) {
       const providerErrorDetails = await providerError(response, [config.apiKey]);
@@ -164,7 +167,7 @@ export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = 
     let responseId = text(response.headers?.get?.('x-request-id')) || null;
     let usage = null;
     if (kind === 'audio') {
-      const bytes = Buffer.from(await response.arrayBuffer());
+      const bytes = await mediaBytes(response, Math.min(budgets.asset, budgets.total));
       const requestedFormat = text(body.response_format).toLowerCase() || 'mp3';
       const format = AUDIO_FORMATS[requestedFormat] || { mimeType: text(response.headers?.get?.('content-type')).split(';', 1)[0].toLowerCase() || 'application/octet-stream', extension: requestedFormat || 'bin' };
       const providerMimeType = text(response.headers?.get?.('content-type')).split(';', 1)[0].toLowerCase();
@@ -174,13 +177,16 @@ export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = 
       outputArtifacts = [{ kind: 'audio', name: `speech-${requestId}.${format.extension}`, mimeType, sizeBytes: bytes.length, source: { bytes } }];
     } else {
       let data;
-      try { data = await response.json(); } catch { return { ok: false, requestId, provider, api: 'openai-generated-artifact', model, status: response.status, choice: null, outputArtifacts: [], error: 'image provider returned invalid JSON' }; }
+      try { data = JSON.parse((await mediaBytes(response, budgets.metadata)).toString('utf8')); } catch { return { ok: false, requestId, provider, api: 'openai-generated-artifact', model, status: response.status, choice: null, outputArtifacts: [], error: 'image provider returned invalid JSON' }; }
       responseId ||= text(data?.id) || null;
       usage = data?.usage || null;
       if (!Array.isArray(data?.data) || !data.data.length) return { ok: false, requestId, responseId, provider, api: 'openai-generated-artifact', model, status: response.status, choice: null, usage, outputArtifacts: [], error: 'image provider returned no images' };
+      if (data.data.length > budgets.count) throw new Error('generated_media_artifact_count_too_large');
       outputArtifacts = [];
+      let remaining = budgets.total;
       for (let index = 0; index < data.data.length; index += 1) {
-        const resolved = await imageBytes(data.data[index], { fetchImpl, signal: options.signal, secrets: [config.apiKey] });
+        const resolved = await imageBytes(data.data[index], { fetchImpl, signal: options.signal, secrets: [config.apiKey], limit: Math.min(budgets.asset, remaining) });
+        remaining -= resolved.bytes.length;
         const mimeType = imageMime(resolved.bytes, resolved.contentType);
         outputArtifacts.push({ kind: 'image', name: `image-${requestId}-${index + 1}.${imageExtension(mimeType)}`, mimeType, sizeBytes: resolved.bytes.length, source: { bytes: resolved.bytes } });
       }

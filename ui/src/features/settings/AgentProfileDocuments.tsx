@@ -13,12 +13,13 @@ export function AgentProfileDocuments({ agentId, targets, overflowTarget }: { ag
   const request = <T,>(path: string, init?: RequestInit) => apiForTarget<T>(owner.target, path, init);
   const [documents, setDocuments] = useState<ProfileDocument[]>(profileDocumentKinds.map(kind => ({ kind, markdown: '' })));
   const [selectedKind, setSelectedKind] = useState<ProfileDocument['kind']>('SOUL');
-  const [state, setState] = useState<'loading' | 'idle' | 'saving'>('loading');
+  const [state, setState] = useState<'loading' | 'idle' | 'saving' | 'error'>('loading');
+  const [retry, setRetry] = useState(0);
   const [error, setError] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
-    setState('loading'); setError('');
+    setState('loading'); setError(''); setDocuments(profileDocumentKinds.map(kind => ({ kind, markdown: '' })));
     request<{ documents: ProfileDocument[] }>(`/api/agents/${encodeURIComponent(owner.resourceId)}/profile-documents`, { signal: controller.signal }).then(result => {
       if (controller.signal.aborted) return;
       const byKind = new Map((result.documents ?? []).map(document => [document.kind, document.markdown]));
@@ -27,11 +28,12 @@ export function AgentProfileDocuments({ agentId, targets, overflowTarget }: { ag
     }).catch(cause => {
       if (controller.signal.aborted) return;
       setError(cause instanceof Error ? `Could not load profile documents: ${cause.message}` : 'Could not load profile documents.');
-      setState('idle');
+      setState('error');
     });
     return () => controller.abort();
-  }, [owner.target.id, owner.resourceId]);
+  }, [owner.target.id, owner.target.baseUrl, owner.resourceId, retry]);
   const save = async () => {
+    if (state !== 'idle') return;
     setState('saving'); setError('');
     try { await request(`/api/agents/${encodeURIComponent(owner.resourceId)}/profile-documents`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ documents }) }); }
     catch (cause) { setError(cause instanceof Error ? `Could not save profile documents: ${cause.message}` : 'Could not save profile documents.'); }
@@ -42,8 +44,8 @@ export function AgentProfileDocuments({ agentId, targets, overflowTarget }: { ag
   if (overflowTarget) {
     const selected = documents.find(document => document.kind === selectedKind) ?? documents[0];
     const overflow = <div className="settings-overflow-content profile-document-overflow"><SettingSection title={profileDocumentLabels[selected.kind]}><Field label="Markdown"><textarea value={selected.markdown} onChange={event => update(selected.kind, event.target.value)} rows={24} spellCheck="false" /></Field>{error && <p className="settings-request-error" role="alert">{error}</p>}<div className="card-actions"><button className="primary" type="button" onClick={() => void save()} disabled={state !== 'idle'}>{state === 'saving' ? 'Saving…' : 'Save profile documents'}</button></div></SettingSection></div>;
-    return <><SettingSection title="Profile documents"><p className="settings-description">Choose a profile document to edit.</p>{state === 'loading' ? <p className="settings-empty">Loading profile documents…</p> : <div className="profile-document-selector">{documents.map(document => <button type="button" className={document.kind === selected.kind ? 'active' : ''} aria-pressed={document.kind === selected.kind} onClick={() => setSelectedKind(document.kind)} key={document.kind}><strong>{profileDocumentLabels[document.kind]}</strong></button>)}</div>}{error && <p className="settings-request-error" role="alert">{error}</p>}</SettingSection>{createPortal(overflow, overflowTarget)}</>;
+    return <><SettingSection title="Profile documents">{state === 'error' && <button type="button" onClick={() => setRetry(value => value + 1)}>Retry loading</button>}<p className="settings-description">Choose a profile document to edit.</p>{state === 'loading' ? <p className="settings-empty">Loading profile documents…</p> : <div className="profile-document-selector">{documents.map(document => <button type="button" className={document.kind === selected.kind ? 'active' : ''} aria-pressed={document.kind === selected.kind} onClick={() => setSelectedKind(document.kind)} key={document.kind}><strong>{profileDocumentLabels[document.kind]}</strong></button>)}</div>}{error && <p className="settings-request-error" role="alert">{error}</p>}</SettingSection>{createPortal(overflow, overflowTarget)}</>;
   }
 
-  return <SettingSection title="Profile documents"><p className="settings-description">These documents define this agent’s identity, operating rules, orientation, and verified environment facts.</p>{state === 'loading' ? <p className="settings-empty">Loading profile documents…</p> : <details className="profile-documents-accordion"><summary>Show profile documents</summary><div className="profile-documents-content">{documents.map(document => <Field key={document.kind} label={profileDocumentLabels[document.kind]}><textarea value={document.markdown} onChange={event => update(document.kind, event.target.value)} rows={8} spellCheck="false" /></Field>)}{error && <p className="settings-request-error" role="alert">{error}</p>}<div className="card-actions"><button className="primary" onClick={() => void save()} disabled={state !== 'idle'}>{state === 'saving' ? 'Saving…' : 'Save profile documents'}</button></div></div></details>}</SettingSection>;
+  return <SettingSection title="Profile documents">{state === 'error' && <button type="button" onClick={() => setRetry(value => value + 1)}>Retry loading</button>}<p className="settings-description">These documents define this agent’s identity, operating rules, orientation, and verified environment facts.</p>{state === 'loading' ? <p className="settings-empty">Loading profile documents…</p> : <details className="profile-documents-accordion"><summary>Show profile documents</summary><div className="profile-documents-content">{documents.map(document => <Field key={document.kind} label={profileDocumentLabels[document.kind]}><textarea value={document.markdown} onChange={event => update(document.kind, event.target.value)} rows={8} spellCheck="false" /></Field>)}{error && <p className="settings-request-error" role="alert">{error}</p>}<div className="card-actions"><button className="primary" onClick={() => void save()} disabled={state !== 'idle'}>{state === 'saving' ? 'Saving…' : 'Save profile documents'}</button></div></div></details>}</SettingSection>;
 }

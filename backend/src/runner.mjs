@@ -1,3 +1,4 @@
+import { hasExecutedMutationEvidence } from './mutation-gates.mjs';
 // Public compatibility adapter for the legacy `runBurrow(...)` entrypoint.
 // Route/policy/prompt setup and result-shape compatibility stay here;
 // model/proposal/verification/commit execution is delegated to RuntimeOrchestrator.
@@ -37,7 +38,7 @@ function proposalFromNativeToolCalls(toolCalls = [], fallbackText = '') {
 }
 
 function successfulMutation(toolResults = []) {
-  return (toolResults || []).some((result) => result?.ok === true && ['files_write', 'files_patch'].includes(result.tool));
+  return hasExecutedMutationEvidence(toolResults);
 }
 
 function verificationMissingCheck(verification = {}) {

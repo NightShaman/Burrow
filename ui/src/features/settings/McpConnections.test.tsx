@@ -78,3 +78,19 @@ describe('MCP server inventory', () => {
     overflow.remove();
   });
 });
+
+it('keeps environment name focus and row identity while typing and deleting a preceding row', async () => {
+ vi.mocked(api).mockResolvedValue({ connections: [] });
+ render(<ConfirmProvider><McpConnections /></ConfirmProvider>);
+ fireEvent.change(screen.getByLabelText('Transport'), { target: { value: 'stdio' } });
+ fireEvent.click(screen.getByRole('button', { name: 'Add variable' }));
+ fireEvent.click(screen.getByRole('button', { name: 'Add variable' }));
+ const first = screen.getByLabelText('Environment variable 1 name');
+ first.focus(); fireEvent.change(first, { target: { value: 'B' } });
+ expect(document.activeElement).toBe(first);
+ fireEvent.change(first, { target: { value: 'BW_SESSION' } });
+ const second = screen.getByLabelText('Environment variable 2 name');
+ fireEvent.change(second, { target: { value: 'SECOND' } });
+ fireEvent.click(screen.getByRole('button', { name: /Remove.*BW_SESSION/ }));
+ expect(screen.getByLabelText('Environment variable 1 name')).toBe(second);
+});

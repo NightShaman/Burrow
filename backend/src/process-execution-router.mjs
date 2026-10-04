@@ -103,3 +103,14 @@ export function createExecutionProviderRegistry() {
     get(providerId) { return controllers.get(String(providerId || '')) || null; },
   });
 }
+
+/** Signal an isolated POSIX process group, with direct-child fallback on Windows. */
+export function terminateProcessGroup(child, signal) {
+  if (!child.pid) return false;
+  try {
+    if (process.platform !== 'win32') { process.kill(-child.pid, signal); return true; }
+    return child.kill(signal);
+  } catch {
+    try { return child.kill(signal); } catch { return false; }
+  }
+}

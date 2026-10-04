@@ -61,7 +61,7 @@
 @container(max-width:900px){.forge-jobs button{grid-template-columns:72px minmax(0,.7fr) minmax(0,1.3fr)}.forge-jobs time{grid-column:2 / -1;grid-row:2;max-width:none;white-space:normal;text-align:right}}
 .forge-status.succeeded{color:var(--ok)}
 .forge-status.failed,.forge-status.interrupted{color:var(--danger)}
-.forge-status.running,.forge-status.queued{color:var(--warning)}
+.forge-status.running,.forge-status.queued{color:var(--warn)}
 .forge-muted{padding:0 20px 20px;color:var(--muted)}
 .forge-page::-webkit-scrollbar{display:none}
 .forge-studio .forge-panel-head{padding:0 0 12px}

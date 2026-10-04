@@ -280,6 +280,7 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
   if (!text(toolName)) throw new Error('mcp_tool_name_invalid');
   return withConnectionConfig(connection, apiKey, environmentVariables, async (configPath, runtime) => {
     let output;
+    let launcherFailure = null;
     try {
       output = await runCommand(runtime.binary, ['call', `connection.${toolName}`, '--config', configPath, '--args', JSON.stringify(toolArguments), '--output', 'json'], { cwd: runtime.runtimeRoot, timeoutMs: 30_000, protectedValues: [apiKey, ...Object.values(environmentVariables || {})] });
     } catch (error) {
@@ -287,16 +288,20 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
       // true }` result, while writing that result to stdout. Parse it before
       // treating the process exit as a launcher/runtime failure.
       if (String(error?.message || error) !== 'mcp_runtime_failed' || typeof error?.stdout !== 'string') throw error;
+      launcherFailure = error;
       output = error.stdout;
     }
     try {
       const parsed = JSON.parse(output);
-      if (parsed?.isError === true || parsed?.error || parsed?.ok === false || parsed?.success === false) {
+      const structuredFailure = parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed.isError === true || parsed.error || parsed.ok === false || parsed.success === false);
+      if (launcherFailure && !structuredFailure) throw launcherFailure;
+      if (structuredFailure) {
         const providerFailure = providerFailureDetail(parsed);
         throw runtimeFailure('mcp_tool_failed', { stdout: boundedJson(parsed), protectedValues: [apiKey, ...Object.values(environmentVariables || {})], toolErrorCode: providerFailure.toolErrorCode, httpStatus: providerFailure.httpStatus, detail: providerFailure.detail });
       }
       return parsed;
     } catch (error) {
+      if (launcherFailure && String(error?.message || error) !== 'mcp_tool_failed') throw launcherFailure;
       if (String(error?.message || error) === 'mcp_tool_failed') throw error;
       return output.trim();
     }

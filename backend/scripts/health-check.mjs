@@ -74,11 +74,11 @@ if (args.help) {
 
 const url = args.url || process.env.BURROW_HEALTH_URL || 'http://127.0.0.1:42817/health';
 const timeoutMs = Number.isFinite(args.timeoutMs) ? args.timeoutMs : 5000;
-const controller = new AbortController();
-const timer = setTimeout(() => controller.abort(), timeoutMs);
+if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new Error('invalid timeout');
+const signal = AbortSignal.timeout(timeoutMs);
 
 try {
-  const response = await fetch(url, { signal: controller.signal });
+  const response = await fetch(url, { signal });
   const text = await response.text();
   let body;
   try {
@@ -97,6 +97,4 @@ try {
   if (args.json) console.log(JSON.stringify(output, null, 2));
   else console.error(`Burrow health: failed (${output.error})`);
   process.exit(1);
-} finally {
-  clearTimeout(timer);
 }

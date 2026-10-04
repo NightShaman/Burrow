@@ -1,3 +1,4 @@
+import { AccessibleModal } from '../../app/AccessibleModal';
 import { useEffect, useRef, useState } from 'react';
 import type { ClaudeCodeLogin } from './modelConnectionsApi';
 import type { useClaudeCodeLoginFlow } from './useClaudeCodeLoginFlow';
@@ -88,7 +89,7 @@ export function ModelConnectionOAuthDialog({ kind, editingId, apiType, onClose, 
   };
 
   return <div className="oauth-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <div className="oauth-modal" role="dialog" aria-modal="true" aria-labelledby="oauth-modal-title">
+    <AccessibleModal className="oauth-modal" role="dialog" aria-labelledby="oauth-modal-title" onClose={onClose}>
       <div className="oauth-modal-header"><div><span className="eyebrow">AUTHENTICATION</span><h2 id="oauth-modal-title">{kind === 'openai' ? 'OpenAI OAuth' : 'Anthropic OAuth'}</h2></div><button className="modal-close" type="button" aria-label="Close OAuth dialog" onClick={onClose}>×</button></div>
       {kind === 'openai' ? <>
         <p className="oauth-helper">Uses OpenAI OAuth PKCE. Stores encrypted OAuth credentials.</p>
@@ -107,6 +108,6 @@ export function ModelConnectionOAuthDialog({ kind, editingId, apiType, onClose, 
         {claudeLoginCanImport(claude.login) && <button className="primary" type="button" onClick={() => void claude.importCredentials()} disabled={claude.requestState !== 'idle'}>{claude.requestState === 'importing' ? 'Importing…' : 'Import Claude auth'}</button>}
         {claude.error && <p className="settings-request-error" role="alert">{claude.error}</p>}
       </>}
-    </div>
+    </AccessibleModal>
   </div>;
 }

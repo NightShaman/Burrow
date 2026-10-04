@@ -92,7 +92,7 @@ describe('useWorkspaceFiles', () => {
 
   it('saves a remote tab to its stored owner across node switches and rejects missing owners', async () => {
     const remote: ApiTarget = { id: 'remote-a', name: 'Remote A', baseUrl: 'https://remote.test', enabled: true };
-    const tab: Tab = { id: 'remote-a::agent-a:shared.txt', label: 'shared.txt', kind: 'file', path: 'shared.txt', workspaceAgentId: 'remote-a::agent-a', targetId: remote.id };
+    const tab: Tab = { id: 'remote-a::agent-a:shared.txt', label: 'shared.txt', kind: 'file', fileLoaded: true, path: 'shared.txt', workspaceAgentId: 'remote-a::agent-a', targetId: remote.id };
     apiForTargetMock.mockResolvedValue({ content: 'saved' });
     const { result, rerender } = renderHook(({ targets }) => useWorkspaceFiles({ selectedAgentId: 'agent-a', targets, setTabs, setActiveTabId, pollingEnabled: false }), { initialProps: { targets: [localApiTarget, remote] } });
     await act(async () => { await result.current.saveFile(tab, 'first'); });
@@ -125,7 +125,7 @@ describe('useWorkspaceFiles', () => {
   it('saves local tabs and fails closed for unavailable or inconsistent owners', async () => {
     const remote: ApiTarget = { id: 'remote-a', name: 'A', baseUrl: 'https://a.test', enabled: true };
     const disabled = { ...remote, enabled: false };
-    const local: Tab = { id: 'agent:same.txt', label: 'same.txt', kind: 'file', path: 'same.txt', workspaceAgentId: 'agent', targetId: 'local' };
+    const local: Tab = { id: 'agent:same.txt', label: 'same.txt', kind: 'file', fileLoaded: true, path: 'same.txt', workspaceAgentId: 'agent', targetId: 'local' };
     const { result, rerender } = renderHook(({ targets }) => useWorkspaceFiles({ selectedAgentId: 'remote-a::agent', targets, setTabs, setActiveTabId, pollingEnabled: false }), { initialProps: { targets: [localApiTarget, remote] } });
     apiForTargetMock.mockResolvedValue({ content: 'local saved' });
     await act(async () => { await result.current.saveFile(local, 'local draft'); });
@@ -146,7 +146,7 @@ describe('useWorkspaceFiles', () => {
   it('preserves tabs after network failure and retries the original remote owner despite selected B', async () => {
     const a: ApiTarget = { id: 'remote-a', name: 'A', baseUrl: 'https://a.test', enabled: true };
     const b: ApiTarget = { id: 'remote-b', name: 'B', baseUrl: 'https://b.test', enabled: true };
-    const tab: Tab = { id: 'remote-a::agent:same.txt', label: 'same.txt', kind: 'file', path: 'same.txt', workspaceAgentId: 'remote-a::agent', targetId: a.id, content: 'draft' };
+    const tab: Tab = { id: 'remote-a::agent:same.txt', label: 'same.txt', kind: 'file', fileLoaded: true, path: 'same.txt', workspaceAgentId: 'remote-a::agent', targetId: a.id, content: 'draft' };
     let tabs = [tab];
     const updateTabs: Dispatch<SetStateAction<Tab[]>> = (change) => { tabs = typeof change === 'function' ? change(tabs) : change; };
     const { result, rerender } = renderHook(({ selectedAgentId }) => useWorkspaceFiles({ selectedAgentId, targets: [localApiTarget, a, b], setTabs: updateTabs, setActiveTabId, pollingEnabled: false }), { initialProps: { selectedAgentId: 'remote-a::agent' } });
@@ -163,7 +163,7 @@ describe('useWorkspaceFiles', () => {
   it('commits a deferred A save only to the original tab after switching to same-path B', async () => {
     const a: ApiTarget = { id: 'remote-a', name: 'A', baseUrl: 'https://a.test', enabled: true };
     const b: ApiTarget = { id: 'remote-b', name: 'B', baseUrl: 'https://b.test', enabled: true };
-    const original: Tab = { id: 'remote-a::agent:same.txt', label: 'same.txt', kind: 'file', path: 'same.txt', workspaceAgentId: 'remote-a::agent', targetId: a.id, content: 'A draft' };
+    const original: Tab = { id: 'remote-a::agent:same.txt', label: 'same.txt', kind: 'file', fileLoaded: true, path: 'same.txt', workspaceAgentId: 'remote-a::agent', targetId: a.id, content: 'A draft' };
     let tabs: Tab[] = [original];
     const updateTabs: Dispatch<SetStateAction<Tab[]>> = (change) => { tabs = typeof change === 'function' ? change(tabs) : change; };
     const pending = deferred<{ content: string }>();
@@ -178,4 +178,52 @@ describe('useWorkspaceFiles', () => {
     expect(tabs.map((item) => item.content)).toEqual(['A saved', 'B draft', 'local draft']);
   });
 
+});
+
+it('reuses a loaded dirty tab without fetching or replacing its draft', async () => {
+  const tabs: Tab[] = [];
+  const update: Dispatch<SetStateAction<Tab[]>> = change => { tabs.splice(0, tabs.length, ...(typeof change === 'function' ? change(tabs) : change)); };
+  apiForTargetMock.mockResolvedValue({ content: 'server' });
+  const { result } = renderHook(() => useWorkspaceFiles({ selectedAgentId: 'agent-a', targets: [localApiTarget], tabs, setTabs: update, setActiveTabId, pollingEnabled: false }));
+  const file = { name: 'a.txt', path: 'a.txt', type: 'file' as const };
+  await act(async () => { await result.current.openFile(file); });
+  tabs[0] = { ...tabs[0], content: 'draft' };
+  await act(async () => { await result.current.openFile(file); });
+  expect(tabs[0].content).toBe('draft');
+  expect(apiForTargetMock).toHaveBeenCalledTimes(1);
+});
+
+it('does not overwrite an edit made while a read is pending', async () => {
+  const tabs: Tab[] = [];
+  const update: Dispatch<SetStateAction<Tab[]>> = change => { tabs.splice(0, tabs.length, ...(typeof change === 'function' ? change(tabs) : change)); };
+  const read = deferred<{ content: string }>();
+  apiForTargetMock.mockReturnValue(read.promise);
+  const { result } = renderHook(() => useWorkspaceFiles({ selectedAgentId: 'agent-a', targets: [localApiTarget], tabs, setTabs: update, setActiveTabId, pollingEnabled: false }));
+  let opening!: Promise<void>;
+  act(() => { opening = result.current.openFile({ name: 'a', path: 'a', type: 'file' }); });
+  tabs[0] = { ...tabs[0], content: 'new edit' };
+  await act(async () => { read.resolve({ content: 'old server' }); await opening; });
+  expect(tabs[0].content).toBe('new edit');
+});
+
+it('blocks pending and failed writes and retries a failed read successfully', async () => {
+  const tabs: Tab[] = [];
+  const update: Dispatch<SetStateAction<Tab[]>> = change => { tabs.splice(0, tabs.length, ...(typeof change === 'function' ? change(tabs) : change)); };
+  let reject!: (error: Error) => void;
+  apiForTargetMock.mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail; }));
+  const { result } = renderHook(() => useWorkspaceFiles({ tabs, selectedAgentId: 'agent-a', targets: [localApiTarget], setTabs: update, setActiveTabId, pollingEnabled: false }));
+  const file = { name: 'a', path: 'a', type: 'file' as const };
+  let opening!: Promise<void>;
+  act(() => { opening = result.current.openFile(file); });
+  await expect(result.current.saveFile(tabs[0], 'bad')).rejects.toThrow('not loaded');
+  await act(async () => { reject(new Error('offline')); await opening; });
+  expect(tabs[0].content).toBe('');
+  expect((tabs[0] as Tab & { fileError?: string }).fileError).toContain('offline');
+  await expect(result.current.saveFile(tabs[0], 'bad')).rejects.toThrow('not loaded');
+  expect(apiForTargetMock).toHaveBeenCalledTimes(1);
+  apiForTargetMock.mockResolvedValue({ content: 'success' });
+  await act(async () => { await result.current.openFile(file); });
+  expect(tabs[0]).toMatchObject({ content: 'success', fileLoaded: true, fileError: undefined });
+  await act(async () => { await result.current.saveFile(tabs[0], 'success'); });
+  expect(apiForTargetMock).toHaveBeenCalledTimes(3);
 });

@@ -441,7 +441,7 @@ export function nativeToolSchemas({ includeForge = true, includeMutations = true
     && (includeTaskBoard || !['tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete'].includes(tool.function?.name))
     && (includeAgentProfile || !['agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now'].includes(tool.function?.name))
     && (includeAgentChat || tool.function?.name !== 'agent_send_message')
-    && (includeMcpMenu || !['mcp_providers', 'mcp_capabilities', 'mcp_call', 'list_skills', 'load_skill'].includes(tool.function?.name)));
+    && (includeMcpMenu || !['mcp_providers', 'mcp_capabilities', 'mcp_call'].includes(tool.function?.name)));
 }
 
 export function actionFromNativeToolCall(call = {}, index = 0) {

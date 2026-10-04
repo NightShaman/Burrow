@@ -90,3 +90,8 @@ export function writeArchiveSessionCache(query: string, sessions: ArchiveSession
     .slice(0, archiveSessionsCacheLimit);
   writeStoredValue(archiveSessionsCacheStorageKey, archiveCacheVersion, Object.fromEntries(entries), storage);
 }
+
+export type ArchiveQueryScope = { target: string; agent: string; query: string; date: string; timezone: string; kind: string; detail?: string };
+export function archiveQueryCacheKey(scope: ArchiveQueryScope) {
+  return JSON.stringify([scope.target, scope.agent, scope.query.trim(), scope.date, scope.timezone, scope.kind, scope.detail ?? '']);
+}

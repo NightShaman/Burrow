@@ -55,6 +55,50 @@ describe('useChatComposers', () => {
     expect(result.current.session.isOpen).toBe(false);
   });
 
+  it.each(['agent', 'node', 'session'])('discards late create after %s navigation', async (navigation) => {
+    let resolve!: (value: unknown) => void;
+    apiForTargetMock.mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    const { result, options, rerender } = renderComposers();
+    act(() => result.current.session.setName('planning'));
+    let pending!: Promise<void>;
+    act(() => { pending = result.current.session.create(); });
+    if (navigation === 'agent') options.selectedAgentId = 'other';
+    if (navigation === 'node') options.activeTarget = targets[0];
+    if (navigation === 'session') options.sessionId = 'other';
+    rerender();
+    await act(async () => { resolve({}); await pending; });
+    expect(options.selectSession).not.toHaveBeenCalled();
+    expect(options.reportError).not.toHaveBeenCalled();
+  });
+
+  it('discards a late reset failure after session navigation away and back', async () => {
+    let reject!: (reason: Error) => void;
+    apiForTargetMock.mockResolvedValueOnce({}).mockReturnValueOnce(new Promise((_done, fail) => { reject = fail; }));
+    const { result, options, rerender } = renderComposers();
+    act(() => result.current.session.setName('planning'));
+    let pending!: Promise<void>;
+    act(() => { pending = result.current.session.create(); });
+    await waitFor(() => expect(apiForTargetMock).toHaveBeenCalledTimes(2));
+    options.sessionId = 'other'; rerender();
+    options.sessionId = ''; rerender();
+    await act(async () => { reject(new Error('offline')); await pending; });
+    expect(options.reportError).not.toHaveBeenCalled();
+    expect(options.selectSession).not.toHaveBeenCalled();
+    expect(result.current.session.error).toBe('');
+  });
+
+  it('exposes copied-history partial success and retries reset without another fork', async () => {
+    apiForTargetMock.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error('reset offline'));
+    const { result, options } = renderComposers();
+    act(() => result.current.session.setName('planning'));
+    await act(() => result.current.session.create());
+    expect(result.current.session.error).toContain('copied history');
+    expect(options.selectSession).not.toHaveBeenCalled();
+    await act(() => result.current.session.create());
+    expect(apiForTargetMock.mock.calls.filter(([, path]) => path.includes('/fork'))).toHaveLength(1);
+    expect(options.selectSession).toHaveBeenCalledWith('planning');
+  });
+
   it('keeps invalid or duplicate session names in the dialog without network work', async () => {
     const { result } = renderComposers({ sessions: [{ id: 'planning' }] });
     act(() => {

@@ -1,3 +1,5 @@
+import { finalAnswerAfterToolLoopPrompt } from './runtime-final-synthesis-prompt.mjs';
+import { accumulateCompletionEvidence } from './completion-addendum.mjs';
 import { compactSkippedToolActions, skippedToolSummary, executedToolResultPrompt } from './tool-continuation-prompt.mjs';
 import path from 'node:path';
 import { nativeToolSchemas, parseActionProposal } from './action-proposal.mjs';
@@ -6,7 +8,7 @@ import { createModelAdapter } from './model-adapter.mjs';
 import { executeReviewedProposalActions } from './proposal-executor.mjs';
 import { createRuntimeTurnResult, assertRuntimeTurnContract } from './chat-runtime-contracts.mjs';
 import { normalizeExecutionPolicyInput } from './execution-policy.mjs';
-import { summarizeToolResults } from './runtime-result-shapes.mjs';
+import { accumulateToolConsequences, summarizeToolResults } from './runtime-result-shapes.mjs';
 import { inspectRuntimeObject } from './runtime-heap-diagnostics.mjs';
 import { normalizeProviderMessages } from './provider-messages.mjs';
 import { serializeContinuationEvidence } from './continuation-evidence.mjs';
@@ -94,20 +96,6 @@ function mutationNotExecutedAnswer({ skipped = [], toolResults = [] } = {}) {
   ].filter(Boolean).join('\n\n');
 }
 
-function finalAnswerAfterToolLoopPrompt({ basePrompt = '', message = '', toolResults = [], skipped = [], runtimeNotice = null, modelConfig = null, contextThreshold = null } = {}) {
-  const skippedSummary = skippedToolSummary(skipped);
-  const buildPrompt = (evidence = '') => [
-    basePrompt, '',
-    'The bounded chat tool loop has ended. Answer the user directly using only the executed tool evidence below and the conversation context.',
-    runtimeNotice || null,
-    'If the evidence is insufficient, say exactly what is missing. Do not ask the user to paste files that you already tried to inspect.',
-    'Never describe skipped tool calls as completed. If a requested edit/write/append/change was skipped or lacks executed mutation evidence, say the file was NOT edited.',
-    '', 'User request:', message, '', 'Executed tool evidence:', evidence || '(no executed continuation evidence)', '',
-    'Skipped / not executed tool calls:', skippedSummary || '(none)',
-  ].filter(Boolean).join('\n');
-  const evidence = serializeContinuationEvidence({ toolResults, modelConfig, contextThreshold, buildPrompt });
-  return buildPrompt(evidence);
-}
 
 async function executeChatToolCalls({ model, workspaceRoot = null, rootDir = null, dataRoot = null, sessionId = null, conversationId = null, iteration = 0, traceLogger = null, executionPolicy = null, modelConfig = null, executionContext = null, abortSignal = null } = {}) {
   const proposal = proposalFromNativeToolCalls(model?.choice?.toolCalls, model?.choice?.text ?? '', executionContext);
@@ -449,7 +437,7 @@ export async function runPlainModelTurn({
         const result = rawToolResults[index];
         if (!result) return;
         appendBoundedChatHistory(completedToolCallHistory, {
-          callFingerprint: fingerprint({ name: call.name, arguments: call.arguments }),
+          callFingerprint: call.callFingerprint,
           outcomeFingerprint: fingerprint(normalizedToolOutcome(result)),
         }, CHAT_TOOL_CALL_HISTORY_LIMIT, 'omittedCompletedToolCalls');
       });
@@ -481,6 +469,7 @@ export async function runPlainModelTurn({
       }, CHAT_TOOL_HISTORY_LIMIT, 'omittedIterations');
       chatToolLoop.omittedIterations = chatToolLoop.iterations.omittedIterations || 0;
       for (const item of skipped) appendBoundedChatHistory(chatToolLoop.skipped, item, CHAT_TOOL_HISTORY_LIMIT, 'omittedSkipped');
+      chatToolLoop.consequences = accumulateCompletionEvidence(accumulateToolConsequences(chatToolLoop.consequences, rawToolResults), rawToolResults);
       for (const result of resultSummaries) appendBoundedChatHistory(chatToolLoop.toolResults, result, CHAT_TOOL_RESULT_HISTORY_LIMIT, 'omittedToolResults');
       chatToolLoop.omittedToolResults = chatToolLoop.toolResults.omittedToolResults || 0;
       for (const result of compactResults) appendBoundedChatHistory(promptEvidenceResults, result, CHAT_TOOL_HISTORY_LIMIT, 'omittedPromptEvidenceResults');
@@ -652,7 +641,7 @@ export async function runPlainModelTurn({
     finalText: answerText || '',
     blocker: model?.ok ? null : (model?.error || 'model_failed'),
     evidence: chatToolLoop.toolResults,
-    sideChannels: [{ type: 'receipt', content: { modelOk: model?.ok ?? null, proposedActions: proposal?.actions?.length ?? 0, chatToolCalls: chatToolLoop.iterations.reduce((sum, item) => sum + item.toolCalls.length, 0), executedChatTools: chatToolLoop.toolResults.length, terminal: chatToolLoop.terminal } }],
+    sideChannels: [{ type: 'receipt', content: { modelOk: model?.ok ?? null, proposedActions: proposal?.actions?.length ?? 0, chatToolCalls: chatToolLoop.iterations.reduce((sum, item) => sum + item.toolCalls.length, 0), executedChatTools: chatToolLoop.consequences?.executed || 0, terminal: chatToolLoop.terminal } }],
     metadata: { calledModel: true, modelUsage: model?.usage ?? null, ...(outputArtifacts.length ? { outputArtifacts } : {}), attachments: { images: modelInput.imageCount || 0, visionUsed: Boolean(modelInput.vision), visionFallback: Boolean(modelInput.fallback) }, chatToolLoop: { enabled: chatToolLoop.enabled, iterations: chatToolLoop.iterations.length, toolResults: chatToolLoop.toolResults.length, noProgress: Boolean(chatToolLoop.noProgress), loopWarnings: chatToolLoop.loopWarnings.length, terminal: chatToolLoop.terminal, semanticInspectionStalls: chatToolLoop.semanticInspectionStalls.length, omittedPromptEvidenceResults: chatToolLoop.omittedPromptEvidenceResults || 0 } },
   });
 

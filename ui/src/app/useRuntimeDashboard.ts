@@ -3,6 +3,7 @@ import { apiForTarget, type AnthropicUsage, type ModelConnection, type OpenAiUsa
 import type { ApiTarget } from './apiTargets';
 import { readAccountOrder, writeAccountOrder } from './accountOrderStorage';
 import type { Account, AccountMeter, Agent, SavedProvider } from './types';
+import { mergeVisibleOrder } from './useAgentRailPreferences';
 import { usePolling } from './usePolling';
 
 export type OperatorProfile = { name: string; avatar: string };
@@ -68,17 +69,17 @@ function formatResetCredit(count?: number | null, nearestEndAt?: string | null) 
 
 function quotaMeter(window: CodexLbQuotaWindow | undefined, key: string): AccountMeter | null {
   if (!window) return null;
-  const percent = Number(window.percent);
+  const percent = window.percent;
   // Codex-LB names this field RemainingPercent; it is already the amount left,
   // unlike the OAuth usage APIs which report utilization/used percent.
-  return { key, label: window.label ?? key, remainingPercent: Number.isFinite(percent) ? Math.max(0, Math.min(100, Math.round(percent))) : null, resetAt: window.resetAt ?? null };
+  return { key, label: window.label ?? key, remainingPercent: typeof percent === 'number' && Number.isFinite(percent) ? Math.max(0, Math.min(100, Math.round(percent))) : null, resetAt: window.resetAt ?? null };
 }
 
 export function asCodexAccount(account: CodexLbAccount, index: number): Account {
-  const usagePercent = Number(account.usagePercent);
-  const remaining = Number.isFinite(usagePercent) ? Math.max(0, Math.min(100, Math.round(usagePercent))) : 0;
+  const usagePercent = account.usagePercent;
+  const remaining = typeof usagePercent === 'number' && Number.isFinite(usagePercent) ? Math.max(0, Math.min(100, Math.round(usagePercent))) : null;
   const meters = [quotaMeter(account.quotaWindows?.primary, 'primary'), quotaMeter(account.quotaWindows?.secondary, 'secondary')].filter((meter): meter is NonNullable<typeof meter> => meter !== null);
-  return { id: account.id ?? `account-${index + 1}`, name: account.name ?? `Account ${index + 1}`, plan: account.type ?? 'Unknown plan', used: 100 - remaining, reset: formatReset(account.resetAt), status: account.status ?? 'Unknown', resetCredit: formatResetCredit(account.availableResetCredits, account.resetCreditNearestExpiresAt), meters };
+  return { id: account.id ?? `account-${index + 1}`, name: account.name ?? `Account ${index + 1}`, plan: account.type ?? 'Unknown plan', used: remaining === null ? null : 100 - remaining, reset: formatReset(account.resetAt), status: account.status ?? 'Unknown', resetCredit: formatResetCredit(account.availableResetCredits, account.resetCreditNearestExpiresAt), meters };
 }
 
 export const isOpenAiOAuthConnection = (provider?: Pick<SavedProvider, 'auth' | 'authSource' | 'oauthConfigured'>) =>
@@ -91,7 +92,8 @@ export const isOpenAiOAuthConnection = (provider?: Pick<SavedProvider, 'auth' | 
 
 const asSavedProvider = (connection: ModelConnection): SavedProvider => ({
   id: connection.id, provider: connection.provider, apiType: connection.apiType, url: connection.baseUrl, apiKey: '', apiKeyConfigured: connection.apiKeyConfigured,
-  auth: connection.auth, oauthConfigured: connection.authConfigured, authSource: connection.auth?.source, expiresAt: connection.auth?.expiresAt,
+  auth: connection.auth, oauthConfigured: connection.auth?.type === 'oauth' || connection.auth?.source === 'oauth' || connection.auth?.source === 'openai-oauth', authSource: connection.auth?.source, expiresAt: connection.auth?.expiresAt,
+  connectionModels: connection.models,
   models: connection.models.filter((model) => model.selected !== false).map((model) => model.id),
   manualModels: Object.fromEntries(connection.models.map((model) => [model.id, model.manual === true])),
   modelLabels: Object.fromEntries(connection.models.map((model) => [model.id, model.displayName ?? model.id])),
@@ -113,6 +115,10 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [operatorProfile, setOperatorProfile] = useState<OperatorProfile>({ name: 'Operator', avatar: 'OP' });
   const codexAccountOrder = useRef(readAccountOrder(codexAccountOrderKey));
+  const scopeKey = JSON.stringify([target?.id ?? 'local', target?.baseUrl ?? '']);
+  const scope = useRef({ key: scopeKey, generation: 0 });
+  if (scope.current.key !== scopeKey) scope.current = { key: scopeKey, generation: scope.current.generation + 1 };
+  const generation = scope.current.generation;
 
   const reorderAccounts = useCallback((draggedId: string, targetId: string) => {
     setAccounts((current) => {
@@ -120,14 +126,16 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
       const targetIndex = current.findIndex((account) => account.id === targetId);
       if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return current;
       const next = [...current]; const [dragged] = next.splice(sourceIndex, 1); next.splice(targetIndex, 0, dragged);
-      codexAccountOrder.current = next.map((account) => account.id);
+      codexAccountOrder.current = mergeVisibleOrder(codexAccountOrder.current, next.map((account) => account.id));
       writeAccountOrder(codexAccountOrderKey, codexAccountOrder.current);
       return next;
     });
   }, []);
 
   const refreshModelConnections = useCallback(async () => {
+    if (scope.current.generation !== generation) return;
     const { connections } = await apiForTarget<{ connections: ModelConnection[] }>(target, '/api/settings/model-connections');
+    if (scope.current.generation !== generation) return;
     const providers = connections.map(asSavedProvider).filter((provider) => provider.models.length);
     runtimeProviders.current = providers;
     setSavedProviders(providers); setModelConnectionsLoaded(true);
@@ -139,9 +147,16 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
       const efforts = ['off', ...(provider.modelEfforts?.[model] ?? []).filter((item) => item !== 'off')];
       return { ...agent, provider: provider.provider, model, effort: efforts.includes(agent.effort) ? agent.effort : provider.defaultEfforts?.[model] ?? 'off' };
     }));
-  }, [setAgents, target]);
+  }, [setAgents, target, generation]);
 
-  useEffect(() => { apiForTarget<{ operator: OperatorProfile }>(target, '/api/settings/identities').then(({ operator }) => setOperatorProfile(operator)).catch((error: Error) => reportError(`Could not load operator profile: ${error.message}`)); }, [reportError, target]);
+  useEffect(() => {
+    let cancelled = false;
+    setOperatorProfile({ name: 'Operator', avatar: 'OP' });
+    apiForTarget<{ operator: OperatorProfile }>(target, '/api/settings/identities')
+      .then(({ operator }) => { if (!cancelled && scope.current.generation === generation) setOperatorProfile(operator); })
+      .catch((error: Error) => { if (!cancelled && scope.current.generation === generation) reportError(`Could not load operator profile: ${error.message}`); });
+    return () => { cancelled = true; };
+  }, [reportError, target, generation]);
   useEffect(() => { let cancelled = false; setModelConnectionsLoaded(false); setSavedProviders([]); runtimeProviders.current = []; refreshModelConnections().catch((error: Error) => !cancelled && reportError(`Could not load model connections: ${error.message}`)); return () => { cancelled = true; }; }, [refreshModelConnections, reportError, target]);
 
   usePolling(async (isCancelled) => {
@@ -149,8 +164,8 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
       const { accounts: nextAccounts } = await apiForTarget<{ accounts: CodexLbAccount[] }>(target, '/api/codex-lb/accounts');
       if (isCancelled()) return;
       setAccounts(() => {
-        const next = (nextAccounts ?? []).map(asCodexAccount); const knownIds = new Set(next.map((account) => account.id));
-        const orderedIds = codexAccountOrder.current.filter((id) => knownIds.has(id)); const orderedIdSet = new Set(orderedIds);
+        const next = (nextAccounts ?? []).map(asCodexAccount);
+        const orderedIds = codexAccountOrder.current; const orderedIdSet = new Set(orderedIds);
         codexAccountOrder.current = [...orderedIds, ...next.map((account) => account.id).filter((id) => !orderedIdSet.has(id))];
         return next.sort((a, b) => codexAccountOrder.current.indexOf(a.id) - codexAccountOrder.current.indexOf(b.id));
       });

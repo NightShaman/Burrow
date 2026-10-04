@@ -3,6 +3,8 @@ import { panelIds } from './panelRegistry';
 import { readStorage, removeStorage, writeStorage, readStoredValue, writeStoredValue, type StoredValueValidator } from './browserStorage';
 import type { PanelId } from './types';
 
+export const railSplitBounds = { min: 25, max: 75 } as const;
+export const clampRailSplit = (value: number) => Math.min(railSplitBounds.max, Math.max(railSplitBounds.min, value));
 const persistedStateVersion = 1;
 const rightPanelDefaultsVersionKey = 'hc.rightPanelDefaultsVersion';
 const rightPanelDefaultsVersion = '3';
@@ -58,8 +60,8 @@ export function usePersistedLayout() {
   migrateRightPanelDefaults();
   const [leftCollapsed, setLeftCollapsed] = useStoredState('hc.leftCollapsed', false, isBoolean, (raw) => raw === 'true' ? true : raw === 'false' ? false : undefined);
   const [rightCollapsed, setRightCollapsed] = useStoredState('hc.rightCollapsed', false, isBoolean, (raw) => raw === 'true' ? true : raw === 'false' ? false : undefined);
-  const [leftSplit, setLeftSplit] = useStoredState('hc.leftSplit', 40, boundedNumber(25, 60), (raw) => { const value = Number(raw); return Number.isFinite(value) ? value : undefined; });
-  const [rightSplit, setRightSplit] = useStoredState('hc.rightSplit', 50, boundedNumber(25, 75), (raw) => { const value = Number(raw); return Number.isFinite(value) ? value : undefined; });
+  const [leftSplit, setLeftSplit] = useStoredState('hc.leftSplit', 40, boundedNumber(railSplitBounds.min, railSplitBounds.max), (raw) => { const value = Number(raw); return Number.isFinite(value) ? value : undefined; });
+  const [rightSplit, setRightSplit] = useStoredState('hc.rightSplit', 50, boundedNumber(railSplitBounds.min, railSplitBounds.max), (raw) => { const value = Number(raw); return Number.isFinite(value) ? value : undefined; });
   const [leftTopPanel, setLeftTopPanel] = useStoredState<PanelId>('hc.leftTopPanel', 'agents', isPanel, (raw) => isPanel(raw) ? raw : undefined);
   const [leftBottomPanel, setLeftBottomPanel] = useStoredState<PanelId>('hc.leftBottomPanel', 'workspace', isPanel, (raw) => isPanel(raw) ? raw : undefined);
   const [leftRailLayout, setLeftRailLayout] = useStoredState<RailLayout>('hc.leftRailLayout', 'divided', isRailLayout, (raw) => railLayouts.includes(raw as RailLayout) ? raw as RailLayout : undefined);

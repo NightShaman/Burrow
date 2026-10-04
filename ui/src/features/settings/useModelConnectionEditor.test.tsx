@@ -202,3 +202,20 @@ describe('useModelConnectionEditor', () => {
     expect(onModelConnectionsChanged).toHaveBeenCalledOnce();
   });
 });
+
+it.each(['edit', 'cancel'])('FE029 ignores ordinary discovery after %s for success and failure', async action => {
+ for (const fail of [false,true]) {
+  let resolve!: (value:any)=>void, reject!:(error:Error)=>void;
+  const pending = new Promise<any>((yes,no)=>{resolve=yes;reject=no;});
+  vi.spyOn(modelConnectionsApi,'discover').mockReturnValue(pending);
+  const {result,unmount} = renderEditor();
+  act(()=>result.current.editProvider(savedProvider));
+  let work!:Promise<any>; act(()=>{work=result.current.connect();});
+  act(()=> action === 'edit' ? result.current.editProvider({...savedProvider,id:'B',provider:'B',models:['b']}) : result.current.resetProvider());
+  await act(async()=>{if(fail) reject(new Error('stale'));else resolve({models:[{id:'stale'}]});await work;});
+  expect(result.current.availableModels.map(m=>m.id)).toEqual(action === 'edit' ? ['b'] : []);
+  expect(result.current.requestError).toBe(''); expect(result.current.requestState).toBe('idle');
+  expect(result.current.connected).toBe(action === 'edit');
+  unmount();vi.restoreAllMocks();
+ }
+});

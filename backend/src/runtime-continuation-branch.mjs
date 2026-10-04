@@ -73,7 +73,7 @@ export async function runContinuationBranch({
     if (eligibility.ok) {
       try {
         const runStep = runWorkbenchStepOverride || runWorkbenchStep;
-        continuedResult = await runStep({ rootDir, step, message: activeWorkItem.message, workspaceRoot: continuationPlan.workspaceRoot, verifyCommand: normalizedArgs.verify_command || normalizedArgs.verifyCommand || null, runId: `${logger.runId}-work-${step}`, conversationId, args: { ...normalizedArgs, data_root: dataRoot, session_id: sessionId, conversation_id: conversationId, files: continuationPlan.targetFiles }, parentPermissions: null });
+        continuedResult = await runStep({ rootDir, stores, step, message: activeWorkItem.message, workspaceRoot: continuationPlan.workspaceRoot, verifyCommand: normalizedArgs.verify_command || normalizedArgs.verifyCommand || null, runId: `${logger.runId}-work-${step}`, conversationId, args: { ...normalizedArgs, data_root: dataRoot, session_id: sessionId, conversation_id: conversationId, files: continuationPlan.targetFiles }, parentPermissions: null });
       } catch (error) {
         const detail = String(error?.message || error || 'unknown error');
         continuedResult = {

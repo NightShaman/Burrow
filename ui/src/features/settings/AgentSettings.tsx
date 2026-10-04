@@ -24,7 +24,7 @@ export function AgentSettings({ selected, targets, savedProviders, onAgentsChang
   const [state, setState] = useState<'idle' | 'saving' | 'deleting'>('idle');
   const [error, setError] = useState('');
 
-  useEffect(() => { setName(selected.name); setAvatar(selected.avatar.startsWith('data:image/') ? selected.avatar : ''); setAvatarFileName(''); setEnabled(selected.activity !== 'Disabled'); setError(''); }, [selected]);
+  useEffect(() => { setName(selected.name); setAvatar(selected.avatar.startsWith('data:image/') ? selected.avatar : ''); setAvatarFileName(''); setEnabled(selected.activity !== 'Disabled'); setError(''); }, [selected.id, owner.target.id, owner.target.baseUrl, owner.resourceId]);
   const chooseAvatar = async (file?: File) => {
     if (!file) return;
     try { setAvatar(await optimizeAvatar(file)); setAvatarFileName(file.name || 'Pasted image'); setError(''); }

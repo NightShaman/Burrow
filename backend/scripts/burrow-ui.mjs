@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { postgresTransactionContext, withPostgresTransaction } from '../src/postgres-foundation.mjs';
+import { readJsonBody } from '../src/request-resource-budgets.mjs';
 import { createAlbdruckRoutes } from './ui/albdruck-routes.mjs';
 import { validateTimezone, operatorTimezone, saveOperatorTimezone } from '../src/timezone.mjs';
 import { ensureDefaultGlobalWorkspace } from '../src/runtime-workspace-defaults.mjs';
@@ -184,7 +186,7 @@ function scheduler() {
     scheduledJobScheduler = createScheduledJobScheduler({
       storeFactory: () => borrowedStore,
       closeStore: async () => {},
-      resolveAgentRuntime, rootDir: projectRoot,
+      resolveAgentRuntime, rootDir: projectRoot, stores: postgresApplication.stores,
       activeOwnerModIds: () => loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id),
     });
   }
@@ -735,9 +737,7 @@ function hashBasicPassword(password) {
   return `scrypt:16384:${salt.toString('base64url')}:${scryptSync(String(password || ''), salt, 32, { N: 16384 }).toString('base64url')}`;
 }
 
-async function saveUiAuthSettings(body = {}) {
-  try {
-    const existing = await readUiAuthRecord();
+function planUiAuthSettings(body, existing) {
     const mode = String(body.mode || existing.mode || 'none').trim().toLowerCase();
     if (!['none', 'trusted-proxy', 'basic', 'oidc'].includes(mode)) return { ok: false, status: 400, error: 'ui_auth_mode_invalid' };
     const trustedProxyInput = body.trustedProxy && typeof body.trustedProxy === 'object' ? body.trustedProxy : {};
@@ -767,13 +767,30 @@ async function saveUiAuthSettings(body = {}) {
     });
     if (next.mode === 'trusted-proxy' && !next.trustedProxy.allowedProxies.length) return { ok: false, status: 400, error: 'trusted_proxy_allowed_proxies_required' };
     if (next.mode === 'basic' && (!next.basic.username || !next.basic.passwordHash)) return { ok: false, status: 400, error: 'basic_username_password_required' };
-    if (oidcInput.clientSecret !== undefined && String(oidcInput.clientSecret || '').trim()) await uiAuthSecretStore().set('oidcClientSecret', String(oidcInput.clientSecret));
-    next.oidc.clientSecretConfigured = Boolean(next.oidc.clientSecretConfigured || await uiAuthSecretStore().has('oidcClientSecret'));
+    const replacementSecret = oidcInput.clientSecret !== undefined && String(oidcInput.clientSecret || '').trim() ? String(oidcInput.clientSecret) : null;
+    next.oidc.clientSecretConfigured = Boolean(next.oidc.clientSecretConfigured || replacementSecret);
     if (next.mode === 'oidc' && (!next.oidc.issuer || !next.oidc.clientId || !next.oidc.clientSecretConfigured)) return { ok: false, status: 400, error: 'oidc_issuer_client_secret_required' };
+    return { ok: true, next, replacementSecret };
+}
+
+async function saveUiAuthSettings(body = {}) {
+  try {
+    const plan = planUiAuthSettings(body, await readUiAuthRecord());
+    if (!plan.ok) return plan;
+    const { next, replacementSecret } = plan;
     const stored = normalizeUiAuthRecord(next);
     stored.oidc.clientSecret = '';
     stored.oidc.clientSecretConfigured = next.oidc.clientSecretConfigured;
-    await metadataStore().set('ui_auth', stored);
+    const metadata = metadataStore();
+    const secrets = uiAuthSecretStore();
+    await withPostgresTransaction(metadata.pool, async (client) => {
+      const pool = postgresTransactionContext(client);
+      // Borrow one context without losing store configuration or injected failures.
+      const transactionalMetadata = Object.assign(Object.create(Object.getPrototypeOf(metadata)), metadata, { pool });
+      const transactionalSecrets = Object.assign(Object.create(Object.getPrototypeOf(secrets)), secrets, { pool });
+      if (replacementSecret) await transactionalSecrets.set('oidcClientSecret', replacementSecret);
+      await transactionalMetadata.set('ui_auth', stored);
+    });
     const runtime = await runtimeConfig();
     return { ok: true, auth: safeUiAuthSettings(next), effective: { mode: runtime.ui.authMode, enabled: runtime.ui.authEnabled, source: runtime.ui.authSource } };
   } catch (error) { return { ok: false, status: 400, error: String(error?.message || error) }; }
@@ -1541,10 +1558,21 @@ const IMPORT_SUPPORTED_CATEGORIES = new Set(['agents', 'settings', 'task-board',
 async function importPreview(decoded, conflictPolicy) {
   const supported = decoded.categories.filter((id) => IMPORT_SUPPORTED_CATEGORIES.has(id));
   const unsupported = decoded.categories.filter((id) => !IMPORT_SUPPORTED_CATEGORIES.has(id));
-  return { ok: true, format: decoded.payload.manifest.format, encrypted: decoded.encrypted, categories: decoded.categories, supported, unsupported, conflictPolicy, requiresConfirmation: true, redacted: Boolean(decoded.payload.manifest.redacted) };
+  let uiAuth = null;
+  if (supported.includes('ui-auth') && decoded.payload.categories['ui-auth']?.auth) {
+    const category = decoded.payload.categories['ui-auth'];
+    const existing = await readUiAuthRecord();
+    const secret = category.oidcClientSecret;
+    const input = secret && secret !== '[redacted]' ? { ...category.auth, oidc: { ...category.auth.oidc, clientSecret: secret } } : category.auth;
+    const plan = planUiAuthSettings(input, existing);
+    if (!plan.ok) throw Object.assign(new Error(plan.error), { statusCode: plan.status });
+    const summary = record => ({ mode: record.mode, enabled: record.mode !== 'none', basicPasswordConfigured: Boolean(record.basic.passwordHash), oidcClientSecretConfigured: Boolean(record.oidc.clientSecretConfigured || record.oidc.clientSecret) });
+    uiAuth = { before: summary(existing), after: summary(plan.next) };
+  }
+  return { ok: true, format: decoded.payload.manifest.format, encrypted: decoded.encrypted, categories: decoded.categories, supported, unsupported, conflictPolicy, requiresConfirmation: true, redacted: Boolean(decoded.payload.manifest.redacted), uiAuth };
 }
 async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
-  const categories = decoded.payload.categories || {};
+  const categories = Object.fromEntries(decoded.categories.map(id => [id, decoded.payload.categories[id]]));
   const unsupported = decoded.categories.filter((id) => !IMPORT_SUPPORTED_CATEGORIES.has(id));
   if (unsupported.length) return { ok: false, status: 400, error: 'import_category_unsupported', details: { categories: unsupported } };
   if (Object.hasOwn(categories, 'agents') && (!categories.agents || typeof categories.agents !== 'object' || Array.isArray(categories.agents) || categories.agents.schema !== 'burrow.agents-and-profiles/v2' || !Array.isArray(categories.agents.records) || !categories.agents.profiles || typeof categories.agents.profiles !== 'object' || Array.isArray(categories.agents.profiles))) {
@@ -1558,15 +1586,28 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
       if (!connection?.id) continue;
       const existingById = await store.get(connection.id);
       const existingByProvider = (await store.list()).find((item) => String(item.provider || '').toLowerCase() === String(connection.provider || '').toLowerCase() && item.id !== connection.id);
-      // A supplied ID is the portable identity of a model connection. Saving
-      // it again is an update, not a conflict; the store already handles that
-      // transactionally. Only a different connection with the same provider
-      // label needs an explicit conflict policy.
-      if (!existingById && existingByProvider) conflicts.push({ category: 'model-connections', id: connection.id, existingId: existingByProvider.id, reason: 'provider' });
+      if (existingById) conflicts.push({ category: 'model-connections', id: connection.id, reason: 'id' });
+      if (existingByProvider) conflicts.push({ category: 'model-connections', id: connection.id, existingId: existingByProvider.id, reason: 'provider' });
     }
   }
+  for (const agent of (categories.agents?.records || [])) if (await agentsStore().get(agent.id)) conflicts.push({ category: 'agents', id: agent.id });
+  const mcpConnections = Array.isArray(categories['mcp-connections']) ? categories['mcp-connections'] : (categories['mcp-connections']?.connections || []);
+  for (const connection of mcpConnections) if (await mcpStore().get(connection.id)) conflicts.push({ category: 'mcp-connections', id: connection.id });
+  for (const task of (categories['task-board']?.tasks || [])) if (await withTaskBoard(store => store.getTask(task.id))) conflicts.push({ category: 'task-board.tasks', id: task.id });
   if (conflicts.length && conflictPolicy === 'error') return { ok: false, status: 409, error: 'import_conflicts', details: { conflicts } };
   const imported = [];
+  const deleted = [];
+  const completed = [];
+  let currentItem = null;
+  const failure = (result) => ({ ...result, ok: false, status: result.status || result.statusCode || 400, imported: [...imported], deleted: [...deleted], completed: [...completed], partial: completed.length > 0 || deleted.length > 0, failed: { item: currentItem, error: String(result.error || 'import_failed') }, skipped: conflicts.filter(c => conflictPolicy === 'skip'), unsupported: [] });
+  const write = async (item, operation) => {
+    currentItem = item;
+    const result = await operation();
+    if (result?.ok === false || result === false) throw Object.assign(new Error(result?.error || 'import_write_failed'), { importResult: result || {} });
+    completed.push(item);
+    return result;
+  };
+  try {
   let importRuntime = null;
   const materializeAgentRuntime = async (agent) => {
     if (!agent?.id) return;
@@ -1577,15 +1618,15 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
   };
   if (categories.settings && typeof categories.settings === 'object') {
     if (categories.settings.executionBoundaries) {
-      const result = await saveExecutionBoundaries(categories.settings.executionBoundaries, { metadataStore: postgresApplication.stores.metadata, });
-      if (!result.ok) return result;
+      const result = await write('settings:execution-boundaries', () => saveExecutionBoundaries(categories.settings.executionBoundaries, { metadataStore: postgresApplication.stores.metadata, }));
+      if (!result.ok) return failure(result);
       imported.push('settings:execution-boundaries');
     }
     if (categories.settings.curatorSelection) {
       try {
-        await saveCuratorSelection(categories.settings.curatorSelection, { stores: postgresApplication.stores, root: curatorRoot() });
+        await write('settings:curator-selection', () => saveCuratorSelection(categories.settings.curatorSelection, { stores: postgresApplication.stores, root: curatorRoot() }));
         imported.push('settings:curator-selection');
-      } catch (error) { return { ok: false, status: 400, error: String(error?.message || error) }; }
+      } catch (error) { return failure({ status: 400, error: String(error?.message || error) }); }
     }
   }
   // Model connections must exist before agent dream settings are restored.
@@ -1596,9 +1637,9 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
       const connectionConflicts = conflicts.filter((conflict) => conflict.category === 'model-connections' && conflict.id === connection.id);
       if (conflictPolicy === 'skip' && connectionConflicts.length) continue;
       for (const conflict of connectionConflicts) {
-        if (conflict.reason === 'provider' && conflict.existingId && conflict.existingId !== connection.id) await store.remove(conflict.existingId);
+        if (conflict.reason === 'provider' && conflict.existingId && conflict.existingId !== connection.id) { await write(`model-connections:delete:${conflict.existingId}`, () => store.remove(conflict.existingId)); deleted.push(`model-connections:${conflict.existingId}`); }
       }
-      await store.save(connection);
+      await write(`model-connections:${connection.id}`, () => store.save(connection));
       imported.push(`model-connections:${connection.id}`);
     }
   }
@@ -1608,26 +1649,26 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
     for (const agent of agentRecords) {
       if (conflictPolicy === 'skip' && conflicts.some((c) => c.category === 'agents' && c.id === agent.id)) continue;
       const existingAgent = await agentsStore().get(agent.id);
-      const importedAgent = existingAgent ? await agentsStore().update(agent.id, agent) : await agentsStore().create(agent);
-      await materializeAgentRuntime(importedAgent);
-      if (agent.avatar !== undefined || agent.identityName !== undefined) await modelsStore().saveIdentity({ kind: 'agent', id: agent.id, name: agent.identityName ?? agent.name, avatar: agent.avatar ?? '' });
+      const importedAgent = await write(`agents:${agent.id}:record`, () => existingAgent ? agentsStore().update(agent.id, agent) : agentsStore().create(agent));
+      await write(`agents:${agent.id}:runtime`, () => materializeAgentRuntime(importedAgent));
+      if (agent.avatar !== undefined || agent.identityName !== undefined) await write(`agents:${agent.id}:identity`, () => modelsStore().saveIdentity({ kind: 'agent', id: agent.id, name: agent.identityName ?? agent.name, avatar: agent.avatar ?? '' }));
       const profileDocuments = Array.isArray(profiles[agent.id]) ? profiles[agent.id] : [];
       if (profileDocuments.length) {
         const profileStore = profilesStore();
-        try { await profileStore.replace(agent.id, profileDocuments.filter((item) => AGENT_PROFILE_KINDS.includes(String(item?.kind || '').toUpperCase())).map((item) => ({ ...item, kind: String(item.kind).toUpperCase() }))); } finally { await profileStore.close(); }
+        try { await write(`agents:${agent.id}:profiles`, () => profileStore.replace(agent.id, profileDocuments.filter((item) => AGENT_PROFILE_KINDS.includes(String(item?.kind || '').toUpperCase())).map((item) => ({ ...item, kind: String(item.kind).toUpperCase() })))); } finally { await profileStore.close(); }
       }
       if (agent.dreamSettings && typeof agent.dreamSettings === 'object') {
         const dreamStore = dreamSettingsStore();
         try {
           try {
-            await dreamStore.save(agent.id, agent.dreamSettings);
+            await write(`agents:${agent.id}:dream`, () => dreamStore.save(agent.id, agent.dreamSettings));
           } catch (error) {
             // Dream model selection is optional. An export may refer to a provider
             // model that was not included, was redacted, or is unavailable here.
             // Preserve the rest of the dream configuration rather than aborting
             // the entire import; the model can be selected later in Settings.
             if (!['dream_settings_model_selection_invalid', 'dream_settings_model_selection_incomplete'].includes(error?.message)) throw error;
-            await dreamStore.save(agent.id, { ...agent.dreamSettings, modelConnectionId: null, model: null });
+            await write(`agents:${agent.id}:dream`, () => dreamStore.save(agent.id, { ...agent.dreamSettings, modelConnectionId: null, model: null }));
           }
         } finally { await dreamStore.close(); }
       }
@@ -1635,15 +1676,15 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
     }
     if (categories.agents.operator && typeof categories.agents.operator === 'object') {
       const operator = categories.agents.operator;
-      await modelsStore().saveIdentity({ kind: 'operator', id: 'default', name: operator.name ?? '', avatar: operator.avatar ?? '' });
+      await write('agents:operator', () => modelsStore().saveIdentity({ kind: 'operator', id: 'default', name: operator.name ?? '', avatar: operator.avatar ?? '' }));
       imported.push('agents:operator');
     }
   }
-  if (categories['task-board']) for (const project of (categories['task-board'].projects || [])) { if (conflictPolicy === 'skip' && conflicts.some((c) => c.category === 'task-board.projects' && c.id === project.id)) continue; if (!(await withTaskBoard((store) => store.getProject(project.id)))) await withTaskBoard((store) => store.createProject(project)); imported.push(`task-board.projects:${project.id}`); }
-  if (categories['task-board']) for (const task of (categories['task-board'].tasks || [])) { const exists = await withTaskBoard((store) => store.getTask(task.id)); if (exists && conflictPolicy !== 'replace') continue; if (!exists) await withTaskBoard((store) => store.createTask(task)); else await withTaskBoard((store) => store.updateTask(task.id, task)); imported.push(`task-board.tasks:${task.id}`); }
+  if (categories['task-board']) for (const project of (categories['task-board'].projects || [])) { if (conflictPolicy === 'skip' && conflicts.some((c) => c.category === 'task-board.projects' && c.id === project.id)) continue; const existing = await withTaskBoard((store) => store.getProject(project.id)); if (!existing) await write(`task-board.projects:${project.id}`, () => withTaskBoard((store) => store.createProject(project))); else if (conflictPolicy === 'replace') await write(`task-board.projects:${project.id}`, () => withTaskBoard((store) => store.updateProject(project.id, project))); else continue; imported.push(`task-board.projects:${project.id}`); }
+  if (categories['task-board']) for (const task of (categories['task-board'].tasks || [])) { const exists = await withTaskBoard((store) => store.getTask(task.id)); if (exists && conflictPolicy !== 'replace') continue; if (!exists) await write(`task-board.tasks:${task.id}`, () => withTaskBoard((store) => store.createTask(task))); else await write(`task-board.tasks:${task.id}`, () => withTaskBoard((store) => store.updateTask(task.id, task))); imported.push(`task-board.tasks:${task.id}`); }
   if (categories['mcp-connections'] && typeof categories['mcp-connections'] === 'object' && !Array.isArray(categories['mcp-connections'])) {
     const connections = Array.isArray(categories['mcp-connections'].connections) ? categories['mcp-connections'].connections : [];
-    for (const connection of connections) { if (connection.apiKey === '[redacted]') continue; const { environmentVariables, ...portableConnection } = connection; await mcpStore().save(portableConnection); imported.push(`mcp-connections:${connection.id}`); }
+    for (const connection of connections) { if (connection.apiKey === '[redacted]' || (conflictPolicy === 'skip' && conflicts.some(c => c.category === 'mcp-connections' && c.id === connection.id))) continue; const { environmentVariables, ...portableConnection } = connection; await write(`mcp-connections:${connection.id}`, () => mcpStore().save(portableConnection)); imported.push(`mcp-connections:${connection.id}`); }
     for (const grant of (Array.isArray(categories['mcp-connections'].grants) ? categories['mcp-connections'].grants : [])) {
       if (!await agentsStore().get(grant?.agentId) || !Array.isArray(grant?.tools) || !grant.tools.length) continue;
       // v2 stores connection IDs inside each per-agent tool grant. The old
@@ -1652,25 +1693,28 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
       // mcp_connection_id_invalid before setAgentTools could validate it.
       const connectionIds = [...new Set(grant.tools.map((tool) => String(tool?.connectionId || '').trim()).filter(Boolean))];
       if (connectionIds.length && (await Promise.all(connectionIds.map((connectionId) => mcpStore().get(connectionId)))).every(Boolean)) {
-        await mcpStore().setAgentTools(grant.agentId, grant.tools);
+        await write(`mcp-grants:${grant.agentId}`, () => mcpStore().setAgentTools(grant.agentId, grant.tools));
         imported.push(`mcp-grants:${grant.agentId}`);
       }
     }
-  } else if (Array.isArray(categories['mcp-connections'])) for (const connection of categories['mcp-connections']) { if (connection.apiKey === '[redacted]') continue; const { environmentVariables, ...portableConnection } = connection; await mcpStore().save(portableConnection); imported.push(`mcp-connections:${connection.id}`); }
+  } else if (Array.isArray(categories['mcp-connections'])) for (const connection of categories['mcp-connections']) { if (connection.apiKey === '[redacted]' || (conflictPolicy === 'skip' && conflicts.some(c => c.category === 'mcp-connections' && c.id === connection.id))) continue; const { environmentVariables, ...portableConnection } = connection; await write(`mcp-connections:${connection.id}`, () => mcpStore().save(portableConnection)); imported.push(`mcp-connections:${connection.id}`); }
   if (categories['ui-auth'] && typeof categories['ui-auth'] === 'object') {
     const auth = categories['ui-auth'].auth;
     const secret = categories['ui-auth'].oidcClientSecret;
     if (auth && typeof auth === 'object' && secret !== '[redacted]' && secret) {
-      const result = await saveUiAuthSettings({ ...auth, oidc: { ...(auth.oidc || {}), clientSecret: secret } });
-      if (!result.ok) return result;
+      const result = await write('ui-auth:oidc-secret', () => saveUiAuthSettings({ ...auth, oidc: { ...(auth.oidc || {}), clientSecret: secret } }));
+      if (!result.ok) return failure(result);
       imported.push('ui-auth:oidc-secret');
     } else if (auth && typeof auth === 'object') {
-      const result = await saveUiAuthSettings(auth);
-      if (!result.ok) return result;
+      const result = await write('ui-auth:settings', () => saveUiAuthSettings(auth));
+      if (!result.ok) return failure(result);
       imported.push('ui-auth:settings');
     }
   }
-  return { ok: true, imported, skipped: conflicts.filter((c) => conflictPolicy === 'skip'), unsupported: [] };
+  return { ok: true, imported, deleted, completed, partial: false, skipped: conflicts.filter((c) => conflictPolicy === 'skip'), unsupported: [] };
+  } catch (error) {
+    return failure({ ...(error?.importResult || {}), error: String(error?.importResult?.error || error?.message || error), status: error?.importResult?.status || error?.statusCode || 400 });
+  }
 }
 
 async function exportSnapshot(categories = []) {
@@ -1691,8 +1735,8 @@ async function exportSnapshot(categories = []) {
     let profiles;
     let dreamSettings;
     try {
-      profiles = Object.fromEntries(agentRecords.map((agent) => [agent.id, profileStore.list(agent.id)]));
-      dreamSettings = Object.fromEntries(agentRecords.map((agent) => [agent.id, dreamStore.get(agent.id)]));
+      profiles = Object.fromEntries(await Promise.all(agentRecords.map(async (agent) => [agent.id, await profileStore.list(agent.id)])));
+      dreamSettings = Object.fromEntries(await Promise.all(agentRecords.map(async (agent) => [agent.id, await dreamStore.get(agent.id)])));
     } finally { await profileStore.close(); await dreamStore.close(); }
     data.agents = {
       schema: 'burrow.agents-and-profiles/v2',
@@ -1834,17 +1878,6 @@ async function serveV18Asset(url, res) {
   }
 }
 
-async function readJsonBody(req) {
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  const text = Buffer.concat(chunks).toString('utf8');
-  if (!text) return {};
-  try { return JSON.parse(text); } catch {
-    const error = new Error('invalid_json');
-    error.statusCode = 400;
-    throw error;
-  }
-}
 
 function requireObjectBody(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw Object.assign(new Error('request_body_object_required'), { statusCode: 400 });
@@ -2563,6 +2596,7 @@ async function workbenchRun(body = {}, agentRuntime = null) {
   const workflow = workbenchWorkflow({ session, actionRoute, workspaceRoot });
   const result = await runWorkbenchStep({
     rootDir: projectRoot,
+    stores: postgresApplication.stores,
     step: body.step || 'inspect',
     message,
     workspaceRoot,
@@ -2608,6 +2642,7 @@ async function runWorkbenchItemStep(id, body = {}, agentRuntime = null) {
   if (!eligibility.ok) return { ok: false, decision: 'blocked', blockers: eligibility.blockers, allowedNextSteps: eligibility.allowedNextSteps, item };
   const result = await runWorkbenchStep({
     rootDir: projectRoot,
+    stores: postgresApplication.stores,
     step,
     message: body.message || item.message,
     workspaceRoot: body.workspaceRoot ? String(body.workspaceRoot) : item.workspaceRoot,

@@ -71,7 +71,8 @@ const UPSERT_SQL = `INSERT INTO continuity_handoffs
   ON CONFLICT (id) DO UPDATE SET run_id=EXCLUDED.run_id, source=EXCLUDED.source, title=EXCLUDED.title,
     content=EXCLUDED.content, source_refs=EXCLUDED.source_refs, evidence_summary=EXCLUDED.evidence_summary,
     updated_at=EXCLUDED.updated_at, expires_at=EXCLUDED.expires_at
-    WHERE NOT (continuity_handoffs.source='explicit' AND EXCLUDED.source='runtime')`;
+    WHERE continuity_handoffs.agent_id=EXCLUDED.agent_id AND continuity_handoffs.session_id=EXCLUDED.session_id
+    AND NOT (continuity_handoffs.source='explicit' AND EXCLUDED.source='runtime')`;
 
 export class PostgresContinuityHandoffStore {
   constructor({ pool, ownsPool = false } = {}) {
@@ -85,10 +86,12 @@ export class PostgresContinuityHandoffStore {
     const timestamp = now();
     return withPostgresTransaction(this.pool, async (client) => {
       const existing = await client.query('SELECT * FROM continuity_handoffs WHERE id=$1', [value.id]);
+      if (existing.rows[0] && (existing.rows[0].agent_id !== value.agentId || existing.rows[0].session_id !== value.sessionId)) throw new Error('continuity_handoff_owner_conflict');
       if (existing.rows[0]?.source === 'explicit' && value.source === 'runtime') return publicRecord(existing.rows[0]);
       await client.query(UPSERT_SQL, [value.id, value.agentId, value.sessionId, value.runId, value.source, value.title, value.content, JSON.stringify(value.sourceRefs), value.evidenceSummary, timestamp, value.expiresAt]);
       await client.query('DELETE FROM continuity_handoffs WHERE expires_at < $1', [timestamp]);
       const result = await client.query('SELECT * FROM continuity_handoffs WHERE id=$1', [value.id]);
+      if (result.rows[0] && (result.rows[0].agent_id !== value.agentId || result.rows[0].session_id !== value.sessionId)) throw new Error('continuity_handoff_owner_conflict');
       return publicRecord(result.rows[0]);
     });
   }

@@ -1,3 +1,4 @@
+import { closePostgresWithRetry } from './postgres-cleanup.mjs';
 import { userInfo } from 'node:os';
 import { createPostgresPool, postgresConfig } from './postgres-foundation.mjs';
 import { postgresLifecycleConfig, startPostgresLifecycle } from './postgres-lifecycle-bootstrap.mjs';
@@ -25,16 +26,20 @@ export async function preparePostgresStartup({ env = process.env } = {}) {
   if (config.mode === 'disabled') throw new Error('postgres_startup_requires_explicit_lifecycle');
   const childEnv = resolvePostgresRuntimeEnv({ env });
   const pool = createPostgresPool({ config: postgresConfig(childEnv) });
+  const cleanup = { budgetMs: Number(env.BURROW_POSTGRES_CLEANUP_BUDGET_MS || 60_000) };
   let handle;
   try {
-    handle = await startPostgresLifecycle({ env, query: pool.query.bind(pool) });
+    handle = await startPostgresLifecycle({ env, pool });
     await migratePostgres(pool);
     const result = { initialized: true };
     await pool.end();
-    return { env: childEnv, result, close: () => handle.close() };
+    return { env: childEnv, result, close: () => closePostgresWithRetry(handle, cleanup) };
   } catch (error) {
     await pool.end().catch(() => {});
-    if (handle) await handle.close().catch(() => {});
+    if (handle) {
+      try { await closePostgresWithRetry(handle, cleanup); }
+      catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Startup failed and PostgreSQL cleanup requires operator recovery'); }
+    }
     throw error;
   }
 }

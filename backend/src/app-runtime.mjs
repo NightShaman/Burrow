@@ -20,7 +20,8 @@ import { loadEffectiveSkillCatalog } from './skill-catalog.mjs';
 import { buildRuntimeTurnEnvelope } from './runtime-turn-envelope.mjs';
 import { createExecutionPolicy } from './execution-policy.mjs';
 import { loadRuntimeConfig } from './runtime-config-loader.mjs';
-import { compactPlannerObservability } from './runtime-result-assembly.mjs';
+import { finalizeBlockedRuntimeResult } from './runtime-blocked-result.mjs';
+import { compactPlannerObservability, compactAskChatResult } from './runtime-result-assembly.mjs';
 import { persistPlainChatResult } from './runtime-plain-chat-persistence.mjs';
 import { appendRuntimeSessionTurn } from './runtime-session-writer.mjs';
 import { prepareRuntimePromptContext } from './runtime-prompt-context.mjs';
@@ -220,7 +221,7 @@ async function runAskChatUnserialized({
     sessionId: resolvedSessionId,
   });
   const logger = createTraceLogger({ rootDir: traceRoot, runId: resolvedRunId, sessionId: resolvedSessionId, onRecord: onTraceRecord });
-  const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, testHooks });
+  const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, logger, testHooks });
   const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, inboundEntryId, parentSignal = null }) => {
     const nestedRunId = `${resolvedRunId}-reply-${recipientRuntime.agentId}`;
     const lifecycle = typeof registerNestedAgentRun === 'function'
@@ -254,7 +255,7 @@ async function runAskChatUnserialized({
     }
   };
   const { mcpTools, mcpConnections } = await loadRuntimeMcpCapabilities({ agentId: runtimeState.agentId, stores });
-  const executionContext = createRuntimeExecutionContext({ stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, abortSignal: normalizedArgs.abort_signal || null });
+  const executionContext = Object.freeze({ ...createRuntimeExecutionContext({ stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, abortSignal: normalizedArgs.abort_signal || null }), skillOverrides: scopedSkillsConfig });
   const effectiveSkillCatalog = await loadEffectiveSkillCatalog({
     workspaceRoot: runtimeState.workspaceRoot,
     agentId: runtimeState.agentId,
@@ -385,7 +386,19 @@ async function runAskChatUnserialized({
   const modelTask = incomingAgentMessage
     ? `[Agent message from ${incomingAgentMessage.senderAgentId || 'another agent'}]: ${message}`
     : message;
-  const promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, temporalContext: { turnStartedAt, lastOperatorMessageAt, timezone: await operatorTimezone(stores.metadata) } });
+  let promptContext;
+  try {
+    promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, temporalContext: { turnStartedAt, lastOperatorMessageAt, timezone: await operatorTimezone(stores.metadata) } });
+  } catch (error) {
+    // Context preparation can reject before returning its final inspection.
+    // Route that exact budget failure through the same durable blocked owner,
+    // rather than bypassing terminal assembly with an uncaught exception.
+    if (error?.message !== 'context_preparation_prompt_over_budget') throw error;
+    promptContext = {
+      finalPromptInspection: { ...error.details, pressure: 'blocked' },
+      contextCompression: { blocked: true, ...error.details },
+    };
+  }
   const { turnContext, conversationContext, prompt, finalPromptInspection, contextCompression } = promptContext;
   if (finalPromptInspection.pressure === 'blocked') {
     const content = 'I could not safely fit the final prompt inside the configured model context window after compression. I should not call the model with an over-budget prompt.';
@@ -426,7 +439,7 @@ async function runAskChatUnserialized({
     return modelExecution.result;
   }
   const { modelTurn, finalWorkingContext } = modelExecution;
-  const result = await persistPlainChatResult({ stores, agentId: runtimeState.agentId, sessionRoot, dataRoot, logger, command, message, sessionId: resolvedSessionId, priorSession, route, selectedSkills: route.skills.selected.map((skill) => skill.id), prompt, contextEngine: turnContext, contextCompression, intent, session, workspaceRoot: resolvedWorkingRoot, subjectScope: verifiedSubjectScope, backgroundWork: trackedBackgroundWork, modelTurn, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, subagents, structuredSubagents, extraEyesReview, fileDeicticResolution: deicticFiles, finalWorkingContext, commitTerminalResult });
+  const result = await persistPlainChatResult({ stores, agentId: runtimeState.agentId, sessionRoot, dataRoot, logger, command, message, sessionId: resolvedSessionId, priorSession, route, selectedSkills: route.skills.selected.map((skill) => skill.id), prompt, contextEngine: turnContext, contextCompression, intent, session, workspaceRoot: resolvedWorkingRoot, artifactWorkspaceRoot: runtimeState.agentWorkspaceRoot, subjectScope: verifiedSubjectScope, backgroundWork: trackedBackgroundWork, modelTurn, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, subagents, structuredSubagents, extraEyesReview, fileDeicticResolution: deicticFiles, finalWorkingContext, commitTerminalResult });
   if (result?.ok && result.decision === 'answered' && result.answerText) {
     // Tiddle residue is advisory and must never turn a completed chat response
     // into a failure. The periodic pass owns semantic reconciliation later.

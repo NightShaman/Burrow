@@ -1,5 +1,7 @@
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { validateArtifactRoot } from './artifact-root-validation.mjs';
 
 export const ATTACHMENT_RETENTION_DAYS = 30;
 export const MODEL_VISIBLE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
@@ -80,11 +82,28 @@ function mimeFromAttachment(attachment = {}, filePath = '') {
   return 'application/octet-stream';
 }
 
-export async function readAttachmentArtifact({ agentWorkspaceRoot, artifactPath, attachment = {}, maxTextBytes = 256 * 1024 } = {}) {
+// Read at most the configured budget even if a file grows after resolution.
+async function boundedAttachmentBytes(filePath, limit) {
+  const budget = Number.isSafeInteger(limit) && limit >= 0 ? limit : 0;
+  const handle = await fs.open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size > budget) return null;
+    const bytes = Buffer.alloc(stat.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (!bytesRead) break;
+      offset += bytesRead;
+    }
+    return bytes.subarray(0, offset);
+  } finally { await handle.close(); }
+}
+
+export async function readAttachmentArtifact({ agentWorkspaceRoot, artifactPath, attachment = {}, maxTextBytes = 256 * 1024, maxImageBytes = 20 * 1024 * 1024 } = {}) {
   const resolved = await resolveAttachmentArtifact({ agentWorkspaceRoot, artifactPath });
   if (!resolved) return null;
   const type = mimeFromAttachment(attachment, resolved.filePath);
-  const bytes = await fs.readFile(resolved.filePath);
   const base = {
     id: String(artifactPath),
     artifactPath: String(artifactPath),
@@ -95,10 +114,17 @@ export async function readAttachmentArtifact({ agentWorkspaceRoot, artifactPath,
   };
   if (type.toLowerCase().startsWith('image/')) {
     const normalizedType = type.toLowerCase();
-    if (MODEL_VISIBLE_IMAGE_TYPES.has(normalizedType)) return { ...base, type: normalizedType, kind: 'image', dataUrl: `data:${normalizedType};base64,${bytes.toString('base64')}` };
+    if (MODEL_VISIBLE_IMAGE_TYPES.has(normalizedType)) {
+      const bytes = await boundedAttachmentBytes(resolved.filePath, maxImageBytes);
+      if (!bytes) return { ...base, kind: 'binary', unsupportedReason: 'attachment_too_large' };
+      return { ...base, type: normalizedType, kind: 'image', dataUrl: `data:${normalizedType};base64,${bytes.toString('base64')}` };
+    }
     return { ...base, kind: 'binary', unsupportedReason: 'image_type_not_model_visible', supportedImageTypes: [...MODEL_VISIBLE_IMAGE_TYPES] };
   }
-  if (/^(text\/|application\/(json|xml|javascript)|application\/x-ndjson)/i.test(type) && bytes.length <= maxTextBytes) return { ...base, kind: 'text', text: bytes.toString('utf8') };
+  if (/^(text\/|application\/(json|xml|javascript)|application\/x-ndjson)/i.test(type) && resolved.stat.size <= maxTextBytes) {
+    const bytes = await boundedAttachmentBytes(resolved.filePath, maxTextBytes);
+    if (bytes) return { ...base, kind: 'text', text: bytes.toString('utf8') };
+  }
   return { ...base, kind: 'binary' };
 }
 
@@ -112,6 +138,7 @@ export async function deleteAttachmentArtifact({ agentWorkspaceRoot, artifactPat
 export async function cleanupExpiredAttachments({ agentWorkspaceRoot, now = new Date(), retentionDays = ATTACHMENT_RETENTION_DAYS } = {}) {
   if (!agentWorkspaceRoot) throw new Error('attachment_workspace_required');
   const root = attachmentRoot(agentWorkspaceRoot);
+  if (!await validateArtifactRoot(agentWorkspaceRoot, root, { missing: true })) throw new Error('attachment_root_invalid');
   if (retentionDays === null) return { root, deleted: [] };
   const cutoff = new Date(now).getTime() - Number(retentionDays) * 86400000;
   let entries = [];
@@ -120,7 +147,8 @@ export async function cleanupExpiredAttachments({ agentWorkspaceRoot, now = new 
   for (const entry of entries) {
     if (!entry.isFile() || entry.isSymbolicLink()) continue;
     const filePath = path.join(root, entry.name);
-    const stat = await fs.stat(filePath);
+    const stat = await fs.lstat(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) continue;
     if (stat.mtimeMs > cutoff) continue;
     await fs.rm(filePath, { force: true });
     deleted.push(path.relative(agentWorkspaceRoot, filePath));
@@ -156,23 +184,26 @@ export async function persistChatAttachments({ agentWorkspaceRoot, attachments =
   if (!Array.isArray(attachments) || !attachments.length) return [];
   if (!agentWorkspaceRoot) throw new Error('attachment_workspace_required');
   const root = attachmentRoot(agentWorkspaceRoot);
+  if (!await validateArtifactRoot(agentWorkspaceRoot, root, { missing: true })) throw new Error('attachment_root_invalid');
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
+  if (!await validateArtifactRoot(agentWorkspaceRoot, root)) throw new Error('attachment_root_invalid');
   await cleanupExpiredAttachments({ agentWorkspaceRoot, now, retentionDays });
   const stamp = new Date(now).toISOString().replace(/[:.]/g, '-');
   const persisted = [];
   for (let index = 0; index < attachments.length; index += 1) {
     const attachment = attachments[index] || {};
     if (!String(attachment.content || '')) continue;
-    const filename = `${stamp}-${index + 1}-${safeName(attachment.name)}`;
+    const filename = `${stamp}-${randomUUID()}-${index + 1}-${safeName(attachment.name)}`;
     const filePath = path.resolve(root, filename);
     if (!contained(root, filePath)) throw new Error('attachment_path_invalid');
     const bytes = dataBytes(attachment.content);
-    await fs.writeFile(filePath, bytes, { mode: 0o600 });
+    const handle = await fs.open(filePath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600);
+    try { await handle.writeFile(bytes); } finally { await handle.close(); }
     persisted.push({
       ...attachment,
       artifactPath: path.relative(agentWorkspaceRoot, filePath),
       storedAt: new Date(now).toISOString(),
-      size: Number.isFinite(Number(attachment.size)) ? Number(attachment.size) : bytes.length,
+      size: bytes.length,
     });
   }
   return persisted;

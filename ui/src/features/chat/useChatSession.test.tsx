@@ -32,6 +32,142 @@ beforeEach(() => {
 });
 
 describe('useChatSession', () => {
+  it.each(['agent', 'node'])('discards late reset across %s navigation', async (navigation) => {
+    const available = [localApiTarget];
+    const { result, rerender } = renderHook(({ selected, targets }) => useChatSession(selected, targets), {
+      initialProps: { selected: agentId, targets: available },
+    });
+    await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+    const delayed = deferred<unknown>();
+    apiMock.mockImplementation((_target, path) => {
+      if (path.includes('/reset?')) return delayed.promise;
+      if (path.startsWith('/api/sessions?')) return Promise.resolve({ sessions: [{ id: sessionId }] });
+      return Promise.resolve({ session: { id: sessionId, turns: [] } });
+    });
+    let pending!: Promise<unknown>;
+    act(() => { pending = result.current.resetSession(); });
+    rerender({ selected: navigation === 'agent' ? 'other' : agentId,
+      targets: navigation === 'node' ? [{ ...localApiTarget, baseUrl: 'http://changed.invalid' }] : available });
+    await act(async () => { delayed.resolve({}); await pending; });
+    expect(result.current.isNewSession).toBe(false);
+  });
+
+  it('discards a late reset after navigating to a different session and back', async () => {
+    const { result } = renderHook(() => useChatSession(agentId));
+    await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+    const delayed = deferred<unknown>();
+    apiMock.mockReturnValueOnce(delayed.promise);
+    let pending!: Promise<unknown>;
+    act(() => { pending = result.current.resetSession(); });
+    act(() => result.current.selectSession('other'));
+    act(() => result.current.selectSession(sessionId));
+    act(() => result.current.appendTurn(agentId, sessionId, { role: 'user', content: 'newer' }));
+    await act(async () => { delayed.resolve({}); await pending; });
+    expect(result.current.turns).toContainEqual({ role: 'user', content: 'newer' });
+  });
+
+  it.each(['session-1', 'child-session', 'default'])('keeps reset destination %s and leaves unrelated default cache intact', async (destination) => {
+    apiMock.mockImplementation(async (_target, path) => {
+      if (path === sessionListPath) return { sessions: [{ id: destination }] };
+      if (path.endsWith('/reset?agentId=luna')) return { ok: true };
+      if (path.startsWith('/api/sessions/')) return { session: { id: destination, turns: [{ role: 'assistant', content: 'Old context' }] } };
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { result } = renderHook(() => useChatSession(agentId));
+    await waitFor(() => expect(result.current.turns).toHaveLength(1));
+    act(() => result.current.appendTurn(agentId, 'default', { role: 'assistant', content: 'Unrelated default' }));
+    await act(async () => { await result.current.resetSession(); });
+    expect(result.current.sessionId).toBe(destination);
+    expect(result.current.turns).toEqual([]);
+    expect(apiMock).toHaveBeenCalledWith(localApiTarget, `/api/sessions/${destination}/reset?agentId=luna`, { method: 'POST' });
+    act(() => {
+      result.current.leaveNewSessionForMessage();
+      result.current.appendTurn(agentId, result.current.sessionId, { role: 'user', content: 'Next message' });
+    });
+    expect(result.current.turns).toEqual([{ role: 'user', content: 'Next message' }]);
+    if (destination !== 'default') {
+      act(() => result.current.selectSession('default'));
+      expect(result.current.turns).toContainEqual({ role: 'assistant', content: 'Unrelated default' });
+    }
+  });
+
+  it.each(['local', 'b'])('stops recovered A on its captured owner after switching to %s', async (selection) => {
+    const a = { id: 'a', name: 'A', baseUrl: 'http://a.invalid', enabled: true };
+    const b = { id: 'b', name: 'B', baseUrl: 'http://b.invalid', enabled: true };
+    const targets = [localApiTarget, a, b];
+    apiMock.mockImplementation(async (_target, path) => {
+      if (path.startsWith('/api/sessions?')) return { sessions: [{ id: sessionId }] };
+      if (path.startsWith('/api/sessions/')) return { session: { id: sessionId, turns: [] } };
+      if (path.startsWith('/api/chat/runs/active')) return { runs: [{ runId: 'same-run', agentId, sessionId, status: 'running', progress: [] }] };
+      if (path.endsWith('/cancel')) return { ok: true };
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { result, rerender } = renderHook(({ selected, available }) => useChatSession(selected, available), {
+      initialProps: { selected: `a::${agentId}`, available: targets },
+    });
+    await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('same-run'));
+    const captured = result.current.runtimeRun!;
+    await act(async () => { await result.current.cancelRuntimeRun(captured); });
+    expect(apiMock.mock.calls.filter(([, path]) => path.endsWith('/cancel'))).toEqual([
+      [a, '/api/chat/same-run/cancel', expect.objectContaining({ body: JSON.stringify({ agentId, reason: 'Stopped by operator' }) })],
+    ]);
+    rerender({ selected: selection === 'local' ? agentId : `b::${agentId}`, available: targets });
+    await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('same-run'));
+    apiMock.mockClear();
+    await act(async () => { await result.current.cancelRuntimeRun(captured); });
+    expect(apiMock.mock.calls.filter(([, path]) => path.endsWith('/cancel'))).toEqual([
+      [a, '/api/chat/same-run/cancel', expect.objectContaining({ body: JSON.stringify({ agentId, reason: 'Stopped by operator' }) })],
+    ]);
+    apiMock.mockClear();
+    await act(async () => { await result.current.cancelRuntimeRun({ ...captured, targetId: '' }); });
+    expect(apiMock.mock.calls.filter(([, path]) => path.endsWith('/cancel'))).toEqual([]);
+    for (const available of [targets.filter((target) => target.id !== 'a'), targets.map((target) => target.id === 'a' ? { ...target, enabled: false } : target)]) {
+      rerender({ selected: selection === 'local' ? agentId : `b::${agentId}`, available });
+      await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('same-run'));
+      apiMock.mockClear();
+      await act(async () => { await result.current.cancelRuntimeRun(captured); });
+      expect(apiMock.mock.calls.filter(([, path]) => path.endsWith('/cancel'))).toEqual([]);
+      expect(result.current.chatError).toMatch(/Could not stop run/);
+    }
+  });
+
+  it.each(['local', 'b'])('stops recovered child on A after switching to %s without fallback', async (selection) => {
+    const a = { id: 'a', name: 'A', baseUrl: 'http://a.invalid', enabled: true };
+    const b = { id: 'b', name: 'B', baseUrl: 'http://b.invalid', enabled: true };
+    const targets = [localApiTarget, a, b];
+    apiMock.mockImplementation(async (_target, path) => {
+      if (path.startsWith('/api/sessions?')) return { sessions: [{ id: sessionId }] };
+      if (path.startsWith('/api/sessions/')) return { session: { id: sessionId, turns: [] } };
+      if (path.startsWith('/api/chat/runs/active')) return { runs: [], subagents: [{
+        id: 'child', agentId, runId: 'same-child-run', sessionId: 'child-session',
+        parentSessionId: sessionId, status: 'running', final: false, purpose: 'Child work',
+      }] };
+      if (path.endsWith('/cancel')) return { ok: true };
+      throw new Error(path);
+    });
+    const { result, rerender } = renderHook(({ selected, available }) => useChatSession(selected, available), {
+      initialProps: { selected: `a::${agentId}`, available: targets },
+    });
+    await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+    act(() => result.current.selectChildSession(`a::${agentId}`, 'child-session'));
+    await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('same-child-run'));
+    const captured = result.current.runtimeRun!;
+    expect(captured.subagent).toBeDefined();
+    rerender({ selected: selection === 'local' ? agentId : `b::${agentId}`, available: targets });
+    apiMock.mockClear();
+    await act(async () => { await result.current.cancelRuntimeRun(captured); });
+    expect(apiMock.mock.calls.filter(([, path]) => path.endsWith('/cancel'))).toEqual([
+      [a, '/api/chat/same-child-run/cancel', expect.objectContaining({ body: JSON.stringify({ agentId, reason: 'Stopped by operator' }) })],
+    ]);
+    for (const available of [targets.filter((target) => target.id !== 'a'), targets.map((target) => target.id === 'a' ? { ...target, enabled: false } : target)]) {
+      rerender({ selected: selection === 'local' ? agentId : `b::${agentId}`, available });
+      apiMock.mockClear();
+      await act(async () => { await result.current.cancelRuntimeRun(captured); });
+      expect(apiMock.mock.calls.filter(([, path]) => path.endsWith('/cancel'))).toEqual([]);
+      expect(result.current.chatError).toMatch(/Could not stop run/);
+    }
+  });
+
   it('loads the first session and its conversation for the selected agent', async () => {
     apiMock.mockImplementation(async (_target, path) => {
       if (path === sessionListPath) return { sessions: [{ id: sessionId }, { id: 'older' }] };
@@ -141,7 +277,7 @@ describe('useChatSession', () => {
     apiMock.mockResolvedValueOnce({});
     await act(async () => {
       await result.current.resetSession();
-      result.current.appendTurn(agentId, 'default', resetSessionTurn);
+      result.current.appendTurn(agentId, sessionId, resetSessionTurn);
       result.current.leaveNewSessionForMessage();
     });
 
@@ -452,3 +588,16 @@ it('clears a task run immediately when selecting another session', async () => {
   expect(result.current.runtimeRun).toBeNull();
   unmount();
 });
+
+ it('discards pending attachments on agent navigation and rejects delayed completion', async () => {
+ const { result, rerender } = renderHook(({ agent }) => useChatSession(agent), { initialProps: { agent: agentId } });
+ await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+ const oldSetter = result.current.setAttachment;
+ const file = { name: 'secret.txt', type: 'text/plain', size: 6, encoding: 'data-url' as const, content: 'secret' };
+ act(() => result.current.setAttachment([file]));
+ expect(result.current.attached).toHaveLength(1);
+ rerender({ agent: 'other' });
+ expect(result.current.attached).toEqual([]);
+ act(() => oldSetter([file]));
+ expect(result.current.attached).toEqual([]);
+ });

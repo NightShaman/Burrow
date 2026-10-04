@@ -54,6 +54,16 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+# Shell and systemd consume generated paths. Reject unsupported encodings before
+# download, mkdir, uninstall, or durable-state mutation.
+case "$INSTALL_DIR" in
+  /*) ;;
+  *) echo "Burrow install: --dir must be absolute." >&2; exit 2 ;;
+esac
+case "$INSTALL_DIR" in
+  *[!A-Za-z0-9_./-]*) echo "Burrow install: --dir contains unsupported characters (use letters, digits, _, ., /, -)." >&2; exit 2 ;;
+esac
+
 [ -z "$LISTEN_HOST" ] || case "$LISTEN_HOST" in
   *[!A-Za-z0-9._:-]*|'') echo "Burrow install: --host contains unsupported characters." >&2; exit 2 ;;
 esac
@@ -100,6 +110,8 @@ fi
 
 TMP_ROOT=""
 PG_KEY_TMP=""
+STAGING=""
+LOCK_DIR=""
 update_log() { printf '%s\n' "Burrow update: $*"; }
 verbose_log() {
   [ "$VERBOSE" -eq 1 ] || return 0
@@ -107,6 +119,8 @@ verbose_log() {
 }
 cleanup() {
   status=$?
+  [ -z "$STAGING" ] || rm -rf "$STAGING"
+  [ -z "$LOCK_DIR" ] || rm -rf "$LOCK_DIR"
   [ -z "$TMP_ROOT" ] || rm -rf "$TMP_ROOT"
   [ -z "$PG_KEY_TMP" ] || rm -f "$PG_KEY_TMP"
   exit "$status"
@@ -212,7 +226,7 @@ verify_restarted_runtime() {
   # GitHub assemblies write their immutable build identity into SOURCE_VERSIONS.
   # Development/source-dir installs retain package-version fallback support.
   expected_version=$(awk '$1 == "Burrow-Build-Version" { print $2; exit }' "$INSTALL_DIR/app/SOURCE_VERSIONS" 2>/dev/null || true)
-  [ -n "$expected_version" ] || expected_version=$(node -p "require('$INSTALL_DIR/app/backend/package.json').version")
+  [ -n "$expected_version" ] || expected_version=$(node -e 'process.stdout.write(String(require(process.argv[1]).version))' "$INSTALL_DIR/app/backend/package.json")
   runtime_endpoint
   previous_invocation=${1:-}
   verbose_log "waiting for new service invocation after ${previous_invocation:-none}; expected build $expected_version"
@@ -249,8 +263,8 @@ if [ -z "$SOURCE_DIR" ]; then
   # Resolve main through GitHub's commit API, then download that immutable
   # codeload archive. `archive/refs/heads/main` is CDN-cached and can lag a
   # completed assembly by minutes, leaving an update to reinstall stale code.
-  assembly_sha=$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${REPOSITORY}/commits/main" | node -e 'let body=""; process.stdin.on("data", chunk => { body += chunk; }).on("end", () => { try { const sha=JSON.parse(body).sha; if (/^[0-9a-f]{40}$/i.test(sha || "")) process.stdout.write(sha); } catch {} });')
-  [ -n "$assembly_sha" ] || { echo "Burrow install: could not resolve the current GitHub assembly commit." >&2; exit 1; }
+  assembly_sha=$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${REPOSITORY}/commits/main" | sed -n 's/^[[:space:]]*"sha"[[:space:]]*:[[:space:]]*"\([0-9a-fA-F]*\)".*/\1/p' | head -n 1)
+  [ "${#assembly_sha}" -eq 40 ] || { echo "Burrow install: could not resolve the current GitHub assembly commit." >&2; exit 1; }
   update_log "downloading assembly $assembly_sha"
   verbose_log "resolved immutable GitHub assembly commit $assembly_sha"
   verbose_log "downloading immutable assembly archive from codeload.github.com"
@@ -271,11 +285,23 @@ if [ -z "$SOURCE_DIR" ]; then
   [ -z "$LISTEN_PORT" ] || set -- "$@" --port "$LISTEN_PORT"
   [ "$VERBOSE" -ne 1 ] || set -- "$@" --verbose
   verbose_log "handing update to incoming assembly installer"
-  trap - EXIT HUP INT TERM
-  exec "$SOURCE_DIR/install.sh" "$@"
+  # Keep download ownership in this process on both success and failure.
+  "$SOURCE_DIR/install.sh" "$@"
+  exit $?
 fi
 [ -n "$SOURCE_DIR" ] && [ -f "$SOURCE_DIR/backend/package.json" ] && [ -f "$SOURCE_DIR/ui/package.json" ] || { echo "Burrow install: source is not an assembled Burrow checkout: ${SOURCE_DIR:-unknown}" >&2; exit 1; }
 INSTALL_DIR=$(mkdir -p "$INSTALL_DIR" && cd "$INSTALL_DIR" && pwd)
+# Atomic per-root lock; never steal a possibly live updater's lock. A stale
+# owner requires explicit operator recovery rather than unsafe PID reuse guesses.
+if mkdir "$INSTALL_DIR/.install-lock" 2>/dev/null; then
+  LOCK_DIR="$INSTALL_DIR/.install-lock"
+  printf '%s\n' "$$" > "$LOCK_DIR/owner"
+else
+  owner=$(cat "$INSTALL_DIR/.install-lock/owner" 2>/dev/null || true)
+  echo "Burrow install: update in progress (owner ${owner:-unknown}); inspect .install-lock before retrying." >&2
+  exit 1
+fi
+
 if [ -n "${BURROW_INSTALL_TEST_ROOT:-}" ]; then
   TEST_ROOT=$(cd "$BURROW_INSTALL_TEST_ROOT" && pwd) || { echo "Burrow install: test root is unavailable." >&2; exit 1; }
   TEST_HOME=$(cd "$HOME" && pwd) || { echo "Burrow install: test HOME is unavailable." >&2; exit 1; }
@@ -380,7 +406,7 @@ esac
 mkdir -p "$INSTALL_DIR/config" "$INSTALL_DIR/workspace" "$INSTALL_DIR/cache" "$INSTALL_DIR/reports" "$INSTALL_DIR/integrations" "$INSTALL_DIR/bin"
 STAGING="$INSTALL_DIR/.app-staging-$$"
 verbose_log "staging application payload"
-PREVIOUS="$INSTALL_DIR/.app-previous"
+PREVIOUS="$INSTALL_DIR/.app-previous-$$"
 rm -rf "$STAGING" "$PREVIOUS"; mkdir -p "$STAGING"
 cp -R "$SOURCE_DIR/backend" "$STAGING/backend"
 cp "$SOURCE_DIR/install.sh" "$STAGING/install.sh"
@@ -410,8 +436,8 @@ if [ "$INSTALL_DEPS" -eq 1 ]; then
   verbose_log "running backend npm ci (production dependencies only)"
   (cd "$STAGING/backend" && npm ci --omit=dev --no-audit --no-fund --loglevel=error)
   INTEGRATION_MANIFEST="$STAGING/backend/scripts/runtime-integrations.json"
-  MCPORTER_VERSION=$(node -p "require('$INTEGRATION_MANIFEST')['mcporter'].version")
-  CLAUDE_CODE_VERSION=$(node -p "require('$INTEGRATION_MANIFEST')['claude-code'].version")
+  MCPORTER_VERSION=$(node -e 'process.stdout.write(require(process.argv[1])["mcporter"].version)' "$INTEGRATION_MANIFEST")
+  CLAUDE_CODE_VERSION=$(node -e 'process.stdout.write(require(process.argv[1])["claude-code"].version)' "$INTEGRATION_MANIFEST")
   update_log "staging MCP integration..."
   verbose_log "installing pinned mcporter integration $MCPORTER_VERSION"
   npm install --prefix "$STAGING/integrations/mcporter" --omit=dev --no-package-lock --no-save --no-audit --no-fund --loglevel=error "mcporter@$MCPORTER_VERSION"

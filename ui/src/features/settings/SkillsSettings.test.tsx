@@ -102,3 +102,33 @@ describe('shared Skills settings', () => {
     unmount(); configuration.remove();
   });
 });
+
+it('preserves skill drafts without catalog or assignment refetch on registry identity refresh', async () => {
+ mocked.mockImplementation(async (_target, path) => (path === '/api/settings/skills' ? { skills: [skill] } : grants) as never);
+ const configuration = document.createElement('div'); document.body.append(configuration);
+ const { rerender, unmount } = render(<SkillsSettings agents={agents} agentId={agents[0].id} targets={targets} configurationTarget={configuration} />);
+ fireEvent.click(await screen.findByRole('button', { name: /Review/ }));
+ fireEvent.change(screen.getByDisplayValue('# Review'), { target: { value: '# Draft' } });
+ const count = mocked.mock.calls.length;
+ rerender(<SkillsSettings agents={agents.map(agent => ({ ...agent }))} agentId={agents[0].id} targets={targets.map(target => ({ ...target }))} configurationTarget={configuration} />);
+ await waitFor(() => expect(mocked.mock.calls.length).toBe(count));
+ expect(screen.getByDisplayValue('# Draft')).toBeTruthy();
+ unmount(); configuration.remove();
+});
+
+it('preserves dirty content through membership/catalog refresh and saves that draft', async () => {
+ let content = '# Review';
+ mocked.mockImplementation(async (_target, path, init) => (init?.method ? {} : path === '/api/settings/skills' ? {skills:[{...skill, content}]} : grants) as never);
+ const configuration=document.createElement('div');document.body.append(configuration);
+ const view=render(<SkillsSettings agents={agents} agentId={agents[0].id} targets={targets} configurationTarget={configuration}/>);
+ fireEvent.click(await screen.findByRole('button',{name:/Review/}));
+ fireEvent.change(screen.getByLabelText('Content'),{target:{value:'# Unsaved'}});
+ content='# Updated catalog';
+ view.rerender(<SkillsSettings agents={[...agents,{id:'remote::new',name:'New'} as Agent]} agentId={agents[0].id} targets={targets} configurationTarget={configuration}/>);
+ await waitFor(()=>expect(mocked.mock.calls.some(([,path])=>path==='/api/agents/new/skills')).toBe(true));
+ await within(configuration).findByRole('button',{name:'Save skill'});
+ expect(screen.getByLabelText('Content')).toHaveProperty('value','# Unsaved');
+ fireEvent.click(screen.getByRole('button',{name:'Save skill'}));
+ await waitFor(()=>expect(mocked).toHaveBeenCalledWith(targets[1],'/api/settings/skills/review',expect.objectContaining({method:'PATCH',body:expect.stringContaining('# Unsaved')})));
+ view.unmount();configuration.remove();
+});

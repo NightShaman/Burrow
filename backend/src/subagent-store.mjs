@@ -241,7 +241,7 @@ export function mergeSubagentResult(record = {}) {
     memoryWrites: Array.isArray(result.memoryWrites) ? result.memoryWrites : [],
     trace: record.trace || {},
     provenance: record.provenance || [],
-    sideEffectsApplied: Boolean(result.sideEffectsApplied),
+    sideEffectsApplied: result.sideEffectsApplied === true ? true : (result.sideEffectsApplied === false ? false : null),
   };
 }
 
@@ -292,7 +292,7 @@ export function subagentVisibilitySummary(record = {}) {
       artifacts: Array.isArray(record.result.artifacts) ? record.result.artifacts.length : 0,
       changedFiles: Array.isArray(record.result.changedFiles) ? record.result.changedFiles.length : 0,
       memoryWrites: Array.isArray(record.result.memoryWrites) ? record.result.memoryWrites.length : 0,
-      sideEffectsApplied: Boolean(record.result.sideEffectsApplied),
+      sideEffectsApplied: record.result.sideEffectsApplied === true ? true : (record.result.sideEffectsApplied === false ? false : null),
     } : null,
   };
 }

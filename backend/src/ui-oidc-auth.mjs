@@ -117,6 +117,7 @@ export async function oidcLoginUrl(runtime, origin) {
 }
 
 function safeReturnTo(value = '/') {
+  if (/[\\\x00-\x1f\x7f]/.test(String(value))) return '/';
   const path = text(value) || '/';
   if (!path.startsWith('/') || path.startsWith('//') || path.includes('://')) return '/';
   return path;

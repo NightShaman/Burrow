@@ -4,6 +4,7 @@ function compactToolCalls(toolCalls = []) {
   return (toolCalls || []).map((call, index) => ({
     id: String(call?.id || `tool-call-${index}`).slice(0, 256),
     name: call?.name ? String(call.name).slice(0, 256) : null,
+    callFingerprint: call?.callFingerprint || exactArgumentFingerprint({ name: call?.name, arguments: call?.arguments || {} }),
     // This is a receipt projection only. The original provider calls remain
     // available to the executor for this iteration; no tool is rejected or
     // skipped because its retained representation was compacted.
@@ -140,8 +141,46 @@ function stableJson(value) {
   return serialize(bounded) ?? 'null';
 }
 
+// Stream exact identity independently of the bounded display receipt. Iterative
+// traversal avoids recursive stack limits; only active ancestry is retained.
+function exactArgumentFingerprint(value) {
+  const hash = createHash('sha256');
+  const ancestors = new WeakSet();
+  const stack = [{ value }];
+  const text = (value) => {
+    hash.update(`${value.length}:`);
+    for (let offset = 0; offset < value.length; offset += 4096) hash.update(value.slice(offset, offset + 4096), 'utf16le');
+  };
+  while (stack.length) {
+    const entry = stack.pop();
+    if (entry.iterator) {
+      const next = entry.iterator.next();
+      if (next.done) { ancestors.delete(entry.value); hash.update('end;'); continue; }
+      const key = next.value;
+      let child;
+      try { child = entry.value[key]; } catch { child = '[unreadable]'; }
+      stack.push(entry, { value: child }, { value: key });
+      continue;
+    }
+    const input = entry.value;
+    if (input === null || typeof input !== 'object') {
+      hash.update(`${typeof input}:`); text(String(input)); continue;
+    }
+    if (ancestors.has(input)) { hash.update('cycle;'); continue; }
+    ancestors.add(input);
+    hash.update(Array.isArray(input) ? 'array;' : 'object;');
+    // JSON objects require sorted keys for insertion-order independent identity;
+    // arrays stream indices without an additional full-size allocation.
+    const keys = Array.isArray(input)
+      ? (function* () { for (let i = 0; i < input.length; i++) yield String(i); })()
+      : Object.keys(input).sort()[Symbol.iterator]();
+    stack.push({ value: input, iterator: keys });
+  }
+  return hash.digest('hex');
+}
+
 function toolPlanFingerprint(toolCalls = []) {
-  return fingerprint(compactToolCalls(toolCalls).map((call) => ({ name: call.name, arguments: call.arguments })));
+  return exactArgumentFingerprint(compactToolCalls(toolCalls).map(call => call.callFingerprint));
 }
 
 function fingerprint(value) {
@@ -151,8 +190,8 @@ function fingerprint(value) {
 function repeatedToolCallObservations(toolCalls = [], priorIterations = []) {
   const prior = (priorIterations || []).flatMap((entry) => entry.toolCalls || []);
   return compactToolCalls(toolCalls).map((call) => {
-    const callFingerprint = fingerprint({ name: call.name, arguments: call.arguments });
-    const priorCount = prior.filter((entry) => fingerprint({ name: entry.name, arguments: entry.arguments }) === callFingerprint).length;
+    const callFingerprint = call.callFingerprint;
+    const priorCount = prior.filter((entry) => (entry.callFingerprint || exactArgumentFingerprint({ name: entry.name, arguments: entry.arguments })) === callFingerprint).length;
     return { tool: call.name, fingerprint: callFingerprint, repeatCount: priorCount + 1, reason: typeof call.arguments?.reason === 'string' ? call.arguments.reason.slice(0, 500) : null };
   });
 }
@@ -232,22 +271,23 @@ function semanticInspectionObservations(toolCalls = [], history = new Map()) {
 }
 
 function exactRepeatVerdict(toolCalls = [], history = [], { loopWarningThreshold = 2, loopBlockThreshold = 3 } = {}) {
+  let warning = null;
   for (const call of compactToolCalls(toolCalls)) {
-    const callFingerprint = fingerprint({ name: call.name, arguments: call.arguments });
+    const callFingerprint = call.callFingerprint;
     let streak = 0;
     let outcomeFingerprint = null;
     for (let index = history.length - 1; index >= 0; index -= 1) {
       const entry = history[index];
-      if (entry.callFingerprint !== callFingerprint) break;
+      if (entry.callFingerprint !== callFingerprint) continue;
       if (outcomeFingerprint === null) outcomeFingerprint = entry.outcomeFingerprint;
       if (entry.outcomeFingerprint !== outcomeFingerprint) break;
       streak += 1;
     }
     const attemptedCount = streak + 1;
     if (streak && attemptedCount >= loopBlockThreshold) return { action: 'block', tool: call.name, callFingerprint, outcomeFingerprint, repeatedCompletedCalls: streak, attemptedCount, arguments: call.arguments };
-    if (streak && attemptedCount >= loopWarningThreshold) return { action: 'warn', tool: call.name, callFingerprint, outcomeFingerprint, repeatedCompletedCalls: streak, attemptedCount, arguments: call.arguments };
+    if (streak && attemptedCount >= loopWarningThreshold) warning = { action: 'warn', tool: call.name, callFingerprint, outcomeFingerprint, repeatedCompletedCalls: streak, attemptedCount, arguments: call.arguments };
   }
-  return null;
+  return warning;
 }
 
 function loopReceiptText(verdict, { terminal = false } = {}) {

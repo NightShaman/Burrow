@@ -372,15 +372,22 @@ export class PostgresScheduledJobStore {
     return runRow(result.rows[0]);
   }
   async createManualRun(jobId, { at: when = this.clock() } = {}) {
-    const job = await this.getJob(jobId);
-    if (!job) return null;
-    const runId = randomUUID();
-    await this.pool.query(
-      "INSERT INTO scheduled_job_runs (id,job_id,scheduled_for,status,agent_id,session_id,dispatched_at,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$3,$3,$3)",
-      [runId, job.id, when, "running", job.agentId, job.sessionId],
-    );
-    return this.getRun(runId);
+    return withPostgresTransaction(this.pool, async (client) => {
+      // Share the due-claim serialization boundary, not receipt ordering.
+      const locked = await client.query("SELECT * FROM scheduled_jobs WHERE id=$1 FOR UPDATE", [id(jobId, "scheduled_job_id")]);
+      const job = jobRow(locked.rows[0]);
+      if (!job) return null;
+      const active = await client.query("SELECT * FROM scheduled_job_runs WHERE job_id=$1 AND status='running' LIMIT 1", [job.id]);
+      if (active.rows[0]) return { ...runRow(active.rows[0]), overlap: true };
+      const runId = randomUUID();
+      const result = await client.query(
+        "INSERT INTO scheduled_job_runs (id,job_id,scheduled_for,status,agent_id,session_id,dispatched_at,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$3,$3,$3) RETURNING *",
+        [runId, job.id, when, "running", job.agentId, job.sessionId],
+      );
+      return runRow(result.rows[0]);
+    });
   }
+
   async markMissedRuns({ at: when = this.clock() } = {}) {
     const result = await this.pool.query(
       "UPDATE scheduled_job_runs SET status='missed',completed_at=$1,error='scheduler_restart_before_completion',updated_at=$1 WHERE status='running'",
@@ -411,6 +418,8 @@ export class PostgresScheduledJobStore {
       let missed = 0;
       for (const row of jobs.rows) {
         const job = await this.resolved(row, client);
+        const timezone = await this.effective(job.timezone, client);
+        const cron = parseCron(job.cron);
         let scheduled = job.nextRunAt;
         while (scheduled && new Date(scheduled) < new Date(when)) {
           await client.query(
@@ -418,11 +427,14 @@ export class PostgresScheduledJobStore {
             [randomUUID(), job.id, scheduled, job.agentId, job.sessionId, when],
           );
           scheduled = nextCronOccurrence(
-            job.cron,
-            await this.effective(job.timezone, client),
+            cron,
+            timezone,
             new Date(scheduled),
           );
           missed += 1;
+          // Preserve one durable receipt per occurrence, but relinquish the
+          // event loop regularly even with immediately-resolved query adapters.
+          if (missed % 128 === 0) await new Promise((resolve) => setImmediate(resolve));
         }
         await client.query(
           "UPDATE scheduled_jobs SET next_run_at=$1,updated_at=$2 WHERE id=$3",

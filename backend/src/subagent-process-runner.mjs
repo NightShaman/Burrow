@@ -1,3 +1,4 @@
+import { terminateProcessGroup } from './process-execution-router.mjs';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -78,6 +79,7 @@ export async function runSubagentProcess({
   childScriptPath: overrideChildScriptPath = null,
   maxStreamCaptureBytes = DEFAULT_STREAM_CAPTURE_BYTES,
   signal = null,
+  cancellationGraceMs = 1_000,
 } = {}) {
   const { dir, payloadPath } = await writePayload({ args }, tempDir);
   const startedAt = Date.now();
@@ -95,15 +97,30 @@ export async function runSubagentProcess({
     });
     let settled = false;
     const child = spawn(nodePath, [overrideChildScriptPath || childScriptPath(), payloadPath], {
+      detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
       env: childEnv(),
     });
     let cancelled = Boolean(signal?.aborted);
-    const abortChild = () => { cancelled = true; if (!settled) child.kill('SIGTERM'); };
+    let killTimer = null;
+    const graceMs = Math.max(1, Number(cancellationGraceMs) || 1_000);
+    const abortChild = () => {
+      cancelled = true;
+      if (settled || killTimer) return;
+      terminateProcessGroup(child, 'SIGTERM');
+      // Configurable grace allows cooperative worker cleanup before forcing the
+      // entire isolated group down, including descendants holding inherited pipes.
+      killTimer = setTimeout(() => terminateProcessGroup(child, 'SIGKILL'), graceMs);
+    };
     if (signal?.aborted) abortChild();
     else signal?.addEventListener?.('abort', abortChild, { once: true });
     const finish = async (payload) => {
       signal?.removeEventListener?.('abort', abortChild);
+      // Even if the leader closes early, descendants may ignore SIGTERM.
+      if (killTimer) {
+        clearTimeout(killTimer);
+        terminateProcessGroup(child, 'SIGKILL');
+      }
       await cleanupPayloadDir(dir);
       resolve({ durationMs: Date.now() - startedAt, payloadCleaned: true, ...payload });
     };

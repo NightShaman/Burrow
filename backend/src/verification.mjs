@@ -34,7 +34,7 @@ function artifactPathsFromResult(result = {}) {
 }
 
 function resultIsMutationResult(result = {}) {
-  return Boolean(['files_write', 'files_patch'].includes(result.tool));
+  return Boolean(['files_write', 'files_edit', 'files_patch'].includes(result.tool));
 }
 
 function resultIsArtifactEvidence(result = {}) {
@@ -67,7 +67,7 @@ function resultIsFailedCheck(result = {}) {
 
 function mutationTargetsFromResult(result = {}, scope = {}) {
   if (!resultIsMutationResult(result)) return [];
-  if (result.tool === 'files_write') return [normalizeEvidencePath(result.filePath, scope)].filter(Boolean);
+  if (['files_write', 'files_edit'].includes(result.tool)) return [normalizeEvidencePath(result.filePath, scope)].filter(Boolean);
   if (result.tool === 'files_patch') {
     return unique((result.touchedFiles || []).map((file) => normalizeEvidencePath(file, { ...scope, baseRoot: result.baseRoot || scope.baseRoot })));
   }

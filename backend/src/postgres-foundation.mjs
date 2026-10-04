@@ -61,11 +61,19 @@ export function postgresConfig(env = process.env) {
   return Object.freeze({ ...config, max, idleTimeoutMillis, connectionTimeoutMillis });
 }
 
-export function createPostgresPool({ config = postgresConfig(), PoolClass = Pool } = {}) {
-  return new PoolClass({ ...config, types: { getTypeParser(oid, format) {
+export function createPostgresPool({ config = postgresConfig(), PoolClass = Pool, onIdleError = detail => console.error("PostgreSQL idle connection lost; replacement on next checkout", detail) } = {}) {
+  const pool = new PoolClass({ ...config, types: { getTypeParser(oid, format) {
     if (oid === 1184 && format !== 'binary') return value => new Date(value).toISOString();
     return pg.types.getTypeParser(oid, format);
   } } });
+  // pg removes the broken idle client before emitting this event. Keep the pool
+  // available: subsequent checkout reconnects through the driver, while normal
+  // query failures remain visible to callers. Never log raw driver diagnostics.
+  pool.on('error', () => {
+    try { onIdleError({ event: 'postgres_idle_connection_lost', recovery: 'replace_on_next_checkout' }); }
+    catch { /* diagnostics must not convert recoverable loss into process failure */ }
+  });
+  return pool;
 }
 
 const transactionClients = new WeakMap();
@@ -73,13 +81,37 @@ let savepointSequence = 0;
 /** Explicit borrowed transaction context; nested operations cannot commit the owner. */
 export function postgresTransactionContext(client) {
   if (!client?.query) throw new TypeError('postgres_transaction_client_required');
-  const context = Object.freeze({ connect: async () => client });
+  const context = Object.freeze({ get query() { return (...args) => client.query(...args); }, get connect() { return async () => client; } });
   transactionClients.set(context, client);
   return context;
 }
 
 /** Run statements on one checked-out client; nested contexts use savepoints. */
-export async function withPostgresTransaction(pool, work) {
+async function acquireTransactionClient(pool, { deadline, signal } = {}) {
+  signal?.throwIfAborted();
+  if (deadline === undefined && !signal) return pool.connect();
+  let stopped = false;
+  let timer;
+  let abort;
+  const cancelled = new Promise((_, reject) => {
+    abort = () => { stopped = true; reject(signal.reason); };
+    signal?.addEventListener('abort', abort, { once: true });
+    if (deadline !== undefined) timer = setTimeout(() => {
+      stopped = true;
+      reject(new Error('history_query_budget_exceeded'));
+    }, Math.max(0, deadline - performance.now()));
+  });
+  // The driver cannot remove a queued checkout. Its eventual client remains
+  // owned here, never by the cancelled caller, and is returned without BEGIN.
+  const checkout = Promise.resolve().then(() => pool.connect()).then(client => {
+    if (stopped) { client.release(); return; }
+    return client;
+  });
+  try { return await Promise.race([checkout, cancelled]); }
+  finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
+}
+
+export async function withPostgresTransaction(pool, work, acquisition = {}) {
   if (transactionClients.has(pool)) {
     const client = transactionClients.get(pool);
     const name = `burrow_nested_${++savepointSequence}`;
@@ -93,7 +125,7 @@ export async function withPostgresTransaction(pool, work) {
       throw error;
     }
   }
-  const client = await pool.connect();
+  const client = await acquireTransactionClient(pool, acquisition);
   let discard = false;
   try {
     await client.query('BEGIN');
@@ -157,6 +189,7 @@ export function normalizePostgresPool(pool) {
     const value = Reflect.get(target, key, target);
     return typeof value === 'function' ? value.bind(target) : value;
   } });
+  if (transactionClients.has(pool)) transactionClients.set(proxy, transactionClients.get(pool));
   normalizedPools.set(pool, proxy);
   normalizedPools.set(proxy, proxy);
   return proxy;

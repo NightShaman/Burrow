@@ -165,6 +165,9 @@ function supportsAnthropicXhighEffort(model = '') {
 
 function anthropicReasoningEffort(config = {}) {
   const effort = String(config.reasoningEffort ?? config.extra?.reasoning?.effort ?? '').trim().toLowerCase();
+  // Global max is the established ultra tier: native max on adaptive
+  // models and the existing ultra budget on manual-thinking models.
+  if (effort === 'max') return 'ultra';
   return ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'ultra'].includes(effort) ? effort : null;
 }
 
@@ -560,7 +563,9 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
       try { data = responseBody.ok ? (responseBody.text ? JSON.parse(responseBody.text) : {}) : { error: { message: responseBody.error } }; }
       catch { data = { raw: responseBody.text }; }
     }
-    const ok = Boolean(response.ok) && responseBody.ok;
+    const envelopeError = !streaming ? anthropicEnvelopeError(data) : null;
+    if (envelopeError) data = { ...data, error: { message: envelopeError } };
+    const ok = Boolean(response.ok) && responseBody.ok && !envelopeError;
     const candidateChoice = ok ? normalizeAnthropicChoice(data) : null;
     const maxTokensIncomplete = ok && candidateChoice?.finishReason === 'max_tokens';
     const success = ok && !maxTokensIncomplete;
@@ -617,3 +622,14 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
 
 export const __test__ = { anthropicUrl, normalizeAnthropicChoice, anthropicCachedTokens, anthropicThinkingConfig, supportsAnthropicThinking, supportsAdaptiveAnthropicThinking };
 
+
+function anthropicEnvelopeError(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return 'model_response_malformed_envelope';
+  if (data.error || data.type === 'error') return data.error?.message || 'model_response_provider_error';
+  if (!Array.isArray(data.content)) return 'model_response_malformed_envelope';
+  // max_tokens keeps the established bounded partial-result diagnostics.
+  if (data.stop_reason === 'max_tokens') return null;
+  if (!['end_turn', 'tool_use', 'stop_sequence'].includes(data.stop_reason)) return `model_response_${data.stop_reason || 'missing_stop_reason'}`;
+  const usable = data.content.some(block => (block?.type === 'text' && typeof block.text === 'string' && block.text.trim()) || (block?.type === 'tool_use' && typeof block.name === 'string' && block.name && typeof block.id === 'string' && block.input && typeof block.input === 'object') || (block?.type === 'image' && block.source));
+  return usable ? null : 'model_response_empty';
+}

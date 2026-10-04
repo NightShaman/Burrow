@@ -30,9 +30,12 @@ export function useClaudeCodeLoginFlow({ onConnection, onImported, autoImport = 
   onConnectionRef.current = onConnection;
   onImportedRef.current = onImported;
 
-  useEffect(() => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
     mounted.current = false;
     actionGeneration.current += 1;
+    };
   }, []);
 
   useEffect(() => {

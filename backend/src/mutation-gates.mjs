@@ -1,3 +1,4 @@
+import { finalAnswerAfterToolLoopPrompt } from './runtime-final-synthesis-prompt.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
 import { executedToolResultPrompt } from './tool-continuation-prompt.mjs';
 import path from 'node:path';
@@ -13,13 +14,13 @@ import { serializeContinuationEvidence } from './continuation-evidence.mjs';
 import { hasExecutedInspectionEvidence, missingInspectionTargets, shouldFollowReadOnlyInspection, targetedUiInspectionMissingFallback, shouldForceInspectionEvidence, runDefaultReadOnlyInspection, pendingInspectionFallback } from './inspection-evidence.mjs';
 import { recordMaterialProgress } from './tool-loop-detection.mjs';
 
-function hasExecutedMutationEvidence(toolResults = []) {
-  return (toolResults || []).some((result) => result?.ok === true && ['files_write', 'files_patch'].includes(String(result.tool || '')));
+export function hasExecutedMutationEvidence(toolResults = []) {
+  return (toolResults || []).some((result) => result?.ok === true && ['files_write', 'files_edit', 'files_patch'].includes(String(result.tool || '')));
 }
 
 function mutationOnlyToolSchemas() {
   return nativeToolSchemas({ includeMutations: true })
-    .filter((tool) => ['files_write', 'files_patch'].includes(tool.function?.name));
+    .filter((tool) => ['files_write', 'files_edit', 'files_patch'].includes(tool.function?.name));
 }
 
 function execOnlyToolSchemas() {
@@ -28,15 +29,15 @@ function execOnlyToolSchemas() {
 }
 
 function proposalHasMutationAction(proposal = null) {
-  return (proposal?.actions || []).some((action) => ['files_write', 'files_patch'].includes(action.tool));
+  return (proposal?.actions || []).some((action) => ['files_write', 'files_edit', 'files_patch'].includes(action.tool));
 }
 
 function hasMutationToolResult(toolResults = []) {
-  return (toolResults || []).some((result) => ['files_write', 'files_patch'].includes(String(result?.tool || '')));
+  return (toolResults || []).some((result) => ['files_write', 'files_edit', 'files_patch'].includes(String(result?.tool || '')));
 }
 
 function failedMutationToolResult(toolResults = []) {
-  return (toolResults || []).find((result) => result?.ok === false && ['files_write', 'files_patch'].includes(String(result?.tool || ''))) || null;
+  return (toolResults || []).find((result) => result?.ok === false && ['files_write', 'files_edit', 'files_patch'].includes(String(result?.tool || ''))) || null;
 }
 
 function hasFailedMutationToolResult(toolResults = []) {
@@ -74,7 +75,7 @@ function continuationPrompt({ prompt, message, toolResults, modelConfig, context
 export async function completeMutationAfterInspection({ adapter, prompt, message, toolResults, modelConfig, contextThreshold, traceLogger }) {
   const followupPrompt = continuationPrompt({ prompt, message, toolResults, modelConfig, contextThreshold, tools: nativeToolSchemas(), instructions: [
     'The user explicitly asked for a fix/change. Read-only inspection was only preflight, not completion.',
-    'Use the executed inspection evidence below. If the change is safe and inside scope, call files_write or files_patch now. If you cannot safely patch, report the specific blocker. Do not ask the user to paste files and do not stop at analysis.',
+    'Use the executed inspection evidence below. If the change is safe and inside scope, call files_write, files_edit or files_patch now. If you cannot safely patch, report the specific blocker. Do not ask the user to paste files and do not stop at analysis.',
   ], label: 'Executed inspection results:' });
   return adapter.complete({ ...structuredFollowupInput({ prompt, content: followupPrompt }), tools: nativeToolSchemas(), toolChoice: 'auto', traceLogger });
 }
@@ -82,7 +83,7 @@ export async function completeMutationAfterInspection({ adapter, prompt, message
 export async function completeMutationRepairAfterNoAction({ adapter, prompt, message, toolResults, modelConfig, contextThreshold, traceLogger }) {
   const repairPrompt = continuationPrompt({ prompt, message, toolResults, modelConfig, contextThreshold, tools: mutationOnlyToolSchemas(), instructions: [
     'Mutation is required and inspection already succeeded. Prose is not a valid completion for this turn.',
-    'You must call files_write or files_patch now. Those are the only available tools.',
+    'You must call files_write, files_edit or files_patch now. Those are the only available tools.',
     'If you cannot safely make a change, do not answer in prose; emit no tool call and the runtime will fail clearly.',
   ], label: 'Executed inspection results:' });
   return adapter.complete({ ...structuredFollowupInput({ prompt, content: repairPrompt }), tools: mutationOnlyToolSchemas(), toolChoice: 'auto', traceLogger });
@@ -93,7 +94,7 @@ export async function completeMutationRepairAfterToolFailure({ adapter, prompt, 
   const repairPrompt = continuationPrompt({ prompt, message, toolResults: [...inspectionToolResults, failedMutationResult], modelConfig, contextThreshold, tools: mutationOnlyToolSchemas(), instructions: [
     `Repair attempt: ${attempt}`,
     'Mutation is still required. The previous mutation tool call failed mechanically; this is retryable.',
-    'Regenerate the change and call files_write or files_patch now. Those are the only available tools.',
+    'Regenerate the change and call files_write, files_edit or files_patch now. Those are the only available tools.',
     'If files_patch failed because the patch was malformed or empty, produce a valid unified diff or use files_write with complete file content.',
   ], label: 'Executed continuation evidence:' });
   return adapter.complete({ ...structuredFollowupInput({ prompt, content: repairPrompt }), tools: mutationOnlyToolSchemas(), toolChoice: 'auto', traceLogger });
@@ -483,7 +484,7 @@ function authorizedCommitPathsFromToolResults(toolResults = [], workspaceRoot = 
   const paths = new Set();
   for (const result of toolResults || []) {
     if (!result?.ok) continue;
-    if (result.tool === 'files_write' && result.filePath) paths.add(path.relative(root, path.resolve(result.filePath)));
+    if (['files_write', 'files_edit'].includes(result.tool) && result.filePath) paths.add(path.relative(root, path.resolve(result.filePath)));
     if (result.tool === 'files_patch') {
       for (const file of result.touchedFiles || []) {
         const resolved = path.isAbsolute(file) ? path.resolve(file) : path.resolve(result.baseRoot || root, file);

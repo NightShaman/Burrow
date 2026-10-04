@@ -35,6 +35,8 @@ export function compactChatToolLoop(loop = null) {
       tools: summarizeToolResults(iteration.proposalExecution?.toolResults || []),
     })),
     tools: summarizeToolResults(loop.toolResults || []),
+    consequences: loop.consequences || null,
+    omittedToolResults: loop.omittedToolResults || 0,
     truncated: Boolean(loop.truncated),
     omittedIterations: Number(loop.omittedIterations || 0) + Math.max(0, (loop.iterations || []).length - PERSISTED_CHAT_LOOP_ITERATIONS),
   };
@@ -234,6 +236,7 @@ export async function finalizePlainChatRuntimeResult({
   intent = null,
   session = null,
   workspaceRoot = null,
+  artifactWorkspaceRoot = null,
   backgroundWork = null,
   modelTurn = null,
   turnPlan = null,
@@ -259,7 +262,7 @@ export async function finalizePlainChatRuntimeResult({
   for (const artifact of generatedArtifactSources) {
     try {
       outputArtifacts.push(await persistGeneratedArtifact({
-        agentWorkspaceRoot: workspaceRoot,
+        agentWorkspaceRoot: artifactWorkspaceRoot,
         metadata: artifact.metadata,
         ...(artifact.bytes ? { bytes: artifact.bytes } : { localSource: artifact.localSource }),
       }));
@@ -275,7 +278,7 @@ export async function finalizePlainChatRuntimeResult({
     ? enforcePlainChatTerminalIntegrity({ modelOk: Boolean(model.ok), answerText, chatToolLoop })
     : { decision: 'routed', answerText: null, integrityViolation: null };
   const decision = terminalIntegrity.decision;
-  const completion = completionEvidence({ toolResults: chatToolLoop?.toolResults || [], decision });
+  const completion = completionEvidence({ toolResults: chatToolLoop?.toolResults || [], consequences: chatToolLoop?.consequences, decision });
   // Completion evidence is structured runtime metadata. It must not become
   // assistant transcript content; the transcript is the user-visible answer.
   const finalAnswerText = terminalIntegrity.answerText;
@@ -378,7 +381,7 @@ export async function finalizePlainChatRuntimeResult({
     proposal,
     chatToolLoop: compactLoop,
     acceptanceChecklist,
-    proposalExecution: { executed: chatToolLoop?.toolResults?.length ?? 0, skipped: skippedActionsFromChatToolLoop(chatToolLoop), tools: summarizeToolResults(chatToolLoop?.toolResults || []) },
+    proposalExecution: { executed: chatToolLoop?.consequences?.executed ?? chatToolLoop?.toolResults?.length ?? 0, skipped: skippedActionsFromChatToolLoop(chatToolLoop), tools: summarizeToolResults(chatToolLoop?.toolResults || []) },
     modelUsage: model?.usage ?? null,
     completionEvidence: completion,
     model,

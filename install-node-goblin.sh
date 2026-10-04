@@ -2,7 +2,7 @@
 # Public bootstrap for the calendar-versioned Node Goblin release.
 set -eu
 
-REPOSITORY=${NODE_GOBLIN_REPOSITORY:-NightShaman/Node-Goblin}
+REPOSITORY=${NODE_GOBLIN_REPOSITORY:-NightShaman/Burrow}
 VERSION=${NODE_GOBLIN_VERSION:-latest}
 CONTROLLER=
 NODE_ID=
@@ -32,6 +32,10 @@ case "$VERSION" in
   [0-9][0-9][0-9][0-9].[0-1][0-9].[0-3][0-9]|[0-9][0-9][0-9][0-9].[0-1][0-9].[0-3][0-9].[0-9]*) ;;
   *) echo "version must be YYYY.MM.DD[.N] or latest" >&2; exit 2 ;;
 esac
+# Reject incomplete configuration before downloading or installing anything.
+if [ -n "$CONTROLLER" ] || [ -n "$NODE_ID" ]; then
+  [ -n "$CONTROLLER" ] && [ -n "$NODE_ID" ] || { echo "--controller and --node-id must be supplied together" >&2; exit 2; }
+fi
 [ "$(id -u)" -eq 0 ] || { echo "Node Goblin bootstrap must run as root" >&2; exit 1; }
 for command in curl tar sha256sum; do command -v "$command" >/dev/null 2>&1 || { echo "$command is required" >&2; exit 1; }; done
 

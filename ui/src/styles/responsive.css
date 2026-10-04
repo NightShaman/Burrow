@@ -1,1 +1,22 @@
-@media(max-width:900px){.cockpit{grid-template-columns:220px minmax(0,1fr);grid-template-rows:72px minmax(0,1fr) 240px 30px}.app-header,.status-bar{grid-column:1/3}.app-header{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}.header-rail-controls button span:not(.rail-control-icon){display:none}.right-rail{grid-column:1/3;grid-row:3;grid-template-rows:auto minmax(0,1fr)}.workspace{grid-column:2}.settings-view{grid-template-columns:110px minmax(0,1fr) minmax(0,1fr);gap:14px;padding:16px}.settings-content{grid-column:2/4}.right-panes.divided{grid-template-rows:minmax(90px,1fr) 8px minmax(90px,1fr)}.tasks-mode .tasks-workspace,.settings-mode .settings-workspace{grid-column:1/3;grid-row:2/4}}@media(max-width:600px){.cockpit{grid-template-columns:minmax(0,1fr);grid-template-rows:56px minmax(0,1fr) 30px}.app-header,.status-bar,.workspace,.left-rail,.right-rail{grid-column:1}.app-header{grid-template-columns:minmax(0,1fr) max-content minmax(0,1fr)}.left-rail,.right-rail{display:none}.page-tabs button{min-width:70px;padding:0 8px}.workspace-toolbar label{display:none}.settings-view{grid-template-columns:1fr}.settings-rail{flex-direction:row;overflow:auto}.settings-rail button{white-space:nowrap}.page-view{padding:18px}.tasks-mode .tasks-workspace,.settings-mode .settings-workspace{grid-column:1;grid-row:2}}
+@media(max-width:900px){.cockpit{grid-template-columns:220px minmax(0,1fr);grid-template-rows:72px minmax(0,1fr) 240px 30px}.app-header,.status-bar{grid-column:1/3}.app-header{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}.header-rail-controls button span:not(.rail-control-icon){display:none}.right-rail{grid-column:1/3;grid-row:3;grid-template-rows:auto minmax(0,1fr)}.workspace{grid-column:2}.settings-view{grid-template-columns:110px minmax(0,1fr) minmax(0,1fr);gap:14px;padding:16px}.settings-content{grid-column:2/4}.right-panes.divided{grid-template-rows:minmax(90px,1fr) 8px minmax(90px,1fr)}.tasks-mode .tasks-workspace,.settings-mode .settings-workspace{grid-column:1/3;grid-row:2/4}}@media(max-width:600px){.cockpit{grid-template-columns:minmax(0,1fr);grid-template-rows:56px minmax(0,1fr) 30px}.app-header,.status-bar,.workspace,.left-rail,.right-rail{grid-column:1}.app-header{grid-template-columns:minmax(0,1fr) max-content minmax(0,1fr)}.page-tabs button{min-width:70px;padding:0 8px}.settings-view{grid-template-columns:1fr}.settings-rail{flex-direction:row;overflow:auto}.settings-rail button{white-space:nowrap}.page-view{padding:18px}.tasks-mode .tasks-workspace,.settings-mode .settings-workspace{grid-column:1;grid-row:2}}
+.accessible-modal-backdrop{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--overlay);overflow:auto}.accessible-modal-backdrop>section{max-height:calc(100dvh - 40px);overflow:auto}
+
+/* Reflow existing, fully functional controls rather than maintaining a second mobile UI. */
+@media(max-width:600px){
+ html,body,#root{height:auto;min-height:100%;overflow:auto}
+ .cockpit{width:100%;height:auto;min-height:100dvh;display:flex;flex-direction:column}
+ .app-header{display:flex;flex-wrap:wrap;flex:none;gap:8px;padding:8px;overflow:visible}
+ .target-selector{margin-left:0;min-width:0}.target-selector select{min-width:0;max-width:100%}
+ .page-tabs{order:3;width:100%;overflow:auto;flex-shrink:0}.page-tabs button{min-width:60px}
+ .header-rail-controls{margin-left:auto;padding:0}
+ .left-rail,.right-rail{display:flex;flex-direction:column;flex:none;width:100%;max-height:320px;overflow:auto}
+ .left-rail.collapsed,.right-rail.collapsed{max-height:44px;min-height:44px}
+ .rail-expander{width:100%;min-height:40px}.left-panes,.right-panes{min-height:180px}
+ .workspace{flex:none;min-height:65dvh;overflow:visible}
+ .workspace-toolbar{display:flex;flex-wrap:wrap;height:auto;gap:8px;padding:10px}
+ .workspace-toolbar label{display:flex;flex-wrap:wrap;min-width:0;max-width:100%}
+ .workspace-toolbar select{max-width:100%;min-width:0}.session-controls{display:flex;flex-wrap:wrap;min-width:0;width:100%}
+ .session-controls label{flex:1;min-width:0}.session-controls select{width:100%}
+ .document-tabs{flex-wrap:wrap;min-width:0}.status-bar{flex-wrap:wrap;flex:none;min-height:30px}
+ .settings-workspace,.tasks-workspace{min-width:0;width:100%}.settings-content{min-width:0}
+}

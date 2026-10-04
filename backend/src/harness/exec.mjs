@@ -1,3 +1,4 @@
+import { terminateProcessGroup } from '../process-execution-router.mjs';
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -119,18 +120,7 @@ export async function runExec({
       abortSignal?.removeEventListener('abort', onAbort);
       resolve(value);
     };
-    const terminate = (signal) => {
-      if (!child.pid) return false;
-      try {
-        if (process.platform !== 'win32') {
-          process.kill(-child.pid, signal);
-          return true;
-        }
-        return child.kill(signal);
-      } catch {
-        try { return child.kill(signal); } catch { return false; }
-      }
-    };
+    const terminate = (signal) => terminateProcessGroup(child, signal);
     const stop = (kind) => {
       if (settled) return;
       timedOut ||= kind === 'timeout';

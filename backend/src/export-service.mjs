@@ -1,3 +1,5 @@
+import { boundJson } from './request-resource-budgets.mjs';
+import { importBudgets, resourceBytes } from './request-resource-budgets.mjs';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scrypt as scryptCallback } from 'node:crypto';
 import { gzip, gunzip } from 'node:zlib';
 import { promisify } from 'node:util';
@@ -88,8 +90,10 @@ export async function buildExport({ request, data = {}, sourceFiles = {} } = {})
 }
 
 
-export async function decodeExport(body, { password = null } = {}) {
+export async function decodeExport(body, { password = null, maxCompressedBytes = importBudgets().compressed, maxDecompressedBytes = importBudgets().expanded, maxDepth, maxItems } = {}) {
   if (!Buffer.isBuffer(body) || !body.length) throw Object.assign(new Error('export_payload_required'), { statusCode: 400 });
+  if (body.length > resourceBytes(maxCompressedBytes)) throw Object.assign(new Error('export_compressed_too_large'), { statusCode: 413 });
+  maxDecompressedBytes = resourceBytes(maxDecompressedBytes);
   let compressed = body;
   let encrypted = false;
   if (body[0] !== 0x1f || body[1] !== 0x8b) {
@@ -108,10 +112,19 @@ export async function decodeExport(body, { password = null } = {}) {
     } catch { throw Object.assign(new Error('import_password_invalid'), { statusCode: 400 }); }
   }
   let payload;
-  try { payload = JSON.parse((await gunzipAsync(compressed)).toString('utf8')); } catch { throw Object.assign(new Error('export_payload_invalid'), { statusCode: 400 }); }
+  try { payload = JSON.parse((await gunzipAsync(compressed, { maxOutputLength: maxDecompressedBytes })).toString('utf8')); } catch (error) { if (error.code === 'ERR_BUFFER_TOO_LARGE') throw Object.assign(new Error('export_expanded_too_large'), { statusCode: 413 }); throw Object.assign(new Error('export_payload_invalid'), { statusCode: 400 }); }
+  boundJson(payload, {maxDepth,maxItems});
   if (!payload || payload.manifest?.format !== EXPORT_FORMAT || !Array.isArray(payload.manifest.categories) || !payload.categories || typeof payload.categories !== 'object') throw Object.assign(new Error('export_manifest_invalid'), { statusCode: 400 });
-  const categories = payload.manifest.categories.map((entry) => entry?.id).filter((id) => categoryMap.has(id));
-  if (!categories.length) throw Object.assign(new Error('export_categories_required'), { statusCode: 400 });
+  const declared = payload.manifest.categories.map((entry) => entry?.id);
+  const actual = Object.keys(payload.categories);
+  if (Array.isArray(payload.categories) || declared.some((id) => !categoryMap.has(id)) ||
+      new Set(declared).size !== declared.length || declared.length !== actual.length ||
+      actual.some((id) => !declared.includes(id))) {
+    throw Object.assign(new Error('export_categories_mismatch'), { statusCode: 400 });
+  }
+  if (!declared.length) throw Object.assign(new Error('export_categories_required'), { statusCode: 400 });
+  // Both preview and application now consume the same validated category set.
+  const categories = actual;
   return { payload, encrypted, categories };
 }
 
@@ -119,7 +132,9 @@ export function normalizeImportRequest(body = {}) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw Object.assign(new Error('request_body_object_required'), { statusCode: 400 });
   const encoded = text(body.payload || body.export || body.data);
   if (!encoded) throw Object.assign(new Error('export_payload_required'), { statusCode: 400 });
+  if (encoded.length > Math.ceil(importBudgets().compressed / 3) * 4) throw Object.assign(new Error('export_compressed_too_large'), { statusCode: 413 });
   const binary = Buffer.from(encoded, 'base64');
+  if (binary.length > importBudgets().compressed) throw Object.assign(new Error('export_compressed_too_large'), { statusCode: 413 });
   if (!binary.length) throw Object.assign(new Error('export_payload_invalid'), { statusCode: 400 });
   const conflictPolicy = text(body.conflictPolicy || 'error').toLowerCase();
   if (!['error', 'skip', 'replace'].includes(conflictPolicy)) throw Object.assign(new Error('import_conflict_policy_invalid'), { statusCode: 400 });

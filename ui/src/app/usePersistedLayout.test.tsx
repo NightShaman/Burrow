@@ -72,3 +72,20 @@ it('keeps single selection separate from remembered divided selections and split
  expect(result.current.leftBottomPanel).toBe('workspace');
  expect(result.current.leftSplit).toBe(45);
 });
+
+it.each([61, 70, 75])('roundtrips archived left-rail trigger %s through reload', (split) => {
+ const hook = renderHook(() => usePersistedLayout());
+ act(() => hook.result.current.setLeftSplit(split));
+ hook.unmount();
+ const reload = renderHook(() => usePersistedLayout());
+ expect(reload.result.current.leftSplit).toBe(split);
+ reload.unmount();
+});
+it.each([24, 76, 99])('rejects out-of-range persisted split %s on both rails', (split) => {
+ localStorage.setItem('hc.leftSplit', JSON.stringify({version: 1, value: split}));
+ localStorage.setItem('hc.rightSplit', JSON.stringify({version: 1, value: split}));
+ const hook = renderHook(() => usePersistedLayout());
+ expect(hook.result.current.leftSplit).toBe(40);
+ expect(hook.result.current.rightSplit).toBe(50);
+ hook.unmount();
+});

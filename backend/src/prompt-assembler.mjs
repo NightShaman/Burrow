@@ -407,20 +407,25 @@ function renderUiTarget(target = null) {
   return `Active UI target${target.label ? ` (${target.label})` : ''}: ${target.url}\nUse the granted browser tools to open or select this target when visual inspection, browser debugging, or UI validation is needed. This is the current target; do not assume a fixed dev-server port.`;
 }
 
-function renderGroupChannel(group = null) {
+function renderGroupChannel(group = null, budget = 12_000) {
   if (!group?.channelId || !Array.isArray(group.turns) || !group.turns.length) return '';
-  const lines = group.turns.slice(-80).map((turn) => {
+  budget = Math.max(0, Math.floor(Number(budget) || 0));
+  const header = `Shared operator group room: ${group.channelName || group.channelId}\nThese are shared room messages from the operator and participating agents. They are separate from this agent's private session transcript.`;
+  const omitted = '[older group turns omitted]';
+  const truncated = '[group turn truncated]';
+  const lines = [];
+  let remaining = budget - header.length - omitted.length - 2;
+  for (const turn of group.turns.slice(-80).reverse()) {
     const metadata = turn.metadata || {};
-    const speaker = turn.role === 'user'
-      ? 'Operator'
-      : metadata.fromAgentName || metadata.fromAgentId || turn.role || 'Participant';
-    return `[${speaker}] ${String(turn.content || '').trim()}`;
-  }).filter((line) => line.length > 0);
-  return [
-    `Shared operator group room: ${group.channelName || group.channelId}`,
-    'These are shared room messages from the operator and participating agents. They are separate from this agent\'s private session transcript.',
-    ...lines,
-  ].join('\n');
+    const speaker = turn.role === 'user' ? 'Operator' : metadata.fromAgentName || metadata.fromAgentId || turn.role || 'Participant';
+    const line = `[${speaker}] ${String(turn.content || '').trim()}`;
+    if (line.length + 1 > remaining) {
+      if (!lines.length && remaining > truncated.length + 1) lines.push(line.slice(0, remaining - truncated.length - 1) + truncated);
+      break;
+    }
+    lines.push(line); remaining -= line.length + 1;
+  }
+  return [header, ...(lines.length < group.turns.length ? [omitted] : []), ...lines.reverse()].join('\n').slice(0, budget);
 }
 
 function renderSessionRecall(recall = null) {
@@ -570,7 +575,7 @@ export async function assemblePrompt({
     section('action-output-contract', outputMode === 'proposal' ? renderActionProposalContract() : ''),
     section('conversation', renderedConversation),
     section('prior-conversation-summary', clampText(renderPriorConversationSummary(conversation), limits.priorSummaryChars ?? 4_000)),
-    section('support-group-channel', clampText(renderGroupChannel(supportContext?.groupChannel || null), limits.groupChannelChars ?? 12_000)),
+    section('support-group-channel', renderGroupChannel(supportContext?.groupChannel || null, limits.groupChannelChars ?? 12_000)),
     section('support-session-recall', clampText(renderSessionRecall(supportContext?.sessionRecall || null), limits.sessionRecallChars ?? 6_000)),
     section('selective-albdruck-knowledge', clampText(supportContext?.albdruckRecall?.items?.length ? 'Derived knowledge, not original evidence. Verify via cited originals before relying on mutable facts.\n' + JSON.stringify(supportContext.albdruckRecall.items.map(item => ({ id: item.id, state: item.state, document: item.document, evidence: item.evidence }))) : '', resolveAlbdruckConfig().promptMaxChars)),
     section('relevant-run-evidence', clampText(supportContext?.runEvidence?.text || '', limits.runEvidenceChars ?? 6_000)),

@@ -190,8 +190,8 @@ export class PostgresWorkingMemoryStore {
       const expiresAt = material
         ? input.expiresAt || expiry(input.ttlDays ?? this.retention.workingMemoryTtlDays)
         : old.expires_at;
-      await c.query(
-        `INSERT INTO working_memory(id,agent_id,session_id,conversation_id,project,kind,state,title,content,source_refs,pinned,created_at,updated_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$12,$13) ON CONFLICT(id) DO UPDATE SET session_id=EXCLUDED.session_id,conversation_id=EXCLUDED.conversation_id,project=EXCLUDED.project,kind=EXCLUDED.kind,state=EXCLUDED.state,title=EXCLUDED.title,content=EXCLUDED.content,source_refs=EXCLUDED.source_refs,pinned=EXCLUDED.pinned,updated_at=EXCLUDED.updated_at,expires_at=EXCLUDED.expires_at`,
+      const written = await c.query(
+        `INSERT INTO working_memory(id,agent_id,session_id,conversation_id,project,kind,state,title,content,source_refs,pinned,created_at,updated_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$12,$13) ON CONFLICT(id) DO UPDATE SET session_id=EXCLUDED.session_id,conversation_id=EXCLUDED.conversation_id,project=EXCLUDED.project,kind=EXCLUDED.kind,state=EXCLUDED.state,title=EXCLUDED.title,content=EXCLUDED.content,source_refs=EXCLUDED.source_refs,pinned=EXCLUDED.pinned,updated_at=EXCLUDED.updated_at,expires_at=EXCLUDED.expires_at WHERE working_memory.agent_id=EXCLUDED.agent_id RETURNING id`,
         [
           r.id,
           r.agentId,
@@ -208,6 +208,7 @@ export class PostgresWorkingMemoryStore {
           expiresAt,
         ],
       );
+      if (!written.rows.length) throw Error("working_memory_owner_conflict");
       return this.get(r.id, r.agentId, c);
     });
   }
@@ -292,7 +293,7 @@ export class PostgresWorkingMemoryStore {
     await client.query(`INSERT INTO dream_${kind}_entries(envelope_id,position,payload) SELECT $1,$2::bigint+ordinality-1,value FROM json_array_elements($3::json) WITH ORDINALITY`, [id,start,JSON.stringify(entries)]);
     return this.dreamRead(identity, kind, client);
   }
-  async replaceDreamPreload({ agentId, project, items = [], expiresAt } = {}) {
+  async replaceDreamPreload({ agentId, project, items = [], expiresAt } = {}, client = null) {
     await this.ready();
     if (!text(agentId) || !text(project))
       throw Error("dream_preload_scope_required");
@@ -310,8 +311,9 @@ export class PostgresWorkingMemoryStore {
         };
       })
       .filter((i) => i.id && i.title && i.content && i.sourceRefs.length);
-    return withPostgresTransaction(this.pool, (c) =>
-      this.dreamWrite(
+    const write = async (c) => {
+      await c.query("SELECT pg_advisory_xact_lock(hashtext($1))", [JSON.stringify([agentId, "preload-set"])]);
+      return this.dreamWrite(
         { agentId, project }, 'preload',
         {
           version: 1,
@@ -322,8 +324,20 @@ export class PostgresWorkingMemoryStore {
           updatedAt: this.clock(),
         },
         c,
-      ),
-    );
+      );
+    };
+    return client ? write(client) : withPostgresTransaction(this.pool, write);
+  }
+  async replaceDreamPreloads({ agentId, scopes = [], expiresAt } = {}) {
+    await this.ready();
+    if (!text(agentId)) throw Error("dream_preload_scope_required");
+    return withPostgresTransaction(this.pool, async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [JSON.stringify([agentId, "preload-set"])]);
+      await client.query("DELETE FROM dream_state_envelopes WHERE agent_id=$1 AND kind='preload'", [agentId]);
+      const results = [];
+      for (const scope of scopes) results.push(await this.replaceDreamPreload({ ...scope, agentId, expiresAt }, client));
+      return results;
+    });
   }
   async getDreamPreload({ agentId, project } = {}) {
     await this.ready();
@@ -371,13 +385,17 @@ export class PostgresWorkingMemoryStore {
     return this.dreamRead({ agentId, project }, 'ledger');
   }
   async supersedeDreamRecords({ agentId, project, keepIds = [] } = {}) {
-    const keep = new Set((keepIds || []).map(text));
-    const records = (
-      await this.list({ agentId, project, includeInactive: false, limit: 100 })
-    ).filter((x) => x.id.startsWith("dream-") && !keep.has(x.id));
-    for (const x of records)
-      await this.record({ ...x, state: "superseded", expiresAt: x.expiresAt });
-    return Promise.all(records.map((x) => this.get(x.id, agentId)));
+    await this.ready();
+    if (!text(agentId) || !text(project)) throw Error('dream_supersede_scope_required');
+    const at = this.clock();
+    const result = await this.pool.query(
+      `UPDATE working_memory SET state='superseded', updated_at=$3
+       WHERE agent_id=$1 AND project=$2 AND state='active'
+         AND (pinned OR expires_at >= $3) AND id LIKE 'dream-%'
+         AND NOT (id = ANY($4::text[])) RETURNING *`,
+      [text(agentId), text(project), at, (keepIds || []).map(text)],
+    );
+    return result.rows.map(row);
   }
   async replaceDreamScopeReviewQueue({
     agentId,
@@ -582,6 +600,7 @@ export class PostgresWorkingMemoryStore {
         return {
           ...card,
           score:
+            (!exact && hits === 0) ? 0 :
             (exact ? 100 : 0) +
             hits * 10 +
             Math.min(20, Number(card.recurrence || 0)),

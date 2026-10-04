@@ -1,6 +1,6 @@
 import { prepareDreamExtraction, extractIncrementalDreamCandidates } from './dream-incremental-extraction.mjs';
 import { redactProtectedText } from './redaction.mjs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolveModelConfig } from './config.mjs';
 import { consolidateDreamMemoryAsync } from './dream-memory-consolidator.mjs';
 import { inspectAssembledPromptBudget } from './prompt-budget.mjs';
@@ -8,7 +8,7 @@ import { createModelAdapter } from './model-adapter.mjs';
 import { nextCronOccurrence } from './scheduled-job-store.mjs';
 import { reconciledDreamCycleState } from './dream-cycle-state.mjs';
 import { isChatMessage } from './session-entry.mjs';
-import { appendPreferenceSignalAsync, applyPreferenceUpdateAsync, parsePreferenceAdjudication, preferenceAdjudicationPrompt, preferenceLearningStateAsync, preferenceSignalsAsync, validatePreferenceAdjudication } from './preference-learning.mjs';
+import { appendPreferenceSignalAsync, markPreferenceReviewedAsync, applyPreferenceUpdateAsync, parsePreferenceAdjudication, preferenceAdjudicationPrompt, preferenceLearningStateAsync, preferenceSignalsAsync, validatePreferenceAdjudication } from './preference-learning.mjs';
 
 const PHASES = Object.freeze(['light', 'deep', 'rem']);
 const DEFAULT_LIMIT = 12;
@@ -24,7 +24,7 @@ function receiptState(agentId, runId) { return `dream-cycle-receipt:${agentId}:$
 function occurrenceState(agentId, scheduledFor) { return `dream-cycle-occurrence:${agentId}:${scheduledFor}`; }
 const dreamRuntimeInstanceId = randomUUID();
 const activeDreamRunIds = new Set();
-function entryId(agentId, phase, title, content) { return `dream-${phase}-${Buffer.from(`${agentId}\0${title}\0${content}`).toString('base64url').slice(0, 40)}`; }
+function entryId(agentId, phase, title, content) { return `dream-${phase}-${createHash('sha256').update(JSON.stringify([agentId, phase, title, content])).digest('hex')}`; }
 function clamp(value, limit) { const source = text(value).replace(/\s+/g, ' '); return source.length <= limit ? source : `${source.slice(0, limit).trim()}…`; }
 function safeModelError(value, config = {}) {
   if (typeof value !== 'string') return null;
@@ -123,7 +123,7 @@ function parseModelJson(value) {
   let depth = 0; let quoted = false; let escaped = false;
   for (let index = start; index < source.length; index += 1) {
     const character = source[index];
-    if (quoted) { if (escaped) escaped = false; else if (character === '\\\\') escaped = true; else if (character === '"') quoted = false; continue; }
+    if (quoted) { if (escaped) escaped = false; else if (character === '\\') escaped = true; else if (character === '"') quoted = false; continue; }
     if (character === '"') { quoted = true; continue; }
     if (character === opener) depth += 1;
     else if (character === closer && --depth === 0) {
@@ -353,7 +353,7 @@ function phaseExtractionPrompt({ phase, windowStart, generatedAt, messages, echo
   ].join('\n\n');
 }
 
-export async function sessionWindow({ rootDir, phase, generatedAt, conversationStore = null, conversationAgentId = null, conversationSessionIds = [] }) {
+export async function sessionWindow({ rootDir, phase, generatedAt, conversationStore = null, conversationAgentId = null, conversationSessionIds = [], originalEntries = null, sessions: suppliedSessions = null }) {
   if (conversationStore) {
     const since = Date.parse(phaseWindowStart({ phase, generatedAt }));
     const until = Date.parse(generatedAt);
@@ -363,13 +363,20 @@ export async function sessionWindow({ rootDir, phase, generatedAt, conversationS
     const addEntries = (values, sessionId) => { for (const value of values || []) { if (value?.id && seen.has(`${sessionId}:${value.id}`)) continue; if (value?.id) seen.add(`${sessionId}:${value.id}`); entries.push({ ...value, __sessionId: sessionId }); } };
     // Child execution transcripts are not conversational Dream evidence. Use
     // persisted provenance plus the canonical legacy child-session namespace.
-    const sessions = typeof conversationStore.listSessions === 'function'
-      ? await conversationStore.listSessions({ agentId: conversationAgentId, includeArchived: true }) : [];
+    const sessions = suppliedSessions || (typeof conversationStore.listSessions === 'function'
+      ? await conversationStore.listSessions({ agentId: conversationAgentId, includeArchived: true }) : []);
     const childIds = new Set(sessions.filter(session =>
       session.sessionKind === 'subagent' || session.metadata?.sessionKind === 'subagent'
       || session.parentChild === true || session.metadata?.parentChild === true
     ).map(session => session.sessionId));
-    for (const sessionId of conversationSessionIds) {
+    if (originalEntries || typeof conversationStore.dreamWindow === 'function') {
+      const originals = originalEntries || await conversationStore.dreamWindow({ agentId: conversationAgentId,
+        since: phaseWindowStart({ phase, generatedAt }), until: generatedAt });
+      for (const entry of originals) {
+        if (childIds.has(entry.__sessionId) || String(entry.__sessionId).startsWith('subagent-')) continue;
+        entries.push(entry);
+      }
+    } else for (const sessionId of conversationSessionIds) {
       if (childIds.has(sessionId) || String(sessionId).startsWith('subagent-')) continue;
       if (typeof conversationStore.listOriginalEntries === 'function') {
         addEntries(await conversationStore.listOriginalEntries({ agentId: conversationAgentId, sessionId }), sessionId);
@@ -397,7 +404,7 @@ export async function sessionWindow({ rootDir, phase, generatedAt, conversationS
     for (const turn of entries) {
       if (!isChatMessage(turn)) continue;
       if (String(turn.metadata?.kind || '').startsWith('subagent-') || turn.metadata?.subagentId) continue;
-      const at = Date.parse(turn.ts || turn.at || turn.createdAt);
+      const at = Date.parse(turn.timestamp ?? turn.ts ?? turn.at ?? turn.createdAt ?? turn.__storedAt);
       if (!Number.isFinite(at) || at < since || at > until) continue;
       const sessionId = turn.__sessionId || turn.sessionId || '';
       output.push({ sourceRef: `session:${sessionId}:message:${turn.id}`, sessionId, entryId: turn.id, role: turn.role, at: new Date(at).toISOString(), content: text(turn.content) });
@@ -618,10 +625,14 @@ export async function runDreamExtractionDiagnostic({ agentId, rootDir = null, ge
       if (config?.model) adapter = createModelAdapter({ config: { ...config, temperature: settings?.temperature ?? config.temperature ?? 0.2, reasoningEffort: 'off' } });
     }
     const results = [];
+    const activeConversationStore = conversationStore || injected?.conversations || null;
+    const sessions = activeConversationStore?.listSessions ? await activeConversationStore.listSessions({ agentId: id, includeArchived: true }) : [];
+    const longestPhase = phases.reduce((a,b) => PHASE_WINDOWS_DAYS[a] > PHASE_WINDOWS_DAYS[b] ? a : b);
+    const originalEntries = activeConversationStore?.dreamWindow ? await activeConversationStore.dreamWindow({ agentId: id,
+      since: phaseWindowStart({ phase: longestPhase, generatedAt }), until: generatedAt }) : null;
     for (const currentPhase of phases) {
-      const activeConversationStore = conversationStore || injected?.conversations || null;
-      const sessionIds = conversationSessionIds || (activeConversationStore?.listSessions ? (await activeConversationStore.listSessions({ agentId: id, includeArchived: true })).map((session) => session.sessionId).filter(Boolean) : []);
-      const messages = await sessionWindow({ rootDir, phase: currentPhase, generatedAt, conversationStore: activeConversationStore, conversationAgentId: id, conversationSessionIds: sessionIds });
+      const sessionIds = conversationSessionIds || sessions.map(session => session.sessionId).filter(Boolean);
+      const messages = await sessionWindow({ rootDir, phase: currentPhase, generatedAt, conversationStore: activeConversationStore, conversationAgentId: id, conversationSessionIds: sessionIds, originalEntries, sessions });
       try {
         const extraction = await extractPhaseCandidates({ phase: currentPhase, messages, generatedAt, modelAdapter: adapter, modelConfig: config, traceLogger, echoAllowedSourceRefs });
         results.push({ phase: currentPhase, ok: true, inspected: messages.length, chunks: extraction.chunks, memoryCount: extraction.memories.length, preferenceCount: extraction.preferences.length, modelResponses: extraction.diagnostics });
@@ -633,10 +644,10 @@ export async function runDreamExtractionDiagnostic({ agentId, rootDir = null, ge
   } finally { /* composed store remains open */ }
 }
 
-async function adjudicatePreferencesAsync({ agentId, profileStore, metadataStore, generatedAt, modelAdapter = null, modelConfig = null, traceLogger = null, onProgress = null } = {}) {
+export async function adjudicatePreferencesAsync({ agentId, profileStore, metadataStore, generatedAt, modelAdapter = null, modelConfig = null, traceLogger = null, onProgress = null } = {}) {
   if (!profileStore?.atomicPreferenceUpdate) throw new Error('dream_profile_store_required');
   const state = await preferenceLearningStateAsync({ agentId, metadataStore });
-  const signals = await preferenceSignalsAsync({ agentId, metadataStore, since: state.lastSignalAt, limit: 100 });
+  const signals = (await preferenceSignalsAsync({ agentId, metadataStore, since: state.lastSignalAt, limit: 240 })).filter(signal => !(state.reviewedSignalIds || []).includes(signal.id));
   if (!signals.length) return { disposition: 'no_new_signals', signalCount: 0 };
   let adapter = modelAdapter; let config = modelConfig;
   try {
@@ -646,7 +657,11 @@ async function adjudicatePreferencesAsync({ agentId, profileStore, metadataStore
     const result = await completeTextResult({ content: preferenceAdjudicationPrompt({ preferences: current, signals }), modelAdapter: adapter, modelConfig: config, traceLogger, onProgress });
     const proposal = parsePreferenceAdjudication(result.text);
     const validation = validatePreferenceAdjudication({ proposal, signals });
-    if (!validation.ok || validation.disposition === 'noop') return { disposition: validation.ok ? 'noop' : 'rejected', signalCount: signals.length, reason: validation.reason || proposal?.reason || null };
+    if (!validation.ok) return { disposition: 'rejected', signalCount: signals.length, reason: validation.reason || null };
+    if (validation.disposition === 'noop') {
+      await markPreferenceReviewedAsync({ agentId, metadataStore, signals, at: generatedAt });
+      return { disposition: 'noop', signalCount: signals.length, reason: proposal.reason };
+    }
     const update = await applyPreferenceUpdateAsync({ agentId, markdown: proposal.markdown, sourceSignals: validation.signals, profileStore, at: generatedAt });
     return { disposition: update.applied ? 'updated' : update.reason, signalCount: signals.length, signalIds: validation.signals.map((signal) => signal.id) };
   } catch (error) { return { disposition: 'failed', signalCount: signals.length, reason: String(error?.message || error) }; }
@@ -687,9 +702,11 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     const conversationStore = stores?.conversations || null;
     const conversationSessions = conversationStore?.listSessions ? await conversationStore.listSessions({ agentId: id, includeArchived: true }) : [];
     const conversationSessionIds = conversationSessions.map((session) => session.sessionId).filter(Boolean);
+    const originalEntries = conversationStore?.dreamWindow ? await conversationStore.dreamWindow({
+      agentId: id, since: phaseWindowStart({ phase: 'rem', generatedAt }), until: generatedAt }) : null;
     for (const phase of PHASES) {
       await progress({ phase, step: 'loading_history', request: null });
-      phaseWindows[phase] = await sessionWindow({ rootDir, phase, generatedAt, conversationStore, conversationAgentId: id, conversationSessionIds });
+      phaseWindows[phase] = await sessionWindow({ rootDir, phase, generatedAt, conversationStore, conversationAgentId: id, conversationSessionIds, originalEntries, sessions: conversationSessions });
       await progress({ sourceMessages: phaseWindows[phase].length, sourceChars: phaseWindows[phase].reduce((sum, item) => sum + item.content.length, 0) });
     }
     const soul = (await profileStore.get(id, 'SOUL'))?.markdown || '';
@@ -759,7 +776,8 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     const preloadProjects = [...new Set(dreamMemoryCandidates.map((item) => text(item.project)).filter(Boolean))];
     await progress({ step: 'preload' });
     const dreamPreloads = [];
-    if (preloadItems.length) { dreamPreloads.push(await memoryStore.replaceDreamPreload({ agentId: id, project: 'global', items: preloadItems, expiresAt: preloadExpiry })); for (const project of preloadProjects.slice(0, 8)) { const items = dreamMemoryCandidates.filter((item) => item.project === project).slice(0, 5).map((item) => ({ id: item.id, title: item.title, content: item.content, sourceRefs: item.sourceRefs })); if (items.length) dreamPreloads.push(await memoryStore.replaceDreamPreload({ agentId: id, project, items, expiresAt: preloadExpiry })); } }
+    const preloadScopes = [{ project: 'global', items: preloadItems }, ...preloadProjects.filter(project => project !== 'global').slice(0, 8).map(project => ({ project, items: dreamMemoryCandidates.filter(item => item.project === project).slice(0, 5).map(item => ({ id: item.id, title: item.title, content: item.content, sourceRefs: item.sourceRefs })) }))];
+    if (!phaseResults.some(phase => phase.extractionError)) dreamPreloads.push(...await memoryStore.replaceDreamPreloads({ agentId: id, scopes: preloadScopes, expiresAt: preloadExpiry }));
     await progress({ step: 'preferences' });
     const preferences = await adjudicatePreferencesAsync({ agentId: id, profileStore, metadataStore, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress });
     await progress({ step: 'saving_diaries', request: null });
@@ -791,12 +809,14 @@ export function createDreamCycleScheduler({ intervalMs = 30_000, clock = now, re
     try {
       const at = clock();
       if (!stores?.agents || !stores?.dreamCycles || !stores?.dreamSettings) throw new Error('dream_cycle_stores_required');
+      const results = [];
       const due = (await Promise.all((await stores.agents.list({ includeDisabled: false })).map(async (agent) => {
+          try {
           const settings = await stores.dreamSettings.get(agent.id);
           const state = await stores.dreamCycles.ensureState({ agentId: agent.id, settings, at });
           return settings.enabled && state.nextRunAt && state.nextRunAt <= at ? { agent } : null;
+          } catch (error) { results.push({ ok: false, agentId: agent.id, error: String(error?.message || error), generatedAt: at }); return null; }
         }))).filter(Boolean);
-      const results = [];
       for (const item of due) {
         const claim = await stores.dreamCycles.claimDue({ agentId: item.agent.id, at });
         if (!claim) continue;

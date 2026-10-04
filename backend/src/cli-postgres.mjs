@@ -1,4 +1,5 @@
 import { createPostgresApplication } from './postgres-composition.mjs';
+import { resolvePostgresRuntimeEnv } from './postgres-startup.mjs';
 import { postgresConfig } from './postgres-foundation.mjs';
 import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
 import { loadRuntimeConfig } from './runtime-config-loader.mjs';
@@ -7,7 +8,8 @@ import { loadRuntimeConfig } from './runtime-config-loader.mjs';
 export async function withCliPostgres({ rootDir, args = {}, env = process.env,
   compose = createPostgresApplication, loadConfig = loadRuntimeConfig,
 } = {}, operation) {
-  const application = await compose({ poolConfig: postgresConfig(env),
+  const resolvedEnv = resolvePostgresRuntimeEnv({ env });
+  const application = await compose({ poolConfig: postgresConfig(resolvedEnv),
     encryptionKey: settingsKeyFromEnvironment(env),
     runtimeRoot: env.BURROW_RUNTIME_ROOT || env.BURROW_DATA_ROOT });
   try {

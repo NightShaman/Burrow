@@ -103,6 +103,6 @@ describe('configurable rails', () => {
     render(<WorkspaceRail {...railProps} layout="divided" />);
     expect(screen.getByText('agents panel')).toBeTruthy();
     expect(screen.getByText('workspace panel')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Resize left rail panels' })).toBeTruthy();
+    expect(screen.getByRole('separator', { name: 'Resize left rail panels' })).toBeTruthy();
   });
 });

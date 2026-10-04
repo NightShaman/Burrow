@@ -1,6 +1,10 @@
+import { rovingKeys } from '../../app/keyboardWidgets';
+import { ownedAgentResource } from '../../app/ownedAgent';
+import { useOwnedApi } from '../../app/useOwnedApi';
+import { localApiTarget, type ApiTarget } from '../../app/apiTargets';
 import { ImagePreview } from '../../app/ImagePreview';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, fetchApi } from '../../app/api';
+
 import type { Agent } from '../../app/types';
 import './forge.css';
 
@@ -69,42 +73,69 @@ function artifactPath(url: string): string {
   }
 }
 
-function ArtifactDownload({ artifact }: { artifact: Artifact }) {
-  const [href, setHref] = useState('');
-  useEffect(() => {
-    let cancelled = false;
-    let objectUrl = '';
-    if (!artifact.downloadUrl) return undefined;
-    void fetchApi(artifactPath(artifact.downloadUrl), { headers: { accept: 'application/octet-stream, */*' } })
-      .then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.blob(); })
-      .then((blob) => { if (!cancelled) { objectUrl = URL.createObjectURL(blob); setHref(objectUrl); } })
-      .catch(() => { if (!cancelled) setHref(''); });
-    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [artifact.downloadUrl]);
-  return href ? <a href={href} download={artifact.name}>Download</a> : <span className="forge-download-pending">Preparing download…</span>;
-}
-
-function ArtifactMedia({ artifact }: { artifact: Artifact }) {
+export function ArtifactOutput({ artifact, fetchMedia }: { artifact: Artifact; fetchMedia: ReturnType<typeof useOwnedApi>["fetch"] }) {
   const [src, setSrc] = useState('');
+  const [previewState, setPreviewState] = useState('loading');
+  const [downloadState, setDownloadState] = useState('idle');
+  const [attempt, setAttempt] = useState(0);
+  const resource = useMemo(() => ({ active: true, abort: new AbortController(), urls: new Set<string>(), requests: new Map<string, Promise<string>>() }), [artifact.id, artifact.previewUrl, artifact.downloadUrl, artifact.mimeType, fetchMedia]);
+  const load = (source: string) => {
+    const path = artifactPath(source);
+    const cached = resource.requests.get(path);
+    if (cached) return cached;
+    const signal = resource.abort.signal;
+    const request = fetchMedia(path, { signal, headers: { accept: artifact.mimeType || '*/*' } })
+      .then(response => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.blob(); })
+      .then(blob => {
+        if (!resource.active || signal.aborted) throw new Error('Artifact retired');
+        const url = URL.createObjectURL(blob);
+        resource.urls.add(url);
+        return url;
+      }).catch(error => { if (resource.requests.get(path) === request) resource.requests.delete(path); throw error; });
+    resource.requests.set(path, request);
+    return request;
+  };
+  useEffect(() => {
+    resource.active = true;
+    if (resource.abort.signal.aborted) resource.abort = new AbortController();
+    return () => {
+      resource.active = false;
+      resource.abort.abort();
+      resource.urls.forEach(url => URL.revokeObjectURL(url));
+      resource.urls.clear();
+      resource.requests.clear();
+    };
+  }, [resource]);
   useEffect(() => {
     let cancelled = false;
-    let objectUrl = '';
-    const source = artifact.previewUrl;
-    if (!source) return undefined;
-    void fetchApi(artifactPath(source), { headers: { accept: artifact.mimeType || '*/*' } })
-      .then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.blob(); })
-      .then((blob) => { if (!cancelled) { objectUrl = URL.createObjectURL(blob); setSrc(objectUrl); } })
-      .catch(() => { if (!cancelled) setSrc(''); });
-    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [artifact.previewUrl, artifact.mimeType]);
-  if (!src) return <div className="forge-file">Loading preview…</div>;
-  if (artifact.kind === 'image') return <ImagePreview src={src} alt={artifact.name} />;
-  if (artifact.kind === 'video') return <video controls src={src} />;
-  if (artifact.kind === 'audio') return <audio controls src={src} />;
-  return <div className="forge-file">{artifact.name}</div>;
+    setSrc(''); setPreviewState('loading'); setDownloadState('idle');
+    if (artifact.previewUrl) void load(artifact.previewUrl).then(url => {
+      if (!cancelled) { setSrc(url); setPreviewState('ready'); }
+    }).catch(() => { if (!cancelled) setPreviewState('failed'); });
+    return () => { cancelled = true; };
+  }, [resource, attempt]);
+  const download = async () => {
+    if (!artifact.downloadUrl || downloadState === 'loading') return;
+    setDownloadState('loading');
+    try {
+      const url = await load(artifact.downloadUrl);
+      if (!resource.active) return;
+      const link = document.createElement('a');
+      link.href = url; link.download = artifact.name;
+      document.body.appendChild(link); link.click(); link.remove();
+      setDownloadState('idle');
+    } catch { if (resource.active) setDownloadState('failed'); }
+  };
+  return <>
+    {!artifact.previewUrl ? <div className="forge-file">{artifact.name}</div> : previewState === 'failed' ? <div className="forge-file"><p role="alert">Preview failed.</p><button type="button" onClick={() => setAttempt(value => value + 1)}>Retry preview</button></div> : !src ? <div className="forge-file">Loading preview…</div> : artifact.kind === 'image' ? <ImagePreview src={src} alt={artifact.name} /> : artifact.kind === 'video' ? <video controls src={src} /> : artifact.kind === 'audio' ? <audio controls src={src} /> : <div className="forge-file">{artifact.name}</div>}
+    {artifact.downloadUrl && <div>{downloadState === 'failed' && <p role="alert">Download failed.</p>}<button type="button" disabled={downloadState === 'loading'} onClick={() => void download()}>{downloadState === 'loading' ? 'Preparing download…' : downloadState === 'failed' ? 'Retry download' : 'Download'}</button></div>}
+  </>;
 }
 
-export function Forge({ selectedAgentId, sessionId }: { agents?: Agent[]; selectedAgentId: string; sessionId: string }) {
+export function Forge({ target = localApiTarget, agents = [], selectedAgentId, sessionId }: { target?: ApiTarget | null; agents?: Agent[]; selectedAgentId: string; sessionId: string }) {
+  const owned = useOwnedApi(target);
+  const api = owned.api;
+  const [capturedTarget] = useState(() => target && { ...target });
   const [mode, setMode] = useState<'image' | 'video' | 'audio' | 'music'>('image');
   const [showRecents, setShowRecents] = useState(false);
   const [models, setModels] = useState<ForgeModel[]>([]);
@@ -218,13 +249,13 @@ export function Forge({ selectedAgentId, sessionId }: { agents?: Agent[]; select
   const attach = async (artifact: Artifact) => {
     const agentAtStart = selectedAgentId;
     if (!selectedJob || !sessionId || !agentAtStart) return;
-    try { await api(`/api/forge/jobs/${encodeURIComponent(selectedJob.id)}/attach`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: agentAtStart, sessionId, artifactId: artifact.id }) }); if (activeAgentRef.current === agentAtStart) setNotice('Attached to the current conversation.'); } catch (e) { if (activeAgentRef.current === agentAtStart) setError(`Could not attach artifact: ${(e as Error).message}`); }
+    try { const resourceAgentId = ownedAgentResource(agents, agentAtStart, capturedTarget); await api(`/api/forge/jobs/${encodeURIComponent(selectedJob.id)}/attach`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: resourceAgentId, sessionId, artifactId: artifact.id }) }); if (activeAgentRef.current === agentAtStart) setNotice('Attached to the current conversation.'); } catch (e) { if (activeAgentRef.current === agentAtStart) setError(`Could not attach artifact: ${(e as Error).message}`); }
   };
   return <main className="forge-page">
     <header className="forge-heading"><div><h1>The Phantasm Forge</h1><p>Manufacture sights, sounds, and moving lies.</p></div>
-    <div className="forge-modes" role="tablist" aria-label="Forge modes">{(['image', 'video', 'audio', 'music'] as const).map((item) => <button key={item} role="tab" aria-selected={!showRecents && mode === item} className={!showRecents && mode === item ? 'active' : ''} onClick={() => { setMode(item); setShowRecents(false); }}>{item === 'image' ? '▧' : item === 'video' ? '◉' : item === 'audio' ? '◌' : '♫'}<span>{modeLabels[item]}</span></button>)}<button role="tab" aria-selected={showRecents} className={showRecents ? 'active' : ''} onClick={() => setShowRecents(true)}>◷<span>Recents</span></button></div></header>
+    <div className="forge-modes" role="tablist" aria-label="Forge modes" onKeyDown={event => rovingKeys(event, '[role="tab"]')}>{(['image', 'video', 'audio', 'music'] as const).map((item) => <button key={item} role="tab" tabIndex={!showRecents && mode === item ? 0 : -1} aria-selected={!showRecents && mode === item} className={!showRecents && mode === item ? 'active' : ''} onClick={() => { setMode(item); setShowRecents(false); }}>{item === 'image' ? '▧' : item === 'video' ? '◉' : item === 'audio' ? '◌' : '♫'}<span>{modeLabels[item]}</span></button>)}<button role="tab" aria-selected={showRecents} className={showRecents ? 'active' : ''} onClick={() => setShowRecents(true)}>◷<span>Recents</span></button></div></header>
     <div className={`forge-grid${showRecents ? ' forge-recents-grid' : ''}`}><section className="forge-studio" hidden={showRecents}><div className="forge-panel-head"><div><span className="eyebrow">CREATE</span><h2>{modeLabels[mode]} generation</h2></div><span className="forge-badge">{availableModels.length} model{availableModels.length === 1 ? '' : 's'}</span></div><label className="forge-field"><span>Model</span><select aria-label="Forge model" value={selectedModel} onChange={(event) => void saveSelection(event.target.value)} disabled={loading || selectionSaving || !availableModels.length}>{savedSelection && !selectedAvailable && <option value={selectedModel}>{savedSelection.modelId} (unavailable)</option>}{availableModels.map((model) => <option key={`${model.connectionId}:${model.modelId}`} value={modelKey(model)}>{model.label}</option>)}</select></label>{savedUnavailableReason && <p className="forge-error" role="alert">Saved model unavailable: {savedUnavailableReason}</p>}{selectionSaving && <p role="status">Saving model selection…</p>}{selectionError && <p className="forge-error" role="alert">{selectionError}</p>}<label className="forge-field forge-prompt"><span>{mode === 'music' ? 'Musical direction' : 'Prompt'}</span><textarea aria-label={mode === 'audio' ? 'Script' : mode === 'music' ? 'Musical direction' : 'Prompt'} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={mode === 'audio' ? 'Enter the words to speak…' : mode === 'music' ? 'Describe the music to create…' : `Describe the ${mode} to manufacture…`} /><small>{mode === 'audio' ? 'Verbatim script' : mode === 'music' ? 'Style, mood, tempo, and arrangement guidance' : 'Prompt'}</small></label>{mode === 'music' && <label className="forge-field forge-prompt"><span>Lyrics <em>(optional)</em></span><textarea aria-label="Lyrics" value={lyrics} onChange={(event) => setLyrics(event.target.value)} placeholder="Add words for the song…" /><small>Lyrics are supplied as guidance and are not guaranteed verbatim.</small></label>}<div className="forge-actions">{(mode !== 'music' || availableModels.length > 0) && <button className="forge-primary" type="button" onClick={() => void submit()} disabled={loading || selectionSaving || busy || !selectedAvailable || !prompt.trim()}>{busy ? 'Starting…' : `Generate ${modeLabels[mode]}`}</button>}{notice && <span className="forge-notice" role="status">{notice}</span>}</div>{error && <p className="forge-error" role="alert">{error}</p>}{!loading && !availableModels.length && <div className="forge-empty"><strong>{mode === 'video' ? 'Video generation is unavailable' : mode === 'music' ? 'No music model configured' : `No ${modeLabels[mode].toLowerCase()} models available`}</strong><span>{modeUnavailableReason ?? (mode === 'video' ? 'This release does not have a video provider contract.' : mode === 'music' ? 'Music generation is not configured.' : 'Configure a compatible model connection to use this mode.')}</span></div>}
-      {mode === 'video' && catalog?.sourceAttachments && <p className="forge-capability-note">Source attachments: unavailable — {catalog.sourceAttachments.reason ?? 'not supported by this release.'}</p>}</section><section className="forge-preview" aria-label="Creation viewer"><div className="forge-panel-head"><div><span className="eyebrow">OUTPUT</span><h2>{selectedJob ? jobLabel(selectedJob) : 'Preview'}</h2></div>{selectedJob && <span className={`forge-status ${selectedJob.status}`}>{selectedJob.status}</span>}</div>{showRecents && <div className="forge-recent-details">{error && <p role="alert" className="forge-error">{error}</p>}{notice && <p role="status">{notice}</p>}{selectedJob && <><p>{selectedJob.prompt}</p><small>{selectedJob.modelId} · {new Date(selectedJob.createdAt).toLocaleString()}</small></>}</div>}{selectedJob?.artifacts?.length ? <div className="forge-artifacts">{selectedJob.artifacts.map((artifact) => <article className="forge-artifact" key={artifact.id}>{artifact.previewUrl ? <ArtifactMedia artifact={artifact} /> : <div className="forge-file">{artifact.name}</div>}<footer><strong>{artifact.name}</strong><div>{artifact.downloadUrl && <ArtifactDownload artifact={artifact} />}<button type="button" onClick={() => void attach(artifact)} disabled={!sessionId}>Attach to conversation</button></div></footer></article>)}</div> : <div className="forge-placeholder"><span aria-hidden="true">✦</span><strong>{selectedJob ? selectedJob.status === 'failed' ? 'Generation failed' : selectedJob.status === 'interrupted' ? 'Generation interrupted' : 'Preparing your artifact…' : 'Your creation will appear here'}</strong>{selectedJob?.status === 'failed' ? <FailureDetails job={selectedJob} /> : <small>{selectedJob?.error ?? 'Forge uses the full workspace for the work, and keeps the result close at hand.'}</small>}</div>}</section>
+      {mode === 'video' && catalog?.sourceAttachments && <p className="forge-capability-note">Source attachments: unavailable — {catalog.sourceAttachments.reason ?? 'not supported by this release.'}</p>}</section><section className="forge-preview" aria-label="Creation viewer"><div className="forge-panel-head"><div><span className="eyebrow">OUTPUT</span><h2>{selectedJob ? jobLabel(selectedJob) : 'Preview'}</h2></div>{selectedJob && <span className={`forge-status ${selectedJob.status}`}>{selectedJob.status}</span>}</div>{showRecents && <div className="forge-recent-details">{error && <p role="alert" className="forge-error">{error}</p>}{notice && <p role="status">{notice}</p>}{selectedJob && <><p>{selectedJob.prompt}</p><small>{selectedJob.modelId} · {new Date(selectedJob.createdAt).toLocaleString()}</small></>}</div>}{selectedJob?.artifacts?.length ? <div className="forge-artifacts">{selectedJob.artifacts.map((artifact) => <article className="forge-artifact" key={artifact.id}><ArtifactOutput key={JSON.stringify([artifact.id, artifact.previewUrl, artifact.downloadUrl])} fetchMedia={owned.fetch} artifact={artifact} /><footer><strong>{artifact.name}</strong><div><button type="button" onClick={() => void attach(artifact)} disabled={!sessionId}>Attach to conversation</button></div></footer></article>)}</div> : <div className="forge-placeholder"><span aria-hidden="true">✦</span><strong>{selectedJob ? selectedJob.status === 'failed' ? 'Generation failed' : selectedJob.status === 'interrupted' ? 'Generation interrupted' : 'Preparing your artifact…' : 'Your creation will appear here'}</strong>{selectedJob?.status === 'failed' ? <FailureDetails job={selectedJob} /> : <small>{selectedJob?.error ?? 'Forge uses the full workspace for the work, and keeps the result close at hand.'}</small>}</div>}</section>
     <section className="forge-history"><div className="forge-panel-head"><div><span className="eyebrow">HISTORY</span><h2>{showRecents ? `Recent creations (${jobs.length})` : 'Recent creations'}</h2></div><button type="button" disabled={loading || selectionSaving} onClick={() => void load()}>Refresh</button></div>{recentJobs.length ? <div className="forge-jobs" role="region" aria-label="Recent creations list" tabIndex={0}>{recentJobs.map((job) => <button type="button" key={job.id} className={selectedJob?.id === job.id ? 'selected' : ''} onClick={() => setSelectedJobId(job.id)} aria-label={`${jobLabel(job)} ${job.status}: ${job.prompt}`}><span className={`forge-status ${job.status}`}>{job.status}</span><strong>{showRecents ? `${jobLabel(job)} · ${job.modelId}` : job.modelId}</strong><span title={job.prompt}>{job.prompt}</span><time>{new Date(job.createdAt).toLocaleString()}</time></button>)}</div> : <p className="forge-muted">{loading ? 'Loading creations…' : showRecents ? 'No recent creations.' : `No recent ${modeLabels[mode].toLowerCase()} creations.`}</p>}</section>
     </div>
   </main>;

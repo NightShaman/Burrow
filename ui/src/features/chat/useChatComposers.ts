@@ -2,10 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { apiForTarget, type SessionSummary } from '../../app/api';
 import { targetForResource, type ApiTarget } from '../../app/apiTargets';
+import { targetOwnerKey } from '../../app/useOwnedApi';
 import type { Tab } from '../../app/types';
 
 type ChatComposerOptions = {
   selectedAgentId: string;
+  sessionId?: string;
   activeRunId: string | null;
   sessions: SessionSummary[];
   targets: ApiTarget[];
@@ -19,7 +21,21 @@ type ChatComposerOptions = {
   setActiveTabId: Dispatch<SetStateAction<string>>;
 };
 
-export function useChatComposers({ selectedAgentId, activeRunId, sessions, targets, activeTarget, refreshSessions, selectSession, reportError, clearError, tabs, setTabs, setActiveTabId }: ChatComposerOptions) {
+export function useChatComposers({ sessionId = '', selectedAgentId, activeRunId, sessions, targets, activeTarget, refreshSessions, selectSession, reportError, clearError, tabs, setTabs, setActiveTabId }: ChatComposerOptions) {
+  const owner = targetForResource(targets, selectedAgentId);
+  const scopeKey = JSON.stringify([targetOwnerKey(owner.target), selectedAgentId, sessionId, targetOwnerKey(activeTarget)]);
+  const scopeRef = useRef({ key: scopeKey });
+  if (scopeRef.current.key !== scopeKey) scopeRef.current = { key: scopeKey };
+  const scope = scopeRef.current;
+  const mutationRef = useRef<object | null>(null);
+  const partialRef = useRef<{ scope: object; id: string } | null>(null);
+  useEffect(() => {
+    mutationRef.current = null;
+    partialRef.current = null;
+    setIsCreatingSession(false);
+    setSessionError('');
+    setIsSessionOpen(false);
+  }, [scope]);
   const [isSessionOpen, setIsSessionOpen] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [sessionName, setSessionName] = useState('');
@@ -83,38 +99,55 @@ export function useChatComposers({ selectedAgentId, activeRunId, sessions, targe
     setSessionError('');
   }, []);
   const createSession = useCallback(async () => {
-    if (!selectedAgentId || isCreatingSession || activeRunId) {
+    if (!selectedAgentId || mutationRef.current || isCreatingSession || activeRunId) {
       setSessionError('A session cannot be created while the current run is active.');
       return;
     }
     const targetSessionId = sessionName.trim();
     if (!targetSessionId) return setSessionError('Give the session a name.');
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(targetSessionId)) return setSessionError('Use 1–80 letters, numbers, hyphens, or underscores; start with a letter or number.');
-    if (sessions.some((session) => session.id === targetSessionId)) return setSessionError(`A session named “${targetSessionId}” already exists.`);
+    const partial = partialRef.current?.scope === scope && partialRef.current.id === targetSessionId;
+    if (!partial && sessions.some((session) => session.id === targetSessionId)) return setSessionError(`A session named “${targetSessionId}” already exists.`);
+    const operation = {};
+    mutationRef.current = operation;
+    const current = () => scopeRef.current === scope && mutationRef.current === operation;
+    let forked = partial;
     setIsCreatingSession(true);
     setSessionError('');
     clearError();
     try {
       const owner = targetForResource(targets, selectedAgentId);
-      await apiForTarget(owner.target, `/api/sessions/default/fork?agentId=${encodeURIComponent(owner.resourceId)}`, {
+      if (!partial) await apiForTarget(owner.target, `/api/sessions/default/fork?agentId=${encodeURIComponent(owner.resourceId)}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ targetSessionId }),
       });
+      forked = true;
+      if (!current()) return;
+      partialRef.current = { scope, id: targetSessionId };
       await apiForTarget(owner.target, `/api/sessions/${encodeURIComponent(targetSessionId)}/reset?agentId=${encodeURIComponent(owner.resourceId)}`, { method: 'POST' });
+      if (!current()) return;
+      partialRef.current = null;
       await refreshSessions(selectedAgentId);
+      if (!current()) return;
       selectSession(targetSessionId);
       setIsSessionOpen(false);
       setSessionName('');
       setSessionError('');
     } catch (error) {
-      const message = `Could not create session: ${(error as Error).message}`;
+      if (!current()) return;
+      const message = forked && partialRef.current
+        ? `Session “${targetSessionId}” was created with copied history, but could not be emptied: ${(error as Error).message}. Submit the same name again to retry reset, or close this dialog and open it from the session list. Reset deletes its copied history.`
+        : forked
+          ? `Session “${targetSessionId}” was created and emptied, but the session list could not be refreshed: ${(error as Error).message}. Refresh the session list to open it.`
+          : `Could not create session: ${(error as Error).message}`;
+      if (forked) void refreshSessions(selectedAgentId).catch(() => {});
       setSessionError(message);
       reportError(message);
     } finally {
-      setIsCreatingSession(false);
+      if (current()) { mutationRef.current = null; setIsCreatingSession(false); }
     }
-  }, [activeRunId, clearError, isCreatingSession, refreshSessions, reportError, selectedAgentId, selectSession, sessionName, sessions, targets]);
+  }, [scope, activeRunId, clearError, isCreatingSession, refreshSessions, reportError, selectedAgentId, selectSession, sessionName, sessions, targets]);
 
   const openGroup = useCallback(() => {
     setGroupError('');

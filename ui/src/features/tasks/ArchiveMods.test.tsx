@@ -1,3 +1,4 @@
+import { archiveRepository } from './archiveRepository';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Archive } from './ArchivePage';
@@ -9,7 +10,7 @@ vi.mock('./archiveRepository', () => ({ archiveRepository: { listContinuityCards
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 it('discovers Archive contributions, passes calendar date and removes disabled destinations', async () => {
   vi.mocked(loadModArchives).mockResolvedValue([{ modId: 'fixture', name: 'Fixture archive', archiveUrl: '/api/mods/fixture/ui/archive.js' }]);
-  render(<Archive agents={[]} />);
+  render(<Archive repository={archiveRepository} agents={[]} />);
   fireEvent.click(await screen.findByRole('button', { name: 'Fixture archive' }));
   expect(screen.getByTestId('mod-date').textContent).toBe('all dates');
   fireEvent.click(screen.getByRole('button', { name: 'Next month' }));

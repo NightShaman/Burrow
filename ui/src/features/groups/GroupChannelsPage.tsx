@@ -80,9 +80,17 @@ export function GroupChannelsPage({ channelId, target, agents, operator }: { cha
   const [attached, setAttached] = useState<ChatAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const scope = useRef({ channelId, target });
+  if (scope.current.channelId !== channelId || scope.current.target !== target) scope.current = { channelId, target };
+  const requestNumber = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const load = useCallback(async () => {
+    const owner = scope.current;
+    const request = ++requestNumber.current;
     if (!channelId) return;
     const response = await apiForTarget<{ channel?: unknown; turns?: unknown; runs?: unknown }>(target, `/api/group-channels/${encodeURIComponent(channelId)}`);
+    if (!mounted.current || scope.current !== owner || request !== requestNumber.current) return;
     const channelValue = record(response.channel ?? response);
     setChannel(normalizeChannel({ ...channelValue, turns: channelValue.turns ?? response.turns, runs: channelValue.runs ?? response.runs }));
   }, [channelId, target]);
@@ -99,10 +107,10 @@ export function GroupChannelsPage({ channelId, target, agents, operator }: { cha
       .catch(() => undefined);
   }, [operator, target]);
   useEffect(() => {
-    if (!channel?.runs.length) return;
+    if (!channelId) return;
     const timer = window.setInterval(() => { void load().catch((reason: Error) => setError(`Could not refresh group chat: ${reason.message}`)); }, 2_000);
     return () => window.clearInterval(timer);
-  }, [channel?.runs.length, load]);
+  }, [channelId, load]);
   const agentById = useMemo(() => new Map(agents.filter((agent) => (agent.targetId ?? 'local') === target.id).map((agent) => [agent.resourceId ?? agent.id, agent])), [agents, target.id]);
   const mentionCandidates = useMemo(() => {
     if (mentionQuery === null || !channel) return [];

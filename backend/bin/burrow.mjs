@@ -15,7 +15,6 @@ import { createOpenAICompatibleModelAdapter } from '../src/model-adapter.mjs';
 import { loadRuntimeConfig, runAskChat } from '../src/app-runtime.mjs';
 import { runCliSessionSearch } from '../src/cli-session-search.mjs';
 import { translateBlockers } from '../src/workbench-status.mjs';
-import { runDreamCycle } from '../src/dream-cycle-runner.mjs';
 import { ensureDefaultGlobalWorkspace } from '../src/runtime-workspace-defaults.mjs';
 import { createPortableInstallBackup, formatPortableInstallResult, planPortableInstallBackup, planPortableInstallRestore, restorePortableInstall } from '../scripts/portable-install-backup.mjs';
 
@@ -34,8 +33,6 @@ function usage() {
   burrow review-proposal --root DIR --message JSON|--proposal-file PATH
   burrow doctor --root DIR [--check-memory]
   burrow retention --root DIR [--confirm] [--summary]
-  burrow dream-memory --root DIR [--agent-id ID] [--limit N] [--json]
-  burrow dream-cycle --root DIR [--agent-id ID] [--limit N] [--json]
   burrow serve --root DIR [--host HOST] [--port PORT] [--context-threshold RATIO]
   burrow install-backup --output FILE [--root DIR] [--confirm] [--json]
   burrow install-restore --archive FILE [--home DIR] [--replace] [--confirm] [--json]
@@ -311,7 +308,7 @@ async function main() {
     console.log(JSON.stringify(await runCliPostgresAccess({ ...accessArgs, _: [command, ...accessArgs._] }), null, 2));
     return;
   }
-  if (command !== 'install-backup' && command !== 'install-restore' && command !== 'ask' && command !== 'chat' && command !== 'plan' && command !== 'trace' && command !== 'session-search' && command !== 'run' && command !== 'factory' && command !== 'review-proposal' && command !== 'doctor' && command !== 'retention' && command !== 'dream-memory' && command !== 'dream-cycle' && command !== 'serve') throw new Error(`unknown command: ${command}`);
+  if (command !== 'install-backup' && command !== 'install-restore' && command !== 'ask' && command !== 'chat' && command !== 'plan' && command !== 'trace' && command !== 'session-search' && command !== 'run' && command !== 'factory' && command !== 'review-proposal' && command !== 'doctor' && command !== 'retention' && command !== 'serve') throw new Error(`unknown command: ${command}`);
 
   const args = parseArgs(rest);
   if (args.help || args.h) {
@@ -322,7 +319,7 @@ async function main() {
     const root = args.root || process.env.BURROW_RUNTIME_ROOT;
     if (!root) throw new Error('--root is required (or set BURROW_RUNTIME_ROOT)');
     if (!args.output) throw new Error('--output is required');
-    const result = args.confirm ? await createPortableInstallBackup({ root, output: args.output }) : await planPortableInstallBackup({ root, output: args.output });
+    const result = args.confirm ? await createPortableInstallBackup({ root, output: args.output, overwrite: args.overwrite }) : await planPortableInstallBackup({ root, output: args.output, overwrite: args.overwrite });
     console.log(args.json ? JSON.stringify(result, null, 2) : formatPortableInstallResult(result));
     process.exitCode = result.ok ? 0 : 1; return;
   }
@@ -364,7 +361,7 @@ async function main() {
   }
 
   if (command === 'doctor') {
-    const result = await runDoctor({ rootDir, checkMemory: Boolean(args.check_memory) });
+    const result = await runDoctor({ rootDir, args });
     console.log(JSON.stringify(result, null, 2));
     return;
   }

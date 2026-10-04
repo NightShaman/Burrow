@@ -32,7 +32,7 @@ describe('Archive detail selection', () => {
     const availability = vi.spyOn(archiveRepository, 'listCalendarAvailability').mockImplementation(async (kind, month, agentId) => ({ ok: true, kind, month, dates: agentId ? [`${month}-12`] : [`${month}-29`] }));
     const testAgents = [{ id: 'smatchet', name: 'Smatchet', avatar: '', activity: '', context: null, provider: '', model: '', effort: '', temperature: 0, workspace: '', files: [], subagents: [] }];
     const dreams = vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([]));
-    render(<Archive agents={testAgents} />);
+    render(<Archive repository={archiveRepository} agents={testAgents} />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Select 2026-09-29, has archived records' }));
     await waitFor(() => expect(sessions).toHaveBeenCalledWith('', expect.any(AbortSignal), null, '2026-09-29', undefined));
@@ -43,7 +43,7 @@ describe('Archive detail selection', () => {
     await waitFor(() => expect(availability).toHaveBeenLastCalledWith('sessions', expect.stringMatching(/^\d{4}-\d{2}$/), 'smatchet', expect.any(AbortSignal)));
 
     fireEvent.click(screen.getByRole('button', { name: /Dreams/ }));
-    await waitFor(() => expect(dreams).toHaveBeenCalledWith(expect.any(AbortSignal), null, '2026-09-29', undefined));
+    await waitFor(() => expect(dreams).toHaveBeenCalledWith(expect.any(AbortSignal), null, undefined, 'smatchet'));
   });
 
   it('does not let a slower previous Tiddle request replace the current card', async () => {
@@ -57,7 +57,7 @@ describe('Archive detail selection', () => {
     vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([]));
     vi.spyOn(archiveRepository, 'loadContinuityCard').mockImplementation((selected) => selected.id === 'first' ? firstRequest.promise : secondRequest.promise);
 
-    render(<Archive agents={[]} />);
+    render(<Archive repository={archiveRepository} agents={[]} />);
     fireEvent.click(screen.getByRole('button', { name: /Tiddle/ }));
     await screen.findByRole('button', { name: /First card/ });
 
@@ -81,7 +81,7 @@ describe('Paginated chat history', () => {
     vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([]));
     vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([session('one')]));
     const load = vi.spyOn(archiveRepository, 'loadSession').mockResolvedValueOnce(page('new', true, 'older')).mockResolvedValueOnce(page('old', false));
-    render(<Archive agents={[]} />);
+    render(<Archive repository={archiveRepository} agents={[]} />);
     fireEvent.click(await screen.findByRole('button', { name: /one.*turns/i }));
     await screen.findByText('new');
     fireEvent.click(screen.getByRole('button', { name: 'Load earlier messages' }));
@@ -96,7 +96,7 @@ describe('Paginated chat history', () => {
     vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([session('one'), session('two')]));
     const old = deferred<ArchiveDetail>();
     vi.spyOn(archiveRepository, 'loadSession').mockImplementation((selected, _signal, before) => before ? old.promise : Promise.resolve(page(selected.sessionId, selected.sessionId === 'one', selected.sessionId === 'one' ? 'older' : null)));
-    render(<Archive agents={[]} />);
+    render(<Archive repository={archiveRepository} agents={[]} />);
     fireEvent.click(await screen.findByRole('button', { name: /one.*turns/i }));
     await screen.findByRole('button', { name: 'Load earlier messages' });
     fireEvent.click(screen.getByRole('button', { name: 'Load earlier messages' }));
@@ -105,4 +105,82 @@ describe('Paginated chat history', () => {
     await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'two' })).toBeTruthy());
     expect(screen.queryByText('intruder')).toBeNull();
   });
+});
+
+it('resolves qualified Archive filters on the captured remote owner', async () => {
+  const sessions = vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([]));
+  vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([]));
+  vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([]));
+  vi.spyOn(archiveRepository, 'listCalendarAvailability').mockImplementation(async (kind, month) => ({ ok: true, kind, month, dates: [] }));
+  const agent = { id: 'a::same', resourceId: 'same', targetId: 'a', name: 'Remote' } as any;
+  render(<Archive agents={[agent]} target={{ id: 'a', name: 'A', baseUrl: 'https://a.invalid', enabled: true }} repository={archiveRepository} />);
+  fireEvent.change(screen.getByLabelText('Filter by agent'), { target: { value: agent.id } });
+  await waitFor(() => expect(sessions).toHaveBeenLastCalledWith('', expect.anything(), null, undefined, 'same'));
+});
+
+it.each(['kind', 'search', 'unmount'])('FE-022 aborts pending chat pagination on %s', async (change) => {
+  const pending = deferred<ArchivePage<ArchiveSession>>();
+  const session = { agentId: 'a', sessionId: 's', id: 's', title: 'Scope session', summary: '', archived: true } as ArchiveSession;
+  const list = vi.spyOn(archiveRepository, 'listSessions').mockImplementation((_q, _signal, cursor) => cursor ? pending.promise : Promise.resolve({ items: [session], nextCursor: 'next', hasMore: true }));
+  vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([]));
+  vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([]));
+  vi.spyOn(archiveRepository, 'listCalendarAvailability').mockResolvedValue({ ok: true, kind: 'sessions', month: '2026-09', dates: [] });
+  const view = render(<Archive repository={archiveRepository} agents={[]} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Load more conversations' }));
+  const signal = list.mock.calls.at(-1)?.[1];
+  if (change === 'kind') fireEvent.click(screen.getByRole('button', { name: /Dreams/ }));
+  if (change === 'search') fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'changed' } });
+  if (change === 'unmount') view.unmount();
+  expect(signal).toBeInstanceOf(AbortSignal);
+  expect(signal?.aborted).toBe(true);
+  await act(async () => pending.resolve(collectionPage([session])));
+});
+
+it('FE-023 displays cold loading, failure, retry and successful empty states', async () => {
+  const pending = deferred<ArchivePage<ArchiveSession>>();
+  const list = vi.spyOn(archiveRepository, 'listSessions').mockReturnValueOnce(pending.promise).mockRejectedValueOnce(new Error('Archive offline')).mockResolvedValue(collectionPage([]));
+  vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([]));
+  vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([]));
+  vi.spyOn(archiveRepository, 'listCalendarAvailability').mockResolvedValue({ ok: true, kind: 'sessions', month: '2026-09', dates: [] });
+  render(<Archive repository={archiveRepository} agents={[]} />);
+  expect(await screen.findByText('Loading conversations…')).toBeTruthy();
+  await act(async () => pending.resolve(collectionPage([])));
+  expect(await screen.findByText('No conversations match this shelf.')).toBeTruthy();
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'new' } });
+  expect(await screen.findByText('Archive offline')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry conversations' }));
+  expect(await screen.findByText('No conversations match this shelf.')).toBeTruthy();
+  expect(list).toHaveBeenCalledTimes(3);
+});
+
+it('FE-023 keeps scoped cache visibly stale on failed revalidation and retries', async () => {
+  const { archiveQueryCacheKey, writeArchiveSessionCache } = await import('./archiveCache');
+  const { targetOwnerKey } = await import('../../app/useOwnedApi');
+  const { localApiTarget } = await import('../../app/apiTargets');
+  writeArchiveSessionCache(archiveQueryCacheKey({ target: targetOwnerKey(localApiTarget), agent: '', query: '', date: '', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, kind: 'chat' }), []);
+  vi.spyOn(archiveRepository, 'listSessions').mockRejectedValueOnce(new Error('Revalidation offline')).mockResolvedValue(collectionPage([]));
+  vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([]));
+  vi.spyOn(archiveRepository, 'listCalendarAvailability').mockResolvedValue({ ok: true, kind: 'sessions', month: '2026-09', dates: [] });
+  render(<Archive repository={archiveRepository} agents={[]} />);
+  expect(await screen.findByText('Revalidation offline')).toBeTruthy();
+  expect(screen.getByText('Showing stale cached conversations while revalidating.')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry conversations' }));
+  await waitFor(() => expect(screen.queryByText('Showing stale cached conversations while revalidating.')).toBeNull());
+});
+
+it('FE022 agent switch rejects late pagination rows in the rendered shelf', async () => {
+  const pending = deferred<ArchivePage<ArchiveSession>>();
+  const item = (id:string) => ({agentId:'a',sessionId:id,id,title:id,summary:'',archived:true} as ArchiveSession);
+  const list = vi.spyOn(archiveRepository,'listSessions').mockImplementation((_q,_signal,cursor,_date,owner) => cursor ? pending.promise : Promise.resolve({items:[item(owner ? 'Current owner' : 'Old owner')],nextCursor: owner ? null : 'next',hasMore:!owner}));
+  vi.spyOn(archiveRepository,'listContinuityCards').mockResolvedValue(collectionPage([]));
+  vi.spyOn(archiveRepository,'listCalendarAvailability').mockResolvedValue({ok:true,kind:'sessions',month:'2026-09',dates:[]});
+  render(<Archive repository={archiveRepository} agents={[{id:'b',name:'B'} as any]} />);
+  fireEvent.click(await screen.findByRole('button',{name:'Load more conversations'}));
+  const signal = list.mock.calls.at(-1)?.[1];
+  fireEvent.change(screen.getByLabelText('Filter by agent'),{target:{value:'b'}});
+  await screen.findByText('Current owner');
+  expect(signal?.aborted).toBe(true);
+  await act(async () => pending.resolve(collectionPage([item('Stale intruder')])));
+  expect(screen.queryByText('Stale intruder')).toBeNull();
+  expect(screen.queryByText('Old owner')).toBeNull();
 });

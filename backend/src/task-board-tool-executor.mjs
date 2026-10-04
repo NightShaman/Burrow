@@ -12,7 +12,7 @@ function compactTask(task) {
 async function resolveProjectId(taskBoard, projectRef) {
   const ref = text(projectRef);
   if (!ref) return ref;
-  if (await taskBoard.getProject(ref)) return ref;
+  if (/^[A-Za-z0-9._-]{1,96}$/.test(ref) && await taskBoard.getProject(ref)) return ref;
   const matches = (await taskBoard.listProjects()).filter((project) => project.name.toLowerCase() === ref.toLowerCase());
   if (matches.length === 1) return matches[0].id;
   if (matches.length > 1) throw new Error('task_project_name_ambiguous');

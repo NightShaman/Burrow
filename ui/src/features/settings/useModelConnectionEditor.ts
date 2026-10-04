@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, type RuntimeModel } from '../../app/api';
 import { useConfirm } from '../../app/ConfirmDialog';
 import type { SavedProvider } from '../../app/types';
@@ -17,6 +17,8 @@ type Options = {
 
 export function useModelConnectionEditor({ onModelConnectionsChanged }: Options) {
   const confirm = useConfirm();
+  const discoveryGeneration = useRef(0);
+  useEffect(() => () => { discoveryGeneration.current += 1; }, []);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [provider, setProvider] = useState('');
   const [apiType, setApiType] = useState('openai-chat-completions');
@@ -33,6 +35,7 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
   const [oauthModal, setOauthModal] = useState<'openai' | 'anthropic' | null>(null);
 
   const resetProvider = () => {
+    discoveryGeneration.current += 1;
     setEditingId(null);
     setProvider('');
     setApiType('openai-chat-completions');
@@ -53,6 +56,8 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     const discoveryProvider = connection ? connection.provider ?? 'OpenAI' : provider;
     const discoveryUrl = connection ? connection.baseUrl ?? 'https://chatgpt.com/backend-api' : url;
     if (!discoveryProvider.trim() || !discoveryUrl.trim()) return availableModels;
+    const generation = ++discoveryGeneration.current;
+    const current = () => generation === discoveryGeneration.current && isCurrent();
     setRequestState('connecting');
     setRequestError('');
     try {
@@ -64,14 +69,14 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
         apiKey: connection ? '' : apiKey,
         models: connection ? selectedRuntimeModels(connection.models) : availableModels,
       });
-      if (!isCurrent()) return [];
+      if (!current()) return [];
       if (connection && (result.discovery?.status === 'error' || result.discovery?.error)) throw new Error(result.discovery.error || 'Discovery failed');
       setAvailableModels(result.models);
       setSelectedModelId(result.models[0]?.id ?? null);
       setConnected(true);
       return result.models;
     } catch (error) {
-      if (!isCurrent()) return [];
+      if (!current()) return [];
       setConnected(true);
       setRequestError(error instanceof Error
         ? `Could not discover models: ${error.message}. Add model IDs manually.`
@@ -79,7 +84,7 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
       if (connection) throw error;
       return availableModels;
     } finally {
-      if (isCurrent()) setRequestState('idle');
+      if (current()) setRequestState('idle');
     }
   };
 
@@ -112,6 +117,7 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
   };
 
   const applyOAuthConnection = (connection: OpenAiOAuthConnection) => {
+    discoveryGeneration.current += 1;
     setEditingId(connection.id);
     setProvider(connection.provider ?? 'OpenAI');
     setApiType(connection.apiType ?? 'openai-responses');
@@ -204,13 +210,15 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
   const deleteManualModel = (id: string) => setAvailableModels((all) => all.filter((model) => model.id !== id));
 
   const editProvider = (item: SavedProvider) => {
+    discoveryGeneration.current += 1;
+    setRequestState('idle');
     setEditingId(item.id);
     setProvider(item.provider);
     setApiType(item.apiType);
     setUrl(item.url);
     setApiKey('');
     setApiKeyConfigured(item.apiKeyConfigured === true);
-    const models = item.models.map((id) => {
+    const models = item.connectionModels ?? item.models.map((id) => {
       const discoveredInput = item.modelDiscoveredInputs?.[id];
       const acceptedInputOverride = item.modelInputOverrides?.[id];
       return {

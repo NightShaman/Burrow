@@ -1,4 +1,4 @@
-import { createScheduledJobScheduler } from './scheduled-job-scheduler.mjs';
+import { createScheduledJobScheduler, scheduledJobSchedulerForStores } from './scheduled-job-scheduler.mjs';
 
 async function owned(store, agentId, jobId) {
   const job = await store.getJob(jobId);
@@ -18,7 +18,7 @@ function input(action, { sessionId, create = false } = {}) {
   return value;
 }
 
-export async function executeAgentScheduledJobTool({ action, agentId, sessionId, store, rootDir, resolveAgentRuntime } = {}) {
+export async function executeAgentScheduledJobTool({ action, agentId, sessionId, store, rootDir, stores = null, resolveAgentRuntime } = {}) {
   const fail = (error) => ({ tool: action?.tool || 'scheduled_jobs', ok: false, error });
   if (!agentId) return fail('scheduled_job_agent_required');
   if (!store) return fail('scheduled_job_store_required');
@@ -31,7 +31,7 @@ export async function executeAgentScheduledJobTool({ action, agentId, sessionId,
     if (action.tool === 'scheduled_jobs_update') return { tool: action.tool, ok: true, job: await store.updateJob(job.id, input(action, { sessionId })) };
     if (action.tool === 'scheduled_jobs_delete') return { tool: action.tool, ok: true, job: await store.deleteJob(job.id) };
     if (action.tool === 'scheduled_jobs_run_now') {
-      const scheduler = createScheduledJobScheduler({ storeFactory: () => store, closeStore: async () => {}, resolveAgentRuntime, rootDir });
+      const scheduler = scheduledJobSchedulerForStores(stores) || createScheduledJobScheduler({ storeFactory: () => store, closeStore: async () => {}, resolveAgentRuntime, rootDir, stores });
       return { tool: action.tool, ...(await scheduler.trigger(job.id)) };
     }
     return fail('scheduled_job_tool_unsupported');

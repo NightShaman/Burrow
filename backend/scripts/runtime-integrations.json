@@ -6,7 +6,7 @@
   },
   "claude-code": {
     "packageName": "@anthropic-ai/claude-code",
-    "version": "latest",
+    "version": "2.1.283",
     "executable": "claude"
   }
 }

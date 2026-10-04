@@ -21,9 +21,48 @@ function cronField(value, min, max) {
   return selected;
 }
 export function parseCron(expression) { const fields = text(expression).split(/\s+/); if (fields.length !== 5) throw new Error('scheduled_job_cron_invalid'); return { expression: fields.join(' '), minute: cronField(fields[0], 0, 59), hour: cronField(fields[1], 0, 23), day: cronField(fields[2], 1, 31), month: cronField(fields[3], 1, 12), weekday: cronField(fields[4], 0, 6) }; }
-function localParts(date, timezone) { const values = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: timezone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', weekday: 'short' }).formatToParts(date).filter((part) => part.type !== 'literal').map((part) => [part.type, part.value])); return { minute: Number(values.minute), hour: Number(values.hour), day: Number(values.day), month: Number(values.month), weekday: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(values.weekday) }; }
+// Bounded formatter cache: callers can supply arbitrary valid timezone aliases.
+const formatters = new Map();
+function formatter(timezone) {
+  if (formatters.has(timezone)) return formatters.get(timezone);
+  const value = new Intl.DateTimeFormat('en-US', { timeZone: timezone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', weekday: 'short' });
+  if (formatters.size >= 64) formatters.delete(formatters.keys().next().value);
+  formatters.set(timezone, value);
+  return value;
+}
+function localParts(date, timezone) {
+  const values = Object.fromEntries(formatter(timezone).formatToParts(date).filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+  return { year: Number(values.year), minute: Number(values.minute), hour: Number(values.hour), day: Number(values.day), month: Number(values.month), weekday: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(values.weekday) };
+}
 export function cronMatches(expression, date, timezone) { const cron = typeof expression === 'string' ? parseCron(expression) : expression; const local = localParts(date, timezone); return cron.minute.has(local.minute) && cron.hour.has(local.hour) && cron.day.has(local.day) && cron.month.has(local.month) && cron.weekday.has(local.weekday); }
-export function nextCronOccurrence(expression, timezone, from = new Date()) { const cron = typeof expression === 'string' ? parseCron(expression) : expression; let candidate = new Date(Math.floor(from.getTime() / 60_000) * 60_000 + 60_000); const limit = candidate.getTime() + 366 * 24 * 60 * 60_000; while (candidate.getTime() <= limit) { if (cronMatches(cron, candidate, timezone)) return candidate.toISOString(); candidate = new Date(candidate.getTime() + 60_000); } throw new Error('scheduled_job_next_run_unresolvable'); }
+export function nextCronOccurrence(expression, timezone, from = new Date()) {
+  const cron = typeof expression === 'string' ? parseCron(expression) : expression;
+  const start = Math.floor(from.getTime() / 60_000) * 60_000 + 60_000;
+  const limit = start + 366 * 86400_000;
+  if (!Number.isFinite(start)) throw new Error('scheduled_job_next_run_unresolvable');
+  formatter(timezone);
+  // An IANA civil date is within one day of its UTC date (offset <24h).
+  // Reject entire UTC days only when none of those three civil dates is
+  // calendar-eligible. On eligible days scan UTC minutes: no assumptions
+  // about transition times, offset granularity, gaps or repeated hours.
+  // Sparse annual/impossible schedules therefore inspect days, not a year
+  // of minutes; dense schedules return immediately as before.
+  let candidate = start;
+  while (candidate <= limit) {
+    const midnight = Math.floor(candidate / 86400_000) * 86400_000;
+    const eligible = [-1, 0, 1].some((delta) => {
+      const date = new Date(midnight + delta * 86400_000);
+      return cron.month.has(date.getUTCMonth() + 1) && cron.day.has(date.getUTCDate()) && cron.weekday.has(date.getUTCDay());
+    });
+    if (!eligible) { candidate = midnight + 86400_000; continue; }
+    const end = Math.min(midnight + 86400_000 - 60_000, limit);
+    while (candidate <= end) {
+      if (cronMatches(cron, new Date(candidate), timezone)) return new Date(candidate).toISOString();
+      candidate += 60_000;
+    }
+  }
+  throw new Error('scheduled_job_next_run_unresolvable');
+}
 function jobRow(row) { return row && { id: row.id, ownerModId: row.owner_mod_id || null, agentId: row.agent_id, name: row.name, prompt: row.prompt, cron: row.cron_expression, timezone: row.timezone, sessionId: row.session_id, modelConnectionId: row.model_connection_id || null, model: row.model || null, enabled: Boolean(row.enabled), nextRunAt: row.next_run_at || null, lastRunAt: row.last_run_at || null, createdAt: row.created_at, updatedAt: row.updated_at }; }
 function runRow(row) { return row && { id: row.id, jobId: row.job_id, scheduledFor: row.scheduled_for, status: row.status, agentId: row.agent_id, sessionId: row.session_id, runId: row.run_id || null, dispatchedAt: row.dispatched_at || null, completedAt: row.completed_at || null, traceDir: row.trace_dir || null, decision: row.decision || null, ok: row.ok === null ? null : Boolean(row.ok), error: row.error || null, result: parseJson(row.result_json), createdAt: row.created_at, updatedAt: row.updated_at }; }
 function modelOverride(input) {

@@ -54,7 +54,15 @@ export async function streamChat({ target, requestBody, signal, onEvent }: ChatS
     buffer += decoder.decode(value, { stream: !done });
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
-    for (const line of lines) if (line.trim()) handleLine(line);
+    for (const line of lines) {
+      if (line.trim()) handleLine(line);
+      if (terminalType) {
+        // Do not wait for transport EOF or a possibly stalled cancellation.
+        void reader.cancel().catch(() => {});
+        reader.releaseLock();
+        return { terminalType, finalResult };
+      }
+    }
     if (done) break;
   }
   if (buffer.trim()) handleLine(buffer);

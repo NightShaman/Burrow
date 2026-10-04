@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import pg from 'pg';
 
 const EXPECTED_MAJOR = 17;
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -102,11 +103,41 @@ export function createManagedPostgresLifecycle(options = {}) {
   return Object.freeze({ mode: 'managed', config, init, initialize: init, start, stop, probeStatus, status: () => Object.freeze({ state, initialized, running, dataDir: config.dataDir, socketDir: config.socketDir }) });
 }
 
-export async function validateExternalPostgres({ client, query, expectedMajor = EXPECTED_MAJOR, vectorExtension = 'vector', timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+export async function validateExternalPostgres({ client, pool, query, cancel, expectedMajor = EXPECTED_MAJOR, vectorExtension = 'vector', timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   if (!Number.isInteger(expectedMajor) || expectedMajor < 1) throw new PostgresLifecycleError('expectedMajor must be a positive integer');
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new PostgresLifecycleError('timeoutMs must be a positive number');
-  const execute = query || client?.query?.bind(client);
-  if (!execute) throw new PostgresLifecycleError('External PostgreSQL validation requires a query function');
+  // Generic adapters are unowned: a cancellation callback is mandatory, even
+  // when their queries normally resolve immediately. Reject before dispatch.
+  if (query && typeof cancel !== 'function') throw new PostgresLifecycleError('Unowned query adapter requires a cooperative cancel callback');
+  if (!pool && !query && client && typeof client.end !== 'function') throw new PostgresLifecycleError('Unowned client requires end or a cancellable query adapter');
+  // A pool checkout is owned by validation. Destroy it on deadline rather than
+  // leaving an abandoned query (and a busy pooled connection) behind.
+  let connection;
+  let expired = false;
+  const controller = new AbortController();
+  let rejectDeadline;
+  const deadline = new Promise((_, reject) => { rejectDeadline = reject; });
+  const timer = setTimeout(() => {
+    expired = true;
+    controller.abort();
+    const active = connection || client;
+    if (active?.activeQuery && active?.connectionParameters) {
+      const canceller = new pg.Client(active.connectionParameters);
+      canceller.on('error', () => {});
+      canceller.cancel(active, active.activeQuery);
+    }
+    if (connection?.release) connection.release(true);
+    else if (client?.end) void client.end().catch(() => {});
+    else if (cancel) cancel();
+    rejectDeadline(new PostgresLifecycleError('External PostgreSQL validation timed out'));
+  }, timeoutMs);
+  const work = async () => {
+    if (pool) {
+      connection = await pool.connect();
+      if (expired) { connection.release(true); throw new PostgresLifecycleError('External PostgreSQL validation timed out'); }
+    }
+    const execute = query ? (sql, params) => query(sql, params, { signal: controller.signal }) : (connection || client)?.query?.bind(connection || client);
+    if (!execute) throw new PostgresLifecycleError('External PostgreSQL validation requires a query function');
   const versionResult = await execute('SHOW server_version_num');
   const versionNum = Number(versionResult.rows?.[0]?.server_version_num);
   const major = Number.isFinite(versionNum) ? Math.floor(versionNum / 10000) : majorFromVersion((await execute('SELECT version()')).rows?.[0]?.version);
@@ -114,6 +145,10 @@ export async function validateExternalPostgres({ client, query, expectedMajor = 
   const extensionResult = await execute('SELECT extname FROM pg_extension WHERE extname = $1', [vectorExtension]);
   if (!extensionResult.rows?.some((row) => row.extname === vectorExtension)) throw new PostgresLifecycleError(`Required PostgreSQL extension "${vectorExtension}" is missing; install it before starting Burrow (external lifecycle never creates extensions)`);
   return Object.freeze({ major, vectorExtension, vectorAvailable: true });
+  };
+  try { return await Promise.race([work(), deadline]); }
+  finally { clearTimeout(timer); if (connection && !expired) connection.release(); }
+
 }
 
 export function createExternalPostgresLifecycle(options = {}) {

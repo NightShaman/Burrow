@@ -10,7 +10,8 @@ function text(value) { return String(value || '').replace(/\s+/g, ' ').trim(); }
 function checkResult(result) { return result?.tool === 'shell_exec' && (result.verificationCheck === true || /(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:check|test|lint|build)|\b(?:check|test|lint|build)\b/i.test(String(result.command || ''))); }
 function mcpLabel(result) { return result?.mcpToolName || result?.toolName || 'MCP tool'; }
 
-export function completionEvidence({ toolResults = [], verification = null, decision = null, validation = null } = {}) {
+export function completionEvidence({ toolResults = [], consequences = null, verification = null, decision = null, validation = null } = {}) {
+  if (consequences?.completion) return { ...consequences.completion, verification: verification ? { required: Boolean(verification.required), ok: verification.ok === true, reason: verification.reason || null } : null, validation: validation || null, decision: decision || null };
   const results = Array.isArray(toolResults) ? toolResults : [];
   const successful = results.filter((result) => result?.ok === true);
   const failed = results.filter((result) => result?.ok === false);
@@ -57,3 +58,22 @@ export function appendCompletionAddendum(answerText, evidence = null) {
 }
 
 export const __test__ = { checkResult, mcpLabel };
+
+// Fold bounded display evidence, separately from exact all-run counts/indexes.
+export function accumulateCompletionEvidence(aggregate, results = []) {
+  for (const result of results) {
+    const next = completionEvidence({ toolResults: [result] });
+    const prior = aggregate.completion || completionEvidence();
+    aggregate.completion = {
+      ...prior,
+      meaningful: prior.meaningful || next.meaningful,
+      inspected: prior.inspected + next.inspected,
+      changedFiles: aggregate.changedFiles.slice(0, MAX_ITEMS),
+      checks: [...prior.checks, ...next.checks].slice(0, MAX_ITEMS),
+      mcp: [...prior.mcp, ...next.mcp].slice(0, MAX_ITEMS),
+      failed: [...prior.failed, ...next.failed].slice(0, MAX_ITEMS),
+      repaired: prior.repaired || next.repaired || Boolean(result?.failureClass && aggregate.failed && aggregate.successful),
+    };
+  }
+  return aggregate;
+}

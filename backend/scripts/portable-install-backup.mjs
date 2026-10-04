@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
 import { execFile } from 'node:child_process';
@@ -8,6 +9,7 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const ARCHIVE_ROOT = 'burrow-install';
+const REQUIRED = ['app', 'bin', 'burrow.env', 'config', 'workspace', 'integrations'];
 const MANIFEST = 'portable-install-manifest.json';
 const TAR_LIST_MAX_BUFFER = 64 * 1024 * 1024;
 const MCPORTER_VERSION = '0.13.7';
@@ -16,10 +18,11 @@ const CLAUDE_CODE_VERSION = 'latest';
 function nonEmpty(value, name) { if (!value) throw new Error(`${name} is required`); return value; }
 
 export function parseArgs(argv = []) {
-  const args = { root: null, output: null, archive: null, home: process.env.HOME || os.homedir(), confirm: false, replace: false, json: false };
+  const args = { root: null, output: null, archive: null, home: process.env.HOME || os.homedir(), confirm: false, replace: false, overwrite: false, json: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--confirm') args.confirm = true;
+    else if (arg === '--overwrite') args.overwrite = true;
     else if (arg === '--replace') args.replace = true;
     else if (arg === '--json') args.json = true;
     else if (arg === '--root') args.root = argv[++i];
@@ -33,25 +36,26 @@ export function parseArgs(argv = []) {
 }
 
 export function usage() {
-  return `Usage:\n  burrow install-backup --output FILE [--root DIR] [--confirm] [--json]\n  burrow install-restore --archive FILE [--home DIR] [--replace] [--confirm] [--json]\n\nCreates/restores a complete portable Burrow install. Backup is dry-run by default. Restore targets <home>/.burrow, preserves modes, and assigns ownership to the target home owner.\n`;
+  return `Usage:\n  burrow install-backup --output FILE [--root DIR] [--overwrite] [--confirm] [--json]\n  burrow install-restore --archive FILE [--home DIR] [--replace] [--confirm] [--json]\n\nCreates/restores a complete portable Burrow install. Backup is dry-run by default. Restore targets <home>/.burrow, preserves modes, and assigns ownership to the target home owner.\n`;
 }
 
 async function exists(file) { try { await fs.lstat(file); return true; } catch (error) { if (error?.code === 'ENOENT') return false; throw error; } }
 async function directoryIsEmpty(dir) { try { return (await fs.readdir(dir)).length === 0; } catch (error) { if (error?.code === 'ENOENT') return true; throw error; } }
 
-export async function planPortableInstallBackup({ root, output, now = new Date() } = {}) {
+export async function planPortableInstallBackup({ root, output, overwrite = false, now = new Date() } = {}) {
   const installRoot = path.resolve(nonEmpty(root, '--root'));
   const archive = path.resolve(nonEmpty(output, '--output'));
+  if (await exists(archive) && !overwrite) throw new Error('backup output exists; pass --overwrite to replace it');
   const stat = await fs.stat(installRoot);
   if (!stat.isDirectory()) throw new Error(`install root is not a directory: ${installRoot}`);
   if (archive === installRoot || archive.startsWith(`${installRoot}${path.sep}`)) throw new Error('backup archive must be outside the install root');
-  const required = ['app', 'bin', 'burrow.env', 'config', 'workspace', 'integrations'];
+  const required = [...REQUIRED];
   const present = await Promise.all(required.map(async (entry) => ({ entry, exists: await exists(path.join(installRoot, entry)) })));
   return { ok: present.every((entry) => entry.exists), dryRun: true, installRoot, archive, required, missing: present.filter((entry) => !entry.exists).map((entry) => entry.entry), createdAt: now.toISOString() };
 }
 
-export async function createPortableInstallBackup({ root, output, now = new Date(), runTar = execFileAsync } = {}) {
-  const plan = await planPortableInstallBackup({ root, output, now });
+export async function createPortableInstallBackup({ root, output, overwrite = false, now = new Date(), runTar = execFileAsync } = {}) {
+  const plan = await planPortableInstallBackup({ root, output, overwrite, now });
   if (!plan.ok) return { ...plan, dryRun: false, created: false, error: 'incomplete_install_root' };
   await fs.mkdir(path.dirname(plan.archive), { recursive: true });
   const staging = await fs.mkdtemp(path.join(path.dirname(plan.archive), '.burrow-portable-backup-'));
@@ -61,22 +65,25 @@ export async function createPortableInstallBackup({ root, output, now = new Date
     await fs.cp(plan.installRoot, stagedRoot, {
       recursive: true,
       dereference: false,
+      verbatimSymlinks: true,
       preserveTimestamps: true,
       filter: (source) => source === plan.installRoot || !path.basename(source).startsWith('.app-staging-'),
     });
-    await fs.writeFile(path.join(stagedRoot, MANIFEST), `${JSON.stringify({ format: 1, createdAt: plan.createdAt, archiveRoot: ARCHIVE_ROOT, required: plan.required }, null, 2)}\n`, { mode: 0o600 });
+    await fs.writeFile(path.join(stagedRoot, MANIFEST), `${JSON.stringify({ format: 1, createdAt: plan.createdAt, archiveRoot: ARCHIVE_ROOT, required: plan.required, checksums: await inventory(stagedRoot) }, null, 2)}\n`, { mode: 0o600 });
     const outputHandle = await fs.open(pendingArchive, 'wx', 0o600);
     await outputHandle.close();
     await runTar('tar', ['-czf', pendingArchive, '-C', staging, ARCHIVE_ROOT], { timeout: 300_000 });
     await fs.chmod(pendingArchive, 0o600);
-    await fs.rename(pendingArchive, plan.archive);
+    await validateArchive(pendingArchive, runTar);
+    if (overwrite) await fs.rename(pendingArchive, plan.archive);
+    else { await fs.link(pendingArchive, plan.archive); await fs.unlink(pendingArchive); }
   } finally { await fs.rm(staging, { recursive: true, force: true }); }
   return { ...plan, dryRun: false, created: true };
 }
 
 function safeArchiveEntry(entry) {
   const normalized = entry.replace(/^\.\//, '');
-  return normalized === ARCHIVE_ROOT || normalized.startsWith(`${ARCHIVE_ROOT}/`);
+  return !normalized.split('/').includes('..') && (normalized === ARCHIVE_ROOT || normalized.startsWith(`${ARCHIVE_ROOT}/`));
 }
 
 async function archiveEntries(archive, runTar) {
@@ -112,6 +119,54 @@ async function validateRestoredTree(root) {
     }
   };
   await walk(root);
+}
+
+async function inventory(root) {
+  const result = {};
+  const walk = async (dir) => {
+    for (const name of (await fs.readdir(dir)).sort()) {
+      const file = path.join(dir, name), relative = path.relative(root, file);
+      if (relative === MANIFEST) continue;
+      const stat = await fs.lstat(file);
+      if (stat.isDirectory()) { result[relative] = 'directory'; await walk(file); }
+      else if (stat.isSymbolicLink()) result[relative] = `link:${await fs.readlink(file)}`;
+      else result[relative] = `sha256:${createHash('sha256').update(await fs.readFile(file)).digest('hex')}`;
+    }
+  };
+  await walk(root);
+  return result;
+}
+
+async function validateInstall(root) {
+  await validateRestoredTree(root);
+  for (const entry of REQUIRED) {
+    const stat = await fs.lstat(path.join(root, entry));
+    if (stat.isSymbolicLink() || (entry === 'burrow.env' ? !stat.isFile() : !stat.isDirectory())) throw new Error(`invalid required asset: ${entry}`);
+  }
+  for (const file of ['app/package.json', 'bin/burrow']) {
+    if (!(await fs.stat(path.join(root, file))).isFile()) throw new Error(`invalid required asset: ${file}`);
+  }
+  const pkg = JSON.parse(await fs.readFile(path.join(root, 'app/package.json'), 'utf8'));
+  if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) throw new Error('invalid package JSON');
+  const env = await fs.readFile(path.join(root, 'burrow.env'), 'utf8');
+  if (env.includes('\0') || env.split('\n').some(line => line.trim() && !line.trim().startsWith('#') && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(line))) throw new Error('invalid environment format');
+}
+
+async function validateArchiveRoot(root) {
+  await validateInstall(root);
+  const manifest = JSON.parse(await fs.readFile(path.join(root, MANIFEST), 'utf8'));
+  if (manifest?.format !== 1 || manifest.archiveRoot !== ARCHIVE_ROOT || !Array.isArray(manifest.required) || JSON.stringify(manifest.required) !== JSON.stringify(REQUIRED)) throw new Error('unsupported portable install manifest');
+  if (JSON.stringify(manifest.checksums) !== JSON.stringify(await inventory(root))) throw new Error('portable install checksum mismatch');
+}
+
+async function validateArchive(archive, runTar) {
+  const entries = await archiveEntries(archive, runTar);
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'burrow-archive-check-'));
+  try {
+    await runTar('tar', ['-xzf', archive, '-C', temporary, '--no-same-owner', '--same-permissions'], { timeout: 300_000 });
+    await validateArchiveRoot(path.join(temporary, ARCHIVE_ROOT));
+  } finally { await fs.rm(temporary, { recursive: true, force: true }); }
+  return entries;
 }
 
 async function applyOwnership(root, owner) {
@@ -164,13 +219,14 @@ export async function planPortableInstallRestore({ archive, home = process.env.H
   const sourceArchive = path.resolve(nonEmpty(archive, '--archive'));
   if (!await exists(sourceArchive)) throw new Error(`archive does not exist: ${sourceArchive}`);
   const targetHome = path.resolve(nonEmpty(home, '--home'));
+  if (!/^[A-Za-z0-9_./-]+$/.test(targetHome)) throw new Error('restore home contains unsupported characters (use letters, digits, _, ., /, -)');
   const homeStat = await fs.stat(targetHome);
   if (!homeStat.isDirectory()) throw new Error(`restore home is not a directory: ${targetHome}`);
   const target = path.join(targetHome, '.burrow');
   const targetExists = await exists(target);
   const targetEmpty = targetExists ? await directoryIsEmpty(target) : true;
   if (targetExists && !targetEmpty && !replace) throw new Error(`restore target exists: ${target}; pass --replace with --confirm to replace it`);
-  const entries = await archiveEntries(sourceArchive, runTar);
+  const entries = await validateArchive(sourceArchive, runTar);
   return { ok: true, dryRun: true, archive: sourceArchive, targetHome, target, replace: Boolean(replace), targetExists, archiveEntries: entries.length, owner: { uid: homeStat.uid, gid: homeStat.gid } };
 }
 
@@ -181,7 +237,7 @@ export async function restorePortableInstall({ archive, home = process.env.HOME 
   try {
     await runTar('tar', ['-xzf', plan.archive, '-C', staging, '--no-same-owner', '--same-permissions'], { timeout: 300_000 });
     const stagedRoot = path.join(staging, ARCHIVE_ROOT);
-    await validateRestoredTree(stagedRoot);
+    await validateArchiveRoot(stagedRoot);
     const manifestPath = path.join(stagedRoot, MANIFEST);
     if (!await exists(manifestPath)) throw new Error('archive is missing portable install manifest');
     const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));

@@ -30,8 +30,8 @@ export function orderAgents(agents: Agent[], order: string[]) {
 }
 
 export function completeAgentOrder(agents: Agent[], order: string[]) {
-  const known = new Set(agents.map((agent) => agent.id));
-  return [...order.filter((id) => known.has(id)), ...agents.map((agent) => agent.id).filter((id) => !order.includes(id))];
+  // A node-local inventory is not authoritative for stored IDs on other nodes.
+  return [...order, ...agents.map((agent) => agent.id).filter((id) => !order.includes(id))];
 }
 
 export function useAgentRailPreferences() {
@@ -43,4 +43,11 @@ export function useAgentRailPreferences() {
   }));
   useEffect(() => writeStoredValue(agentRailPreferencesKey, 1, preferences), [preferences]);
   return [preferences, setPreferences] as const;
+}
+
+export function mergeVisibleOrder(current: string[], visible: string[]) {
+  const visibleIds = new Set(visible);
+  let index = 0;
+  const merged = current.map((id) => visibleIds.has(id) ? visible[index++] : id);
+  return [...merged, ...visible.slice(index)];
 }

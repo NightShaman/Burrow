@@ -2,6 +2,7 @@ import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { operatorTimezone } from './timezone.mjs';
 import { PostgresSettingsMetadataStore } from './postgres-settings-metadata-store.mjs';
 import { randomUUID } from 'node:crypto';
+import { continuityOwner } from './postgres-continuity-owner.mjs';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 import { nextCronOccurrence } from './scheduled-job-store.mjs';
 import { reconciledDreamCycleState } from './dream-cycle-state.mjs';
@@ -41,8 +42,9 @@ export class PostgresDreamCycleReceiptStore {
   constructor({ pool, ownsPool = false, clock = () => new Date().toISOString(), runtimeInstanceId = randomUUID() } = {}) {
     if (!pool?.query || !pool?.connect) throw new Error('dream_cycle_postgres_pool_required');
     this.pool = normalizePostgresPool(pool); this.ownsPool = ownsPool; this.clock = clock; this.runtimeInstanceId = runtimeInstanceId;
+    this.owner = continuityOwner(this.pool, `dream:${runtimeInstanceId}`);
   }
-  async close() { if (this.ownsPool) await closePostgresPool(this.pool); }
+  async close() { await this.owner.close(); if (this.ownsPool) await closePostgresPool(this.pool); }
   async getState(agentId, client = this.pool) {
     const r = await client.query('SELECT state_json FROM dream_cycle_state WHERE agent_id=$1', [text(agentId)]);
     return r.rows[0] ? parse(r.rows[0].state_json) : null;
@@ -84,11 +86,20 @@ export class PostgresDreamCycleReceiptStore {
       return { agentId: id, runId, scheduledFor, nextRunAt };
     });
   }
-  async write(receipt, at = this.clock(), client = this.pool) {
+  async write(receipt, at = this.clock(), client = null) {
     const agentId = text(receipt?.agentId), runId = text(receipt?.runId);
     if (!agentId || !runId) throw new Error('dream_cycle_receipt_required');
-    await client.query(`INSERT INTO dream_cycle_receipts(agent_id,run_id,receipt_json,updated_at) VALUES($1,$2,$3::jsonb,$4) ON CONFLICT(agent_id,run_id) DO UPDATE SET receipt_json=EXCLUDED.receipt_json,updated_at=EXCLUDED.updated_at`, [agentId, runId, json(receipt), at]);
-    return receipt;
+    await this.owner.ready();
+    const operation = async tx => {
+      await lockAgent(tx, agentId);
+      const prior = parse((await tx.query('SELECT receipt_json FROM dream_cycle_receipts WHERE agent_id=$1 AND run_id=$2 FOR UPDATE', [agentId, runId])).rows[0]?.receipt_json);
+      if (prior.runId && (prior.status !== 'running' || prior.ownerId !== this.owner.id || prior.ownershipProtocol !== 'postgres-session-lock-v1')) throw new Error('dream_cycle_owner_fenced');
+      await this.owner.ready();
+      const owned = { ...receipt, ownerId: this.owner.id, ownershipProtocol: 'postgres-session-lock-v1' };
+      await tx.query(`INSERT INTO dream_cycle_receipts(agent_id,run_id,receipt_json,updated_at) VALUES($1,$2,$3::jsonb,$4) ON CONFLICT(agent_id,run_id) DO UPDATE SET receipt_json=EXCLUDED.receipt_json,updated_at=EXCLUDED.updated_at`, [agentId, runId, json(owned), at]);
+      return owned;
+    };
+    return this.owner.guard(() => client ? operation(client) : withPostgresTransaction(this.pool, operation));
   }
   async reconcileInterruptedDreamCycles(options = {}) { return this.reconcileInterrupted(options); }
 
@@ -98,8 +109,11 @@ export class PostgresDreamCycleReceiptStore {
       let count = 0;
       for (const row of rows.rows) {
         const receipt = parse(row.receipt_json);
-        if (activeRunIds.has(receipt.runId) || receipt.runtimeInstanceId === runtimeInstanceId) continue;
-        await this.write({ ...receipt, ok: false, status: 'interrupted', error, completedAt: at }, at, client);
+        if (activeRunIds.has(receipt.runId)) continue;
+        // Legacy ownership is unknown, not evidence of death. Reuse native
+        // PostgreSQL session liveness rather than runtime UUID/PID guesses.
+        if (receipt.ownershipProtocol !== 'postgres-session-lock-v1' || !receipt.ownerId || await this.owner.alive(receipt.ownerId)) continue;
+        await client.query('UPDATE dream_cycle_receipts SET receipt_json=$3::jsonb,updated_at=$4 WHERE agent_id=$1 AND run_id=$2', [row.agent_id, row.run_id, json({ ...receipt, ok: false, status: 'interrupted', error, completedAt: at }), at]);
         count++;
       }
       return count;

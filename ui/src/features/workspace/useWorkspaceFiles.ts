@@ -7,6 +7,7 @@ import { usePolling } from '../../app/usePolling';
 type WorkspaceFile = { path: string; type: 'file' | 'directory' };
 
 type UseWorkspaceFilesOptions = {
+  tabs?: Tab[];
   selectedAgentId: string;
   targets: ApiTarget[];
   setTabs: Dispatch<SetStateAction<Tab[]>>;
@@ -14,7 +15,10 @@ type UseWorkspaceFilesOptions = {
   pollingEnabled?: boolean;
 };
 
-export function useWorkspaceFiles({ selectedAgentId, targets, setTabs, setActiveTabId, pollingEnabled = true }: UseWorkspaceFilesOptions) {
+export function useWorkspaceFiles({ tabs, selectedAgentId, targets, setTabs, setActiveTabId, pollingEnabled = true }: UseWorkspaceFilesOptions) {
+  const pendingLoads = useRef(new Set<string>());
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
   const [workspaceFiles, setWorkspaceFiles] = useState<FileNode[]>([]);
   const workspaceListingRef = useRef<WorkspaceFile[]>([]);
   const ownerFor = useCallback((agentId: string) => targetForResource(targets, agentId), [targets]);
@@ -44,20 +48,31 @@ export function useWorkspaceFiles({ selectedAgentId, targets, setTabs, setActive
     const agentId = selectedAgentId;
     const owner = ownerFor(agentId);
     const tabId = `${agentId}:${file.path}`;
-    setTabs((all) => all.some((tab) => tab.id === tabId) ? all : [...all, {
-      id: tabId, path: file.path, label: file.name, kind: 'file', content: 'Loading…', workspaceAgentId: agentId, targetId: owner.target.id,
-    }]);
     setActiveTabId(tabId);
+    const existing = tabsRef.current?.find(tab => tab.id === tabId);
+    if (existing?.fileLoaded || pendingLoads.current.has(tabId)) return;
+    pendingLoads.current.add(tabId);
+    const loadId = crypto.randomUUID();
+    const loadingTab: Tab = {
+      id: tabId, path: file.path, label: file.name, kind: 'file', content: '', fileLoadId: loadId,
+      fileLoaded: false, fileLoading: true, workspaceAgentId: agentId, targetId: owner.target.id,
+    };
+    setTabs((all) => all.some(tab => tab.id === tabId)
+      ? all.map(tab => tab.id === tabId ? { ...tab, fileLoadId: loadId, fileLoading: true, fileError: undefined } : tab)
+      : [...all, loadingTab]);
     try {
       const { content } = await apiForTarget<{ content: string }>(owner.target, `/api/workspace/file?agentId=${encodeURIComponent(owner.resourceId)}&scope=agent&path=${encodeURIComponent(file.path)}`);
-      setTabs((all) => all.map((tab) => tab.id === tabId ? { ...tab, content } : tab));
+      setTabs((all) => all.map((tab) => tab.id === tabId && tab.fileLoadId === loadId && tab.content === (existing?.content ?? '') ? { ...tab, content, fileLoaded: true, fileLoading: false, fileError: undefined, savedContent: content } : tab));
     } catch (error) {
-      setTabs((all) => all.map((tab) => tab.id === tabId ? { ...tab, content: `Could not read ${file.path}: ${(error as Error).message}` } : tab));
+      setTabs((all) => all.map((tab) => tab.id === tabId && tab.fileLoadId === loadId && tab.content === (existing?.content ?? '') ? { ...tab, fileLoading: false, fileError: `Could not read ${file.path}: ${(error as Error).message}` } : tab));
+    } finally {
+      pendingLoads.current.delete(tabId);
     }
   }, [ownerFor, selectedAgentId, setActiveTabId, setTabs]);
 
   const saveFile = useCallback(async (tab: Tab, content: string) => {
     if (!tab.workspaceAgentId || !tab.path) throw new Error('No agent workspace file is selected.');
+    if (!tab.fileLoaded || tab.fileLoading || tab.fileError) throw new Error('Workspace file is not loaded.');
     const parsed = parseOwnedResourceId(tab.workspaceAgentId);
     if (!tab.targetId || tab.targetId !== parsed.targetId) throw new Error('Workspace file owner is missing or inconsistent.');
     const target = targets.find((item) => item.id === tab.targetId && item.enabled);
@@ -67,7 +82,7 @@ export function useWorkspaceFiles({ selectedAgentId, targets, setTabs, setActive
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ agentId: owner.resourceId, scope: 'agent', path: tab.path, content }),
     });
-    setTabs((all) => all.map((item) => item.id === tab.id ? { ...item, content: result.content } : item));
+    setTabs((all) => all.map((item) => item.id === tab.id ? { ...item, content: item.content === tab.content ? result.content : item.content, savedContent: result.content } : item));
   }, [targets, setTabs]);
 
   return { workspaceFiles, refreshWorkspaceFiles, openFile, saveFile };

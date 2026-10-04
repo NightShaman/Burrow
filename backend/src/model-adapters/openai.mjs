@@ -26,7 +26,17 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
   if (!model) throw new Error('model is required');
 
   const imageCountFor = (messages = []) => (Array.isArray(messages) ? messages : []).reduce((count, message) => count + (Array.isArray(message?.content) ? message.content.filter((part) => part?.type === 'image_url' || part?.type === 'input_image' || part?.image_url || part?.input_image).length : 0), 0);
-  const textPromptCharsFor = (messages = []) => (Array.isArray(messages) ? messages : []).reduce((total, message) => total + (typeof message?.content === 'string' ? message.content.length : (Array.isArray(message?.content) ? message.content.reduce((chars, part) => chars + String(part?.text || '').length, 0) : 0)) + (Array.isArray(message?.tool_calls) ? message.tool_calls.reduce((chars, call) => chars + String(call?.function?.name || '').length + String(call?.function?.arguments || '').length, 0) : 0), 0);
+  const textPromptCharsFor = (messages = []) => (Array.isArray(messages) ? messages : []).reduce((total, message) => {
+    const contentChars = typeof message?.content === 'string' ? message.content.length
+      : Array.isArray(message?.content) ? message.content.reduce((chars, part) => chars + String(part?.text || '').length, 0) : 0;
+    // Responses protocol items have no content field. Their arguments/output
+    // are prompt text too; ignoring them bypasses the shared continuation budget.
+    const nativeChars = message?.type === 'function_call_output' ? String(message.output || '').length
+      : message?.type === 'function_call' ? String(message.name || '').length + String(message.arguments || '').length : 0;
+    const callChars = Array.isArray(message?.tool_calls)
+      ? message.tool_calls.reduce((chars, call) => chars + String(call?.function?.name || '').length + String(call?.function?.arguments || '').length, 0) : 0;
+    return total + contentChars + nativeChars + callChars;
+  }, 0);
 
   const buildRequest = ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens, tools = null, toolChoice = 'auto', toolContinuation = null, streaming = false } = {}) => {
     const resolvedMessages = messages || [{ role: 'user', content: String(prompt || '') }];
@@ -169,7 +179,11 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         }
       }
 
-      const ok = Boolean(response.ok) && responseBody.ok;
+      // HTTP success alone is not a completed provider generation. Apply the
+      // nonstream schema gate also when a proxy ignores the streaming request.
+      const envelopeError = (!streaming || providerReturnedJson) ? openAIEnvelopeError(data, mode) : null;
+      if (envelopeError) data = { ...data, error: { message: envelopeError } };
+      const ok = Boolean(response.ok) && responseBody.ok && !envelopeError;
       const result = {
         ok,
         requestId,
@@ -246,3 +260,22 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
 }
 
 
+
+function openAIEnvelopeError(data, mode) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return 'model_response_malformed_envelope';
+  if (data.error) return data.error.message || 'model_response_provider_error';
+  if (mode === 'openai-responses') {
+    if (data.status !== 'completed') return `model_response_${data.status || 'missing_status'}`;
+    if (!Array.isArray(data.output) && typeof data.output_text !== 'string') return 'model_response_malformed_envelope';
+    const choice = normalizeResponseChoice(data);
+    const media = (data.output || []).some(item => item?.type === 'image_generation_call' && typeof item.result === 'string' && item.result.length);
+    return choice.text.trim() || choice.toolCalls.length || media ? null : 'model_response_empty';
+  }
+  const choice = data.choices?.[0];
+  if (!Array.isArray(data.choices) || !choice || !choice.message || typeof choice.message !== 'object') return 'model_response_malformed_envelope';
+  if (!['stop', 'tool_calls', 'function_call'].includes(choice.finish_reason)) return `model_response_${choice.finish_reason || 'missing_finish_reason'}`;
+  if (choice.message.tool_calls != null && !Array.isArray(choice.message.tool_calls)) return 'model_response_malformed_envelope';
+  const normalized = normalizeChoice(data);
+  const media = choice.message.audio && (choice.message.audio.data || choice.message.audio.id);
+  return normalized.text.trim() || normalized.toolCalls.length || media ? null : 'model_response_empty';
+}

@@ -120,6 +120,7 @@ export function ChatComposer({
   const visibleProjects = projectQuery === null ? [] : projects.filter((project) => !projectQuery || project.name.toLowerCase().includes(projectQuery.toLowerCase()));
   const chooseCommand = (name: string) => setDraft(`/${name}${name === 'context' ? ' ' : ''}`);
   const submit = () => {
+    if (!canSend) return;
     if (projectQuery !== null) {
       if (projectQuery.trim().toLowerCase() === 'clear') void chooseProject(null);
       return;
@@ -186,7 +187,7 @@ export function ChatComposer({
         </div>
       )}
       <div className="composer">
-        <textarea ref={messageInput} onSelect={rememberSelection} onClick={rememberSelection} id="chat-message" name="message" aria-label="Message" value={draft} onChange={(event) => setDraft(event.target.value)} onPaste={pasteImages} onKeyDown={(event) => { onKeyDown?.(event); if (event.defaultPrevented) return; if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={placeholder} />
+        <textarea ref={messageInput} onSelect={rememberSelection} onClick={rememberSelection} id="chat-message" name="message" aria-label="Message" value={draft} onChange={(event) => setDraft(event.target.value)} onPaste={pasteImages} onKeyDown={(event) => { if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return; onKeyDown?.(event); if (event.defaultPrevented) return; if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={placeholder} />
         <div className="compose-footer"><div className="compose-actions">
           <button className="copy-conversation" onClick={() => void copyConversation()} disabled={!conversationTurns.some((turn) => textFromChatValue(turn.content).trim())} aria-label={copyState === 'copied' ? 'Conversation copied' : 'Copy conversation'} title={copyState === 'copied' ? 'Conversation copied' : copyState === 'failed' ? 'Copy failed' : 'Copy conversation'}>{copyState === 'copied' ? '✓' : '⧉'}</button>
           <div className="emoji-control" ref={emojiArea} onKeyDown={closeEmojiOnEscape}>

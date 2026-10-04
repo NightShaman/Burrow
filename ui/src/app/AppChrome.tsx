@@ -1,3 +1,4 @@
+import { rovingKeys } from './keyboardWidgets';
 import type { AnthropicUsage, OpenAiUsage } from './api';
 import type { Tab } from './types';
 import { formatUsageReset } from './useRuntimeDashboard';
@@ -10,12 +11,12 @@ type DocumentTabsProps = {
 };
 
 export function DocumentTabs({ tabs, activeTabId, onSelect, onClose }: DocumentTabsProps) {
-  return <div className="document-tabs" role="tablist" aria-label="Open documents">
+  return <div className="document-tabs" role="tablist" aria-label="Open documents" onKeyDown={event => rovingKeys(event, '[role="tab"]')}>
     {tabs.map((tab) => {
       const active = activeTabId === tab.id;
       const closeable = tab.kind === 'file' || tab.kind === 'group';
       return <div className={`document-tab${active ? ' active' : ''}${closeable ? ' closeable' : ''}`} key={tab.id}>
-        <button className="document-tab-select" type="button" role="tab" aria-selected={active} onClick={() => onSelect(tab.id)}>{tab.label}</button>
+        <button className="document-tab-select" type="button" role="tab" tabIndex={active ? 0 : -1} aria-selected={active} onClick={() => onSelect(tab.id)}>{tab.label}</button>
         {closeable && <button className="document-tab-close" type="button" onClick={() => onClose(tab.id)} aria-label={`Close ${tab.label}`}>×</button>}
       </div>;
     })}

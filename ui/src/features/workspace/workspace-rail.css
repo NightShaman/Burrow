@@ -43,3 +43,5 @@
 @media (max-width:420px){.retention-card{align-items:flex-start;flex-direction:column}.retention-actions{width:100%}.retention-actions button{flex:1}.sessions-toolbar{gap:5px}.session-kind-filter{flex-basis:64px}}
 
 .agent-pane.compact .agent-card{padding-block:6px}
+
+.system-status.checking i{background:var(--muted);box-shadow:none}.system-status.disconnected i{background:var(--danger);box-shadow:none}

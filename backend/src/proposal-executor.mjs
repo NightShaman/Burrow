@@ -233,7 +233,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
     }
     if (['scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now'].includes(action.tool)) {
       const started = await traceLogger?.toolStart?.({ tool: action.tool, toolCallId: action.toolCallId || null, jobId: action.jobId || null });
-      const result = await executeAgentScheduledJobTool({ action, agentId, sessionId, store: executionContext?.stores?.scheduledJobs, rootDir, resolveAgentRuntime });
+      const result = await executeAgentScheduledJobTool({ action, agentId, sessionId, store: executionContext?.stores?.scheduledJobs, rootDir, stores: executionContext?.stores, resolveAgentRuntime: resolveAgentRuntime || executionContext?.resolveAgentRuntime });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, jobId: result.job?.id || action.jobId || null, error: result.error || null });
       continue;
@@ -267,7 +267,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
 
     if (action.tool === 'list_skills' || action.tool === 'load_skill') {
       const skillsWorkspace = executionContext?.agentWorkspaceRoot ? path.dirname(executionContext.agentWorkspaceRoot) : executionRoot;
-      const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: skillsWorkspace, agentId: agentId || executionContext?.agentId || 'hatchet', agentRuntime: executionContext?.agentRuntime || null, store: executionContext?.stores?.tasks || null });
+      const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: skillsWorkspace, agentId: agentId || executionContext?.agentId || 'hatchet', agentRuntime: agentRuntime || executionContext?.agentRuntime || null, overrides: executionContext?.skillOverrides || {}, skillStore: executionContext?.stores?.skills || null });
       const started = await traceLogger?.toolStart?.({ tool: action.tool, skillId: action.skillId || null, catalogCount: catalog.availableSkills.length });
       let result;
       if (action.tool === 'list_skills') {

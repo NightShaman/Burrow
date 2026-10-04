@@ -83,8 +83,8 @@ export const ChatTranscript = memo(function ChatTranscript({ selected, parent, o
       {a2aActivities.length > 0 && <section className="a2a-activity-list" aria-label="Agent-to-agent activity">{a2aActivities.map((activity) => <A2AActivityCard key={activity.id} activity={activity} selectedName={selected.name} />)}</section>}
       {visibleRuntimeChildActivities.length > 0 && <section className="a2a-activity-list" aria-label="Minion activity">{visibleRuntimeChildActivities.map((activity) => <ToolActivityCard key={activity.runId} activity={activity} live={activity.status === 'running'} />)}</section>}
       {isSending && !messages.some((turn) => turn.role === 'assistant' && turn.runId === activeRunId && Boolean(turn.metadata?.progress || turn.metadata?.toolActivity || turn.content)) && <LiveAssistantTurn name={selected.name} avatar={selected.avatar} progress={liveProgress} activity={activeActivity} answer={liveAnswer} />}
-      {error && <p className="chat-error" role="alert">{error}</p>}
     </>}
+      {error && <p className="chat-error" role="alert">{error}</p>}
   </div>;
 });
 

@@ -2,6 +2,7 @@ import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { PostgresAlbdruckStore } from './postgres-albdruck-store.mjs';
 import { PostgresSessionStore } from './postgres-session-store.mjs';
 import { buildSessionEntry } from './session-entry.mjs';
+import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import {
@@ -19,6 +20,7 @@ import {
 import { persistChatAttachments } from "./attachment-store.mjs";
 import { diagnostic } from "./forge-diagnostics.mjs";
 import {
+  postgresTransactionContext,
   closePostgresPool,
   withPostgresTransaction,
 } from "./postgres-foundation.mjs";
@@ -130,6 +132,7 @@ export class PostgresForgeStore {
     this.googleAdapterFactory = googleAdapterFactory;
     this.ownerId = ownerId;
     this.pending = new Set();
+    this.backgroundFailures = new Map();
   }
   async init() {
     return this;
@@ -234,7 +237,7 @@ export class PostgresForgeStore {
       }
     }
     const r = await this.pool.query(sql, values);
-    return r.rows.map((x) => publicJob(parse(x.record)));
+    return r.rows.map((x) => this.public(parse(x.record)));
   }
   async save(job, client = this.pool) {
     job.updatedAt = at();
@@ -256,7 +259,14 @@ export class PostgresForgeStore {
     return this.runtimeRoot || owner?.agentWorkspaceRoot;
   }
   public(job) {
-    return publicJob(job);
+    const blocker = this.backgroundFailures.get(job.id);
+    return publicJob(blocker ? {
+      ...job,
+      status: "interrupted",
+      error: blocker.error,
+      errorDetails: null,
+      backgroundFailure: { ...blocker },
+    } : job);
   }
   selectionMatches(mode, model, catalog) {
     return (
@@ -406,6 +416,18 @@ export class PostgresForgeStore {
     if (!result.replayed) {
       const task = Promise.resolve()
         .then(() => this.run(result.raw, owner))
+        .catch(async () => {
+          // Own the failure even when the failed-state receipt cannot be saved.
+          // Never retain driver/provider messages, which may contain secrets.
+          const job = result.raw;
+          const blocker = { error: "forge_background_persistence_failed", updatedAt: at() };
+          this.backgroundFailures.set(job.id, blocker);
+          job.status = "interrupted";
+          job.error = blocker.error;
+          job.errorDetails = null;
+          try { await this.save(job); } catch { /* explicit recovery remains available */ }
+          console.error("Forge background persistence failed; interrupted receipt reconciliation attempted");
+        })
         .finally(() => this.pending.delete(task));
       this.pending.add(task);
     }
@@ -550,24 +572,27 @@ export class PostgresForgeStore {
     // Serialize delivery by job/destination. Retries reuse both the existing turn
     // and its attachment file, not merely the underlying generated artifact.
     const key = `forge:${job.id}:${artifact.id}`;
-    const entry = await withPostgresTransaction(this.pool, async client => {
-      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`forge-delivery:${body.agentId}:${body.sessionId}:${key}`]);
-      const prior = await client.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND idempotency_key=$3', [body.agentId,body.sessionId,key]);
-      if (prior.rows[0]) return prior.rows[0].entry;
-      const bytes = await fs.readFile(resolved.filePath);
-      const [stored] = await persistChatAttachments({ retentionDays: (await new PostgresAlbdruckStore({ pool: this.pool, resolveOriginal: ref => conversations.resolveOriginal(ref), searchHistory: input => conversations.history(input) }).readRetention()).attachmentDays, agentWorkspaceRoot: destination.agentWorkspaceRoot, attachments: [{ name: artifact.name, type: artifact.mimeType, content: `data:${artifact.mimeType};base64,${bytes.toString('base64')}` }] });
-      const { content, ...metadata } = stored;
-      const value = buildSessionEntry({sessionId:body.sessionId,type:'message',role:'user',content:'',metadata:{attachments:[metadata],idempotencyKey:key}});
-      try {
+    let copiedPath;
+    let entry;
+    try {
+      entry = await withPostgresTransaction(this.pool, async client => {
+        await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`forge-delivery:${body.agentId}:${body.sessionId}:${key}`]);
+        const prior = await client.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND idempotency_key=$3', [body.agentId,body.sessionId,key]);
+        if (prior.rows[0]) return prior.rows[0].entry;
+        const bytes = await fs.readFile(resolved.filePath);
+        const [stored] = await persistChatAttachments({ retentionDays: (await new PostgresAlbdruckStore({ pool: postgresTransactionContext(client), resolveOriginal: ref => conversations.resolveOriginal(ref), searchHistory: input => conversations.history(input) }).readRetention()).attachmentDays, agentWorkspaceRoot: destination.agentWorkspaceRoot, attachments: [{ name: artifact.name, type: artifact.mimeType, content: `data:${artifact.mimeType};base64,${bytes.toString('base64')}` }] });
+        const { content, ...metadata } = stored;
+        copiedPath = path.join(destination.agentWorkspaceRoot, metadata.artifactPath);
+        const value = buildSessionEntry({sessionId:body.sessionId,type:'message',role:'user',content:'',metadata:{attachments:[metadata],idempotencyKey:key}});
         await client.query('SELECT 1 FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE',[body.agentId,body.sessionId]);
         await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at) VALUES($1,$2,$3,$4,$5::json,$6)',[body.agentId,body.sessionId,value.id,key,JSON.stringify(value),value.ts]);
         await client.query('UPDATE conversation_sessions SET updated_at=$3 WHERE agent_id=$1 AND session_id=$2',[body.agentId,body.sessionId,value.ts]);
-      } catch(error) {
-        await fs.unlink(path.join(destination.agentWorkspaceRoot,metadata.artifactPath)).catch(()=>{});
-        throw error;
-      }
-      return value;
-    });
+        return value;
+      });
+    } catch (error) {
+      if (copiedPath) await fs.unlink(copiedPath).catch(() => {});
+      throw error;
+    }
     const a = entry.metadata.attachments[0];
     return { id: a.artifactPath, ...a, sessionId: body.sessionId };
   }

@@ -17,6 +17,8 @@ const templateRoutes = new Set();
 for (const route of literalRoutes) {
   if (route.includes('/')) templateRoutes.add(route);
 }
+// Dynamic Dream routes are composed from an agent prefix and suffix.
+for (const match of source.matchAll(/url\.pathname\.endsWith\(['"](\/dream-[^'"]+)['"]\)/g)) literalRoutes.add(`/api/agents/{agentId}${match[1]}`);
 const documented = new Set(Object.keys(spec.paths));
 // These serve the contract/documentation UI itself rather than product API operations.
 const ignoredExact = new Set(['/api/openapi.json', '/api/docs']);

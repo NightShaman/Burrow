@@ -150,15 +150,17 @@ async function completeSession(session, code, { persistAuth, fetchImpl = fetch, 
 
 function startCallbackServer(session, options = {}) {
   return new Promise((resolve) => {
-    const server = createServer((req, res) => {
+    const server = createServer(async (req, res) => {
       const url = new URL(req.url || '/', 'http://localhost');
       if (url.pathname !== session.callbackPath) { res.writeHead(404, { 'content-type': 'text/plain' }); res.end('not found'); return; }
       const state = normalize(url.searchParams.get('state'));
       const code = normalize(url.searchParams.get('code'));
       if (state !== session.state) { res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' }); res.end('<h1>OpenAI OAuth failed</h1><p>State mismatch.</p>'); return; }
       if (!code) { res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' }); res.end('<h1>OpenAI OAuth failed</h1><p>Missing authorization code.</p>'); return; }
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end('<h1>OpenAI OAuth complete</h1><p>You can close this window.</p>');
-      void completeSession(session, code, options);
+      await completeSession(session, code, options);
+      const authorized = session.status === 'authorized';
+      res.writeHead(authorized ? 200 : 400, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(authorized ? '<h1>OpenAI OAuth complete</h1><p>You can close this window.</p>' : '<h1>OpenAI OAuth failed</h1><p>Authorization could not be persisted.</p>');
     });
     server.listen(session.callbackPort, session.callbackHost, () => resolve(server));
     server.on('error', () => resolve(null));

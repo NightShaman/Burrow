@@ -55,3 +55,14 @@ describe('archive cache', () => {
     expect(() => writeArchiveDetailCache(session('one'), { turns: [] }, storage)).not.toThrow();
   });
 });
+
+it('FE-021 isolates every query scope dimension and detail identity', async () => {
+  const { archiveQueryCacheKey } = await import('./archiveCache');
+  const scope = { target: 'local', agent: 'a', query: ' hello ', date: '', timezone: 'UTC', kind: 'chat' };
+  const key = archiveQueryCacheKey(scope);
+  writeArchiveSessionCache(key, [session('one')]);
+  expect(readArchiveSessionCache(archiveQueryCacheKey({ ...scope, query: 'hello' }))?.sessions).toHaveLength(1);
+  for (const field of ['target', 'agent', 'query', 'date', 'timezone', 'kind', 'detail'] as const) {
+    expect(readArchiveSessionCache(archiveQueryCacheKey({ ...scope, [field]: 'different' }))).toBeNull();
+  }
+});

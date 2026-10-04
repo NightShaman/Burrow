@@ -90,3 +90,34 @@ describe('composer emoji picker', () => {
     expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('Still here');
   });
 });
+
+describe('IME submission', () => {
+  it.each([{ isComposing: true }, { keyCode: 229 }])('does not submit composition Enter: %j', (composition) => {
+    let sends = 0;
+    render(<ChatComposer draft="composition" setDraft={() => {}} attached={[]} onAttach={() => {}} onRemoveAttachment={() => {}} onSend={() => sends++} placeholder="Message" />);
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ...composition });
+    expect(sends).toBe(0);
+  });
+});
+
+describe('FE015 composition lifecycle and submission eligibility', () => {
+  it('keeps composing Enter local and submits once after composition ends', () => {
+    let sends = 0;
+    render(<ChatComposer draft="日本語" setDraft={() => {}} attached={[]} onAttach={() => {}} onRemoveAttachment={() => {}} onSend={() => sends++} placeholder="Message" />);
+    const input = screen.getByRole('textbox');
+    fireEvent.compositionStart(input);
+    fireEvent.compositionUpdate(input, { data: '日本語' });
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+    expect(sends).toBe(0);
+    fireEvent.compositionEnd(input, { data: '日本語' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(sends).toBe(1);
+  });
+  it.each([{ draft: 'message', disabled: true }, { draft: '   ', disabled: false }])('blocks keyboard and button submission when ineligible %j', (props) => {
+    let sends = 0;
+    render(<ChatComposer {...props} setDraft={() => {}} attached={[]} onAttach={() => {}} onRemoveAttachment={() => {}} onSend={() => sends++} placeholder="Message" />);
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+    expect(sends).toBe(0);
+    expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});

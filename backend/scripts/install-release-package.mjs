@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash, randomBytes } from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -194,13 +194,15 @@ export function mergeRuntimeEnv(template, original = '') {
   return template + (preserved.trim() ? '\n# Preserved operator settings.\n' + preserved + '\n' : '');
 }
 
-async function smokeInstall({ installDir, port, timeoutMs }) {
+export async function smokeInstall({ installDir, port, timeoutMs }) {
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new Error('health_timeout_invalid');
   const logPath = path.join(os.tmpdir(), `burrow-install-smoke-${path.basename(installDir)}-${process.pid}.log`);
   const runtimeEnv = await readEnvFile(path.join(installDir, 'burrow.env'));
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (key.startsWith('BURROW_')) delete env[key];
   Object.assign(env, runtimeEnv, { BURROW_SOURCE_ROOT: installDir, BURROW_RUNTIME_ROOT: installDir, BURROW_WORKSPACE_ROOT: path.join(installDir, 'workspace'), BURROW_CACHE_ROOT: path.join(installDir, 'cache'), BURROW_UI_HOST: '127.0.0.1', BURROW_UI_PORT: String(port) });
-  const child = execFile('/usr/bin/env', ['node', path.join(installDir, 'bin', 'burrow.mjs'), 'serve', '--root', installDir], { cwd: installDir, env });
+  const child = spawn('/usr/bin/env', ['node', path.join(installDir, 'bin', 'burrow.mjs'), 'serve', '--root', installDir], { cwd: installDir, env, detached: process.platform !== 'win32' });
+  const exited = new Promise(resolve => { child.once('exit', resolve); child.once('error', resolve); });
   const output = [];
   child.stdout?.on('data', (chunk) => output.push(chunk));
   child.stderr?.on('data', (chunk) => output.push(chunk));
@@ -209,18 +211,24 @@ async function smokeInstall({ installDir, port, timeoutMs }) {
     let lastError = null;
     while (Date.now() < deadline) {
       try {
-        const response = await fetch(`http://127.0.0.1:${port}/health`);
+        const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())) });
         const body = await response.json();
         const sourceRoot = body?.state?.sourceRoot || body?.runtimeState?.sourceRoot || body?.sourceRoot || null;
         if (response.ok && body?.ok && path.resolve(sourceRoot || '') === path.resolve(installDir)) return { ok: true, port, sourceRoot, logPath };
         lastError = new Error(`health_mismatch:${response.status}:${sourceRoot || 'unknown'}`);
       } catch (error) { lastError = error; }
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await new Promise((resolve) => setTimeout(resolve, Math.min(250, Math.max(0, deadline - Date.now()))));
     }
     throw lastError || new Error('health_timeout');
   } finally {
-    child.kill('SIGTERM');
-    await new Promise((resolve) => { child.once('exit', resolve); setTimeout(resolve, 5_000); });
+    const killGroup = (signal) => {
+      try { if (process.platform !== 'win32') process.kill(-child.pid, signal); else child.kill(signal); }
+      catch (error) { if (error.code !== 'ESRCH') throw error; }
+    };
+    killGroup('SIGTERM');
+    await new Promise(resolve => setTimeout(resolve, 100));
+    killGroup('SIGKILL');
+    await exited;
     await fs.writeFile(logPath, Buffer.concat(output.map((value) => Buffer.from(value))));
   }
 }

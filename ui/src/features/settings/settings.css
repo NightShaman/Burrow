@@ -178,7 +178,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .schedule-footer .setting-actions button{width:100%;min-height:34px;white-space:nowrap}
 @media(max-width:620px){.schedule-field-pair{grid-template-columns:1fr}.schedule-footer{grid-template-columns:1fr;gap:10px}.schedule-footer .setting-actions{display:contents}}
 
-.auth-mode-fields{display:grid;gap:12px;margin-top:12px}.auth-mode-fields .settings-description{margin:0}.auth-actions{display:flex;justify-content:flex-end;margin-top:14px}.settings-auth-warning{margin:0 0 12px;padding:9px 10px;border:1px solid color-mix(in srgb,var(--warning,#f59e0b) 45%,var(--line));border-radius:6px;background:color-mix(in srgb,var(--warning,#f59e0b) 10%,var(--surface-raised));color:var(--text);font-size:12px;line-height:1.4}.settings-auth-configured{margin:0;color:var(--muted);font-size:12px;line-height:1.4}
+.auth-mode-fields{display:grid;gap:12px;margin-top:12px}.auth-mode-fields .settings-description{margin:0}.auth-actions{display:flex;justify-content:flex-end;margin-top:14px}.settings-auth-warning{margin:0 0 12px;padding:9px 10px;border:1px solid color-mix(in srgb,var(--warn,#f59e0b) 45%,var(--line));border-radius:6px;background:color-mix(in srgb,var(--warn,#f59e0b) 10%,var(--surface-raised));color:var(--text);font-size:12px;line-height:1.4}.settings-auth-configured{margin:0;color:var(--muted);font-size:12px;line-height:1.4}
 .oauth-shortcuts{display:flex;justify-content:flex-start;margin-top:4px}.oauth-trigger{display:inline-flex;align-items:center;gap:9px;min-height:32px;padding:5px 11px;border:1px solid var(--line);border-radius:7px;background:var(--surface-raised);color:var(--text);font-weight:800}.oauth-trigger:hover{border-color:var(--accent-border);background:var(--surface-hover)}.oauth-trigger small{color:var(--muted);font-size:11px;font-weight:700}.oauth-modal-backdrop{position:fixed;inset:0;z-index:30;display:grid;place-items:center;padding:20px;background:rgb(0 0 0 / 58%)}.oauth-modal{width:min(560px,100%);max-height:min(720px,calc(100vh - 40px));overflow:auto;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:0 24px 80px rgb(0 0 0 / 35%)}.oauth-modal-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}.oauth-modal-header h2{margin:3px 0 0;font-size:20px}.oauth-status{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;margin:16px 0 18px;padding:9px 11px;border:1px solid color-mix(in srgb,var(--accent) 34%,var(--line));border-radius:8px;background:color-mix(in srgb,var(--accent) 9%,var(--surface-raised));color:var(--text);font-size:12px;font-weight:750;line-height:1.35}.oauth-status::before{content:"";width:7px;height:7px;flex:0 0 auto;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 16%,transparent)}.modal-close{width:30px;height:30px;border:1px solid var(--line);border-radius:7px;background:var(--surface-raised);color:var(--muted);font-size:20px;line-height:1}.modal-close:hover{color:var(--text);background:var(--surface-hover)}.oauth-helper{margin:0 0 14px;color:var(--muted);font-size:12px;line-height:1.45}.oauth-modal .claude-login-actions{margin-bottom:10px}
 
 /* First-run setup should feel like arrival, not an admin form. */
@@ -201,7 +201,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
 
 /* First-run provider setup stays in the wizard: setup should feel like a path, not a trapdoor. */
 .wizard-provider-empty{gap:12px;padding:24px;text-align:left;border:1px dashed color-mix(in srgb,var(--accent) 42%,var(--line));background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 9%,var(--surface-sunken)),var(--surface-sunken))}.wizard-provider-empty .primary{align-self:flex-start}
-.wizard-provider-setup{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:4px 0 18px;padding:22px;border:1px solid color-mix(in srgb,var(--accent) 32%,var(--line));border-radius:16px;background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 8%,var(--surface-sunken)),var(--surface-sunken));box-shadow:inset 0 1px rgb(255 255 255 / .04)}.wizard-provider-setup>div:first-child,.wizard-provider-setup .field:nth-of-type(2),.wizard-provider-setup .settings-request-error,.wizard-provider-actions{grid-column:1 / -1}.wizard-provider-setup h3{margin:3px 0 5px;font-size:17px}.wizard-provider-setup p{margin:0;color:var(--text-muted);font-size:13px;line-height:1.45}.wizard-provider-setup .field{margin:0}.wizard-provider-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:4px}
+.wizard-provider-setup{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:4px 0 18px;padding:22px;border:1px solid color-mix(in srgb,var(--accent) 32%,var(--line));border-radius:16px;background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 8%,var(--surface-sunken)),var(--surface-sunken));box-shadow:inset 0 1px rgb(255 255 255 / .04)}.wizard-provider-setup>div:first-child,.wizard-provider-setup .field:nth-of-type(2),.wizard-provider-setup .settings-request-error,.wizard-provider-actions{grid-column:1 / -1}.wizard-provider-setup h3{margin:3px 0 5px;font-size:17px}.wizard-provider-setup p{margin:0;color:var(--muted);font-size:13px;line-height:1.45}.wizard-provider-setup .field{margin:0}.wizard-provider-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:4px}
 @media (max-width:600px){.wizard-provider-setup{grid-template-columns:1fr;padding:18px}.wizard-provider-setup>div:first-child,.wizard-provider-setup .field:nth-of-type(2),.wizard-provider-setup .settings-request-error,.wizard-provider-actions{grid-column:auto}.wizard-provider-actions{justify-content:stretch}.wizard-provider-actions button{flex:1}}
 
 /* First-run finale: five seconds of earned drama, then the app takes the stage. */
@@ -353,8 +353,8 @@ button:disabled{cursor:not-allowed;opacity:.45}
 
 /* Column 4 ownership for the remaining nested Settings inventories. */
 .profile-document-selector{display:grid;gap:7px}
-.profile-document-selector button{display:flex;align-items:center;min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.025);color:var(--text);text-align:left;cursor:pointer}
-.profile-document-selector button.active{border-color:var(--accent);background:rgba(var(--accent-rgb),.12);box-shadow:0 0 0 1px var(--accent)}
+.profile-document-selector button{display:flex;align-items:center;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.025);color:var(--text);text-align:left;cursor:pointer}
+.profile-document-selector button.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);box-shadow:0 0 0 1px var(--accent)}
 .profile-document-overflow,.profile-document-overflow>.setting-section{height:100%;min-height:0}
 .profile-document-overflow>.setting-section{display:grid;grid-template-rows:auto minmax(0,1fr) auto;align-content:stretch}
 .profile-document-overflow .field{min-height:0}
@@ -620,7 +620,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .system-rail-summary strong span{color:var(--muted);font-family:var(--mono,monospace);font-size:10px;font-weight:600}
 .system-rail-status{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em}
 .system-rail-status i{width:7px;height:7px;border-radius:50%;background:var(--muted)}
-.system-rail-status.healthy i{background:var(--success);box-shadow:0 0 8px color-mix(in srgb,var(--success) 55%,transparent)}
+.system-rail-status.healthy i{background:var(--ok);box-shadow:0 0 8px color-mix(in srgb,var(--ok) 55%,transparent)}
 .system-rail-status.error i{background:var(--danger)}
 .system-rail-group{display:grid;padding:13px 14px}
 .system-rail-group h3{margin:0 0 4px;padding:0 1px 8px;border-bottom:1px solid var(--line-soft);color:var(--muted);font-size:9px;font-weight:900;letter-spacing:.12em;text-transform:uppercase}
@@ -632,7 +632,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .system-rail-stat small{overflow-wrap:anywhere;color:var(--muted);font-size:9px;line-height:1.35;text-align:right}
 .system-rail-meter{display:block;height:3px;overflow:hidden;border-radius:999px;background:var(--surface-input)}
 .system-rail-meter i{display:block;height:100%;border-radius:inherit;background:var(--accent);transition:width .25s ease}
-.system-rail-meter.warning i{background:var(--warning,#f59e0b)}
+.system-rail-meter.warning i{background:var(--warn,#f59e0b)}
 @media(prefers-reduced-motion:reduce){.system-rail-meter i{transition:none}}
 
 /* Mod contributions use the same column surface as native Settings: no nested card. */

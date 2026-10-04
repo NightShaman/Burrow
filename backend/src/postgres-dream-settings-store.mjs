@@ -2,6 +2,7 @@ import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { operatorTimezone } from './timezone.mjs';
 import { PostgresSettingsMetadataStore } from './postgres-settings-metadata-store.mjs';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
+import { parseCron } from './scheduled-job-store.mjs';
 import { DEFAULT_DREAM_PROMPT } from './dream-prompt-defaults.mjs';
 
 export const POSTGRES_DREAM_SETTINGS_SCHEMA_SQL = `
@@ -24,9 +25,9 @@ const timestamp = (value) => value instanceof Date ? value.toISOString() : value
 function agentId(value) { const result = text(value); if (!/^[A-Za-z0-9._-]{1,96}$/.test(result)) throw new Error('agent_id_invalid'); return result; }
 function bool(value, fallback = true) { return value === undefined ? fallback : Boolean(value); }
 function validTimezone(value) { try { new Intl.DateTimeFormat('en-US', { timeZone: value }).format(); return true; } catch { return false; } }
-function cron(value) { const result = text(value || '0 4 * * *'); if (result.split(/\s+/).length !== 5) throw new Error('dream_settings_cron_invalid'); return result; }
+function cron(value) { const result = text(value || '0 4 * * *'); try { return parseCron(result).expression; } catch { throw new Error('dream_settings_cron_invalid'); } }
 function timezone(value) { if (value == null) return null; const result = text(value || 'UTC'); if (!validTimezone(result)) throw new Error('dream_settings_timezone_invalid'); return result; }
-function prompt(value) { const result = value === undefined || value === null ? DEFAULT_DREAM_PROMPT : text(value); if (!result || result.length > 20_000) throw new Error('dream_settings_prompt_invalid'); return result; }
+function prompt(value) { const result = value === undefined || value === null ? DEFAULT_DREAM_PROMPT : String(value); if (!result.trim() || result.length > 20_000) throw new Error('dream_settings_prompt_invalid'); return result; }
 function modelId(value) { const result = text(value); if (!result) return null; if (result.length > 256) throw new Error('dream_settings_model_invalid'); return result; }
 function parseModels(value) { if (Array.isArray(value)) return value; try { return JSON.parse(value || '[]'); } catch { return []; } }
 function publicRow(row) { return row && { agentId: row.agent_id, enabled: Boolean(row.enabled), cron: row.cron_expression, timezone: row.timezone, prompt: row.prompt, modelConnectionId: row.model_connection_id || null, model: row.model || null, createdAt: timestamp(row.created_at), updatedAt: timestamp(row.updated_at) }; }

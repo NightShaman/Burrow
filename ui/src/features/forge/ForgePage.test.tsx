@@ -5,7 +5,7 @@ import { composeMusicPrompt, Forge } from './ForgePage';
 
 const apiMock = vi.hoisted(() => vi.fn());
 const fetchApiMock = vi.hoisted(() => vi.fn());
-vi.mock('../../app/api', () => ({ api: apiMock, fetchApi: fetchApiMock }));
+vi.mock('../../app/api', () => ({ api: apiMock, fetchApi: fetchApiMock, apiForTarget: (_target: unknown, ...args: unknown[]) => apiMock(...args), fetchApiForTarget: (_target: unknown, ...args: unknown[]) => fetchApiMock(...args) }));
 
 const agent = { id: 'agent-a', name: 'Smatchet' } as Agent;
 const catalog = { music: { available: false, reason: 'music_model_not_configured', models: [] }, models: [{ connectionId: 'c1', modelId: 'image-1', label: 'Image One', kind: 'image', available: true, controls: [] }, { connectionId: 'c2', modelId: 'video-1', label: 'Video One', kind: 'video', available: false, unavailableReason: 'video_disabled', controls: [] }], video: { available: false, reason: 'video_disabled' }, sourceAttachments: { available: false, reason: 'unsupported' } };
@@ -268,6 +268,17 @@ describe('Forge workspace', () => {
     renderForge([job]);
     await screen.findByText('castle.png');
     await waitFor(() => expect(fetchApiMock).toHaveBeenCalled());
-    expect(fetchApiMock.mock.calls.map(([path]) => path)).toEqual(expect.arrayContaining(['/protected/preview', '/protected/download']));
+    expect(fetchApiMock.mock.calls.map(([path]) => path)).toEqual(['/protected/preview']);
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    await waitFor(() => expect(fetchApiMock.mock.calls.map(([path]) => path)).toEqual(['/protected/preview', '/protected/download']));
   });
+});
+
+it('attaches remote artifacts with verified raw conversation identity', async () => {
+  const job = { id: 'job-owner', kind: 'image', modelId: 'image-1', prompt: 'owner output', status: 'succeeded', createdAt: '2026-09-27T00:00:00Z', artifacts: [{ id: 'artifact', kind: 'image', name: 'a.png' }] };
+  apiMock.mockImplementation((path: string) => Promise.resolve(path.endsWith('/catalog') ? catalog : path === '/api/forge/jobs' ? { jobs: [job] } : {}));
+  const remote = { ...agent, id: 'a::same', resourceId: 'same', targetId: 'a' };
+  render(<Forge target={{ id: 'a', name: 'A', enabled: true, baseUrl: 'https://a.invalid' }} agents={[remote]} selectedAgentId={remote.id} sessionId="session" />);
+  fireEvent.click(await screen.findByRole('button', { name: /Attach/ }));
+  await waitFor(() => expect(apiMock).toHaveBeenCalledWith('/api/forge/jobs/job-owner/attach', expect.objectContaining({ body: JSON.stringify({ agentId: 'same', sessionId: 'session', artifactId: 'artifact' }) })));
 });

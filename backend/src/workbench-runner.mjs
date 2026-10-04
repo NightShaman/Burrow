@@ -33,7 +33,7 @@ function compactRun(result) {
   };
 }
 
-export async function runWorkbenchStep({ rootDir, configPath, step = 'inspect', message, workspaceRoot, target = null, verifyCommand = null, runId = null, conversationId = null, args = {}, parentPermissions = null, agentRuntime = null, ...legacyOptions } = {}) {
+export async function runWorkbenchStep({ rootDir, configPath, step = 'inspect', message, workspaceRoot, target = null, verifyCommand = null, runId = null, conversationId = null, args = {}, parentPermissions = null, agentRuntime = null, stores = null, ...legacyOptions } = {}) {
   if (!rootDir) throw new Error('rootDir is required');
   if (!message) throw new Error('message is required');
   if (!STEPS.has(step)) throw new Error(`unsupported workbench step: ${step}`);
@@ -41,7 +41,7 @@ export async function runWorkbenchStep({ rootDir, configPath, step = 'inspect', 
   if (agentRuntime) {
     for (const key of authorityKeys) if (args[key] !== undefined) throw new Error(`agent_runtime_override_forbidden:${key}`);
   }
-  const runtime = await loadRuntimeConfig({ rootDir, configPath, args });
+  const runtime = await loadRuntimeConfig({ rootDir, configPath, args, stores });
   if (agentRuntime) {
     runtime.runtimeState = {
       ...runtime.runtimeState,
@@ -85,7 +85,8 @@ export async function runWorkbenchStep({ rootDir, configPath, step = 'inspect', 
       mode: 'model',
       runId: resolvedRunId,
       workspaceRoot,
-      action: 'write',
+      // A proposal preview is planning, not an executed mutation.
+      action: 'plan',
       modelConfig: runtime.modelConfig,
       skillConfig: runtime.skillsConfig,
       contextThreshold: runtime.contextConfig.contextThreshold,

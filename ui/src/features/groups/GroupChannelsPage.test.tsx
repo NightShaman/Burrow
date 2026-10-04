@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { apiForTarget } from '../../app/api';
 import { localApiTarget } from '../../app/apiTargets';
@@ -36,4 +36,30 @@ it('shows the persisted session-store time for historical group turns, not Now',
     expect(within(screen.getByText(content).closest('article')!).getByText(/TIME UNAVAILABLE/)).toBeTruthy();
   }
   expect(screen.queryByText(/· NOW/)).toBeNull();
+});
+
+
+it('FE017 external idle refresh wins over an older overlapping response', async () => {
+  let tick!: () => void;
+  const timer = vi.spyOn(window, 'setInterval').mockImplementation((callback, delay) => { if (delay === 2_000) tick = callback as () => void; return 123; });
+  let finishOld!: (value: unknown) => void;
+  let reads = 0;
+  const payload = (content: string) => ({ channel: { id: 'room-1', name: 'Group room', participantAgentIds: [] }, turns: [{ type: 'message', role: 'user', content }], runs: [] });
+  vi.mocked(apiForTarget).mockImplementation(async (_target, path) => {
+    if (path === '/api/settings/identities') return {};
+    reads++;
+    if (reads === 2) return new Promise(resolve => { finishOld = resolve; });
+    return payload(reads === 1 ? 'Initial idle' : 'External new message');
+  });
+  try {
+    render(<GroupChannelsPage channelId="room-1" target={localApiTarget} agents={[]} />);
+    await screen.findByText('Initial idle');
+    await act(async () => { tick(); });
+    await act(async () => { tick(); });
+    await screen.findByText('External new message');
+    await act(async () => { finishOld(payload('Stale overlapping message')); });
+    expect(screen.queryByText('Stale overlapping message')).toBeNull();
+    expect(screen.getByText('External new message')).toBeTruthy();
+    expect(reads).toBe(3);
+  } finally { timer.mockRestore(); }
 });

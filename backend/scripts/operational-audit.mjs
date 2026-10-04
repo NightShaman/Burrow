@@ -81,7 +81,9 @@ export async function runOperationalAudit({ root = process.cwd(), unit = 'burrow
   const doctor = parseJsonResult(doctorRun);
   const service = parseJsonResult(serviceRun);
   const retention = parseJsonResult(retentionRun);
-  const git = summarizeGitStatus(gitRun.stdout);
+  const git = gitRun.ok && gitRun.exitCode === 0
+    ? summarizeGitStatus(gitRun.stdout)
+    : { ok: false, dirty: null, count: 0, entries: [], truncated: false, exitCode: gitRun.exitCode ?? null, stderr: gitRun.stderr || '', error: 'git_execution_failed' };
 
   const checks = {
     doctor: { ok: Boolean(doctor?.ok), status: doctor?.status || null, blockers: doctor?.blockers || [], warnings: doctor?.warnings || [] },
@@ -93,7 +95,7 @@ export async function runOperationalAudit({ root = process.cwd(), unit = 'burrow
   const blockers = [];
   if (!checks.doctor.ok) blockers.push('doctor_failed');
   if (!checks.service.ok) blockers.push('service_smoke_failed');
-  if (!checks.git.ok) blockers.push('git_dirty');
+  if (!checks.git.ok) blockers.push(checks.git.error || 'git_dirty');
   if (!checks.retention.ok) blockers.push('retention_dry_run_failed');
 
   return {
@@ -111,7 +113,7 @@ export function formatAuditText(audit) {
   if (audit.blockers.length) lines.push(`Blockers: ${audit.blockers.join(', ')}`);
   lines.push(`Doctor: ${audit.checks.doctor.ok ? 'ok' : 'failed'}${audit.checks.doctor.status ? ` (${audit.checks.doctor.status})` : ''}`);
   lines.push(`Service: ${audit.checks.service.ok ? 'ok' : 'failed'} active=${audit.checks.service.active || '?'} enabled=${audit.checks.service.enabled || '?'}`);
-  lines.push(`Git: ${audit.checks.git.ok ? 'clean' : `dirty (${audit.checks.git.count})`}`);
+  lines.push(`Git: ${audit.checks.git.error ? `unknown (${audit.checks.git.exitCode}): ${audit.checks.git.stderr}` : audit.checks.git.ok ? 'clean' : `dirty (${audit.checks.git.count})`}`);
   lines.push(`Retention dry-run: ${audit.checks.retention.ok ? 'ok' : 'failed'}`);
   return lines.join('\n');
 }

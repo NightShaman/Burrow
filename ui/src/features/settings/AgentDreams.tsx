@@ -1,3 +1,4 @@
+import { rovingKeys } from '../../app/keyboardWidgets';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { SavedProvider } from '../../app/types';
@@ -42,6 +43,8 @@ function DreamModelSelect({ value, model, options, onChange, disabled }: { value
 
   useEffect(() => {
     if (!open) return;
+    const options = menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]');
+    (Array.from(options ?? []).find(option => option.getAttribute('aria-selected') === 'true') ?? options?.[0])?.focus();
     const close = (event: MouseEvent) => {
       if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
     };
@@ -55,8 +58,8 @@ function DreamModelSelect({ value, model, options, onChange, disabled }: { value
     <button type="button" className="dream-model-trigger" aria-haspopup="listbox" aria-expanded={open} aria-label="Dream model" disabled={disabled} onClick={() => setOpen((current) => !current)}>
       <span>{selected?.label ?? modelLabel(model, options)}</span><span className="dream-phase-chevron" aria-hidden="true">⌄</span>
     </button>
-    {open && <div className="dream-model-menu" role="listbox" aria-label="Dream model">
-      {options.map((option) => <button type="button" role="option" aria-selected={option.value === value} className={option.value === value ? 'selected' : ''} key={option.value} onClick={() => { onChange(option.value); setOpen(false); }}>{option.label}</button>)}
+    {open && <div className="dream-model-menu" role="listbox" aria-label="Dream model" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); setOpen(false); menuRef.current?.querySelector<HTMLButtonElement>('.dream-model-trigger')?.focus(); } else rovingKeys(event, '[role="option"]', false); }}>
+      {options.map((option) => <button type="button" role="option" aria-selected={option.value === value} className={option.value === value ? 'selected' : ''} key={option.value} onClick={() => { onChange(option.value); setOpen(false); menuRef.current?.querySelector<HTMLButtonElement>('.dream-model-trigger')?.focus(); }}>{option.label}</button>)}
     </div>}
   </div>;
 }
@@ -67,7 +70,8 @@ export function AgentDreams({ agentId, targets, savedProviders, overflowTarget }
   const dreamModels = savedProviders.flatMap((provider) => provider.models.map((model) => ({ connectionId: provider.id, model, label: `${provider.provider} · ${provider.modelLabels?.[model] ?? model}` })));
   const [settings, setSettings] = useState<DreamSettings>({ enabled: false, cron: '0 4 * * *', timezone: null, prompt: '', modelConnectionId: null, model: null });
   const selectedDreamModel = settingsModelValue(settings);
-  const [state, setState] = useState<'loading' | 'idle' | 'saving'>('loading');
+  const [state, setState] = useState<'loading' | 'idle' | 'saving' | 'error'>('loading');
+  const [retry, setRetry] = useState(0);
   const [error, setError] = useState('');
   const [effectiveModel, setEffectiveModel] = useState<DreamModel | null>(null);
   const [modelResolutionError, setModelResolutionError] = useState<string | null>(null);
@@ -78,7 +82,7 @@ export function AgentDreams({ agentId, targets, savedProviders, overflowTarget }
   useEffect(() => {
     const version = ++requestVersion.current;
     const controller = new AbortController();
-    setState('loading'); setError(''); setReceiptError(''); setReceipts([]);
+    setState('loading'); setError(''); setSettings({ enabled: false, cron: '0 4 * * *', timezone: null, prompt: '', modelConnectionId: null, model: null }); setEffectiveModel(null); setModelResolutionError(null); setReceiptError(''); setReceipts([]);
     Promise.all([
       request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(owner.resourceId)}/dream-settings`, { signal: controller.signal }),
       request<DreamCycleResponse>(`/api/agents/${encodeURIComponent(owner.resourceId)}/dream-cycle?limit=5`, { signal: controller.signal }).catch((cause) => {
@@ -95,11 +99,12 @@ export function AgentDreams({ agentId, targets, savedProviders, overflowTarget }
     }).catch(cause => {
       if (controller.signal.aborted || version !== requestVersion.current) return;
       setError(cause instanceof Error ? `Could not load dream settings: ${cause.message}` : 'Could not load dream settings.');
-      setState('idle');
+      setState('error');
     });
     return () => controller.abort();
-  }, [owner.target.id, owner.resourceId]);
+  }, [owner.target.id, owner.target.baseUrl, owner.resourceId, retry]);
   const save = async () => {
+    if (state !== 'idle') return;
     const version = requestVersion.current;
     setState('saving'); setError('');
     try {
@@ -138,7 +143,7 @@ export function AgentDreams({ agentId, targets, savedProviders, overflowTarget }
       {receiptError && <p className="settings-request-error" role="alert">{receiptError}</p>}
     </div>;
   return <><SettingSection title="Dreams">
-    <p className="settings-description">Configure scheduled dreaming for this agent.</p>
+    <p className="settings-description">Configure scheduled dreaming for this agent.</p>{state === 'error' && <button type="button" onClick={() => setRetry(value => value + 1)}>Retry loading</button>}
     <div className="dream-settings-fields">
       <label className="agent-enabled"><input type="checkbox" checked={settings.enabled} disabled={disabled} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} /><span>Enable scheduled dreaming</span></label>
       <div className="dream-schedule-fields"><Field label="Cron"><input value={settings.cron} disabled={disabled} onChange={(event) => setSettings({ ...settings, cron: event.target.value })} /></Field><Field label="Timezone"><label><input type="checkbox" aria-label="Use operator timezone" checked={settings.timezone === null} disabled={disabled} onChange={event => setSettings({ ...settings, timezone: event.target.checked ? null : settings.effectiveTimezone || '' })} />Use operator timezone</label>{settings.timezone === null ? <small className="field-hint">Effective timezone: {settings.effectiveTimezone || 'Loading…'}. Follows operator timezone changes.</small> : <input value={settings.timezone} disabled={disabled} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} />}</Field><Field label="Model"><DreamModelSelect value={selectedDreamModel} model={settings} options={[{ value: '', label: 'Use agent chat model' }, ...dreamModels.map((option) => ({ value: dreamModelValue(option.connectionId, option.model), label: option.label }))]} onChange={(value) => setSettings({ ...settings, ...dreamModelFromValue(value) })} disabled={disabled} /></Field></div>

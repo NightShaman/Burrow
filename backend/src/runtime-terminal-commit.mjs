@@ -1,7 +1,7 @@
 import { compactAskChatResult } from './runtime-result-assembly.mjs';
 import { persistSessionWorkingContext } from './working-context.mjs';
 
-export function createTerminalCommitter({ stores = null, agentId, continuityAuthority = null, rootDir, sessionRoot, sessionId, runId, generation, command, json, initialWorkingContext, objective = null, traceRef = null, testHooks } = {}) {
+export function createTerminalCommitter({ stores = null, agentId, continuityAuthority = null, rootDir, sessionRoot, sessionId, runId, generation, command, json, initialWorkingContext, objective = null, traceRef = null, logger = null, testHooks } = {}) {
   if (!stores?.conversations) throw new Error('runtime_stores_required');
   if (!continuityAuthority?.commit || !continuityAuthority?.interrupt) throw new Error('runtime_continuity_authority_required');
   return async function commitTerminalResult({ workingContext = initialWorkingContext, finalize, branch = 'terminal' } = {}) {
@@ -35,6 +35,7 @@ export function createTerminalCommitter({ stores = null, agentId, continuityAuth
       return json ? superseded : compactAskChatResult(superseded);
     }
     const result = completion.value;
+    await logger?.terminal?.();
     void testHooks?.afterTerminalResponse?.({ branch, sessionId, runId, postTerminalCuration: null });
     return json ? { ...result, continuity: { ...completion.head, current: true } } : compactAskChatResult(result);
   };

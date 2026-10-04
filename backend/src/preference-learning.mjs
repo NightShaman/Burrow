@@ -60,6 +60,17 @@ export async function preferenceLearningStateAsync({ agentId, metadataStore } = 
 
 
 /** PostgreSQL implementation: profile, learning state, and audit share one transaction and profile lock. */
+export async function markPreferenceReviewedAsync({ agentId, metadataStore, signals, at, disposition = 'noop' }) {
+  requireAsyncStores(agentId, metadataStore);
+  const reviewedSignalIds = signals.map(signal => signal.id);
+  return metadataStore.atomicUpdate(stateKey(agentId), current => ({
+    ...(current || { version: 1, agentId }),
+    reviewedSignalIds: [...new Set([...(current?.reviewedSignalIds || []), ...reviewedSignalIds])].slice(-MAX_SIGNALS),
+    lastReviewedAt: at, lastReviewedSignalAt: signals.map(signal => signal.observedAt).sort().at(-1),
+    reviewedDisposition: disposition,
+  }), at);
+}
+
 export async function applyPreferenceUpdateAsync({ agentId, markdown, sourceSignals = [], profileStore, at = new Date().toISOString() } = {}) {
   const id = text(agentId); const document = typeof markdown === 'string' ? markdown.trim() : '';
   if (!id || !document || !profileStore?.atomicPreferenceUpdate) throw new Error('preference_update_invalid');

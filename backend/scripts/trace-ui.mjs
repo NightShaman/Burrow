@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import http from 'node:http';
+import { loadBurrowConfig, resolveRuntimeStateConfig } from '../src/config.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -195,22 +196,20 @@ export async function summarizeTraceRun(rootDir, runId) {
 }
 
 export async function listTraceRuns(rootDir) {
-  let entries;
-  try {
-    entries = await fs.readdir(rootDir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-
-  const dirs = entries.filter((entry) => entry.isDirectory());
   const runs = [];
-  for (const dir of dirs) {
-    try {
-      runs.push(await summarizeTraceRun(rootDir, dir.name));
-    } catch {
-      // Ignore malformed or concurrently removed trace run directories.
+  let visited = 0;
+  async function scan(dir, depth) {
+    if (depth > 4 || ++visited > 10000) return;
+    let entries;
+    try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    // A run owns evidence files; container directories must never aggregate children.
+    if (depth > 0 && entries.some((entry) => entry.isFile() && /\.(jsonl?|ndjson|md|txt)$/u.test(entry.name))) {
+      try { runs.push(await summarizeTraceRun(path.dirname(dir), path.basename(dir))); } catch {}
+      return;
     }
+    for (const entry of entries) if (entry.isDirectory()) await scan(path.join(dir, entry.name), depth + 1);
   }
+  await scan(rootDir, 0);
 
   runs.sort((a, b) => {
     const byUpdated = Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
@@ -270,7 +269,7 @@ function renderPage(runs) {
 <body>
   <main>
     <h1>Burrow Trace UI</h1>
-    <p class="muted">Recent trace runs from <code>./traces</code>.</p>
+    <p class="muted">Recent trace runs from the configured runtime cache trace root.</p>
 
     <section class="card">
       <h2>Latest Summary</h2>
@@ -281,7 +280,7 @@ function renderPage(runs) {
 
     <section class="card">
       <h2>Copyable Commands</h2>
-      <pre>node bin/burrow.mjs trace --latest --tool-output</pre>
+      <pre>node bin/burrow.mjs trace --root &lt;application-root&gt; --latest --tool-output</pre>
       <pre>npm run service:smoke</pre>
     </section>
 
@@ -335,7 +334,13 @@ export async function serveTraceUi({ rootDir = path.join(process.cwd(), 'traces'
 const isCli = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 if (isCli) {
   const port = parsePort(process.argv.slice(2));
-  const rootDir = path.join(process.cwd(), 'traces');
+  const argv = process.argv.slice(2);
+  const rootIndex = argv.indexOf('--root');
+  if (rootIndex >= 0 && !argv[rootIndex + 1]) throw new Error('--root requires a directory');
+  const applicationRoot = path.resolve(rootIndex >= 0 ? argv[rootIndex + 1] : process.cwd());
+  const loaded = await loadBurrowConfig({ rootDir: applicationRoot });
+  const runtime = resolveRuntimeStateConfig({ rootDir: applicationRoot, loadedConfig: loaded.config });
+  const rootDir = path.join(runtime.cacheRoot, 'traces');
   const server = await serveTraceUi({ rootDir, port });
   const address = server.address();
   const actualPort = typeof address === 'object' && address ? address.port : port;

@@ -29,3 +29,34 @@ describe('archive transcript attribution', () => {
     expect(archiveTurnText({ role: 'user', content: 'Task', metadata: { parentAgentId: 'hatchet' } }, 'Minion', names, 'Rob')).toBe('## Hatchet\n\nTask');
   });
 });
+
+import { cleanup, render, fireEvent, screen, waitFor } from '@testing-library/react';
+import { afterEach, vi } from 'vitest';
+import { ChatArchiveReader } from './ArchiveReaders';
+import type { ArchiveSession } from './archiveTypes';
+afterEach(cleanup);
+
+it('FE-024 renders sender identities consistently with copied turns, including ordinary controls', () => {
+  const session: ArchiveSession = { agentId: 'smatchet', agentName: 'Smatchet', sessionId: 'owned-fixture', id: 'owned-fixture', title: 'Fixture', summary: '', turnCount: 4, chatTurnCount: 4, createdAt: null, updatedAt: null, archived: true, archivedAt: null, kind: null, lastRole: null, lastRunId: null };
+  const turns = [
+    { role: 'agent', content: 'Peer', metadata: { fromAgentId: 'hatchet' } },
+    { role: 'user', content: 'Delegated', metadata: { parentAgentId: 'guido' } },
+    { role: 'user', content: 'Ordinary operator' },
+    { role: 'assistant', content: 'Ordinary assistant' },
+  ];
+  const { container } = render(<ChatArchiveReader session={session} detail={{ turns }} loading={false} error="" earlierLoading={false} earlierError="" historyUnavailable={false} onLoadEarlier={() => {}} onRestart={() => {}} agentNames={names} operatorName="Rob" />);
+  expect([...container.querySelectorAll('.archive-turn-meta strong')].map(n => n.textContent)).toEqual(['Hatchet', 'Guido', 'Rob', 'Smatchet']);
+  turns.forEach((turn, i) => expect(archiveTurnText(turn, 'Smatchet', names, 'Rob')).toContain(`## ${['Hatchet', 'Guido', 'Rob', 'Smatchet'][i]}`));
+});
+
+it('FE024 recipient metadata never replaces sender in rendered or actual clipboard output', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText}});
+  Object.defineProperty(window, 'isSecureContext', {configurable:true, value:true});
+  const session = {agentId:'smatchet',agentName:'Smatchet',sessionId:'peer',id:'peer',title:'Peer',summary:'',turnCount:1,chatTurnCount:1,createdAt:null,updatedAt:null,archived:true,archivedAt:null,kind:null,lastRole:null,lastRunId:null} as ArchiveSession;
+  const turn = {role:'agent',content:'Sender report',metadata:{fromAgentId:'hatchet',toAgentId:'smatchet'}};
+  const {container} = render(<ChatArchiveReader session={session} detail={{turns:[turn]}} loading={false} error="" earlierLoading={false} earlierError="" historyUnavailable={false} onLoadEarlier={() => {}} onRestart={() => {}} agentNames={names} operatorName="Rob" />);
+  expect(container.querySelector('.archive-turn-meta strong')?.textContent).toBe('Hatchet');
+  fireEvent.click(screen.getByRole('button',{name:'Copy loaded chat as Markdown'}));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith('## Hatchet\n\nSender report'));
+});

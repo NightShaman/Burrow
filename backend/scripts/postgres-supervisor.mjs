@@ -15,8 +15,8 @@ async function shutdown(signal) {
 process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
 process.once('SIGINT', () => { void shutdown('SIGINT'); });
 child.once('exit', async (code, signal) => {
-  await handle.close();
+  try { await handle.close(); } catch (error) { console.error(error); process.exitCode = 1; return; }
   process.exitCode = signal ? 128 + (signal === 'SIGTERM' ? 15 : 2) : (code ?? 1);
 });
 
-child.once('error', async (error) => { console.error('Application launch failed:', error.message); await handle.close(); process.exitCode = 1; });
+child.once('error', async (error) => { console.error('Application launch failed:', error.message); try { await handle.close(); } catch (cleanupError) { console.error(cleanupError); } process.exitCode = 1; });

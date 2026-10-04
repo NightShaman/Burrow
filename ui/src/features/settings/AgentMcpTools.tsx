@@ -17,11 +17,12 @@ export function AgentMcpTools({ agentId, targets, overflowTarget }: { agentId: s
   const [selectedConnectionId, setSelectedConnectionId] = useState('');
   const [enabled, setEnabled] = useState<Set<string>>(new Set());
   const [historicalModGrants, setHistoricalModGrants] = useState<{ connectionId: string; toolName: string; enabled: boolean }[]>([]);
-  const [state, setState] = useState<'loading' | 'idle' | 'saving'>('loading');
+  const [state, setState] = useState<'loading' | 'idle' | 'saving' | 'error'>('loading');
+  const [retry, setRetry] = useState(0);
   const [error, setError] = useState('');
   useEffect(() => {
     const controller = new AbortController();
-    setState('loading'); setError('');
+    setState('loading'); setError(''); setConnections([]); setEnabled(new Set()); setHistoricalModGrants([]); setSelectedConnectionId('');
     Promise.all([
       request<{ connections: McpConnection[] }>('/api/settings/mcp-connections', { signal: controller.signal }),
       request<{ tools: { connectionId: string; toolName: string; enabled: boolean }[] }>(`/api/agents/${encodeURIComponent(owner.resourceId)}/mcp-tools`, { signal: controller.signal }),
@@ -37,10 +38,10 @@ export function AgentMcpTools({ agentId, targets, overflowTarget }: { agentId: s
     }).catch(cause => {
       if (controller.signal.aborted) return;
       setError(cause instanceof Error ? `Could not load MCP tools: ${cause.message}` : 'Could not load MCP tools.');
-      setState('idle');
+      setState('error');
     });
     return () => controller.abort();
-  }, [owner.target.id, owner.resourceId]);
+  }, [owner.target.id, owner.target.baseUrl, owner.resourceId, retry]);
   const toggleConnection = (connection: McpConnection) => setEnabled(current => {
     const keys = grantableTools(connection).map(tool => `${connection.id}:${tool.name}`);
     const selectAll = !keys.every(key => current.has(key));
@@ -57,7 +58,8 @@ export function AgentMcpTools({ agentId, targets, overflowTarget }: { agentId: s
     return next;
     });
   };
-  const save = async () => { setState('saving'); setError(''); try { const tools = [...historicalModGrants, ...connections.flatMap(connection => grantableTools(connection).filter(tool => enabled.has(`${connection.id}:${tool.name}`)).map(tool => ({ connectionId: connection.id, toolName: tool.name, enabled: true })))]; await request(`/api/agents/${encodeURIComponent(owner.resourceId)}/mcp-tools`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tools }) }); } catch (cause) { setError(cause instanceof Error ? `Could not save MCP tools: ${cause.message}` : 'Could not save MCP tools.'); } finally { setState('idle'); } };
+  const save = async () => {
+    if (state !== 'idle') return; setState('saving'); setError(''); try { const tools = [...historicalModGrants, ...connections.flatMap(connection => grantableTools(connection).filter(tool => enabled.has(`${connection.id}:${tool.name}`)).map(tool => ({ connectionId: connection.id, toolName: tool.name, enabled: true })))]; await request(`/api/agents/${encodeURIComponent(owner.resourceId)}/mcp-tools`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tools }) }); } catch (cause) { setError(cause instanceof Error ? `Could not save MCP tools: ${cause.message}` : 'Could not save MCP tools.'); } finally { setState('idle'); } };
   const grantableConnections = connections.filter(connection => grantableTools(connection).length > 0);
   const selectedConnection = grantableConnections.find(connection => connection.id === selectedConnectionId) ?? grantableConnections[0];
   const toolOptions = (connection: McpConnection) => {
@@ -70,10 +72,10 @@ export function AgentMcpTools({ agentId, targets, overflowTarget }: { agentId: s
   };
 
   if (overflowTarget) {
-    const serverList = <SettingSection title="Connected tool servers"><p className="settings-description">Choose a server to configure its tools.</p>{state === 'loading' ? <p className="settings-empty">Loading MCP tools…</p> : grantableConnections.length === 0 ? <p className="settings-empty">No grantable MCP tools available. Add and discover one under Connections.</p> : <div className="mcp-server-selector">{grantableConnections.map(connection => { const selectedCount = grantableTools(connection).filter(tool => enabled.has(`${connection.id}:${tool.name}`)).length; return <button type="button" className={selectedConnection?.id === connection.id ? 'active' : ''} aria-pressed={selectedConnection?.id === connection.id} onClick={() => setSelectedConnectionId(connection.id)} key={connection.id}><strong>{connection.name}</strong><small>{selectedCount}/{grantableTools(connection).length} grants</small></button>; })}</div>}{error && <p className="settings-request-error" role="alert">{error}</p>}</SettingSection>;
+    const serverList = <SettingSection title="Connected tool servers">{state === 'error' && <button type="button" onClick={() => setRetry(value => value + 1)}>Retry loading</button>}<p className="settings-description">Choose a server to configure its tools.</p>{state === 'loading' ? <p className="settings-empty">Loading MCP tools…</p> : grantableConnections.length === 0 ? <p className="settings-empty">No grantable MCP tools available. Add and discover one under Connections.</p> : <div className="mcp-server-selector">{grantableConnections.map(connection => { const selectedCount = grantableTools(connection).filter(tool => enabled.has(`${connection.id}:${tool.name}`)).length; return <button type="button" className={selectedConnection?.id === connection.id ? 'active' : ''} aria-pressed={selectedConnection?.id === connection.id} onClick={() => setSelectedConnectionId(connection.id)} key={connection.id}><strong>{connection.name}</strong><small>{selectedCount}/{grantableTools(connection).length} grants</small></button>; })}</div>}{error && <p className="settings-request-error" role="alert">{error}</p>}</SettingSection>;
     const overflow = <div className="settings-overflow-content mcp-tools-overflow">{selectedConnection ? <SettingSection title={`${selectedConnection.name} tools`}><p className="settings-description">Choose the discovered tools this agent may use.</p>{toolOptions(selectedConnection)}{error && <p className="settings-request-error" role="alert">{error}</p>}<div className="card-actions"><button className="primary" onClick={() => void save()} disabled={state !== 'idle'}>{state === 'saving' ? 'Saving…' : 'Save MCP tools'}</button></div></SettingSection> : <><strong>Selectable tools</strong><p className="settings-empty">Select a connected tool server.</p></>}</div>;
     return <>{serverList}{createPortal(overflow, overflowTarget)}</>;
   }
 
-  return <SettingSection title="MCP tools"><p className="settings-description">Choose the discovered MCP tools this agent may use.</p>{state === 'loading' ? <p className="settings-empty">Loading MCP tools…</p> : grantableConnections.length === 0 ? <p className="settings-empty">No grantable MCP tools available. Add and discover one under Connections.</p> : <div className="mcp-tool-list">{grantableConnections.map(connection => { const selectedCount = grantableTools(connection).filter(tool => enabled.has(`${connection.id}:${tool.name}`)).length; return <details className="mcp-tool-group" key={connection.id}><summary><strong>{connection.name}</strong><small>{selectedCount}/{grantableTools(connection).length} grants</small></summary>{toolOptions(connection)}</details>; })}</div>}{error && <p className="settings-request-error" role="alert">{error}</p>}<div className="card-actions"><button className="primary" onClick={() => void save()} disabled={state !== 'idle'}>{state === 'saving' ? 'Saving…' : 'Save MCP tools'}</button></div></SettingSection>;
+  return <SettingSection title="MCP tools">{state === 'error' && <button type="button" onClick={() => setRetry(value => value + 1)}>Retry loading</button>}<p className="settings-description">Choose the discovered MCP tools this agent may use.</p>{state === 'loading' ? <p className="settings-empty">Loading MCP tools…</p> : grantableConnections.length === 0 ? <p className="settings-empty">No grantable MCP tools available. Add and discover one under Connections.</p> : <div className="mcp-tool-list">{grantableConnections.map(connection => { const selectedCount = grantableTools(connection).filter(tool => enabled.has(`${connection.id}:${tool.name}`)).length; return <details className="mcp-tool-group" key={connection.id}><summary><strong>{connection.name}</strong><small>{selectedCount}/{grantableTools(connection).length} grants</small></summary>{toolOptions(connection)}</details>; })}</div>}{error && <p className="settings-request-error" role="alert">{error}</p>}<div className="card-actions"><button className="primary" onClick={() => void save()} disabled={state !== 'idle'}>{state === 'saving' ? 'Saving…' : 'Save MCP tools'}</button></div></SettingSection>;
 }

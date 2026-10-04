@@ -1,3 +1,4 @@
+import { applyLogicalMemberMigration } from './postgres-logical-metadata-migration.mjs';
 import { POSTGRES_LOSSLESS_NATIVE_CATALOGS_SQL } from './postgres-remaining-json.mjs';
 import { applyLegacyContinuity } from './postgres-lossless-continuity.mjs';
 import { migrationChecksum, migrationLockKey, withPostgresTransaction } from './postgres-foundation.mjs';
@@ -60,6 +61,7 @@ export async function migratePostgres(pool, { migrations = POSTGRES_MIGRATIONS, 
         continue;
       }
       if ([18,26].includes(migration.version) && migration === POSTGRES_MIGRATIONS[migration.version-1]) await applyLegacyContinuity(client, migration);
+      else if (migration.version === 38 && migration === POSTGRES_MIGRATIONS[37]) await applyLogicalMemberMigration(client, migration);
       else if (migration.version === 32 && migration === POSTGRES_MIGRATIONS[31]) await client.query(POSTGRES_LOSSLESS_NATIVE_CATALOGS_SQL);
       else await client.query(migration.sql);
       await client.query('INSERT INTO burrow_schema_migrations(version,name,checksum) VALUES($1,$2,$3)', [migration.version, migration.name, checksum]);

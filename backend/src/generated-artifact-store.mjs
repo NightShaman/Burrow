@@ -2,6 +2,7 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { validateArtifactRoot } from './artifact-root-validation.mjs';
 import { normalizeModelOutputArtifact } from './model-output-artifacts.mjs';
 
 const GENERATED_ARTIFACT_DIRECTORY = path.join('artifacts', 'generated');
@@ -41,7 +42,9 @@ async function generatedRoot(agentWorkspaceRoot) {
   if (!agentWorkspaceRoot) throw new Error('artifact_workspace_required');
   const workspace = path.resolve(agentWorkspaceRoot);
   const root = path.resolve(workspace, GENERATED_ARTIFACT_DIRECTORY);
+  if (!await validateArtifactRoot(workspace, root, { missing: true })) throw new Error('artifact_root_invalid');
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
+  if (!await validateArtifactRoot(workspace, root)) throw new Error('artifact_root_invalid');
   const realRoot = await fs.realpath(root);
   if (realRoot !== root) throw new Error('artifact_root_invalid');
   return { workspace, root };
@@ -96,7 +99,9 @@ export async function persistGeneratedArtifact({ agentWorkspaceRoot, metadata = 
       await pipeline(sourceHandle.createReadStream(), destinationHandle.createWriteStream());
     }
   } catch (error) {
-    await fs.rm(destination, { force: true }).catch(() => {});
+    // Never unlink by a re-resolved pathname after failure: a replaced parent
+    // could make cleanup remove a file outside the owning workspace. Partial
+    // owned files are preferable until descriptor-relative unlink is available.
     throw error;
   } finally {
     await sourceHandle?.close().catch(() => {});
@@ -113,6 +118,7 @@ export async function resolveGeneratedArtifact({ agentWorkspaceRoot, storageRefe
   const root = path.resolve(workspace, GENERATED_ARTIFACT_DIRECTORY);
   const candidate = path.resolve(workspace, String(storageReference));
   if (!contained(root, candidate)) return null;
+  if (!await validateArtifactRoot(workspace, root)) return null;
   const resolved = await regularFileWithoutSymlinkAncestors(root, candidate);
   if (!resolved) return null;
   const basename = path.basename(candidate).replace(/^[0-9a-f]{8}-[0-9a-f-]{27}-/i, '');

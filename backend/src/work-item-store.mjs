@@ -111,11 +111,11 @@ function isActiveWorkItem(item = {}, { sessionId = null, workspaceRoot = null, n
 
 export function workItemEligibility(item = {}, step = 'inspect', { override = false } = {}) {
   if (['done', 'archived', 'completed', 'running'].includes(item.status)) return { ok: false, step, blockers: [`work_item_${item.status}`], allowedNextSteps: [] };
-  if (override) return { ok: true, step, override: true, blockers: [], allowedNextSteps: allowedNextSteps(item, { override: true }) };
   if (!STEP_ORDER.includes(step)) return { ok: false, step, blockers: [`unsupported_step:${step}`], allowedNextSteps: allowedNextSteps(item) };
+  if (override) return { ok: true, step, override: true, blockers: [], allowedNextSteps: allowedNextSteps(item, { override: true }) };
+  if (step === 'inspect') return { ok: true, step, blockers: [], allowedNextSteps: allowedNextSteps(item) };
   const failed = lastFailed(item);
   if (failed) return { ok: false, step, blockers: ['previous_step_failed'], failedStep: failed.step, allowedNextSteps: allowedNextSteps(item) };
-  if (step === 'inspect') return { ok: true, step, blockers: [], allowedNextSteps: allowedNextSteps(item) };
   if (step === 'propose' && !completedStep(item, 'inspect')) return { ok: false, step, blockers: ['inspect_required'], allowedNextSteps: allowedNextSteps(item) };
   if (step === 'verify' && !completedStep(item, 'propose')) return { ok: false, step, blockers: ['proposal_required'], allowedNextSteps: allowedNextSteps(item) };
   if (step === 'factory' && !completedStep(item, 'verify')) return { ok: false, step, blockers: ['verification_required'], allowedNextSteps: allowedNextSteps(item) };

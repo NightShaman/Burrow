@@ -59,9 +59,10 @@ export function useChatRun({ selectedAgentId, selected, selectedTarget = localAp
   const streamAbortRef = useRef<Record<string, AbortController>>({});
   const activeRunForSelection = selectedAgentId && session.sessionId ? activeRuns[runKey(selectedAgentId, session.sessionId)] ?? null : null;
 
-  const sendMessage = async (draftOverride?: string) => {
+  // Acceptance is synchronous; the returned promise still tracks run completion.
+  const sendMessage = async (draftOverride?: string, onAccepted?: () => void) => {
     const message = (draftOverride ?? session.draft).trim() || (session.attached.length ? 'Please analyze the attached files.' : '');
-    if (!message || !selectedAgentId || !session.sessionId || activeRunForSelection) return;
+    if (!message || !selectedAgentId || !session.sessionId || activeRunForSelection || streamAbortRef.current[runKey(selectedAgentId, session.sessionId)]) return;
     const target = { agentId: selectedAgentId, resourceAgentId: selected?.resourceId ?? selectedAgentId, sessionId: session.sessionId };
     const runId = createRunId(target.sessionId);
     const provider = savedProviders.find((item) => item.provider === selected?.provider) ?? savedProviders[0];
@@ -74,7 +75,7 @@ export function useChatRun({ selectedAgentId, selected, selectedTarget = localAp
     setActiveRuns((current) => ({ ...current, [targetKey]: { runId, ...target } }));
     setLiveProgressByRun((current) => ({ ...current, [targetKey]: [] }));
     setLiveAnswerByRun((current) => ({ ...current, [targetKey]: '' }));
-    setAgentActivity(target.agentId, 'thinking'); session.clearError(); session.setDraft(''); session.clearAttachment(); session.leaveNewSessionForMessage();
+    setAgentActivity(target.agentId, 'thinking'); session.clearError(); session.setDraft(''); onAccepted?.(); session.clearAttachment(); session.leaveNewSessionForMessage();
     session.appendTurn(target.agentId, target.sessionId, { type: 'message', role: 'user', content: message, ts: new Date().toISOString(), runId, ...(attachments.length ? { metadata: { attachments: attachments.map(({ name, type, size }, index) => ({ index, name, type, size, encoding: 'data-url', ...(type.startsWith('image/') ? { preview: attachments[index].content } : {}) })) } } : {}) });
     let streamedAnswer = ''; let progressEntries: ProgressEntry[] = []; let toolSequence = 0; let frame = 0;
     const flushLiveText = () => { frame = 0; setLiveProgressByRun((current) => ({ ...current, [targetKey]: progressEntries })); setLiveAnswerByRun((current) => ({ ...current, [targetKey]: streamedAnswer })); };

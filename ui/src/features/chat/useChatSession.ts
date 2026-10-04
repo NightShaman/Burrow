@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { apiForTarget, textFromChatValue, type ActiveA2AActivity, type ActiveChatRun, type ActiveChatRunsResponse, type ActiveSubagent, type ChatAttachment, type ProgressEntry, type SessionSummary, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
+import { targetOwnerKey } from '../../app/useOwnedApi';
 import { localApiTarget, targetForResource, type ApiTarget } from '../../app/apiTargets';
 import { conversationCacheKey, readConversationCache, writeConversationCache, type ConversationCache } from './chatConversationCache';
 import { readDraftCache, writeDraftCache, type DraftCache } from './chatDraftCache';
@@ -12,6 +13,7 @@ export { conversationCacheKey } from './chatConversationCache';
 const defaultApiTargets = [localApiTarget];
 
 type RuntimeRunForSelection = {
+  targetId: string;
   runId: string;
   agentId: string;
   sessionId: string;
@@ -47,9 +49,9 @@ function runtimeToolActivity(run: ActiveChatRun): ToolActivity | undefined {
   return { runId: run.runId, items, status: hasError ? 'warn' : hasPending ? 'running' : 'ok' };
 }
 
-function runtimeRunForSelection(run: ActiveChatRun | undefined): RuntimeRunForSelection | null {
+function runtimeRunForSelection(run: ActiveChatRun | undefined, targetId: string): RuntimeRunForSelection | null {
   if (!run) return null;
-  return { runId: run.runId, agentId: run.agentId, sessionId: run.sessionId, latestUserMessage: typeof run.latestUserMessage === 'string' ? run.latestUserMessage : '', progress: runtimeRunProgress(run), toolActivity: runtimeToolActivity(run) };
+  return { targetId, runId: run.runId, agentId: run.agentId, sessionId: run.sessionId, latestUserMessage: typeof run.latestUserMessage === 'string' ? run.latestUserMessage : '', progress: runtimeRunProgress(run), toolActivity: runtimeToolActivity(run) };
 }
 
 function formatElapsed(from?: string | null, to = Date.now()) {
@@ -88,25 +90,33 @@ function subagentToolActivity(child: ActiveSubagent, now = Date.now()): ToolActi
   };
 }
 
-function runtimeRunForSubagent(child: ActiveSubagent | undefined): RuntimeRunForSelection | null {
+function runtimeRunForSubagent(child: ActiveSubagent | undefined, targetId: string): RuntimeRunForSelection | null {
   if (!child || child.final) return null;
   const runId = child.runId || child.id;
   const agentId = child.agentId || '';
   const traceChildSessionId = child.trace && 'childSessionId' in child.trace && typeof child.trace.childSessionId === 'string' ? child.trace.childSessionId : '';
   const sessionId = child.sessionId || traceChildSessionId || '';
   if (!runId || !agentId || !sessionId) return null;
-  return { runId, agentId, sessionId, latestUserMessage: child.purpose || child.label || '', progress: [], toolActivity: subagentToolActivity(child), subagent: child };
+  return { targetId, runId, agentId, sessionId, latestUserMessage: child.purpose || child.label || '', progress: [], toolActivity: subagentToolActivity(child), subagent: child };
 }
 
 /** Owns durable chat-session state, draft retention, and runtime reconciliation. */
 export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = defaultApiTargets) {
   const sessionRepository = useMemo(() => createChatSessionRepository(targets), [targets]);
   const [draftCache, setDraftCache] = useState<DraftCache>(readDraftCache);
-  const [attached, setAttached] = useState<ChatAttachment[]>([]);
+  const [attachmentState, setAttachmentState] = useState<{ scope: object; files: ChatAttachment[] } | null>(null);
   const [isNewSession, setIsNewSession] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionId, setSessionId] = useState('');
   const [turns, setTurns] = useState<SessionTurn[]>([]);
+  const attachmentOwner = targetForResource(targets, selectedAgentId);
+  const attachmentKey = JSON.stringify([targetOwnerKey(attachmentOwner.target), attachmentOwner.resourceId, sessionId]);
+  const attachmentScopeRef = useRef({ key: attachmentKey });
+  if (attachmentScopeRef.current.key !== attachmentKey) attachmentScopeRef.current = { key: attachmentKey };
+  const attachmentScope = attachmentScopeRef.current;
+  const attached = attachmentState?.scope === attachmentScope ? attachmentState.files : [];
+  const isAttachmentScopeCurrent = useCallback(() => attachmentScopeRef.current === attachmentScope, [attachmentScope]);
+
   const [chatError, setChatError] = useState('');
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
   const [a2aActivities, setA2aActivities] = useState<ActiveA2AActivity[]>([]);
@@ -318,7 +328,7 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
             && (!parentRunId || !selectedRuntimeRun || parentRunId === selectedRuntimeRun.runId);
         });
         const childActivities = matchingLiveSubagents.map((child) => subagentToolActivity(child));
-        const projectedRuntimeRun = runtimeRunForSelection(selectedRuntimeRun) ?? runtimeRunForSubagent(isChildSession ? matchingLiveSubagents[0] : undefined);
+        const projectedRuntimeRun = runtimeRunForSelection(selectedRuntimeRun, owner.target.id) ?? runtimeRunForSubagent(isChildSession ? matchingLiveSubagents[0] : undefined, owner.target.id);
         if (selectedRuntimeRun) recoveredProgressByRunRef.current[selectedRuntimeRun.runId] = projectedRuntimeRun?.progress ?? [];
         setRuntimeRun(projectedRuntimeRun);
         setRuntimeChildActivities(childActivities);
@@ -402,17 +412,20 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   }, []);
   const parentSessionIdForAgent = useCallback((agentId: string) => parentSessionIdByAgentRef.current[agentId] || 'default', []);
   const resetSession = useCallback(async () => {
-    if (!selectedAgentId) return;
-    await sessionRepository.resetSession(selectedAgentId, sessionId || 'default');
-    setSessionId('default');
-    sessionIdByAgentRef.current[selectedAgentId] = 'default';
-    const cacheKey = conversationCacheKey(selectedAgentId, 'default');
+    if (!selectedAgentId) return false;
+    const resetSessionId = sessionId || 'default';
+    await sessionRepository.resetSession(selectedAgentId, resetSessionId);
+    if (!isAttachmentScopeCurrent()) return false;
+    setSessionId(resetSessionId);
+    sessionIdByAgentRef.current[selectedAgentId] = resetSessionId;
+    const cacheKey = conversationCacheKey(selectedAgentId, resetSessionId);
     conversationCacheRef.current[cacheKey] = [];
     writeConversationCache(conversationCacheRef.current, cacheKey);
     setTurns([]);
     setIsNewSession(true);
     setChatError('');
-  }, [selectedAgentId, sessionId, sessionRepository]);
+    return true;
+  }, [selectedAgentId, sessionId, sessionRepository, isAttachmentScopeCurrent]);
   const leaveNewSessionForMessage = useCallback(() => {
     if (isNewSession) skipNextConversationLoadRef.current = true;
     setIsNewSession(false);
@@ -430,13 +443,18 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
     setToolActivityVersion((version) => version + 1);
   }, []);
   const toolActivityForRun = useCallback((runId: string) => toolActivityByRunRef.current[runId], []);
-  const setAttachment = useCallback((attachments: ChatAttachment[]) => setAttached((current) => [...current, ...attachments]), []);
-  const clearAttachment = useCallback(() => setAttached([]), []);
-  const removeAttachment = useCallback((index: number) => setAttached((current) => current.filter((_, attachmentIndex) => attachmentIndex !== index)), []);
+  const setAttachment = useCallback((attachments: ChatAttachment[]) => {
+    if (!isAttachmentScopeCurrent()) return;
+    setAttachmentState((current) => ({ scope: attachmentScope, files: [...(current?.scope === attachmentScope ? current.files : []), ...attachments] }));
+  }, [attachmentScope, isAttachmentScopeCurrent]);
+  const clearAttachment = useCallback(() => setAttachmentState(null), []);
+  const removeAttachment = useCallback((index: number) => setAttachmentState((current) => current?.scope === attachmentScope ? { ...current, files: current.files.filter((_, attachmentIndex) => attachmentIndex !== index) } : current), [attachmentScope]);
   const cancelRuntimeRun = useCallback(async (run: RuntimeRunForSelection) => {
-    const owner = targetForResource(targets, run.agentId);
     try {
-      await apiForTarget(owner.target, `/api/chat/${encodeURIComponent(run.runId)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: owner.resourceId, reason: 'Stopped by operator' }) });
+      // Recovered runs carry raw backend IDs, not UI-qualified resource IDs.
+      const target = targets.find((candidate) => candidate.id === run.targetId && candidate.enabled);
+      if (!target) throw new Error('Owning target is unavailable.');
+      await apiForTarget(target, `/api/chat/${encodeURIComponent(run.runId)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: run.agentId, reason: 'Stopped by operator' }) });
     } catch (error) {
       setChatError(error instanceof Error ? `Could not stop run: ${error.message}` : 'Could not stop run.');
     }
@@ -444,5 +462,5 @@ export function useChatSession(selectedAgentId: string, targets: ApiTarget[] = d
   const reportError = useCallback((message: string) => setChatError(message), []);
   const clearError = useCallback(() => setChatError(''), []);
 
-  return { attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation: isLoadingConversation || isSwitchingAgent, draft, setDraft, refreshSessions, refreshConversation, selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun, a2aActivities, runtimeRun, runtimeChildActivities, cancelRuntimeRun };
+  return { isAttachmentScopeCurrent, attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation: isLoadingConversation || isSwitchingAgent, draft, setDraft, refreshSessions, refreshConversation, selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun, a2aActivities, runtimeRun, runtimeChildActivities, cancelRuntimeRun };
 }

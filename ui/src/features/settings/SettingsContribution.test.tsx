@@ -115,7 +115,7 @@ it('selects credential forms without conflating selection and revoke, and clears
   const view = render(<DeclarativeSection contribution={contribution!} section={contribution!.sections[0]} module={{}} overflowTarget={overflow} />);
   fireEvent.click(within(overflow).getByRole('button', { name: 'Revoke' }));
   expect(within(view.container).getByLabelText('Gateway ID')).toBeTruthy();
-  fireEvent.click(within(overflow).getByRole('button', { name: 'Cancel' }));
+  fireEvent.click(within(document.body).getByRole('button', { name: 'Cancel' }));
   fireEvent.click(within(overflow).getByRole('button', { name: 'Hatchet' }));
   expect(within(overflow).getByRole('button', { name: 'Hatchet', pressed: true })).toBeTruthy();
   fireEvent.change(within(view.container).getByLabelText('New secret'), { target: { value: 'fixture-secret' } });

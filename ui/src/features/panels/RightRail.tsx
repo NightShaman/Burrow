@@ -6,10 +6,10 @@ import { Chevron, RailExpander } from '../workspace/WorkspaceRail';
 import { getPanelTitle } from '../../app/panelRegistry';
 import { AccountCard } from './AccountCard';
 export type PanelContext = { accounts: Account[] };
-export function RightRail({ collapsed, topPanel, bottomPanel, singlePanel, layout, renderPanel, onExpand, onCollapse, onResizeSplit }: { collapsed: boolean; topPanel: PanelId; bottomPanel: PanelId; singlePanel?: PanelId; layout: RailLayout; renderPanel: (panel: PanelId) => ReactNode; onExpand: () => void; onCollapse: () => void; onResizeSplit: (event: PointerEvent) => void }) {
+export function RightRail({ collapsed, topPanel, bottomPanel, singlePanel, layout, renderPanel, onExpand, onCollapse, onResizeSplit, split = 50, onSplitChange }: { collapsed: boolean; topPanel: PanelId; bottomPanel: PanelId; singlePanel?: PanelId; layout: RailLayout; renderPanel: (panel: PanelId) => ReactNode; onExpand: () => void; onCollapse: () => void; onResizeSplit: (event: PointerEvent) => void; split?: number; onSplitChange?: (value: number) => void }) {
  const fullPanel = layout === 'divided' ? topPanel : singlePanel ?? (layout === 'bottom' ? bottomPanel : topPanel);
  const isDivided = layout === 'divided';
- return <aside className={`right-rail ${collapsed ? 'collapsed' : ''}`}>{collapsed ? <RailExpander label="Open right rail" onClick={onExpand} side="right" /> : <><div className="rail-head"><span>{getPanelTitle(fullPanel)}</span><button onClick={onCollapse} aria-label="Collapse right rail"><Chevron direction="right" /></button></div><div className={`right-panes ${isDivided ? 'divided' : 'full'}`}><section className="rail-panel top">{renderPanel(isDivided ? topPanel : fullPanel)}</section>{isDivided && <><button className="resize-divider vertical" onPointerDown={onResizeSplit} aria-label="Resize right rail panels" /><section className="rail-panel bottom"><div className="rail-head"><span>{getPanelTitle(bottomPanel)}</span></div>{renderPanel(bottomPanel)}</section></>}</div></>}</aside>;
+ return <aside className={`right-rail ${collapsed ? 'collapsed' : ''}`}>{collapsed ? <RailExpander label="Open right rail" onClick={onExpand} side="right" /> : <><div className="rail-head"><span>{getPanelTitle(fullPanel)}</span><button onClick={onCollapse} aria-label="Collapse right rail"><Chevron direction="right" /></button></div><div className={`right-panes ${isDivided ? 'divided' : 'full'}`}><section className="rail-panel top">{renderPanel(isDivided ? topPanel : fullPanel)}</section>{isDivided && <><button className="resize-divider vertical" role="separator" aria-orientation="horizontal" aria-valuemin={25} aria-valuemax={75} aria-valuenow={split} onKeyDown={event => { const next = event.key === 'Home' ? 25 : event.key === 'End' ? 75 : event.key === 'ArrowUp' ? split - 5 : event.key === 'ArrowDown' ? split + 5 : null; if (next !== null) { event.preventDefault(); onSplitChange?.(Math.max(25, Math.min(75, next))); } }} onPointerDown={onResizeSplit} aria-label="Resize right rail panels" /><section className="rail-panel bottom"><div className="rail-head"><span>{getPanelTitle(bottomPanel)}</span></div>{renderPanel(bottomPanel)}</section></>}</div></>}</aside>;
 }
 
 export function CodexAccounts({ accounts, onReorder }: { accounts: Account[]; onReorder?: (draggedId: string, targetId: string) => void }) {
@@ -17,8 +17,8 @@ export function CodexAccounts({ accounts, onReorder }: { accounts: Account[]; on
  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
  const clearDrag = () => { setDraggedId(null); setDropTargetId(null); };
  const handleDrop = (event: DragEvent<HTMLElement>, targetId: string) => { event.preventDefault(); const sourceId = event.dataTransfer.getData('text/plain') || draggedId; if (sourceId && sourceId !== targetId) onReorder?.(sourceId, targetId); clearDrag(); };
- return <section className="codex-content account-status">{accounts.map((account) => {
-   const remaining = 100 - account.used;
+ return <section className="codex-content account-status">{accounts.map((account, index) => {
+   const remaining = account.used === null ? null : 100 - account.used;
    const statusClass = account.status.toLowerCase().replace(/\s+/g, '-');
    const isDragging = draggedId === account.id;
    const isDropTarget = dropTargetId === account.id && !isDragging;
@@ -26,6 +26,7 @@ export function CodexAccounts({ accounts, onReorder }: { accounts: Account[]; on
      ? account.meters.filter((meter) => !(meter.key === 'primary' && meter.remainingPercent === 0 && !meter.resetAt))
      : [{ key: 'legacy', label: '', remainingPercent: remaining, resetAt: null }];
    return <AccountCard name={account.name} subtitle={account.plan} status={account.status} statusTone={statusClass as 'active' | 'paused' | 'quota-exceeded' | 'reauth-required'} className={`${isDragging ? 'dragging' : ''} ${isDropTarget ? 'drop-target' : ''}`} key={account.id} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', account.id); setDraggedId(account.id); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTargetId(account.id); }} onDragLeave={() => setDropTargetId((current) => current === account.id ? null : current)} onDrop={(event) => handleDrop(event, account.id)} onDragEnd={clearDrag}>
+     {onReorder && <div><button type="button" aria-label={`Move ${account.name} up`} disabled={index === 0} onClick={() => onReorder(account.id, accounts[index - 1].id)}>↑</button><button type="button" aria-label={`Move ${account.name} down`} disabled={index === accounts.length - 1} onClick={() => onReorder(account.id, accounts[index + 1].id)}>↓</button></div>}
      <div className={`account-meters ${meters.length === 2 ? 'two-up' : ''}`}>
        {meters.map((meter, index) => { const meterLevel = meter.remainingPercent === null ? 'unknown' : meter.remainingPercent <= 15 ? 'low' : meter.remainingPercent <= 50 ? 'medium' : 'high'; return <div className={`account-meter ${index === 1 ? 'secondary' : 'primary'}`} key={meter.key}>
          <div className="usage"><i style={{ width: `${meter.remainingPercent ?? 0}%` }} /></div>

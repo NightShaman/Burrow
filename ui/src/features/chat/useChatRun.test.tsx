@@ -134,3 +134,41 @@ describe('useChatRun', () => {
   });
 
 });
+
+
+describe('FE-014 immediate acceptance', () => {
+  it.each(['agent', 'session', 'blank'])('does not accept an unavailable %s', async (missing) => {
+    const session = createSession();
+    if (missing === 'session') session.sessionId = '';
+    if (missing === 'blank') session.draft = '  ';
+    const { result } = renderHook(() => useChatRun({ selectedAgentId: missing === 'agent' ? '' : 'nigel', selected: undefined, savedProviders: [], session, setAgentActivity: vi.fn() }));
+    const accepted = vi.fn();
+    await act(async () => { await result.current.sendMessage(undefined, accepted); });
+    expect(accepted).not.toHaveBeenCalled();
+    expect(session.setDraft).not.toHaveBeenCalled();
+    expect(streamChatMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts synchronously, rejects duplicate/running sends and awaits completion', async () => {
+    let complete!: (value: Awaited<ReturnType<typeof streamChat>>) => void;
+    streamChatMock.mockImplementation(() => new Promise((resolve) => { complete = resolve; }));
+    const session = createSession();
+    const { result } = renderHook(() => useChatRun({ selectedAgentId: 'nigel', selected: undefined, savedProviders: [], session, setAgentActivity: vi.fn() }));
+    const accepted = vi.fn(); const rejected = vi.fn(); let settled = false;
+    let completion!: Promise<void>;
+    act(() => {
+      completion = result.current.sendMessage('Accepted', accepted);
+      void completion.then(() => { settled = true; });
+      void result.current.sendMessage('Duplicate', rejected);
+      expect(accepted).toHaveBeenCalledTimes(1);
+    });
+    expect(settled).toBe(false);
+    await act(async () => { await result.current.sendMessage('Next draft', rejected); });
+    expect(rejected).not.toHaveBeenCalled();
+    expect(streamChatMock).toHaveBeenCalledTimes(1);
+    session.setDraft.mockClear(); session.draft = 'Typed next draft';
+    await act(async () => { complete({ terminalType: 'run.completed', finalResult: { ok: true, answerText: 'Done' } }); await completion; });
+    expect(settled).toBe(true);
+    expect(session.setDraft).not.toHaveBeenCalled();
+  });
+});

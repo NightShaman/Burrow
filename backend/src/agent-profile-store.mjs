@@ -20,7 +20,7 @@ function kind(value) {
 function markdown(value) {
   if (typeof value !== 'string') throw new Error('agent_profile_markdown_required');
   if (value.length > MAX_DOCUMENT_CHARS) throw new Error('agent_profile_markdown_too_large');
-  return value.trim();
+  return value;
 }
 
 function document(row) {

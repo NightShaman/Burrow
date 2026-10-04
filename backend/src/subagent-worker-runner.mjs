@@ -1,3 +1,5 @@
+import { CHAT_TOOL_RESULT_HISTORY_LIMIT, CHAT_TOOL_CALL_HISTORY_LIMIT, compactToolCalls, exactRepeatVerdict, fingerprint, normalizedToolOutcome, appendBoundedChatHistory } from './tool-loop-detection.mjs';
+import { accumulateToolConsequences } from './runtime-result-shapes.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createModelAdapter } from './model-adapter.mjs';
@@ -10,7 +12,7 @@ import { conversationAuthority } from './conversation-authority.mjs';
 import { updateSubagentStatus } from './subagent-store.mjs';
 import { normalizeProviderMessages } from './provider-messages.mjs';
 import { prepareNativeToolContinuation } from './native-continuation-preparation.mjs';
-import { summarizeToolResults } from './runtime-result-shapes.mjs';
+import { changedPathsFromToolResults, summarizeToolResults } from './runtime-result-shapes.mjs';
 import { boundedRedactedValue } from './redaction.mjs';
 import { chatToolActivity } from './runtime-plain-chat-finalizer.mjs';
 
@@ -144,11 +146,12 @@ async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSes
   const executionPolicy = normalizeExecutionPolicyInput(executionPolicyInput);
   toolCalls = toolCalls.map((call, index) => ({ ...call, id: call.id || `tool-call-${index}` }));
   const proposal = proposalFromNativeToolCalls(toolCalls);
-  const reviews = reviewProposalActions({ actions: proposal.actions, workspaceRoot: target.root });
+  const reviews = reviewProposalActions({ actions: proposal.actions, workspaceRoot: target.root, executionContext: parentExecutionContext });
   const executionContext = createExecutionContext({
     conversationStore: parentExecutionContext?.conversationStore || parentExecutionContext?.stores?.conversations,
     stores: parentExecutionContext?.stores,
     agentId: parentExecutionContext?.agentId,
+    executionBoundaries: parentExecutionContext?.executionBoundaries || null,
     abortSignal: signal,
     sessionId: childSessionId, conversationId, workspaceRoot: target.root, target, dataRoot, cacheRoot: traceLogger?.traceDir || null,
     executionEnvironment: parentExecutionContext?.executionEnvironment?.kind === 'remote' ? parentExecutionContext.executionEnvironment : null,
@@ -178,19 +181,24 @@ async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSes
 
 function continuationToolCallsForTruncatedEvidence(toolResults = [], continuationCounts = new Map()) {
   const calls = [];
-  const observedOffsets = new Set(toolResults
-    .filter((result) => result?.ok && result.filePath)
-    .map((result) => `${result.filePath}:${Math.max(0, Number(result.offsetBytes || 0))}`));
-  const observedOffsetList = toolResults
-    .filter((result) => result?.ok && result.filePath)
-    .map((result) => ({ filePath: result.filePath, offsetBytes: Math.max(0, Number(result.offsetBytes || 0)) }));
+  const deliveredRanges = toolResults.filter(result => result?.ok && result.tool === 'files_read' && result.filePath)
+    .map(result => ({ filePath: result.filePath, start: Number(result.offsetBytes || 0),
+      end: Number(result.offsetBytes || 0) + Number(result.delivery?.returnedBytes ?? result.returnedBytes ?? 0) }));
   for (const result of toolResults) {
-    if (!result?.ok || !result.truncated || !result.filePath) continue;
-    const offsetBytes = Math.max(0, Number(result.offsetBytes || 0) + Number(result.returnedBytes || 0));
+    if (!result?.ok || !(result.delivery?.truncated ?? result.truncated) || !result.filePath) continue;
+    let offsetBytes = Math.max(0, Number(result.delivery?.nextOffsetBytes ?? (Number(result.offsetBytes || 0) + Number(result.returnedBytes || 0))));
     if (!Number.isFinite(offsetBytes) || offsetBytes >= Number(result.bytes || 0)) continue;
+    // Only contiguous delivered bytes close a gap; a disjoint later read does not.
+    let previous;
+    do {
+      previous = offsetBytes;
+      for (const range of deliveredRanges) {
+        if (range.filePath === result.filePath && range.start <= offsetBytes && range.end > offsetBytes) offsetBytes = range.end;
+      }
+    } while (previous !== offsetBytes);
+    if (offsetBytes >= Number(result.bytes || 0)) continue;
     const key = `${result.filePath}:${offsetBytes}`;
-    const laterRangeAlreadyObserved = observedOffsetList.some((observed) => observed.filePath === result.filePath && observed.offsetBytes > Number(result.offsetBytes || 0));
-    if (laterRangeAlreadyObserved || observedOffsets.has(key) || continuationCounts.has(key)) continue;
+    if (continuationCounts.has(key)) continue;
     continuationCounts.set(key, true);
     calls.push({ name: 'files_read', arguments: { filePath: result.filePath, offsetBytes, maxBytes: 32_000 }, forcedContinuation: true });
     if (calls.length >= 2) break;
@@ -231,6 +239,7 @@ function compactEvidenceItem(result = {}) {
     bytes: Number(result.bytes || 0),
     truncated: Boolean(result.truncated),
     content: compactText(result.content, CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS),
+    delivery: result.delivery || { returnedBytes: Buffer.byteLength(String(result.content || "").slice(0, CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS)), truncated: Boolean(result.truncated) || String(result.content || "").length > CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS, nextOffsetBytes: Number(result.offsetBytes || 0) + Buffer.byteLength(String(result.content || "").slice(0, CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS)) },
     error: compactText(result.error, 800) || null,
     warnings: (result.warnings || []).slice(0, 8),
   };
@@ -270,8 +279,8 @@ function compactEvidenceItem(result = {}) {
     stdout: compactText(result.stdout, CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS), stderr: compactText(result.stderr, 1_200),
     resultFingerprint: result.resultFingerprint || null, error: compactText(result.error, 800) || null,
   };
-  if (result.tool === 'files_edit') return {
-    ...base, filePath: result.filePath || null, changedFiles: (result.changedFiles || []).slice(0, 20),
+  if (['files_write', 'files_edit', 'files_patch'].includes(result.tool)) return {
+    ...base, filePath: result.filePath || null, touchedFiles: (result.touchedFiles || []).slice(0, 20), changedFiles: (result.changedFiles || []).slice(0, 20),
     beforeHash: result.beforeHash || null, afterHash: result.afterHash || null, resultFingerprint: result.resultFingerprint || null,
     error: compactText(result.error, 800) || null,
   };
@@ -333,6 +342,22 @@ function compactEvidenceForHandoff(toolResults = []) {
   return retained;
 }
 
+function retainChildResults(history, results, { limit = CHAT_TOOL_RESULT_HISTORY_LIMIT } = {}) {
+  history.consequences = accumulateToolConsequences(history.consequences, results);
+  history.allArtifacts ||= new Set();
+  history.allMemoryWrites ||= new Set();
+  for (const result of results) {
+    for (const item of (Array.isArray(result.artifacts) ? result.artifacts : (result.artifacts ? [result.artifacts] : []))) history.allArtifacts.add(item);
+    if (result.ok) for (const item of (Array.isArray(result.memoryWrites) ? result.memoryWrites : [])) history.allMemoryWrites.add(item);
+    if (result.ok && (result.sideEffectsApplied === true || ['files_write', 'files_edit', 'files_patch'].includes(result.tool))) history.sideEffectsApplied = true;
+    else if (result.ok && !['files_read', 'files_list', 'files_find', 'files_search', 'files_inspect', 'git_status', 'git_diff'].includes(result.tool) && result.sideEffectsApplied !== false && history.sideEffectsApplied !== true) history.sideEffectsApplied = null;
+    const receipt = compactEvidenceItem(result);
+    if (result.tool === 'files_read') receipt.content = String(result.content || '').slice(0, CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS);
+    if (result.tool === 'files_read') receipt.delivery = result.delivery || { returnedBytes: result.returnedBytes || 0, truncated: Boolean(result.truncated) || String(result.content || '').length > CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS, nextOffsetBytes: Number(result.offsetBytes || 0) + Number(result.returnedBytes || 0) };
+    appendBoundedChatHistory(history, receipt, Math.max(1, Number(limit) || CHAT_TOOL_RESULT_HISTORY_LIMIT), 'omittedToolResults');
+  }
+}
+
 function subagentResult({ ok, summary, blockers = [], warnings = [], verification = null, toolResults = [], target = null } = {}) {
   return {
     ok: Boolean(ok),
@@ -342,11 +367,13 @@ function subagentResult({ ok, summary, blockers = [], warnings = [], verificatio
     // Full raw tool output is preserved in the child trace artifacts. The IPC
     // result and delegated record deliberately carry bounded evidence only.
     evidence: compactEvidenceForHandoff(toolResults),
-    artifacts: [],
-    changedFiles: [],
-    memoryWrites: [],
+    artifacts: toolResults.allArtifacts ? [...toolResults.allArtifacts] : toolResults.flatMap(result => result.artifacts || []),
+    changedFiles: toolResults.consequences?.changedFiles || changedPathsFromToolResults(toolResults),
+    memoryWrites: toolResults.allMemoryWrites ? [...toolResults.allMemoryWrites] : toolResults.flatMap(result => result.ok ? (result.memoryWrites || []) : []),
+    ...(toolResults.consequences ? { consequences: toolResults.consequences, omittedToolResults: toolResults.omittedToolResults || 0 } : {}),
     ...(verification ? { verification } : {}),
-    sideEffectsApplied: false,
+    sideEffectsApplied: toolResults.consequences ? (toolResults.sideEffectsApplied ?? (toolResults.sideEffectsApplied === null ? null : false)) : toolResults.some(result => result.ok && (result.sideEffectsApplied === true || ['files_write', 'files_edit', 'files_patch'].includes(result.tool))) ? true
+      : toolResults.some(result => result.ok && !['files_read', 'files_list', 'files_find', 'files_search', 'files_inspect', 'git_status', 'git_diff'].includes(result.tool) && result.sideEffectsApplied !== false) ? null : false,
     verificationTarget: target?.root || null,
   };
 }
@@ -377,6 +404,7 @@ function subagentTerminalMissingResult({ toolResults = [], target = null, text =
 function terminalResultFromToolCalls(toolCalls = [], { toolResults = [], target = null } = {}) {
   const call = toolCalls.find((item) => item?.name === 'finish_subagent');
   if (!call) return null;
+  if (toolCalls.length !== 1) return subagentResult({ ok: false, summary: 'Mixed terminal batch rejected; requested actions were not executed.', blockers: ['subagent_terminal_must_be_sole_call'], toolResults, target });
   const args = call.arguments || {};
   const status = compactString(args.status || 'completed');
   const summary = compactString(args.summary);
@@ -409,7 +437,8 @@ function followupPromptWithEvidence({ prompt, toolResults = [], latestResults = 
   return [
     prompt,
     '',
-    'Evidence ledger (all executed evidence references; a missing full excerpt is not missing evidence):',
+    'Evidence ledger (retained executed evidence references; full output remains in child trace artifacts):',
+    toolResults.omittedToolResults ? `${toolResults.omittedToolResults} older receipts omitted from the retained window; all-run consequences remain aggregated.` : null,
     boundedEvidenceLedger(toolResults) || '(no evidence)',
     '',
     'Current-round compact tool evidence JSON:',
@@ -508,6 +537,7 @@ export async function runSpawnSubagentChild({
   let lastText = firstText;
   let activitySequence = 0;
   const toolResults = [];
+  const completedCalls = [];
   let current = first;
   let terminalResult = terminalResultFromToolCalls(firstToolCalls, { toolResults, target });
   const forcedContinuations = new Map();
@@ -520,13 +550,22 @@ export async function runSpawnSubagentChild({
       if (!forced.length) break;
       toolCalls = forced;
     }
+    signal?.throwIfAborted();
+    const repeat = exactRepeatVerdict(toolCalls, completedCalls, modelConfig || {});
+    if (repeat?.action === 'block') {
+      terminalResult = subagentResult({ ok: false, summary: 'Minion stopped repeated unchanged tool calls; work may be incomplete.', blockers: ['subagent_repeated_no_progress'], toolResults, target });
+      break;
+    }
     await progress?.({ type: 'subagent-progress', phase: 'tool-request', id, toolCallCount: toolCalls.length });
     await recordLiveActivity({ kind: 'tool', phase: 'tool-request', label: `Starting ${toolCalls.length} tool${toolCalls.length === 1 ? '' : 's'}`, tool: toolCalls[0]?.name || null, counts: { toolCalls: toolCalls.length } }, 'tool_request');
     const batch = await runSubagentToolCalls({ toolCalls, target, dataRoot, childSessionId, conversationId: owner.conversationId || null, traceLogger: modelTrace, executionPolicy: executionPolicyInput, modelConfig, observedToolResults: toolResults, parentExecutionContext, signal });
     const batchOk = batch.results.every((result) => result?.ok !== false);
     await progress?.({ type: 'subagent-progress', phase: 'tool-result', id, resultCount: batch.results.length });
     await recordLiveActivity({ kind: 'tool', phase: 'tool-result', label: `Finished ${batch.results.length} tool result${batch.results.length === 1 ? '' : 's'}`, status: batchOk ? 'completed' : 'error', tool: batch.results[0]?.tool || toolCalls[0]?.name || null, error: batchOk ? null : (batch.results.find((result) => result?.ok === false)?.error || 'tool_failed'), counts: { toolResults: batch.results.length } }, batchOk ? 'tool_result' : 'tool_error');
-    toolResults.push(...batch.results);
+    retainChildResults(toolResults, batch.results, { limit: modelConfig?.toolResultHistoryLimit });
+    compactToolCalls(toolCalls).forEach((call, index) => {
+      if (batch.results[index]) appendBoundedChatHistory(completedCalls, { callFingerprint: call.callFingerprint, outcomeFingerprint: fingerprint(normalizedToolOutcome(batch.results[index])) }, CHAT_TOOL_CALL_HISTORY_LIMIT, 'omittedCompletedToolCalls');
+    });
     activitySequence = await appendChildToolRound({
       authority, sessionId: childSessionId, runId: id, traceDir, iteration: round + 1,
       toolCalls, toolResults: batch.results, activitySequence,
@@ -578,9 +617,19 @@ export async function runSpawnSubagentChild({
       await updateSubagentStatus({ dataRoot, id, status: 'failed', phase: 'idle', result, activity: subagentLiveActivity({ kind: 'terminal', phase: 'idle', status: 'error', label: 'Subagent failed', completedAt: nowIso(), error: result.blockers?.[0] || null }), provenance: { source: 'spawn-subagent-child', reason: 'model_continuation_threw' } });
       return result;
     }
+    // Native serialization records the bytes actually delivered on raw results.
+    // Copy that metadata back without retaining their large payloads.
+    for (let index = 0; index < batch.results.length; index++) {
+      const retained = toolResults[toolResults.length - batch.results.length + index];
+      if (retained && batch.results[index]?.delivery) retained.delivery = { ...batch.results[index].delivery };
+    }
     await progress?.({ type: 'subagent-progress', phase: 'model-response', id });
     await recordLiveActivity({ kind: 'model', phase: 'model-response', label: next.ok ? 'Model continuation received' : 'Model continuation failed', status: next.ok ? 'completed' : 'error', model: modelConfig?.model || null, error: next.ok ? null : (next.error || next.status) }, next.ok ? 'model_response' : 'model_error');
     if (nativeContinuation && Array.isArray(next?.nativeTranscript)) messages.splice(0, messages.length, ...next.nativeTranscript);
+    // A completed but empty continuation cannot finish a child. Give the
+    // existing structured-terminal synthesis path one chance; transport and
+    // incomplete/provider failures remain fatal.
+    if (!next.ok && next.error === 'model_response_empty') break;
     if (!next.ok) {
       const result = subagentResult({ ok: false, summary: 'Minion follow-up model call failed.', blockers: [`subagent_model_failed:${next.error || next.status}`], toolResults, target });
       await updateSubagentStatus({ dataRoot, id, status: 'failed', phase: 'idle', result, activity: subagentLiveActivity({ kind: 'terminal', phase: 'idle', status: 'error', label: 'Subagent failed', completedAt: nowIso(), error: result.blockers?.[0] || null }), provenance: { source: 'spawn-subagent-child', reason: 'model_failed_after_tools' } });
@@ -615,7 +664,7 @@ export async function runSpawnSubagentChild({
   });
   await progress?.({ type: 'subagent-progress', phase: 'terminal-response', id });
   await recordLiveActivity({ kind: 'model', phase: 'terminal-response', label: synthesis.ok ? 'Terminal summary received' : 'Terminal summary failed', status: synthesis.ok ? 'completed' : 'error', model: modelConfig?.model || null, error: synthesis.ok ? null : (synthesis.error || synthesis.status) }, synthesis.ok ? 'terminal_response' : 'terminal_error');
-  if (!synthesis.ok) {
+  if (!synthesis.ok && synthesis.error !== 'model_response_empty') {
     const result = subagentResult({ ok: false, summary: 'Minion final synthesis model call failed.', blockers: [`subagent_model_failed:${synthesis.error || synthesis.status}`], toolResults, target });
     await updateSubagentStatus({ dataRoot, id, status: 'failed', phase: 'idle', result, activity: subagentLiveActivity({ kind: 'terminal', phase: 'idle', status: 'error', label: 'Subagent failed', completedAt: nowIso(), error: result.blockers?.[0] || null }), provenance: { source: 'spawn-subagent-child', reason: 'final_synthesis_failed' } });
     await conversationStore.updateMetadata({ agentId, sessionId: childSessionId, update: old => ({ ...old, sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: 'failed', subagentOk: false, workerProfile: 'spawn_subagent' }) });
@@ -642,4 +691,4 @@ export async function runSpawnSubagentChild({
 
 }
 
-export const __subagentWorkerRunner__ = Object.freeze({ runSubagentToolCalls, childPrompt, proposalFromNativeToolCalls, boundedEvidenceLedger, compactEvidenceItem, compactEvidenceForHandoff, followupPromptWithEvidence, finalSynthesisPrompt, terminalResultFromToolCalls, subagentEmptyFinalResult, subagentTerminalMissingResult });
+export const __subagentWorkerRunner__ = Object.freeze({ retainChildResults, subagentResult, continuationToolCallsForTruncatedEvidence, runSubagentToolCalls, childPrompt, proposalFromNativeToolCalls, boundedEvidenceLedger, compactEvidenceItem, compactEvidenceForHandoff, followupPromptWithEvidence, finalSynthesisPrompt, terminalResultFromToolCalls, subagentEmptyFinalResult, subagentTerminalMissingResult });

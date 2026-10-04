@@ -1,4 +1,4 @@
-import { normalizePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
+import { normalizePostgresPool, postgresTransactionContext, withPostgresTransaction } from './postgres-foundation.mjs';
 
 export const POSTGRES_MOD_DISTRIBUTION_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS mod_sources (
@@ -51,7 +51,7 @@ export function createPostgresModDistributionRepository({ pool } = {}) {
       async uninstallMetadata(id) { const [installation,lifecycle] = await Promise.all([query('SELECT mod_id,source_id,version,archive_sha256,installed_at,updated_at FROM mod_installations WHERE mod_id=$1',[id]),query('SELECT mod_id,enabled,created_at,updated_at FROM mod_lifecycle WHERE mod_id=$1',[id])]); return { installation:first(installation), lifecycle:first(lifecycle) }; },
       async removeMetadata(id) { await query('DELETE FROM mod_installations WHERE mod_id=$1',[id]); await query('DELETE FROM mod_lifecycle WHERE mod_id=$1',[id]); await query('DELETE FROM mcp_connections WHERE id=$1 AND base_url=$2',[`mod.${id}`,`mod://${id}`]); },
       async restoreMetadata(metadata) { if(metadata.installation) await query('INSERT INTO mod_installations (mod_id,source_id,version,archive_sha256,installed_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(mod_id) DO UPDATE SET source_id=EXCLUDED.source_id,version=EXCLUDED.version,archive_sha256=EXCLUDED.archive_sha256,installed_at=EXCLUDED.installed_at,updated_at=EXCLUDED.updated_at',[metadata.installation.mod_id,metadata.installation.source_id,metadata.installation.version,metadata.installation.archive_sha256,metadata.installation.installed_at,metadata.installation.updated_at]); if(metadata.lifecycle) await query('INSERT INTO mod_lifecycle (mod_id,enabled,created_at,updated_at) VALUES ($1,$2,$3,$4) ON CONFLICT(mod_id) DO UPDATE SET enabled=EXCLUDED.enabled,created_at=EXCLUDED.created_at,updated_at=EXCLUDED.updated_at',[metadata.lifecycle.mod_id,metadata.lifecycle.enabled,metadata.lifecycle.created_at,metadata.lifecycle.updated_at]); },
-      async transaction(callback) { return withPostgresTransaction(pool, (client) => callback(make(client))); },
+      async transaction(callback) { return withPostgresTransaction(queryer === pool ? pool : postgresTransactionContext(queryer), (client) => callback(make(client))); },
     };
   }
   return make(pool);

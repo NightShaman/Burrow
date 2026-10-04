@@ -19,7 +19,7 @@ async function main() {
   try {
     const result = await runSpawnSubagentChild({
       ...childArgs,
-      parentExecutionContext: { conversationStore, agentId: childArgs.owner?.agentId },
+      parentExecutionContext: { conversationStore, agentId: childArgs.owner?.agentId, executionBoundaries: childArgs.executionBoundaries || null },
       progress: async (event = {}) => {
         process.stdout.write(`${JSON.stringify({ __burrowSubagentProgress: true, ...event, at: new Date().toISOString() })}\n`);
       },

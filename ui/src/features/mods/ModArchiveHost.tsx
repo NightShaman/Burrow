@@ -22,7 +22,7 @@ export function ModArchiveHost({ panel, date }: { panel: ModArchive; date: strin
     // A late async mount must never clear a newer mount's DOM.
     const node = document.createElement('div');
     host.replaceChildren(node);
-    const timer = window.setTimeout(() => { if (!disposed) { disposed = true; setLoading(false); setError('The mod panel took too long to load.'); } }, 15000);
+    const timer = window.setTimeout(() => { if (!disposed) { disposed = true; node.remove(); setLoading(false); setError('The mod panel took too long to load.'); } }, 15000);
     setError(''); setLoading(true);
     const url = panel.archiveUrl + (panel.version ? `?v=${encodeURIComponent(panel.version)}` : '');
     void import(/* @vite-ignore */ url).then(async (module: ArchiveModule) => {
@@ -35,7 +35,7 @@ export function ModArchiveHost({ panel, date }: { panel: ModArchive; date: strin
       } };
       const result = await module.mountArchive(context);
       const dispose = typeof result === 'function' ? result : result?.unmount;
-      if (disposed) { dispose?.(); node.replaceChildren(); } else {
+      if (disposed) { try { dispose?.(); } catch { /* Isolate late cleanup. */ } finally { node.remove(); node.replaceChildren(); } } else {
         cleanup = dispose;
         updateRef.current = () => {
           if (disposed || context.date === dateRef.current) return;
@@ -49,7 +49,7 @@ export function ModArchiveHost({ panel, date }: { panel: ModArchive; date: strin
         updateRef.current(); // Catch date changes while import/mount was pending.
       }
     }).catch((cause) => { if (!disposed) { window.clearTimeout(timer); setLoading(false); node.replaceChildren(); setError(cause instanceof Error ? cause.message : 'Could not load mod panel.'); } });
-    return () => { disposed = true; updateRef.current = undefined; window.clearTimeout(timer); try { cleanup?.(); } catch { /* A mod cleanup must not break Archive navigation. */ } finally { node.replaceChildren(); } };
+    return () => { disposed = true; updateRef.current = undefined; window.clearTimeout(timer); node.remove(); try { cleanup?.(); } catch { /* A mod cleanup must not break Archive navigation. */ } finally { node.replaceChildren(); } };
   }, [panel.modId, panel.archiveUrl, panel.version, revision]);
   useEffect(() => { updateRef.current?.(); }, [date]);
   return <div className="page-view mod-panel-page" data-mod-id={panel.modId}>

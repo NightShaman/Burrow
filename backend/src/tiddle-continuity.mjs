@@ -1,4 +1,4 @@
-import { runAsync, tiddlePersistence } from './tiddle-persistence.mjs';
+import { withTiddleOccurrence, runAsync, tiddlePersistence } from './tiddle-persistence.mjs';
 import { rollingCardActive } from './postgres-rolling-continuity-store.mjs';
 import { randomUUID } from 'node:crypto';
 import { completeCurator, curatorRoot, readCuratorSelection } from './curator-runtime.mjs';
@@ -77,7 +77,7 @@ function residueUpdate(current, { agentId, scope, sessionId, conversationId, run
 
 export async function appendTiddleResidueAsync({ metadataStore, ...input } = {}) {
   metadataStore ||= input.stores?.metadata;
-  if (!metadataStore) return appendTiddleResidue(input);
+  if (!metadataStore) throw new Error('tiddle_postgres_store_required');
   const { agentId, scope, sessionId, runId, answerText } = input;
   if (!text(agentId) || !text(scope) || !text(sessionId) || !text(runId) || !text(answerText)) return null;
   const at = input.at || iso();
@@ -171,17 +171,21 @@ function* upsertGlobalCluster(db, { agentId, cluster, at }) {
   return { card, prior: existing || null };
 }
 
-export async function runTiddleSynthesis({ agentId, stores = null, runtimeRoot = null, settingsKey = undefined, temperature = undefined, at = iso(), traceLogger = null } = {}) {
+async function runTiddleSynthesisOwned({ assertOwner, ownerClient, agentId, stores = null, runtimeRoot = null, settingsKey = undefined, temperature = undefined, at = iso(), traceLogger = null } = {}) {
   const id = text(agentId); if (!id) throw new Error('tiddle_agent_required');
-  const db = tiddlePersistence({ stores });
+  const raw = tiddlePersistence({ stores, ownerClient });
+  const db = new Proxy(raw, { get(target, key) { const value = target[key]; if (typeof value !== 'function' || key === 'close') return value; return async (...args) => { await assertOwner(); return value(...args); }; } });
   const runId = `tiddle-synthesis-${randomUUID()}`;
   try {
     const candidates = (await runAsync(synthesisCandidates(db, id, at))); const globals = (await runAsync(activeCards(db, id, GLOBAL_SCOPE, at)));
     if (candidates.length < 2) { const receipt = { version: 1, ok: true, runId, agentId: id, generatedAt: at, windowDays: 21, candidateCount: candidates.length, disposition: 'noop', reason: 'insufficient_candidates' }; await runAsync(setMeta(db, synthesisKey(id), { ...receipt, lastSuccessAt: at }, at)); await runAsync(setMeta(db, receiptKey(id, runId), receipt, at)); return receipt; }
     const configuredSelection = await readCuratorSelection({ stores, root: curatorRoot({ runtimeRoot: runtimeRoot || undefined }) }); if (!configuredSelection) throw new Error('curator_selection_required');
     const selection = temperature === undefined ? configuredSelection : { ...configuredSelection, temperature };
+    await assertOwner();
     const completion = await completeCurator({ selection, stores, settingsKey, root: curatorRoot({ runtimeRoot: runtimeRoot || undefined }), prompt: synthesisPrompt({ agentId: id, at, candidates, globalCards: globals }), jsonSchema: synthesisSchema(), traceLogger });
-    const proposal = parseTiddleSynthesis(completion?.choice?.text); const clusters = validateSynthesisClusters(proposal, candidates, globals, at); const updates = await db.transaction(id, function* (tx) {
+    const proposal = parseTiddleSynthesis(completion?.choice?.text); const clusters = validateSynthesisClusters(proposal, candidates, globals, at);
+    if (!proposal || (proposal.action === 'UPSERT_CLUSTERS' && clusters.length !== proposal.clusters.length)) throw new Error('tiddle_synthesis_invalid');
+    const updates = await db.transaction(id, function* (tx) {
       const results = [];
       for (const cluster of clusters) results.push(yield* upsertGlobalCluster(tx, { agentId: id, cluster, at }));
       return results;
@@ -203,10 +207,11 @@ function* upsertCard(db, { agentId, scope, proposal, residue, at }) {
   return { card, prior: existing || null };
 }
 
-export async function runTiddlePass({ agentId, stores = null, runtimeRoot = null, settingsKey = undefined, temperature = undefined, at = iso(), traceLogger = null } = {}) {
+async function runTiddlePassOwned({ assertOwner, ownerClient, agentId, stores = null, runtimeRoot = null, settingsKey = undefined, temperature = undefined, at = iso(), traceLogger = null } = {}) {
   const id = text(agentId);
   if (!id) throw new Error('tiddle_agent_required');
-  const db = tiddlePersistence({ stores });
+  const raw = tiddlePersistence({ stores, ownerClient });
+  const db = new Proxy(raw, { get(target, key) { const value = target[key]; if (typeof value !== 'function' || key === 'close') return value; return async (...args) => { await assertOwner(); return value(...args); }; } });
   const runId = `tiddle-pass-${randomUUID()}`;
   try {
     const lookbackStart = new Date(at).getTime() - LOOKBACK_MS;
@@ -236,9 +241,12 @@ export async function runTiddlePass({ agentId, stores = null, runtimeRoot = null
       const { context: items, newRefs } = group;
       if (!newRefs.size) continue;
       const cards = (await runAsync(activeCards(db, id, scope, at)));
-      const completion = await completeCurator({ selection, stores, settingsKey, root: curatorRoot({ runtimeRoot: runtimeRoot || undefined }), prompt: prompt({ agentId: id, scope, residue: items.map((item) => ({ ...item, newSinceLastPass: newRefs.has(item.ref) })), cards }), jsonSchema: schema(), traceLogger });
+      await assertOwner();
+    const completion = await completeCurator({ selection, stores, settingsKey, root: curatorRoot({ runtimeRoot: runtimeRoot || undefined }), prompt: prompt({ agentId: id, scope, residue: items.map((item) => ({ ...item, newSinceLastPass: newRefs.has(item.ref) })), cards }), jsonSchema: schema(), traceLogger });
       const proposal = parseTiddleProposal(completion?.choice?.text);
-      const observedPreference = proposal?.preferenceSignal ? await appendPreferenceSignalAsync({ metadataStore: stores.metadata, agentId: id, signal: { ...proposal.preferenceSignal, sourceRefs: [...newRefs] }, at }) : null;
+      if (!proposal) throw new Error('tiddle_proposal_invalid');
+      await assertOwner();
+      const observedPreference = proposal?.preferenceSignal ? await appendPreferenceSignalAsync({ metadataStore: db, agentId: id, signal: { ...proposal.preferenceSignal, sourceRefs: [...newRefs] }, at }) : null;
       const cardUpdate = proposal?.action === 'UPSERT' ? { agentId: id, scope, proposal, residue: items, at } : null;
       const update = await commitScopePass(db, { agentId: id, scope, at, cardUpdate, entry: (cardUpdateResult) => {
         const card = cardUpdateResult?.card || null;
@@ -315,8 +323,9 @@ export function createTiddleScheduler({ stores = null, intervalMs = 60_000, cloc
       const due = await listDueTiddlePasses({ stores, at });
       // Await the batch so the reentrancy guard remains held through synthesis.
       return await Promise.all(due.map(async (agent) => {
-        const options = { agentId: agent.id, stores, runtimeRoot, at };
+        const options = { agentId: agent.id, stores, runtimeRoot, at, scheduled: true };
         const pass = await runTiddlePass(options);
+        if (pass.disposition === 'occurrence_busy') return pass;
         const db = tiddlePersistence({ stores });
         let last;
         try { last = (await runAsync(meta(db, synthesisKey(agent.id), {})))?.lastSuccessAt; }
@@ -341,3 +350,15 @@ export function tiddleHistory(options = {}) { return runAsync(tiddleHistoryOpera
 export function tiddleStatus(options = {}) { return runAsync(tiddleStatusOperation(options)); }
 
 export function listDueTiddlePasses(options = {}) { return runAsync(listDueTiddlePassesOperation(options)); }
+
+export function runTiddlePass(options = {}) {
+  const at = options.at || iso();
+  return withTiddleOccurrence({ stores: options.stores, agentId: text(options.agentId), kind: 'pass', at, scheduled: options.scheduled === true,
+    operation: (assertOwner, ownerClient) => runTiddlePassOwned({ ...options, at, assertOwner, ownerClient }) });
+}
+
+export function runTiddleSynthesis(options = {}) {
+  const at = options.at || iso();
+  return withTiddleOccurrence({ stores: options.stores, agentId: text(options.agentId), kind: 'synthesis', at, scheduled: options.scheduled === true,
+    operation: (assertOwner, ownerClient) => runTiddleSynthesisOwned({ ...options, at, assertOwner, ownerClient }) });
+}

@@ -283,7 +283,7 @@ export async function searchAgentSessionEvidence({ conversationStore = null, con
       ? await indexedEvidenceTranscript({ conversationStore, agentId, sessionId: candidate.sessionId, query, includeResetHistory: true })
       : await evidenceTranscript({ conversationStore, agentId, rootDir: candidate.rootDir, sessionId: candidate.sessionId, includeResetHistory: true });
     for (const entry of transcript) {
-      const entryKey = `${candidate.rootDir}:${entry.id || `${entry.ts}:${entry.role}:${entry.content}`}`;
+      const entryKey = JSON.stringify([candidate.rootDir, candidate.sessionId, entry.id || [entry.ts, entry.role, entry.content]]);
       if (seenEntries.has(entryKey) || !recallEligible(entry) || (!includeSummaries && entry.metadata?.compressionSummary) || !matchesRole(entry, role) || !matchesQuery(entry, query)) continue;
       seenEntries.add(entryKey);
       const evidenceKey = normalized(entry.metadata?.compressionSummary?.text || entry.content).replace(/\s+/gu, ' ').trim();

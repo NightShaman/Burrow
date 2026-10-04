@@ -238,6 +238,7 @@ function nativeToolReceipt(result = {}) {
     memory_working_search: ['project', 'agentId', 'results'],
     memory_rolling_search: ['project', 'agentId', 'owner', 'entersPrompt', 'results'],
     memory_working_write: ['record'],
+    agent_update_tools_profile: ['document'],
     session_write_handoff: ['handoff'],
     files_read: ['encoding', 'bytes', 'modifiedAt', 'offsetBytes', 'returnedBytes', 'nextOffsetBytes'],
     files_write: ['encoding', 'created', 'overwrote', 'bytesWritten'],
@@ -283,95 +284,6 @@ function attachmentViewUserMessage(result = {}, call = {}, index = 0) {
     ],
     metadata: { providerMessageSource: 'attachment-view-image' },
   };
-}
-
-function truncatedNativeTailText(value, maxChars) {
-  if (typeof value !== 'string') return null;
-  if (value.length <= maxChars) return value;
-  const marker = '[earlier volatile context truncated in native continuation]\n';
-  return `${marker}${value.slice(-(maxChars - marker.length))}`;
-}
-
-function nativeTextFromStructuredContent(value) {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (Array.isArray(value)) return value.map(nativeTextFromStructuredContent).filter(Boolean).join('\n');
-  if (typeof value !== 'object') return '';
-  const type = String(value.type || '').toLowerCase();
-  if (type === 'image_url' || type === 'input_image' || value.image_url || value.input_image) return '';
-  return nativeTextFromStructuredContent(value.text ?? value.content ?? value.message ?? value.output ?? value.value);
-}
-
-function nativeMessageContent(content, maxChars = MAX_NATIVE_BASE_MESSAGE_CHARS, { preserveTail = false } = {}) {
-  if (maxChars <= 0) return '';
-  if (typeof content === 'string') return (preserveTail ? truncatedNativeTailText(content, maxChars) : truncatedNativeText(content, maxChars)) || '';
-  if (Array.isArray(content)) {
-    let remaining = maxChars;
-    const parts = [];
-    for (const part of content) {
-      if (!part || typeof part !== 'object') {
-        const text = nativeTextFromStructuredContent(part);
-        if (!text) continue;
-        const bounded = (preserveTail ? truncatedNativeTailText(text, remaining) : truncatedNativeText(text, remaining)) || '';
-        if (bounded) parts.push({ type: 'text', text: bounded });
-        remaining = Math.max(0, remaining - bounded.length);
-        continue;
-      }
-      const type = String(part.type || '').toLowerCase();
-      if ((type === 'image_url' || part.image_url) && part.image_url?.url) {
-        parts.push({ type: 'image_url', image_url: { url: String(part.image_url.url) } });
-        continue;
-      }
-      if ((type === 'input_image' || part.input_image) && part.input_image) {
-        parts.push({ type: 'input_image', input_image: part.input_image });
-        continue;
-      }
-      const text = nativeTextFromStructuredContent(part);
-      if (!text || remaining <= 0) continue;
-      const bounded = (preserveTail ? truncatedNativeTailText(text, remaining) : truncatedNativeText(text, remaining)) || '';
-      if (bounded) parts.push({ type: 'text', text: bounded });
-      remaining = Math.max(0, remaining - bounded.length);
-    }
-    return parts;
-  }
-  const text = nativeTextFromStructuredContent(content);
-  return (preserveTail ? truncatedNativeTailText(text, maxChars) : truncatedNativeText(text, maxChars)) || '';
-}
-
-function nativeBaseMessage(message = {}, maxChars = Infinity, { preserveTail = false } = {}) {
-  const role = ['system', 'developer', 'user', 'assistant'].includes(message?.role) ? message.role : 'user';
-  return { role, content: nativeMessageContent(message?.content, maxChars, { preserveTail }) };
-}
-
-function boundedNativeBaseMessages(messages = []) {
-  // A continuation must retain the exact static prefix accepted by the initial
-  // provider request. It is an ordered semantic unit, not a pool where an
-  // earlier profile block may starve later operating instructions. Context
-  // preparation owns model-window fitting before the first call; silently
-  // changing system/developer content here creates a different agent mid-turn.
-  const stableIndexes = [];
-  const dialogueIndexes = [];
-  for (const [index, message] of messages.entries()) {
-    if (message?.role === 'system' || message?.role === 'developer') stableIndexes.push(index);
-    else if (message?.role === 'user' || message?.role === 'assistant') dialogueIndexes.push(index);
-  }
-  const retained = new Map();
-  for (const index of stableIndexes) {
-    const next = nativeBaseMessage(messages[index]);
-    if (next.content) retained.set(index, next);
-  }
-  // Select newest dialogue first, but restore natural conversation order for
-  // the provider. The latest user turn is therefore guaranteed first claim on
-  // the dialogue budget without flattening or inventing a synthetic summary.
-  let dialogueRemaining = MAX_NATIVE_RECENT_DIALOGUE_CHARS;
-  for (const index of [...dialogueIndexes].reverse()) {
-    if (dialogueRemaining <= 0) break;
-    const next = nativeBaseMessage(messages[index], dialogueRemaining, { preserveTail: true });
-    dialogueRemaining = Math.max(0, dialogueRemaining - messageContentChars(next.content));
-    if (next.content) retained.set(index, next);
-  }
-  return [...retained.entries()].sort(([left], [right]) => left - right).map(([, message]) => message);
 }
 
 function nativeToolCall(call = {}, index = 0) {
@@ -429,22 +341,22 @@ function messageContentChars(content) {
   return content.reduce((sum, part) => sum + String(part?.text || part?.image_url?.url || part?.input_image?.image_url || '').length, 0);
 }
 
-async function readResponseTextBounded(response, maxBytes = DEFAULT_MAX_RESPONSE_BYTES) {
+async function readResponseBytesBounded(response, maxBytes = DEFAULT_MAX_RESPONSE_BYTES) {
   const limit = Math.max(1, Math.floor(Number(maxBytes) || DEFAULT_MAX_RESPONSE_BYTES));
   const contentLength = Number(response?.headers?.get?.('content-length') || 0);
   if (Number.isFinite(contentLength) && contentLength > limit) {
     await response?.body?.cancel?.();
-    return { ok: false, text: '', bytes: contentLength, error: `model_response_too_large:${contentLength}>${limit}` };
+    return { ok: false, data: Buffer.alloc(0), bytes: contentLength, error: `model_response_too_large:${contentLength}>${limit}` };
   }
   const reader = response?.body?.getReader?.();
   if (!reader) {
     // Compatibility fallback for mock/custom fetch implementations. Native
     // fetch responses use the stream branch above, which is the hard limit.
-    const text = await response.text();
-    const bytes = Buffer.byteLength(text);
+    const data = typeof response.arrayBuffer === 'function' ? Buffer.from(await response.arrayBuffer()) : Buffer.from(await response.text());
+    const bytes = data.length;
     return bytes > limit
-      ? { ok: false, text: '', bytes, error: `model_response_too_large:${bytes}>${limit}` }
-      : { ok: true, text, bytes, error: null };
+      ? { ok: false, data: Buffer.alloc(0), bytes, error: `model_response_too_large:${bytes}>${limit}` }
+      : { ok: true, data, bytes, error: null };
   }
   const chunks = [];
   let bytes = 0;
@@ -459,15 +371,20 @@ async function readResponseTextBounded(response, maxBytes = DEFAULT_MAX_RESPONSE
       bytes += chunkBytes;
       if (bytes > limit) {
         await reader.cancel();
-        return { ok: false, text: '', bytes, error: `model_response_too_large:${bytes}>${limit}` };
+        return { ok: false, data: Buffer.alloc(0), bytes, error: `model_response_too_large:${bytes}>${limit}` };
       }
       chunks.push(Buffer.isBuffer(value) ? value : Buffer.from(value));
     }
   } finally {
     reader.releaseLock?.();
   }
-  return { ok: true, text: Buffer.concat(chunks).toString('utf8'), bytes, error: null };
+  return { ok: true, data: Buffer.concat(chunks), bytes, error: null };
 }
+async function readResponseTextBounded(response, maxBytes) {
+  const result = await readResponseBytesBounded(response, maxBytes);
+  return { ...result, text: result.data.toString('utf8') };
+}
+
 
 
 export { randomUUID, normalizeProviderMessage, normalizeProviderMessages, buildProviderMessageManifest, providerToolRound, pruneProviderToolResults };
@@ -490,5 +407,6 @@ export {
   attachmentViewUserMessage,
   messageContentChars,
   readResponseTextBounded,
+  readResponseBytesBounded,
   chatToolContinuationMessages,
 };

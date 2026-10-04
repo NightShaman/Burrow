@@ -1,3 +1,4 @@
+import { AccessibleModal } from '../../app/AccessibleModal';
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import type { Agent } from '../../app/types';
@@ -41,26 +42,33 @@ function defaultFieldValues(definition: SettingsContribution['sections'][number]
 export function DeclarativeSection({ contribution, section, module, overflowTarget }: { contribution: SettingsContribution; section: ModSettingsSection; module: ModSettingsModule; overflowTarget: HTMLElement | null }) {
   const definition = contribution.sections.find((item) => item.id === section.id);
   const [values, setValues] = useState<Record<string, string | boolean>>(() => definition ? defaultFieldValues(definition) : {});
+  const previousDefaults = useRef({ sectionId: section.id, values: definition ? defaultFieldValues(definition) : {} });
   const [actionState, setActionState] = useState<{ id: string; status: 'saving' | 'success' | 'error'; message: string } | null>(null);
   const [pendingConfirmation, setPendingConfirmation] = useState<{ actionId: string; message: string } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState(definition?.items?.[0]?.id ?? '');
   useEffect(() => {
     if (!definition) return;
-    setValues((current) => ({ ...defaultFieldValues(definition), ...current }));
+    const defaults = defaultFieldValues(definition);
+    const previous = previousDefaults.current;
+    setValues(current => Object.fromEntries(Object.entries(defaults).map(([id, value]) => [id,
+      previous.sectionId === section.id && Object.hasOwn(previous.values, id) && current[id] !== previous.values[id] ? current[id] : value,
+    ])));
+    previousDefaults.current = { sectionId: section.id, values: defaults };
+    setActionState(null); setPendingConfirmation(null); setEditingId(null);
     setSelectedId((current) => definition.items?.some((item) => item.id === current) ? current : definition.items?.[0]?.id ?? '');
-  }, [definition]);
+  }, [definition, section.id]);
   if (!definition) return null;
   const update = (id: string, value: string | boolean) => setValues((current) => ({ ...current, [id]: value }));
   const runAction = async (actionId: string) => {
     setActionState({ id: actionId, status: 'saving', message: 'Saving…' });
     const actionValues = { ...defaultFieldValues(definition), ...values };
-    try { await module.handleSettingsAction?.(actionId, actionValues); setActionState({ id: actionId, status: 'success', message: 'Saved.' }); setValues(current => Object.fromEntries(Object.entries(current).map(([id, value]) => [id, [...(definition.fields ?? []), ...(definition.items?.flatMap(item => item.fields ?? []) ?? [])].some(field => field.id === id && field.control === 'password') ? '' : value]))); if (definition.fields?.length) setEditingId(null); }
+    try { if (typeof module.handleSettingsAction !== 'function') throw new Error('The mod does not provide an action handler.'); await module.handleSettingsAction(actionId, actionValues); setActionState({ id: actionId, status: 'success', message: 'Saved.' }); setValues(current => Object.fromEntries(Object.entries(current).map(([id, value]) => [id, [...(definition.fields ?? []), ...(definition.items?.flatMap(item => item.fields ?? []) ?? [])].some(field => field.id === id && field.control === 'password') ? '' : value]))); if (definition.fields?.length) setEditingId(null); }
     catch (cause) { setActionState({ id: actionId, status: 'error', message: cause instanceof Error ? cause.message : 'The action could not be completed.' }); }
   };
   const actions = (items: SettingsAction[] | undefined) => items?.length ? <>
     <div className="card-actions">{items.map((action) => { const saving = actionState?.id === action.id && actionState?.status === 'saving'; return <button type="button" className={action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : ''} disabled={actionState?.status === 'saving'} key={action.id} onClick={() => action.confirm ? setPendingConfirmation({ actionId: action.id, message: action.confirm }) : void runAction(action.id)}>{saving ? 'Saving…' : action.label}</button>; })}</div>
-    {pendingConfirmation && items.some(action => action.id === pendingConfirmation.actionId) && <div className="settings-confirm-backdrop" role="presentation" onMouseDown={() => setPendingConfirmation(null)}><section className="settings-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-confirm-title" onMouseDown={(event) => event.stopPropagation()}><header><div><span className="eyebrow">CONFIRM ACTION</span><h2 id="settings-confirm-title">Are you sure?</h2></div><button className="settings-confirm-close" type="button" aria-label="Close confirmation" onClick={() => setPendingConfirmation(null)}>×</button></header><p>{pendingConfirmation.message}</p><div className="card-actions"><button type="button" onClick={() => setPendingConfirmation(null)}>Cancel</button><button type="button" className="danger" onClick={() => { const { actionId } = pendingConfirmation; setPendingConfirmation(null); void runAction(actionId); }}>Continue</button></div></section></div>}
+    {pendingConfirmation && items.some(action => action.id === pendingConfirmation.actionId) && <div className="settings-confirm-backdrop" role="presentation" onMouseDown={() => setPendingConfirmation(null)}><AccessibleModal className="settings-confirm-dialog" role="dialog" aria-labelledby="settings-confirm-title" onMouseDown={(event) => event.stopPropagation()} onClose={() => setPendingConfirmation(null)}><header><div><span className="eyebrow">CONFIRM ACTION</span><h2 id="settings-confirm-title">Are you sure?</h2></div><button className="settings-confirm-close" type="button" aria-label="Close confirmation" onClick={() => setPendingConfirmation(null)}>×</button></header><p>{pendingConfirmation.message}</p><div className="card-actions"><button type="button" onClick={() => setPendingConfirmation(null)}>Cancel</button><button type="button" className="danger" onClick={() => { const { actionId } = pendingConfirmation; setPendingConfirmation(null); void runAction(actionId); }}>Continue</button></div></AccessibleModal></div>}
   </> : null;
   const feedback = actionState && <p className={actionState.status === 'error' ? 'settings-request-error' : 'settings-help'} role={actionState.status === 'error' ? 'alert' : 'status'}>{actionState.message}</p>;
   if (definition.layout === 'form-inventory') {
@@ -89,8 +97,8 @@ export function DeclarativeSection({ contribution, section, module, overflowTarg
   </SettingSection>;
   if (definition.layout === 'list-detail') {
     const selected = definition.items?.find((item) => item.id === selectedId) ?? definition.items?.[0];
-    const detail = selected && <section className="setting-section"><h2>{selected.label}</h2>{selected.description && <p className="settings-help">{selected.description}</p>}{selected.meta && <p className="settings-help">{selected.meta}</p>}{selected.detail && <p>{selected.detail}</p>}{selected.fields?.map((field) => <Field label={field.label} key={field.id}>{field.control === 'select' ? <select value={String(values[field.id] ?? field.value ?? '')} onChange={(event) => update(field.id, event.currentTarget.value)}>{field.options?.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select> : <input value={String(values[field.id] ?? field.value ?? '')} onChange={(event) => update(field.id, event.currentTarget.value)} />}</Field>)}{actions(selected.actions)}{feedback}</section>;
-    return <><SettingSection title={definition.label}>{definition.description && <p className="settings-help">{definition.description}</p>}{definition.fields?.map((field) => <Field label={field.label} key={field.id}>{field.control === 'boolean' ? <input type="checkbox" checked={values[field.id] === true} onChange={(event) => update(field.id, event.currentTarget.checked)} /> : field.control === 'select' ? <select value={String(values[field.id] ?? '')} onChange={(event) => update(field.id, event.currentTarget.value)}>{field.options?.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select> : <input type={field.control === 'password' ? 'password' : field.control === 'number' ? 'number' : 'text'} value={String(values[field.id] ?? '')} onChange={(event) => update(field.id, event.currentTarget.value)} />}{field.description && <small className="settings-help">{field.description}</small>}</Field>)}{actions(definition.actions)}{feedback}<div className="mcp-server-selector">{definition.items?.map((item) => <button type="button" className={item.id === selected?.id ? 'active' : ''} aria-current={item.id === selected?.id ? 'page' : undefined} onClick={() => setSelectedId(item.id)} key={item.id}>{item.label}{item.meta && <small>{item.meta}</small>}</button>)}</div></SettingSection>{overflowTarget && createPortal(detail, overflowTarget)}</>;
+    const detail = selected && <section className="setting-section"><h2>{selected.label}</h2>{selected.description && <p className="settings-help">{selected.description}</p>}{selected.meta && <p className="settings-help">{selected.meta}</p>}{selected.detail && <p>{selected.detail}</p>}{selected.fields?.map((field) => <Field label={field.label} key={field.id}>{field.control === 'select' ? <select value={String(values[field.id] ?? field.value ?? '')} onChange={(event) => update(field.id, event.currentTarget.value)}>{field.options?.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select> : field.control === 'boolean' ? <input type="checkbox" checked={values[field.id] === true} onChange={(event) => update(field.id, event.currentTarget.checked)} /> : <input type={field.control === 'password' ? 'password' : field.control === 'number' ? 'number' : 'text'} value={String(values[field.id] ?? field.value ?? '')} onChange={(event) => update(field.id, event.currentTarget.value)} />}</Field>)}{actions(selected.actions)}{feedback}</section>;
+    return <><SettingSection title={definition.label}>{definition.description && <p className="settings-help">{definition.description}</p>}{definition.fields?.map((field) => <Field label={field.label} key={field.id}>{field.control === 'boolean' ? <input type="checkbox" checked={values[field.id] === true} onChange={(event) => update(field.id, event.currentTarget.checked)} /> : field.control === 'select' ? <select value={String(values[field.id] ?? '')} onChange={(event) => update(field.id, event.currentTarget.value)}>{field.options?.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select> : <input type={field.control === 'password' ? 'password' : field.control === 'number' ? 'number' : 'text'} value={String(values[field.id] ?? '')} onChange={(event) => update(field.id, event.currentTarget.value)} />}{field.description && <small className="settings-help">{field.description}</small>}</Field>)}{actions(definition.actions)}{!selected && feedback}<div className="mcp-server-selector">{definition.items?.map((item) => <button type="button" className={item.id === selected?.id ? 'active' : ''} aria-current={item.id === selected?.id ? 'page' : undefined} onClick={() => setSelectedId(item.id)} key={item.id}>{item.label}{item.meta && <small>{item.meta}</small>}</button>)}</div></SettingSection>{overflowTarget ? createPortal(detail, overflowTarget) : detail}</>;
   }
   return <SettingSection title={definition.label}>{definition.description && <p className="settings-help">{definition.description}</p>}{definition.items?.map((item) => <article className="provider-card" key={item.id}><strong>{item.label}</strong>{item.description && <p>{item.description}</p>}{item.meta && <small>{item.meta}</small>}{actions(item.actions)}</article>)}</SettingSection>;
 }
@@ -143,22 +151,26 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
       const contribution = loaded.createSettingsContribution
         ? validateSettingsContribution(await loaded.createSettingsContribution({ api: modApi(modId), agents: agentsRef.current }))
         : staticContribution;
+      if (!active) return;
       const next = contribution?.sections ?? validSections(loaded.settingsSections);
       if ((!contribution && typeof loaded.mountSettings !== 'function') || !next.length) throw new Error('The mod settings entry does not implement the Burrow settings contract.');
       setModule(loaded); setContribution(contribution); setSections(next); setSection(next[0].id);
     }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'Could not load mod settings.'); });
     return () => { active = false; };
-  }, [settingsUrl]);
+  }, [settingsUrl, modId]);
 
   useEffect(() => {
     const primary = primaryRef.current;
     const definition = contribution?.sections.find((item) => item.id === section);
     const hasDeclarativeContent = Boolean(definition && (definition.layout === 'form' ? (definition.fields?.length || definition.actions?.length) : definition.items?.length));
     if (hasDeclarativeContent || !module?.mountSettings || !primary || !section) return;
-    primary.replaceChildren();
-    overflowTarget?.replaceChildren();
-    const primarySurface = createSurface(primary);
-    const overflowSurface = overflowTarget ? createSurface(overflowTarget) : null;
+    const node = document.createElement('div');
+    primary.replaceChildren(node);
+    const overflowNode = overflowTarget ? document.createElement('div') : null;
+    if (overflowNode) overflowTarget!.replaceChildren(overflowNode);
+    const primarySurface = createSurface(node);
+    const overflowSurface = overflowNode ? createSurface(overflowNode) : null;
+    const disposeSafely = (candidate?: () => void) => { try { candidate?.(); } catch { /* Mod cleanup cannot break navigation. */ } };
     let disposed = false;
     let cleanup: (() => void) | undefined;
     const context: ModSettingsContext = {
@@ -178,11 +190,11 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
         });
       },
     };
-    void Promise.resolve(module.mountSettings(context)).then((result) => {
+    void Promise.resolve().then(() => { if (!disposed) return module.mountSettings!(context); }).then((result) => {
       const candidate = typeof result === 'function' ? result : result?.unmount;
-      if (disposed) candidate?.(); else cleanup = candidate;
+      if (disposed) disposeSafely(candidate); else cleanup = candidate;
     }).catch((cause) => { if (!disposed) setError(cause instanceof Error ? cause.message : 'Could not mount mod settings.'); });
-    return () => { disposed = true; cleanup?.(); primary.replaceChildren(); overflowTarget?.replaceChildren(); };
+    return () => { disposed = true; node.remove(); overflowNode?.remove(); disposeSafely(cleanup); node.replaceChildren(); overflowNode?.replaceChildren(); };
   }, [module, contribution, section, modId, overflowTarget]);
 
   return <>
@@ -190,7 +202,8 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
     {error && <section className="setting-section"><h2>Mod settings unavailable</h2><p className="settings-request-error" role="alert">{error}</p></section>}
     <div ref={primaryRef} className="mod-settings-mount" data-mod-id={modId}>
       {contribution && <DeclarativeSection key={section} contribution={contribution} module={{ ...module, handleSettingsAction: async (actionId, values) => {
-        await module?.handleSettingsAction?.(actionId, values);
+        if (typeof module?.handleSettingsAction !== 'function') throw new Error('The mod does not provide an action handler.');
+        await module.handleSettingsAction(actionId, values);
         if (module?.createSettingsContribution) {
           try {
             const { agents: currentAgents } = await apiLocal<{ agents: Agent[] }>('/api/agents');

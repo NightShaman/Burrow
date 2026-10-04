@@ -19,10 +19,10 @@
   white-space:nowrap
 }
 .proof-status-completed,.proof-status-ok,.proof-status-validated {
-  color:var(--success,#58d68d)
+  color:var(--ok,#58d68d)
 }
 .proof-status-warning,.proof-status-unverified,.proof-status-incomplete,.proof-status-unresolved,.proof-status-unknown {
-  color:var(--warning,#f5b942)
+  color:var(--warn,#f5b942)
 }
 .proof-status-failed {
   color:var(--danger,#ef6a7a)
@@ -224,8 +224,8 @@
   gap:3px;
   margin-top:3px;
   padding:8px;
-  border-left:2px solid var(--warning,#f5b942);
-  background:color-mix(in srgb,var(--warning,#f5b942) 8%,transparent);
+  border-left:2px solid var(--warn,#f5b942);
+  background:color-mix(in srgb,var(--warn,#f5b942) 8%,transparent);
   font-size:11px;
   line-height:1.35
 }
@@ -260,16 +260,16 @@
 .proof-status-notice {
   margin-top:18px;
   padding:12px 14px;
-  border:1px solid color-mix(in srgb,var(--warning,#f5b942) 40%,var(--line));
-  border-left:3px solid var(--warning,#f5b942);
+  border:1px solid color-mix(in srgb,var(--warn,#f5b942) 40%,var(--line));
+  border-left:3px solid var(--warn,#f5b942);
   border-radius:8px;
-  background:color-mix(in srgb,var(--warning,#f5b942) 8%,var(--panel));
+  background:color-mix(in srgb,var(--warn,#f5b942) 8%,var(--panel));
   color:var(--text);
   font-size:12px;
   line-height:1.5
 }
 .proof-status-notice strong {
-  color:var(--warning,#f5b942);
+  color:var(--warn,#f5b942);
   font-size:11px;
   font-weight:800;
   letter-spacing:.05em;

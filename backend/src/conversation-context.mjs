@@ -137,7 +137,7 @@ export function buildConversationContext({ transcript = [], limits = {} } = {}) 
   const chatMessages = [];
   const promptEnteringEntries = entries.filter((entry) => entry?.entersPrompt === true).map(promptEnteringProjection);
   const executionDigestEntries = entries.filter(isExecutionDigest);
-  const retainedDigestEntries = new Set(executionDigestEntries.slice(-maxPromptExecutionDigests));
+  const retainedDigestEntries = new Set(maxPromptExecutionDigests === 0 ? [] : executionDigestEntries.slice(-maxPromptExecutionDigests));
 
   for (const entry of entries) {
     if (isPromptChatMessage(entry)) {

@@ -140,9 +140,8 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
   const orderedCards = useMemo(() => orderAccountStatusCards(cards, order), [cards, order]);
 
   useEffect(() => {
-    const knownIds = new Set(cards.map((card) => card.id));
     setOrder((current) => {
-      const next = [...current.filter((id) => knownIds.has(id)), ...cards.map((card) => card.id).filter((id) => !current.includes(id))];
+      const next = [...current, ...cards.map((card) => card.id).filter((id) => !current.includes(id))];
       if (next.length === current.length && next.every((id, index) => id === current[index])) return current;
       writeAccountOrder(accountStatusOrderKey, next);
       return next;
@@ -172,7 +171,7 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
     {orderedCards.map((card) => {
       const isDragging = draggedId === card.id;
       const isDropTarget = dropTargetId === card.id && !isDragging;
-      return <AccountCard key={card.id} name={card.name} subtitle={card.vendor} status={card.state === 'error' ? 'Disconnected' : 'Connected'} statusTone={card.state === 'error' ? 'paused' : 'active'} className={`${isDragging ? 'dragging' : ''} ${isDropTarget ? 'drop-target' : ''}`} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', card.id); setDraggedId(card.id); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTargetId(card.id); }} onDragLeave={() => setDropTargetId((current) => current === card.id ? null : current)} onDrop={(event) => handleDrop(event, card.id)} onDragEnd={clearDrag}>
+      return <AccountCard key={card.id} name={card.name} subtitle={card.vendor} status={card.state === 'loading' ? 'Checking' : card.state === 'error' ? 'Disconnected' : 'Connected'} statusTone={card.state === 'ready' ? 'active' : 'paused'} className={`${isDragging ? 'dragging' : ''} ${isDropTarget ? 'drop-target' : ''}`} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', card.id); setDraggedId(card.id); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTargetId(card.id); }} onDragLeave={() => setDropTargetId((current) => current === card.id ? null : current)} onDrop={(event) => handleDrop(event, card.id)} onDragEnd={clearDrag}>
         {card.state === 'loading' && <small className="hint">Loading usage…</small>}
         {card.state === 'error' && <small className="hint">{card.error ?? 'Usage unavailable'}</small>}
         {card.state === 'ready' && !card.bars.length && <small className="hint">No usage windows reported.</small>}
