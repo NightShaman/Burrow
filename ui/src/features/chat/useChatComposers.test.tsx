@@ -42,7 +42,7 @@ describe('useChatComposers', () => {
     await act(() => result.current.session.create());
 
     expect(apiMock).toHaveBeenNthCalledWith(1, '/api/sessions/default/fork?agentId=smatchet', expect.objectContaining({ method: 'POST', body: JSON.stringify({ targetSessionId: 'planning' }) }));
-    expect(apiMock).toHaveBeenNthCalledWith(2, '/api/sessions/planning/reset?agentId=smatchet', { method: 'POST' });
+    expect(apiMock).toHaveBeenNthCalledWith(2, '/api/sessions/planning/reset?agentId=smatchet', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     expect(options.refreshSessions).toHaveBeenCalledWith('smatchet');
     expect(options.selectSession).toHaveBeenCalledWith('planning');
     expect(result.current.session.isOpen).toBe(false);

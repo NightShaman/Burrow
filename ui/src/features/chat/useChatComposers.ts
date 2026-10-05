@@ -114,7 +114,7 @@ export function useChatComposers({ sessionId = '', selectedAgentId, activeRunId,
       forked = true;
       if (!current()) return;
       partialRef.current = { scope, id: targetSessionId };
-      await api(`/api/sessions/${encodeURIComponent(targetSessionId)}/reset?agentId=${encodeURIComponent(selectedAgentId)}`, { method: 'POST' });
+      await api(`/api/sessions/${encodeURIComponent(targetSessionId)}/reset?agentId=${encodeURIComponent(selectedAgentId)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
       if (!current()) return;
       partialRef.current = null;
       await refreshSessions(selectedAgentId);

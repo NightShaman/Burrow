@@ -70,7 +70,11 @@ describe('useChatSession', () => {
     await act(async () => { await result.current.resetSession(); });
     expect(result.current.sessionId).toBe(destination);
     expect(result.current.turns).toEqual([]);
-    expect(apiMock).toHaveBeenCalledWith(`/api/sessions/${destination}/reset?agentId=luna`, { method: 'POST' });
+    expect(apiMock).toHaveBeenCalledWith(`/api/sessions/${destination}/reset?agentId=luna`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
     act(() => {
       result.current.leaveNewSessionForMessage();
       result.current.appendTurn(agentId, result.current.sessionId, { role: 'user', content: 'Next message' });

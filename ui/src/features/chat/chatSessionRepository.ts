@@ -63,7 +63,7 @@ export function createChatSessionRepository(): ChatSessionRepository {
       return response.session;
     },
     async resetSession(agentId, sessionId) {
-      await api(`/api/sessions/${encodeURIComponent(sessionId)}/reset?agentId=${encodeURIComponent(agentId)}`, { method: 'POST' });
+      await api(`/api/sessions/${encodeURIComponent(sessionId)}/reset?agentId=${encodeURIComponent(agentId)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     },
   };
 }
