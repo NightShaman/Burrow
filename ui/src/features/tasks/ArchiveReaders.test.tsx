@@ -63,7 +63,7 @@ it('FE024 recipient metadata never replaces sender in rendered or actual clipboa
 
 
 it('FE-025 renders attachment-only and generated-artifact turns instead of dropping empty text', () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new Blob(['media'], { type: 'image/png' }), { status: 200, headers: { 'content-type': 'image/png' } })));
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new Uint8Array([109, 101, 100, 105, 97]), { status: 200, headers: { 'content-type': 'image/png' } })));
   const session = {agentId:'smatchet',agentName:'Smatchet',sessionId:'media',id:'media',title:'Media',summary:'',turnCount:2,chatTurnCount:2,createdAt:null,updatedAt:null,archived:true,archivedAt:null,kind:null,lastRole:null,lastRunId:null} as ArchiveSession;
   const turns = [
     { role: 'user', content: '', metadata: { attachments: [{ name: 'photo.png', type: 'image/png', artifactPath: 'artifacts/photo.png' }] } },
