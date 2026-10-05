@@ -97,6 +97,9 @@ jobs:
         run: |
           set -eu
           (cd backend-source && npm ci && npm test)
+          # UI contract tests import the exact backend browser policy through
+          # the sibling layout used by the component repository workflow.
+          ln -s backend-source Burrow-Backend
           (cd ui-source && npm ci && npm test)
       - name: Stamp and build generated release
         id: build
