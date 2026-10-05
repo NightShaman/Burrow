@@ -7,6 +7,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { promisify } from 'node:util';
 import { verifyReleaseArtifact } from '../src/release-deployer.mjs';
+import { buildIdentity } from './build-identity.mjs';
 import { ensureDefaultGlobalWorkspace } from '../src/runtime-workspace-defaults.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -197,11 +198,15 @@ export function mergeRuntimeEnv(template, original = '') {
 export async function smokeInstall({ installDir, port, timeoutMs }) {
   if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new Error('health_timeout_invalid');
   const logPath = path.join(os.tmpdir(), `burrow-install-smoke-${path.basename(installDir)}-${process.pid}.log`);
+  const backendRoot = await exists(path.join(installDir, 'app/backend/package.json')) ? path.join(installDir, 'app/backend') : installDir;
+  const expectedIdentity = await buildIdentity(backendRoot);
+  const smokeToken = randomBytes(32).toString('hex');
   const runtimeEnv = await readEnvFile(path.join(installDir, 'burrow.env'));
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (key.startsWith('BURROW_')) delete env[key];
-  Object.assign(env, runtimeEnv, { BURROW_SOURCE_ROOT: installDir, BURROW_RUNTIME_ROOT: installDir, BURROW_WORKSPACE_ROOT: path.join(installDir, 'workspace'), BURROW_CACHE_ROOT: path.join(installDir, 'cache'), BURROW_UI_HOST: '127.0.0.1', BURROW_UI_PORT: String(port) });
-  const child = spawn('/usr/bin/env', ['node', path.join(installDir, 'bin', 'burrow.mjs'), 'serve', '--root', installDir], { cwd: installDir, env, detached: process.platform !== 'win32' });
+  Object.assign(env, runtimeEnv, { BURROW_SMOKE_TOKEN: smokeToken, BURROW_SOURCE_ROOT: backendRoot, BURROW_RUNTIME_ROOT: installDir, BURROW_WORKSPACE_ROOT: path.join(installDir, 'workspace'), BURROW_CACHE_ROOT: path.join(installDir, 'cache'), BURROW_UI_HOST: '127.0.0.1', BURROW_UI_PORT: String(port) });
+  const command = backendRoot === installDir ? ['node', path.join(installDir, 'bin', 'burrow.mjs'), 'serve', '--root', installDir] : [path.join(installDir, 'bin', 'burrow'), 'serve'];
+  const child = spawn('/usr/bin/env', command, { cwd: installDir, env, detached: process.platform !== 'win32' });
   const exited = new Promise(resolve => { child.once('exit', resolve); child.once('error', resolve); });
   const output = [];
   child.stdout?.on('data', (chunk) => output.push(chunk));
@@ -211,11 +216,10 @@ export async function smokeInstall({ installDir, port, timeoutMs }) {
     let lastError = null;
     while (Date.now() < deadline) {
       try {
-        const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())) });
+        const response = await fetch(`http://127.0.0.1:${port}/health`, { headers: { 'x-burrow-smoke-token': smokeToken }, signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())) });
         const body = await response.json();
-        const sourceRoot = body?.state?.sourceRoot || body?.runtimeState?.sourceRoot || body?.sourceRoot || null;
-        if (response.ok && body?.ok && path.resolve(sourceRoot || '') === path.resolve(installDir)) return { ok: true, port, sourceRoot, logPath };
-        lastError = new Error(`health_mismatch:${response.status}:${sourceRoot || 'unknown'}`);
+        if (response.ok && body?.ok && body.buildIdentity === expectedIdentity && body.smokeToken === smokeToken && child.exitCode === null && child.signalCode === null) return { ok: true, port, buildIdentity: expectedIdentity, logPath };
+        lastError = new Error(`health_mismatch:${response.status}:${body.buildIdentity || 'unknown'}`);
       } catch (error) { lastError = error; }
       await new Promise((resolve) => setTimeout(resolve, Math.min(250, Math.max(0, deadline - Date.now()))));
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFile, spawn } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -29,6 +29,7 @@ async function executableWorks(root, executable) {
   try {
     const entry = path.join(root, 'node_modules', '.bin', executable);
     const stat = await fs.stat(entry);
+    await fs.access(entry, constants.X_OK);
     return stat.isFile();
   } catch { return false; }
 }

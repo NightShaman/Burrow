@@ -52,8 +52,8 @@ async function fetchHealth(timeoutMs) {
       status: response.status,
       url,
       ui: body?.ui || null,
-      modelConfigured: Boolean(body?.model?.configured),
-      memoryConfigured: Boolean(body?.memory?.configured),
+      modelConfigured: (typeof body?.model?.configured === 'boolean' ? body?.model?.configured : null),
+      memoryConfigured: (typeof body?.memory?.configured === 'boolean' ? body?.memory?.configured : null),
     };
   } catch (error) {
     return { ok: false, url, error: String(error?.message || error) };
@@ -105,9 +105,9 @@ if (args.json) {
   console.log(`Active: ${output.active}`);
   console.log(`Enabled: ${output.enabled}`);
   console.log(`Health: ${health.ok ? 'ok' : 'failed'} ${health.url}`);
-  if (health.ui) console.log(`UI: ${health.ui.host}:${health.ui.port} auth=${health.ui.authEnabled ? 'on' : 'off'}`);
-  console.log(`Model: ${health.modelConfigured ? 'configured' : 'selection required'}`);
-  console.log(`Memory: ${health.memoryConfigured ? 'configured' : 'missing'}`);
+  if (health.ui) console.log(`UI: ${health.ui.host}:${health.ui.port} auth=${typeof health.ui.authEnabled !== 'boolean' ? 'unknown' : health.ui.authEnabled ? 'on' : 'off'}`);
+  console.log(`Model: ${health.modelConfigured === null ? 'unknown' : health.modelConfigured ? 'configured' : 'selection required'}`);
+  console.log(`Memory: ${health.memoryConfigured === null ? 'unknown' : health.memoryConfigured ? 'configured' : 'missing'}`);
 }
 
 process.exit(ok ? 0 : 1);

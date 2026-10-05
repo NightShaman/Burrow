@@ -7,14 +7,13 @@ import process from 'node:process';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { ensureRuntimeIntegrations } from './ensure-runtime-integrations.mjs';
 import { coldBackupPolicy, restoreInventory } from './portable-backup-policy.mjs';
 const execFileAsync = promisify(execFile);
 const ARCHIVE_ROOT = 'burrow-install';
 const REQUIRED = ['app', 'bin', 'burrow.env', 'config', 'workspace', 'integrations'];
 const MANIFEST = 'portable-install-manifest.json';
 const TAR_LIST_MAX_BUFFER = 64 * 1024 * 1024;
-const MCPORTER_VERSION = '0.13.7';
-const CLAUDE_CODE_VERSION = 'latest';
 
 function nonEmpty(value, name) { if (!value) throw new Error(`${name} is required`); return value; }
 
@@ -146,10 +145,11 @@ async function validateInstall(root) {
     const stat = await fs.lstat(path.join(root, entry));
     if (stat.isSymbolicLink() || (entry === 'burrow.env' ? !stat.isFile() : !stat.isDirectory())) throw new Error(`invalid required asset: ${entry}`);
   }
-  for (const file of ['app/package.json', 'bin/burrow']) {
+  const backend = await exists(path.join(root, 'app/backend/package.json')) ? 'app/backend' : 'app';
+  for (const file of [`${backend}/package.json`, 'bin/burrow', `${backend}/scripts/runtime-integrations.json`]) {
     if (!(await fs.stat(path.join(root, file))).isFile()) throw new Error(`invalid required asset: ${file}`);
   }
-  const pkg = JSON.parse(await fs.readFile(path.join(root, 'app/package.json'), 'utf8'));
+  const pkg = JSON.parse(await fs.readFile(path.join(root, backend, 'package.json'), 'utf8'));
   if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) throw new Error('invalid package JSON');
   const env = await fs.readFile(path.join(root, 'burrow.env'), 'utf8');
   if (env.includes('\0') || env.split('\n').some(line => line.trim() && !line.trim().startsWith('#') && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(line))) throw new Error('invalid environment format');
@@ -212,16 +212,17 @@ async function rebaseRestoredEnvironment(installRoot, finalRoot = installRoot, m
 }
 
 async function installRestoredIntegrations(installRoot, runCommand = execFileAsync) {
-  const integrationsRoot = path.join(installRoot, 'integrations');
-  const mcporterRoot = path.join(integrationsRoot, 'mcporter');
-  const claudeRoot = path.join(integrationsRoot, 'claude-code');
-  await fs.rm(mcporterRoot, { recursive: true, force: true });
-  await fs.rm(claudeRoot, { recursive: true, force: true });
-  await fs.mkdir(mcporterRoot, { recursive: true });
-  await runCommand('npm', ['install', '--prefix', mcporterRoot, '--omit=dev', '--no-package-lock', '--no-save', '--no-audit', '--no-fund', '--loglevel=error', `mcporter@${MCPORTER_VERSION}`]);
-  await fs.mkdir(claudeRoot, { recursive: true });
-  await fs.writeFile(path.join(claudeRoot, 'package.json'), `${JSON.stringify({ private: true, dependencies: { '@anthropic-ai/claude-code': CLAUDE_CODE_VERSION }, allowScripts: { [`@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}`]: true } }, null, 2)}\n`);
-  await runCommand('npm', ['install', '--prefix', claudeRoot, '--omit=dev', '--no-package-lock', '--ignore-scripts=false', '--no-audit', '--no-fund', '--loglevel=error']);
+  const backend = await exists(path.join(installRoot, 'app/backend/package.json')) ? 'app/backend' : 'app';
+  const manifest = JSON.parse(await fs.readFile(path.join(installRoot, backend, 'scripts/runtime-integrations.json'), 'utf8'));
+  const integrations = Object.entries(manifest).map(([id, spec]) => {
+    if (!/^[a-z0-9-]+$/.test(id) || !spec || !/^(?:@[a-z0-9-]+\/)?[a-z0-9.-]+$/.test(spec.packageName) ||
+        !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(spec.version) || !/^[a-z0-9-]+$/.test(spec.executable)) {
+      throw new Error('invalid pinned release integration manifest');
+    }
+    return { id, packageName: spec.packageName, version: spec.version, executable: spec.executable };
+  });
+  if (!integrations.length) throw new Error('empty release integration manifest');
+  await ensureRuntimeIntegrations({ runtimeRoot: installRoot, integrations, runCommand, logger: { log() {} } });
 }
 
 export async function planPortableInstallRestore({ archive, home = process.env.HOME || os.homedir(), replace = false, runTar = execFileAsync } = {}) {

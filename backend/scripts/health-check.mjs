@@ -34,21 +34,21 @@ function summarize(health) {
   return {
     ok: Boolean(health?.ok),
     runtime: health?.runtime || 'unknown',
-    config: health?.config?.exists === true,
+    config: typeof health?.config?.exists === 'boolean' ? health.config.exists : null,
     ui: {
       host: health?.ui?.host || null,
       port: health?.ui?.port || null,
-      authEnabled: Boolean(health?.ui?.authEnabled),
+      authEnabled: (typeof health?.ui?.authEnabled === 'boolean' ? health?.ui?.authEnabled : null),
     },
     model: {
-      configured: Boolean(health?.model?.configured),
+      configured: (typeof health?.model?.configured === 'boolean' ? health?.model?.configured : null),
       api: health?.model?.api || null,
       model: health?.model?.model || null,
     },
     memory: {
-      configured: Boolean(health?.memory?.configured),
+      configured: (typeof health?.memory?.configured === 'boolean' ? health?.memory?.configured : null),
       project: health?.memory?.project || null,
-      hasApiKey: Boolean(health?.memory?.hasApiKey),
+      hasApiKey: (typeof health?.memory?.hasApiKey === 'boolean' ? health?.memory?.hasApiKey : null),
     },
     policy: {
       packs: health?.policy?.packs ?? null,
@@ -59,9 +59,9 @@ function summarize(health) {
 function formatText(summary) {
   const lines = [];
   lines.push(`Burrow health: ${summary.ok ? 'ok' : 'not ok'}`);
-  lines.push(`UI: ${summary.ui.host || '?'}:${summary.ui.port || '?'} auth=${summary.ui.authEnabled ? 'on' : 'off'}`);
-  lines.push(`Model: ${summary.model.configured ? 'configured' : 'selection required'} ${summary.model.model || ''}`.trim());
-  lines.push(`Memory: ${summary.memory.configured ? 'configured' : 'missing'} ${summary.memory.project || ''}`.trim());
+  lines.push(`UI: ${summary.ui.host || '?'}:${summary.ui.port || '?'} auth=${summary.ui.authEnabled === null ? 'unknown' : summary.ui.authEnabled ? 'on' : 'off'}`);
+  lines.push(`Model: ${summary.model.configured === null ? 'unknown' : summary.model.configured ? 'configured' : 'selection required'} ${summary.model.model || ''}`.trim());
+  lines.push(`Memory: ${summary.memory.configured === null ? 'unknown' : summary.memory.configured ? 'configured' : 'missing'} ${summary.memory.project || ''}`.trim());
   lines.push(`Policy packs: ${summary.policy.packs ?? 'unknown'}`);
   return lines.join('\n');
 }
