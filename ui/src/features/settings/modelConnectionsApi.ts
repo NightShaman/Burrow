@@ -1,4 +1,4 @@
-import { api, type RuntimeModel } from '../../app/api';
+import { api, jsonMutation, type RuntimeModel } from '../../app/api';
 
 export type ClaudeCodeLogin = {
   id: string;
@@ -47,7 +47,7 @@ export const modelConnectionsApi = {
   submitOpenAiOAuthCode: (loginId: string, input: string) =>
     api<{ login: OpenAiOAuthLogin }>(`/api/settings/model-connections/openai-oauth/${encodeURIComponent(loginId)}/submit-code`, jsonPost({ input })),
   cancelOpenAiOAuth: (loginId: string) =>
-    api<{ login: OpenAiOAuthLogin }>(`/api/settings/model-connections/openai-oauth/${encodeURIComponent(loginId)}/cancel`, { method: 'POST' }),
+    api<{ login: OpenAiOAuthLogin }>(`/api/settings/model-connections/openai-oauth/${encodeURIComponent(loginId)}/cancel`, jsonMutation('POST')),
 
   startClaudeCodeLogin: (connectionId?: string) =>
     api<{ connection?: OpenAiOAuthConnection | null; login: ClaudeCodeLogin }>('/api/settings/model-connections/claude-code-login/start', jsonPost(connectionId ? { connectionId } : {})),
@@ -56,7 +56,7 @@ export const modelConnectionsApi = {
   submitClaudeCode: (loginId: string, code: string) =>
     api<{ login: ClaudeCodeLogin }>(`/api/settings/model-connections/claude-code-login/${encodeURIComponent(loginId)}/submit-code`, jsonPost({ code })),
   cancelClaudeCodeLogin: (loginId: string) =>
-    api<{ login: ClaudeCodeLogin }>(`/api/settings/model-connections/claude-code-login/${encodeURIComponent(loginId)}/cancel`, { method: 'POST' }),
+    api<{ login: ClaudeCodeLogin }>(`/api/settings/model-connections/claude-code-login/${encodeURIComponent(loginId)}/cancel`, jsonMutation('POST')),
   importClaudeCodeLogin: (loginId: string, connectionId?: string) =>
     api<{ login: ClaudeCodeLogin }>(`/api/settings/model-connections/claude-code-login/${encodeURIComponent(loginId)}/import`, jsonPost(connectionId ? { connectionId } : {})),
 };

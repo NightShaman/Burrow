@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api } from '../../app/api';
+import { api, jsonMutation } from '../../app/api';
 import { clearConversationCache } from '../chat/chatConversationCache';
 import { clearArchiveCaches } from '../tasks/archiveCache';
 
@@ -16,7 +16,7 @@ export function ConversationPurge({ conversation, onClose, onPurged }: { convers
     if (busy || result || !reason.trim() || confirmation !== conversation.sessionId) return;
     setBusy(true); setError('');
     try {
-      const response = await api<PurgeResult>('/api/albdruck/purge-conversation', { method: 'POST', body: JSON.stringify({ ...conversation, reason: reason.trim() }) });
+      const response = await api<PurgeResult>('/api/albdruck/purge-conversation', jsonMutation('POST', { ...conversation, reason: reason.trim() }));
       clearConversationCache(); clearArchiveCaches(); setResult(response); onPurged();
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }

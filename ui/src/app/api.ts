@@ -333,6 +333,25 @@ export function createRequestHeaders(headers: HeadersInit = {}, defaultAccept = 
   return requestHeaders;
 }
 
+export type JsonMutationMethod = 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
+/** Browser API mutations are JSON requests, including actions with no payload. */
+export function jsonMutation(method: JsonMutationMethod, body?: unknown, init: Omit<RequestInit, 'method' | 'body'> = {}): RequestInit {
+  const headers = createRequestHeaders(init.headers);
+  headers.set('content-type', 'application/json');
+  return { ...init, method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) };
+}
+
+function browserRequestInit(init: RequestInit): RequestInit {
+  const method = init.method?.toUpperCase();
+  if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {
+    const headers = createRequestHeaders(init.headers);
+    headers.set('content-type', 'application/json');
+    return { ...init, method, headers };
+  }
+  return { ...init, headers: createRequestHeaders(init.headers) };
+}
+
 export function generatedArtifactPath(agentId: string, storageReference: string): string {
   return `/api/generated-artifacts/${encodeURIComponent(agentId)}/${encodeURIComponent(storageReference)}`;
 }
@@ -340,12 +359,12 @@ export function generatedArtifactPath(agentId: string, storageReference: string)
 /** All ordinary requests have a bounded deadline composed with caller cancellation; only interactive chat streams are exempt. */
 export async function fetchApi(path: string, init: RequestInit = {}): Promise<Response> {
   // Chat NDJSON is intentionally unbounded. Other raw bodies retain their budget until consumed.
-  if (path.startsWith('/api/chat')) return fetch(path, { ...init, headers: createRequestHeaders(init.headers) });
+  if (path.startsWith('/api/chat')) return fetch(path, browserRequestInit(init));
   const controller = new AbortController();
   const signal = init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
   const timeout = window.setTimeout(() => controller.abort(new DOMException('Request deadline exceeded', 'TimeoutError')), clientBudgets.requestDeadlineMs);
   try {
-    const response = await fetch(path, { ...init, signal, headers: createRequestHeaders(init.headers) });
+    const response = await fetch(path, browserRequestInit({ ...init, signal }));
     if (!response.body) { window.clearTimeout(timeout); return response; }
     const reader = response.body.getReader();
     const body = new ReadableStream<Uint8Array>({
@@ -370,7 +389,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const signal = init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
   const timeout = window.setTimeout(() => controller.abort(new DOMException('Request deadline exceeded', 'TimeoutError')), clientBudgets.requestDeadlineMs);
   try {
-    const response = await fetch(path, { ...init, signal, headers: createRequestHeaders(init.headers) });
+    const response = await fetch(path, browserRequestInit({ ...init, signal }));
     return await parseApiResponse<T>(response);
   } finally { window.clearTimeout(timeout); }
 }

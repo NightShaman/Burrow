@@ -3209,6 +3209,12 @@ const server = createServer(async (req, res) => {
     if (await authRoute({ req, res, url, origin })) return;
     if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/api/health')) return sendJson(res, 200, { ok: true, runtime: 'burrow', version: releaseVersion });
     if (!(await authorizeRequest(req, res, url))) return;
+    if (req.method === 'GET' && url.pathname === '/api/auth/validate') {
+      const runtime = await runtimeConfig();
+      const mode = runtime?.ui?.authMode || 'none';
+      if (mode === 'none') return sendJson(res, 401, { ok: false, error: 'authentication_not_enabled', auth: { mode, enabled: false, authenticated: false } });
+      return sendJson(res, 200, { ok: true, auth: { mode, enabled: true, authenticated: req.burrowVerifiedAuth?.authenticated === true } });
+    }
     if (await forgeRoute({ req, res, url })) return;
     if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {
       if (await serveV18Asset(url, res)) return;

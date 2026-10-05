@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api, fetchApi, generatedArtifactPath } from './api';
+import { api, fetchApi, generatedArtifactPath, jsonMutation } from './api';
+// This contract test intentionally executes the backend's real browser policy against UI-built requests.
+// @ts-expect-error The backend policy is a sibling JavaScript package without TypeScript declarations.
+import { browserRequestPolicy } from '../../../Burrow-Backend/src/browser-origin-policy.mjs';
 import { clearBasicCredentials, setBasicCredentials } from './auth';
 
 describe('API requests', () => {
@@ -42,6 +45,38 @@ describe('API requests', () => {
     expect(new Headers(init.headers).get('authorization')).toBe('Basic Z29ibGluOnNlY3JldA==');
     expect(new Headers(init.headers).get('accept')).toBe('application/x-ndjson');
     expect(new Headers(init.headers).get('content-type')).toBe('application/json');
+  });
+
+  it('builds every JSON mutation method to satisfy the backend browser policy, including bodyless actions and bodyful DELETE', async () => {
+    const requests: Array<[string, RequestInit]> = [];
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((path: string, init: RequestInit) => {
+      requests.push([path, init]);
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }));
+
+    await api('/api/task-board/tasks/t/execute', jsonMutation('POST'));
+    await api('/api/scheduled-jobs/j/trigger', jsonMutation('POST'));
+    await api('/api/settings/model-connections/openai-oauth/l/cancel', jsonMutation('POST'));
+    await api('/api/mod-management/source-refresh', jsonMutation('PUT', { enabled: true }));
+    await api('/api/albdruck/history', jsonMutation('POST', { query: 'goblin' }));
+    await api('/api/albdruck/knowledge/k', jsonMutation('DELETE', { reason: 'superseded' }));
+
+    for (const [path, init] of requests) {
+      const headers = Object.fromEntries(new Headers(init.headers).entries());
+      if (init.body !== undefined) headers['content-length'] = String(String(init.body).length);
+      expect(browserRequestPolicy({ method: init.method, headers }, new URL(path, 'https://burrow.example'))).toMatchObject({ status: null });
+      expect(headers['content-type']).toBe('application/json');
+    }
+  });
+
+  it('normalizes legacy mutation call sites at the shared request boundary', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api('/api/action', { method: 'POST' });
+    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = Object.fromEntries(new Headers(init.headers).entries());
+    expect(browserRequestPolicy({ method: init.method, headers }, new URL(path, 'https://burrow.example'))).toMatchObject({ status: null });
+    expect(headers['content-type']).toBe('application/json');
   });
 
   it('encodes generated artifact route parameters without exposing reference path segments', () => {

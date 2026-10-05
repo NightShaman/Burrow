@@ -1,5 +1,11 @@
 export function createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson } = {}) {
   return async function handleAuthRoute({ req, res, url, origin } = {}) {
+    if (req.method === 'GET' && url.pathname === '/api/auth/discovery') {
+      const runtime = await runtimeConfig();
+      const mode = runtime?.ui?.authMode || 'none';
+      sendJson(res, 200, { ok: true, auth: { mode, enabled: mode !== 'none' } });
+      return true;
+    }
     if (req.method === 'GET' && url.pathname === '/auth/oidc/login') {
       const runtime = await runtimeConfig();
       const login = await oidcLoginUrl(runtime, origin);

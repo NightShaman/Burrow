@@ -1,5 +1,5 @@
 import { AccessibleModal } from '../../app/AccessibleModal';
-import { api } from '../../app/api';
+import { api, jsonMutation } from '../../app/api';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { type ProgressEntry } from '../../app/api';
 import { toolDisplayName } from '../../app/toolDisplayName';
@@ -213,7 +213,7 @@ export function Tasks({ agents }: { agents: Agent[] }) {
     setSaving(true);
     setError('');
     try {
-      const result = await api<{ task: BoardTask; execution?: { runId?: string; agentId?: string; sessionId?: string } }>(`/api/task-board/tasks/${encodeURIComponent(editingTask.id)}/execute`, { method: 'POST' });
+      const result = await api<{ task: BoardTask; execution?: { runId?: string; agentId?: string; sessionId?: string } }>(`/api/task-board/tasks/${encodeURIComponent(editingTask.id)}/execute`, jsonMutation('POST'));
       setTasks((current) => current.map((task) => task.id === result.task.id ? result.task : task));
       setEditor((current) => reconcileEditor(current, result.task));
       if (result.execution?.runId && result.execution.agentId && result.execution.sessionId) {

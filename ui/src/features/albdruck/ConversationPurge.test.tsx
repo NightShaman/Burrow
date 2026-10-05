@@ -4,7 +4,7 @@ import { api } from '../../app/api';
 import { ConversationPurge } from './ConversationPurge';
 import { clearConversationCache } from '../chat/chatConversationCache';
 import { clearArchiveCaches } from '../tasks/archiveCache';
-vi.mock('../../app/api', () => ({ api: vi.fn() }));
+vi.mock('../../app/api', () => ({ api: vi.fn(), jsonMutation: (method: string, body?: unknown) => ({ method, headers: { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }) }));
 vi.mock('../chat/chatConversationCache', () => ({ clearConversationCache: vi.fn() }));
 vi.mock('../tasks/archiveCache', () => ({ clearArchiveCaches: vi.fn() }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
@@ -20,7 +20,7 @@ it('requires deliberate confirmation and nonblank reason; posts exact contract a
   fireEvent.change(screen.getByLabelText('Purge reason (required)'),{target:{value:' remove '}});
   fireEvent.click(button);
   await screen.findByText('evidence: 2');
-  expect(api).toHaveBeenCalledWith('/api/albdruck/purge-conversation',{method:'POST',body:JSON.stringify({agentId:'a',sessionId:'s',reason:'remove'})});
+  expect(api).toHaveBeenCalledWith('/api/albdruck/purge-conversation',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({agentId:'a',sessionId:'s',reason:'remove'})});
   expect(screen.getByText(/already absent/)).toBeTruthy(); expect(done).toHaveBeenCalledOnce();
   expect(clearConversationCache).toHaveBeenCalledOnce(); expect(clearArchiveCaches).toHaveBeenCalledOnce();
 });

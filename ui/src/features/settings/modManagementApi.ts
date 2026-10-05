@@ -1,4 +1,4 @@
-import { api, apiLocal } from '../../app/api';
+import { api, apiLocal, jsonMutation, type JsonMutationMethod } from '../../app/api';
 
 export type ModRecord = {
   id: string;
@@ -49,7 +49,12 @@ export async function loadModManagement(): Promise<NormalizedModManagement> {
 }
 
 export async function modManagementAction(path: string, init: RequestInit = {}) {
-  return api<ModManagementState>(path, { ...init, headers: { 'content-type': 'application/json', ...(init.headers ?? {}) } });
+  const method = init.method?.toUpperCase();
+  if (method && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    const body = init.body === undefined ? undefined : JSON.parse(String(init.body));
+    return api<ModManagementState>(path, jsonMutation(method as JsonMutationMethod, body, init));
+  }
+  return api<ModManagementState>(path, init);
 }
 
 export async function loadSourceRefreshConfig(): Promise<SourceRefreshConfig> {
@@ -62,10 +67,7 @@ export async function loadSourceRefreshConfig(): Promise<SourceRefreshConfig> {
 }
 
 export async function saveSourceRefreshConfig(config: SourceRefreshConfig): Promise<SourceRefreshConfig> {
-  const response = await api<{ sourceRefresh?: Partial<SourceRefreshConfig> }>('/api/mod-management/source-refresh', {
-    method: 'PUT',
-    body: JSON.stringify(config),
-  });
+  const response = await api<{ sourceRefresh?: Partial<SourceRefreshConfig> }>('/api/mod-management/source-refresh', jsonMutation('PUT', config));
   const saved = response.sourceRefresh;
   if (!saved || typeof saved.enabled !== 'boolean' || !Number.isSafeInteger(saved.intervalMs) || (saved.intervalMs ?? 0) <= 0 || !Number.isSafeInteger(saved.staleMs) || (saved.staleMs ?? 0) <= 0) {
     throw new Error('Core returned invalid saved mod source refresh settings.');

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api } from '../../app/api';
+import { api, jsonMutation } from '../../app/api';
 import type { Agent } from '../../app/types';
 import './albdruck.css';
 import { ConversationPurge } from './ConversationPurge';
@@ -45,7 +45,7 @@ export function Albdruck({ agents }: { agents: Agent[] }) {
     const recall = mode === 'recall';
     if (recall && !search.trim()) { setBusy(false); return; }
     const path = recall ? `history${suffix}` : `knowledge${suffix}&query=${encodeURIComponent(search)}&cursor=${encodeURIComponent(cursor)}&pageSize=50`;
-    const init = recall ? {method:'POST', body:JSON.stringify({query:search, ...(cursor ? {cursor} : {}),pageSize:50})} : undefined;
+    const init = recall ? jsonMutation('POST', { query: search, ...(cursor ? { cursor } : {}), pageSize: 50 }) : undefined;
     void (recall ? request<HistoryResults>(path, init).then(r => { if (token === sequence.current) setHistory(r); }) : request<Results>(path).then(r => { if (token === sequence.current) setResults(r); })).catch(e => { if (token === sequence.current) setError(String(e.message)); }).finally(() => { if (token === sequence.current) setBusy(false); });
     return () => { ++sequence.current; ++detailSequence.current; };
   }, [suffix, mode, search, cursor, refresh]);
@@ -63,13 +63,13 @@ export function Albdruck({ agents }: { agents: Agent[] }) {
     const token = detailSequence.current; setBusy(true); setError('');
     try {
       const body = operation === 'delete' ? {reason:reason.trim()} : {operation,reason:reason.trim(), ...(operation === 'correct' ? {document:parseDocument(editor)} : {})};
-      await request(`knowledge/${encodeURIComponent(detail.id)}${suffix}`, {method:operation === 'delete' ? 'DELETE' : 'PUT',body:JSON.stringify(body)});
+      await request(`knowledge/${encodeURIComponent(detail.id)}${suffix}`, jsonMutation(operation === 'delete' ? 'DELETE' : 'PUT', body));
       if (token === detailSequence.current) { setRefresh(r => r+1); }
     } catch(e) { if (token === detailSequence.current) setError((e as Error).message); } finally { if (token === detailSequence.current) setBusy(false); }
   }
   async function saveRetention() {
     if (!policy) return; const token = retentionSequence.current; setRetentionBusy(true); setError('');
-    try { const body = Object.fromEntries(retentionKeys.map(k => [k,parseDays(policy[k])])); await request('retention',{method:'PUT',body:JSON.stringify(body)}); if (token === retentionSequence.current) setError('Retention policy saved.'); }
+    try { const body = Object.fromEntries(retentionKeys.map(k => [k,parseDays(policy[k])])); await request('retention', jsonMutation('PUT', body)); if (token === retentionSequence.current) setError('Retention policy saved.'); }
     catch(e) { if (token === retentionSequence.current) setError((e as Error).message); } finally { if (token === retentionSequence.current) setRetentionBusy(false); }
   }
   return <div className="albdruck-page"><h1>Albdruck — Knowledge & Recall</h1><p>Derived knowledge is not original evidence and must never serve as evidence for itself.</p>

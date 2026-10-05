@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { api } from '../../app/api';
+import { api, jsonMutation } from '../../app/api';
 import type { SavedProvider } from '../../app/types';
 import { useConfirm } from '../../app/ConfirmDialog';
 import { Field, SettingSection } from './SettingsPrimitives';
@@ -72,7 +72,7 @@ export function AgentSchedules({ agentId, savedProviders, overflowTarget }: { ag
     setTriggeringId(job.id); setError(''); setNotice('');
     const version = requestVersion.current;
     try {
-      const result = await request<{ ok: boolean; error?: string }>(`/api/scheduled-jobs/${encodeURIComponent(job.id)}/trigger`, { method: 'POST' });
+      const result = await request<{ ok: boolean; error?: string }>(`/api/scheduled-jobs/${encodeURIComponent(job.id)}/trigger`, jsonMutation('POST'));
       if (version !== requestVersion.current) return;
       if (!result.ok) { setError(`Could not run ${job.name}: ${result.error || 'The scheduler rejected the request.'}`); return; }
       setNotice(`${job.name} started. The run continues in the background.`);

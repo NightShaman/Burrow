@@ -1,11 +1,8 @@
 import { useState, type FormEvent } from 'react';
-import { api } from '../../app/api';
-import { setBasicCredentials } from '../../app/auth';
+import { setBasicCredentials, validateBasicCredentials } from '../../app/auth';
 import './login.css';
 
 type LoginPageProps = { onAuthenticated: () => void; overlay?: boolean };
-
-type AuthProbe = { auth?: { required?: boolean; mode?: string } };
 
 export function LoginPage({ onAuthenticated, overlay = false }: LoginPageProps) {
   const [username, setUsername] = useState('');
@@ -22,9 +19,9 @@ export function LoginPage({ onAuthenticated, overlay = false }: LoginPageProps) 
     }
     setError('');
     setIsSubmitting(true);
-    setBasicCredentials(nextUsername, password);
     try {
-      await api<AuthProbe>('/api/health');
+      await validateBasicCredentials(nextUsername, password);
+      setBasicCredentials(nextUsername, password);
       onAuthenticated();
     } catch {
       setError('Those credentials were not accepted. Check them and try again.');

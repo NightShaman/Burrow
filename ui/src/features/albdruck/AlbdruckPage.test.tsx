@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Albdruck, parseDays, parseDocument } from './AlbdruckPage';
 import { api } from '../../app/api';
-vi.mock('../../app/api', () => ({ api: vi.fn() }));
+vi.mock('../../app/api', () => ({ api: vi.fn(), jsonMutation: (method: string, body?: unknown) => ({ method, headers: { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }) }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 const item = {id:'k',document:{claim:'Use PG',rationale:null,alternatives:[],constraints:[],relationships:[]},state:'active',updated_at:'2026-01-01T00:00:00Z'};
 function mockApi() { vi.mocked(api).mockImplementation(async (path) => {
