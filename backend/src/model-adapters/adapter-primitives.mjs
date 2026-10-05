@@ -243,12 +243,12 @@ function nativeToolReceipt(result = {}) {
     files_read: ['encoding', 'bytes', 'modifiedAt', 'offsetBytes', 'returnedBytes', 'nextOffsetBytes'],
     files_write: ['encoding', 'created', 'overwrote', 'bytesWritten'],
     files_edit: ['replaced', 'changedFiles'],
-    files_patch: ['touchedFiles', 'failureClass', 'gitApplyExitCode'],
+    files_patch: ['touchedFiles', 'changedFiles', 'sideEffectsApplied', 'failureClass', 'gitApplyExitCode'],
     files_inspect: ['exists', 'type', 'size', 'modifiedAt', 'symlinkTarget'],
     shell_exec: ['cwd', 'exitCode', 'signal', 'timedOut', 'cancelled', 'killed', 'stdoutTruncated', 'stderrTruncated', 'stdoutOriginalChars', 'stderrOriginalChars'],
     git_status: ['exitCode'],
     git_diff: ['exitCode'],
-    spawn_subagent: ['status', 'spawned', 'reused', 'evidence', 'blockers', 'verification', 'verificationTarget', 'childRun', 'target', 'childSessionId'],
+    spawn_subagent: ['changedFiles', 'sideEffectsApplied', 'status', 'spawned', 'reused', 'evidence', 'blockers', 'verification', 'verificationTarget', 'childRun', 'target', 'childSessionId'],
     finish_subagent: ['status', 'verification', 'blockers'],
   };
   for (const key of nativeFields[result?.tool] || []) {

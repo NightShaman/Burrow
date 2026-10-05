@@ -213,71 +213,75 @@ async function applyStructuredPatch({ patch, baseRoot, logger, prefix }) {
   const changedFiles = [];
   const operationArtifacts = [];
 
-  for (const [index, operation] of parsed.operations.entries()) {
-    const targetPath = structuredPatchFilePath(operation.file, baseRoot);
-    if (!targetPath) return { ok: false, error: `patch_missing_file:${index}`, failureClass: 'patch_malformed', changedFiles, operationArtifacts };
-    const relative = path.relative(baseRoot, targetPath);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) return { ok: false, error: `patch_target_outside_base:${operation.file}`, failureClass: 'patch_validation_failed', changedFiles, operationArtifacts };
+  try {
+    for (const [index, operation] of parsed.operations.entries()) {
+      const targetPath = structuredPatchFilePath(operation.file, baseRoot);
+      if (!targetPath) return { ok: false, error: `patch_missing_file:${index}`, failureClass: 'patch_malformed', changedFiles, operationArtifacts };
+      const relative = path.relative(baseRoot, targetPath);
+      if (relative.startsWith('..') || path.isAbsolute(relative)) return { ok: false, error: `patch_target_outside_base:${operation.file}`, failureClass: 'patch_validation_failed', changedFiles, operationArtifacts };
 
-    if (operation.type === 'delete') {
+      if (operation.type === 'delete') {
+        const before = await fs.readFile(targetPath, 'utf8');
+        const beforePath = await logger.artifact(`${prefix}-structured-${index}-before.txt`, before);
+        await fs.unlink(targetPath);
+        changedFiles.push(relative);
+        operationArtifacts.push({ beforePath });
+        continue;
+      }
+
+      if (operation.type === 'add') {
+        const newBlock = hunkBlocksFromStructuredPatchLines(operation.lines).map((hunk) => hunk.newBlock).join('\n');
+        await fs.mkdir(path.dirname(targetPath), { recursive: true });
+        await fs.writeFile(targetPath, newBlock.endsWith('\n') ? newBlock : `${newBlock}\n`, 'utf8');
+        changedFiles.push(relative);
+        const afterPath = await logger.artifact(`${prefix}-structured-${index}-after.txt`, await fs.readFile(targetPath, 'utf8'));
+        operationArtifacts.push({ beforePath: null, afterPath });
+        continue;
+      }
+
       const before = await fs.readFile(targetPath, 'utf8');
+      let after = before;
+      const hunks = hunkBlocksFromStructuredPatchLines(operation.lines);
+      for (const [hunkIndex, { oldBlock, newBlock }] of hunks.entries()) {
+        // A no-op hunk adds no evidence and must not make an otherwise valid
+        // multi-hunk update fail because it cannot be found independently.
+        if (oldBlock === newBlock) continue;
+        if (!oldBlock) {
+          return {
+            ok: false,
+            error: `patch_missing_context:${operation.file}:hunk-${hunkIndex + 1}`,
+            failureClass: 'patch_malformed',
+            changedFiles,
+            operationArtifacts,
+            failedOperationIndex: index,
+            failedHunkIndex: hunkIndex,
+          };
+        }
+        const indexOf = after.indexOf(oldBlock);
+        if (indexOf < 0) {
+          return {
+            ok: false,
+            error: `patch_context_mismatch:${operation.file}:hunk-${hunkIndex + 1}`,
+            failureClass: 'patch_context_mismatch',
+            changedFiles,
+            operationArtifacts,
+            failedOperationIndex: index,
+            failedHunkIndex: hunkIndex,
+          };
+        }
+        after = `${after.slice(0, indexOf)}${newBlock}${after.slice(indexOf + oldBlock.length)}`;
+      }
+      if (after === before) continue;
       const beforePath = await logger.artifact(`${prefix}-structured-${index}-before.txt`, before);
-      await fs.unlink(targetPath);
-      operationArtifacts.push({ beforePath });
+      await fs.writeFile(targetPath, after, 'utf8');
       changedFiles.push(relative);
-      continue;
+      const afterPath = await logger.artifact(`${prefix}-structured-${index}-after.txt`, after);
+      operationArtifacts.push({ beforePath, afterPath });
     }
 
-    if (operation.type === 'add') {
-      const newBlock = hunkBlocksFromStructuredPatchLines(operation.lines).map((hunk) => hunk.newBlock).join('\n');
-      await fs.mkdir(path.dirname(targetPath), { recursive: true });
-      await fs.writeFile(targetPath, newBlock.endsWith('\n') ? newBlock : `${newBlock}\n`, 'utf8');
-      const afterPath = await logger.artifact(`${prefix}-structured-${index}-after.txt`, await fs.readFile(targetPath, 'utf8'));
-      operationArtifacts.push({ beforePath: null, afterPath });
-      changedFiles.push(relative);
-      continue;
-    }
-
-    const before = await fs.readFile(targetPath, 'utf8');
-    let after = before;
-    const hunks = hunkBlocksFromStructuredPatchLines(operation.lines);
-    for (const [hunkIndex, { oldBlock, newBlock }] of hunks.entries()) {
-      // A no-op hunk adds no evidence and must not make an otherwise valid
-      // multi-hunk update fail because it cannot be found independently.
-      if (oldBlock === newBlock) continue;
-      if (!oldBlock) {
-        return {
-          ok: false,
-          error: `patch_missing_context:${operation.file}:hunk-${hunkIndex + 1}`,
-          failureClass: 'patch_malformed',
-          changedFiles,
-          operationArtifacts,
-          failedOperationIndex: index,
-          failedHunkIndex: hunkIndex,
-        };
-      }
-      const indexOf = after.indexOf(oldBlock);
-      if (indexOf < 0) {
-        return {
-          ok: false,
-          error: `patch_context_mismatch:${operation.file}:hunk-${hunkIndex + 1}`,
-          failureClass: 'patch_context_mismatch',
-          changedFiles,
-          operationArtifacts,
-          failedOperationIndex: index,
-          failedHunkIndex: hunkIndex,
-        };
-      }
-      after = `${after.slice(0, indexOf)}${newBlock}${after.slice(indexOf + oldBlock.length)}`;
-    }
-    if (after === before) continue;
-    const beforePath = await logger.artifact(`${prefix}-structured-${index}-before.txt`, before);
-    await fs.writeFile(targetPath, after, 'utf8');
-    const afterPath = await logger.artifact(`${prefix}-structured-${index}-after.txt`, after);
-    operationArtifacts.push({ beforePath, afterPath });
-    changedFiles.push(relative);
+  } catch (error) {
+    return { ok: false, error: String(error.message || error), failureClass: 'patch_apply_failed', changedFiles: unique(changedFiles), operationArtifacts };
   }
-
   return { ok: true, error: null, failureClass: null, changedFiles: unique(changedFiles), operationArtifacts };
 }
 
@@ -462,7 +466,9 @@ export async function applyPatchEnvelope({
       ok: apply.ok,
       error: apply.error,
       failureClass: apply.failureClass,
-      touchedFiles: apply.changedFiles.length ? apply.changedFiles : baseResult.touchedFiles,
+      touchedFiles: unique(apply.changedFiles),
+      changedFiles: unique(apply.changedFiles),
+      sideEffectsApplied: apply.changedFiles.length > 0,
       operationArtifacts: apply.operationArtifacts,
     });
   }

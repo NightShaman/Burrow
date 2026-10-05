@@ -35,10 +35,12 @@ describe('AppStatusBar', () => {
       anthropicUsage={{ windows: [{ key: 'five_hour', usedPercent: 25 }] }}
       openAiUsage={{ windows: [{ key: 'primary', label: 'Weekly', usedPercent: 125 }] }}
       runtimeVersion="1.2.3"
+      uiIdentity="1234567890"
+      runtimeIdentity={{ assembly: '2026.10.05.2', backend: 'abcdef012345', ui: '1234567890' }}
     />);
 
     expect(screen.getByRole('progressbar', { name: '5hr usage remaining' }).getAttribute('aria-valuenow')).toBe('75');
     expect(screen.getByRole('progressbar', { name: 'Weekly usage remaining' }).getAttribute('aria-valuenow')).toBe('0');
-    expect(screen.getByText('v. 1.2.3')).toBeTruthy();
+    expect(screen.getByText(/v\. 1\.2\.3 · UI 1234567 · BE abcdef0 · ASM 2026.10.05.2/)).toBeTruthy();
   });
 });

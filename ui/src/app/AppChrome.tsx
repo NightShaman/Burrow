@@ -40,7 +40,7 @@ function UsageMeter({ label, usedPercent, resetAt }: UsageMeterProps) {
   </span>;
 }
 
-export function AppStatusBar({ anthropicUsage, openAiUsage, runtimeVersion, registryStale }: { anthropicUsage: AnthropicUsage | null; openAiUsage: OpenAiUsage | null; runtimeVersion?: string | null; registryStale?: boolean }) {
+export function AppStatusBar({ anthropicUsage, openAiUsage, runtimeVersion, uiIdentity, runtimeIdentity, registryStale }: { anthropicUsage: AnthropicUsage | null; openAiUsage: OpenAiUsage | null; runtimeVersion?: string | null; uiIdentity?: string; runtimeIdentity?: { assembly: string; backend: string; ui: string }; registryStale?: boolean }) {
   return <footer className="status-bar">
     {registryStale && <span className="registry-stale" role="status" title="Agent registry refresh failed; showing the last known agents.">Agents stale</span>}
     {anthropicUsage?.windows
@@ -49,6 +49,6 @@ export function AppStatusBar({ anthropicUsage, openAiUsage, runtimeVersion, regi
     {openAiUsage?.windows
       .filter((window) => window.usedPercent != null)
       .map((window) => <UsageMeter key={`openai-${window.key}`} label={window.label} usedPercent={window.usedPercent!} resetAt={window.resetAt} />)}
-    <span className="status-version">v. {runtimeVersion ?? '—'}</span>
+    <span className="status-version" title={`UI ${uiIdentity ?? 'unknown'} · Backend ${runtimeIdentity?.backend ?? 'unknown'} · Assembly ${runtimeIdentity?.assembly ?? 'unknown'}`}>v. {runtimeVersion ?? '—'} · UI {(uiIdentity ?? 'unknown').slice(0, 7)} · BE {(runtimeIdentity?.backend ?? 'unknown').slice(0, 7)} · ASM {runtimeIdentity?.assembly ?? 'unknown'}</span>
   </footer>;
 }

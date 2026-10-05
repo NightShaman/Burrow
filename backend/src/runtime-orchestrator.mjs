@@ -10,7 +10,7 @@ import { createRuntimeTurnResult, assertRuntimeTurnContract } from './chat-runti
 import { normalizeExecutionPolicyInput } from './execution-policy.mjs';
 import { accumulateToolConsequences, summarizeToolResults } from './runtime-result-shapes.mjs';
 import { inspectRuntimeObject } from './runtime-heap-diagnostics.mjs';
-import { normalizeProviderMessages } from './provider-messages.mjs';
+import { normalizeNativeToolCalls, normalizeProviderMessages } from './provider-messages.mjs';
 import { serializeContinuationEvidence } from './continuation-evidence.mjs';
 import { inspectionResultSummary, shouldFollowReadOnlyInspection, hasExecutedInspectionEvidence, hasExecutedReadFileEvidence, missingInspectionTargets, shouldForceInspectionEvidence, defaultInspectionFileList, runDefaultReadOnlyInspection, pendingInspectionFallback } from './inspection-evidence.mjs';
 import { CHAT_TOOL_HISTORY_LIMIT, CHAT_TOOL_RESULT_HISTORY_LIMIT, CHAT_TOOL_CALL_HISTORY_LIMIT, compactToolCalls, boundedToolArgumentValue, stableJson, fingerprint, toolPlanFingerprint, exactRepeatVerdict, loopReceiptText, appendBoundedChatHistory, appendBoundedMapEntry, compactPromptEvidenceResult, runtimeObservationFacts, materialEvidenceKeys, recordMaterialProgress, repeatedToolCallObservations, semanticInspectionObservations, logChatToolLoopHeapStage, normalizedToolOutcome } from './tool-loop-detection.mjs';
@@ -98,7 +98,8 @@ function mutationNotExecutedAnswer({ skipped = [], toolResults = [] } = {}) {
 
 
 async function executeChatToolCalls({ model, workspaceRoot = null, rootDir = null, dataRoot = null, sessionId = null, conversationId = null, iteration = 0, traceLogger = null, executionPolicy = null, modelConfig = null, executionContext = null, abortSignal = null } = {}) {
-  const proposal = proposalFromNativeToolCalls(model?.choice?.toolCalls, model?.choice?.text ?? '', executionContext);
+  const toolCalls = normalizeNativeToolCalls(model?.choice?.toolCalls || []);
+  const proposal = proposalFromNativeToolCalls(toolCalls, model?.choice?.text ?? '', executionContext);
   const proposalReview = reviewProposalActions({ actions: proposal?.actions ?? [], workspaceRoot, executionContext });
   const proposalExecution = proposal
     ? await executeReviewedProposalActions({
@@ -119,20 +120,15 @@ async function executeChatToolCalls({ model, workspaceRoot = null, rootDir = nul
           abortSignal,
       })
     : { executed: 0, skipped: [], toolResults: [] };
-  const resultsByAllowedAction = new Map();
-  let resultIndex = 0;
-  for (const action of proposal?.actions || []) {
-    const review = proposalReview.reviews.find((item) => item.index === action.index);
-    if (review?.status === 'allowed') resultsByAllowedAction.set(action.index, (proposalExecution.nativeToolResults || proposalExecution.toolResults)[resultIndex++] || null);
-  }
+  const resultsByCallId = new Map((proposalExecution.nativeToolResults || proposalExecution.toolResults).map(result => [result.toolCallId, result]));
   // Provider-native transcripts require one output for every input call. A
   // malformed or policy-denied call is a failed tool result, not a missing
   // result or a terminal human-facing pseudo-blocker. That lets the model
   // correct its arguments on the next turn.
-  const callResults = (model?.choice?.toolCalls || []).map((call, index) => {
+  const callResults = toolCalls.map((call, index) => {
     const action = proposal?.actions?.find((item) => item.index === index) || null;
     const review = proposalReview.reviews.find((item) => item.index === index) || null;
-    const executedResult = resultsByAllowedAction.get(index);
+    const executedResult = resultsByCallId.get(call.id);
     if (executedResult) return executedResult;
     const reasons = review?.blockers?.length ? review.blockers : (action?.errors?.length ? action.errors : ['tool_call_not_executed']);
     return {
@@ -145,7 +141,7 @@ async function executeChatToolCalls({ model, workspaceRoot = null, rootDir = nul
       callId: call?.id || null,
     };
   });
-  return { proposal, proposalReview, proposalExecution, toolCalls: model?.choice?.toolCalls || [], callResults };
+  return { proposal, proposalReview, proposalExecution, toolCalls, callResults };
 }
 
 function isImageAttachment(attachment = {}) {
@@ -418,7 +414,7 @@ export async function runPlainModelTurn({
       let executed = await executeChatToolCalls({ model, workspaceRoot, rootDir, dataRoot, sessionId, conversationId, iteration, traceLogger, executionPolicy, modelConfig, executionContext, abortSignal });
       let rawToolResults = executed.callResults || [];
       const nativeToolCalls = executed.toolCalls;
-      const compactCalls = compactToolCalls(model.choice.toolCalls);
+      const compactCalls = compactToolCalls(nativeToolCalls);
       const compactResults = rawToolResults.map((result) => compactPromptEvidenceResult(result));
       const resultSummaries = summarizeToolResults(rawToolResults);
       const proposal = executed.proposal;

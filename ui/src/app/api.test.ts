@@ -1,8 +1,33 @@
+// @ts-expect-error Tests run in Node; the browser production build intentionally omits Node typings.
+import { readFile } from 'node:fs/promises';
+// @ts-expect-error Tests run in Node; the browser production build intentionally omits Node typings.
+import { resolve } from 'node:path';
+declare const process: { cwd(): string };
+declare const Buffer: { from(value: string): { toString(encoding: 'base64'): string } };
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api, fetchApi, generatedArtifactPath, jsonMutation } from './api';
-// This contract test intentionally executes the backend's real browser policy against UI-built requests.
-// @ts-expect-error The backend policy is a sibling JavaScript package without TypeScript declarations.
-import { browserRequestPolicy } from '../../../Burrow-Backend/src/browser-origin-policy.mjs';
+// Execute the backend's real policy in both supported repository layouts:
+// standalone Burrow-UI + Burrow-Backend siblings, and assembled ui + backend siblings.
+type BrowserRequestPolicy = (input: { method?: string; headers?: Record<string, string> }, url: URL) => unknown;
+const policyCandidates = [
+  resolve(process.cwd(), '../Burrow-Backend/src/browser-origin-policy.mjs'),
+  resolve(process.cwd(), '../backend/src/browser-origin-policy.mjs'),
+];
+let browserRequestPolicy: BrowserRequestPolicy | undefined;
+for (const candidate of policyCandidates) {
+  try {
+    const source = await readFile(candidate, 'utf8');
+    const module = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+    if (typeof module.browserRequestPolicy === 'function') {
+      browserRequestPolicy = module.browserRequestPolicy as BrowserRequestPolicy;
+      break;
+    }
+  } catch {
+    // Try the other supported repository layout.
+  }
+}
+if (!browserRequestPolicy) throw new Error(`backend_browser_policy_not_found:${policyCandidates.join(',')}`);
+const applyBrowserRequestPolicy = browserRequestPolicy;
 import { clearBasicCredentials, setBasicCredentials } from './auth';
 
 describe('API requests', () => {
@@ -64,7 +89,7 @@ describe('API requests', () => {
     for (const [path, init] of requests) {
       const headers = Object.fromEntries(new Headers(init.headers).entries());
       if (init.body !== undefined) headers['content-length'] = String(String(init.body).length);
-      expect(browserRequestPolicy({ method: init.method, headers }, new URL(path, 'https://burrow.example'))).toMatchObject({ status: null });
+      expect(applyBrowserRequestPolicy({ method: init.method, headers }, new URL(path, 'https://burrow.example'))).toMatchObject({ status: null });
       expect(headers['content-type']).toBe('application/json');
     }
   });
@@ -75,7 +100,7 @@ describe('API requests', () => {
     await api('/api/action', { method: 'POST' });
     const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const headers = Object.fromEntries(new Headers(init.headers).entries());
-    expect(browserRequestPolicy({ method: init.method, headers }, new URL(path, 'https://burrow.example'))).toMatchObject({ status: null });
+    expect(applyBrowserRequestPolicy({ method: init.method, headers }, new URL(path, 'https://burrow.example'))).toMatchObject({ status: null });
     expect(headers['content-type']).toBe('application/json');
   });
 

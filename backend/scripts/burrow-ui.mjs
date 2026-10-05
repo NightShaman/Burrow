@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { buildIdentity } from './build-identity.mjs';
+import { releaseProvenance } from './release-provenance.mjs';
 import { browserRequestPolicy } from '../src/browser-origin-policy.mjs';
 import { artifactResponseHeaders } from '../src/artifact-response-policy.mjs';
 import { postgresTransactionContext, withPostgresTransaction } from '../src/postgres-foundation.mjs';
@@ -118,6 +119,7 @@ function summarizeSessionTurns(turns = [], { maxChars = 4000 } = {}) {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sourceRoot = path.resolve(__dirname, '..');
 const healthBuildIdentity = await buildIdentity(sourceRoot);
+const healthReleaseProvenance = await releaseProvenance(sourceRoot);
 const projectRoot = path.resolve(process.env.BURROW_SOURCE_ROOT || sourceRoot);
 const uiDistRoot = path.join(projectRoot, 'public', 'ui');
 const apiDocsRoot = path.join(sourceRoot, 'public', 'api-docs');
@@ -3209,7 +3211,7 @@ const server = createServer(async (req, res) => {
     const origin = `${url.protocol}//${url.host}`;
     if (applyApiCors(req, res, url)) return;
     if (await authRoute({ req, res, url, origin })) return;
-    if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/api/health')) return sendJson(res, 200, { ok: true, runtime: 'burrow', version: releaseVersion, buildIdentity: healthBuildIdentity, ...(process.env.BURROW_SMOKE_TOKEN && req.headers['x-burrow-smoke-token'] === process.env.BURROW_SMOKE_TOKEN ? { smokeToken: process.env.BURROW_SMOKE_TOKEN } : {}) });
+    if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/api/health')) return sendJson(res, 200, { ok: true, runtime: 'burrow', version: releaseVersion, buildIdentity: healthBuildIdentity, ...(healthReleaseProvenance ? { releaseProvenance: healthReleaseProvenance } : {}), ...(process.env.BURROW_SMOKE_TOKEN && req.headers['x-burrow-smoke-token'] === process.env.BURROW_SMOKE_TOKEN ? { smokeToken: process.env.BURROW_SMOKE_TOKEN } : {}) });
     if (!(await authorizeRequest(req, res, url))) return;
     if (req.method === 'GET' && url.pathname === '/api/auth/validate') {
       const runtime = await runtimeConfig();

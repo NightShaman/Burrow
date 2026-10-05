@@ -52,6 +52,18 @@ export function normalizeProviderMessages(messages = []) {
 // A tool round is indivisible protocol. Callers may bound or summarize the
 // result content, but they must never retain the assistant call without its
 // corresponding tool output in a provider request.
+export function normalizeNativeToolCalls(toolCalls = []) {
+  const byId = new Map();
+  for (const [index, call] of toolCalls.entries()) {
+    const id = String(call?.id || `tool-call-${index}`).slice(0, 256);
+    const signature = JSON.stringify([call?.name, call?.rawArguments ?? call?.arguments ?? {}]);
+    const previous = byId.get(id);
+    if (previous && previous.signature !== signature) throw new Error('model_tool_call_conflict');
+    if (!previous) byId.set(id, { signature, call: { ...call, id } });
+  }
+  return [...byId.values()].map(item => item.call);
+}
+
 export function providerToolRound({ toolCalls = [], toolResults = [], toolResultContent = () => '' } = {}) {
   const calls = (Array.isArray(toolCalls) ? toolCalls : []).map((call, index) => ({
     id: String(call?.id || `tool-call-${index}`).slice(0, 256),

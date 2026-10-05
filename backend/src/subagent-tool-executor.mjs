@@ -395,6 +395,8 @@ export async function executeSpawnSubagentTool({
     receiptRefs: child.receiptRefs,
     retention: child.retention,
     evidence: result.evidence,
+    changedFiles: result.changedFiles,
+    sideEffectsApplied: result.sideEffectsApplied,
     ...(result.verification ? { verification: result.verification } : {}),
     verificationTarget: result.verificationTarget,
     blockers: result.blockers,

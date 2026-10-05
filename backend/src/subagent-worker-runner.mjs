@@ -230,7 +230,7 @@ function evidenceLabel(result = {}, index) {
 }
 
 function compactEvidenceItem(result = {}) {
-  const base = { tool: result.tool || 'unknown', ok: Boolean(result.ok) };
+  const base = { tool: result.tool || 'unknown', ok: Boolean(result.ok), sideEffectsApplied: result.sideEffectsApplied };
   if (result.tool === 'files_read') return {
     ...base,
     filePath: result.filePath || null,
@@ -349,7 +349,7 @@ function retainChildResults(history, results, { limit = CHAT_TOOL_RESULT_HISTORY
   for (const result of results) {
     for (const item of (Array.isArray(result.artifacts) ? result.artifacts : (result.artifacts ? [result.artifacts] : []))) history.allArtifacts.add(item);
     if (result.ok) for (const item of (Array.isArray(result.memoryWrites) ? result.memoryWrites : [])) history.allMemoryWrites.add(item);
-    if (result.ok && (result.sideEffectsApplied === true || ['files_write', 'files_edit', 'files_patch'].includes(result.tool))) history.sideEffectsApplied = true;
+    if ((result.sideEffectsApplied === true || (result.ok && ['files_write', 'files_edit', 'files_patch'].includes(result.tool)))) history.sideEffectsApplied = true;
     else if (result.ok && !['files_read', 'files_list', 'files_find', 'files_search', 'files_inspect', 'git_status', 'git_diff'].includes(result.tool) && result.sideEffectsApplied !== false && history.sideEffectsApplied !== true) history.sideEffectsApplied = null;
     const receipt = compactEvidenceItem(result);
     if (result.tool === 'files_read') receipt.content = String(result.content || '').slice(0, CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS);
@@ -372,7 +372,7 @@ function subagentResult({ ok, summary, blockers = [], warnings = [], verificatio
     memoryWrites: toolResults.allMemoryWrites ? [...toolResults.allMemoryWrites] : toolResults.flatMap(result => result.ok ? (result.memoryWrites || []) : []),
     ...(toolResults.consequences ? { consequences: toolResults.consequences, omittedToolResults: toolResults.omittedToolResults || 0 } : {}),
     ...(verification ? { verification } : {}),
-    sideEffectsApplied: toolResults.consequences ? (toolResults.sideEffectsApplied ?? (toolResults.sideEffectsApplied === null ? null : false)) : toolResults.some(result => result.ok && (result.sideEffectsApplied === true || ['files_write', 'files_edit', 'files_patch'].includes(result.tool))) ? true
+    sideEffectsApplied: toolResults.consequences ? (toolResults.sideEffectsApplied ?? (toolResults.sideEffectsApplied === null ? null : false)) : toolResults.some(result => (result.sideEffectsApplied === true || (result.ok && ['files_write', 'files_edit', 'files_patch'].includes(result.tool)))) ? true
       : toolResults.some(result => result.ok && !['files_read', 'files_list', 'files_find', 'files_search', 'files_inspect', 'git_status', 'git_diff'].includes(result.tool) && result.sideEffectsApplied !== false) ? null : false,
     verificationTarget: target?.root || null,
   };

@@ -91,6 +91,7 @@ export function summarizeToolResults(toolResults = []) {
   return (toolResults || []).map((toolResult, index) => ({
     activityId: toolResult.activityId || `tool-${index + 1}`,
     tool: toolResult.tool || null,
+    toolCallId: toolResult.toolCallId || null,
     ok: toolResult.ok ?? null,
     ...(toolResult.tool === 'mcp_call' ? {
       mcpToolName: toolResult.mcpToolName ? compactText(toolResult.mcpToolName, 240) : null,
@@ -351,9 +352,13 @@ export function displayPathForToolResult(filePath, toolResult = {}) {
 export function changedPathsFromToolResults(toolResults = []) {
   const changed = [];
   for (const toolResult of toolResults || []) {
-    if (!toolResult?.ok || !['files_write', 'files_edit', 'files_patch'].includes(toolResult.tool)) continue;
+    if (toolResult?.tool === 'spawn_subagent') {
+      for (const filePath of toolResult.changedFiles || []) if (!changed.includes(filePath)) changed.push(filePath);
+      continue;
+    }
+    if (!toolResult || (!toolResult.ok && toolResult.sideEffectsApplied !== true) || !['files_write', 'files_edit', 'files_patch'].includes(toolResult.tool)) continue;
     const paths = toolResult.tool === 'files_patch'
-      ? (toolResult.touchedFiles || [])
+      ? (toolResult.changedFiles || toolResult.touchedFiles || [])
       : [toolResult.filePath].filter(Boolean);
     for (const filePath of paths) {
       const displayPath = displayPathForToolResult(filePath, toolResult);
