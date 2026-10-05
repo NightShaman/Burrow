@@ -102,6 +102,7 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
   const session = sessionId(targetSessionId);
   const source = sessionId(sourceSessionId || 'default');
   const deliveryId = createHash('sha256').update(JSON.stringify([sender, recipient, source, session, runId || null, resolvedMode, body])).digest('hex');
+  const deliveryRequest = { sender, recipient, sourceSessionId: source, targetSessionId: session, runId: runId || null, messageMode: resolvedMode, content: body };
 
   const deliver = async () => {
     const recipientEntry = await appendAgentMessage({
@@ -127,15 +128,38 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
   };
   if (!['request_reply', 'request_reply_complete'].includes(resolvedMode)) return (await deliver()).receipt;
   if (typeof runRecipientReply !== 'function') throw new Error('agent_message_reply_unavailable');
+  if (typeof conversationStore.claimAgentMessageDelivery !== 'function' || typeof conversationStore.completeAgentMessageDelivery !== 'function' || typeof conversationStore.readAgentMessageDelivery !== 'function') throw new Error('agent_message_delivery_store_required');
+
+  // Claim before recipient ingress or execution. A concurrent/restarted retry
+  // observes the same durable terminal result rather than waking the recipient twice.
+  const claim = await conversationStore.claimAgentMessageDelivery({ deliveryId, request: deliveryRequest });
+  if (!claim.execute) {
+    if (claim.status === 'completed') return claim.result;
+    for (;;) {
+      abortSignal?.throwIfAborted();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const observed = await conversationStore.readAgentMessageDelivery({ deliveryId });
+      if (observed?.status === 'completed') return observed.result;
+      if (!observed) throw new Error('agent_message_delivery_claim_missing');
+    }
+  }
 
   // Ingress is part of the recipient reply transaction. Appending a second
   // A2A message while the first recipient run owns this session advances the
   // transcript underneath it and makes the first terminal commit stale. Queue
   // both delivery and execution per recipient session instead.
-  const releaseWait = beginReplyWait(
-    replySessionKey(senderRuntime.agentWorkspaceRoot, source),
-    replySessionKey(recipientRuntime.agentWorkspaceRoot, session),
-  );
+  let releaseWait;
+  try {
+    releaseWait = beginReplyWait(
+      replySessionKey(senderRuntime.agentWorkspaceRoot, source),
+      replySessionKey(recipientRuntime.agentWorkspaceRoot, session),
+    );
+  } catch (error) {
+    const failed = { tool: 'agent_send_message', ok: false, messageMode: resolvedMode, deliveryId,
+      senderAgentId: sender, recipientAgentId: recipient, sourceSessionId: source, targetSessionId: session,
+      reply: { ok: false, decision: null, error: error?.message || String(error), content: null }, autoExecuted: false };
+    return conversationStore.completeAgentMessageDelivery({ deliveryId, result: failed });
+  }
   let exchange;
   try {
     exchange = await serializeRecipientReply({
@@ -150,20 +174,32 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
         return { ...delivery, reply: response };
       },
     });
+  } catch (error) {
+    const failed = { tool: 'agent_send_message', ok: false, messageMode: resolvedMode, deliveryId,
+      senderAgentId: sender, recipientAgentId: recipient, sourceSessionId: source, targetSessionId: session,
+      reply: { ok: false, decision: null, error: error?.message || String(error), content: null }, autoExecuted: false };
+    await conversationStore.completeAgentMessageDelivery({ deliveryId, result: failed });
+    return failed;
   } finally { releaseWait(); }
   const { sourceEntry, receipt, reply } = exchange;
   const replyText = text(reply?.answerText);
-  if (!replyText) return { ...receipt, reply: { ok: false, error: reply?.error || 'agent_message_reply_empty' } };
+  if (!replyText) {
+    const failed = { ...receipt, ok: false, reply: { ok: Boolean(reply?.ok), decision: reply?.decision || reply?.reply?.decision || null, error: reply?.error || reply?.reply?.error || 'agent_message_reply_empty', content: null } };
+    return conversationStore.completeAgentMessageDelivery({ deliveryId, result: failed });
+  }
   const replyEntry = await appendAgentMessage({
     conversationStore, agentId: sender, sessionId: source, content: replyText,
     sender: recipient, senderRuntime: recipientRuntime, recipient: sender,
     sourceSessionId: session, sourceRunId: reply?.runId || null,
     messageMode: 'reply', direction: 'inbound', deliveryId: `${deliveryId}:reply`, replyToEntryId: sourceEntry.id,
   });
-  return {
+  const result = {
     ...receipt,
+    ok: reply?.ok !== false,
     reply: {
-      ok: true,
+      ok: reply?.ok !== false,
+      decision: reply?.decision || null,
+      error: reply?.error || null,
       runId: reply.runId || null,
       entryId: replyEntry.id,
       recipientReplyEntryId: reply.recipientReplyEntryId || null,
@@ -172,4 +208,5 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
       content: replyText,
     },
   };
+  return conversationStore.completeAgentMessageDelivery({ deliveryId, result });
 }

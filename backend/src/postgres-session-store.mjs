@@ -5,6 +5,7 @@ import { POSTGRES_HISTORY_KEYSET_SQL } from './postgres-history-keyset.mjs';
 import { POSTGRES_RESET_INSTANT_SQL } from './postgres-reset-instant.mjs';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { POSTGRES_CONTINUITY_STATE_SCHEMA_SQL } from './postgres-continuity-state-store.mjs';
+import { POSTGRES_AGENT_DELIVERY_SCHEMA_SQL } from './postgres-agent-delivery-store.mjs';
 import { resolveAlbdruckConfig } from './config.mjs';
 import { matchesQuery } from './session-search.mjs';
 import { closeContinuityOwners } from './postgres-continuity-owner.mjs';
@@ -505,7 +506,7 @@ UPDATE conversation_entries SET has_payload_id=NULL;
 UPDATE conversation_archive_entries SET has_payload_id=NULL;
 `;
 
-export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL + POSTGRES_RESET_INSTANT_SQL + POSTGRES_HISTORY_KEYSET_SQL + POSTGRES_LOGICAL_MEMBER_SQL + POSTGRES_ARCHIVE_RELATIONAL_ID_SQL + POSTGRES_CATALOG_SCALAR_ID_SQL + POSTGRES_LOGICAL_LOOKUP_INDEX_SQL;
+export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL + POSTGRES_RESET_INSTANT_SQL + POSTGRES_HISTORY_KEYSET_SQL + POSTGRES_LOGICAL_MEMBER_SQL + POSTGRES_ARCHIVE_RELATIONAL_ID_SQL + POSTGRES_CATALOG_SCALAR_ID_SQL + POSTGRES_LOGICAL_LOOKUP_INDEX_SQL + POSTGRES_AGENT_DELIVERY_SCHEMA_SQL;
 
 const text = (value) => String(value ?? '');
 const required = (value, name) => { const result = text(value).trim(); if (!result) throw new Error(`${name} is required`); return result; };
@@ -543,6 +544,34 @@ export class PostgresSessionStore {
     if (!pool?.query || !pool?.connect) throw new Error('session_postgres_pool_required');
     this.pool = normalizePostgresPool(pool); this.ownsPool = ownsPool; this.clock = clock;
   }
+  async claimAgentMessageDelivery({ deliveryId, request } = {}) {
+    const id = required(deliveryId, 'deliveryId');
+    const payload = request && typeof request === 'object' ? request : {};
+    const inserted = await this.pool.query(`INSERT INTO agent_message_deliveries(delivery_id,status,request)
+      VALUES($1,'executing',$2::jsonb) ON CONFLICT DO NOTHING RETURNING delivery_id`, [id, JSON.stringify(payload)]);
+    if (inserted.rowCount === 1) return { execute: true, status: 'executing', result: null };
+    const { rows } = await this.pool.query('SELECT status,request,result FROM agent_message_deliveries WHERE delivery_id=$1', [id]);
+    const row = rows[0];
+    if (!row || JSON.stringify(Object.fromEntries(Object.entries(row.request).sort())) !== JSON.stringify(Object.fromEntries(Object.entries(payload).sort()))) throw new Error('agent_message_delivery_identity_conflict');
+    return { execute: false, status: row.status, result: row.result || null };
+  }
+
+  async completeAgentMessageDelivery({ deliveryId, result } = {}) {
+    const id = required(deliveryId, 'deliveryId');
+    const { rows } = await this.pool.query(`UPDATE agent_message_deliveries SET status='completed',result=$2::jsonb,completed_at=CURRENT_TIMESTAMP
+      WHERE delivery_id=$1 AND status='executing' RETURNING result`, [id, JSON.stringify(result)]);
+    if (rows.length) return rows[0].result;
+    const existing = await this.pool.query('SELECT status,result FROM agent_message_deliveries WHERE delivery_id=$1', [id]);
+    if (existing.rows[0]?.status === 'completed') return existing.rows[0].result;
+    throw new Error('agent_message_delivery_claim_missing');
+  }
+
+  async readAgentMessageDelivery({ deliveryId } = {}) {
+    const id = required(deliveryId, 'deliveryId');
+    const { rows } = await this.pool.query('SELECT status,result FROM agent_message_deliveries WHERE delivery_id=$1', [id]);
+    return rows[0] || null;
+  }
+
   async deleteSession({agentId: rawAgentId, sessionId: rawSessionId, retentionPolicy = null} = {}) {
     const agentId = required(rawAgentId, 'agentId');
     const sessionId = required(rawSessionId, 'sessionId');

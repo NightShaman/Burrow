@@ -39,6 +39,7 @@ import { POSTGRES_RETENTION_SETTINGS_SCHEMA_SQL } from './postgres-retention-set
 import { POSTGRES_WORKING_MEMORY_RETENTION_SCHEMA_SQL } from './postgres-working-memory-retention-settings-store.mjs';
 import { POSTGRES_SESSION_SCHEMA_SQL, POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL, POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL, POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL, POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL, POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL, POSTGRES_SESSION_SEARCH_SCHEMA_SQL, POSTGRES_SESSION_NATIVE_SCHEMA_SQL, POSTGRES_SESSION_METADATA_SCHEMA_SQL, POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL } from './postgres-session-store.mjs';
 import { POSTGRES_UI_AUTH_SECRET_SCHEMA_SQL } from './postgres-ui-auth-secret-store.mjs';
+import { POSTGRES_AGENT_DELIVERY_SCHEMA_SQL } from './postgres-agent-delivery-store.mjs';
 
 // Version 1 and its component SQL are immutable after adoption. Schema changes
 // require an appended migration, never edits to a previously applied checksum.
@@ -102,4 +103,5 @@ ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS effective_timezone TEXT;` },
   { version: 40, name: 'catalog-lossless-scalar-identity', sql: POSTGRES_CATALOG_SCALAR_ID_SQL },
   { version: 41, name: 'logical-original-lookup-indexes', sql: POSTGRES_LOGICAL_LOOKUP_INDEX_SQL },
   { version: 42, name: 'indexed-dream-occurrence-windows', sql: POSTGRES_DREAM_WINDOW_SQL },
+  { version: 43, name: 'durable-agent-message-deliveries', sql: POSTGRES_AGENT_DELIVERY_SCHEMA_SQL },
 ]);

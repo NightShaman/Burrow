@@ -249,7 +249,7 @@ async function runAskChatUnserialized({
         onModelContextUsage: lifecycle?.onModelContextUsage || null,
         args: { abort_signal: lifecycle?.signal || parentSignal || normalizedArgs.abort_signal || null },
       });
-      return { answerText: reply.answerText || null, runId: reply.runId || null, recipientReplyEntryId: reply.assistantTurn?.id || null, error: reply.error || null };
+      return { ok: reply.ok === true, decision: reply.decision || null, answerText: reply.answerText || null, runId: reply.runId || null, recipientReplyEntryId: reply.assistantTurn?.id || null, error: reply.error || null };
     } finally {
       lifecycle?.finish?.();
     }
