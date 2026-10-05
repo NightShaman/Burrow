@@ -166,7 +166,14 @@ async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSes
     allowMutations: executionPolicyAllowsMutation(executionPolicy),
     observedToolResults, executionContext, abortSignal: signal,
   });
-  const resultsByCallId = new Map((execution.nativeToolResults || execution.toolResults).map((result, index) => [result.toolCallId, { ...execution.toolResults[index], toolCallId: result.toolCallId }]));
+  const resultsByCallId = new Map((execution.nativeToolResults || execution.toolResults).map((result, index) => {
+    const compact = execution.toolResults[index] || {};
+    // Execution receipts are deliberately compact, but the immediate provider
+    // continuation must receive the original selected evidence (for example a
+    // loaded skill body). Pair by immutable call ID; positional overlay was both
+    // lossy and unsafe after executor deduplication.
+    return [result.toolCallId, { ...compact, ...result, toolCallId: result.toolCallId }];
+  }));
   const results = toolCalls.map((call, index) => {
     const executed = resultsByCallId.get(call.id);
     if (executed) return executed;
@@ -177,6 +184,27 @@ async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSes
       error: status === 'cancelled' ? 'cancelled' : (skipped?.blockers || review?.blockers || ['tool_call_not_executed']).join(', ') };
   });
   return { results, skipped: execution.skipped };
+}
+
+function applyFinalProviderDelivery({ toolCalls = [], toolResults = [], messages = [] } = {}) {
+  const byCallId = new Map((toolCalls || []).map((call, index) => [String(call?.id || `tool-call-${index}`), toolResults[index]]));
+  for (const message of messages || []) {
+    if (message?.role !== 'tool' || !message.tool_call_id) continue;
+    const result = byCallId.get(String(message.tool_call_id));
+    if (!result || result.tool !== 'files_read') continue;
+    let receipt;
+    try { receipt = JSON.parse(String(message.content || '{}')); } catch { continue; }
+    const projected = receipt?.content;
+    const deliveredText = typeof projected === 'string' ? projected : (projected && typeof projected.text === 'string' ? projected.text : '');
+    const returnedBytes = Buffer.byteLength(deliveredText, result.encoding || 'utf8');
+    const rawReturnedBytes = Number(result.returnedBytes ?? Buffer.byteLength(String(result.content || ''), result.encoding || 'utf8'));
+    const offsetBytes = Number(result.offsetBytes || 0);
+    result.delivery = {
+      returnedBytes,
+      truncated: returnedBytes < rawReturnedBytes || Boolean(result.truncated),
+      nextOffsetBytes: offsetBytes + returnedBytes,
+    };
+  }
 }
 
 function continuationToolCallsForTruncatedEvidence(toolResults = [], continuationCounts = new Map()) {
@@ -586,6 +614,7 @@ export async function runSpawnSubagentChild({
             tools: continuationTools,
           })
         : null;
+      if (preparedContinuation) applyFinalProviderDelivery({ toolCalls, toolResults: batch.results, messages: preparedContinuation.messages });
       next = nativeContinuation
         ? await adapter.continueWithToolResults({
             previousModel: current,
@@ -691,4 +720,4 @@ export async function runSpawnSubagentChild({
 
 }
 
-export const __subagentWorkerRunner__ = Object.freeze({ retainChildResults, subagentResult, continuationToolCallsForTruncatedEvidence, runSubagentToolCalls, childPrompt, proposalFromNativeToolCalls, boundedEvidenceLedger, compactEvidenceItem, compactEvidenceForHandoff, followupPromptWithEvidence, finalSynthesisPrompt, terminalResultFromToolCalls, subagentEmptyFinalResult, subagentTerminalMissingResult });
+export const __subagentWorkerRunner__ = Object.freeze({ retainChildResults, subagentResult, continuationToolCallsForTruncatedEvidence, applyFinalProviderDelivery, runSubagentToolCalls, childPrompt, proposalFromNativeToolCalls, boundedEvidenceLedger, compactEvidenceItem, compactEvidenceForHandoff, followupPromptWithEvidence, finalSynthesisPrompt, terminalResultFromToolCalls, subagentEmptyFinalResult, subagentTerminalMissingResult });
