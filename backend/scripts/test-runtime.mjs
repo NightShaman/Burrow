@@ -111,7 +111,7 @@ function assertOwned(runtime) {
 
 function assertNoInheritedDatabase(env) {
   if (Object.entries(env).some(([key, value]) => value &&
-    (key === 'DATABASE_URL' || key.startsWith('BURROW_POSTGRES_') || /^PG[A-Z_0-9]+$/.test(key)))) {
+    (key === 'DATABASE_URL' || key === 'BURROW_ACCESS_TEST_SOCKET' || key.startsWith('BURROW_POSTGRES_') || /^PG[A-Z_0-9]+$/.test(key)))) {
     throw new Error('Inherited database configuration rejected; use a run-owned disposable fixture');
   }
 }
@@ -126,7 +126,8 @@ export function testRuntimeEnv(runtime, baseEnv = process.env) {
   for (const key of ['BURROW_CONFIG', 'BURROW_RUNTIME_ROOT', 'BURROW_DATA_ROOT', 'BURROW_WORKSPACE_ROOT', 'BURROW_AGENT_WORKSPACE_ROOT', 'BURROW_AGENT_DATA_ROOT', 'BURROW_CACHE_ROOT', 'BURROW_ARCHIVE_ROOT', 'BURROW_SETTINGS_KEY', 'TMPDIR', 'TMP', 'TEMP']) delete env[key];
   // Isolated settings stores still encrypt connection secrets. This fixed test-only
   // key never reaches a deployed runtime and avoids inheriting host credentials.
-  return { ...env, BURROW_POSTGRES_HOST: path.join(runtime.root, 'no-postgres-socket'), BURROW_POSTGRES_DATABASE: 'burrow_test_disabled', BURROW_POSTGRES_USER: 'burrow_test_disabled', TMPDIR: runtime.tmp, TMP: runtime.tmp, TEMP: runtime.tmp, BURROW_RUNTIME_ROOT: runtime.root, BURROW_WORKSPACE_ROOT: runtime.workspace, BURROW_AGENT_WORKSPACE_ROOT: runtime.agentWorkspace, BURROW_CACHE_ROOT: runtime.cache, BURROW_TRACE_ISOLATION: '1', BURROW_SETTINGS_KEY: Buffer.alloc(32, 7).toString('base64') };
+  const disabledSocket = path.join(runtime.root, 'no-postgres-socket');
+  return { ...env, PGHOST: disabledSocket, PGPORT: '5432', PGDATABASE: 'burrow_test_disabled', PGUSER: 'burrow_test_disabled', BURROW_POSTGRES_HOST: disabledSocket, BURROW_POSTGRES_DATABASE: 'burrow_test_disabled', BURROW_POSTGRES_USER: 'burrow_test_disabled', TMPDIR: runtime.tmp, TMP: runtime.tmp, TEMP: runtime.tmp, BURROW_RUNTIME_ROOT: runtime.root, BURROW_WORKSPACE_ROOT: runtime.workspace, BURROW_AGENT_WORKSPACE_ROOT: runtime.agentWorkspace, BURROW_CACHE_ROOT: runtime.cache, BURROW_TRACE_ISOLATION: '1', BURROW_SETTINGS_KEY: Buffer.alloc(32, 7).toString('base64') };
 }
 
 export async function removeTestRuntime(runtime) {
@@ -161,6 +162,17 @@ export async function runTestSuite({ argv = null, spawnProcess = spawn, verifyDe
       childEnv.BURROW_POSTGRES_HOST = socketDir;
       childEnv.BURROW_POSTGRES_DATABASE = 'postgres';
       childEnv.BURROW_POSTGRES_USER = os.userInfo().username;
+      childEnv.PGHOST = socketDir;
+      childEnv.PGPORT = '5432';
+      childEnv.PGDATABASE = 'postgres';
+      childEnv.PGUSER = os.userInfo().username;
+      // These opt-ins are minted only after this runner has created the owned
+      // fixture. They are never accepted from the invoking environment.
+      childEnv.BURROW_ACCESS_TEST_SOCKET = socketDir;
+      childEnv.BURROW_ACCESS_TEST_USER = os.userInfo().username;
+      childEnv.BURROW_POSTGRES_MANAGED_INTEGRATION = '1';
+      childEnv.BURROW_POSTGRES_TEST_BIN = postgresBinDir;
+      childEnv.PATH = `${postgresBinDir}${path.delimiter}${childEnv.PATH || ''}`;
     }
     const deployedBefore = verifyDeployedIsolation ? await deployedRuntimeManifests() : null;
     const exitCode = await new Promise((resolve, reject) => {
