@@ -1,4 +1,4 @@
-import { getBasicAuthHeader } from './auth';
+import { getBasicAuthHeader, hasBasicCredentials } from './auth';
 import { clientBudgets } from './clientBudgets';
 
 export type SetupStatus = {
@@ -378,7 +378,9 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 async function parseApiResponse<T>(response: Response): Promise<T> {
   if (response.status === 204) return undefined as T;
 
-  if (response.status === 401) window.dispatchEvent(new CustomEvent('burrow:auth-required'));
+  // A 401 only represents an expired UI session when this tab has established Basic credentials.
+  // In auth-disabled mode (or for unrelated backend authorization failures), do not invent a login prompt.
+  if (response.status === 401 && hasBasicCredentials()) window.dispatchEvent(new CustomEvent('burrow:auth-required'));
   const text = await response.text();
   const contentType = response.headers.get('content-type') ?? '';
   const responseExcerpt = text.length > 500 ? `${text.slice(0, 500)}…` : text;

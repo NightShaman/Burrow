@@ -17,6 +17,10 @@ export function setBasicCredentials(username: string, password: string) {
   basicCredentials = { username, password };
 }
 
+export function hasBasicCredentials() {
+  return basicCredentials !== null;
+}
+
 export function clearBasicCredentials() {
   basicCredentials = null;
 }

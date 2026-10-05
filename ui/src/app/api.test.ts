@@ -102,8 +102,18 @@ describe('API requests', () => {
     await expect(api('/api/reset')).resolves.toBeUndefined();
   });
 
-  it('dispatches the reauthentication signal for malformed 401 JSON before parsing fails', async () => {
+  it('does not request reauthentication for a 401 when no Basic session exists', async () => {
     const event = vi.fn();
+    window.addEventListener('burrow:auth-required', event);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('unauthorized', { status: 401 })));
+    await expect(api('/api/agents')).rejects.toMatchObject({ status: 401 });
+    expect(event).not.toHaveBeenCalled();
+    window.removeEventListener('burrow:auth-required', event);
+  });
+
+  it('dispatches reauthentication for malformed 401 JSON only in an established Basic session', async () => {
+    const event = vi.fn();
+    setBasicCredentials('goblin', 'secret');
     window.addEventListener('burrow:auth-required', event);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{broken', { status: 401, headers: { 'content-type': 'application/json' } })));
     await expect(api('/api/agents')).rejects.toMatchObject({ status: 401 });
