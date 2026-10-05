@@ -1,6 +1,26 @@
 import { DEFAULT_MAX_RESPONSE_BYTES, MAX_MODEL_TEXT_CHARS, MAX_SSE_CARRY_CHARS, MAX_SSE_EVENT_CHARS, boundedText, normalizeToolCall, jsonText } from './adapter-primitives.mjs';
 import { isGoogleOpenAICompatible } from './google-wire.mjs';
 function trimSlash(value) { return String(value || '').replace(/\/+$/, ''); }
+
+export function openAIEnvelopeError(data, mode) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return 'model_response_malformed_envelope';
+  if (data.error) return data.error.message || 'model_response_provider_error';
+  if (mode === 'openai-responses') {
+    if (data.status !== 'completed') return `model_response_${data.status || 'missing_status'}`;
+    if (!Array.isArray(data.output) && typeof data.output_text !== 'string') return 'model_response_malformed_envelope';
+    const choice = normalizeResponseChoice(data);
+    const media = (data.output || []).some(item => item?.type === 'image_generation_call' && typeof item.result === 'string' && item.result.length);
+    return choice.text.trim() || choice.toolCalls.length || media ? null : 'model_response_empty';
+  }
+  const choice = data.choices?.[0];
+  if (!Array.isArray(data.choices) || !choice || !choice.message || typeof choice.message !== 'object') return 'model_response_malformed_envelope';
+  if (!['stop', 'tool_calls', 'function_call'].includes(choice.finish_reason)) return `model_response_${choice.finish_reason || 'missing_finish_reason'}`;
+  if (choice.message.tool_calls != null && !Array.isArray(choice.message.tool_calls)) return 'model_response_malformed_envelope';
+  const normalized = normalizeChoice(data);
+  const media = choice.message.audio && typeof choice.message.audio === 'object'
+    && (typeof choice.message.audio.data === 'string' || typeof choice.message.audio.id === 'string');
+  return normalized.text.trim() || normalized.toolCalls.length || media ? null : 'model_response_empty';
+}
 export function isChatGptBackendBaseUrl(value) { const raw=trimSlash(value); if (!raw) return false; try { const url=new URL(raw); const pathname=url.pathname.replace(/\/+$/,''); return url.hostname.toLowerCase()==='chatgpt.com' && ['/backend-api','/backend-api/v1','/backend-api/codex','/backend-api/codex/v1'].includes(pathname); } catch { return false; } }
 function codexResponsesUrl(baseUrl) { const url=new URL(trimSlash(baseUrl)); url.pathname='/backend-api/codex/responses'; url.search=''; url.hash=''; return url.toString(); }
 export function completionUrl(config={}) { const baseUrl=trimSlash(config.baseUrl||config.apiBaseUrl||config.url); if(!baseUrl) throw new Error('model baseUrl is required'); if(isChatGptBackendBaseUrl(baseUrl)) return codexResponsesUrl(baseUrl); if(config.chatCompletionsPath) return `${baseUrl}/${String(config.chatCompletionsPath).replace(/^\/+/, '')}`; if(baseUrl.endsWith('/chat/completions')) return baseUrl; if(baseUrl.endsWith('/v1')||(isGoogleOpenAICompatible(config)&&baseUrl.endsWith('/openai'))) return `${baseUrl}/chat/completions`; return `${baseUrl}/v1/chat/completions`; }
@@ -404,6 +424,12 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   const data = mode === 'openai-responses'
     ? (finalData ? { ...finalData, ...(text ? { output_text: text } : {}), ...(responseToolCalls.length ? { output: responseToolCalls.filter(Boolean) } : finalData.output ? { output: finalData.output } : {}) } : { status: streamError ? 'failed' : 'completed', output_text: text, output: responseToolCalls.filter(Boolean) })
     : { choices: [{ index: 0, finish_reason: finishReason, message: { role: 'assistant', content: text, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) } }], usage };
+  // Streaming must apply the same terminal semantic contract as one-shot
+  // responses. Do this before returning any data so callers cannot execute
+  // tool calls or persist a transcript from length/content-filter/refusal,
+  // incomplete, malformed, or empty terminals.
+  const terminalError = openAIEnvelopeError(data, mode);
+  if (terminalError) return { ok: false, bytes, error: terminalError, data: null, streamedTextChars: text.length };
   return { ok: !streamError, bytes, error: streamError, errorDetails: streamErrorDetails, data, streamedTextChars: text.length };
 }
 

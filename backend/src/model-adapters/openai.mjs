@@ -1,5 +1,5 @@
 import { apiMode, isChatGptBackendBaseUrl, responsesUrl, completionUrl } from './openai-transport.mjs';
-import { toolNames, responseApiTool, messagesToResponsesInput, readResponseSseBounded, normalizeResponseChoice, normalizeChoice, compactResponseCompletion, mergeStreamToolCall } from './openai-transport.mjs';
+import { toolNames, responseApiTool, messagesToResponsesInput, readResponseSseBounded, normalizeResponseChoice, normalizeChoice, compactResponseCompletion, mergeStreamToolCall, openAIEnvelopeError } from './openai-transport.mjs';
 import { redactStructuredJsonText } from '../redaction.mjs';
 import { googleCompatibleWireModel } from './google-wire.mjs';
 import {
@@ -257,25 +257,4 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       });
     },
   };
-}
-
-
-
-function openAIEnvelopeError(data, mode) {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return 'model_response_malformed_envelope';
-  if (data.error) return data.error.message || 'model_response_provider_error';
-  if (mode === 'openai-responses') {
-    if (data.status !== 'completed') return `model_response_${data.status || 'missing_status'}`;
-    if (!Array.isArray(data.output) && typeof data.output_text !== 'string') return 'model_response_malformed_envelope';
-    const choice = normalizeResponseChoice(data);
-    const media = (data.output || []).some(item => item?.type === 'image_generation_call' && typeof item.result === 'string' && item.result.length);
-    return choice.text.trim() || choice.toolCalls.length || media ? null : 'model_response_empty';
-  }
-  const choice = data.choices?.[0];
-  if (!Array.isArray(data.choices) || !choice || !choice.message || typeof choice.message !== 'object') return 'model_response_malformed_envelope';
-  if (!['stop', 'tool_calls', 'function_call'].includes(choice.finish_reason)) return `model_response_${choice.finish_reason || 'missing_finish_reason'}`;
-  if (choice.message.tool_calls != null && !Array.isArray(choice.message.tool_calls)) return 'model_response_malformed_envelope';
-  const normalized = normalizeChoice(data);
-  const media = choice.message.audio && (choice.message.audio.data || choice.message.audio.id);
-  return normalized.text.trim() || normalized.toolCalls.length || media ? null : 'model_response_empty';
 }
