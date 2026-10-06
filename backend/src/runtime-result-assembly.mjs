@@ -206,7 +206,7 @@ export function compactRuntimeReceipt({
             ...prompt.contextBuildReceipt.budget,
             estimatedTokens: Number(contextUsage.estimatedTokens),
             estimatedChars: Number(contextUsage.estimatedChars) || prompt.contextBuildReceipt.budget?.estimatedChars || null,
-            usageRatio: Number.isFinite(Number(prompt.contextBuildReceipt.budget?.contextTokens || prompt.contextBuildReceipt.budget?.contextWindow))
+            usageRatio: Number(prompt.contextBuildReceipt.budget?.contextTokens ?? prompt.contextBuildReceipt.budget?.contextWindow) > 0
               ? Number(contextUsage.estimatedTokens) / Number(prompt.contextBuildReceipt.budget.contextTokens || prompt.contextBuildReceipt.budget.contextWindow)
               : null,
             source: contextUsage.source || 'provider-request-estimate',

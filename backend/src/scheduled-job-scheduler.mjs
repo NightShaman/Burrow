@@ -1,3 +1,4 @@
+import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
 import { createChatTurnRunId, runChatTurnFromBody } from './chat-turn-controller.mjs';
 
 const applicationSchedulers = new WeakMap();
@@ -60,8 +61,9 @@ export function createScheduledJobScheduler({ storeFactory, closeStore: closeSto
         resolveAgentRuntime,
         turnSource: 'scheduled',
       });
+      const outcome = classifyRuntimeOutcome(result, { cancelled: controller.signal.aborted });
       const store = await openStore();
-      try { await store.completeRun(run.id, { runId: result.runId || runId, dispatchedAt: record.startedAt, traceDir: result.traceDir || null, decision: result.decision || null, ok: Boolean(result.ok), error: result.ok ? null : (result.error || null), result: boundedResult(result) }); } finally { await closeStore(store); }
+      try { await store.completeRun(run.id, { ...outcome, runId: result.runId || runId, dispatchedAt: record.startedAt, traceDir: result.traceDir || null, decision: result.decision || null, error: outcome.ok ? null : (result.error || result.blockedReason || result.decision || outcome.status), result: boundedResult(result) }); } finally { await closeStore(store); }
     } catch (error) {
       reportFailure(error, 'dispatch', run);
       const store = await openStore();

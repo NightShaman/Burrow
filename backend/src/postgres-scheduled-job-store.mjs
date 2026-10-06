@@ -1,3 +1,4 @@
+import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { operatorTimezone } from './timezone.mjs';
 import { PostgresSettingsMetadataStore } from './postgres-settings-metadata-store.mjs';
@@ -519,7 +520,9 @@ export class PostgresScheduledJobStore {
       );
       const current = runRow(result.rows[0]);
       if (!current || current.status !== "running") return current;
-      const status = text(input.status) || (input.ok ? "completed" : "failed");
+      if (input.status && (!["completed", "failed", "cancelled"].includes(text(input.status)))) throw new Error("scheduled_job_run_status_invalid");
+      const outcome = classifyRuntimeOutcome(input);
+      const status = outcome.status;
       if (
         !RUN_STATUS.has(status) ||
         ["running", "missed", "skipped"].includes(status)
@@ -535,7 +538,7 @@ export class PostgresScheduledJobStore {
           stamp,
           input.traceDir || null,
           input.decision || null,
-          input.ok === undefined ? null : Boolean(input.ok),
+          outcome.ok,
           input.error || null,
           json(input.result),
           current.id,

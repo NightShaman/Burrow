@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 
 FROM node:24-bookworm AS ui-build
+ARG BURROW_UI_SHA
+ENV BURROW_UI_SHA=$BURROW_UI_SHA
 WORKDIR /build/ui
 COPY ui/package*.json ./
 RUN npm ci

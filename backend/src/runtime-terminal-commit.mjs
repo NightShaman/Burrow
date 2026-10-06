@@ -1,3 +1,4 @@
+import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
 import { compactAskChatResult } from './runtime-result-assembly.mjs';
 import { persistSessionWorkingContext } from './working-context.mjs';
 
@@ -12,7 +13,8 @@ export function createTerminalCommitter({ stores = null, agentId, continuityAuth
       runId,
       generation,
       commit: async () => {
-        const result = await finalize();
+        const finalized = await finalize();
+        const result = { ...finalized, ok: classifyRuntimeOutcome(finalized).ok };
         await persistSessionWorkingContext({ rootDir: sessionRoot, sessionId, workingContext, conversationStore:stores?.conversations,agentId });
         return result;
       },

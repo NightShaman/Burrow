@@ -47,7 +47,7 @@ export async function finalizeBlockedRuntimeResult({
     });
   }
   return {
-    ok: true,
+    ok: false,
     mode: 'ask',
     command,
     decision: 'blocked',

@@ -72,8 +72,8 @@ function compactCompressionOutcome(result = null, { attempted = false, source = 
 }
 
 function contextThresholdState({ usageRatio = null, contextThreshold = null } = {}) {
-  const usage = Number(usageRatio);
-  const threshold = Number(contextThreshold);
+  const usage = usageRatio == null ? NaN : Number(usageRatio);
+  const threshold = contextThreshold == null ? NaN : Number(contextThreshold);
   if (!Number.isFinite(usage) || !Number.isFinite(threshold) || threshold <= 0) return 'unknown';
   if (usage >= threshold) return 'threshold_exceeded';
   if (usage >= threshold * 0.9) return 'approaching_threshold';
@@ -83,11 +83,11 @@ function contextThresholdState({ usageRatio = null, contextThreshold = null } = 
 function contextBuildEvent({ phase, budget = null, compression = null, contextThreshold = null } = {}) {
   return {
     phase,
-    estimatedTokens: Number.isFinite(Number(budget?.estimatedTokens)) ? Number(budget.estimatedTokens) : null,
-    contextTokens: Number.isFinite(Number(budget?.contextTokens)) ? Number(budget.contextTokens) : null,
-    usageRatio: Number.isFinite(Number(budget?.usageRatio)) ? Number(budget.usageRatio) : null,
+    estimatedTokens: budget?.estimatedTokens != null && Number.isFinite(Number(budget.estimatedTokens)) ? Number(budget.estimatedTokens) : null,
+    contextTokens: budget?.contextTokens != null && Number.isFinite(Number(budget.contextTokens)) ? Number(budget.contextTokens) : null,
+    usageRatio: budget?.usageRatio != null && Number.isFinite(Number(budget.usageRatio)) ? Number(budget.usageRatio) : null,
     windowPressure: budget?.pressure || 'unknown',
-    compressionThreshold: Number.isFinite(Number(contextThreshold)) ? Number(contextThreshold) : null,
+    compressionThreshold: contextThreshold != null && Number.isFinite(Number(contextThreshold)) ? Number(contextThreshold) : null,
     compressionState: contextThresholdState({ usageRatio: budget?.usageRatio, contextThreshold }),
     compression: compactCompressionOutcome(compression, { attempted: compression?.attempted ?? Boolean(compression), source: phase }),
   };

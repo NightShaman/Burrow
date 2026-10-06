@@ -342,7 +342,15 @@ function messageContentChars(content) {
 }
 
 async function readResponseBytesBounded(response, maxBytes = DEFAULT_MAX_RESPONSE_BYTES) {
-  const limit = Math.max(1, Math.floor(Number(maxBytes) || DEFAULT_MAX_RESPONSE_BYTES));
+  const limit = Number(maxBytes);
+  if (!Number.isSafeInteger(limit) || limit < 0) {
+    await response?.body?.cancel?.();
+    return { ok: false, data: Buffer.alloc(0), bytes: 0, error: 'invalid_model_response_budget' };
+  }
+  if (limit === 0) {
+    await response?.body?.cancel?.();
+    return { ok: false, data: Buffer.alloc(0), bytes: 0, error: 'model_response_budget_exhausted' };
+  }
   const contentLength = Number(response?.headers?.get?.('content-length') || 0);
   if (Number.isFinite(contentLength) && contentLength > limit) {
     await response?.body?.cancel?.();

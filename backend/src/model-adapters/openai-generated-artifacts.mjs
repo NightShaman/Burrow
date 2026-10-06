@@ -108,6 +108,7 @@ function validBase64(value) {
 }
 
 async function imageBytes(item, { fetchImpl, signal, secrets, limit, trusted, lookupImpl }) {
+  if (limit <= 0) throw new Error('generated_media_budget_exhausted');
   const encoded = validBase64(item?.b64_json);
   if (encoded) return { bytes: decodeMedia(encoded, limit), contentType: '' };
   const url = text(item?.url);
