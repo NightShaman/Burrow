@@ -78,10 +78,10 @@ CREATE TRIGGER mcp_catalog_refresh AFTER INSERT OR UPDATE OF tools_json ON mcp_c
 export const POSTGRES_LOSSLESS_NATIVE_CATALOGS_SQL = `
 CREATE OR REPLACE FUNCTION catalog_identity(payload json, field text) RETURNS text
 LANGUAGE plpgsql IMMUTABLE AS $$
-DECLARE safe text;
+DECLARE token json;
 BEGIN
- safe := regexp_replace(payload::text, '\\\\u0000|\\\\u[dD][89aAbB][0-9a-fA-F]{2}(?!\\\\u[dD][c-fC-F][0-9a-fA-F]{2})|(?<!\\\\u[dD][89aAbB][0-9a-fA-F]{2})\\\\u[dD][c-fC-F][0-9a-fA-F]{2}', ' ', 'g');
- RETURN safe::json->>field;
+ token := burrow_json_member(payload,field);
+ RETURN token #>> '{}';
 END $$;
 CREATE TABLE model_catalog (
  connection_id TEXT NOT NULL REFERENCES model_connections(id) ON DELETE CASCADE,

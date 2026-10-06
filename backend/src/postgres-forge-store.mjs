@@ -1,6 +1,6 @@
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { PostgresAlbdruckStore } from './postgres-albdruck-store.mjs';
-import { PostgresSessionStore } from './postgres-session-store.mjs';
+import { findSessionReplay, PostgresSessionStore } from './postgres-session-store.mjs';
 import { buildSessionEntry } from './session-entry.mjs';
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -577,8 +577,9 @@ export class PostgresForgeStore {
     try {
       entry = await withPostgresTransaction(this.pool, async client => {
         await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`forge-delivery:${body.agentId}:${body.sessionId}:${key}`]);
-        const prior = await client.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND idempotency_key=$3', [body.agentId,body.sessionId,key]);
-        if (prior.rows[0]) return prior.rows[0].entry;
+        await client.query('SELECT 1 FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE',[body.agentId,body.sessionId]);
+        const prior = await findSessionReplay(client, body.agentId, body.sessionId, null, key);
+        if (prior) return prior.entry;
         const bytes = await fs.readFile(resolved.filePath);
         const [stored] = await persistChatAttachments({ retentionDays: (await new PostgresAlbdruckStore({ pool: postgresTransactionContext(client), resolveOriginal: ref => conversations.resolveOriginal(ref), searchHistory: input => conversations.history(input) }).readRetention()).attachmentDays, agentWorkspaceRoot: destination.agentWorkspaceRoot, attachments: [{ name: artifact.name, type: artifact.mimeType, content: `data:${artifact.mimeType};base64,${bytes.toString('base64')}` }] });
         const { content, ...metadata } = stored;

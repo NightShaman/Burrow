@@ -224,7 +224,7 @@ export class PostgresAlbdruckStore {
     return withPostgresTransaction(this.pool, async client => {
       await client.query('LOCK TABLE albdruck_knowledge, albdruck_evidence, albdruck_revisions IN SHARE ROW EXCLUSIVE MODE');
       for (const item of evidence) {
-        const current = await this.resolveOriginal(item.ref);
+        const current = await this.resolveOriginal(item.ref, client);
         if (!isChatMessage(current) || current.content !== item.excerpt || current.role !== item.role) throw new Error('albdruck_original_evidence_changed');
       }
       let target = null;

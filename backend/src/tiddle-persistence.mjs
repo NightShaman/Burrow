@@ -35,7 +35,7 @@ export function tiddlePersistence({ stores, ownerClient = null } = {}) {
         await pruneRollingCards(tx, agentId, new Date().toISOString(), ttl);
         return runAsync(operation(adapter(tx, true)));
       }),
-      rollingTtlDays: async () => { if (stores.workingMemoryRetention?.read) return (await stores.workingMemoryRetention.read()).rollingContinuityTtlDays; const r = await client.query("SELECT value_json FROM working_memory_retention_settings WHERE owner_id='default'"); return Number(r.rows[0]?.value_json?.rollingContinuityTtlDays || 90); },
+      rollingTtlDays: async () => { if (stores.workingMemoryRetention?.read) return (await stores.workingMemoryRetention.read(client)).rollingContinuityTtlDays; const r = await client.query("SELECT value_json FROM working_memory_retention_settings WHERE owner_id='default'"); return Number(r.rows[0]?.value_json?.rollingContinuityTtlDays || 90); },
       close() {},
     });
     return adapter(ownerClient || pool);

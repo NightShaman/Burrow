@@ -537,7 +537,7 @@ export class PostgresWorkingMemoryStore {
           ].slice(-20),
           evidence: bounded(evidence, 80),
           reason: bounded(reason, 360) || null,
-          expiresAt: new Date(new Date(stamp).getTime() + Math.max(1, Number(ttlDays ?? (typeof this.retentionSource === "function" ? (await this.retentionSource()).rollingContinuityTtlDays : this.retention.rollingContinuityTtlDays)) || DEFAULT_RETENTION.rollingContinuityTtlDays) * 86400000).toISOString(),
+          expiresAt: new Date(new Date(stamp).getTime() + Math.max(1, Number(ttlDays ?? (typeof this.retentionSource === "function" ? (await this.retentionSource(c)).rollingContinuityTtlDays : this.retention.rollingContinuityTtlDays)) || DEFAULT_RETENTION.rollingContinuityTtlDays) * 86400000).toISOString(),
         };
       await writeRollingCard(c, card, stamp);
       return card;
@@ -550,7 +550,7 @@ export class PostgresWorkingMemoryStore {
     return result.rowCount;
   }
   async pruneRollingContinuityCards(client = this.pool) {
-    const policy = typeof this.retentionSource === 'function' ? await this.retentionSource() : this.retention;
+    const policy = typeof this.retentionSource === 'function' ? await this.retentionSource(client) : this.retention;
     const {rows} = await client.query('SELECT DISTINCT agent_id FROM rolling_continuity_cards');
     let removed=0;
     for (const row of rows) removed += await pruneRollingCards(client,row.agent_id,this.clock(),policy?.rollingContinuityTtlDays ?? 90);

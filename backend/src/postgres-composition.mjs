@@ -66,7 +66,7 @@ export async function createPostgresApplication({
     dreamCycles: new PostgresDreamCycleReceiptStore({ ...common, ...(clock ? { clock } : {}), ...(runtimeInstanceId ? { runtimeInstanceId } : {}) }),
     continuity: new PostgresContinuityHandoffStore(common),
     forge: new PostgresForgeStore({ ...common, runtimeRoot, resolveAgent, resolveOperator, connections, resolveConfig, ...(ownerId ? { ownerId } : {}) }),
-    workingMemory: new PostgresWorkingMemoryStore({ ...common, retention: retention || (() => workingMemoryRetention.read()), ...(clock ? { clock } : {}) }),
+    workingMemory: new PostgresWorkingMemoryStore({ ...common, retention: retention || (client => workingMemoryRetention.read(client)), ...(clock ? { clock } : {}) }),
     apiTokens: new PostgresApiTokenStore({ pool: sharedPool, ...(clock ? { clock } : {}) }),
     skills: new PostgresSkillSettingsStore({ ...common, ...(clock ? { clock } : {}) }),
     setupState: new PostgresSetupStateStore({ ...common, ...(clock ? { clock } : {}) }),
@@ -76,7 +76,7 @@ export async function createPostgresApplication({
     metadata: new PostgresSettingsMetadataStore({ ...common, ...(clock ? { clock } : {}) }),
     conversations: new PostgresSessionStore({ ...common, ...(clock ? { clock } : {}) }),
     };
-    stores.albdruck = new PostgresAlbdruckStore({ pool: sharedPool, resolveOriginal: ref => stores.conversations.resolveOriginal(ref), searchHistory: input => stores.conversations.history(input) });
+    stores.albdruck = new PostgresAlbdruckStore({ pool: sharedPool, resolveOriginal: (ref, client) => stores.conversations.resolveOriginal(ref, client), searchHistory: input => stores.conversations.history(input) });
     await stores.forge.init();
     let closed = false;
     return Object.freeze({

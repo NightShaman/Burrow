@@ -12,6 +12,20 @@ import { closeContinuityOwners } from './postgres-continuity-owner.mjs';
 import { randomUUID } from 'node:crypto';
 import { closePostgresPool, withPostgresTransaction, migrationLockKey } from './postgres-foundation.mjs';
 
+// Caller holds the session row lock: append, compact and delivery share one boundary.
+export async function findSessionReplay(client, agentId, sessionId, entryId, key) {
+  const { rows } = await client.query(`SELECT sequence,entry FROM (
+      SELECT sequence,entry,entry_id,idempotency_key,0 AS priority,0::bigint AS generation FROM conversation_entries WHERE agent_id=$1 AND session_id=$2
+      UNION ALL SELECT ordinal,entry,entry_id,idempotency_key,1,generation FROM conversation_archive_entries
+      WHERE agent_id=$1 AND session_id=$2 AND archive_kind='compacted'
+        AND generation >= COALESCE((SELECT (metadata->>'resetGeneration')::bigint FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2),0)
+    ) r
+    WHERE (entry_id=$3 OR ($4::text IS NOT NULL AND idempotency_key=$4))
+    ORDER BY priority,generation DESC,sequence LIMIT 1`,
+    [agentId, sessionId, entryId, key]);
+  return rows[0] || null;
+}
+
 export const POSTGRES_SESSION_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS conversation_sessions (
   agent_id TEXT NOT NULL,
@@ -764,9 +778,9 @@ export class PostgresSessionStore {
     });
   }
 
-  async resolveOriginal({ agentId, sessionId, entryId }) {
+  async resolveOriginal({ agentId, sessionId, entryId }, client = this.pool) {
     // Compare lossless UTF-16 logical keys, including NUL and lone surrogates.
-    const { rows } = await this.pool.query(`SELECT entry FROM conversation_original_rows
+    const { rows } = await client.query(`SELECT entry FROM conversation_original_rows
       WHERE agent_id=$1 AND session_id=$2 AND burrow_history_key(entry_key)=burrow_history_key($3)
       ORDER BY CASE WHEN source_store='live' THEN 0 ELSE 1 END,CASE WHEN source_store='live' THEN ordinal END DESC,generation DESC NULLS LAST,source_id DESC,ordinal LIMIT 1`,
     [agentId, sessionId, JSON.stringify(entryId)]);
@@ -784,6 +798,8 @@ export class PostgresSessionStore {
       await client.query(`INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,'{}'::jsonb,$3,$3) ON CONFLICT(agent_id,session_id) DO NOTHING`, [agentId, sid, now]);
       // Row lock serializes appenders before identity allocation, making commit-order paging complete.
       await client.query('SELECT 1 FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sid]);
+      const replay = await findSessionReplay(client, agentId, sid, entryId, key);
+      if (replay) return { ...rowEntry(replay), idempotent: true };
       const result = await client.query(`INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at) VALUES($1,$2,$3,$4,$5::json,$6) ON CONFLICT DO NOTHING RETURNING sequence,entry`, [agentId, sid, entryId, key, JSON.stringify(value), now]);
       if (result.rows[0]) {
         await client.query('UPDATE conversation_sessions SET updated_at=$3 WHERE agent_id=$1 AND session_id=$2', [agentId, sid, now]);
@@ -913,13 +929,13 @@ export class PostgresSessionStore {
   async exportTranscript({ agentId, sessionId } = {}) {
     const result = await this.pool.query(`
       SELECT s.metadata,s.created_at,s.updated_at,
-        COALESCE((SELECT json_agg((SELECT COALESCE(json_agg(e.entry ORDER BY e.ordinal),'[]'::json) FROM conversation_archive_entries e WHERE e.agent_id=a.agent_id AND e.session_id=a.session_id AND e.source_id=a.archive_id) ORDER BY a.generation,a.archive_id)
+        COALESCE((SELECT json_agg((SELECT COALESCE(json_agg(json_build_object('occurrence',e.entry_id,'entry',e.entry) ORDER BY e.ordinal),'[]'::json) FROM conversation_archive_entries e WHERE e.agent_id=a.agent_id AND e.session_id=a.session_id AND e.source_id=a.archive_id) ORDER BY a.generation,a.archive_id)
           FROM conversation_archives a WHERE a.agent_id=s.agent_id AND a.session_id=s.session_id
           AND a.kind='compacted' AND a.generation >= COALESCE(
             (s.metadata->>'resetGeneration')::bigint,
             (SELECT max(r.generation)+1 FROM conversation_archives r
               WHERE r.agent_id=s.agent_id AND r.session_id=s.session_id AND r.kind='reset'),0)), '[]'::json) AS history,
-        COALESCE((SELECT json_agg(e.entry ORDER BY e.sequence) FROM conversation_entries e
+        COALESCE((SELECT json_agg(json_build_object('occurrence',e.entry_id,'entry',e.entry) ORDER BY e.sequence) FROM conversation_entries e
           WHERE e.agent_id=s.agent_id AND e.session_id=s.session_id), '[]'::json) AS entries
       FROM conversation_sessions s WHERE s.agent_id=$1 AND s.session_id=$2`,
     [required(agentId, 'agentId'), required(sessionId, 'sessionId')]);
@@ -931,12 +947,14 @@ export class PostgresSessionStore {
     const entries = []; const positions = new Map();
     for (const snapshot of [...row.history, row.entries]) {
       const seen = new Set();
-      for (const entry of snapshot) {
-        if (!entry?.id) { entries.push(entry); continue; }
-        if (seen.has(entry.id)) continue;
-        seen.add(entry.id);
-        if (positions.has(entry.id)) entries[positions.get(entry.id)] = entry;
-        else { positions.set(entry.id, entries.length); entries.push(entry); }
+      for (const occurrence of snapshot) {
+        const entry = occurrence.entry;
+        const identity = entry?.id ? `payload:${entry.id}` : occurrence.occurrence ? `occurrence:${occurrence.occurrence}` : null;
+        if (!identity) { entries.push(entry); continue; }
+        if (seen.has(identity)) continue;
+        seen.add(identity);
+        if (positions.has(identity)) entries[positions.get(identity)] = entry;
+        else { positions.set(identity, entries.length); entries.push(entry); }
       }
     }
     return { schemaVersion: '1', session: { id: sessionId, metadata: { ...row.metadata, createdAt: row.created_at, updatedAt: row.updated_at } }, entries };
@@ -988,7 +1006,7 @@ export class PostgresSessionStore {
       await client.query(`INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,'{}'::jsonb,$3,$3) ON CONFLICT DO NOTHING`, [agentId, sid, now]);
       const session = await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sid]);
       const prior = session.rows[0]?.metadata || {};
-      const old = await client.query('SELECT sequence,entry,entry_id,idempotency_key FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence', [agentId, sid]);
+      const old = await client.query('SELECT sequence,entry,entry::text AS raw_entry,entry_id,idempotency_key,created_at FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence', [agentId, sid]);
       const archiveId = old.rows.length ? randomUUID() : null;
       const generation = Number(prior.generation || 0) + 1;
       if (archiveId) await client.query('INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)', [agentId, sid, archiveId, generation - 1, 'compacted', JSON.stringify({ ...prior, compressionSummary: summary }), now]);
@@ -999,9 +1017,18 @@ export class PostgresSessionStore {
         FROM conversation_entries WHERE agent_id=$1 AND session_id=$2`, [agentId,sid,archiveId,'compacted',generation-1]);
       await client.query('DELETE FROM conversation_entries WHERE agent_id=$1 AND session_id=$2', [agentId, sid]);
       const summaryEntry = { id: randomUUID(), ts: now, sessionId: sid, type: 'summary', role: null, content: String(summary.text), visibility: 'debug', entersPrompt: false, metadata: { compressionSummary: summary } };
-      const retained = (Array.isArray(tailEntries) ? tailEntries : []).map((entry) => ({ ...entry, sessionId: sid, metadata: { ...(entry.metadata || {}) } }));
+      const retained = Array.isArray(tailEntries) ? tailEntries : [];
+      const used = new Set();
       for (const entry of [summaryEntry, ...retained]) {
-        await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,entry,created_at) VALUES($1,$2,$3,$4::json,$5)', [agentId, sid, text(entry.id).trim() || old.rows.find(row => (entry.sequence && String(row.sequence) === String(entry.sequence)) || JSON.stringify({ ...row.entry, sessionId: sid, metadata: { ...(row.entry.metadata || {}) } }) === JSON.stringify(entry))?.entry_id || randomUUID(), JSON.stringify(entry), now]);
+        // Match each occurrence once; equal id-less messages are distinct originals.
+        const original = entry === summaryEntry ? null : old.rows.find(row => !used.has(row.entry_id) &&
+          ((entry.sequence && String(row.sequence) === String(entry.sequence)) ||
+           (entry.id && row.entry.id === entry.id) ||
+           JSON.stringify(row.entry) === JSON.stringify(entry) ||
+           JSON.stringify({ ...row.entry, sessionId: sid, metadata: { ...(row.entry.metadata || {}) } }) === JSON.stringify(entry)));
+        if (original) used.add(original.entry_id);
+        await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at) VALUES($1,$2,$3,$4,$5::json,$6)',
+          [agentId, sid, original?.entry_id || text(entry.id).trim() || randomUUID(), original?.idempotency_key || null, original?.raw_entry || JSON.stringify(entry), now]);
       }
       const next = { ...prior, generation, archived: false, transcriptGeneration: randomUUID(), activeTranscript: 'postgres', archiveId, updatedAt: now, turnCount: 1 + retained.length, chatTurnCount: retained.filter((entry) => entry.type === 'message' && ['user','assistant','agent'].includes(entry.role)).length };
       await client.query('UPDATE conversation_sessions SET metadata=$3::jsonb,updated_at=$4 WHERE agent_id=$1 AND session_id=$2', [agentId, sid, JSON.stringify(next), now]);
