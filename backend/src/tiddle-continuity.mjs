@@ -164,7 +164,7 @@ function* upsertGlobalCluster(db, { agentId, cluster, at }) {
   const existing = cluster.targetId ? cards.find((card) => card.id === cluster.targetId) : null;
   if (cluster.targetId && !existing) throw new Error('tiddle_global_target_invalid');
   const id = existing?.id || `warm-global:${randomUUID()}`;
-  const sourceCardIds = [...new Set([...(existing?.sourceCardIds || []), ...cluster.sourceCardIds])].slice(-100);
+  const sourceCardIds = [...new Set([...(existing?.sourceCardIds || []), ...cluster.sourceCardIds])];
   const scopes = [...new Set([...(existing?.scopes || []), ...cluster.scopes])];
   const card = { id, agentId, project: GLOBAL_SCOPE, title: cluster.title, summary: cluster.summary, firstSeen: existing?.firstSeen || at, lastSeen: at, recurrence: Number(existing?.recurrence || 0) + 1, sourceCardIds, scopes, confidence: cluster.confidence, evidence: 'cross-scope-synthesis', reason: bounded(cluster.reason, 240), expiresAt: iso(new Date(new Date(at).getTime() + (yield () => db.rollingTtlDays()) * 24 * 60 * 60 * 1000)) };
   yield* setMeta(db, globalCardKey(agentId), { version: 1, agentId, project: GLOBAL_SCOPE, cards: [card, ...cards.filter((entry) => entry.id !== id)], updatedAt: at }, at);
@@ -201,7 +201,7 @@ function* upsertCard(db, { agentId, scope, proposal, residue, at }) {
   const existing = proposal.targetId ? cards.find((card) => card.id === proposal.targetId) : null;
   if (proposal.targetId && !existing) throw new Error('tiddle_card_target_invalid');
   const id = existing?.id || `warm:${randomUUID()}`;
-  const refs = [...new Set([...(existing?.recentRefs || []), ...residue.map((item) => item.ref)])].slice(-20);
+  const refs = [...new Set([...(existing?.recentRefs || []), ...residue.map((item) => item.ref)])];
   const card = { id, agentId, project: scope, title: proposal.title, summary: proposal.summary, firstSeen: existing?.firstSeen || at, lastSeen: at, recurrence: Number(existing?.recurrence || 0) + 1, recentRefs: refs, evidence: 'windowed-conversation', reason: proposal.reason, expiresAt: iso(new Date(at).getTime() + (yield () => db.rollingTtlDays()) * 24 * 60 * 60 * 1000) };
   yield* setMeta(db, cardKey(agentId, scope), { version: 1, agentId, project: scope, cards: [card, ...cards.filter((entry) => entry.id !== id)], updatedAt: at }, at);
   return { card, prior: existing || null };

@@ -8,6 +8,13 @@ vi.mock('../../app/api', () => ({ api: vi.fn(), jsonMutation: (method: string, b
 vi.mock('../chat/chatConversationCache', () => ({ clearConversationCache: vi.fn() }));
 vi.mock('../tasks/archiveCache', () => ({ clearArchiveCaches: vi.fn() }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
+it('states the selective purge and retention policy without promising blanket revision deletion', () => {
+  render(<ConversationPurge conversation={{agentId:'a',sessionId:'s'}} onClose={vi.fn()} onPurged={vi.fn()}/>);
+  expect(screen.getByText(/unsupported synthesized rolling descendants/)).toHaveProperty('textContent', expect.stringContaining('Independently supported or human-corrected knowledge, pinned working memory, and mixed-source supported syntheses and their revisions survive'));
+  expect(screen.getByText(/retained syntheses may keep historical source references/)).toBeTruthy();
+  expect(screen.queryByText(/all revisions of affected knowledge are deleted/i)).toBeNull();
+  expect(screen.getByText(/Filesystem attachments are outside this purge’s scope and are not deleted/)).toBeTruthy();
+});
 it('requires deliberate confirmation and nonblank reason; posts exact contract and shows counts', async () => {
   const done = vi.fn();
   vi.mocked(api).mockResolvedValue({agentId:'a',sessionId:'s',deleted:false,removed:{evidence:2,knowledge:1,revisions:3,working_memory:4,continuity_handoffs:0,conversation_project_bindings:0,dream_diary_entries:0,working_memory_meta:1}});

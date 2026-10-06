@@ -111,9 +111,35 @@ export class PostgresAlbdruckStore {
       await client.query('LOCK TABLE rolling_continuity_cards,rolling_continuity_envelopes,tiddle_entries,tiddle_envelopes IN SHARE ROW EXCLUSIVE MODE');
       derived.rolling_continuity_cards = 0;
       const cards = await client.query('SELECT project,card_id,card_json,legacy_card_json FROM rolling_continuity_cards WHERE agent_id=$1', [agentId]);
-      for (const row of cards.rows) if (references(row.card_json) || references(row.legacy_card_json)) {
+      // Syntheses retain content only with independent support. A cycle is not
+      // support: first find the affected closure, then propagate support from
+      // unaffected cards into it. Direct conversation cards are always erased.
+      // Retained JSON is not reserialized (including legacy lexical payloads).
+      const direct = new Set(cards.rows.filter(row => references(row.card_json) || references(row.legacy_card_json) || row.project === `conversation:${sessionId}`).map(row => row.card_id));
+      const sources = row => Array.isArray(row.card_json?.sourceCardIds) ? row.card_json.sourceCardIds : [];
+      const graphAffected = new Set(direct);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const row of cards.rows) if (!graphAffected.has(row.card_id) && sources(row).some(id => graphAffected.has(id))) {
+          graphAffected.add(row.card_id); changed = true;
+        }
+      }
+      const supported = new Set(cards.rows.filter(row => !graphAffected.has(row.card_id)).map(row => row.card_id));
+      changed = true;
+      while (changed) {
+        changed = false;
+        for (const row of cards.rows) if (!direct.has(row.card_id) && !supported.has(row.card_id) && sources(row).some(id => supported.has(id))) {
+          supported.add(row.card_id); changed = true;
+        }
+      }
+      for (const row of cards.rows) if (graphAffected.has(row.card_id) && !supported.has(row.card_id)) {
         derived.rolling_continuity_cards += (await client.query('DELETE FROM rolling_continuity_cards WHERE agent_id=$1 AND project=$2 AND card_id=$3', [agentId,row.project,row.card_id])).rowCount;
       }
+      // Runtime handoffs are intrinsically run/session scoped even when a
+      // sourceRefs array also contains a non-session citation. Explicit handoffs
+      // with independent support survive, detached from the erased source.
+      derived.continuity_handoffs += (await client.query("DELETE FROM continuity_handoffs WHERE agent_id=$1 AND session_id=$2 AND source='runtime'",[agentId,sessionId])).rowCount;
       // Conservatively remove matching legacy envelopes and Tiddle aggregates.
       const envelopes = await client.query('SELECT legacy_source,legacy_key,envelope_agent_id,extra_metadata FROM rolling_continuity_envelopes');
       for (const row of envelopes.rows) if ((row.envelope_agent_id === agentId || row.legacy_key.startsWith(`rolling-continuity:${agentId}:`)) && references(row.extra_metadata)) await client.query('DELETE FROM rolling_continuity_envelopes WHERE legacy_source=$1 AND legacy_key=$2',[row.legacy_source,row.legacy_key]);

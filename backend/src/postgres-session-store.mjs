@@ -1100,6 +1100,68 @@ export class PostgresSessionStore {
         (agent_id,session_id,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation,search_grams,entry_id,idempotency_key)
         SELECT agent_id,$3,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation,search_grams,entry_id,idempotency_key
         FROM conversation_archive_entries WHERE agent_id=$1 AND session_id=$2`, [agentId,source,target]);
+      // Mutable ownership and citations follow the new identity; original JSON
+      // entries/archives above remain byte-for-byte lexical evidence.
+      const exists = async name => (await client.query('SELECT to_regclass($1) AS relation',[name])).rows[0].relation !== null;
+      if (await exists('conversation_project_bindings')) await client.query('UPDATE conversation_project_bindings SET session_id=$3 WHERE agent_id=$1 AND session_id=$2',[agentId,source,target]);
+      if (await exists('working_memory')) await client.query(`UPDATE working_memory SET session_id=$3,conversation_id=CASE WHEN conversation_id=$2 THEN $3 WHEN conversation_id=$1 || ':' || $2 THEN $1 || ':' || $3 ELSE conversation_id END WHERE agent_id=$1 AND session_id=$2`,[agentId,source,target]);
+      if (await exists('continuity_handoffs')) await client.query('UPDATE continuity_handoffs SET session_id=$3 WHERE agent_id=$1 AND session_id=$2',[agentId,source,target]);
+      if (await exists('scheduled_jobs')) await client.query('UPDATE scheduled_jobs SET session_id=$3 WHERE agent_id=$1 AND session_id=$2',[agentId,source,target]);
+      if (await exists('scheduled_job_runs')) await client.query('UPDATE scheduled_job_runs SET session_id=$3 WHERE agent_id=$1 AND session_id=$2',[agentId,source,target]);
+      if (await exists('albdruck_evidence')) await client.query(`UPDATE albdruck_evidence SET source_ref=jsonb_set(source_ref,'{sessionId}',to_jsonb($3::text)) WHERE source_ref->>'agentId'=$1 AND source_ref->>'sessionId'=$2`,[agentId,source,target]);
+      const oldRef=`session:${source}:`, newRef=`session:${target}:`;
+      for (const table of ['working_memory','continuity_handoffs']) {
+        if (!await exists(table)) continue;
+        await client.query(`UPDATE ${table} SET source_refs=(SELECT jsonb_agg(CASE WHEN ref.value=$4 THEN $5 WHEN starts_with(ref.value,$2) THEN $3 || substr(ref.value,length($2)+1) ELSE ref.value END ORDER BY ref.ordinality) FROM jsonb_array_elements_text(source_refs) WITH ORDINALITY ref(value,ordinality)) WHERE agent_id=$1 AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(source_refs) ref(value) WHERE ref.value=$4 OR starts_with(ref.value,$2))`,[agentId,oldRef,newRef,`session:${source}`,`session:${target}`]);
+      }
+      // Only rewrite typed mutable identity fields, never prose or historical
+      // lexical originals (archive entries, Tiddle history, legacy card JSON).
+      const rewriteIdentity = (value, key = '') => {
+        if (typeof value === 'string') {
+          if (['sessionId','conversationId'].includes(key) && value === source) return target;
+          if (key === 'conversationId' && value === `${agentId}:${source}`) return `${agentId}:${target}`;
+          if (['project','scope'].includes(key) && value === `conversation:${source}`) return `conversation:${target}`;
+          if (['ref','sourceRefs','recentRefs'].includes(key)) {
+            if (value === `session:${source}`) return `session:${target}`;
+            if (value.startsWith(oldRef)) return newRef + value.slice(oldRef.length);
+          }
+          return value;
+        }
+        if (Array.isArray(value)) return value.map(item => rewriteIdentity(item, key));
+        if (value && typeof value === 'object') {
+          if (value.agentId && value.agentId !== agentId) return value;
+          return Object.fromEntries(Object.entries(value).map(([field,item]) => [field,rewriteIdentity(item,field)]));
+        }
+        return value;
+      };
+      const rewriteRows = async (sql, params, update) => {
+        for (const row of (await client.query(sql, params)).rows) {
+          const next = rewriteIdentity(row.payload);
+          if (JSON.stringify(next) !== JSON.stringify(row.payload)) await update(row, JSON.stringify(next));
+        }
+      };
+      if (await exists('rolling_continuity_cards')) {
+        await rewriteRows('SELECT project,card_id,card_json AS payload FROM rolling_continuity_cards WHERE agent_id=$1 FOR UPDATE',[agentId],
+          (row,json) => client.query('UPDATE rolling_continuity_cards SET card_json=$4::json WHERE agent_id=$1 AND project=$2 AND card_id=$3',[agentId,row.project,row.card_id,json]));
+        await client.query('UPDATE rolling_continuity_cards SET project=$3 WHERE agent_id=$1 AND project=$2',[agentId,`conversation:${source}`,`conversation:${target}`]);
+      }
+      if (await exists('tiddle_envelopes')) {
+        await rewriteRows("SELECT envelope_id,value_json AS payload FROM tiddle_envelopes WHERE agent_id=$1 AND kind <> 'tiddle-history' FOR UPDATE",[agentId],
+          (row,json) => client.query('UPDATE tiddle_envelopes SET value_json=$2::json WHERE envelope_id=$1',[row.envelope_id,json]));
+        await rewriteRows("SELECT t.id,t.value_json AS payload FROM tiddle_entries t JOIN tiddle_envelopes e USING(envelope_id) WHERE e.agent_id=$1 AND e.kind='tiddle-residue' FOR UPDATE OF t",[agentId],
+          (row,json) => client.query("UPDATE tiddle_entries SET value_json=$2::json,ref=$2::json->>'ref' WHERE id=$1",[row.id,json]));
+        await client.query("UPDATE tiddle_envelopes SET scope=$3 WHERE agent_id=$1 AND kind='tiddle-pass-scope' AND scope=$2",[agentId,`conversation:${source}`,`conversation:${target}`]);
+      }
+      if (await exists('task_board_tasks')) {
+        for (const column of ['metadata_json','execution_json']) {
+          await rewriteRows(`SELECT id,${column} AS payload FROM task_board_tasks WHERE COALESCE(${column}->>'agentId',assigned_agent_id)=$1 FOR UPDATE`,[agentId],
+            (row,json) => client.query(`UPDATE task_board_tasks SET ${column}=$2::jsonb WHERE id=$1`,[row.id,json]));
+        }
+      }
+      for (const column of ['head','manifest','queue']) {
+        await rewriteRows(`SELECT session_id,${column} AS payload FROM continuity_state WHERE agent_id=$1 AND session_id=$2 FOR UPDATE`,[agentId,source],
+          (row,json) => client.query(`UPDATE continuity_state SET ${column}=$3::json WHERE agent_id=$1 AND session_id=$2`,[agentId,row.session_id,json]));
+      }
       await client.query('UPDATE continuity_state SET session_id=$3 WHERE agent_id=$1 AND session_id=$2',[agentId,source,target]);
       await client.query('UPDATE continuity_log SET session_id=$3 WHERE agent_id=$1 AND session_id=$2',[agentId,source,target]);
       await client.query('DELETE FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [agentId, source]);
