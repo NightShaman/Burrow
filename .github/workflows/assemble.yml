@@ -99,28 +99,10 @@ jobs:
           cache-dependency-path: |
             backend-source/package-lock.json
             ui-source/package-lock.json
-      - name: Install PostgreSQL 17 and pgvector for disposable integration fixtures
+      - name: Install build dependencies and test assembly contracts
         run: |
-          set -eu
-          sudo apt-get update
-          sudo apt-get install -y wget ca-certificates gnupg
-          sudo install -d /usr/share/postgresql-common/pgdg
-          wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
-          . /etc/os-release
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
-          sudo apt-get update
-          sudo apt-get install -y postgresql-17 postgresql-client-17 postgresql-17-pgvector
-      - name: Verify sources
-        env:
-          BURROW_TEST_TIMEOUT_MS: '600000'
-          BURROW_TEST_DISPOSABLE_POSTGRES: '1'
-        run: |
-          set -eu
-          (cd backend-source && npm ci && npm test)
-          # UI contract tests import the exact backend browser policy through
-          # the sibling layout used by the component repository workflow.
-          ln -s backend-source Burrow-Backend
-          (cd ui-source && npm ci && npm test)
+          node --test assembled/scripts/assembly/*.test.mjs
+          (cd ui-source && npm ci)
       - name: Stamp and build generated release
         id: build
         env:
@@ -167,8 +149,18 @@ jobs:
           cp ../backend-source/deploy/docker/.dockerignore .dockerignore
           printf '{"assembly":"%s","backend":"%s","ui":"%s","nodeGoblin":"%s"}\n' "${{ steps.build.outputs.version }}" "${{ steps.revisions.outputs.backend }}" "${{ steps.revisions.outputs.ui }}" "${{ steps.revisions.outputs.node_goblin }}" > backend/RELEASE_PROVENANCE.json
           printf 'Burrow-Build-Version %s\nBurrow-Backend %s\nBurrow-UI %s\nNode-Goblin %s\n' "${{ steps.build.outputs.version }}" "${{ steps.revisions.outputs.backend }}" "${{ steps.revisions.outputs.ui }}" "${{ steps.revisions.outputs.node_goblin }}" > SOURCE_VERSIONS
-          (cd ui && npm ci && npm test)
           grep -R "${{ steps.revisions.outputs.ui }}" ui/dist/assets >/dev/null
+      - name: Build local release image
+        uses: docker/build-push-action@v6
+        with:
+          context: assembled
+          load: true
+          push: false
+          build-args: |
+            BURROW_UI_SHA=${{ steps.revisions.outputs.ui }}
+          tags: burrow-assembly:tested
+      - name: Smoke disposable packaged runtime
+        run: node assembled/scripts/assembly/packaged-smoke.mjs burrow-assembly:tested assembled
       - name: Commit generated assembly
         id: publish
         run: |
@@ -210,15 +202,13 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and publish Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: assembled
-          push: true
-          tags: |
-            ghcr.io/nightshaman/burrow:latest
-            ghcr.io/nightshaman/burrow:${{ steps.build.outputs.version }}
-            ghcr.io/nightshaman/burrow:sha-${{ steps.publish.outputs.commit }}
+      - name: Publish the tested image without rebuilding
+        run: |
+          set -eu
+          for tag in latest "${{ steps.build.outputs.version }}" "sha-${{ steps.publish.outputs.commit }}"; do
+            docker tag burrow-assembly:tested "ghcr.io/nightshaman/burrow:$tag"
+            docker push "ghcr.io/nightshaman/burrow:$tag"
+          done
       - name: Publish calendar release
         env:
           GH_TOKEN: ${{ github.token }}
