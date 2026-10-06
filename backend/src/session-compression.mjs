@@ -62,8 +62,8 @@ export function buildCompressionSummaryRecord({ sessionId = 'default', transcrip
     version: 1,
     sessionId: String(sessionId || 'default'),
     createdAt: clock(),
-    source: 'preserved-source-handoff',
-    preservation: 'all-eligible-prose-in-chronological-order',
+    source: 'bounded-conversation-recap',
+    preservation: 'lossy-recap-originals-archived',
     text: summaryText,
     textChars: summaryText.length,
     sourceTurnCount: sourceMessages.length,
@@ -84,27 +84,29 @@ export function buildCompressionSummaryRecord({ sessionId = 'default', transcrip
 
 export function structuredCompressionSummary(messages = [], { maxChars = 6000, retainedStates = [] } = {}) {
   const source = (Array.isArray(messages) ? messages : []).filter(isCompressionEntry);
-  // Preserve every eligible utterance, in order: heuristic extraction cannot
-  // establish which early facts or instructions remain material.
-  const text = [
-    '# Compacted Conversation Handoff',
-    'Older conversational context, not independently verified evidence. Later corrections override earlier statements.',
-    '## Goal and constraints / Completed actions and active state',
-    '## Latest unresolved user ask (see chronological source below)',
-    ...source.map(compressionEntryText),
-    '## Explicit retained state',
-    `${retainedStates.length} lifecycle-managed records rendered separately.`,
-  ].join('\n');
-  if (text.length > maxChars) throw Object.assign(new Error('compression_preservation_budget_exceeded'), { code: 'compression_preservation_budget_exceeded' });
-  return text;
+  return boundedRecap(source.map(compressionEntryText).join('\n'), maxChars);
+}
+
+// Conversation owns a lossy navigation recap, not inferred task truth. Explicit
+// lifecycle state is rendered independently and must never be clipped to fit it.
+function boundedRecap(value, maxChars) {
+  const disclosure = '# Compacted Conversation Handoff\nOlder conversation is a lossy recap: prose may be omitted, not lossless evidence. Retrieve authoritative originals with session_search before relying on exact history. Later corrections override earlier statements.\n## Goal and constraints / Completed actions and active state\n## Latest unresolved user ask (inspect originals)\n## Explicit retained state is rendered separately\n';
+  if (disclosure.length > maxChars) throw Object.assign(new Error('compression_preservation_budget_exceeded'), { code: 'compression_preservation_budget_exceeded' });
+  const text = String(value || '').trim();
+  const available = maxChars - disclosure.length;
+  if (text.length <= available) return disclosure + text;
+  const marker = '\n[older prose omitted; retrieve archived originals]\n';
+  if (available < marker.length) return disclosure;
+  const chars = available - marker.length;
+  const head = Math.floor(chars / 2);
+  return disclosure + text.slice(0, head) + marker + text.slice(text.length - (chars - head));
 }
 
 export function mergeCompressionSummaries({ previousSummary = '', nextSummary = '', maxChars = 6000 } = {}) {
   const prior = String(previousSummary || '').trim();
   const next = String(nextSummary || '').trim();
   const merged = [prior, next].filter(Boolean).join('\n\n');
-  if (merged.length > maxChars) throw Object.assign(new Error('compression_preservation_budget_exceeded'), { code: 'compression_preservation_budget_exceeded' });
-  return merged;
+  return merged.length <= maxChars ? merged : boundedRecap(merged, maxChars);
 }
 
 function tokenTargetToCharBudget(tokens, fallback = 6000) {
@@ -120,6 +122,10 @@ export async function appendCompressionSummary({ rootDir, sessionId = 'default',
   const combinedText = text ?? structuredCompressionSummary(sourceMessages, { maxChars, retainedStates: contextStatesFromTranscript(transcript) });
   const mergedText = mergeCompressionSummaries({ previousSummary, nextSummary: combinedText, maxChars });
   const summary = buildCompressionSummaryRecord({ sessionId, transcript, plan, text: mergedText, maxChars });
+  const previous = compressionSummariesFromTranscript(transcript);
+  summary.sourceEntryIds = [...new Set([...previous.flatMap(item => item.sourceEntryIds || []), ...summary.sourceEntryIds])];
+  summary.sourceTurnCount += previous.reduce((count, item) => count + Number(item.sourceTurnCount || 0), 0);
+  summary.firstSummarizedEntryId = previous[0]?.firstSummarizedEntryId || summary.firstSummarizedEntryId;
   // Semantic compaction creates a compact successor transcript. The prior
   // transcript remains an auditable artifact, but is no longer normal prompt
   // context or normal history-read input.
@@ -127,7 +133,7 @@ export async function appendCompressionSummary({ rootDir, sessionId = 'default',
   // Canonical execution facts are durable history, not disposable prompt tail.
   // They remain in the active transcript even when their surrounding chat is
   // summarized for provider context.
-  const tailEntries = transcript.filter((entry) => String(entry?.type || '') === 'context_state' || isCanonicalExecutionEntry(entry) || !sourceIds.has(entry?.id));
+  const tailEntries = transcript.filter((entry) => !entry?.metadata?.compressionSummary && (String(entry?.type || '') === 'context_state' || isCanonicalExecutionEntry(entry) || !sourceIds.has(entry?.id)));
   if (!conversation) throw new Error('conversation_store_required');
   const authority = conversation;
   const rotation = await authority.compact(sessionId, { summary, tailEntries });

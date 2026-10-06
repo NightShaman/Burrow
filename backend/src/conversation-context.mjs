@@ -177,7 +177,7 @@ export function buildConversationContext({ transcript = [], limits = {} } = {}) 
   }
 
   const persistedSummaries = compressionSummariesFromTranscript(entries);
-  const retainedState = renderContextStates(contextStatesFromTranscript(entries), { maxChars: Math.max(0, Math.floor(priorSummaryCharBudget * 0.4)) });
+  const retainedState = renderContextStates(contextStatesFromTranscript(entries), { maxChars: Infinity });
   const coveredIds = new Set(persistedSummaries.flatMap((summary) => Array.isArray(summary.sourceEntryIds) ? summary.sourceEntryIds : []));
   const priorMessages = chatMessages.slice(0, Math.max(0, chatMessages.length - recentMessages.length)).filter((message) => !coveredIds.has(message.id));
   const summaryParts = [];

@@ -1,28 +1,28 @@
 import { randomUUID } from 'node:crypto';
 
-export const CONTEXT_STATE_KINDS = new Set(['decision', 'blocker', 'task', 'operator_instruction', 'pin', 'evidence']);
+export const CONTEXT_STATE_KINDS = new Set(['decision', 'blocker', 'task', 'operator_instruction', 'pin', 'evidence', 'side_effect']);
 export const CONTEXT_STATE_LIFECYCLES = new Set(['active', 'resolved', 'superseded', 'completed', 'withdrawn', 'expired']);
 
-function text(value, limit = 2_400) { return String(value ?? '').trim().slice(0, limit); }
-function strings(value, limit = 12) { return Array.isArray(value) ? value.map((item) => text(item, 320)).filter(Boolean).slice(0, limit) : []; }
+function text(value) { return String(value ?? '').trim(); }
+function strings(value) { return Array.isArray(value) ? value.map((item) => text(item)).filter(Boolean) : []; }
 
 // This is deliberately explicit. It does not infer an instruction, decision, or
 // blocker from conversational prose. Callers must record the semantic event.
 export function normalizeSessionContextState(input = {}) {
-  const kind = text(input.kind, 64);
-  const lifecycle = text(input.lifecycle || 'active', 32);
-  const title = text(input.title, 240);
+  const kind = text(input.kind);
+  const lifecycle = text(input.lifecycle || 'active');
+  const title = text(input.title);
   const content = text(input.content);
   if (!CONTEXT_STATE_KINDS.has(kind)) throw new Error('context_state_kind_invalid');
   if (!CONTEXT_STATE_LIFECYCLES.has(lifecycle)) throw new Error('context_state_lifecycle_invalid');
   if (!title || !content) throw new Error('context_state_content_required');
   return {
-    id: text(input.id, 160) || randomUUID(), kind, lifecycle, title, content,
-    scopeKey: text(input.scopeKey, 240) || null,
-    supersedes: text(input.supersedes, 160) || null,
+    id: text(input.id) || randomUUID(), kind, lifecycle, title, content,
+    scopeKey: text(input.scopeKey) || null,
+    supersedes: text(input.supersedes) || null,
     sourceRefs: strings(input.sourceRefs),
     pinned: input.pinned === true,
-    expiresAt: text(input.expiresAt, 80) || null,
+    expiresAt: text(input.expiresAt) || null,
   };
 }
 
@@ -52,5 +52,6 @@ export function renderContextStates(states = [], { maxChars = 2_400 } = {}) {
     lines.push(`- [${state.kind}${state.pinned ? ', pinned' : ''}] ${state.title}: ${state.content}${refs}`);
   }
   const textValue = lines.join('\n');
-  return textValue.length <= maxChars ? textValue : `${textValue.slice(0, Math.max(0, maxChars - 42)).trim()}\n[structured context truncated by budget]`;
+  if (textValue.length > maxChars) throw Object.assign(new Error('context_mandatory_material_over_budget'), { statusCode: 413 });
+  return textValue;
 }
