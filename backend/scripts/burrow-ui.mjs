@@ -3,6 +3,7 @@ import { completeSetupOperation } from '../src/setup-operation.mjs';
 import { createGroupChannelMessageStarter } from '../src/group-channel-message.mjs';
 import { buildIdentity } from './build-identity.mjs';
 import { releaseProvenance } from './release-provenance.mjs';
+import { httpAuthorityConfig, hostAuthorityPolicy } from '../src/http-authority.mjs';
 import { browserRequestPolicy } from '../src/browser-origin-policy.mjs';
 import { artifactResponseHeaders } from '../src/artifact-response-policy.mjs';
 import { postgresTransactionContext, withPostgresTransaction } from '../src/postgres-foundation.mjs';
@@ -127,6 +128,7 @@ const uiDistRoot = path.join(projectRoot, 'public', 'ui');
 const apiDocsRoot = path.join(sourceRoot, 'public', 'api-docs');
 const port = Number(process.env.BURROW_UI_PORT || process.argv.find((arg) => arg.startsWith('--port='))?.split('=')[1] || 42817);
 const host = process.env.BURROW_UI_HOST || '0.0.0.0';
+const authorityConfig = httpAuthorityConfig({ host, port });
 const activeChatRuns = new Map();
 const executionProviders = createExecutionProviderRegistry();
 const sessionContinuityHeads = new Map();
@@ -3169,10 +3171,14 @@ const modManagementRoute = createModManagementRoute({ distribution: modDistribut
 const server = createServer(async (req, res) => {
   const startedAt = Date.now();
   let responseStatus = null;
-  res.once('finish', () => { void serverLogger.event('http_request', { method: req.method || null, path: new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`).pathname, status: responseStatus || res.statusCode, durationMs: Date.now() - startedAt }); });
+  res.once('finish', () => { void serverLogger.event('http_request', { method: req.method || null, path: String(req.url || '/').split('?')[0], status: responseStatus || res.statusCode, durationMs: Date.now() - startedAt }); });
   req.once('aborted', () => { void serverLogger.event('client_disconnect', { method: req.method || null, path: req.url || null, phase: 'request_aborted', durationMs: Date.now() - startedAt }); });
   try {
-    const url = new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`);
+    const authority = hostAuthorityPolicy(req, authorityConfig, authorityConfig.enabled ? (await runtimeConfig()).ui.authMode : 'none');
+    if (authority.error) return sendJson(res, authority.status, { ok: false, error: authority.error });
+    const url = new URL(req.url || '/', `${authority.protocol}//${authority.authority || `${host}:${port}`}`);
+    // Absolute-form request targets cannot override the checked authority.
+    if (authorityConfig.enabled && url.host !== authority.authority) return sendJson(res, 403, { ok: false, error: 'host_authority_not_allowed' });
     const origin = `${url.protocol}//${url.host}`;
     if (applyApiCors(req, res, url)) return;
     if (await authRoute({ req, res, url, origin })) return;
