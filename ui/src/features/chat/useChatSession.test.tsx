@@ -546,3 +546,17 @@ it('admits attachment batches cumulatively including concurrent read completions
   act(() => result.current.setAttachment([file]));
   expect(result.current.attached).toHaveLength(8);
 });
+
+it('keeps submitted user visible through empty polling snapshots without duplicate persisted turns or draft loss', async () => {
+ const {result} = renderHook(() => useChatSession(agentId));
+ await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+ const submitted = {role:'user' as const,content:'submitted now',runId:'pending-run',ts:new Date().toISOString()};
+ act(() => { result.current.appendTurn(agentId,sessionId,submitted); result.current.setDraft('next draft'); });
+ expect(result.current.turns).toContainEqual(submitted);
+ await act(async () => { await result.current.refreshConversation(); });
+ expect(result.current.turns).toContainEqual(submitted);
+ expect(result.current.draft).toBe('next draft');
+ apiMock.mockImplementation(async path => path === conversationPath ? {session:{id:sessionId,turns:[submitted]}} : {sessions:[{id:sessionId}]});
+ await act(async () => { await result.current.refreshConversation(); });
+ expect(result.current.turns.filter(turn => turn.runId === 'pending-run')).toHaveLength(1);
+});

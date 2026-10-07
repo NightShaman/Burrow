@@ -54,9 +54,13 @@ export function reconcileConversationTurns(serverTurns: SessionTurn[], cachedTur
   });
 }
 
-export function reconcileSessionTurns(session: ChatSession, cachedTurns: SessionTurn[]): SessionTurn[] {
-  return reconcileConversationTurns(
+export function reconcileSessionTurns(session: ChatSession, cachedTurns: SessionTurn[], pendingTurns: SessionTurn[] = []): SessionTurn[] {
+  const reconciled = reconcileConversationTurns(
     mergeSessionActivities(session.turns ?? [], session.activities ?? []),
     cachedTurnsForSession(session, cachedTurns),
   );
+  // Only current-tab submitted turns may bridge an absent server run. Durable
+  // cache entries alone must never resurrect purged history.
+  const missing = cachedTurnsForSession(session, pendingTurns).filter((pending) => !reconciled.some((turn) => turn.runId === pending.runId && turn.role === pending.role));
+  return [...reconciled, ...missing];
 }

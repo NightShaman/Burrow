@@ -168,11 +168,10 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
 
   if (!cards.length) return <div className="panel-body"><p className="hint">No Anthropic or OpenAI OAuth connections yet.</p></div>;
   return <section className="codex-content account-status">
-    {orderedCards.map((card, index) => {
+    {orderedCards.map((card) => {
       const isDragging = draggedId === card.id;
       const isDropTarget = dropTargetId === card.id && !isDragging;
       return <AccountCard key={card.id} name={card.name} subtitle={card.vendor} status={card.state === 'loading' ? 'Checking' : card.state === 'error' ? 'Disconnected' : 'Connected'} statusTone={card.state === 'ready' ? 'active' : 'paused'} className={`${isDragging ? 'dragging' : ''} ${isDropTarget ? 'drop-target' : ''}`} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', card.id); setDraggedId(card.id); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTargetId(card.id); }} onDragLeave={() => setDropTargetId((current) => current === card.id ? null : current)} onDrop={(event) => handleDrop(event, card.id)} onDragEnd={clearDrag}>
-        <div aria-label={`${card.name} ordering`}><button type="button" aria-label={`Move ${card.name} up`} disabled={index === 0} onClick={() => reorder(card.id, orderedCards[index - 1].id)}>Move up</button><button type="button" aria-label={`Move ${card.name} down`} disabled={index === orderedCards.length - 1} onClick={() => reorder(card.id, orderedCards[index + 1].id)}>Move down</button></div>
         {card.state === 'loading' && <small className="hint">Loading usage…</small>}
         {card.state === 'error' && <small className="hint">{card.error ?? 'Usage unavailable'}</small>}
         {card.state === 'ready' && !card.bars.length && <small className="hint">No usage windows reported.</small>}

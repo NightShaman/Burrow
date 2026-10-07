@@ -1,4 +1,4 @@
-import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AccountStatus } from './AccountStatus';
 import { api } from '../../app/api';
@@ -18,15 +18,11 @@ it.each([false, true])('FE010 rendered Anthropic API-key vs OAuth configured=%s'
  }
 });
 
-it('keyboard move controls reorder and persist account cards', async () => {
- localStorage.clear(); vi.mocked(api).mockResolvedValue({usage:{windows:[]}});
+it('retains draggable cards without visible reorder controls', async () => {
+ vi.mocked(api).mockResolvedValue({usage:{windows:[]}});
  const providers: SavedProvider[] = ['First','Second'].map(name => ({id:name,provider:'Anthropic',name,apiType:'anthropic-messages',url:'https://example.invalid',apiKey:'',models:[],oauthConfigured:true}));
- const view = render(<AccountStatus providers={providers}/>);
+ const {container} = render(<AccountStatus providers={providers}/>);
  await waitFor(() => expect(screen.getAllByText('Connected')).toHaveLength(2));
- const moves = screen.getAllByRole('button', {name:/^Move .* down$/});
- fireEvent.click(moves[0]);
- expect(screen.getAllByRole('button', {name:/^Move .* down$/})[1].getAttribute('aria-label')).toBe(moves[0].getAttribute('aria-label'));
- view.unmount(); render(<AccountStatus providers={providers}/>);
- expect(screen.getAllByRole('button', {name:/^Move .* down$/})[1].getAttribute('aria-label')).toBe(moves[0].getAttribute('aria-label'));
- localStorage.clear();
+ expect(screen.queryByRole('button', {name:/^Move /})).toBeNull();
+ expect(container.querySelectorAll('[draggable="true"]')).toHaveLength(2);
 });

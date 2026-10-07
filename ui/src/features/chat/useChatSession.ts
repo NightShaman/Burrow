@@ -122,9 +122,10 @@ export function useChatSession(selectedAgentId: string) {
   const childSessionsRef = useRef(new Set<string>());
   const recoveredProgressByRunRef = useRef<Record<string, ProgressEntry[]>>({});
   const [, setToolActivityVersion] = useState(0);
+  const pendingTurnsRef = useRef(new Map<string, SessionTurn[]>());
   const conversationCacheRef = useRef<ConversationCache>(readConversationCache());
   useEffect(() => {
-    const invalidate = () => { conversationCacheRef.current = {}; setTurns([]); };
+    const invalidate = () => { conversationCacheRef.current = {}; pendingTurnsRef.current.clear(); setTurns([]); };
     window.addEventListener(conversationCacheInvalidated, invalidate);
     return () => window.removeEventListener(conversationCacheInvalidated, invalidate);
   }, []);
@@ -270,7 +271,7 @@ export function useChatSession(selectedAgentId: string) {
     setChatError('');
     sessionRepository.loadSession(selectedAgentId, sessionId).then((session) => {
       if (cancelled || conversationCacheGeneration !== generationAtRequestStart || conversationCacheRef.current[cacheKey] !== cachedTurns) return;
-      const nextTurns = reconcileSessionTurns(session, conversationCacheRef.current[cacheKey] ?? []);
+      const nextTurns = reconcileSessionTurns(session, conversationCacheRef.current[cacheKey] ?? [], pendingTurnsRef.current.get(cacheKey) ?? []);
       conversationCacheRef.current[cacheKey] = nextTurns;
       writeConversationCache(conversationCacheRef.current, cacheKey);
       setTurns(nextTurns);
@@ -294,7 +295,7 @@ export function useChatSession(selectedAgentId: string) {
     // erase newer local turns; the run's terminal refresh will reconcile once
     // persistence is complete.
     if (conversationCacheGeneration !== generationAtRequestStart || conversationCacheRef.current[cacheKey] !== turnsAtRequestStart) return;
-    const nextTurns = reconcileSessionTurns(session, conversationCacheRef.current[cacheKey] ?? []).map((turn) => {
+    const nextTurns = reconcileSessionTurns(session, conversationCacheRef.current[cacheKey] ?? [], pendingTurnsRef.current.get(cacheKey) ?? []).map((turn) => {
       const activity = turn.runId ? toolActivityByRunRef.current[turn.runId] : undefined;
       const normalizedTurn = { ...turn, content: textFromChatValue(turn.content) };
       return normalizedTurn.role === 'assistant' && activity?.items?.length ? { ...normalizedTurn, metadata: { ...normalizedTurn.metadata, toolActivity: activity } } : normalizedTurn;
@@ -356,7 +357,7 @@ export function useChatSession(selectedAgentId: string) {
           const cachedTurns = conversationCacheRef.current[cacheKey];
           const session = await sessionRepository.loadSession(selectedAgentId, sessionId);
           if (cancelled || conversationCacheGeneration !== generationAtRequestStart || conversationCacheRef.current[cacheKey] !== cachedTurns) return;
-          const nextTurns = reconcileSessionTurns(session, cachedTurns ?? []).map((turn) => {
+          const nextTurns = reconcileSessionTurns(session, cachedTurns ?? [], pendingTurnsRef.current.get(cacheKey) ?? []).map((turn) => {
             if (turn.role !== 'assistant' || !turn.runId || turn.metadata?.progress) return turn;
             const recovered = recoveredProgressByRunRef.current[turn.runId];
             if (!recovered?.length) return turn;
@@ -438,6 +439,8 @@ export function useChatSession(selectedAgentId: string) {
   }, [isNewSession]);
   const appendTurn = useCallback((agentId: string, targetSessionId: string, turn: SessionTurn) => {
     const cacheKey = conversationCacheKey(agentId, targetSessionId);
+    if (turn.runId && turn.role === 'user') pendingTurnsRef.current.set(cacheKey, [...(pendingTurnsRef.current.get(cacheKey) ?? []), turn]);
+    if (turn.runId && turn.role === 'assistant') pendingTurnsRef.current.set(cacheKey, (pendingTurnsRef.current.get(cacheKey) ?? []).filter((pending) => pending.runId !== turn.runId));
     const nextTurns = [...(conversationCacheRef.current[cacheKey] ?? []), turn];
     conversationCacheRef.current[cacheKey] = nextTurns;
     writeConversationCache(conversationCacheRef.current, cacheKey);
