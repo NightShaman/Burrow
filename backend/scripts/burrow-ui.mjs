@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { completeSetupOperation } from '../src/setup-operation.mjs';
+import { createGroupChannelMessageStarter } from '../src/group-channel-message.mjs';
 import { buildIdentity } from './build-identity.mjs';
 import { releaseProvenance } from './release-provenance.mjs';
 import { browserRequestPolicy } from '../src/browser-origin-policy.mjs';
@@ -3041,47 +3043,7 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId })
   }
 }
 
-async function startGroupChannelMessage(channelId, body = {}) {
-  const rootDir = await runtimeDataRoot();
-  const channel = await readGroupChannel({ rootDir, id: channelId });
-  if (!channel) return { ok: false, error: 'group_channel_not_found' };
-  const message = String(body.message || '').trim();
-  if (!message) return { ok: false, error: 'message_required' };
-  const requested = Array.isArray(body.agentIds) ? body.agentIds.map(String) : [];
-  const participantProfiles = await Promise.all(channel.participantAgentIds.map(async (agentId) => {
-    const runtime = await resolveAgentRuntime(agentId);
-    return { id: agentId, name: runtime.agent?.name || agentId };
-  }));
-  const mentions = resolveGroupMentionTargets({ message, participants: participantProfiles });
-  if (mentions.unknown.length) return { ok: false, error: 'group_channel_unknown_mentions', mentions: mentions.unknown };
-  const mentionTargets = mentions.targets;
-  const targetIds = requested.length ? requested : (mentionTargets.length ? mentionTargets : channel.participantAgentIds);
-  const targets = targetIds.filter((agentId) => channel.participantAgentIds.includes(agentId));
-  if (!targets.length) return { ok: false, error: 'group_channel_targets_required' };
-  const operatorTurn = await appendGroupChannelTurn({ rootDir, conversationStore: postgresApplication.stores.conversations, channelId, role: 'user', content: message, metadata: { sender: 'operator', recipientAgentIds: targets, delivery: requested.length || mentionTargets.length ? 'targeted' : 'broadcast', mentions: mentions.mentions } });
-  const room = await readGroupChannelTurns({ rootDir, conversationStore: postgresApplication.stores.conversations, channelId, limit: 500 });
-  const launches = await Promise.all(targets.map(async (agentId) => {
-    const agentRuntime = await resolveAgentRuntime(agentId);
-    const sessionId = `group-${channelId}`;
-    const runId = createChatTurnRunId({ sessionId, prefix: `group-${agentId}` });
-    const controller = new AbortController();
-    const record = { channelId, agentId, runId, sessionId, controller, startedAt: new Date().toISOString(), phase: 'thinking', cancelled: false, reason: null };
-    groupChannelRuns.set(groupChannelRunKey(channelId, agentId, runId), record);
-    // Each participant gets its own runtime/session and therefore its own
-    // identity, tools, memory scope, and continuity head. The shared channel
-    // is only a visible operator transcript.
-    void runChatTurnFromBody({
-      body: { message, sessionId, runId, abortSignal: controller.signal }, rootDir: projectRoot, agentRuntime, stores: postgresApplication.stores, resolveAgentRuntime,
-      groupChannelContext: { channelId, channelName: channel.name, turns: room?.turns || [] },
-    }).then(async (result) => {
-      if (!controller.signal.aborted && result?.answerText) await appendGroupChannelTurn({ rootDir, conversationStore: postgresApplication.stores.conversations, channelId, role: 'agent', content: result.answerText, runId, metadata: { fromAgentId: agentId, fromAgentName: agentRuntime.agent?.name || agentId, recipient: 'group', participantSessionId: sessionId } });
-    }).catch(async (error) => {
-      if (!controller.signal.aborted) await appendGroupChannelTurn({ rootDir, conversationStore: postgresApplication.stores.conversations, channelId, role: 'agent', content: `Request failed: ${String(error?.message || error)}`, runId, metadata: { fromAgentId: agentId, fromAgentName: agentRuntime.agent?.name || agentId, recipient: 'group', participantSessionId: sessionId, failed: true } });
-    }).finally(() => groupChannelRuns.delete(groupChannelRunKey(channelId, agentId, runId)));
-    return { agentId, runId, sessionId };
-  }));
-  return { ok: true, channelId, operatorTurn, runs: launches };
-}
+const startGroupChannelMessage = createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgentRuntime, conversationStore: postgresApplication.stores.conversations, stores: postgresApplication.stores, retentionDays: async () => (await postgresApplication.stores.albdruck.readRetention()).attachmentDays, projectRoot, groupChannelRuns, groupChannelRunKey, runChatTurnFromBody });
 
 async function cancelGroupChannelRun(channelId, runId, body = {}) {
   const record = [...groupChannelRuns.values()].find((item) => item.channelId === channelId && item.runId === runId);
@@ -3136,7 +3098,7 @@ const skillApi = {
   agentSkills: async (id) => { const runtime = await resolveAgentRuntime(id); const assignments = await skillStoreCall(store => store.assignments(runtime.agentId)); const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: runtime.workspaceRoot, agentRuntime: runtime, skillStore: postgresApplication.stores.skills }); return { ok: true, ...assignments, effectiveSkills: catalog.skills.map(skillManifest) }; },
   saveAgentSkills: async (id, body) => { const runtime = await resolveAgentRuntime(id); await skillStoreCall(store => store.replaceAssignments(runtime.agentId, body.skillIds)); return skillApi.agentSkills(runtime.agentId); },
 };
-const settingsRoute = createSettingsRoutes({ timezoneSettings: async () => ({ ok: true, timezone: await operatorTimezone(postgresApplication.stores.metadata) }), saveTimezoneSettings: (body) => saveOperatorTimezone(postgresApplication.stores.metadata, body), ...skillApi, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, archiveSummaryModelSelection: async (agentId) => ({ ok: true, selection: await archiveSummarySelection((await resolveAgentRuntime(agentId)).agentId) }), saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection: async (id) => await modelsStore().remove(id), setupStatus: async () => postgresApplication.stores.setupState.readStatus(), completeSetup: async () => postgresApplication.stores.setupState.completeSetup() });
+const settingsRoute = createSettingsRoutes({ timezoneSettings: async () => ({ ok: true, timezone: await operatorTimezone(postgresApplication.stores.metadata) }), saveTimezoneSettings: (body) => saveOperatorTimezone(postgresApplication.stores.metadata, body), ...skillApi, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, archiveSummaryModelSelection: async (agentId) => ({ ok: true, selection: await archiveSummarySelection((await resolveAgentRuntime(agentId)).agentId) }), saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection: async (id) => await modelsStore().remove(id), completeSetupOperation: async body => { try { return await completeSetupOperation({ pool: postgresApplication.pool, encryptionKey: modelsStore().key, body }); } catch (error) { return { ok: false, status: error.message === 'setup_operation_conflict' || error.message === 'agent_id_exists' ? 409 : 400, error: error.message }; } }, setupStatus: async () => postgresApplication.stores.setupState.readStatus(), completeSetup: async () => postgresApplication.stores.setupState.completeSetup() });
 const agentRoute = createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession, agentOverview });
 const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
 const albdruckRoute = createAlbdruckRoutes({ store: postgresApplication.stores.albdruck, readJsonBody, sendJson });

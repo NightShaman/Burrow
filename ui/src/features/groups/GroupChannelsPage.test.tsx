@@ -1,11 +1,12 @@
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { api } from '../../app/api';
+import { api, fetchApi } from '../../app/api';
 import { GroupChannelsPage } from './GroupChannelsPage';
 
 vi.mock('../../app/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../app/api')>()),
   api: vi.fn(),
+  fetchApi: vi.fn(async () => { throw new Error('test download unavailable'); }),
 }));
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -38,7 +39,7 @@ it('shows the persisted session-store time for historical group turns, not Now',
 });
 
 
-it('FE017 external idle refresh wins over an older overlapping response', async () => {
+it('FE017 accepts slow responses without overlapping polls', async () => {
   let tick!: () => void;
   const timer = vi.spyOn(window, 'setInterval').mockImplementation((callback, delay) => { if (delay === 2_000) tick = callback as () => void; return 123; });
   let finishOld!: (value: unknown) => void;
@@ -55,9 +56,10 @@ it('FE017 external idle refresh wins over an older overlapping response', async 
     await screen.findByText('Initial idle');
     await act(async () => { tick(); });
     await act(async () => { tick(); });
-    await screen.findByText('External new message');
-    await act(async () => { finishOld(payload('Stale overlapping message')); });
-    expect(screen.queryByText('Stale overlapping message')).toBeNull();
+    expect(reads).toBe(2);
+    await act(async () => { finishOld(payload('Slow successful message')); });
+    await screen.findByText('Slow successful message');
+    await act(async () => { tick(); });
     expect(screen.getByText('External new message')).toBeTruthy();
     expect(reads).toBe(3);
   } finally { timer.mockRestore(); }
@@ -99,4 +101,66 @@ it('fences a delayed send completion from a newly navigated group', async () => 
   fireEvent.change(roomTwoComposer, { target: { value: 'room two draft' } });
   await act(async () => { resolveSend({ ok: true }); });
   expect((roomTwoComposer as HTMLTextAreaElement).value).toBe('room two draft');
+});
+
+it('aborts hanging polling at its deadline and recovers on the next interval', async () => {
+  vi.useFakeTimers();
+  let reads = 0;
+  let signal: AbortSignal | undefined;
+  vi.mocked(api).mockImplementation(async (path, init) => {
+    if (path === '/api/settings/identities') return {};
+    if (++reads === 1) return new Promise((_, reject) => {
+      signal = init?.signal as AbortSignal;
+      signal.addEventListener('abort', () => reject(new Error('deadline')), { once: true });
+    });
+    return { channel: { id: 'room-1', turns: [{ role: 'user', content: 'Recovered' }] } };
+  });
+  try {
+    render(<GroupChannelsPage channelId="room-1" agents={[]} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_000); });
+    expect(reads).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(signal?.aborted).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    expect(screen.getByText('Recovered')).toBeTruthy();
+  } finally { cleanup(); vi.useRealTimers(); }
+});
+
+it('reload renders persisted original and generated files with their storage owner', async () => {
+  vi.mocked(api).mockResolvedValue({ channel: { id: 'room-1', turns: [
+    { role: 'user', metadata: { attachmentAgentId: 'storage-owner', attachments: [{ name: 'original.txt', type: 'text/plain', artifactPath: 'attachments/original.txt' }] } },
+    { role: 'agent', metadata: { fromAgentId: 'participant', outputArtifacts: [{ kind: 'file', name: 'result.txt', storageReference: 'artifacts/result.txt' }] } },
+  ] } });
+  for (let reload = 0; reload < 2; reload++) {
+    const view = render(<GroupChannelsPage channelId="room-1" agents={[]} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Download original.txt' }));
+    fireEvent.click(within(screen.getByRole('region', { name: '1 generated artifact' })).getByRole('button', { name: 'Download' }));
+    await waitFor(() => expect(vi.mocked(fetchApi).mock.calls.length).toBe((reload + 1) * 2));
+    expect(vi.mocked(fetchApi).mock.calls[reload * 2][0]).toContain('/storage-owner/');
+    expect(vi.mocked(fetchApi).mock.calls[reload * 2 + 1][0]).toContain('/participant/');
+    view.unmount();
+  }
+});
+
+it.each([false, true])('submits attachment-only files and clears only with persistence receipt (%s)', async (confirmed) => {
+  vi.mocked(api).mockImplementation(async (path, init) => {
+    if (path === '/api/settings/identities') return {};
+    if (init?.method === 'POST') {
+      const body = JSON.parse(String(init.body));
+      expect(body.message).toBe('Please analyze the attached files.');
+      expect(body.attachments[0]).toMatchObject({ name: 'input.txt', type: 'text/plain', encoding: 'data-url' });
+      return { ok: true, operatorTurn: { metadata: { attachments: confirmed ? [{ name: 'input.txt', artifactPath: 'attachments/input.txt' }] : [] } } };
+    }
+    return { channel: { id: 'room-1', turns: [] } };
+  });
+  render(<GroupChannelsPage channelId="room-1" agents={[]} />);
+  await screen.findByPlaceholderText('Message the group…');
+  fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [new File(['hello'], 'input.txt', { type: 'text/plain' })] } });
+  await screen.findByRole('button', { name: 'Remove input.txt' });
+  fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+  await waitFor(() => {
+    if (confirmed) expect(screen.queryByRole('button', { name: 'Remove input.txt' })).toBeNull();
+    else expect(screen.getByText(/server did not confirm attachment persistence/)).toBeTruthy();
+  });
+  if (!confirmed) expect(screen.getByRole('button', { name: 'Remove input.txt' })).toBeTruthy();
 });

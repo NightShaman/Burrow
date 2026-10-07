@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { api, attachmentDisplayName } from '../../app/api';
+import { api, attachmentDisplayName, jsonMutation } from '../../app/api';
 import type { Agent } from '../../app/types';
-import type { ChatAttachment, RunProgress, SessionTurn, ToolActivity } from '../../app/api';
+import type { ChatAttachment, GeneratedArtifact, SessionAttachment, RunProgress, SessionTurn, ToolActivity } from '../../app/api';
 import { ChatComposer, ChatMessage } from '../chat/ChatPage';
+import { usePolling } from '../../app/usePolling';
 import { useComposerHistory } from '../chat/useComposerHistory';
 import { isWithinAttachmentBudget } from '../chat/attachmentValidation';
 
@@ -85,19 +86,19 @@ export function GroupChannelsPage({ channelId, agents, operator }: { channelId: 
   const requestNumber = useRef(0);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     const owner = scope.current;
     const request = ++requestNumber.current;
     if (!channelId) return;
-    const response = await api<{ channel?: unknown; turns?: unknown; runs?: unknown }>(`/api/group-channels/${encodeURIComponent(channelId)}`);
+    const response = await api<{ channel?: unknown; turns?: unknown; runs?: unknown }>(`/api/group-channels/${encodeURIComponent(channelId)}`, { signal });
     if (!mounted.current || scope.current !== owner || request !== requestNumber.current) return;
     const channelValue = record(response.channel ?? response);
+    setError('');
     setChannel(normalizeChannel({ ...channelValue, turns: channelValue.turns ?? response.turns, runs: channelValue.runs ?? response.runs }));
   }, [channelId]);
   useEffect(() => {
-    const owner = scope.current;
     setMessage(''); setAttached([]); setSending(false); setError('');
-    load().catch((reason: Error) => { if (scope.current === owner) setError(`Could not load group chat: ${reason.message}`); });
+    setChannel(null);
   }, [load]);
   useEffect(() => {
     api<{ operator?: unknown; agents?: Array<{ id?: string; avatar?: string }> }>('/api/settings/identities')
@@ -110,11 +111,13 @@ export function GroupChannelsPage({ channelId, agents, operator }: { channelId: 
       })
       .catch(() => undefined);
   }, [operator]);
-  useEffect(() => {
-    if (!channelId) return;
-    const timer = window.setInterval(() => { void load().catch((reason: Error) => setError(`Could not refresh group chat: ${reason.message}`)); }, 2_000);
-    return () => window.clearInterval(timer);
-  }, [channelId, load]);
+  usePolling(async (isCancelled, signal) => {
+    const owner = scope.current;
+    try { await load(signal); }
+    catch (reason) {
+      if (!isCancelled() && scope.current === owner) setError(`Could not refresh group chat: ${(reason as Error).message}`);
+    }
+  }, 2_000, Boolean(channelId), channelId);
   const agentById = useMemo(() => new Map(agents.map((agent) => [agent.resourceId ?? agent.id, agent])), [agents]);
   const mentionCandidates = useMemo(() => {
     if (mentionQuery === null || !channel) return [];
@@ -155,19 +158,25 @@ export function GroupChannelsPage({ channelId, agents, operator }: { channelId: 
     const submittedAttachments = attached;
     setSending(true); setError('');
     try {
-      await api<{ ok: true; channelId: string; operatorTurn?: unknown; runs?: GroupRun[] }>(`/api/group-channels/${encodeURIComponent(channelId)}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: content, ...(submittedAttachments.length ? { attachments: submittedAttachments } : {}) }) });
+      const response = await api<{ ok: true; channelId: string; operatorTurn?: unknown; runs?: GroupRun[] }>(`/api/group-channels/${encodeURIComponent(channelId)}/messages`, jsonMutation('POST', { message: content, ...(submittedAttachments.length ? { attachments: submittedAttachments } : {}) }));
       if (scope.current !== owner) return;
+      if (!response.ok) throw new Error(text(record(response).error, 'Message was not accepted'));
       setMessage((current) => current === submittedMessage ? '' : current);
-      setAttached((current) => current === submittedAttachments ? [] : current);
+      // Do not discard files merely because a legacy backend accepted the text.
+      const persistedAttachments = array(record(record(response.operatorTurn).metadata).attachments);
+      const attachmentsAccepted = !submittedAttachments.length || persistedAttachments.length === submittedAttachments.length && persistedAttachments.every((item, index) => text(record(item).name) === submittedAttachments[index].name && Boolean(text(record(item).artifactPath)));
+      if (attachmentsAccepted) setAttached((current) => current === submittedAttachments ? [] : current);
       await load();
+      if (!attachmentsAccepted) setError('The message was sent, but the server did not confirm attachment persistence. Files remain attached; do not resend the message automatically.');
     } catch (reason) { if (scope.current === owner) setError(`Could not send message: ${(reason as Error).message}`); }
     finally { if (scope.current === owner) setSending(false); }
   }
   function attachImage(files: File[]) { files.forEach((file, index) => {
     const supported = file.type.startsWith('image/') || file.type.startsWith('text/') || ['application/json', 'application/xml', 'application/rtf'].includes(file.type) || /\.(txt|md|markdown|json|csv|xml|html?|css|js|ts|tsx|jsx|py|rb|go|rs|java|c|cpp|h|yaml|yml|rtf)$/i.test(file.name);
     if (!supported || !isWithinAttachmentBudget(attached.map((item) => item.size), file.size)) return;
+    const owner = scope.current;
     const reader = new FileReader();
-    reader.onload = () => { const content = reader.result; if (typeof content === 'string') setAttached((current) => [...current, { name: attachmentDisplayName(file, index + 1), type: file.type, size: file.size, encoding: 'data-url', content }]); };
+    reader.onload = () => { const content = reader.result; if (mounted.current && scope.current === owner && typeof content === 'string') setAttached((current) => [...current, { name: attachmentDisplayName(file, index + 1), type: file.type, size: file.size, encoding: 'data-url', content }]); };
     reader.readAsDataURL(file);
   }); }
 
@@ -210,7 +219,7 @@ export function GroupChannelsPage({ channelId, agents, operator }: { channelId: 
           const avatar = isOperator ? (operatorIdentity?.avatar || operator?.avatar || 'You') : (identityAvatars[turn.authorId || ''] || agent?.avatar || turn.authorName.slice(0, 1).toUpperCase());
           const activity = turn.metadata?.toolActivity as ToolActivity | undefined;
           const progress = turn.metadata?.progress as RunProgress | undefined;
-          return <ChatMessage key={turn.id} side={isOperator ? 'operator' : 'agent'} name={isOperator ? (operatorIdentity?.name || operator?.name || turn.authorName) : turn.authorName} avatar={avatar} time={timeLabel(turn.createdAt)} text={turn.content} activity={activity} progress={progress} activityLive={Boolean(activity && !turn.content)} attachments={Array.isArray(turn.metadata?.attachments) ? turn.metadata.attachments as never : []} />;
+          return <ChatMessage key={turn.id} side={isOperator ? 'operator' : 'agent'} name={isOperator ? (operatorIdentity?.name || operator?.name || turn.authorName) : turn.authorName} avatar={avatar} time={timeLabel(turn.createdAt)} text={turn.content} activity={activity} progress={progress} activityLive={Boolean(activity && !turn.content)} attachments={Array.isArray(turn.metadata?.attachments) ? turn.metadata.attachments as SessionAttachment[] : []} outputArtifacts={Array.isArray(turn.metadata?.outputArtifacts) ? turn.metadata.outputArtifacts as GeneratedArtifact[] : []} attachmentAgentId={text(turn.metadata?.attachmentAgentId) || turn.authorId || undefined} />;
         }) : <div className="group-empty"><h2>No messages yet</h2><p>Send a message to start the group chat.</p></div>}
       </div>
       <div className="group-composer">

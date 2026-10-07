@@ -1065,6 +1065,21 @@ export class PostgresSessionStore {
     });
   }
 
+  async createEmpty({ agentId: rawAgent, sessionId: rawSession, operationId: rawOperation } = {}) {
+    const agentId = required(rawAgent, 'agentId'), sessionId = required(rawSession, 'sessionId');
+    const operationId = required(rawOperation, 'operationId'), now = this.clock();
+    return withPostgresTransaction(this.pool, async client => {
+      const metadata = { creationOperationId: operationId, generation: 0, turnCount: 0, chatTurnCount: 0 };
+      const inserted = await client.query(`INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,$3::jsonb,$4,$4) ON CONFLICT DO NOTHING RETURNING session_id`, [agentId,sessionId,JSON.stringify(metadata),now]);
+      if (!inserted.rows[0]) {
+        const prior = await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId,sessionId]);
+        if (prior.rows[0]?.metadata?.creationOperationId !== operationId) throw new Error('session_target_exists');
+      }
+      // Replay never clears messages sent after creation.
+      return { ok: true, agentId, sessionId, operationId };
+    });
+  }
+
   async fork({ sourceAgentId = null, targetAgentId = null, agentId = null, sourceSessionId: rawSource, targetSessionId: rawTarget, limit = 200 } = {}) {
     const sourceAgent = required(sourceAgentId || agentId, 'sourceAgentId'); const targetAgent = required(targetAgentId || agentId, 'targetAgentId');
     const source = required(rawSource, 'sourceSessionId'); const target = required(rawTarget, 'targetSessionId'); const size = limitValue(limit); const now = this.clock();

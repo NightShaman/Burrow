@@ -149,6 +149,12 @@ export function createSessionRoutes({
       sendJson(res, detail ? 200 : 404, detail ? { ok: true, ...detail } : { ok: false, error: 'not_found' });
       return true;
     }
+    if (req.method === 'POST' && url.pathname === '/api/sessions') {
+      const body = await readJsonBody(req);
+      const runtime = await resolveAgentRuntime(body.agentId);
+      sendJson(res, 200, await conversationStore.createEmpty({ agentId: runtime.agentId, sessionId: body.sessionId, operationId: body.operationId }));
+      return true;
+    }
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       const agentId = url.searchParams.get('agentId');
       const options = { includeArchived: url.searchParams.get('archived') === 'true', query: url.searchParams.get('q') || '', updatedSince: url.searchParams.get('updatedSince'), limit: url.searchParams.get('limit') };
@@ -193,6 +199,7 @@ export function createSessionRoutes({
     if (req.method === 'POST' && url.pathname === '/api/session/handoff-candidate') { sendJson(res, 200, await sessionWriteHandoffCandidate(await readJsonBody(req))); return true; }
     return false;
     } catch (error) {
+      if (error?.message === 'session_target_exists') { sendJson(res, 409, { ok: false, error: error.message }); return true; }
       if (!['archive_cursor_invalid', 'archive_date_invalid', 'archive_month_invalid', 'archive_kind_invalid', 'archive_timezone_invalid'].includes(error?.message)) throw error;
       sendJson(res, 400, { ok: false, error: error.message });
       return true;

@@ -30,6 +30,7 @@ function renderComposers(overrides: Partial<Parameters<typeof useChatComposers>[
 describe('useChatComposers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     apiMock.mockResolvedValue({ id: 'design', name: 'Design' });
   });
 
@@ -41,8 +42,8 @@ describe('useChatComposers', () => {
     });
     await act(() => result.current.session.create());
 
-    expect(apiMock).toHaveBeenNthCalledWith(1, '/api/sessions/default/fork?agentId=smatchet', expect.objectContaining({ method: 'POST', body: JSON.stringify({ targetSessionId: 'planning' }) }));
-    expect(apiMock).toHaveBeenNthCalledWith(2, '/api/sessions/planning/reset?agentId=smatchet', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(apiMock).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ method: 'POST', body: expect.stringContaining('"operationId"') }));
+    expect(apiMock).toHaveBeenCalledTimes(1);
     expect(options.refreshSessions).toHaveBeenCalledWith('smatchet');
     expect(options.selectSession).toHaveBeenCalledWith('planning');
     expect(result.current.session.isOpen).toBe(false);
@@ -64,14 +65,14 @@ describe('useChatComposers', () => {
     expect(options.reportError).not.toHaveBeenCalled();
   });
 
-  it('discards a late reset failure after session navigation away and back', async () => {
+  it('discards a late create failure after session navigation away and back', async () => {
     let reject!: (reason: Error) => void;
-    apiMock.mockResolvedValueOnce({}).mockReturnValueOnce(new Promise((_done, fail) => { reject = fail; }));
+    apiMock.mockReturnValueOnce(new Promise((_done, fail) => { reject = fail; }));
     const { result, options, rerender } = renderComposers();
     act(() => result.current.session.setName('planning'));
     let pending!: Promise<void>;
     act(() => { pending = result.current.session.create(); });
-    await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(1));
     options.sessionId = 'other'; rerender();
     options.sessionId = ''; rerender();
     await act(async () => { reject(new Error('offline')); await pending; });
@@ -80,16 +81,19 @@ describe('useChatComposers', () => {
     expect(result.current.session.error).toBe('');
   });
 
-  it('exposes copied-history partial success and retries reset without another fork', async () => {
-    apiMock.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error('reset offline'));
-    const { result, options } = renderComposers();
-    act(() => result.current.session.setName('planning'));
-    await act(() => result.current.session.create());
-    expect(result.current.session.error).toContain('copied history');
-    expect(options.selectSession).not.toHaveBeenCalled();
-    await act(() => result.current.session.create());
-    expect(apiMock.mock.calls.filter(([path]) => path.includes('/fork'))).toHaveLength(1);
-    expect(options.selectSession).toHaveBeenCalledWith('planning');
+  it('replays the identical submission after a lost response and reload', async () => {
+    apiMock.mockRejectedValueOnce(new Error('response lost'));
+    const first = renderComposers();
+    act(() => first.result.current.session.setName('planning'));
+    await act(() => first.result.current.session.create());
+    const submitted = apiMock.mock.calls[0][1]?.body;
+    first.unmount();
+    const second = renderComposers({ sessions: [{ id: 'planning' }] });
+    act(() => second.result.current.session.setName('planning'));
+    await act(() => second.result.current.session.create());
+    expect(apiMock.mock.calls[1][1]?.body).toBe(submitted);
+    expect(second.options.selectSession).toHaveBeenCalledWith('planning');
+    expect(localStorage.length).toBe(0);
   });
 
   it('keeps invalid or duplicate session names in the dialog without network work', async () => {
@@ -142,7 +146,7 @@ describe('useChatComposers', () => {
   });
 });
 
-it('finishes emptying a session whose fork succeeds after navigation', async () => {
+it('never resets a session whose create succeeds after navigation', async () => {
   let resolveFork!: (value: unknown) => void;
   apiMock.mockReturnValueOnce(new Promise((resolve) => { resolveFork = resolve; })).mockResolvedValueOnce({});
   const { result, options, rerender } = renderComposers();
@@ -152,6 +156,6 @@ it('finishes emptying a session whose fork succeeds after navigation', async () 
   options.sessionId = 'other';
   rerender();
   await act(async () => { resolveFork({}); await pending; });
-  expect(apiMock).toHaveBeenNthCalledWith(2, '/api/sessions/planning/reset?agentId=smatchet', expect.objectContaining({ method: 'POST' }));
+  expect(apiMock).toHaveBeenCalledTimes(1);
   expect(options.selectSession).not.toHaveBeenCalled();
 });

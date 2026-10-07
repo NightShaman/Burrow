@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { api, type SessionSummary } from '../../app/api';
+import { retainedOperation, completeOperation } from '../../app/durableOperation';
 import type { Tab } from '../../app/types';
 
 type ChatComposerOptions = {
@@ -23,10 +24,9 @@ export function useChatComposers({ sessionId = '', selectedAgentId, activeRunId,
   if (scopeRef.current.key !== scopeKey) scopeRef.current = { key: scopeKey };
   const scope = scopeRef.current;
   const mutationRef = useRef<object | null>(null);
-  const partialRef = useRef<{ scope: object; id: string } | null>(null);
+  useEffect(() => () => { scopeRef.current = { key: "unmounted" }; }, []);
   useEffect(() => {
     mutationRef.current = null;
-    partialRef.current = null;
     setIsCreatingSession(false);
     setSessionError('');
     setIsSessionOpen(false);
@@ -96,28 +96,19 @@ export function useChatComposers({ sessionId = '', selectedAgentId, activeRunId,
     const targetSessionId = sessionName.trim();
     if (!targetSessionId) return setSessionError('Give the session a name.');
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(targetSessionId)) return setSessionError('Use 1–80 letters, numbers, hyphens, or underscores; start with a letter or number.');
-    const partial = partialRef.current?.scope === scope && partialRef.current.id === targetSessionId;
-    if (!partial && sessions.some((session) => session.id === targetSessionId)) return setSessionError(`A session named “${targetSessionId}” already exists.`);
+    const storageKey = `hc.sessionOperation:${selectedAgentId}:${targetSessionId}`;
+    if (!localStorage.getItem(storageKey) && sessions.some((session) => session.id === targetSessionId)) return setSessionError(`A session named “${targetSessionId}” already exists.`);
+    const payload = retainedOperation(storageKey, () => ({ agentId: selectedAgentId, sessionId: targetSessionId, operationId: crypto.randomUUID() }));
     const operation = {};
     mutationRef.current = operation;
     const current = () => scopeRef.current === scope && mutationRef.current === operation;
-    let forked = partial;
     setIsCreatingSession(true);
     setSessionError('');
     clearError();
     try {
-      if (!partial) await api(`/api/sessions/default/fork?agentId=${encodeURIComponent(selectedAgentId)}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ targetSessionId }),
-      });
-      forked = true;
-      // Once the server creates the fork, finish emptying it even if the user navigates.
-      // Selection and UI updates remain fenced to the originating scope below.
-      if (current()) partialRef.current = { scope, id: targetSessionId };
-      await api(`/api/sessions/${encodeURIComponent(targetSessionId)}/reset?agentId=${encodeURIComponent(selectedAgentId)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      await api('/api/sessions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+      completeOperation(storageKey, payload.operationId);
       if (!current()) return;
-      partialRef.current = null;
       await refreshSessions(selectedAgentId);
       if (!current()) return;
       selectSession(targetSessionId);
@@ -126,12 +117,7 @@ export function useChatComposers({ sessionId = '', selectedAgentId, activeRunId,
       setSessionError('');
     } catch (error) {
       if (!current()) return;
-      const message = forked && partialRef.current
-        ? `Session “${targetSessionId}” was created with copied history, but could not be emptied: ${(error as Error).message}. Submit the same name again to retry reset, or close this dialog and open it from the session list. Reset deletes its copied history.`
-        : forked
-          ? `Session “${targetSessionId}” was created and emptied, but the session list could not be refreshed: ${(error as Error).message}. Refresh the session list to open it.`
-          : `Could not create session: ${(error as Error).message}`;
-      if (forked) void refreshSessions(selectedAgentId).catch(() => {});
+      const message = `Could not create session: ${(error as Error).message}. Retry the same name to recover the submitted operation.`;
       setSessionError(message);
       reportError(message);
     } finally {

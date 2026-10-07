@@ -1,3 +1,4 @@
+import { retainedOperation, completeOperation } from '../../app/durableOperation';
 import { AccessibleModal } from '../../app/AccessibleModal';
 import React, { useEffect, useRef, useState } from 'react';
 import type { Agent, SavedProvider } from '../../app/types';
@@ -108,6 +109,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export type AgentToolbarProps = { agents: Agent[]; selectedId: string; onSelect: (id: string) => void; onAgentsChanged: () => Promise<void>; onModelConnectionsChanged: () => Promise<void>; onOperatorProfileChanged?: (profile: { name: string; avatar: string }) => void; onFirstRunComplete?: () => void; onSetupComplete?: () => Promise<void>; firstRun?: boolean };
 
 export function AgentToolbar({ agents, selectedId, onSelect, onAgentsChanged, onModelConnectionsChanged, onOperatorProfileChanged, onFirstRunComplete, onSetupComplete, firstRun = false }: AgentToolbarProps) {
+ const setupOwner = useRef<object>({});
+ useEffect(() => () => { setupOwner.current = {}; }, []);
+ const setupBusy = useRef(false);
  const [showNewAgent, setShowNewAgent] = useState(false);
  const onFirstRunCompleteRef = useRef(onFirstRunComplete);
  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
@@ -159,8 +163,8 @@ export function AgentToolbar({ agents, selectedId, onSelect, onAgentsChanged, on
   if (kind === 'openai') await startOpenAiOAuth(); else await startClaudeOAuth();
  };
  const submitWizardOAuth = async () => { if (oauthProvider === 'openai') await submitOpenAiOAuth(); else if (oauthProvider === 'anthropic') await submitClaudeOAuth(); };
- const reset = () => { wizardOAuthConnection.current = null; setOauthProvider(null); resetOpenAiOAuth(); resetClaudeOAuth(); setCelebrating(false); setShowNewAgent(false); setStep(1); setImportPayload(''); setImportPassword(''); setOperatorName(''); setOperatorAvatar(''); setOperatorAvatarFileName(''); setName(''); setAvatar(''); setSoul(''); setConnectionId(''); setModel(''); setError(''); setImporting(false); setImported(false); if (importInput.current) importInput.current.value = ''; };
- const open = async () => { setShowNewAgent(true); setStep(1); setError(''); try { const result = await api<{ connections: OpenAiOAuthConnection[] }>('/api/settings/model-connections'); setProviders((result.connections ?? []).map(savedProviderFromConnection)); } catch { setProviders([]); } };
+ const reset = () => { setupOwner.current = {}; wizardOAuthConnection.current = null; setOauthProvider(null); resetOpenAiOAuth(); resetClaudeOAuth(); setCelebrating(false); setShowNewAgent(false); setStep(1); setImportPayload(''); setImportPassword(''); setOperatorName(''); setOperatorAvatar(''); setOperatorAvatarFileName(''); setName(''); setAvatar(''); setSoul(''); setConnectionId(''); setModel(''); setError(''); setImporting(false); setImported(false); if (importInput.current) importInput.current.value = ''; };
+ const open = async () => { setShowNewAgent(true); setStep(1); setError(''); const retained = localStorage.getItem('hc.setupOperation'); if (retained) { const payload = JSON.parse(retained); setOperatorName(payload.operator.name); setOperatorAvatar(payload.operator.avatar); setName(payload.agent.name); setAvatar(payload.agentIdentity.avatar); setSoul(payload.documents.find((doc: { kind: string }) => doc.kind === 'SOUL')?.markdown ?? ''); setConnectionId(payload.modelSelection?.connectionId ?? ''); setModel(payload.modelSelection?.model ?? ''); setStep(5); } try { const result = await api<{ connections: OpenAiOAuthConnection[] }>('/api/settings/model-connections'); setProviders((result.connections ?? []).map(savedProviderFromConnection)); } catch { setProviders([]); } };
  useEffect(() => {
    if (firstRun && !showNewAgent) void open();
  }, [firstRun, showNewAgent]);
@@ -182,7 +186,25 @@ export function AgentToolbar({ agents, selectedId, onSelect, onAgentsChanged, on
  const markSetupComplete = async () => {
   if (firstRun) await onSetupComplete?.();
 };
- const finish = async () => { const nextOperatorName = operatorName.trim(); const nextName = name.trim(); const nextId = agentIdFromName(nextName); if (!nextOperatorName) { setStep(2); setError('Your displayed name cannot be empty.'); return; } if (!nextName || !nextId) { setStep(3); setError('Enter an agent name containing at least one letter or number.'); return; } setState('creating'); setError(''); try { await api('/api/settings/identities', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'operator', id: 'default', name: nextOperatorName, avatar: operatorAvatar }) }); onOperatorProfileChanged?.({ name: nextOperatorName, avatar: operatorAvatar }); const result = await api<{ agent: { id: string } }>('/api/agents', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: nextId, name: nextName, enabled: true }) }); const agentId = result.agent.id; await Promise.all([api('/api/settings/identities', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'agent', id: agentId, name: nextName, avatar }) }), api(`/api/agents/${encodeURIComponent(agentId)}/profile-documents`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ documents: profileDocumentKinds.map(kind => ({ kind, markdown: kind === 'SOUL' ? soul : '' })) }) }), ...(connectionId && model ? [api(`/api/agents/${encodeURIComponent(agentId)}/model-selection`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ connectionId, model }) })] : [])]); await Promise.all([onModelConnectionsChanged(), onAgentsChanged()]); await markSetupComplete(); onSelect(agentId); setCelebrating(true); } catch (cause) { setError(cause instanceof Error ? `Could not finish first-run setup: ${cause.message}` : 'Could not finish first-run setup.'); } finally { setState('idle'); } };
+ const finish = async () => {
+  if (setupBusy.current) return;
+  const key = 'hc.setupOperation';
+  if (!localStorage.getItem(key) && (!operatorName.trim() || !agentIdFromName(name.trim()))) { setError('Operator and agent names are required.'); return; }
+  const owner = setupOwner.current;
+  const current = () => setupOwner.current === owner;
+  setupBusy.current = true; setState('creating'); setError('');
+  try {
+   const payload = retainedOperation(key, () => ({ operationId: crypto.randomUUID(), operator: { name: operatorName.trim(), avatar: operatorAvatar }, agent: { id: agentIdFromName(name.trim()), name: name.trim(), enabled: true }, agentIdentity: { avatar }, documents: profileDocumentKinds.map(kind => ({ kind, markdown: kind === 'SOUL' ? soul : '' })), ...(connectionId && model ? { modelSelection: { connectionId, model } } : {}) }));
+   const result = await api<{ agent: { id: string } }>('/api/setup/operation', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+   completeOperation(key, payload.operationId);
+   if (!current()) return;
+   onOperatorProfileChanged?.(payload.operator);
+   await Promise.all([onModelConnectionsChanged(), onAgentsChanged()]);
+   if (!current()) return;
+   onSelect(result.agent.id); setCelebrating(true);
+  } catch (cause) { if (current()) setError(`Could not finish first-run setup: ${cause instanceof Error ? cause.message : 'Unknown error'}. Retry to recover the original submission.`); }
+  finally { setupBusy.current = false; if (current()) setState('idle'); }
+ };
  const provider = providers.find(item => item.id === connectionId);
  const readImportFile = async (file?: File) => {
   if (!file) return;
