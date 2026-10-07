@@ -227,3 +227,13 @@ it.each([true, false])('shows errors with an empty transcript (new=%s)', (isNewS
   render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={isNewSession} turns={[]} isLoading={false} error="Attachment rejected" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" />);
   expect(screen.getByRole('alert').textContent).toBe('Attachment rejected');
 });
+it('attributes reloaded child assistant turns to child name and avatar', () => {
+ show([{type:'message',role:'assistant',content:'Child answer'}]);
+ expect(screen.getByLabelText('Child avatar')).toBeTruthy();
+ expect(screen.queryByLabelText('Hatchet avatar')).toBeNull();
+});
+it('live Markdown blocks protocol-relative image requests until consent', () => {
+ const view = show([{type:'message',role:'assistant',content:'![tracking](//external.invalid/pixel.png)'}]);
+ expect(view.container.querySelector('img[src="//external.invalid/pixel.png"]')).toBeNull();
+ expect(screen.getByRole('button', {name:'Load external image: tracking'})).toBeTruthy();
+});

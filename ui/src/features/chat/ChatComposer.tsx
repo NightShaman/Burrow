@@ -115,6 +115,27 @@ export function ChatComposer({
     void api<{ projects: ProjectOption[] }>('/api/task-board/projects').then((result) => setProjects(result.projects)).catch(() => setProjects([]));
   }, [projectQuery]);
   const visibleProjects = projectQuery === null ? [] : projects.filter((project) => !projectQuery || project.name.toLowerCase().includes(projectQuery.toLowerCase()));
+  const [activeOption, setActiveOption] = useState(0);
+  const [dismissedMenu, setDismissedMenu] = useState(false);
+  useEffect(() => { setActiveOption(0); setDismissedMenu(false); }, [draft]);
+  const menuCount = projectQuery !== null ? visibleProjects.length + 1 : commandMatches.length;
+  const menuOpen = !dismissedMenu && menuCount > 0;
+  const menuKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!menuOpen) return false;
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault();
+      setActiveOption(index => event.key === 'Home' ? 0 : event.key === 'End' ? menuCount - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + menuCount) % menuCount);
+      return true;
+    }
+    if (event.key === 'Escape') { event.preventDefault(); setDismissedMenu(true); return true; }
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      if (projectQuery !== null) void chooseProject(activeOption === 0 ? null : visibleProjects[activeOption - 1]);
+      else chooseCommand(commandMatches[activeOption].name);
+      return true;
+    }
+    return false;
+  };
   const chooseCommand = (name: string) => setDraft(`/${name}${name === 'context' ? ' ' : ''}`);
   const submit = () => {
     if (!canSend) return;
@@ -170,21 +191,21 @@ export function ChatComposer({
           ))}
         </div>
       )}
-      {commandMatches.length > 0 && (
-        <div className="chat-command-menu" role="listbox" aria-label="Chat commands">
-          {commandMatches.map((command) => <button key={command.name} type="button" role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => chooseCommand(command.name)}><strong>{command.usage}</strong><span>{command.description}</span></button>)}
+      {menuOpen && projectQuery === null && commandMatches.length > 0 && (
+        <div className="chat-command-menu" id="composer-options" role="listbox" aria-label="Chat commands">
+          {commandMatches.map((command, index) => <button key={command.name} type="button" role="option" id={`composer-option-${index}`} aria-selected={activeOption === index} tabIndex={-1} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseCommand(command.name)}><strong>{command.usage}</strong><span>{command.description}</span></button>)}
         </div>
       )}
-      {projectQuery !== null && (
-        <div className="chat-command-menu" role="listbox" aria-label="Projects">
+      {menuOpen && projectQuery !== null && (
+        <div className="chat-command-menu" id="composer-options" role="listbox" aria-label="Projects">
           {projectContext && <p className="chat-project-context" role="status">Active project: <strong>{projectContext.name}</strong></p>}
-          <button type="button" role="option" disabled={projectBusy} onMouseDown={(event) => event.preventDefault()} onClick={() => void chooseProject(null)}><strong>{projectBusy ? 'Updating…' : 'Clear active project'}</strong><span>Remove project context from this conversation.</span></button>
-          {visibleProjects.map((project) => <button key={project.id} type="button" role="option" disabled={projectBusy} onMouseDown={(event) => event.preventDefault()} onClick={() => void chooseProject(project)}><strong>{project.name}</strong><span>{project.description || 'TaskBoard project'}</span></button>)}
+          <button type="button" role="option" id="composer-option-0" aria-selected={activeOption === 0} tabIndex={-1} disabled={projectBusy} onMouseDown={(event) => event.preventDefault()} onClick={() => void chooseProject(null)}><strong>{projectBusy ? 'Updating…' : 'Clear active project'}</strong><span>Remove project context from this conversation.</span></button>
+          {visibleProjects.map((project, index) => <button key={project.id} type="button" role="option" id={`composer-option-${index + 1}`} aria-selected={activeOption === index + 1} tabIndex={-1} disabled={projectBusy} onMouseDown={(event) => event.preventDefault()} onClick={() => void chooseProject(project)}><strong>{project.name}</strong><span>{project.description || 'TaskBoard project'}</span></button>)}
           {projectError && <p className="error" role="alert">{projectError}</p>}
         </div>
       )}
       <div className="composer">
-        <textarea ref={messageInput} onSelect={rememberSelection} onClick={rememberSelection} id="chat-message" name="message" aria-label="Message" value={draft} onChange={(event) => setDraft(event.target.value)} onPaste={pasteImages} onKeyDown={(event) => { if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return; onKeyDown?.(event); if (event.defaultPrevented) return; if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={placeholder} />
+        <textarea ref={messageInput} onSelect={rememberSelection} onClick={rememberSelection} id="chat-message" name="message" aria-label="Message" aria-haspopup="listbox" aria-controls={menuOpen ? "composer-options" : undefined} aria-expanded={menuOpen} aria-activedescendant={menuOpen ? `composer-option-${activeOption}` : undefined} value={draft} onChange={(event) => setDraft(event.target.value)} onPaste={pasteImages} onKeyDown={(event) => { if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return; if (menuKey(event)) return; onKeyDown?.(event); if (event.defaultPrevented) return; if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={placeholder} />
         <div className="compose-footer"><div className="compose-actions">
           <button className="copy-conversation" onClick={() => void copyConversation()} disabled={!conversationTurns.some((turn) => textFromChatValue(turn.content).trim())} aria-label={copyState === 'copied' ? 'Conversation copied' : 'Copy conversation'} title={copyState === 'copied' ? 'Conversation copied' : copyState === 'failed' ? 'Copy failed' : 'Copy conversation'}>{copyState === 'copied' ? '✓' : '⧉'}</button>
           <div className="emoji-control" ref={emojiArea} onKeyDown={closeEmojiOnEscape}>

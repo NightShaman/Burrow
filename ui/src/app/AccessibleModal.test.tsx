@@ -20,3 +20,14 @@ it('queues concurrent confirmation requests without losing their resolutions', a
  expect(screen.getByText('Second')).toBeTruthy(); expect(document.activeElement).toBe(screen.getByText('Cancel'));
  fireEvent.click(screen.getByText('Confirm')); await Promise.resolve(); expect(results).toEqual([false,true]);
 });
+it('only top modal owns focus and Escape and restores the underlying opener', () => {
+ let parentClosed = 0; let childClosed = 0;
+ const parent = render(<AccessibleModal role="dialog" onClose={() => parentClosed++}><button>Open nested</button></AccessibleModal>);
+ const opener = screen.getByText('Open nested'); opener.focus();
+ const child = render(<AccessibleModal role="dialog" onClose={() => childClosed++}><button>Nested cancel</button></AccessibleModal>);
+ expect(document.activeElement).toBe(screen.getByText('Nested cancel'));
+ fireEvent.keyDown(document, {key:'Escape'});
+ expect(childClosed).toBe(1); expect(parentClosed).toBe(0);
+ child.unmount(); expect(document.activeElement).toBe(opener);
+ fireEvent.keyDown(document, {key:'Escape'}); expect(parentClosed).toBe(1); parent.unmount();
+});
