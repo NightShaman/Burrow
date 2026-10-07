@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { isWithinAttachmentBudget } from '../../app/clientBudgets';
 import { api, textFromChatValue, type ActiveA2AActivity, type ActiveChatRun, type ActiveChatRunsResponse, type ActiveSubagent, type ChatAttachment, type ProgressEntry, type SessionSummary, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
-import { conversationCacheKey, readConversationCache, writeConversationCache, type ConversationCache } from './chatConversationCache';
+import { conversationCacheGeneration, conversationCacheInvalidated, conversationCacheKey, readConversationCache, writeConversationCache, type ConversationCache } from './chatConversationCache';
 import { readDraftCache, writeDraftCache, type DraftCache } from './chatDraftCache';
 import { reconcileSessionTurns } from './chatTurnReconciliation';
 import { finalizeThoughtProgress, thoughtProgressFromEvents } from './chatThoughtProgress';
@@ -122,6 +123,11 @@ export function useChatSession(selectedAgentId: string) {
   const recoveredProgressByRunRef = useRef<Record<string, ProgressEntry[]>>({});
   const [, setToolActivityVersion] = useState(0);
   const conversationCacheRef = useRef<ConversationCache>(readConversationCache());
+  useEffect(() => {
+    const invalidate = () => { conversationCacheRef.current = {}; setTurns([]); };
+    window.addEventListener(conversationCacheInvalidated, invalidate);
+    return () => window.removeEventListener(conversationCacheInvalidated, invalidate);
+  }, []);
   // The displayed chat session may be a child session. Agent-status is scoped
   // separately to the parent session and must never follow that selection.
   const sessionIdByAgentRef = useRef<Record<string, string>>({});
@@ -249,6 +255,7 @@ export function useChatSession(selectedAgentId: string) {
       return;
     }
     let cancelled = false;
+    const generationAtRequestStart = conversationCacheGeneration;
     const cacheKey = conversationCacheKey(selectedAgentId, sessionId);
     const cachedTurns = conversationCacheRef.current[cacheKey];
     if (cachedTurns) {
@@ -262,7 +269,7 @@ export function useChatSession(selectedAgentId: string) {
     }
     setChatError('');
     sessionRepository.loadSession(selectedAgentId, sessionId).then((session) => {
-      if (cancelled || conversationCacheRef.current[cacheKey] !== cachedTurns) return;
+      if (cancelled || conversationCacheGeneration !== generationAtRequestStart || conversationCacheRef.current[cacheKey] !== cachedTurns) return;
       const nextTurns = reconcileSessionTurns(session, conversationCacheRef.current[cacheKey] ?? []);
       conversationCacheRef.current[cacheKey] = nextTurns;
       writeConversationCache(conversationCacheRef.current, cacheKey);
@@ -279,13 +286,14 @@ export function useChatSession(selectedAgentId: string) {
   const refreshConversation = useCallback(async (agentId = selectedAgentId, targetSessionId = sessionId) => {
     if (!agentId || !targetSessionId) return;
     const cacheKey = conversationCacheKey(agentId, targetSessionId);
+    const generationAtRequestStart = conversationCacheGeneration;
     const turnsAtRequestStart = conversationCacheRef.current[cacheKey];
     const session = await sessionRepository.loadSession(agentId, targetSessionId);
     // A refresh started before a direct send may resolve after appendTurn has
     // added the optimistic user message. That older server snapshot must not
     // erase newer local turns; the run's terminal refresh will reconcile once
     // persistence is complete.
-    if (conversationCacheRef.current[cacheKey] !== turnsAtRequestStart) return;
+    if (conversationCacheGeneration !== generationAtRequestStart || conversationCacheRef.current[cacheKey] !== turnsAtRequestStart) return;
     const nextTurns = reconcileSessionTurns(session, conversationCacheRef.current[cacheKey] ?? []).map((turn) => {
       const activity = turn.runId ? toolActivityByRunRef.current[turn.runId] : undefined;
       const normalizedTurn = { ...turn, content: textFromChatValue(turn.content) };
@@ -308,10 +316,12 @@ export function useChatSession(selectedAgentId: string) {
     let timer: number | undefined;
     let hadRuns = false;
     const isChildSession = childSessionsRef.current.has(conversationCacheKey(selectedAgentId, sessionId));
+    const controller = new AbortController();
     const poll = async () => {
+      const generationAtRequestStart = conversationCacheGeneration;
       try {
         const resourceId = selectedAgentId;
-        const response = await api<ActiveChatRunsResponse>(`/api/chat/runs/active?agentId=${encodeURIComponent(resourceId)}&sessionId=${encodeURIComponent(sessionId)}`);
+        const response = await api<ActiveChatRunsResponse>(`/api/chat/runs/active?agentId=${encodeURIComponent(resourceId)}&sessionId=${encodeURIComponent(sessionId)}`, { signal: controller.signal });
         if (cancelled || selectedChatRef.current.agentId !== selectedAgentId || selectedChatRef.current.sessionId !== sessionId) return;
         const selectedRuntimeRun = response.runs?.find((run) => run.agentId === resourceId && run.sessionId === sessionId);
         const matchingLiveSubagents = (response.subagents ?? []).filter((child) => {
@@ -345,7 +355,7 @@ export function useChatSession(selectedAgentId: string) {
           const cacheKey = conversationCacheKey(selectedAgentId, sessionId);
           const cachedTurns = conversationCacheRef.current[cacheKey];
           const session = await sessionRepository.loadSession(selectedAgentId, sessionId);
-          if (cancelled || conversationCacheRef.current[cacheKey] !== cachedTurns) return;
+          if (cancelled || conversationCacheGeneration !== generationAtRequestStart || conversationCacheRef.current[cacheKey] !== cachedTurns) return;
           const nextTurns = reconcileSessionTurns(session, cachedTurns ?? []).map((turn) => {
             if (turn.role !== 'assistant' || !turn.runId || turn.metadata?.progress) return turn;
             const recovered = recoveredProgressByRunRef.current[turn.runId];
@@ -367,7 +377,7 @@ export function useChatSession(selectedAgentId: string) {
       }
     };
     void poll();
-    return () => { cancelled = true; if (timer !== undefined) window.clearTimeout(timer); };
+    return () => { cancelled = true; controller.abort(); if (timer !== undefined) window.clearTimeout(timer); };
   }, [isNewSession, selectedAgentId, sessionId, sessionRepository]);
 
   const selectSession = useCallback((targetSessionId: string) => {
@@ -441,15 +451,24 @@ export function useChatSession(selectedAgentId: string) {
   const toolActivityForRun = useCallback((runId: string) => toolActivityByRunRef.current[runId], []);
   const setAttachment = useCallback((attachments: ChatAttachment[]) => {
     if (!isAttachmentScopeCurrent()) return;
-    setAttachmentState((current) => ({ scope: attachmentScope, files: [...(current?.scope === attachmentScope ? current.files : []), ...attachments] }));
+    setAttachmentState((current) => {
+      const files = [...(current?.scope === attachmentScope ? current.files : [])];
+      for (const attachment of attachments) if (isWithinAttachmentBudget(files.map((item) => item.size), attachment.size)) files.push(attachment);
+      return { scope: attachmentScope, files };
+    });
   }, [attachmentScope, isAttachmentScopeCurrent]);
   const clearAttachment = useCallback(() => setAttachmentState(null), []);
   const removeAttachment = useCallback((index: number) => setAttachmentState((current) => current?.scope === attachmentScope ? { ...current, files: current.files.filter((_, attachmentIndex) => attachmentIndex !== index) } : current), [attachmentScope]);
+  const cancelController = useRef<AbortController | null>(null);
+  useEffect(() => () => { cancelController.current?.abort(); }, [selectedAgentId, sessionId]);
   const cancelRuntimeRun = useCallback(async (run: RuntimeRunForSelection) => {
+    cancelController.current?.abort();
+    const controller = new AbortController(); cancelController.current = controller;
     try {
       // Recovered runs carry raw backend IDs, not UI-qualified resource IDs.
-      await api( `/api/chat/${encodeURIComponent(run.runId)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: run.agentId, reason: 'Stopped by operator' }) });
+      await api( `/api/chat/${encodeURIComponent(run.runId)}/cancel`, { signal: controller.signal, method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: run.agentId, reason: 'Stopped by operator' }) });
     } catch (error) {
+      if (controller.signal.aborted) return;
       setChatError(error instanceof Error ? `Could not stop run: ${error.message}` : 'Could not stop run.');
     }
   }, []);

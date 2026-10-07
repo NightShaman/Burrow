@@ -171,12 +171,13 @@ export function GroupChannelsPage({ channelId, agents, operator }: { channelId: 
     } catch (reason) { if (scope.current === owner) setError(`Could not send message: ${(reason as Error).message}`); }
     finally { if (scope.current === owner) setSending(false); }
   }
-  function attachImage(files: File[]) { files.forEach((file, index) => {
+  function attachImage(files: File[]) { const admittedSizes = attached.map((item) => item.size); files.forEach((file, index) => {
     const supported = file.type.startsWith('image/') || file.type.startsWith('text/') || ['application/json', 'application/xml', 'application/rtf'].includes(file.type) || /\.(txt|md|markdown|json|csv|xml|html?|css|js|ts|tsx|jsx|py|rb|go|rs|java|c|cpp|h|yaml|yml|rtf)$/i.test(file.name);
-    if (!supported || !isWithinAttachmentBudget(attached.map((item) => item.size), file.size)) return;
+    if (!supported || !isWithinAttachmentBudget(admittedSizes, file.size)) return;
+    admittedSizes.push(file.size);
     const owner = scope.current;
     const reader = new FileReader();
-    reader.onload = () => { const content = reader.result; if (mounted.current && scope.current === owner && typeof content === 'string') setAttached((current) => [...current, { name: attachmentDisplayName(file, index + 1), type: file.type, size: file.size, encoding: 'data-url', content }]); };
+    reader.onload = () => { const content = reader.result; if (mounted.current && scope.current === owner && typeof content === 'string') setAttached((current) => !isWithinAttachmentBudget(current.map((item) => item.size), file.size) ? current : [...current, { name: attachmentDisplayName(file, index + 1), type: file.type, size: file.size, encoding: 'data-url', content }]); };
     reader.readAsDataURL(file);
   }); }
 

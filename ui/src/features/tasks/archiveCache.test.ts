@@ -66,3 +66,12 @@ it('FE-021 isolates every query scope dimension and detail identity', async () =
     expect(readArchiveSessionCache(archiveQueryCacheKey({ ...scope, [field]: 'different' }))).toBeNull();
   }
 });
+
+it('purge clears browser-default archive storage', async () => {
+  const { clearArchiveCaches, archiveSessionsCacheStorageKey, archiveDetailsCacheStorageKey } = await import('./archiveCache');
+  localStorage.setItem(archiveSessionsCacheStorageKey, 'secret');
+  localStorage.setItem(archiveDetailsCacheStorageKey, 'secret');
+  clearArchiveCaches();
+  expect(localStorage.getItem(archiveSessionsCacheStorageKey)).toBeNull();
+  expect(localStorage.getItem(archiveDetailsCacheStorageKey)).toBeNull();
+});

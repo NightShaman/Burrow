@@ -3,7 +3,7 @@ import { ModArchiveHost } from '../mods/ModArchiveHost';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Agent } from '../../app/types';
 import { ArchiveRunsProof } from './ArchiveRunsProof';
-import { archiveQueryCacheKey, readArchiveSessionCache, writeArchiveSessionCache } from './archiveCache';
+import { archiveCacheInvalidated, archiveQueryCacheKey, readArchiveSessionCache, writeArchiveSessionCache } from './archiveCache';
 import { createArchiveRepository, type ArchiveRepository, type ArchiveCalendarKind } from './archiveRepository';
 import { archiveSessionDate, buildCalendarDays, dateFromMonthKey, dreamDate, filterArchiveSessions, filterDreamEntries, groupDreamEntries, monthKey } from './archiveDerivations';
 import { archiveSessionTitle, ChatArchiveReader, DreamArchiveReader, formatArchiveDate, TiddleArchiveReader } from './ArchiveReaders';
@@ -130,6 +130,11 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
     return () => abort.abort();
   }, [agents, selectedDate, selectedAgent, search, queryKey]);
 
+  useEffect(() => {
+    const invalidate = () => { setSessions([]); setSelectedSession(null); setDetail(null); setListRetry((value) => value + 1); };
+    window.addEventListener(archiveCacheInvalidated, invalidate);
+    return () => window.removeEventListener(archiveCacheInvalidated, invalidate);
+  }, []);
   useEffect(() => {
     if (kind !== 'chat') return;
     const abort = new AbortController();

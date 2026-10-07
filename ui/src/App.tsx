@@ -153,9 +153,11 @@ function AppContent() {
     }
   };
   const attachImage = (files: File[]) => {
+    const admittedSizes = attached.map((item) => item.size);
     const accepted = files.filter((file) => {
       if (!isSupportedAttachment(file)) { reportError(`${file.name}: Attach an image or text document. PDF extraction is not supported.`); return false; }
-      if (!isWithinAttachmentBudget(attached.map((item) => item.size), file.size)) { reportError(`${file.name}: Attachment exceeds the client file, count, or batch safety budget.`); return false; }
+      if (!isWithinAttachmentBudget(admittedSizes, file.size)) { reportError(`${file.name}: Attachment exceeds the client file, count, or batch safety budget.`); return false; }
+      admittedSizes.push(file.size);
       return true;
     });
     if (!accepted.length) return;

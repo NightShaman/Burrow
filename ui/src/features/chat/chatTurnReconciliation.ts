@@ -32,7 +32,7 @@ export function reconcileConversationTurns(serverTurns: SessionTurn[], cachedTur
   // refresh can therefore see only one of them while persistence catches up;
   // treating the run id as one indivisible record would erase its missing mate.
   const serverTurnKeys = new Set(serverTurns.map((turn) => turn.runId ? `${turn.runId}:${turn.role}` : ''));
-  const missingCachedTurns = cachedTurns.filter((turn) => turn.runId && !serverTurnKeys.has(`${turn.runId}:${turn.role}`));
+  const missingCachedTurns = cachedTurns.filter((turn) => turn.runId && serverTurns.some((server) => server.runId === turn.runId) && !serverTurnKeys.has(`${turn.runId}:${turn.role}`));
   const cachedTurnsByRunAndRole = new Map(cachedTurns.filter((turn) => turn.runId && turn.role).map((turn) => [`${turn.runId}:${turn.role}`, turn]));
   const mergedServerTurns = serverTurns.map((turn) => {
     const cached = turn.runId && turn.role ? cachedTurnsByRunAndRole.get(`${turn.runId}:${turn.role}`) : undefined;

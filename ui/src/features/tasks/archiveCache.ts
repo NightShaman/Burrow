@@ -1,14 +1,16 @@
-import { readStoredValue, writeStoredValue } from '../../app/browserStorage';
+import { readStoredValue, writeStoredValue, removeStorage } from '../../app/browserStorage';
 import type { ArchiveDetail, ArchiveSession } from './archiveTypes';
 import { clientBudgets } from '../../app/clientBudgets';
 
 export const archiveSessionsCacheStorageKey = 'hc.archiveSessions.v1';
 export const archiveDetailsCacheStorageKey = 'hc.archiveDetails.v1';
 
+export const archiveCacheInvalidated = 'burrow:archive-cache-invalidated';
 export function clearArchiveCaches(storage?: Storage | null) {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(archiveCacheInvalidated));
   try {
-    storage?.removeItem(archiveSessionsCacheStorageKey);
-    storage?.removeItem(archiveDetailsCacheStorageKey);
+    removeStorage(archiveSessionsCacheStorageKey, storage);
+    removeStorage(archiveDetailsCacheStorageKey, storage);
   } catch { /* unavailable storage is already empty for this owner */ }
 }
 const archiveCacheVersion = 1;

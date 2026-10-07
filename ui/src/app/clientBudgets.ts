@@ -8,6 +8,13 @@
  * storage. Archive caps bound restored list/detail payload work. The 30s request
  * deadline is a recovery bound for ordinary JSON/body parsing; chat streams are
  * exempt because their duration is user-driven.
+ * Defaults account for base64 expansion (~4/3) plus UTF-16 preview strings:
+ * a 16 MiB batch can occupy ~43 MiB before decoded image surfaces. Eight files
+ * bound simultaneous FileReader work. The 8 MiB serialized cache budget counts
+ * metadata too; it is best-effort (browser quotas vary), with newest-first eviction.
+ * 24 entries / 500 turns bound retained object counts independently of text size.
+ * 256 KiB per turn prevents one restored message monopolizing parsing/render work.
+ * These are operator-overridable browser resource budgets, not content policy.
  */
 type BudgetName = 'attachmentFileBytes' | 'attachmentBatchBytes' | 'attachmentCount' | 'conversationCacheEntries' | 'conversationCacheTurnsPerEntry' | 'conversationCacheTextBytesPerTurn' | 'conversationCacheTotalTextBytes' | 'archiveSessionCacheEntries' | 'archiveDetailCacheEntries' | 'archiveSessionRowsPerQuery' | 'requestDeadlineMs';
 type BudgetOverrides = Partial<Record<BudgetName, number>>;

@@ -112,3 +112,7 @@ it('preserves attachment-only Forge turns without duplicating them through termi
   expect(reconcileSessionTurns(session, completed)).toEqual(completed);
   expect(reconcileSessionTurns(session, [])).toEqual(completed);
 });
+
+it('does not resurrect cached runs absent from an authoritative empty snapshot', () => {
+  expect(reconcileSessionTurns({ id: 'default', turns: [] }, [turn('assistant', 'purged', 'old', '2026-08-25T12:00:00Z')])).toEqual([]);
+});

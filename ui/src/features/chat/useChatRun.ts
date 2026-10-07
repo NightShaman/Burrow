@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { answerFromChatResult, api, createRunId, type ChatAttachment, type ProgressEntry, type RunProgress, type SessionTurn, type ToolActivityItem } from '../../app/api';
 import type { Agent, SavedProvider } from '../../app/types';
 import { streamChat } from './chatStream';
@@ -149,12 +149,16 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
     }
   };
 
+  const cancelController = useRef<AbortController | null>(null);
+  useEffect(() => () => { cancelController.current?.abort(); }, [selected?.id, session.sessionId]);
   const cancelRun = async () => {
     if (!activeRunForSelection) return;
     const targetKey = runKey(activeRunForSelection.agentId, activeRunForSelection.sessionId);
     streamAbortRef.current[targetKey]?.abort();
-    try { await api(`/api/chat/${encodeURIComponent(activeRunForSelection.runId)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: selected?.resourceId ?? activeRunForSelection.agentId, reason: 'Stopped by operator' }) }); }
-    catch (error) { session.reportError(error instanceof Error ? `Could not stop run: ${error.message}` : 'Could not stop run.'); }
+    cancelController.current?.abort();
+    const controller = new AbortController(); cancelController.current = controller;
+    try { await api(`/api/chat/${encodeURIComponent(activeRunForSelection.runId)}/cancel`, { signal: controller.signal, method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: selected?.resourceId ?? activeRunForSelection.agentId, reason: 'Stopped by operator' }) }); }
+    catch (error) { if (controller.signal.aborted) return; session.reportError(error instanceof Error ? `Could not stop run: ${error.message}` : 'Could not stop run.'); }
   };
 
   return { activeRunForSelection, activeRunId: activeRunForSelection?.runId ?? '', sendMessage, cancelRun, liveProgress: activeRunForSelection ? liveProgressByRun[runKey(activeRunForSelection.agentId, activeRunForSelection.sessionId)] ?? [] : [], liveAnswer: activeRunForSelection ? liveAnswerByRun[runKey(activeRunForSelection.agentId, activeRunForSelection.sessionId)] ?? '' : '' };

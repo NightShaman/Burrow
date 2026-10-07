@@ -1,6 +1,6 @@
 import type { SessionTurn } from '../../app/api';
 import { clientBudgets } from '../../app/clientBudgets';
-import { readStoredValue, writeStoredValue } from '../../app/browserStorage';
+import { readStoredValue, writeStoredValue, removeStorage } from '../../app/browserStorage';
 
 export type ConversationCache = Record<string, SessionTurn[]>;
 type ConversationCacheEntry = { savedAt: number; turns: SessionTurn[] };
@@ -19,7 +19,10 @@ function isCacheEntry(value: unknown): value is ConversationCacheEntry {
     const record = turn as Record<string, unknown>;
     if ('content' in record && typeof record.content !== 'string') return false;
     if (typeof record.content === 'string' && new TextEncoder().encode(record.content).byteLength > clientBudgets.conversationCacheTextBytesPerTurn) return false;
-    return !('metadata' in record) || Boolean(record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata));
+    if (!('metadata' in record)) return true;
+    if (!record.metadata || typeof record.metadata !== 'object' || Array.isArray(record.metadata)) return false;
+    const attachments = (record.metadata as Record<string, unknown>).attachments;
+    return attachments === undefined || Array.isArray(attachments) && attachments.length <= clientBudgets.attachmentCount && attachments.every((item) => item && typeof item === 'object' && typeof item.name === 'string' && typeof item.type === 'string' && (item.artifactPath === undefined || typeof item.artifactPath === 'string') && (item.preview === undefined || typeof item.preview === 'string'));
   });
 }
 
@@ -44,14 +47,21 @@ export function conversationCacheKey(agentId: string, sessionId: string) {
 }
 
 /** Purge invalidation is explicit: no stale conversation can resurrect from browser storage. */
+export let conversationCacheGeneration = 0;
+export const conversationCacheInvalidated = 'burrow:conversation-cache-invalidated';
+
 export function clearConversationCache(storage?: Storage | null) {
-  try { storage?.removeItem(conversationCacheStorageKey); } catch { /* unavailable storage is already empty for this owner */ }
+  conversationCacheGeneration++;
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(conversationCacheInvalidated));
+  try { removeStorage(conversationCacheStorageKey, storage); } catch { /* unavailable storage is already empty for this owner */ }
 }
 
 export function readConversationCache(storage?: Storage | null): ConversationCache {
+  let bytes = 0;
   return Object.fromEntries(Object.entries(readEntries(storage))
     .sort(([, a], [, b]) => b.savedAt - a.savedAt)
     .slice(0, conversationCacheLimit)
+    .filter((entry) => { const size = new TextEncoder().encode(JSON.stringify(entry)).byteLength; if (bytes + size > clientBudgets.conversationCacheTotalTextBytes) return false; bytes += size; return true; })
     .map(([key, entry]) => [key, entry.turns]));
 }
 
@@ -62,7 +72,7 @@ export function writeConversationCache(cache: ConversationCache, touchedKey?: st
   Object.entries(cache).forEach(([key, turns]) => {
     // Optimistic image previews may be multi-megabyte data URLs. Keep them in
     // memory for the send-to-artifact handoff, not in browser storage.
-    const boundedTurns = turns.slice(-clientBudgets.conversationCacheTurnsPerEntry).filter((turn) => new TextEncoder().encode(typeof turn.content === 'string' ? turn.content : '').byteLength <= clientBudgets.conversationCacheTextBytesPerTurn);
+    const boundedTurns = turns.slice(-clientBudgets.conversationCacheTurnsPerEntry).filter((turn) => isCacheEntry({ savedAt: now, turns: [turn] }));
     const storedTurns = boundedTurns.map((turn) => turn.metadata?.attachments?.some((item) => item.preview)
       ? { ...turn, metadata: { ...turn.metadata, attachments: turn.metadata.attachments.map(({ preview: _preview, ...item }) => item) } }
       : turn);
@@ -71,5 +81,11 @@ export function writeConversationCache(cache: ConversationCache, touchedKey?: st
   const entries = Object.entries(next)
     .sort(([aKey, a], [bKey, b]) => b.savedAt - a.savedAt || aKey.localeCompare(bKey))
     .slice(0, conversationCacheLimit);
-  writeStoredValue(conversationCacheStorageKey, conversationCacheVersion, Object.fromEntries(entries), storage);
+  let bytes = 0;
+  const boundedEntries = entries.filter((entry) => {
+    const size = new TextEncoder().encode(JSON.stringify(entry)).byteLength;
+    if (bytes + size > clientBudgets.conversationCacheTotalTextBytes) return false;
+    bytes += size; return true;
+  });
+  writeStoredValue(conversationCacheStorageKey, conversationCacheVersion, Object.fromEntries(boundedEntries), storage);
 }

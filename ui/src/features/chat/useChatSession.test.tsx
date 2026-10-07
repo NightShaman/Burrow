@@ -519,3 +519,30 @@ it('clears a task run immediately when selecting another session', async () => {
  act(() => oldSetter([file]));
  expect(result.current.attached).toEqual([]);
  });
+
+it('purge clears mounted memory and fences a delayed refresh from repersisting it', async () => {
+  const { clearConversationCache, readConversationCache } = await import('./chatConversationCache');
+  const { result, unmount } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+  await waitFor(() => expect(result.current.isLoadingConversation).toBe(false));
+  act(() => result.current.appendTurn(agentId, sessionId, { role: 'assistant', content: 'secret', runId: 'old' }));
+  const delayed = deferred<unknown>();
+  apiMock.mockImplementation((path) => path === conversationPath ? delayed.promise : Promise.resolve({ runs: [], sessions: [{ id: sessionId }] }));
+  let refresh!: Promise<void>;
+  act(() => { refresh = result.current.refreshConversation(); });
+  act(() => clearConversationCache());
+  expect(result.current.turns).toEqual([]);
+  await act(async () => { delayed.resolve({ session: { id: sessionId, turns: [{ role: 'assistant', content: 'secret', runId: 'old' }] } }); await refresh; });
+  expect(result.current.turns).toEqual([]);
+  expect(readConversationCache()).toEqual({});
+  unmount();
+});
+
+it('admits attachment batches cumulatively including concurrent read completions', () => {
+  const { result } = renderHook(() => useChatSession(agentId));
+  const file = { name: 'a.txt', type: 'text/plain', size: 1, content: 'x', encoding: 'data-url' as const };
+  act(() => result.current.setAttachment(Array(9).fill(file)));
+  expect(result.current.attached).toHaveLength(8);
+  act(() => result.current.setAttachment([file]));
+  expect(result.current.attached).toHaveLength(8);
+});

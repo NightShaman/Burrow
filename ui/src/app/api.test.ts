@@ -211,3 +211,15 @@ describe('API requests', () => {
     await expect(api<string>('/api/health')).resolves.toBe('ready');
   });
 });
+
+it.each(['/api/chat/runs/active?agentId=a', '/api/chat/run-id/cancel'])('bounds hanging nonstream chat request %s without replay', async (path) => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn().mockImplementation((_path, init: RequestInit) => new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))));
+  vi.stubGlobal('fetch', fetchMock);
+  const request = api(path, path.endsWith('/cancel') ? jsonMutation('POST', {}) : undefined);
+  const rejected = expect(request).rejects.toThrow();
+  await vi.advanceTimersByTimeAsync(30_000);
+  await rejected;
+  expect(fetchMock).toHaveBeenCalledOnce();
+  vi.useRealTimers();
+});

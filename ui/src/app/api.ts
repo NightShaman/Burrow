@@ -361,7 +361,7 @@ export function generatedArtifactPath(agentId: string, storageReference: string)
 /** All ordinary requests have a bounded deadline composed with caller cancellation; only interactive chat streams are exempt. */
 export async function fetchApi(path: string, init: RequestInit = {}): Promise<Response> {
   // Chat NDJSON is intentionally unbounded. Other raw bodies retain their budget until consumed.
-  if (path.startsWith('/api/chat')) return fetch(path, browserRequestInit(init));
+  if (path === '/api/chat') return fetch(path, browserRequestInit(init));
   const controller = new AbortController();
   const signal = init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
   const timeout = window.setTimeout(() => controller.abort(new DOMException('Request deadline exceeded', 'TimeoutError')), clientBudgets.requestDeadlineMs);
@@ -386,7 +386,7 @@ export async function fetchApi(path: string, init: RequestInit = {}): Promise<Re
 export async function apiLocal<T>(path: string, init: RequestInit = {}): Promise<T> { return api<T>(path, init); }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  if (path.startsWith('/api/chat')) return parseApiResponse<T>(await fetchApi(path, init));
+  if (path === '/api/chat') return parseApiResponse<T>(await fetchApi(path, init));
   const controller = new AbortController();
   const signal = init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
   const timeout = window.setTimeout(() => controller.abort(new DOMException('Request deadline exceeded', 'TimeoutError')), clientBudgets.requestDeadlineMs);

@@ -66,3 +66,36 @@ describe('chat conversation cache', () => {
     expect(() => writeConversationCache({ key: [] }, 'key', storage)).not.toThrow();
   });
 });
+
+it('purge removes browser-default persistent storage and emits memory invalidation', async () => {
+  const { clearConversationCache, conversationCacheGeneration, conversationCacheInvalidated } = await import('./chatConversationCache');
+  writeConversationCache({ 'a:s': [{ role: 'user', content: 'secret' }] });
+  const listener = vi.fn(); window.addEventListener(conversationCacheInvalidated, listener);
+  clearConversationCache();
+  expect(readConversationCache()).toEqual({});
+  expect(localStorage.getItem(conversationCacheStorageKey)).toBeNull();
+  expect(listener).toHaveBeenCalledOnce();
+  expect((await import('./chatConversationCache')).conversationCacheGeneration).toBe(conversationCacheGeneration + 1);
+  window.removeEventListener(conversationCacheInvalidated, listener);
+});
+
+it('rejects malformed attachment metadata on read and write without throwing', () => {
+  for (const attachments of [{}, [null], [{ name: 'bad', type: 3 }]]) {
+    const turns = [{ role: 'user', content: 'bad', metadata: { attachments } }];
+    localStorage.setItem(conversationCacheStorageKey, JSON.stringify({ 'a:s': { savedAt: 1, turns } }));
+    expect(readConversationCache()).toEqual({});
+    expect(() => writeConversationCache({ 'a:s': turns as never })).not.toThrow();
+    expect(readConversationCache()['a:s']).toEqual([]);
+  }
+});
+
+it('bounds aggregate serialized content and metadata, retaining newest entries', () => {
+  const turns = Array.from({ length: 30 }, () => ({ role: 'assistant', content: 'x'.repeat(240 * 1024) }));
+  const values = new Map<string, string>();
+  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) } as unknown as Storage;
+  writeConversationCache({ older: turns, newer: turns }, 'newer', storage);
+  const stored = storage.getItem(conversationCacheStorageKey)!;
+  expect(new TextEncoder().encode(stored).byteLength).toBeLessThan(8 * 1024 * 1024);
+  expect(readConversationCache(storage)).toHaveProperty('newer');
+  expect(readConversationCache(storage)).not.toHaveProperty('older');
+});
