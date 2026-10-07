@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { archiveRunListPage } from './ui/archive-run-list.mjs';
 import { completeSetupOperation } from '../src/setup-operation.mjs';
 import { createGroupChannelMessageStarter } from '../src/group-channel-message.mjs';
 import { buildIdentity } from './build-identity.mjs';
@@ -32,7 +33,7 @@ import { buildContinuityHandoff } from '../src/continuity-handoff-store.mjs';
 import { runPendingRecoveryContinuations } from '../src/recovery-continuation-runner.mjs';
 import { recordActiveRunInterruptions } from '../src/interrupted-run-recovery.mjs';
 import { generateArchiveSummary } from '../src/archive-summary.mjs';
-import { listArchiveRuns, readArchiveRun } from '../src/archive-proof.mjs';
+import { readArchiveRun } from '../src/archive-proof.mjs';
 import { archivePage, archiveUtcDay, archiveUtcMonth, archiveCalendarDates, matchesArchiveDay } from '../src/archive-pagination.mjs';
 import { loadWorkingContinuityAsync, normalizeContinuityScope, projectHandoffsIntoWorkingContinuity } from '../src/working-memory-continuity.mjs';
 import { workingContextFromSession } from '../src/working-context.mjs';
@@ -2036,26 +2037,21 @@ async function archiveContinuityCardDetail({ agentId, cardId, limit = 200, curso
   return { ok: true, card: { ...card, kind: 'continuity', agentId, agentName: agent.name }, history: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
 }
 
-async function archiveRunsForAgent({ agentRuntime, sessionId = null, limit = 100 } = {}) {
-  const agent = await agentsStore().resolve(agentRuntime.agentId) || { id: agentRuntime.agentId, name: agentRuntime.agentId };
-  const runtime = await runtimeConfig(agentRuntime.agentId);
-  return listArchiveRuns({
-    conversationStore: postgresApplication.stores.conversations,
-    rootDir: agentRuntime.agentWorkspaceRoot,
-    dataRoot: agentRuntime.agentDataRoot,
-    resolveTraceRoot: (actualSessionId) => runtimeTraceRoot(runtime, actualSessionId, agentRuntime.agentId),
-    agentId: agentRuntime.agentId,
-    agentName: agent.name,
-    sessionId,
-    limit,
-  });
-}
-
 async function archiveRuns({ agentRuntime = null, sessionId = null, limit = 100, cursor = null } = {}) {
   const agents = agentRuntime ? [agentRuntime] : await Promise.all((await agentsStore().list({ includeDisabled: false })).map((agent) => resolveAgentRuntime(agent.id)));
-  const lists = await Promise.all(agents.map((runtime) => archiveRunsForAgent({ agentRuntime: runtime, sessionId, limit: null })));
-  const page = archivePage(lists.flat(), { limit, cursor, max: 200, scope: JSON.stringify(['runs', agentRuntime?.agentId, sessionId]), timestamp: (row) => row.completedAt || row.startedAt, identity: (row) => `${row.agentId}:${row.runId}` });
-  return { runs: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
+  const scopes = await Promise.all(agents.map(async runtime => {
+    const agent = await agentsStore().resolve(runtime.agentId) || { name: runtime.agentId };
+    const config = await runtimeConfig(runtime.agentId);
+    return {
+      conversationStore: postgresApplication.stores.conversations,
+      rootDir: runtime.agentWorkspaceRoot,
+      dataRoot: runtime.agentDataRoot,
+      resolveTraceRoot: actualSessionId => runtimeTraceRoot(config, actualSessionId, runtime.agentId),
+      agentId: runtime.agentId,
+      agentName: agent.name,
+    };
+  }));
+  return archiveRunListPage({ scopes, agentId: agentRuntime?.agentId ?? null, sessionId, limit, cursor });
 }
 
 

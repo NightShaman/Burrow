@@ -21,23 +21,31 @@ function statusFor({ receipt = null, evidence = null, answer = null } = {}) {
   if (answer && /^\[model_error:/u.test(text(answer.content))) return 'failed';
   return 'completed';
 }
-function receiptFor(entries, runId) {
-  return entries.filter((entry) => entry.type === 'receipt' && entry.runId === runId).at(-1)?.metadata?.receiptRef || null;
+function receiptFor(entries) {
+  return entries.filter((entry) => entry.type === 'receipt').at(-1)?.metadata?.receiptRef || null;
 }
-function answerFor(entries, runId) {
-  return entries.filter((entry) => entry.type === 'message' && entry.role === 'assistant' && entry.runId === runId).at(-1) || null;
+function answerFor(entries) {
+  return entries.filter((entry) => entry.type === 'message' && entry.role === 'assistant').at(-1) || null;
 }
-function requestFor(entries, runId) {
-  return entries.filter((entry) => entry.type === 'message' && entry.role === 'user' && entry.runId === runId).at(-1) || null;
+function requestFor(entries) {
+  return entries.filter((entry) => entry.type === 'message' && entry.role === 'user').at(-1) || null;
 }
-function activitiesFor(entries, runId) {
-  return entries.filter((entry) => entry.visibility === 'activity' && entry.runId === runId)
+function activitiesFor(entries) {
+  return entries.filter((entry) => entry.visibility === 'activity')
     .map((entry) => ({ ts: entry.ts || null, summary: text(entry.content), toolActivity: entry.metadata?.toolActivity || null }));
 }
-
-function executionEntriesFor(entries, runId) {
-  return entries.filter((entry) => entry.runId === runId && entry.metadata?.canonicalExecution === true
+function executionEntriesFor(entries) {
+  return entries.filter((entry) => entry.metadata?.canonicalExecution === true
     && ['tool_call', 'tool_result'].includes(String(entry.type || '')));
+}
+function groupByRun(entries) {
+  const groups = new Map();
+  for (const entry of entries) {
+    if (!entry.runId) continue;
+    if (!groups.has(entry.runId)) groups.set(entry.runId, []);
+    groups.get(entry.runId).push(entry);
+  }
+  return groups;
 }
 
 const TOOL_DETAIL_LIMIT = 320;
@@ -139,9 +147,9 @@ function correlatedToolTimeline(executionEntries = [], trace = null) {
   }));
 }
 
-function runBounds(entries, runId, trace = null) {
+function runBounds(entries, trace = null) {
   const timestamps = [
-    ...entries.filter((entry) => entry.runId === runId).map((entry) => text(entry.ts)),
+    ...entries.map((entry) => text(entry.ts)),
     ...(Array.isArray(trace?.timeline) ? trace.timeline.map((entry) => text(entry.ts)) : []),
   ].filter(Boolean).sort();
   return { startedAt: timestamps[0] || null, lastActivityAt: timestamps.at(-1) || null };
@@ -403,18 +411,18 @@ function timelineFor({ receipt, answer, activities, executionEntries, trace, evi
 }
 
 async function proofDetail({ conversationStore, agentId, agentName, sessionId, runId, entries, evidence, subagentRecords = [], traceRoot = null }) {
-  const receipt = receiptFor(entries, runId);
-  const answer = answerFor(entries, runId);
-  const request = requestFor(entries, runId);
-  const activities = activitiesFor(entries, runId);
-  const executionEntries = executionEntriesFor(entries, runId);
+  const receipt = receiptFor(entries);
+  const answer = answerFor(entries);
+  const request = requestFor(entries);
+  const activities = activitiesFor(entries);
+  const executionEntries = executionEntriesFor(entries);
   const trace = traceRoot ? await summarizeTrace({ conversationStore, agentId, rootDir: traceRoot, runId, includeToolOutput: false, includeRelatedWorkTrace: false }) : null;
-  const bounds = runBounds(entries, runId, trace?.exists ? trace : null);
+  const bounds = runBounds(entries, trace?.exists ? trace : null);
   const status = statusFor({ receipt, evidence, answer });
   const context = contextProof(receipt);
   if (context) context.summary = contextSummary(context);
   const subagents = childProof(subagentRecords, runId);
-  const traceDir = receipt?.traceDir || answer?.traceDir || entries.find((entry) => entry.runId === runId && entry.traceDir)?.traceDir || null;
+  const traceDir = receipt?.traceDir || answer?.traceDir || entries.find((entry) => entry.traceDir)?.traceDir || null;
   return {
     id: runId,
     runId,
@@ -456,6 +464,34 @@ async function proofDetail({ conversationStore, agentId, agentName, sessionId, r
   };
 }
 
+// List projection deliberately never builds detail or consults trace storage.
+function proofSummary({ agentId, agentName, sessionId, runId, entries, evidence, subagentRecords }) {
+  const receipt = receiptFor(entries);
+  const answer = answerFor(entries);
+  const bounds = runBounds(entries);
+  const children = subagentRecords.filter(record => record.owner?.parentRunId === runId).slice(0, 24);
+  const childIds = new Set(children.map(record => record.id));
+  return {
+    id: runId, runId, agentId, agentName, sessionId,
+    status: statusFor({ receipt, evidence, answer }),
+    startedAt: bounds.startedAt || evidence?.createdAt || answer?.ts || null,
+    completedAt: answer?.ts || evidence?.createdAt || null,
+    lastActivityAt: bounds.lastActivityAt,
+    objective: evidence?.objective || null,
+    decision: receipt?.decision || null,
+    route: receipt?.route || null,
+    counts: {
+      observations: nonFailure(evidence?.observations).filter(item => !(text(item.tool) === 'spawn_subagent' && childIds.has(text(item.subagentId)))).length,
+      changes: nonFailure(evidence?.changes).length,
+      verifications: nonFailure(evidence?.validations).length + children.filter(record => childVerification(record)).length,
+      failures: failureEvidence(evidence).length,
+      unresolved: unresolvedEvidence(evidence).length,
+      toolActivities: entries.reduce((total, entry) => total + (entry.visibility === 'activity' ? Number(entry.metadata?.toolActivity?.totalCalls || 0) : 0), 0),
+      subagents: children.length,
+    },
+  };
+}
+
 async function recordsFor(conversationStore, agentId, sessionId = null) {
   if (!conversationStore) throw new Error('conversation_store_required');
   if (sessionId) return [{ id: sessionId }];
@@ -472,9 +508,10 @@ export function mergeArchiveRuns(runLists = [], limit = 100) {
     .slice(0, boundedInteger(limit));
 }
 
-export async function listArchiveRuns({ rootDir, conversationStore, dataRoot = null, traceRoot = null, resolveTraceRoot = null, agentId, agentName = null, sessionId = null, limit = 100 } = {}) {
+export async function listArchiveRuns({ rootDir, conversationStore, dataRoot = null, traceRoot = null, resolveTraceRoot = null, agentId, agentName = null, sessionId = null, limit = 100, summaryOnly = false } = {}) {
   if (!rootDir || !agentId) throw new Error('archive_run_scope_required');
   const results = [];
+  const details = new Map();
   const subagentRecords = dataRoot ? await listSubagentRecords({ dataRoot, includeFinal: true, limit: 500 }) : [];
   for (const session of await recordsFor(conversationStore, agentId, sessionId)) {
     const id = session.id;
@@ -486,10 +523,19 @@ export async function listArchiveRuns({ rootDir, conversationStore, dataRoot = n
     // Tool calls, results, and activity events are already persisted before a
     // terminal receipt. A runtime restart must not hide that existing evidence.
     for (const entry of entries) if (entry.runId) if (!byRun.has(entry.runId)) byRun.set(entry.runId, null);
-    const sessionTraceRoot = traceRootFor({ traceRoot, resolveTraceRoot, sessionId: id });
-    for (const [runId, item] of byRun) results.push(await proofDetail({ conversationStore, agentId, agentName, sessionId: id, runId, entries, evidence: item, subagentRecords, traceRoot: sessionTraceRoot }));
+    const grouped = groupByRun(entries);
+    for (const [runId, item] of byRun) {
+      const runEntries = grouped.get(runId) || [];
+      results.push(await (summaryOnly ? proofSummary : proofDetail)({ conversationStore, agentId, agentName, sessionId: id, runId, entries: runEntries, evidence: item, subagentRecords }));
+      details.set(results.at(-1), { runId, entries: runEntries, evidence: item, sessionId: id });
+    }
   }
-  return results.sort((left, right) => String(right.completedAt || right.startedAt || '').localeCompare(String(left.completedAt || left.startedAt || ''))).slice(0, limit === null ? undefined : boundedInteger(limit));
+  const selected = results.sort((left, right) => String(right.completedAt || right.startedAt || '').localeCompare(String(left.completedAt || left.startedAt || ''))).slice(0, limit === null ? undefined : boundedInteger(limit));
+  if (summaryOnly || (!traceRoot && !resolveTraceRoot)) return selected;
+  return Promise.all(selected.map((run) => {
+    const item = details.get(run);
+    return proofDetail({ conversationStore, agentId, agentName, ...item, subagentRecords, traceRoot: traceRootFor({ traceRoot, resolveTraceRoot, sessionId: item.sessionId }) });
+  }));
 }
 
 export async function readArchiveRun({ rootDir, conversationStore, dataRoot = null, traceRoot = null, resolveTraceRoot = null, agentId, agentName = null, runId } = {}) {
@@ -501,7 +547,8 @@ export async function readArchiveRun({ rootDir, conversationStore, dataRoot = nu
       readRunEvidence({ conversationStore, agentId, rootDir, sessionId: session.id, limit: MAX_RUNS }),
     ]);
     const item = evidence.find((candidate) => candidate.runId === runId) || null;
-    if (item || entries.some((entry) => entry.runId === runId)) return proofDetail({ conversationStore, agentId, agentName, sessionId: session.id, runId, entries, evidence: item, subagentRecords, traceRoot: traceRootFor({ traceRoot, resolveTraceRoot, sessionId: session.id }) });
+    const runEntries = entries.filter((entry) => entry.runId === runId);
+    if (item || runEntries.length) return proofDetail({ conversationStore, agentId, agentName, sessionId: session.id, runId, entries: runEntries, evidence: item, subagentRecords, traceRoot: traceRootFor({ traceRoot, resolveTraceRoot, sessionId: session.id }) });
   }
   return null;
 }
