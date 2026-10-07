@@ -120,7 +120,7 @@ export async function readModConversationPage({ rootDir, conversationStore = nul
   if (!page.turns.length) return output(target, [], [], false, null, status);
   const turns = [];
   const gaps = [];
-  for (let index = page.turns.length - 1; index >= 0; index -= 1) {
+  for (let index = 0; index < page.turns.length; index += 1) {
     if (signal?.aborted) throw signal.reason || new Error('mod_capability_cancelled');
     const turn = page.turns[index];
     const beforeTurn = page.turnReadCursors[index];
@@ -134,7 +134,7 @@ export async function readModConversationPage({ rootDir, conversationStore = nul
       continue;
     }
     if (segment) {
-      if (index !== page.turns.length - 1 || digest(turn) !== segment.digest || typeof turn.content !== 'string') badCursor();
+      if (index !== 0 || digest(turn) !== segment.digest || typeof turn.content !== 'string') badCursor();
       const piece = segmentTurn(turn, segment.offset, target, status, beforeTurn, afterTurn, scope);
       if (!piece) badCursor();
       return piece;

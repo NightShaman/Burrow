@@ -141,6 +141,8 @@ export async function discoverMods({ runtimeRoot = process.env.BURROW_RUNTIME_RO
 
 function escapeRegex(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function normalizedModRoutePath(value) {
+  // Child registrar uses the empty path for the mod API root.
+  if (value === '') return value;
   if (typeof value !== 'string' || value !== value.trim() || !value.startsWith('/') || value === '/' || value.includes('?') || value.includes('#') || value.includes('\\') || value.endsWith('/') || value.includes('//')) throw new Error('mod_route_description_invalid');
   const parts = value.slice(1).split('/');
   if (parts.some((part) => !part || part === '.' || part === '..' || decodeURIComponent(part) !== part)) throw new Error('mod_route_description_invalid');

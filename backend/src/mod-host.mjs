@@ -247,7 +247,19 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
         return;
       }
       systemControllerReady = true;
-      onSystemControllerReady?.(createSystemControllerProxy());
+      try {
+        onSystemControllerReady?.(createSystemControllerProxy());
+      } catch {
+        // IPC EventEmitter callbacks are outside loadMods' async try/catch.
+        // Reject activation here rather than crashing the core process.
+        if (!activationSettled) {
+          activationSettled = true;
+          clearTimeout(activationTimer);
+          rejectActivation(hostError('system_controller_registration_failed', mod.id));
+        }
+        markUnavailable('system_controller_registration_failed');
+        if (!stopped) child.kill('SIGKILL');
+      }
       return;
     }
     if (message?.type === 'system-controller-unregistered') {

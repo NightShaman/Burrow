@@ -267,28 +267,22 @@ async function findPreparedMod(extractRoot) {
   return { root: found[0], manifest, id, name: String(manifest.name).trim() };
 }
 
-async function swapMod(target, prepared) {
-  const parent = path.dirname(target); const backup = `${target}.backup-${crypto.randomUUID()}`;
-  await fs.mkdir(parent, { recursive: true });
-  let backedUp = false;
-  try {
-    try { await fs.rename(target, backup); backedUp = true; } catch (error) { if (error?.code !== 'ENOENT') throw error; }
-    await fs.rename(prepared, target);
-  } catch (error) {
-    await fs.rm(target, { recursive: true, force: true }).catch(() => {});
-    if (backedUp) await fs.rename(backup, target).catch(() => {});
-    throw error;
+async function syncDirectory(directoryPath) {
+  const handle = await fs.open(directoryPath, 'r');
+  try { await handle.sync(); } finally { await handle.close(); }
+}
+
+// Persist file contents and child directory entries before committing SQL.
+async function syncTree(root) {
+  for (const entry of await fs.readdir(root, { withFileTypes: true })) {
+    const child = path.join(root, entry.name);
+    if (entry.isDirectory()) await syncTree(child);
+    else if (entry.isFile()) {
+      const handle = await fs.open(child, 'r');
+      try { await handle.sync(); } finally { await handle.close(); }
+    } else throw new Error('mod_tree_entry_invalid');
   }
-  return {
-    // Once the replacement host is published the old host cannot be recreated.
-    // Backup deletion is therefore cleanup, not a reason to roll files back
-    // underneath the live replacement if the filesystem refuses the removal.
-    async commit() { if (backedUp) await fs.rm(backup, { recursive: true, force: true }).catch(() => {}); },
-    async rollback() {
-      await fs.rm(target, { recursive: true, force: true });
-      if (backedUp) await fs.rename(backup, target);
-    },
-  };
+  await syncDirectory(root);
 }
 
 async function durableJson(filePath, value) {
@@ -322,14 +316,32 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
   let closed = false;
   let failureCount = 0;
   const recoveryRoot = path.join(modsRoot, '.recovery');
-  async function reconcileUninstalls() {
+  async function reconcileModOperations() {
     let names;
     try { names = await fs.readdir(recoveryRoot); } catch (error) { if (error?.code === 'ENOENT') return; throw error; }
     for (const name of names.filter((entry) => entry.endsWith('.json'))) {
       const journalPath = path.join(recoveryRoot, name);
       const journal = JSON.parse(await fs.readFile(journalPath, 'utf8'));
       const expectedTarget = path.join(modsRoot, journal.modId || '');
-      if (journal.operation !== 'uninstall' || (journal.modId === MOD_DATA_DIRECTORY || !MOD_ID.test(journal.modId)) || journal.target !== expectedTarget || !journal.quarantine.startsWith(`${expectedTarget}.uninstall-`) || journal.recovery !== `${journal.quarantine}.recovery`) throw new Error('mod_uninstall_recovery_journal_invalid');
+      if (journal.operation === 'install') {
+        if (journal.version !== 1 || typeof journal.operationId !== 'string' || !journal.operationId || journal.modId === MOD_DATA_DIRECTORY || !MOD_ID.test(journal.modId) || journal.target !== expectedTarget || path.dirname(journal.backup) !== modsRoot || !path.basename(journal.backup).startsWith(`${journal.modId}.backup-`)) throw new Error('mod_install_recovery_journal_invalid');
+        const recoveryDb = await repositoryFactory();
+        try {
+          const committed = await recoveryDb.installationOperation(journal.modId) === journal.operationId;
+          if (committed) {
+            await cleanupPath(journal.backup, { recursive: true, force: true });
+          } else {
+            const backupPresent = await fs.stat(journal.backup).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; });
+            if (backupPresent || !journal.hadTarget) await cleanupPath(journal.target, { recursive: true, force: true });
+            if (backupPresent) await renamePath(journal.backup, journal.target);
+          }
+          await syncDirectory(modsRoot);
+          await onLifecycleChange?.({ modId: journal.modId, enabled: journal.enabled, installed: journal.hadTarget || committed, action: 'update' });
+          await removeDurably(journalPath);
+        } finally { await recoveryDb.close(); }
+        continue;
+      }
+      if (journal.operation !== 'uninstall'  || (journal.modId === MOD_DATA_DIRECTORY || !MOD_ID.test(journal.modId)) || journal.target !== expectedTarget || !journal.quarantine.startsWith(`${expectedTarget}.uninstall-`) || journal.recovery !== `${journal.quarantine}.recovery`) throw new Error('mod_uninstall_recovery_journal_invalid');
       if (journal.committed) {
         await cleanupPath(journal.quarantine, { recursive: true, force: true });
         await cleanupPath(journal.recovery, { recursive: true, force: true });
@@ -350,11 +362,12 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
         await recoveryDb.transaction((tx) => tx.restoreMetadata(journal));
       } finally { await recoveryDb.close(); }
       await onLifecycleChange?.({ modId: journal.modId, enabled: [true, 1].includes(journal.lifecycle?.enabled), installed: true, action: 'uninstall-recovery' });
+      await syncDirectory(modsRoot);
       await removeDurably(journalPath);
     }
     await fs.rmdir(recoveryRoot).catch((error) => { if (error?.code !== 'ENOENT' && error?.code !== 'ENOTEMPTY') throw error; });
   }
-  const ready = reconcileUninstalls();
+  const ready = reconcileModOperations();
   // Install a rejection observer immediately: callers still receive the same
   // rejected promise, but startup failures cannot become transient unhandled
   // rejections before the server reaches its explicit readiness await.
@@ -503,21 +516,37 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       // registry. transitionMod checks again after candidate activation to close
       // the race with work that starts during staging.
       if (wasInstalled && enabled) await onLifecycleChange?.({ modId: prepared.id, enabled: true, installed: true, action: 'update-preflight' });
-      const swap = await swapMod(target, prepared.root);
+      const backup = `${target}.backup-${crypto.randomUUID()}`;
+      const hadTarget = await fs.stat(target).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; });
+      const operationId = crypto.randomUUID();
+      const journalPath = path.join(recoveryRoot, `install-${id}-${operationId}.json`);
+      const journal = { version: 1, operation: 'install', operationId, modId: prepared.id, target, backup, hadTarget, digest, enabled, wasInstalled };
+      await durableJson(journalPath, journal);
+      let metadataCommitted = false;
       try {
+        if (hadTarget) await renamePath(target, backup);
+        await syncTree(prepared.root);
+        await renamePath(prepared.root, target);
+        const directory = await fs.open(modsRoot, 'r');
+        try { await directory.sync(); } finally { await directory.close(); }
         if (wasInstalled && enabled) await onLifecycleChange?.({ modId: prepared.id, enabled: true, installed: true, action: 'update' });
-        const timestamp = now();
-        await db.transaction((tx) => tx.saveInstallation(source, prepared, version, digest, timestamp));
-        // Keep the prior directory until metadata is durable. On failure the
-        // existing update transition can reload the restored prior files.
-        await swap.commit();
+        await db.transaction((tx) => tx.saveInstallation(source, prepared, version, digest, now(), operationId));
+        metadataCommitted = true;
+        await cleanupPath(backup, { recursive: true, force: true });
+        await removeDurably(journalPath);
       } catch (error) {
-        try { await swap.rollback(); }
-        catch (recoveryError) { error.filesystemRecoveryError = recoveryError; }
+        if (metadataCommitted) throw error;
+        try {
+          const backupPresent = await fs.stat(backup).then(() => true, e => { if (e.code === 'ENOENT') return false; throw e; });
+          if (backupPresent || !hadTarget) await cleanupPath(target, { recursive: true, force: true });
+          if (backupPresent) await renamePath(backup, target);
+          await syncDirectory(modsRoot);
+        } catch (recoveryError) { error.filesystemRecoveryError = recoveryError; }
         if (wasInstalled && enabled && !error.filesystemRecoveryError) {
           try { await onLifecycleChange?.({ modId: prepared.id, enabled: true, installed: true, action: 'update' }); }
           catch (recoveryError) { error.runtimeRecoveryError = recoveryError; }
         }
+        if (!error.filesystemRecoveryError && !error.runtimeRecoveryError) await removeDurably(journalPath);
         throw error;
       }
       restart?.();
@@ -561,20 +590,24 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       if (!mod) throw Object.assign(new Error('mod_not_found'), { statusCode: 404 });
       if (mod.manifest?.system === true) throw Object.assign(new Error('system_mod_uninstall_forbidden'), { statusCode: 409 });
       const target = path.join(modsRoot, id); const quarantine = `${target}.uninstall-${crypto.randomUUID()}`; const recovery = `${quarantine}.recovery`;
-      const { installation, lifecycle } = await db.uninstallMetadata(id);
+      const metadata = await db.transaction(tx => tx.uninstallMetadata(id));
+      const { installation, lifecycle } = metadata;
       const journalPath = path.join(recoveryRoot, `uninstall-${id}-${crypto.randomUUID()}.json`);
-      const journal = { version: 1, operation: 'uninstall', modId: id, target, quarantine, recovery, installation, lifecycle, phase: 'journaled', committed: false };
+      const journal = { version: 1, operation: 'uninstall', modId: id, target, quarantine, recovery, ...metadata, phase: 'journaled', committed: false };
       await durableJson(journalPath, journal);
       await renamePath(target, quarantine);
       // Recursive removal may fail after deleting part of the tree. Preserve an
       // independent recovery copy until files, runtime registry, and DB agree.
       try {
         await copyPath(quarantine, recovery, { recursive: true, preserveTimestamps: true });
+        await syncTree(recovery);
+        await syncDirectory(modsRoot);
         await durableJson(journalPath, { ...journal, phase: 'prepared' });
       } catch (error) {
         try {
           await renamePath(quarantine, target);
           await cleanupPath(recovery, { recursive: true, force: true });
+          await syncDirectory(modsRoot);
           await removeDurably(journalPath);
         } catch (recoveryError) { error.filesystemRecoveryError = recoveryError; }
         throw error;
@@ -599,9 +632,10 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
         try {
           await cleanupPath(quarantine, { recursive: true, force: true });
           await renamePath(recovery, target);
+          await syncDirectory(modsRoot);
         } catch (recoveryError) { error.filesystemRecoveryError = recoveryError; }
         if (recordsDeleted) {
-          try { await db.transaction((tx) => tx.restoreMetadata({ installation, lifecycle })); }
+          try { await db.transaction((tx) => tx.restoreMetadata(metadata)); }
           catch (recoveryError) { error.databaseRecoveryError = recoveryError; }
         }
         if (runtimeRemoved) {

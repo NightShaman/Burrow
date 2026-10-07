@@ -3118,6 +3118,9 @@ loadedMods = mods;
 const modRoute = createModRoute({ getMods: () => loadedMods, readJsonBody, sendJson });
 async function transitionMod({ modId, enabled, installed, action }) {
   const old = loadedMods.find((entry) => entry.id === modId) || null;
+  // Repeated enable is a no-op only for a genuinely active loaded host.
+  // Failed/disconnected hosts must still pass through activation on retry.
+  if (action === 'enable' && installed && enabled && old?.status === 'loaded' && old.host && !old.host.child?.killed && old.host.child?.connected) return;
   if (old?.host?.activeOperationCount?.() > 0) throw Object.assign(new Error('mod_busy'), { statusCode: 409 });
   if (action === 'update-preflight') return;
   // A failed uninstall can restore files and lifecycle records after the old
