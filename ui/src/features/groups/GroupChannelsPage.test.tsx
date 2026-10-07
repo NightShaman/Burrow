@@ -62,3 +62,41 @@ it('FE017 external idle refresh wins over an older overlapping response', async 
     expect(reads).toBe(3);
   } finally { timer.mockRestore(); }
 });
+
+it('clears only the submitted group draft when a delayed send succeeds', async () => {
+  let resolveSend!: (value: unknown) => void;
+  vi.mocked(api).mockImplementation(async (path, init) => {
+    if (path === '/api/settings/identities') return {};
+    if (init?.method === 'POST') return new Promise(resolve => { resolveSend = resolve; });
+    return { channel: { id: 'room-1', name: 'Group room', participantAgentIds: [] }, turns: [], runs: [] };
+  });
+  render(<GroupChannelsPage channelId="room-1" agents={[]} />);
+  const composer = await screen.findByPlaceholderText('Message the group…');
+  await act(async () => { composer.focus(); });
+  const { fireEvent } = await import('@testing-library/react');
+  fireEvent.change(composer, { target: { value: 'submitted draft' } });
+  fireEvent.click(screen.getByRole('button', { name: /send/i }));
+  fireEvent.change(composer, { target: { value: 'next unsent draft' } });
+  await act(async () => { resolveSend({ ok: true }); });
+  expect((composer as HTMLTextAreaElement).value).toBe('next unsent draft');
+});
+
+it('fences a delayed send completion from a newly navigated group', async () => {
+  let resolveSend!: (value: unknown) => void;
+  vi.mocked(api).mockImplementation(async (path, init) => {
+    if (path === '/api/settings/identities') return {};
+    if (init?.method === 'POST') return new Promise(resolve => { resolveSend = resolve; });
+    const id = String(path).includes('room-2') ? 'room-2' : 'room-1';
+    return { channel: { id, name: id, participantAgentIds: [] }, turns: [], runs: [] };
+  });
+  const view = render(<GroupChannelsPage channelId="room-1" agents={[]} />);
+  const composer = await screen.findByPlaceholderText('Message the group…');
+  const { fireEvent } = await import('@testing-library/react');
+  fireEvent.change(composer, { target: { value: 'room one' } });
+  fireEvent.click(screen.getByRole('button', { name: /send/i }));
+  view.rerender(<GroupChannelsPage channelId="room-2" agents={[]} />);
+  const roomTwoComposer = await screen.findByPlaceholderText('Message the group…');
+  fireEvent.change(roomTwoComposer, { target: { value: 'room two draft' } });
+  await act(async () => { resolveSend({ ok: true }); });
+  expect((roomTwoComposer as HTMLTextAreaElement).value).toBe('room two draft');
+});

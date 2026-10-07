@@ -112,8 +112,9 @@ export function useChatComposers({ sessionId = '', selectedAgentId, activeRunId,
         body: JSON.stringify({ targetSessionId }),
       });
       forked = true;
-      if (!current()) return;
-      partialRef.current = { scope, id: targetSessionId };
+      // Once the server creates the fork, finish emptying it even if the user navigates.
+      // Selection and UI updates remain fenced to the originating scope below.
+      if (current()) partialRef.current = { scope, id: targetSessionId };
       await api(`/api/sessions/${encodeURIComponent(targetSessionId)}/reset?agentId=${encodeURIComponent(selectedAgentId)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
       if (!current()) return;
       partialRef.current = null;

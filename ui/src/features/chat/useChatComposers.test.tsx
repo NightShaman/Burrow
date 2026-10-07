@@ -141,3 +141,17 @@ describe('useChatComposers', () => {
     expect(result.current.group.rooms).toEqual([]);
   });
 });
+
+it('finishes emptying a session whose fork succeeds after navigation', async () => {
+  let resolveFork!: (value: unknown) => void;
+  apiMock.mockReturnValueOnce(new Promise((resolve) => { resolveFork = resolve; })).mockResolvedValueOnce({});
+  const { result, options, rerender } = renderComposers();
+  act(() => result.current.session.setName('planning'));
+  let pending!: Promise<void>;
+  act(() => { pending = result.current.session.create(); });
+  options.sessionId = 'other';
+  rerender();
+  await act(async () => { resolveFork({}); await pending; });
+  expect(apiMock).toHaveBeenNthCalledWith(2, '/api/sessions/planning/reset?agentId=smatchet', expect.objectContaining({ method: 'POST' }));
+  expect(options.selectSession).not.toHaveBeenCalled();
+});

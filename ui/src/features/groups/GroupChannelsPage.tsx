@@ -94,7 +94,11 @@ export function GroupChannelsPage({ channelId, agents, operator }: { channelId: 
     const channelValue = record(response.channel ?? response);
     setChannel(normalizeChannel({ ...channelValue, turns: channelValue.turns ?? response.turns, runs: channelValue.runs ?? response.runs }));
   }, [channelId]);
-  useEffect(() => { setError(''); load().catch((reason: Error) => setError(`Could not load group chat: ${reason.message}`)); }, [load]);
+  useEffect(() => {
+    const owner = scope.current;
+    setMessage(''); setAttached([]); setSending(false); setError('');
+    load().catch((reason: Error) => { if (scope.current === owner) setError(`Could not load group chat: ${reason.message}`); });
+  }, [load]);
   useEffect(() => {
     api<{ operator?: unknown; agents?: Array<{ id?: string; avatar?: string }> }>('/api/settings/identities')
       .then((response) => {
@@ -146,12 +150,18 @@ export function GroupChannelsPage({ channelId, agents, operator }: { channelId: 
     // and delivery routing. Only use trim() to decide whether the composer is empty.
     const content = message || (attached.length ? 'Please analyze the attached files.' : '');
     if (!content.trim() || sending) return;
+    const owner = scope.current;
+    const submittedMessage = message;
+    const submittedAttachments = attached;
     setSending(true); setError('');
     try {
-      await api<{ ok: true; channelId: string; operatorTurn?: unknown; runs?: GroupRun[] }>(`/api/group-channels/${encodeURIComponent(channelId)}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: content, ...(attached.length ? { attachments: attached } : {}) }) });
-      setMessage(''); setAttached([]); await load();
-    } catch (reason) { setError(`Could not send message: ${(reason as Error).message}`); }
-    finally { setSending(false); }
+      await api<{ ok: true; channelId: string; operatorTurn?: unknown; runs?: GroupRun[] }>(`/api/group-channels/${encodeURIComponent(channelId)}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: content, ...(submittedAttachments.length ? { attachments: submittedAttachments } : {}) }) });
+      if (scope.current !== owner) return;
+      setMessage((current) => current === submittedMessage ? '' : current);
+      setAttached((current) => current === submittedAttachments ? [] : current);
+      await load();
+    } catch (reason) { if (scope.current === owner) setError(`Could not send message: ${(reason as Error).message}`); }
+    finally { if (scope.current === owner) setSending(false); }
   }
   function attachImage(files: File[]) { files.forEach((file, index) => {
     const supported = file.type.startsWith('image/') || file.type.startsWith('text/') || ['application/json', 'application/xml', 'application/rtf'].includes(file.type) || /\.(txt|md|markdown|json|csv|xml|html?|css|js|ts|tsx|jsx|py|rb|go|rs|java|c|cpp|h|yaml|yml|rtf)$/i.test(file.name);

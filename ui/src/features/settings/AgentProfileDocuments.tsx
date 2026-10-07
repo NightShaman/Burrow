@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../app/api';
 import { Field, SettingSection } from './SettingsPrimitives';
 
@@ -15,17 +15,19 @@ export function AgentProfileDocuments({ agentId, overflowTarget }: { agentId: st
   const [state, setState] = useState<'loading' | 'idle' | 'saving' | 'error'>('loading');
   const [retry, setRetry] = useState(0);
   const [error, setError] = useState('');
+  const requestVersion = useRef(0);
 
   useEffect(() => {
+    const version = ++requestVersion.current;
     const controller = new AbortController();
     setState('loading'); setError(''); setDocuments(profileDocumentKinds.map(kind => ({ kind, markdown: '' })));
     request<{ documents: ProfileDocument[] }>(`/api/agents/${encodeURIComponent(resourceId)}/profile-documents`, { signal: controller.signal }).then(result => {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || requestVersion.current !== version) return;
       const byKind = new Map((result.documents ?? []).map(document => [document.kind, document.markdown]));
       setDocuments(profileDocumentKinds.map(kind => ({ kind, markdown: byKind.get(kind) ?? '' })));
       setState('idle');
     }).catch(cause => {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || requestVersion.current !== version) return;
       setError(cause instanceof Error ? `Could not load profile documents: ${cause.message}` : 'Could not load profile documents.');
       setState('error');
     });
@@ -33,10 +35,11 @@ export function AgentProfileDocuments({ agentId, overflowTarget }: { agentId: st
   }, [agentId, retry]);
   const save = async () => {
     if (state !== 'idle') return;
+    const version = requestVersion.current;
     setState('saving'); setError('');
     try { await request(`/api/agents/${encodeURIComponent(resourceId)}/profile-documents`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ documents }) }); }
-    catch (cause) { setError(cause instanceof Error ? `Could not save profile documents: ${cause.message}` : 'Could not save profile documents.'); }
-    finally { setState('idle'); }
+    catch (cause) { if (requestVersion.current === version) setError(cause instanceof Error ? `Could not save profile documents: ${cause.message}` : 'Could not save profile documents.'); }
+    finally { if (requestVersion.current === version) setState('idle'); }
   };
   const update = (kind: ProfileDocument['kind'], markdown: string) => setDocuments(current => current.map(item => item.kind === kind ? { ...item, markdown } : item));
 
