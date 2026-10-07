@@ -105,6 +105,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   let activationSettled = false;
   let stopped = false;
   let closing = false;
+  let admissionsPaused = false;
   let closePromise = null;
   let shutdownError = null;
   let unavailable = false;
@@ -118,6 +119,9 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     if (!requestId || requestId.length > 128 || closing || stopped || !child.connected) return;
     // Never replace the controller of an in-flight request with a forged ID.
     if (activeCapabilities.has(requestId)) return;
+    if (admissionsPaused) {
+      child.send({ type: "capability-result", requestId, error: "mod_busy" }, () => {}); return;
+    }
     const controller = new AbortController();
     if (activeCapabilities.size >= 4 || !capabilities || !["listAgents", "getOperatorIdentity", "getOperatorTimezone", "listConversations", "readConversation", "listModels", "generateText", "listScheduledJobs", "readScheduledJob", "createScheduledJob", "updateScheduledJob", "deleteScheduledJob", "listScheduledJobRuns", "triggerScheduledJob"].includes(message.method)) {
       child.send({ type: "capability-result", requestId, error: "mod_capability_unavailable" }, () => {}); return;
@@ -382,6 +386,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   function createSystemControllerProxy() {
     return Object.freeze({
       executeProcess(request = {}, { abortSignal = null } = {}) {
+        if (admissionsPaused) return Promise.reject(Object.assign(hostError('mod_busy'), { statusCode: 409 }));
         if (!systemControllerReady || closing || stopped || !child.connected) return Promise.reject(hostError('remote_process_controller_unavailable'));
         const operationId = String(request.operationId || '');
         const targetId = String(request.targetId || '');
@@ -428,6 +433,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
         });
       },
       executeNativeFilesystem(request = {}, { abortSignal = null } = {}) {
+        if (admissionsPaused) return Promise.reject(Object.assign(hostError('mod_busy'), { statusCode: 409 }));
         if (!systemControllerReady || closing || stopped || !child.connected) return Promise.reject(hostError('remote_native_filesystem_controller_unavailable'));
         const operationId = String(request.operationId || '');
         const targetId = String(request.targetId || '');
@@ -467,6 +473,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   }
 
   async function invoke(routeId, request, { abortSignal = null } = {}) {
+    if (admissionsPaused) throw Object.assign(hostError('mod_busy'), { statusCode: 409 });
     if (abortSignal?.aborted) throw hostError('mod_tool_cancelled');
     if (stopped || closing || !child.connected) throw hostError('mod_host_unavailable', mod.id);
     const requestId = `${process.pid}-${Date.now()}-${++sequence}`;
@@ -514,6 +521,16 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     return invoke(`protected:${name}`, { reference, caller });
   }
 
+  // Acquire synchronously with the idle check: no work may enter while a
+  // replacement awaits catalog storage. The caller owns release on rollback.
+  function pauseAdmissions() {
+    if (admissionsPaused || pending.size + activeCapabilities.size + pendingSystemProcess.size + pendingSystemFilesystem.size > 0) {
+      throw Object.assign(hostError('mod_busy'), { statusCode: 409 });
+    }
+    admissionsPaused = true;
+    return () => { admissionsPaused = false; };
+  }
+
   function close() {
     if (closePromise) return closePromise;
     closing = true;
@@ -535,5 +552,5 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     return closePromise;
   }
 
-  return { child, activated, invoke, invokeTool, resolveProtectedReference, close, exited, pendingCount: () => pending.size, activeOperationCount: () => pending.size + activeCapabilities.size + pendingSystemProcess.size + pendingSystemFilesystem.size, pendingDiagnostics: () => [...activeCapabilities.values()].map(({ method, startedAt }) => ({ kind: "capability", operation: method, status: "pending", elapsedMs: Math.max(0, Date.now() - startedAt) })), pendingSystemProcessCount: () => pendingSystemProcess.size, pendingSystemFilesystemCount: () => pendingSystemFilesystem.size, controllerInstanceId };
+  return { child, activated, pauseAdmissions, invoke, invokeTool, resolveProtectedReference, close, exited, pendingCount: () => pending.size, activeOperationCount: () => pending.size + activeCapabilities.size + pendingSystemProcess.size + pendingSystemFilesystem.size, pendingDiagnostics: () => [...activeCapabilities.values()].map(({ method, startedAt }) => ({ kind: "capability", operation: method, status: "pending", elapsedMs: Math.max(0, Date.now() - startedAt) })), pendingSystemProcessCount: () => pendingSystemProcess.size, pendingSystemFilesystemCount: () => pendingSystemFilesystem.size, controllerInstanceId };
 }

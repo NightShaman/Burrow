@@ -198,6 +198,8 @@ function repeatedToolCallObservations(toolCalls = [], priorIterations = []) {
 
 function normalizedToolOutcome(result = {}) {
   return {
+    // Hash full observed payload before any bounded display projection.
+    observedPayloadFingerprint: exactArgumentFingerprint(Object.fromEntries(['output', 'job', 'jobs', 'handoff', 'attachment', 'entries', 'paths', 'matches', 'results', 'reply', 'content', 'stdout', 'stderr'].filter(key => result[key] !== undefined).map(key => [key, result[key]]))),
     ok: Boolean(result.ok),
     tool: result.tool || null,
     filePath: result.filePath || null,
@@ -395,6 +397,32 @@ function compactPromptEvidenceResult(result = {}) {
     status: result.task.status || null, priority: result.task.priority || null,
     assignedAgentId: result.task.assignedAgentId || null, updatedAt: result.task.updatedAt || null,
   };
+  // Retain only declared answer-bearing payloads, never arbitrary result graphs.
+  const payloadFields = {
+    mcp_call: ['output', 'protectedValues'], session_read_handoff: ['handoff'],
+    forge_catalog: ['models', 'music', 'video', 'sourceAttachments'],
+    forge_create_job: ['job', 'replayed'], forge_list_jobs: ['jobs'],
+    forge_inspect_job: ['job'], forge_attach_artifact: ['attachment'],
+    agent_send_message: ['reply'],
+  };
+  for (const key of payloadFields[result.tool] || []) {
+    if (result[key] !== undefined) compact[key] = boundedToolArgumentValue(result[key], { maxStringChars: CHAT_TOOL_SINGLE_EXCERPT_CHARS });
+  }
+  compact.incomplete = Boolean(result.incomplete);
+  const omissions = {};
+  for (const key of ['content', 'stdout', 'stderr', 'summary', 'entries', 'paths', 'matches', 'results', 'tasks', 'warnings']) {
+    if (result[key]?.length > compact[key]?.length) omissions[key] = { observed: result[key].length, retained: compact[key].length, omitted: result[key].length - compact[key].length };
+  }
+  for (const [collection, fields] of [['matches', ['text']], ['results', ['title', 'content']], ['tasks', ['title', 'description']]]) {
+    let omittedChars = 0;
+    for (let index = 0; index < (compact[collection]?.length || 0); index += 1) for (const field of fields) {
+      omittedChars += Math.max(0, (result[collection][index]?.[field]?.length || 0) - (compact[collection][index]?.[field]?.length || 0));
+    }
+    if (omittedChars) omissions[`${collection}Fields`] = { omittedChars };
+  }
+  if (result.attachment?.text?.length > compact.attachment?.text?.length) omissions.attachmentText = { omitted: result.attachment.text.length - compact.attachment.text.length };
+  // Nested bounded payloads carry explicit inline omission markers as well.
+  if (Object.keys(omissions).length) compact.retentionOmissions = omissions;
   return compact;
 }
 

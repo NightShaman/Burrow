@@ -50,10 +50,9 @@ export function createPostgresLifecycleFromEnv(options = {}) {
 export async function startPostgresLifecycle(options = {}) {
   const lifecycle = options.lifecycle || createPostgresLifecycleFromEnv(options);
   if (!lifecycle) return Object.freeze({ enabled: false, lifecycle: null, close: async () => {} });
-  await lifecycle.start();
   let closed = false;
   let closing;
-  return Object.freeze({
+  const handle = Object.freeze({
     enabled: true,
     lifecycle,
     status: () => lifecycle.status(),
@@ -65,6 +64,19 @@ export async function startPostgresLifecycle(options = {}) {
       await closing;
     },
   });
+  try { await lifecycle.start(); }
+  catch (error) {
+    // Preserve the exact lifecycle, including uncertain owned launches.
+    error.postgresLifecycleHandle = handle;
+    try { await handle.close(); }
+    catch (cleanupError) {
+      const failure = new AggregateError([error, cleanupError], 'PostgreSQL start failed and cleanup requires operator recovery');
+      failure.postgresLifecycleHandle = handle;
+      throw failure;
+    }
+    throw error;
+  }
+  return handle;
 }
 
 /**

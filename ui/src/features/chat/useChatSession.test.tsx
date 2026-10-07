@@ -560,3 +560,21 @@ it('keeps submitted user visible through empty polling snapshots without duplica
  await act(async () => { await result.current.refreshConversation(); });
  expect(result.current.turns.filter(turn => turn.runId === 'pending-run')).toHaveLength(1);
 });
+
+it('audit: preserves interrupted pending turn before reset but filters it after backend resetAt',async()=>{
+ let reset=false;
+ apiMock.mockImplementation(async(path,init)=>{
+  if(path===sessionListPath)return {sessions:[{id:sessionId}]};
+  if(init?.method==='POST' && path.includes('/reset')){reset=true;return {ok:true,metadata:{resetAt:'2026-10-07T12:01:00.000Z'}};}
+  if(path===conversationPath)return {session:{id:sessionId,turns:[],...(reset?{metadata:{resetAt:'2026-10-07T12:01:00.000Z'}}:{})}};
+  return {runs:[],subagents:[]};
+ });
+ const {result}=renderHook(()=>useChatSession(agentId));
+ await waitFor(()=>expect(result.current.sessionId).toBe(sessionId));
+ act(()=>result.current.appendTurn(agentId,sessionId,{role:'user',runId:'interrupted-run',content:'Interrupted submitted message',ts:'2026-10-07T12:00:00.000Z'}));
+ await act(async()=>{await result.current.refreshConversation();});
+ expect(result.current.turns).toEqual([expect.objectContaining({content:'Interrupted submitted message'})]);
+ await act(async()=>{await result.current.resetSession();});
+ await act(async()=>{await result.current.refreshConversation();});
+ expect(result.current.turns).toEqual([]);
+});

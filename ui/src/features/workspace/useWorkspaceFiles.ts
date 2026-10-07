@@ -7,7 +7,7 @@ type WorkspaceFile = { path: string; type: 'file' | 'directory' };
 type UseWorkspaceFilesOptions = { tabs?: Tab[]; selectedAgentId: string; setTabs: Dispatch<SetStateAction<Tab[]>>; setActiveTabId: Dispatch<SetStateAction<string>>; pollingEnabled?: boolean };
 
 export function useWorkspaceFiles({ tabs, selectedAgentId, setTabs, setActiveTabId, pollingEnabled = true }: UseWorkspaceFilesOptions) {
-  const pendingLoads = useRef(new Set<string>());
+  const pendingLoads = useRef(new Map<string, Tab>());
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   const [workspaceFiles, setWorkspaceFiles] = useState<FileNode[]>([]);
@@ -29,10 +29,16 @@ export function useWorkspaceFiles({ tabs, selectedAgentId, setTabs, setActiveTab
     const tabId = `${agentId}:${file.path}`;
     setActiveTabId(tabId);
     const existing = tabsRef.current?.find(tab => tab.id === tabId);
-    if (existing?.fileLoaded || pendingLoads.current.has(tabId)) return;
-    pendingLoads.current.add(tabId);
+    if (existing?.fileLoaded) return;
+    const pending = pendingLoads.current.get(tabId);
+    if (pending) {
+      // Only an explicit open recreates a closed loading tab; completion never does.
+      setTabs(all => all.some(tab => tab.id === tabId) ? all : [...all, pending]);
+      return;
+    }
     const loadId = crypto.randomUUID();
     const loadingTab: Tab = { id: tabId, path: file.path, label: file.name, kind: 'file', content: '', fileLoadId: loadId, fileLoaded: false, fileLoading: true, workspaceAgentId: agentId };
+    pendingLoads.current.set(tabId, loadingTab);
     setTabs((all) => all.some(tab => tab.id === tabId) ? all.map(tab => tab.id === tabId ? { ...tab, fileLoadId: loadId, fileLoading: true, fileError: undefined } : tab) : [...all, loadingTab]);
     try {
       const { content } = await api<{ content: string }>(`/api/workspace/file?agentId=${encodeURIComponent(agentId)}&scope=agent&path=${encodeURIComponent(file.path)}`);

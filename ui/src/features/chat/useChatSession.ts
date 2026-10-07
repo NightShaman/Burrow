@@ -103,6 +103,7 @@ export function useChatSession(selectedAgentId: string) {
   const sessionRepository = useMemo(() => createChatSessionRepository(), []);
   const [draftCache, setDraftCache] = useState<DraftCache>(readDraftCache);
   const [attachmentState, setAttachmentState] = useState<{ scope: object; files: ChatAttachment[] } | null>(null);
+  const [composerResetGeneration, setComposerResetGeneration] = useState(0);
   const [isNewSession, setIsNewSession] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionId, setSessionId] = useState('');
@@ -423,6 +424,7 @@ export function useChatSession(selectedAgentId: string) {
     const resetSessionId = sessionId || 'default';
     await sessionRepository.resetSession(selectedAgentId, resetSessionId);
     if (!isAttachmentScopeCurrent()) return false;
+    setComposerResetGeneration(value => value + 1);
     setSessionId(resetSessionId);
     sessionIdByAgentRef.current[selectedAgentId] = resetSessionId;
     const cacheKey = conversationCacheKey(selectedAgentId, resetSessionId);
@@ -478,5 +480,5 @@ export function useChatSession(selectedAgentId: string) {
   const reportError = useCallback((message: string) => setChatError(message), []);
   const clearError = useCallback(() => setChatError(''), []);
 
-  return { isAttachmentScopeCurrent, attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation: isLoadingConversation || isSwitchingAgent, draft, setDraft, refreshSessions, refreshConversation, selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun, a2aActivities, runtimeRun, runtimeChildActivities, cancelRuntimeRun };
+  return { composerResetGeneration, isAttachmentScopeCurrent, attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation: isLoadingConversation || isSwitchingAgent, draft, setDraft, refreshSessions, refreshConversation, selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun, a2aActivities, runtimeRun, runtimeChildActivities, cancelRuntimeRun };
 }

@@ -2935,6 +2935,12 @@ async function handleChat(req, res) {
     return sendJson(res, error?.statusCode || 500, { ok: false, error: String(error?.message || error) });
   }
   const sessionId = String(body.sessionId || 'default');
+  // Cancellation must reach the active turn, not wait for that turn to finish.
+  // Keep boundary validation, agent resolution, and command response handling
+  // shared with ordinary requests; only /stop bypasses session serialization.
+  if (parseChatCommand(body.message)?.command === 'stop') {
+    return handleSerializedChat({ req, res, body, agentRuntime, sessionId });
+  }
   return serializeSessionChat({ agentId: agentRuntime.agentId, sessionId, operation: () => handleSerializedChat({ req, res, body, agentRuntime, sessionId }) });
 }
 
@@ -3142,15 +3148,21 @@ async function transitionMod({ modId, enabled, installed, action }) {
     if (next) await cleanupMods([next]);
     throw Object.assign(new Error(next?.error || 'mod_activation_failed'), { statusCode: 409 });
   }
-  // Activation awaits child IPC and can take long enough for new work to start
-  // on the old host. Recheck immediately before the synchronous publication.
-  if (old?.host?.activeOperationCount?.() > 0) {
+  // Activation awaits child IPC; acquire an idle admission barrier before
+  // the fallible asynchronous catalog write. Keep the original host tracked
+  // until publication succeeds, so distribution compensation cannot orphan it.
+  let resumeAdmissions;
+  try {
+    if (old?.host?.activeOperationCount?.() > 0) throw Object.assign(new Error('mod_busy'), { statusCode: 409 });
+    resumeAdmissions = old?.host?.pauseAdmissions?.();
+    if (action === 'update') await publishModTools(next, modLoadOptions.modCatalogWriter);
+    next.commitProviderReplacement?.();
+    loadedMods = old ? loadedMods.map((entry) => entry.id === modId ? next : entry) : [...loadedMods, next];
+  } catch (error) {
     await cleanupMods([next]);
-    throw Object.assign(new Error('mod_busy'), { statusCode: 409 });
+    resumeAdmissions?.();
+    throw error;
   }
-  loadedMods = old ? loadedMods.map((entry) => entry.id === modId ? next : entry) : [...loadedMods, next];
-  if (action === 'update') await publishModTools(next, modLoadOptions.modCatalogWriter);
-  next.commitProviderReplacement?.();
   if (old) await cleanupMods([old]);
 }
 const modDistribution = createModDistribution({

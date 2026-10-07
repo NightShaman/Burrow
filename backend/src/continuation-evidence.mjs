@@ -17,11 +17,11 @@ function collectionReceipt(label, value) {
 }
 
 function projection(result = {}) {
-  const base = { tool: result.tool || 'unknown', ok: result.ok ?? null, error: result.error || null, failureClass: result.failureClass || null, artifacts: result.artifacts || null };
+  const base = { tool: result.tool || 'unknown', ok: result.ok ?? null, error: result.error || null, failureClass: result.failureClass || null, artifacts: result.artifacts || null, retentionOmissions: result.retentionOmissions || null };
   if (result.tool === 'files_read') {
-    const returnedBytes = result.returnedBytes ?? Buffer.byteLength(text(result.content), result.encoding || 'utf8');
+    const returnedBytes = result.delivery?.returnedBytes ?? result.returnedBytes ?? Buffer.byteLength(text(result.content), result.encoding || 'utf8');
     const offsetBytes = Number(result.offsetBytes || 0);
-    return { ...base, path: result.filePath || null, coverage: { start: offsetBytes, end: offsetBytes + returnedBytes, bytes: result.bytes ?? returnedBytes, returnedBytes, truncated: Boolean(result.truncated), nextOffsetBytes: result.nextOffsetBytes ?? null }, contentHash: result.contentHash || null };
+    return { ...base, path: result.filePath || null, coverage: { start: offsetBytes, end: offsetBytes + returnedBytes, bytes: result.bytes ?? returnedBytes, returnedBytes, truncated: Boolean(result.delivery?.truncated || result.truncated), observedReturnedBytes: result.returnedBytes ?? null, nextOffsetBytes: result.delivery?.nextOffsetBytes ?? result.nextOffsetBytes ?? null }, contentHash: result.contentHash || null };
   }
   if (result.tool === 'shell_exec' || result.tool === 'git_status' || result.tool === 'git_diff') return { ...base, command: result.command || null, exitCode: result.exitCode ?? null, durationMs: result.durationMs ?? null, stdoutBytes: Buffer.byteLength(text(result.stdout)), stderrBytes: Buffer.byteLength(text(result.stderr)) };
   if (result.tool === 'files_search') return { ...base, path: result.dirPath || null, query: result.query || null, ...collectionReceipt('matches', result.matches), resultFingerprint: result.resultFingerprint || null, toolTruncated: Boolean(result.truncated), toolIncomplete: Boolean(result.incomplete), toolWarnings: Array.isArray(result.warnings) ? result.warnings : [] };
@@ -49,7 +49,13 @@ function rawFields(result = {}) {
   if (result.tool === 'files_find') return jsonField('files_find paths', result.paths);
   if (result.tool === 'session_search' || result.tool === 'memory_working_search' || result.tool === 'memory_rolling_search') return jsonField(`${result.tool} results`, result.results);
   if (result.tool === 'spawn_subagent' && result.summary) return [{ label: 'subagent summary', text: result.summary }];
-  return [];
+  const fields = {
+    mcp_call: ['output', 'protectedValues'], session_read_handoff: ['handoff'],
+    attachment_view: ['attachment'], forge_catalog: ['models', 'music', 'video', 'sourceAttachments'],
+    forge_create_job: ['job', 'replayed'], forge_list_jobs: ['jobs'],
+    forge_inspect_job: ['job'], forge_attach_artifact: ['attachment'], agent_send_message: ['reply'],
+  };
+  return (fields[result.tool] || []).filter(key => result[key] !== undefined).map(key => ({ label: `${result.tool} ${key}`, text: typeof result[key] === 'string' ? result[key] : JSON.stringify(result[key]) }));
 }
 
 function render({ included = [], omitted = 0, raw = [] } = {}) {
@@ -93,7 +99,7 @@ export function serializeContinuationEvidence({ toolResults = [], modelConfig = 
       const candidate = [...raw, { label: source.label, text: source.text.slice(0, length), omitted: source.text.length - length, originalItems: source.originalItems || null }];
       if (fits(render({ included, omitted, raw: candidate }))) { best = length; low = length + 1; } else high = length - 1;
     }
-    if (best) raw.push({ label: source.label, text: source.text.slice(0, best), omitted: source.text.length - best, originalItems: source.originalItems || null });
+    raw.push({ label: source.label, text: source.text.slice(0, best), omitted: source.text.length - best, originalItems: source.originalItems || null });
   }
   return render({ included, omitted, raw });
 }

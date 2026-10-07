@@ -37,7 +37,7 @@ export function AgentSchedules({ agentId, savedProviders, overflowTarget }: { ag
   const requestVersion = useRef(0);
   const [operatorTimezone, setOperatorTimezone] = useState('');
   const nameInput = useRef<HTMLInputElement>(null);
-  const load = async (signal?: AbortSignal, version = requestVersion.current) => {
+  const load = async (signal: AbortSignal | undefined, version: number) => {
     try {
       const result = await request<{ jobs: ScheduledJob[] }>(`/api/scheduled-jobs?agentId=${encodeURIComponent(resourceId)}`, { signal });
       if (!signal?.aborted && version === requestVersion.current) setJobs(result.jobs ?? []);
@@ -48,7 +48,7 @@ export function AgentSchedules({ agentId, savedProviders, overflowTarget }: { ag
   useEffect(() => {
     const version = ++requestVersion.current;
     const controller = new AbortController();
-    setState('loading'); setEditingId(null); setViewingManagedId(null); setError(''); setNotice(''); setTriggeringId(null); setJobModel({ modelConnectionId: null, model: null });
+    setJobs([]); setName(''); setPrompt(''); setCron('0 9 * * *'); setEnabled(true); setState('loading'); setEditingId(null); setViewingManagedId(null); setError(''); setNotice(''); setTriggeringId(null); setJobModel({ modelConnectionId: null, model: null });
     setTimezone(null); setOperatorTimezone('');
     void request<{ timezone: string }>('/api/settings/timezone', { signal: controller.signal }).then(result => {
       if (!controller.signal.aborted && version === requestVersion.current && result.timezone) { setOperatorTimezone(result.timezone); }
@@ -62,11 +62,14 @@ export function AgentSchedules({ agentId, savedProviders, overflowTarget }: { ag
   useEffect(() => { if (viewingManagedId) nameInput.current?.focus(); }, [viewingManagedId]);
   const save = async () => {
     if (!name.trim() || !prompt.trim() || !cron.trim() || (timezone !== null && !timezone.trim())) { setError('Name, prompt, cron, and timezone are required.'); return; }
+    const version = requestVersion.current;
     setState('saving'); setError('');
     try {
       await request(editingId ? `/api/scheduled-jobs/${encodeURIComponent(editingId)}` : '/api/scheduled-jobs', { method: editingId ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...(editingId ? {} : { agentId: resourceId }), name: name.trim(), prompt: prompt.trim(), cron: cron.trim(), timezone: timezone === null ? null : timezone.trim(), enabled, modelConnectionId: jobModel.modelConnectionId ?? null, model: jobModel.model ?? null }) });
-      await load(); reset();
-    } catch (cause) { setError(cause instanceof Error ? `Could not save schedule: ${cause.message}` : 'Could not save schedule.'); setState('idle'); }
+      if (version !== requestVersion.current) return;
+      await load(undefined, version);
+      if (version === requestVersion.current) reset();
+    } catch (cause) { if (version !== requestVersion.current) return; setError(cause instanceof Error ? `Could not save schedule: ${cause.message}` : 'Could not save schedule.'); setState('idle'); }
   };
   const runNow = async (job: ScheduledJob) => {
     setTriggeringId(job.id); setError(''); setNotice('');
@@ -80,7 +83,7 @@ export function AgentSchedules({ agentId, savedProviders, overflowTarget }: { ag
       if (version === requestVersion.current) setError(cause instanceof Error ? `Could not run ${job.name}: ${cause.message}` : `Could not run ${job.name}.`);
     } finally { if (version === requestVersion.current) setTriggeringId(null); }
   };
-  const remove = async (job: ScheduledJob) => { if (!await confirm({ title: 'Delete scheduled job?', message: job.ownerModId ? `Delete ${job.name}? This job is managed by ${job.ownerModId} and the mod may create it again.` : `Delete ${job.name}?`, confirmLabel: 'Delete job', tone: 'danger' })) return; try { await request(`/api/scheduled-jobs/${encodeURIComponent(job.id)}`, { method: 'DELETE' }); setJobs(items => items.filter(item => item.id !== job.id)); if (editingId === job.id || viewingManagedId === job.id) reset(); } catch (cause) { setError(cause instanceof Error ? `Could not delete schedule: ${cause.message}` : 'Could not delete schedule.'); } };
+  const remove = async (job: ScheduledJob) => { const version = requestVersion.current; if (!await confirm({ title: 'Delete scheduled job?', message: job.ownerModId ? `Delete ${job.name}? This job is managed by ${job.ownerModId} and the mod may create it again.` : `Delete ${job.name}?`, confirmLabel: 'Delete job', tone: 'danger' }) || version !== requestVersion.current) return; try { await request(`/api/scheduled-jobs/${encodeURIComponent(job.id)}`, { method: 'DELETE' }); if (version !== requestVersion.current) return; setJobs(items => items.filter(item => item.id !== job.id)); if (editingId === job.id || viewingManagedId === job.id) reset(); } catch (cause) { if (version !== requestVersion.current) return; setError(cause instanceof Error ? `Could not delete schedule: ${cause.message}` : 'Could not delete schedule.'); } };
   const managedJob = jobs.find(job => job.id === viewingManagedId && job.ownerModId) ?? null;
   const inventory = state === 'loading' ? <p className="settings-empty">Loading cron jobs…</p> : jobs.length === 0 ? <p className="settings-empty">No cron jobs configured for this agent.</p> : <div className="schedule-list">{jobs.map(job => {
     const overrideValue = selectedModelValue(job);

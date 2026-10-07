@@ -37,12 +37,13 @@ export function ChatModelSelector({ selected, savedProviders, updateAgent, sessi
   return <div className="workspace-toolbar"><label htmlFor="chat-provider">Provider <select id="chat-provider" name="provider" value={provider?.provider ?? ''} onChange={(e) => chooseProvider(e.target.value)} disabled={locked || !savedProviders.length}>{!savedProviders.length && <option value="">Configured runtime</option>}{savedProviders.map((item) => <option value={item.provider} key={item.id}>{item.provider}</option>)}</select></label><label htmlFor="chat-model">Model <select id="chat-model" name="model" value={model} onChange={(e) => chooseModel(e.target.value)} disabled={locked || !models.length}>{!models.length && <option value="">Configured runtime</option>}{models.map((item) => <option key={item} value={item}>{provider?.modelLabels?.[item] ?? item}</option>)}</select></label><label htmlFor="chat-effort">Effort <select id="chat-effort" name="effort" value={effort} onChange={(e) => updateAgent({ effort: e.target.value })} disabled={locked || !efforts.length}>{!efforts.length && <option value="">Not configured</option>}{efforts.map((item) => <option key={item}>{item}</option>)}</select></label><label className="temperature-control" htmlFor="chat-temperature">Temp <span>{temperature.toFixed(1)}</span><input id="chat-temperature" name="temperature" type="range" min="0" max="2" step="0.1" value={temperature} onChange={(e) => chooseTemperature(e.target.value)} disabled={locked || !provider} /></label><div className="session-controls"><button className="new-session group-chat-trigger" onClick={onCreateGroup} disabled={locked}>Group Chat</button><button className="new-session" onClick={onNewNamedSession} disabled={locked}>New session</button><label htmlFor="chat-session"><span className="sr-only">Session</span><select id="chat-session" name="session" value={sessionId} onChange={(e) => onSessionChange(e.target.value)} disabled={locked || !sessions.length}>{selectableSessions.map((session) => <option key={session.id} value={session.id}>{session.id}</option>)}</select></label><button className="new-session" onClick={onNewSession} disabled={locked}>Reset Session</button></div></div>;
 }
 
-export function Chat({ selected, parent, operator, draft, setDraft, attached, onAttach, onRemoveAttachment, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, runtimeChildActivities, liveProgress, liveAnswer, a2aActivities, runtimeUserMessage, onSend, onCancel, selectedAgentId, resourceAgentId, sessionId }: { selected: Agent | Subagent; parent: Agent; operator: OperatorProfile; draft: string; setDraft: (value: string) => void; attached: ChatAttachment[]; onAttach: (files: File[]) => void; onRemoveAttachment: (index: number) => void; isNewSession: boolean; turns: SessionTurn[]; isLoading: boolean; error: string; isSending: boolean; activeRunId: string; activeToolActivity?: ToolActivity; runtimeChildActivities?: ToolActivity[]; liveProgress: ProgressEntry[]; liveAnswer: string; a2aActivities?: import('../../app/api').ActiveA2AActivity[]; runtimeUserMessage?: string; onSend: (draft?: string, onAccepted?: () => void) => void; onCancel: () => void; selectedAgentId?: string; resourceAgentId?: string; sessionId?: string }) {
+export function Chat({ selected, parent, operator, draft, setDraft, attached, onAttach, onRemoveAttachment, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, runtimeChildActivities, liveProgress, liveAnswer, a2aActivities, runtimeUserMessage, onSend, onCancel, selectedAgentId, resourceAgentId, sessionId, composerResetGeneration = 0 }: { selected: Agent | Subagent; parent: Agent; operator: OperatorProfile; draft: string; setDraft: (value: string) => void; attached: ChatAttachment[]; onAttach: (files: File[]) => void; onRemoveAttachment: (index: number) => void; isNewSession: boolean; turns: SessionTurn[]; isLoading: boolean; error: string; isSending: boolean; activeRunId: string; activeToolActivity?: ToolActivity; runtimeChildActivities?: ToolActivity[]; liveProgress: ProgressEntry[]; liveAnswer: string; a2aActivities?: import('../../app/api').ActiveA2AActivity[]; runtimeUserMessage?: string; onSend: (draft?: string, onAccepted?: () => void) => void; onCancel: () => void; selectedAgentId?: string; resourceAgentId?: string; sessionId?: string; composerResetGeneration?: number }) {
   const draftContext = `${selectedAgentId ?? ''}:${sessionId ?? ''}`;
   const [localDraft, setLocalDraft] = useState(draft);
   const localDraftRef = useRef(localDraft);
   const persistedDraftRef = useRef(draft);
   const draftContextRef = useRef(draftContext);
+  const resetGenerationRef = useRef(composerResetGeneration);
   localDraftRef.current = localDraft;
   persistedDraftRef.current = draft;
 
@@ -51,11 +52,12 @@ export function Chat({ selected, parent, operator, draft, setDraft, attached, on
   }, [setDraft]);
 
   useEffect(() => {
-    if (draftContextRef.current === draftContext) return;
+    if (draftContextRef.current === draftContext && resetGenerationRef.current === composerResetGeneration) return;
+    resetGenerationRef.current = composerResetGeneration;
     draftContextRef.current = draftContext;
     localDraftRef.current = draft;
     setLocalDraft(draft);
-  }, [draft, draftContext]);
+  }, [draft, draftContext, composerResetGeneration]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => persistDraft(), 250);

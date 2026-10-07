@@ -38,3 +38,28 @@ describe('useWorkspaceFiles local runtime', () => {
   await act(async()=>{read.resolve({content:'old server'});await opening}); expect(tabs[0].content).toBe('new edit');
  });
 });
+
+it('audit: reopening a tab while its original read is pending must recreate the tab',async()=>{
+ const tabs:Tab[]=[]; const update:Dispatch<SetStateAction<Tab[]>>=change=>{tabs.splice(0,tabs.length,...(typeof change==='function'?change(tabs):change))};
+ const read=deferred<{content:string}>(); request.mockReturnValue(read.promise);
+ const {result}=renderHook(()=>useWorkspaceFiles({selectedAgentId:'agent-a',tabs,setTabs:update,setActiveTabId,pollingEnabled:false}));
+ const file={name:'a.txt',path:'a.txt',type:'file' as const};let first!:Promise<void>;
+ act(()=>{first=result.current.openFile(file)});
+ tabs.splice(0); // close the loading tab through App.closeTab
+ await act(async()=>{await result.current.openFile(file)});
+ await act(async()=>{read.resolve({content:'loaded'});await first;});
+ expect(tabs).toHaveLength(1);
+ expect(tabs[0].content).toBe('loaded');
+});
+
+it('does not reopen a closed tab solely because its pending read completed', async () => {
+ const tabs: Tab[] = [];
+ const update: Dispatch<SetStateAction<Tab[]>> = change => { tabs.splice(0, tabs.length, ...(typeof change === 'function' ? change(tabs) : change)); };
+ const read = deferred<{content:string}>(); request.mockReturnValue(read.promise);
+ const {result} = renderHook(() => useWorkspaceFiles({selectedAgentId:'agent-a',tabs,setTabs:update,setActiveTabId,pollingEnabled:false}));
+ let opening!: Promise<void>;
+ act(() => { opening = result.current.openFile({name:'a',path:'a',type:'file'}); });
+ tabs.splice(0);
+ await act(async () => { read.resolve({content:'server'}); await opening; });
+ expect(tabs).toEqual([]);
+});

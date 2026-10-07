@@ -36,9 +36,14 @@ export async function preparePostgresStartup({ env = process.env } = {}) {
     return { env: childEnv, result, close: () => closePostgresWithRetry(handle, cleanup) };
   } catch (error) {
     await pool.end().catch(() => {});
+    handle ||= error.postgresLifecycleHandle;
     if (handle) {
       try { await closePostgresWithRetry(handle, cleanup); }
-      catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Startup failed and PostgreSQL cleanup requires operator recovery'); }
+      catch (cleanupError) {
+        const failure = new AggregateError([error, cleanupError], 'Startup failed and PostgreSQL cleanup requires operator recovery');
+        failure.postgresLifecycleHandle = handle;
+        throw failure;
+      }
     }
     throw error;
   }

@@ -219,3 +219,21 @@ it.each(['agent', 'session'])('FE014 composed run/page retains unavailable %s dr
   expect(input).toHaveProperty('value', 'Keep this draft');
   expect(setDraft).not.toHaveBeenCalledWith('');
 });
+
+it('audit: clears the mounted composer after successful same-session reset', () => {
+  const { props, rerender } = renderChat({ draft: 'Text from before reset' });
+  expect(screen.getByRole('textbox', { name: 'Message' })).toHaveProperty('value', 'Text from before reset');
+  // App.startNewSession clears parent draft after resetSession, which keeps sessionId.
+  rerender(<Chat {...props} draft="" isNewSession={true} composerResetGeneration={1} turns={[]} />);
+  expect(screen.getByRole('textbox', { name: 'Message' })).toHaveProperty('value', '');
+});
+
+it('clears repeated same-session reset generations and never flushes old text afterward', () => {
+ vi.useFakeTimers();
+ const {props,rerender,setDraft,unmount} = renderChat({draft:'old',isNewSession:true,composerResetGeneration:1});
+ fireEvent.change(screen.getByRole('textbox',{name:'Message'}),{target:{value:'typed before second reset'}});
+ rerender(<Chat {...props} draft="" composerResetGeneration={2} />);
+ expect(screen.getByRole('textbox',{name:'Message'})).toHaveProperty('value','');
+ vi.advanceTimersByTime(300); unmount();
+ expect(setDraft).not.toHaveBeenCalledWith('typed before second reset');
+});

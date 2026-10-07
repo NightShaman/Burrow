@@ -32,7 +32,7 @@ function command(binary, args, { cwd, env, timeoutMs = DEFAULT_TIMEOUT_MS } = {}
     child.once('error', (error) => finish(reject, new PostgresLifecycleError(`Unable to execute ${path.basename(binary)}`, { cause: error })));
     child.once('close', (code, signal) => code === 0
       ? finish(resolve, { stdout, stderr })
-      : finish(reject, new PostgresLifecycleError(`${path.basename(binary)} failed${signal ? ` (${signal})` : ` (exit ${code})`}`)));
+      : finish(reject, Object.assign(new PostgresLifecycleError(`${path.basename(binary)} failed${signal ? ` (${signal})` : ` (exit ${code})`}`), { exitCode: code })));
   });
 }
 
@@ -80,20 +80,31 @@ export function createManagedPostgresLifecycle(options = {}) {
     const fileMajor = Number((await fs.readFile(path.join(config.dataDir, 'PG_VERSION'), 'utf8')).trim());
     const binary = await checkBinary();
     if (fileMajor !== binary) throw new PostgresLifecycleError(`Managed PostgreSQL data directory major ${fileMajor} does not match binary major ${binary}`);
+    // Only claim a launch after pg_ctl confirms this private directory is down.
+    // Unknown status (including command timeout) must fail closed, not adopt a server.
+    try {
+      await command(config.pgCtl, ['-D', config.dataDir, 'status'], { timeoutMs: config.timeoutMs });
+      throw new PostgresLifecycleError('Managed PostgreSQL is already running; refusing to adopt an unowned cluster');
+    } catch (error) { if (error.exitCode !== 3) throw error; }
     state = 'starting';
     try {
       const socketOption = `-c ${shellQuote(`unix_socket_directories=${config.socketDir}`)}`;
       const listenOption = `-c ${shellQuote('listen_addresses=')}`;
       await command(config.pgCtl, ['-D', config.dataDir, '-o', `${socketOption} ${listenOption}`, '-l', config.logFile, '-w', 'start', ...config.pgCtlArgs], { timeoutMs: config.timeoutMs });
       running = true; state = 'running'; return { state, socketDir: config.socketDir, major: binary };
-    } catch (error) { state = 'stopped'; throw error; }
+    } catch (error) {
+      // A failed wait can leave the launch alive (or still starting). Keep an
+      // actionable owned state even if a status probe would currently say down.
+      state = 'cleanup-required'; throw error;
+    }
   }
   async function stop() {
     if (state === 'stopped') return { state };
-    if (state !== 'running') throw new PostgresLifecycleError(`Cannot stop PostgreSQL while lifecycle is ${state}`);
+    if (state !== 'running' && state !== 'cleanup-required') throw new PostgresLifecycleError(`Cannot stop PostgreSQL while lifecycle is ${state}`);
+    const previousState = state;
     state = 'stopping';
     try { await command(config.pgCtl, ['-D', config.dataDir, '-m', 'fast', '-w', 'stop'], { timeoutMs: config.timeoutMs }); running = false; state = 'stopped'; return { state }; }
-    catch (error) { state = 'running'; throw error; }
+    catch (error) { state = previousState; throw error; }
   }
   async function probeStatus() {
     assertNonRoot();
