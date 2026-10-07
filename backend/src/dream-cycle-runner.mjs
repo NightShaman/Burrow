@@ -657,12 +657,16 @@ export async function adjudicatePreferencesAsync({ agentId, profileStore, metada
     const result = await completeTextResult({ content: preferenceAdjudicationPrompt({ preferences: current, signals }), modelAdapter: adapter, modelConfig: config, traceLogger, onProgress });
     const proposal = parsePreferenceAdjudication(result.text);
     const validation = validatePreferenceAdjudication({ proposal, signals });
-    if (!validation.ok) return { disposition: 'rejected', signalCount: signals.length, reason: validation.reason || null };
+    if (!validation.ok) {
+      await markPreferenceReviewedAsync({ agentId, metadataStore, signals, at: generatedAt, disposition: 'rejected' });
+      return { disposition: 'rejected', signalCount: signals.length, reason: validation.reason || null };
+    }
     if (validation.disposition === 'noop') {
       await markPreferenceReviewedAsync({ agentId, metadataStore, signals, at: generatedAt });
       return { disposition: 'noop', signalCount: signals.length, reason: proposal.reason };
     }
     const update = await applyPreferenceUpdateAsync({ agentId, markdown: proposal.markdown, sourceSignals: validation.signals, profileStore, at: generatedAt });
+    await markPreferenceReviewedAsync({ agentId, metadataStore, signals, at: generatedAt, disposition: update.applied ? 'updated' : update.reason });
     return { disposition: update.applied ? 'updated' : update.reason, signalCount: signals.length, signalIds: validation.signals.map((signal) => signal.id) };
   } catch (error) { return { disposition: 'failed', signalCount: signals.length, reason: String(error?.message || error) }; }
 }

@@ -95,6 +95,8 @@ function* appendTiddleResidueOperation({ stores = null, agentId, scope, sessionI
   } finally { db.close(); }
 }
 
+// The scope checkpoint covers this entire window: never truncate its evidence.
+// Provider failure leaves the scope uncommitted and retryable.
 function prompt({ agentId, scope, residue, cards }) {
   return [
     'You are Tiddle. You reconcile rolling conversational continuity on a four-hour cadence. Return JSON only; never address the user.',
@@ -104,7 +106,7 @@ function prompt({ agentId, scope, residue, cards }) {
     'Return JSON with the normal action fields and optional preferenceSignal. Use UPSERT only when the supplied residue demonstrates a compact future-turn-relevant thread that persisted or recurred. If it is an existing concept, set targetId to that exact existing card id even if you improve its title. Set targetId:null only for a genuinely new concept. Output either {"action":"NOOP","reason":"..."} or {"action":"UPSERT","targetId":"existing-card-id-or-null","title":"...","summary":"...","reason":"..."}.',
     `Agent: ${agentId}; continuity scope: ${scope}`,
     `Existing warm cards: ${JSON.stringify(cards.map((card) => ({ id: card.id, title: card.title, summary: card.summary, recurrence: card.recurrence, lastSeen: card.lastSeen })).slice(0, 24))}`,
-    `24-hour context residue (newSinceLastPass marks what arrived after the prior successful pass): ${JSON.stringify(residue.map((item) => ({ ref: item.ref, at: item.at, newSinceLastPass: item.newSinceLastPass === true, sessionId: item.sessionId, message: item.message, answer: item.answer, tools: item.tools })).slice(0, 48))}`,
+    `24-hour context residue (newSinceLastPass marks what arrived after the prior successful pass): ${JSON.stringify(residue.map((item) => ({ ref: item.ref, at: item.at, newSinceLastPass: item.newSinceLastPass === true, sessionId: item.sessionId, message: item.message, answer: item.answer, tools: item.tools })))}`,
   ].join('\n\n');
 }
 function schema() { return { oneOf: [
@@ -301,7 +303,7 @@ function* tiddleStatusOperation({ agentId, stores = null, limit = 10 } = {}) {
     const state = id ? (yield* meta(db, passKey(id), null)) : null;
     const rows = (yield () => db.rows({ agentId: id || null, kind: 'tiddle-pass-receipt' })).slice(0, Math.max(1, Math.min(100, Number(limit) || 10)));
     const selection = yield () => readCuratorSelection({ stores, root: curatorRoot() });
-    return { ok: true, agentId: id || null, cadenceHours: 4, lookbackHours: 24, cardTtlDays: 30, temperature: selection?.temperature ?? 0, state, receipts: rows.map((row) => parse(row.value_json, {})) };
+    return { ok: true, agentId: id || null, cadenceHours: 4, lookbackHours: 24, cardTtlDays: yield () => db.rollingTtlDays(), temperature: selection?.temperature ?? 0, state, receipts: rows.map((row) => parse(row.value_json, {})) };
   } finally { db.close(); }
 }
 

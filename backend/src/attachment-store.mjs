@@ -24,6 +24,7 @@ function dataBytes(content) {
 function attachmentRoot(agentWorkspaceRoot) { return path.resolve(agentWorkspaceRoot, 'artifacts', 'attachments'); }
 function contained(root, candidate) { const relative = path.relative(root, candidate); return relative && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative); }
 async function resolveRegularFileWithoutSymlinks(root, filePath) {
+  if (!await validateArtifactRoot(root, attachmentRoot(root))) return null;
   const parts = path.relative(root, filePath).split(path.sep);
   let current = root;
   try {
