@@ -370,8 +370,8 @@ export async function sessionWindow({ rootDir, phase, generatedAt, conversationS
       session.sessionKind === 'subagent' || session.metadata?.sessionKind === 'subagent'
       || session.parentChild === true || session.metadata?.parentChild === true
     ).map(session => session.sessionId));
-    if (originalEntries || typeof conversationStore.dreamWindow === 'function') {
-      const originals = originalEntries || await conversationStore.dreamWindow({ agentId: conversationAgentId,
+    if (originalEntries || typeof conversationStore.dreamTimeline === 'function') {
+      const originals = originalEntries || await conversationStore.dreamTimeline({ agentId: conversationAgentId,
         since: phaseWindowStart({ phase, generatedAt }), until: generatedAt });
       for (const entry of originals) {
         if (childIds.has(entry.__sessionId) || String(entry.__sessionId).startsWith('subagent-')) continue;
@@ -629,7 +629,7 @@ export async function runDreamExtractionDiagnostic({ agentId, rootDir = null, ge
     const activeConversationStore = conversationStore || injected?.conversations || null;
     const sessions = activeConversationStore?.listSessions ? await activeConversationStore.listSessions({ agentId: id, includeArchived: true }) : [];
     const longestPhase = phases.reduce((a,b) => PHASE_WINDOWS_DAYS[a] > PHASE_WINDOWS_DAYS[b] ? a : b);
-    const originalEntries = activeConversationStore?.dreamWindow ? await activeConversationStore.dreamWindow({ agentId: id,
+    const originalEntries = activeConversationStore?.dreamTimeline ? await activeConversationStore.dreamTimeline({ agentId: id,
       since: phaseWindowStart({ phase: longestPhase, generatedAt }), until: generatedAt }) : null;
     for (const currentPhase of phases) {
       const sessionIds = conversationSessionIds || sessions.map(session => session.sessionId).filter(Boolean);
@@ -705,7 +705,7 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     const conversationStore = stores?.conversations || null;
     const conversationSessions = conversationStore?.listSessions ? await conversationStore.listSessions({ agentId: id, includeArchived: true }) : [];
     const conversationSessionIds = conversationSessions.map((session) => session.sessionId).filter(Boolean);
-    const originalEntries = conversationStore?.dreamWindow ? await conversationStore.dreamWindow({
+    const originalEntries = conversationStore?.dreamTimeline ? await conversationStore.dreamTimeline({
       agentId: id, since: phaseWindowStart({ phase: 'rem', generatedAt }), until: generatedAt }) : null;
     for (const phase of PHASES) {
       await progress({ phase, step: 'loading_history', request: null });

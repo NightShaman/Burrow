@@ -712,6 +712,57 @@ export class PostgresSessionStore {
     }, { deadline, signal });
   }
 
+  // Dream-only raw chronological timeline. No Albdruck search, logical-key
+  // authority reconciliation. Legacy Dream suppressed truthy IDs per session;
+  // preserve that acquisition-first rule without authority joins. Equal instants
+  // retain deterministic session/store/source/ordinal acquisition order.
+  async dreamTimeline({ agentId, since, until, signal } = {}) {
+    return withPostgresTransaction(this.pool, async client => {
+      signal?.throwIfAborted();
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const abort = () => { void client.end?.(); };
+      signal?.addEventListener('abort', abort, { once: true });
+      try {
+        const entries = []; const seen = new Map();
+        const branch = live => `SELECT agent_id,session_id,'${live ? 'live' : 'archive'}'::text AS source_store,
+            ${live ? 'sequence::text' : 'source_id'} AS source_id,${live ? 'sequence' : 'ordinal'} AS ordinal,entry,created_at,entry_key,${live ? 'NULL::bigint' : 'generation'} AS generation
+            FROM ${live ? 'conversation_entries' : 'conversation_archive_entries'}
+            WHERE agent_id=$1 AND (dream_at BETWEEN $2::timestamptz AND $3::timestamptz OR dream_at IS NULL)`;
+        await client.query(`DECLARE dream_timeline NO SCROLL CURSOR FOR
+          SELECT r.* FROM ((${branch(true)}) UNION ALL (${branch(false)})) r
+          ORDER BY session_id,source_store DESC,
+            CASE WHEN source_store='live' THEN ordinal END ASC,
+            generation DESC NULLS LAST,source_id DESC,ordinal ASC`,
+          [required(agentId,'agentId'),since,until]);
+        for (;;) {
+          signal?.throwIfAborted();
+          const { rows } = await client.query('FETCH FORWARD 256 FROM dream_timeline');
+          for (const row of rows) {
+            signal?.throwIfAborted();
+            let ids = seen.get(row.session_id);
+            if (!ids) { ids = new Set(); seen.set(row.session_id, ids); }
+            if (row.entry?.id && ids.has(String(row.entry.id))) continue;
+            if (row.entry?.id) ids.add(String(row.entry.id));
+            entries.push({ ...row.entry, __sessionId: row.session_id, __storedAt: row.created_at });
+          }
+          if (rows.length < 256) break;
+        }
+        await client.query('CLOSE dream_timeline');
+        // Legacy addEntries used the first truthy ID per session, even when
+        // subsequent payloads differed. Id-less occurrences remain separate.
+        // JS date parsing matches Dream eligibility for unknown legacy dates.
+        const instant = entry => Date.parse(entry.timestamp ?? entry.ts ?? entry.at ?? entry.createdAt ?? entry.__storedAt);
+        return entries.sort((a, b) => {
+          const left = instant(a), right = instant(b);
+          return (Number.isFinite(left) ? left : Infinity) - (Number.isFinite(right) ? right : Infinity) || 0;
+        });
+      } catch (error) {
+        signal?.throwIfAborted();
+        throw error;
+      } finally { signal?.removeEventListener('abort', abort); }
+    }, { signal });
+  }
+
   // Shared original-history projection for Dream and conversation context.
   // Live wins over snapshots; snapshot precedence matches resolveOriginal.
   // One stable snapshot, indexed occurrence candidates, bounded transfer batches.
