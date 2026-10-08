@@ -12,7 +12,8 @@ import { appendPreferenceSignalAsync, markPreferenceReviewedAsync, applyPreferen
 
 const PHASES = Object.freeze(['light', 'deep', 'rem']);
 const DEFAULT_LIMIT = 12;
-const PHASE_WINDOWS_DAYS = Object.freeze({ light: 1, deep: 7, rem: 14 });
+// Historical reflection windows; durable Albdruck maintenance is independent.
+const PHASE_WINDOWS_DAYS = Object.freeze({ light: 1, deep: 14, rem: 30 });
 export const DREAM_INTERRUPTED_ERROR = 'Dream interrupted by runtime restart before completion';
 
 function text(value) { return String(value ?? '').trim(); }
@@ -673,8 +674,6 @@ export async function adjudicatePreferencesAsync({ agentId, profileStore, metada
 
 export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now(), runId: requestedRunId = null, scheduledFor = null, trigger = null, limit = DEFAULT_LIMIT, modelAdapter = null, modelConfig = null, traceLogger = null, stores } = {}) {
   const id = text(agentId); if (!id) throw new Error('dream_cycle_agent_required');
-  // Read-only reconciliation reuse is cycle-local; writes still revalidate authority.
-  const resolveReconciliationOriginal = scopedOriginalResolver(ref => stores.albdruck.resolveOriginal(ref));
   if (!stores) throw new Error('dream_cycle_stores_required');
   const { dreamSettings, profiles: profileStore, dreamDiary: diaryStore, dreamCycles: cycleStore, workingMemory: memoryStore, metadata: metadataStore } = stores || {};
   if (!dreamSettings || !profileStore || !diaryStore || !cycleStore || !memoryStore || !metadataStore) throw new Error('dream_cycle_stores_required');
@@ -727,49 +726,23 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     const phaseResults = []; const pendingDiaries = []; const selectedByKey = new Map(); const preferenceByKey = new Map();
     const extractionState = stores.dreamExtractions ? await prepareDreamExtraction({ store: stores.dreamExtractions, agentId: id, messages: phaseWindows[PHASES.reduce((longest, value) => PHASE_WINDOWS_DAYS[value] > PHASE_WINDOWS_DAYS[longest] ? value : longest)] }) : null;
     for (const phase of PHASES) {
-      await progress({ phase, step: 'extraction', batch: null, request: null, sourceMessages: phaseWindows[phase].length, sourceChars: phaseWindows[phase].reduce((sum, item) => sum + item.content.length, 0), knowledgeCompleted: 0 });
-      const messages = phaseWindows[phase]; let extraction; let extractionError = null; let extractionDiagnostics = []; const albdruckDiagnostics = [];
+      await progress({ phase, step: 'extraction', batch: null, request: null, sourceMessages: phaseWindows[phase].length, sourceChars: phaseWindows[phase].reduce((sum, item) => sum + item.content.length, 0) });
+      const messages = phaseWindows[phase]; let extraction; let extractionError = null; let extractionDiagnostics = [];
       try { extraction = extractionState ? await extractIncrementalDreamCandidates({ store: stores.dreamExtractions, agentId: id, state: extractionState, messages, generatedAt, onProgress: progress, extract: (uncovered, onBatch) => extractPhaseCandidates({ phase, messages: uncovered, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress, onBatch }) }) : await extractPhaseCandidates({ phase, messages, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress }); extractionDiagnostics = extraction.diagnostics; await progress({ step: 'reconciliation', batch: null, request: null }); const reconciled = await reconcileDreamCandidates({ phase, candidates: extraction, messages, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress }); extractionDiagnostics = [...extractionDiagnostics, ...reconciled.diagnostics]; Object.assign(extraction, reconciled); }
       catch (error) { extraction = { memories: [], preferences: [], chunks: extraction?.chunks || error.completedChunks || 0, diagnostics: [], reusedCoverage: extraction?.reusedCoverage ?? 0, newCoverage: extraction?.newCoverage ?? 0, extractionMessages: extraction?.extractionMessages ?? messages.length, ...(error.coverage || {}) }; extractionError = clamp(error?.message || error, 500); extractionDiagnostics = [...extractionDiagnostics, ...(error?.diagnostics || [])]; }
       if (phase === PHASES.reduce((longest, value) => PHASE_WINDOWS_DAYS[value] > PHASE_WINDOWS_DAYS[longest] ? value : longest)) for (const candidate of extraction.memories) { const key = `${candidate.kind}|${candidate.title.toLowerCase()}|${candidate.content.toLowerCase()}`; const existing = selectedByKey.get(key); selectedByKey.set(key, existing ? { ...existing, sourceRefs: [...new Set([...existing.sourceRefs, ...candidate.sourceRefs])] } : { ...candidate, id: entryId(id, phase, candidate.title, candidate.content), phase }); }
       const userRefs = new Set(messages.filter((message) => message.role === 'user').map((message) => message.sourceRef));
       for (const candidate of extraction.preferences) { if (!candidate.sourceRefs.every((ref) => userRefs.has(ref))) continue; const key = `${candidate.kind}|${candidate.scope.toLowerCase()}|${candidate.guidance.toLowerCase()}`; const existing = preferenceByKey.get(key); preferenceByKey.set(key, existing ? { ...existing, sourceRefs: [...new Set([...existing.sourceRefs, ...candidate.sourceRefs])] } : candidate); }
-      await progress({ step: 'knowledge_reinforcement', request: null });
-      if (stores.albdruck && !extractionError) {
-        for (const candidate of extraction.memories.filter(value => ['decision','finding'].includes(value.kind))) {
-          const refs = [];
-          try {
-            for (const sourceRef of candidate.sourceRefs) {
-              const message = messages.find(value => value.sourceRef === sourceRef);
-              if (!message?.sessionId || !message?.entryId) throw new Error('dream_albdruck_source_locator_unavailable');
-              refs.push({ kind: 'conversation_entry', agentId: id, sessionId: message.sessionId, entryId: message.entryId });
-            }
-            await progress({ knowledgeCompleted: albdruckDiagnostics.length });
-            await reconcileExistingDreamKnowledge({ store: stores.albdruck, resolveOriginal: resolveReconciliationOriginal, agentId: id, document: { claim: candidate.content, rationale: candidate.rationale, alternatives: candidate.alternatives, constraints: candidate.constraints, relationships: candidate.relationships }, sourceRefs: refs, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress });
-            albdruckDiagnostics.push({ operation: 'reinforce', ok: true, sourceRefs: refs });
-          } catch (error) {
-            // Knowledge maintenance is optional; validation and inactive-record
-            // protections remain authoritative. Never retry with weaker evidence.
-            albdruckDiagnostics.push({ operation: 'reinforce', ok: false, sourceRefs: refs, citations: [...candidate.sourceRefs], error: safeModelError(String(error?.message || error), resolvedDreamModel) });
-          }
-        }
-      }
       const selected = extraction.memories.slice(0, Math.max(1, Math.min(12, Number(limit) || DEFAULT_LIMIT)));
       await progress({ step: 'diary', request: null });
       let diaryNarrative = null; let diaryError = null;
       try { if (extractionError) throw new Error(extractionError); diaryNarrative = await generateOperatorDiary({ phase, settings, soul, items: extraction.memories, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress }); } catch (error) { diaryError = clamp(error?.message || error, 500); }
       if (diaryNarrative) pendingDiaries.push({ entryDate: generatedAt.slice(0, 10), phase, narrative: diaryNarrative, sourceRefs: selected.flatMap((item) => item.sourceRefs || []).slice(0, 16) });
-      phaseResults.push({ phase, reusedCoverage: extraction.reusedCoverage ?? 0, newCoverage: extraction.newCoverage ?? 0, extractionMessages: extraction.extractionMessages ?? messages.length, extractionChunks: extraction.chunks, windowDays: PHASE_WINDOWS_DAYS[phase], inspected: messages.length, recorded: selected.length, selected: selected.length, summary: `${phase.toUpperCase()} pass inspected ${messages.length} persisted chat message${messages.length === 1 ? '' : 's'} in its ${PHASE_WINDOWS_DAYS[phase]}-day window and selected ${selected.length} candidate${selected.length === 1 ? '' : 's'}.`, chunks: extraction.chunks, modelResponses: extractionDiagnostics, albdruckDiagnostics, ...(extractionError ? { extractionError } : {}), ...(diaryError ? { diaryError } : {}), windowStart: phaseWindowStart({ phase, generatedAt }), windowEnd: generatedAt, earliestAt: messages[0]?.at || null, latestAt: messages.at(-1)?.at || null });
+      phaseResults.push({ phase, reusedCoverage: extraction.reusedCoverage ?? 0, newCoverage: extraction.newCoverage ?? 0, extractionMessages: extraction.extractionMessages ?? messages.length, extractionChunks: extraction.chunks, windowDays: PHASE_WINDOWS_DAYS[phase], inspected: messages.length, recorded: selected.length, selected: selected.length, summary: `${phase.toUpperCase()} pass inspected ${messages.length} persisted chat message${messages.length === 1 ? '' : 's'} in its ${PHASE_WINDOWS_DAYS[phase]}-day window and selected ${selected.length} candidate${selected.length === 1 ? '' : 's'}.`, chunks: extraction.chunks, modelResponses: extractionDiagnostics, ...(extractionError ? { extractionError } : {}), ...(diaryError ? { diaryError } : {}), windowStart: phaseWindowStart({ phase, generatedAt }), windowEnd: generatedAt, earliestAt: messages[0]?.at || null, latestAt: messages.at(-1)?.at || null });
       lifecycle.phases = [...phaseResults];
       await progress({ step: 'phase_completed', request: null });
     }
     lifecycle.phases = phaseResults;
-    await progress({ phase: null, step: 'knowledge_prune', request: null });
-    if (stores.albdruck) {
-      const diagnostics = phaseResults.at(-1).albdruckDiagnostics;
-      try { await stores.albdruck.prune(); diagnostics.push({ operation: 'prune', ok: true, sourceRefs: [] }); }
-      catch (error) { diagnostics.push({ operation: 'prune', ok: false, sourceRefs: [], error: safeModelError(String(error?.message || error), resolvedDreamModel) }); }
-    }
     for (const candidate of preferenceByKey.values()) await appendPreferenceSignalAsync({ agentId: id, signal: candidate, metadataStore, at: generatedAt });
     const dreamMemoryCandidates = [...selectedByKey.values()].slice(0, Math.max(1, Math.min(36, Number(limit) * 3 || 36)));
     const memoryOwner = phaseResults.reduce((longest, value) => value.windowDays > longest.windowDays ? value : longest);
