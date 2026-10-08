@@ -68,7 +68,10 @@ function structuredFollowupInput({ prompt, content }) {
 
 function continuationPrompt({ prompt, message, toolResults, modelConfig, contextThreshold, tools, instructions, label = 'Executed continuation evidence:' }) {
   const buildPrompt = (evidence = '') => [prompt.text, '', ...instructions, '', 'User request:', message, '', label, evidence || '(no executed continuation evidence)'].join('\n');
-  const evidence = serializeContinuationEvidence({ toolResults, modelConfig, contextThreshold, tools, buildPrompt });
+  const evidence = serializeContinuationEvidence({ toolResults, modelConfig, contextThreshold, tools, buildPrompt, preparePrompt: (content) => {
+    const input = structuredFollowupInput({ prompt, content });
+    return input.messages ? { modelMessages: input.messages } : { text: input.prompt };
+  } });
   return buildPrompt(evidence);
 }
 

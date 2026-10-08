@@ -1,7 +1,7 @@
 import { skippedToolSummary } from './tool-continuation-prompt.mjs';
 import { serializeContinuationEvidence } from './continuation-evidence.mjs';
 
-export function finalAnswerAfterToolLoopPrompt({ basePrompt = '', message = '', toolResults = [], skipped = [], runtimeNotice = null, modelConfig = null, contextThreshold = null } = {}) {
+export function finalAnswerAfterToolLoopPrompt({ basePrompt = '', message = '', toolResults = [], skipped = [], runtimeNotice = null, modelConfig = null, contextThreshold = null, preparePrompt } = {}) {
   const skippedSummary = skippedToolSummary(skipped);
   const buildPrompt = (evidence = '') => [
     basePrompt, '',
@@ -12,6 +12,6 @@ export function finalAnswerAfterToolLoopPrompt({ basePrompt = '', message = '', 
     '', 'User request:', message, '', 'Executed tool evidence:', evidence || '(no executed continuation evidence)', '',
     'Skipped / not executed tool calls:', skippedSummary || '(none)',
   ].filter(Boolean).join('\n');
-  const evidence = serializeContinuationEvidence({ toolResults, modelConfig, contextThreshold, buildPrompt });
+  const evidence = serializeContinuationEvidence({ toolResults, modelConfig, contextThreshold, buildPrompt, preparePrompt });
   return buildPrompt(evidence);
 }

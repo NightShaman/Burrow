@@ -300,6 +300,10 @@ export async function runPlainModelTurn({
   // return a harmless null meter value.
   let peakContextUsage = null;
   let modelInput = modelInputForPlainTurn({ promptText: prompt.text, promptMessages: prompt.modelMessages, attachments, modelConfig, modelAdapter });
+  const followupBudgetPrompt = (content) => {
+    const input = modelInputForFollowupPrompt(content, modelInput);
+    return input.messages ? { modelMessages: input.messages } : { text: input.prompt };
+  };
   // Responses chains server-side by response ID. Chat Completions needs this
   // local, provider-native transcript so prior call/result pairs survive.
   let nativeTranscript = null;
@@ -510,8 +514,8 @@ export async function runPlainModelTurn({
         await traceLogger?.event?.('chat-tool-loop-warning', warning);
       }
       const followupPrompt = toolLoopNoProgress
-        ? finalAnswerAfterToolLoopPrompt({ basePrompt: prompt.text, message, toolResults: promptEvidenceResults, skipped: chatToolLoop.skipped, modelConfig, contextThreshold })
-        : executedToolResultPrompt({ basePrompt: prompt.text, message, toolResults: promptEvidenceResults, skipped: chatToolLoop.skipped, toolCalls: model.choice.toolCalls, iteration, runtimeNotice: warningNotice, modelConfig, contextThreshold });
+        ? finalAnswerAfterToolLoopPrompt({ basePrompt: prompt.text, message, toolResults: promptEvidenceResults, skipped: chatToolLoop.skipped, modelConfig, contextThreshold, preparePrompt: followupBudgetPrompt })
+        : executedToolResultPrompt({ basePrompt: prompt.text, message, toolResults: promptEvidenceResults, skipped: chatToolLoop.skipped, toolCalls: model.choice.toolCalls, iteration, runtimeNotice: warningNotice, modelConfig, contextThreshold, preparePrompt: followupBudgetPrompt });
       // Native continuations preserve the provider's assistant function call ↔
       // function output pairing. The prose receipt prompt remains a compatibility
       // fallback for adapters that do not implement this capability and for the
@@ -596,6 +600,7 @@ export async function runPlainModelTurn({
     }
     if (terminalLoopVerdict) {
       const finalPrompt = finalAnswerAfterToolLoopPrompt({
+        preparePrompt: followupBudgetPrompt,
         basePrompt: prompt.text,
         message,
         toolResults: promptEvidenceResults,

@@ -16,7 +16,7 @@ function skippedToolSummary(skipped = []) {
   return compact.map((item) => `- NOT EXECUTED: ${item.tool || 'tool'}${item.index === null ? '' : ` #${item.index}`} (${item.status})`).join('\n');
 }
 
-function executedToolResultPrompt({ basePrompt = '', message = '', toolResults = [], skipped = [], toolCalls = [], iteration = 1, runtimeNotice = null, modelConfig = null, contextThreshold = null } = {}) {
+function executedToolResultPrompt({ basePrompt = '', message = '', toolResults = [], skipped = [], toolCalls = [], iteration = 1, runtimeNotice = null, modelConfig = null, contextThreshold = null, preparePrompt } = {}) {
   const callSummary = compactToolCalls(toolCalls).map((call) => `${call.name} ${stableJson(call.arguments)}`).join('\n');
   const skippedSummary = skippedToolSummary(skipped);
   const buildPrompt = (evidence = '') => [
@@ -30,7 +30,7 @@ function executedToolResultPrompt({ basePrompt = '', message = '', toolResults =
     'Skipped / not executed tool calls:', skippedSummary || '(none)', '',
     'Truth constraint: never describe a skipped tool call as completed. If a requested edit/write/append/change was skipped or lacks executed mutation evidence, say the file was NOT edited.',
   ].filter(Boolean).join('\n');
-  const evidence = serializeContinuationEvidence({ toolResults, modelConfig, contextThreshold, tools: nativeToolSchemas(), buildPrompt });
+  const evidence = serializeContinuationEvidence({ toolResults, modelConfig, contextThreshold, tools: nativeToolSchemas(), buildPrompt, preparePrompt });
   return buildPrompt(evidence);
 }
 

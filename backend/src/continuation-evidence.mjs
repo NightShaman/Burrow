@@ -70,10 +70,10 @@ function render({ included = [], omitted = 0, raw = [] } = {}) {
 
 // The only model-visible continuation-evidence serializer. It reads existing
 // receipts/results, persists nothing, and has no semantic classifier.
-export function serializeContinuationEvidence({ toolResults = [], modelConfig = null, contextThreshold, buildPrompt, tools = null } = {}) {
+export function serializeContinuationEvidence({ toolResults = [], modelConfig = null, contextThreshold, buildPrompt, tools = null, preparePrompt = (value) => ({ text: value }) } = {}) {
   if (typeof buildPrompt !== 'function') throw new Error('continuation_evidence_prompt_builder_required');
   const cards = (toolResults || []).map((result, index) => ({ receipt: projection(result), raw: rawFields(result), priority: priority(result), index })).sort((a, b) => a.priority - b.priority || b.index - a.index);
-  const initial = inspectAssembledPromptBudget({ prompt: { text: buildPrompt(render({ included: cards, raw: [] })) }, modelConfig, tools });
+  const initial = inspectAssembledPromptBudget({ prompt: preparePrompt(buildPrompt(render({ included: cards, raw: [] }))), modelConfig, tools });
   // Genuinely unknown capacity never licenses raw evidence. Keep the complete
   // deterministic receipt projection, which is compact runtime fact data.
   if (initial.contextTokens === null) return render({ included: cards, raw: [] });
@@ -81,25 +81,42 @@ export function serializeContinuationEvidence({ toolResults = [], modelConfig = 
   // Keep deterministic receipts only rather than inventing a threshold.
   if (!Number.isFinite(Number(contextThreshold)) || contextThreshold <= 0 || contextThreshold >= 1) return render({ included: cards, raw: [] });
   const fits = (evidence) => {
-    const inspection = inspectAssembledPromptBudget({ prompt: { text: buildPrompt(evidence) }, modelConfig, tools });
+    const inspection = inspectAssembledPromptBudget({ prompt: preparePrompt(buildPrompt(evidence)), modelConfig, tools });
     return inspection.estimatedTokens <= Math.floor(inspection.contextTokens * contextThreshold);
   };
+  // Reserve every disclosure before allocating optional projections/excerpts.
   const included = [];
-  let omitted = 0;
-  for (const card of cards) {
-    if (fits(render({ included: [...included, card], omitted, raw: [] }))) included.push(card);
-    else omitted += 1;
+  let omitted = cards.length;
+  if (!fits(render({ included, omitted, raw: [] }))) {
+    throw new Error('continuation_evidence_preservation_budget_exceeded');
   }
-  const base = inspectAssembledPromptBudget({ prompt: { text: buildPrompt(render({ included, omitted, raw: [] })) }, modelConfig, tools });
-  const raw = [];
-  for (const card of included) for (const source of card.raw) {
+  for (const card of cards) {
+    if (fits(render({ included: [...included, card], omitted: omitted - 1, raw: [] }))) {
+      included.push(card);
+      omitted -= 1;
+    }
+  }
+  const sources = included.flatMap(card => card.raw);
+  const raw = sources.map(source => ({ label: source.label, text: '', omitted: source.text.length, originalItems: source.originalItems || null }));
+  // If field-level disclosures cannot fit, disclose their collective omission
+  // instead; never append a zero-length field after a failed fit test.
+  const rawOmission = sources.length ? `[${sources.length} evidence fields omitted by provider request budget; full details remain in artifacts/trace]` : '';
+  const renderWithFields = (fields) => render({ included, omitted, raw: fields });
+  if (!fits(renderWithFields(raw))) {
+    const fallback = `${renderWithFields([])}\n\n${rawOmission}`;
+    if (fits(fallback)) return fallback;
+    const minimal = render({ included: [], omitted: cards.length, raw: [] });
+    if (fits(minimal)) return minimal;
+    throw new Error('continuation_evidence_preservation_budget_exceeded');
+  }
+  for (const [index, source] of sources.entries()) {
     let low = 0; let high = source.text.length; let best = 0;
     while (low <= high) {
       const length = Math.floor((low + high) / 2);
-      const candidate = [...raw, { label: source.label, text: source.text.slice(0, length), omitted: source.text.length - length, originalItems: source.originalItems || null }];
-      if (fits(render({ included, omitted, raw: candidate }))) { best = length; low = length + 1; } else high = length - 1;
+      const candidate = raw.map((item, i) => i === index ? { ...item, text: source.text.slice(0, length), omitted: source.text.length - length } : item);
+      if (fits(renderWithFields(candidate))) { best = length; low = length + 1; } else high = length - 1;
     }
-    raw.push({ label: source.label, text: source.text.slice(0, best), omitted: source.text.length - best, originalItems: source.originalItems || null });
+    raw[index] = { ...raw[index], text: source.text.slice(0, best), omitted: source.text.length - best };
   }
-  return render({ included, omitted, raw });
+  return renderWithFields(raw);
 }
