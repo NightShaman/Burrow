@@ -722,6 +722,11 @@ export class PostgresSessionStore {
       const abort = () => { void client.end?.(); };
       signal?.addEventListener('abort', abort, { once: true });
       try {
+        // OFFSET 0 keeps the existence check parameterized by each candidate.
+        // Without this fence PostgreSQL can decorrelate it into a merge anti-join,
+        // sorting the entire retained authority again for every 256-row page.
+        // The authority is deliberately NOT time-filtered: an out-of-window
+        // occurrence can still supersede an in-window original.
         const entries = []; let after = null;
         for (;;) {
           signal?.throwIfAborted();
@@ -733,7 +738,7 @@ export class PostgresSessionStore {
             WHERE ($4::text IS NULL OR (session_id,source_store,source_id,ordinal)>($4,$5,$6,$7::bigint))
             AND NOT EXISTS (SELECT 1 FROM conversation_original_rows newer
               WHERE newer.agent_id=r.agent_id AND newer.session_id=r.session_id
-              AND burrow_history_key(newer.entry_key)=burrow_history_key(r.entry_key) AND ${originalNewerSQL()})
+              AND burrow_history_key(newer.entry_key)=burrow_history_key(r.entry_key) AND ${originalNewerSQL()} OFFSET 0)
             ORDER BY session_id,source_store,source_id,ordinal LIMIT 256`,
             [required(agentId,'agentId'),since,until,...(after || [null,null,null,null])]);
           for (const row of rows) entries.push({ ...row.entry, __sessionId: row.session_id,
