@@ -104,4 +104,5 @@ ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS effective_timezone TEXT;` },
   { version: 41, name: 'logical-original-lookup-indexes', sql: POSTGRES_LOGICAL_LOOKUP_INDEX_SQL },
   { version: 42, name: 'indexed-dream-occurrence-windows', sql: POSTGRES_DREAM_WINDOW_SQL },
   { version: 43, name: 'durable-agent-message-deliveries', sql: POSTGRES_AGENT_DELIVERY_SCHEMA_SQL },
+  { version: 44, name: 'dream-quiet-day-setting', sql: 'ALTER TABLE dream_settings ADD COLUMN IF NOT EXISTS quiet_day_dreams BOOLEAN NOT NULL DEFAULT TRUE;' },
 ]);

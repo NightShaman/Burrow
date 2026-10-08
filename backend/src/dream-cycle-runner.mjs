@@ -1,4 +1,4 @@
-import { prepareDreamExtraction, extractIncrementalDreamCandidates } from './dream-incremental-extraction.mjs';
+import { dreamSourceIdentity, prepareDreamExtraction, extractIncrementalDreamCandidates } from './dream-incremental-extraction.mjs';
 import { redactProtectedText } from './redaction.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { resolveModelConfig } from './config.mjs';
@@ -166,6 +166,8 @@ function safeResidueItems(items = []) {
   return items.map((item) => ({
     title: clamp(item.title, 96),
     content: text(item.content),
+    ...(item.rationale ? { rationale: text(item.rationale) } : {}),
+    ...Object.fromEntries(['alternatives', 'constraints', 'relationships'].filter(key => item[key]?.length).map(key => [key, item[key].map(text)])),
   })).filter((item) => item.title || item.content);
 }
 
@@ -725,10 +727,16 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     if (!dreamAdapter && resolvedDreamModel?.model) dreamAdapter = createModelAdapter({ config: { ...resolvedDreamModel, temperature: settings.temperature ?? resolvedDreamModel.temperature ?? 0.2, reasoningEffort: 'off' } });
     const phaseResults = []; const pendingDiaries = []; const selectedByKey = new Map(); const preferenceByKey = new Map();
     const extractionState = stores.dreamExtractions ? await prepareDreamExtraction({ store: stores.dreamExtractions, agentId: id, messages: phaseWindows[PHASES.reduce((longest, value) => PHASE_WINDOWS_DAYS[value] > PHASE_WINDOWS_DAYS[longest] ? value : longest)] }) : null;
+    // Extraction coverage is not proof that downstream work completed. Commit
+    // this evidence fingerprint only after memory, preferences and diaries succeed.
+    const processingKey = `dream-processing:${id}`;
+    const fingerprint = createHash('sha256').update(JSON.stringify(PHASES.map(phase => [phase, phaseWindows[phase].map(dreamSourceIdentity)]))).digest('hex');
+    const processed = extractionState ? await metadataStore.get(processingKey) : null;
+    const needsProcessing = !extractionState || (processed?.fingerprint !== fingerprint && (Boolean(processed) || phaseWindows.rem.length > 0));
     for (const phase of PHASES) {
       await progress({ phase, step: 'extraction', batch: null, request: null, sourceMessages: phaseWindows[phase].length, sourceChars: phaseWindows[phase].reduce((sum, item) => sum + item.content.length, 0) });
       const messages = phaseWindows[phase]; let extraction; let extractionError = null; let extractionDiagnostics = [];
-      try { extraction = extractionState ? await extractIncrementalDreamCandidates({ store: stores.dreamExtractions, agentId: id, state: extractionState, messages, generatedAt, onProgress: progress, extract: (uncovered, onBatch) => extractPhaseCandidates({ phase, messages: uncovered, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress, onBatch }) }) : await extractPhaseCandidates({ phase, messages, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress }); extractionDiagnostics = extraction.diagnostics; await progress({ step: 'reconciliation', batch: null, request: null }); const reconciled = await reconcileDreamCandidates({ phase, candidates: extraction, messages, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress }); extractionDiagnostics = [...extractionDiagnostics, ...reconciled.diagnostics]; Object.assign(extraction, reconciled); }
+      try { extraction = extractionState ? await extractIncrementalDreamCandidates({ store: stores.dreamExtractions, agentId: id, state: extractionState, messages, generatedAt, onProgress: progress, extract: (uncovered, onBatch) => extractPhaseCandidates({ phase, messages: uncovered, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress, onBatch }) }) : await extractPhaseCandidates({ phase, messages, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress }); extractionDiagnostics = extraction.diagnostics; }
       catch (error) { extraction = { memories: [], preferences: [], chunks: extraction?.chunks || error.completedChunks || 0, diagnostics: [], reusedCoverage: extraction?.reusedCoverage ?? 0, newCoverage: extraction?.newCoverage ?? 0, extractionMessages: extraction?.extractionMessages ?? messages.length, ...(error.coverage || {}) }; extractionError = clamp(error?.message || error, 500); extractionDiagnostics = [...extractionDiagnostics, ...(error?.diagnostics || [])]; }
       if (phase === PHASES.reduce((longest, value) => PHASE_WINDOWS_DAYS[value] > PHASE_WINDOWS_DAYS[longest] ? value : longest)) for (const candidate of extraction.memories) { const key = `${candidate.kind}|${candidate.title.toLowerCase()}|${candidate.content.toLowerCase()}`; const existing = selectedByKey.get(key); selectedByKey.set(key, existing ? { ...existing, sourceRefs: [...new Set([...existing.sourceRefs, ...candidate.sourceRefs])] } : { ...candidate, id: entryId(id, phase, candidate.title, candidate.content), phase }); }
       const userRefs = new Set(messages.filter((message) => message.role === 'user').map((message) => message.sourceRef));
@@ -736,33 +744,34 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
       const selected = extraction.memories.slice(0, Math.max(1, Math.min(12, Number(limit) || DEFAULT_LIMIT)));
       await progress({ step: 'diary', request: null });
       let diaryNarrative = null; let diaryError = null;
-      try { if (extractionError) throw new Error(extractionError); diaryNarrative = await generateOperatorDiary({ phase, settings, soul, items: extraction.memories, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress }); } catch (error) { diaryError = clamp(error?.message || error, 500); }
+      try { if (extractionError) throw new Error(extractionError); if (!needsProcessing && settings.quietDayDreams === false) throw new Error('dream_quiet_day_disabled'); diaryNarrative = await generateOperatorDiary({ phase, settings, soul, items: extraction.memories, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress }); } catch (error) { if (error?.message !== 'dream_quiet_day_disabled') diaryError = clamp(error?.message || error, 500); }
       if (diaryNarrative) pendingDiaries.push({ entryDate: generatedAt.slice(0, 10), phase, narrative: diaryNarrative, sourceRefs: selected.flatMap((item) => item.sourceRefs || []).slice(0, 16) });
       phaseResults.push({ phase, reusedCoverage: extraction.reusedCoverage ?? 0, newCoverage: extraction.newCoverage ?? 0, extractionMessages: extraction.extractionMessages ?? messages.length, extractionChunks: extraction.chunks, windowDays: PHASE_WINDOWS_DAYS[phase], inspected: messages.length, recorded: selected.length, selected: selected.length, summary: `${phase.toUpperCase()} pass inspected ${messages.length} persisted chat message${messages.length === 1 ? '' : 's'} in its ${PHASE_WINDOWS_DAYS[phase]}-day window and selected ${selected.length} candidate${selected.length === 1 ? '' : 's'}.`, chunks: extraction.chunks, modelResponses: extractionDiagnostics, ...(extractionError ? { extractionError } : {}), ...(diaryError ? { diaryError } : {}), windowStart: phaseWindowStart({ phase, generatedAt }), windowEnd: generatedAt, earliestAt: messages[0]?.at || null, latestAt: messages.at(-1)?.at || null });
       lifecycle.phases = [...phaseResults];
       await progress({ step: 'phase_completed', request: null });
     }
     lifecycle.phases = phaseResults;
-    for (const candidate of preferenceByKey.values()) await appendPreferenceSignalAsync({ agentId: id, signal: candidate, metadataStore, at: generatedAt });
+    if (needsProcessing) for (const candidate of preferenceByKey.values()) await appendPreferenceSignalAsync({ agentId: id, signal: candidate, metadataStore, at: generatedAt });
     const dreamMemoryCandidates = [...selectedByKey.values()].slice(0, Math.max(1, Math.min(36, Number(limit) * 3 || 36)));
     const memoryOwner = phaseResults.reduce((longest, value) => value.windowDays > longest.windowDays ? value : longest);
     await progress({ step: 'dream_memory', request: null });
-    const consolidation = memoryOwner.extractionError ? { itemCount: 0, preserved: true } : await consolidateDreamMemoryAsync({ agentId: id, workingMemoryStore: memoryStore, profileStore, limit, generatedAt, items: dreamMemoryCandidates });
+    const consolidation = (memoryOwner.extractionError || !needsProcessing) ? { itemCount: 0, preserved: true } : await consolidateDreamMemoryAsync({ agentId: id, workingMemoryStore: memoryStore, profileStore, limit, generatedAt, items: dreamMemoryCandidates });
     const preloadItems = dreamMemoryCandidates.slice(0, 5).map((item) => ({ id: item.id, title: item.title, content: item.content, sourceRefs: item.sourceRefs }));
     const preloadExpiry = new Date(new Date(generatedAt).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const preloadProjects = [...new Set(dreamMemoryCandidates.map((item) => text(item.project)).filter(Boolean))];
     await progress({ step: 'preload' });
     const dreamPreloads = [];
     const preloadScopes = [{ project: 'global', items: preloadItems }, ...preloadProjects.filter(project => project !== 'global').slice(0, 8).map(project => ({ project, items: dreamMemoryCandidates.filter(item => item.project === project).slice(0, 5).map(item => ({ id: item.id, title: item.title, content: item.content, sourceRefs: item.sourceRefs })) }))];
-    if (!phaseResults.some(phase => phase.extractionError)) dreamPreloads.push(...await memoryStore.replaceDreamPreloads({ agentId: id, scopes: preloadScopes, expiresAt: preloadExpiry }));
+    if (needsProcessing && !phaseResults.some(phase => phase.extractionError)) dreamPreloads.push(...await memoryStore.replaceDreamPreloads({ agentId: id, scopes: preloadScopes, expiresAt: preloadExpiry }));
     await progress({ step: 'preferences' });
-    const preferences = await adjudicatePreferencesAsync({ agentId: id, profileStore, metadataStore, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress });
+    const preferences = !needsProcessing ? { disposition: 'quiet', signalCount: 0 } : await adjudicatePreferencesAsync({ agentId: id, profileStore, metadataStore, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress });
     await progress({ step: 'saving_diaries', request: null });
     for (const entry of pendingDiaries) { const saved = await diaryStore.append(id, entry); const phase = phaseResults.find((result) => result.phase === entry.phase); if (phase) phase.diaryId = saved.id; }
     await progress({ step: 'finalizing' });
     const completedAt = now(); const state = await cycleStore.ensureState({ agentId: id, settings: { ...settings, lastRunAt: generatedAt }, at: completedAt });
     const nextRunAt = state.nextRunAt;
     const hasErrors = phaseResults.some((phase) => phase.extractionError || phase.diaryError);
+    if (extractionState && needsProcessing && !hasErrors && preferences.disposition !== 'failed') await metadataStore.set(processingKey, { fingerprint, completedAt });
     const receipt = { ...lifecycle, ok: !hasErrors, error: hasErrors ? phaseResults.map((phase) => phase.extractionError || phase.diaryError).find(Boolean) : null, status: hasErrors ? (pendingDiaries.length ? 'partial' : 'failed') : 'completed', phases: phaseResults, dreamMemoryItemCount: consolidation.itemCount, dreamMemoryPreserved: consolidation.preserved === true, dreamPreloadCount: dreamPreloads.length, preferences, nextRunAt, completedAt };
     receipt.progress = { ...receipt.progress, step: 'finished', updatedAt: completedAt, elapsedMs: Date.parse(completedAt) - Date.parse(startedAt) };
     await cycleStore.write(receipt, completedAt); return receipt;

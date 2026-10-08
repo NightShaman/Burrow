@@ -6,7 +6,7 @@ import { api } from '../../app/api';
 import { Field, SettingSection } from './SettingsPrimitives';
 
 type DreamModel = { modelConnectionId?: string | null; model?: string | null };
-type DreamSettings = { enabled: boolean; cron: string; timezone: string | null; effectiveTimezone?: string; prompt: string } & DreamModel;
+type DreamSettings = { enabled: boolean; quietDayDreams: boolean; cron: string; timezone: string | null; effectiveTimezone?: string; prompt: string } & DreamModel;
 type DreamSettingsResponse = { settings: DreamSettings; effectiveModel?: DreamModel | null; modelResolutionError?: string | null };
 type DreamCycleReceipt = {
   runId: string;
@@ -67,7 +67,7 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
   const resourceId = agentId.includes('::') ? agentId.slice(agentId.indexOf('::') + 2) : agentId;
   const request = <T,>(path: string, init?: RequestInit) => api<T>(path, init);
   const dreamModels = savedProviders.flatMap((provider) => provider.models.map((model) => ({ connectionId: provider.id, model, label: `${provider.provider} · ${provider.modelLabels?.[model] ?? model}` })));
-  const [settings, setSettings] = useState<DreamSettings>({ enabled: false, cron: '0 4 * * *', timezone: null, prompt: '', modelConnectionId: null, model: null });
+  const [settings, setSettings] = useState<DreamSettings>({ enabled: false, quietDayDreams: true, cron: '0 4 * * *', timezone: null, prompt: '', modelConnectionId: null, model: null });
   const selectedDreamModel = settingsModelValue(settings);
   const [state, setState] = useState<'loading' | 'idle' | 'saving' | 'error'>('loading');
   const [retry, setRetry] = useState(0);
@@ -81,7 +81,7 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
   useEffect(() => {
     const version = ++requestVersion.current;
     const controller = new AbortController();
-    setState('loading'); setError(''); setSettings({ enabled: false, cron: '0 4 * * *', timezone: null, prompt: '', modelConnectionId: null, model: null }); setEffectiveModel(null); setModelResolutionError(null); setReceiptError(''); setReceipts([]);
+    setState('loading'); setError(''); setSettings({ enabled: false, quietDayDreams: true, cron: '0 4 * * *', timezone: null, prompt: '', modelConnectionId: null, model: null }); setEffectiveModel(null); setModelResolutionError(null); setReceiptError(''); setReceipts([]);
     Promise.all([
       request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-settings`, { signal: controller.signal }),
       request<DreamCycleResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-cycle?limit=5`, { signal: controller.signal }).catch((cause) => {
@@ -90,7 +90,7 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
       }),
     ]).then(([dreamSettings, dreamCycles]) => {
       if (controller.signal.aborted || version !== requestVersion.current) return;
-      setSettings(dreamSettings.settings);
+      setSettings({ ...dreamSettings.settings, quietDayDreams: dreamSettings.settings.quietDayDreams ?? true });
       setEffectiveModel(dreamSettings.effectiveModel ?? null);
       setModelResolutionError(dreamSettings.modelResolutionError ?? null);
       setReceipts(Array.isArray(dreamCycles.receipts) ? dreamCycles.receipts : []);
@@ -107,9 +107,9 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
     const version = requestVersion.current;
     setState('saving'); setError('');
     try {
-      const result = await request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-settings`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: settings.enabled, cron: settings.cron, timezone: settings.timezone, prompt: settings.prompt, modelConnectionId: settings.modelConnectionId ?? null, model: settings.model ?? null }) });
+      const result = await request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-settings`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: settings.enabled, quietDayDreams: settings.quietDayDreams, cron: settings.cron, timezone: settings.timezone, prompt: settings.prompt, modelConnectionId: settings.modelConnectionId ?? null, model: settings.model ?? null }) });
       if (version !== requestVersion.current) return;
-      setSettings(result.settings);
+      setSettings({ ...result.settings, quietDayDreams: result.settings.quietDayDreams ?? true });
       setEffectiveModel(result.effectiveModel ?? null);
       setModelResolutionError(result.modelResolutionError ?? null);
     } catch (cause) {
@@ -145,6 +145,8 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
     <p className="settings-description">Configure scheduled dreaming for this agent.</p>{state === 'error' && <button type="button" onClick={() => setRetry(value => value + 1)}>Retry loading</button>}
     <div className="dream-settings-fields">
       <label className="agent-enabled"><input type="checkbox" checked={settings.enabled} disabled={disabled} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} /><span>Enable scheduled dreaming</span></label>
+      <label className="agent-enabled"><input type="checkbox" checked={settings.quietDayDreams} disabled={disabled} aria-describedby="quiet-day-dreams-help" onChange={(event) => setSettings({ ...settings, quietDayDreams: event.target.checked })} /><span>Dream on quiet days</span></label>
+      <p id="quiet-day-dreams-help" className="settings-description">When enabled, quiet days generate a diary from retained continuity without re-extraction. When disabled, days with no new material skip model work.</p>
       <div className="dream-schedule-fields"><Field label="Cron"><input value={settings.cron} disabled={disabled} onChange={(event) => setSettings({ ...settings, cron: event.target.value })} /></Field><Field label="Timezone"><label><input type="checkbox" aria-label="Use operator timezone" checked={settings.timezone === null} disabled={disabled} onChange={event => setSettings({ ...settings, timezone: event.target.checked ? null : settings.effectiveTimezone || '' })} />Use operator timezone</label>{settings.timezone === null ? <small className="field-hint">Effective timezone: {settings.effectiveTimezone || 'Loading…'}. Follows operator timezone changes.</small> : <input value={settings.timezone} disabled={disabled} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} />}</Field><Field label="Model"><DreamModelSelect value={selectedDreamModel} model={settings} options={[{ value: '', label: 'Use agent chat model' }, ...dreamModels.map((option) => ({ value: dreamModelValue(option.connectionId, option.model), label: option.label }))]} onChange={(value) => setSettings({ ...settings, ...dreamModelFromValue(value) })} disabled={disabled} /></Field></div>
       <p className="settings-description">Effective model: {effectiveModel?.modelConnectionId && effectiveModel.model ? modelLabel(effectiveModel, [{ value: '', label: 'Use agent chat model' }, ...dreamModels.map((option) => ({ value: dreamModelValue(option.connectionId, option.model), label: option.label }))]) : 'Unconfigured'}</p>
       {modelResolutionError && <p className="settings-request-error" role="alert">Model resolution error: {modelResolutionError}</p>}
