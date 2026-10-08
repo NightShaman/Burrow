@@ -12,7 +12,7 @@ import { appendPreferenceSignalAsync, markPreferenceReviewedAsync, applyPreferen
 
 const PHASES = Object.freeze(['light', 'deep', 'rem']);
 const DEFAULT_LIMIT = 12;
-const PHASE_WINDOWS_DAYS = Object.freeze({ light: 1, deep: 14, rem: 30 });
+const PHASE_WINDOWS_DAYS = Object.freeze({ light: 1, deep: 7, rem: 14 });
 export const DREAM_INTERRUPTED_ERROR = 'Dream interrupted by runtime restart before completion';
 
 function text(value) { return String(value ?? '').trim(); }
