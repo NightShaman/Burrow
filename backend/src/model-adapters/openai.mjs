@@ -24,6 +24,14 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
   const url = mode === 'openai-responses' ? responsesUrl(config) : completionUrl(config);
   const model = config.model;
   const wireModel = googleCompatibleWireModel(config);
+  // ChatGPT/Codex cache affinity is tied to the native session/thread headers,
+  // not only to prompt_cache_key. Keep the turn token private to this adapter
+  // instance; the provider may return it for subsequent calls in the same run.
+  let codexTurnState = null;
+  const codexAffinityId = (value) => {
+    const normalized = String(value || '').trim();
+    return normalized || null;
+  };
   if (!model) throw new Error('model is required');
 
   const imageCountFor = (messages = []) => (Array.isArray(messages) ? messages : []).reduce((count, message) => count + (Array.isArray(message?.content) ? message.content.filter((part) => part?.type === 'image_url' || part?.type === 'input_image' || part?.image_url || part?.input_image).length : 0), 0);
@@ -122,6 +130,13 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
         ...(config.headers || {}),
       };
+      if (chatGptBackend) {
+        const sessionId = codexAffinityId(config.codexSessionId || traceLogger?.sessionId);
+        const threadId = codexAffinityId(config.codexThreadId || traceLogger?.conversationId || traceLogger?.sessionId);
+        if (sessionId && !headers['session-id'] && !headers['Session-Id']) headers['session-id'] = sessionId;
+        if (threadId && !headers['thread-id'] && !headers['Thread-Id']) headers['thread-id'] = threadId;
+        if (codexTurnState && !headers['x-codex-turn-state'] && !headers['X-Codex-Turn-State']) headers['x-codex-turn-state'] = codexTurnState;
+      }
       const streaming = chatGptBackend || typeof onTextDelta === 'function' || typeof onThoughtDelta === 'function';
       const { body, providerMessages, providerMessageCount, providerMessageManifest, providerPromptChars, serializedBody, resolvedTools, resolvedToolNames, stablePrefixHash, continuation: isToolContinuation, nativeTranscript } = buildRequest({ prompt, messages, temperature, maxTokens, tools, toolChoice, toolContinuation, streaming });
       // Keep a bounded, exact copy of the transmitted provider body for the
@@ -166,6 +181,10 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       });
 
       const response = await invokeProviderFetch(fetchImpl, url, { method: 'POST', headers, body: serializedBody, ...(signal ? { signal } : {}) }, { traceLogger, requestId, provider: 'openai-compatible', api: mode, model, modelCall, clock, timing });
+      if (chatGptBackend) {
+        const returnedTurnState = response?.headers?.get?.('x-codex-turn-state') || response?.headers?.get?.('x-codex-turn-state-token');
+        if (returnedTurnState) codexTurnState = String(returnedTurnState);
+      }
       // Some OpenAI-compatible proxies silently ignore `stream: true`. Fall
       // back to their normal JSON response rather than converting a complete
       // answer into an empty streamed one.

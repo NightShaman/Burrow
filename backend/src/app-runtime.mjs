@@ -222,7 +222,7 @@ async function runAskChatUnserialized({
     agentId: runtimeState.agentId,
     sessionId: resolvedSessionId,
   });
-  const logger = createTraceLogger({ rootDir: traceRoot, runId: resolvedRunId, sessionId: resolvedSessionId, onRecord: onTraceRecord });
+  const logger = createTraceLogger({ rootDir: traceRoot, runId: resolvedRunId, sessionId: resolvedSessionId, conversationId, onRecord: onTraceRecord });
   if (latencyTiming) await logger.event('chat-admission-timing', { ...latencyTiming, clockDomain: 'server-process' });
   const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, logger, testHooks });
   const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, inboundEntryId, parentSignal = null }) => {

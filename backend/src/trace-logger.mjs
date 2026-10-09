@@ -64,7 +64,7 @@ export function compactTracePayload(payload = {}) {
   return boundedTraceValue(payload, { remaining: TRACE_PAYLOAD_CHAR_BUDGET });
 }
 
-export function createTraceLogger({ rootDir, runId, sessionId, clock = nowIso, onRecord = null } = {}) {
+export function createTraceLogger({ rootDir, runId, sessionId, conversationId = null, clock = nowIso, onRecord = null } = {}) {
   if (!rootDir) throw new Error('rootDir is required');
   const resolvedRunId = safeId(runId || `${clock()}-${randomUUID()}`);
   const traceDir = path.join(rootDir, resolvedRunId);
@@ -163,6 +163,8 @@ export function createTraceLogger({ rootDir, runId, sessionId, clock = nowIso, o
     flushDiagnostics,
     rootDir,
     runId: resolvedRunId,
+    sessionId: sessionId || null,
+    conversationId: conversationId || null,
     traceDir,
     event,
     router,
