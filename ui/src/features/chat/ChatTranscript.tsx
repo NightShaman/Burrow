@@ -1,3 +1,4 @@
+import { chatLiveStageLabel, type ChatLiveStage } from './chatLiveStage';
 import { ImagePreview } from '../../app/ImagePreview';
 import { isValidElement, memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { HTMLAttributes, ReactNode, SyntheticEvent } from 'react';
@@ -26,13 +27,14 @@ type ChatTranscriptProps = {
   activeToolActivity?: ToolActivity;
   liveProgress: ProgressEntry[];
   liveAnswer: string;
+  liveStage?: ChatLiveStage;
   a2aActivities?: import('../../app/api').ActiveA2AActivity[];
   runtimeUserMessage?: string;
   runtimeChildActivities?: ToolActivity[];
   attachmentAgentId?: string;
 };
 
-export const ChatTranscript = memo(function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, a2aActivities = [], runtimeUserMessage = '', runtimeChildActivities = [], attachmentAgentId }: ChatTranscriptProps) {
+export const ChatTranscript = memo(function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, liveStage, a2aActivities = [], runtimeUserMessage = '', runtimeChildActivities = [], attachmentAgentId }: ChatTranscriptProps) {
   const isSubagent = 'stream' in selected;
   const messages = turns.filter((turn) => turn.type === 'message' && turn.metadata?.visibility !== 'debug' && turn.metadata?.kind !== 'subagent-runtime-context' && turn.metadata?.kind !== 'subagent-task' && (turn.content || turn.metadata?.attachments?.length || turn.metadata?.outputArtifacts?.length) && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && isChatCommand(textFromChatValue(turn.content))));
   const activityByRun = new Map<string, ToolActivity>();
@@ -80,7 +82,7 @@ export const ChatTranscript = memo(function ChatTranscript({ selected, parent, o
       })}
       {a2aActivities.length > 0 && <section className="a2a-activity-list" aria-label="Agent-to-agent activity">{a2aActivities.map((activity) => <A2AActivityCard key={activity.id} activity={activity} selectedName={selected.name} />)}</section>}
       {visibleRuntimeChildActivities.length > 0 && <section className="a2a-activity-list" aria-label="Minion activity">{visibleRuntimeChildActivities.map((activity) => <ToolActivityCard key={activity.runId} activity={activity} live={activity.status === 'running'} />)}</section>}
-      {isSending && !messages.some((turn) => turn.role === 'assistant' && turn.runId === activeRunId && Boolean(turn.metadata?.progress || turn.metadata?.toolActivity || turn.content)) && <LiveAssistantTurn name={selected.name} avatar={selected.avatar} progress={liveProgress} activity={activeActivity} answer={liveAnswer} />}
+      {isSending && !messages.some((turn) => turn.role === 'assistant' && turn.runId === activeRunId && Boolean(turn.metadata?.progress || turn.metadata?.toolActivity || turn.content)) && <LiveAssistantTurn name={selected.name} avatar={selected.avatar} progress={liveProgress} activity={activeActivity} answer={liveAnswer} stage={liveStage} />}
     </>}
       {error && <p className="chat-error" role="alert">{error}</p>}
   </div>;
@@ -169,7 +171,7 @@ function StreamedAnswerCard({ text }: { text: string }) {
 
 function avatarSource(value: string) { return /^(?:data:image\/[\w+.-]+;base64,|https?:\/\/|blob:|\/)/.test(value.trim()) ? value.trim() : null; }
 
-function LiveAssistantTurn({ name, avatar, progress, activity, answer }: { name: string; avatar: string; progress: ProgressEntry[]; activity?: ToolActivity; answer: string }) { const image = avatarSource(avatar); return <article className="message agent live-assistant-turn"><div className="message-avatar" aria-label={`${name} avatar`}>{image ? <img src={image} alt="" /> : avatar}</div><div className="message-content"><small>{name.toUpperCase()} · NOW</small>{activity && <ToolActivityCard activity={activity} live />}{progress.length > 0 && <ProgressCard items={progress} live />}{answer ? <div className="message-bubble final-answer live-answer"><Markdown>{answer}</Markdown><span className="stream-caret" aria-hidden="true" /></div> : !progress.length && !activity && <div className="live-waiting" role="status">Waiting for progress…</div>}</div></article>; }
+function LiveAssistantTurn({ name, avatar, progress, activity, answer, stage }: { name: string; avatar: string; progress: ProgressEntry[]; activity?: ToolActivity; answer: string; stage?: ChatLiveStage }) { const image = avatarSource(avatar); return <article className="message agent live-assistant-turn"><div className="message-avatar" aria-label={`${name} avatar`}>{image ? <img src={image} alt="" /> : avatar}</div><div className="message-content"><small>{name.toUpperCase()} · NOW</small>{activity && <ToolActivityCard activity={activity} live />}{progress.length > 0 && <ProgressCard items={progress} live />}{answer ? <div className="message-bubble final-answer live-answer"><Markdown>{answer}</Markdown><span className="stream-caret" aria-hidden="true" /></div> : !progress.length && !activity && <div className="live-waiting" role="status">{chatLiveStageLabel(stage)}</div>}</div></article>; }
 
 type ModelErrorDetails = { overloaded: boolean; message: string };
 

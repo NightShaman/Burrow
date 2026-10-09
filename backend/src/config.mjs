@@ -75,7 +75,7 @@ async function resolveInjectedModel(connectionId, modelId, args = {}) {
   if (!connection) throw new Error('model_connection_not_found');
   const model = selectedModels(connection).find((item) => item.id === modelId);
   if (!model) throw new Error('model_not_enabled_for_connection');
-  const auth = await store.resolveAuth(connection.id, { fetchImpl: args.fetchImpl ?? fetch });
+  const auth = await store.resolveAuth(connection.id, { fetchImpl: args.fetchImpl ?? fetch, signal: args.abort_signal ?? args.abortSignal });
   const token = auth?.token ?? auth?.apiKey ?? auth?.accessToken;
   return { connection, model, auth: { ...auth, token } };
 }

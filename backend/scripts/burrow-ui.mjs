@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { createChatStreamDelta } from '../src/chat-stream-delta.mjs';
+import { serializeSessionAdmission } from '../src/session-admission.mjs';
 import { createBrainRoutes } from './ui/brain-routes.mjs';
 import { archiveRunListPage } from './ui/archive-run-list.mjs';
 import { completeSetupOperation } from '../src/setup-operation.mjs';
@@ -139,13 +141,9 @@ const sessionContinuityHeads = new Map();
 // runtime queue in app-runtime.
 const sessionChatQueues = new Map();
 function sessionChatQueueKey(agentId, sessionId) { return `${String(agentId)}:${String(sessionId || 'default')}`; }
-async function serializeSessionChat({ agentId, sessionId, operation }) {
+async function serializeSessionChat({ agentId, sessionId, operation, signal }) {
   const key = sessionChatQueueKey(agentId, sessionId);
-  const previous = sessionChatQueues.get(key) || Promise.resolve();
-  const current = previous.catch(() => {}).then(operation);
-  sessionChatQueues.set(key, current);
-  try { return await current; }
-  finally { if (sessionChatQueues.get(key) === current) sessionChatQueues.delete(key); }
+  return serializeSessionAdmission(sessionChatQueues, key, operation, signal);
 }
 const claudeCodeLoginConnectionIds = new Map();
 const groupChannelRuns = new Map();
@@ -2940,7 +2938,24 @@ async function handleChat(req, res) {
   if (parseChatCommand(body.message)?.command === 'stop') {
     return handleSerializedChat({ req, res, body, agentRuntime, sessionId });
   }
-  return serializeSessionChat({ agentId: agentRuntime.agentId, sessionId, operation: () => handleSerializedChat({ req, res, body, agentRuntime, sessionId }) });
+  const admission = new AbortController();
+  const disconnected = () => admission.abort(new Error('chat_admission_disconnected'));
+  res.once('close', disconnected);
+  req.once('aborted', disconnected);
+  if (req.aborted || res.destroyed) disconnected();
+  try {
+    return await serializeSessionChat({ agentId: agentRuntime.agentId, sessionId, signal: admission.signal, operation: () => {
+      // After admission preserve the existing detached-run policy.
+      res.removeListener('close', disconnected);
+      req.removeListener('aborted', disconnected);
+      return handleSerializedChat({ req, res, body, agentRuntime, sessionId });
+    } });
+  } catch (error) {
+    if (!admission.signal.aborted) throw error;
+  } finally {
+    res.removeListener('close', disconnected);
+    req.removeListener('aborted', disconnected);
+  }
 }
 
 async function handleSerializedChat({ req, res, body, agentRuntime, sessionId }) {
@@ -2986,14 +3001,8 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId })
           writeNdjson(res, event);
         }
       } : null,
-      onModelTextDelta: streaming ? ({ delta, totalChars, modelCall }) => {
-        record.phase = 'streaming';
-        writeNdjson(res, { type: 'assistant.delta', runId, sessionId, ts: new Date().toISOString(), data: { delta, totalChars, modelCall } });
-      } : null,
-      onModelThoughtDelta: streaming ? ({ delta, totalChars, modelCall }) => {
-        record.phase = 'streaming';
-        writeNdjson(res, { type: 'assistant.thought', runId, sessionId, ts: new Date().toISOString(), data: { delta, totalChars, modelCall } });
-      } : null,
+      onModelTextDelta: streaming ? createChatStreamDelta({ record, type: 'assistant.delta', runId, sessionId, write: (event) => writeNdjson(res, event) }) : null,
+      onModelThoughtDelta: streaming ? createChatStreamDelta({ record, type: 'assistant.thought', runId, sessionId, write: (event) => writeNdjson(res, event) }) : null,
       onModelContextUsage: async (usage) => {
         if (!usage || typeof usage !== 'object') return;
         // Keep every raw measurement in telemetry, while the active card uses

@@ -1,3 +1,4 @@
+import { serializeSessionAdmission } from './session-admission.mjs';
 import { operatorTimezone } from './timezone.mjs';
 import { postgresContinuity } from './postgres-continuity.mjs';
 import { promises as fs } from 'node:fs';
@@ -55,11 +56,7 @@ function sessionExecutionKey({ rootDir, sessionId, args = {}, agentRuntime = nul
 }
 async function serializeSessionExecution(options, operation) {
   const key = sessionExecutionKey(options);
-  const previous = sessionExecutionQueues.get(key) || Promise.resolve();
-  const current = previous.catch(() => {}).then(operation);
-  sessionExecutionQueues.set(key, current);
-  try { return await current; }
-  finally { if (sessionExecutionQueues.get(key) === current) sessionExecutionQueues.delete(key); }
+  return serializeSessionAdmission(sessionExecutionQueues, key, operation, options.args?.abort_signal || options.args?.abortSignal);
 }
 
 export async function runAskChat(options = {}) {
@@ -134,6 +131,7 @@ async function runAskChatUnserialized({
   if (!message) throw new Error('message is required');
 
   const { normalizedArgs, attachments } = normalizeRuntimeTurnInput({ args, workspaceRoot, target, action, noCallModel, callModel, agentRuntime });
+  normalizedArgs.abort_signal?.throwIfAborted();
   const runtimeConfig = await loadRuntimeConfig({ rootDir, args: normalizedArgs, stores });
   const { defaults, modelConfig, executionBoundaries, runtimeState: loadedRuntimeState, skillsConfig } = runtimeConfig
   const agentContextConfig = agentRuntime?.contextConfig || agentRuntime?.agent?.contextConfig || {};
@@ -145,6 +143,7 @@ async function runAskChatUnserialized({
     skillsRoot: path.resolve(agentRuntime.skillsRoot),
     filesystemBoundaries: agentRuntime.filesystemBoundaries.map((item) => path.resolve(item)),
   } : loadedRuntimeState;
+  normalizedArgs.abort_signal?.throwIfAborted();
   const attachmentRetention = stores.albdruck ? (await stores.albdruck.readRetention()).attachmentDays : 30;
   const persistedAttachments = await persistChatAttachments({ retentionDays: attachmentRetention, agentWorkspaceRoot: runtimeState.agentWorkspaceRoot || runtimeState.workspaceRoot, attachments });
   const turnAttachments = persistedAttachments.length ? persistedAttachments : attachments;

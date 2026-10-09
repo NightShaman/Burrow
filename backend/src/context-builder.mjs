@@ -40,16 +40,17 @@ function readEvidenceTargetTokens({ baselineBudget, modelConfig, contextThreshol
   return Math.max(0, Math.floor(contextTokens * contextThreshold));
 }
 
-async function assembleReadEvidenceWithinBudget({ assemble, context, supportContext, baselineBudget, modelConfig, tools, contextThreshold } = {}) {
+async function assembleReadEvidenceWithinBudget({ assemble, context, supportContext, baselineBudget, baselinePrompt, modelConfig, tools, contextThreshold } = {}) {
   const targetTokens = readEvidenceTargetTokens({ baselineBudget, modelConfig, contextThreshold });
-  if (!targetTokens) return assemble(context, 0);
+  if (!targetTokens) return baselinePrompt || assemble(context, 0);
   let low = 0;
   // `workingContextChars` bounds the entire rendered section, including its
   // ledger, ReadEvidence preamble, and per-file headers—not just excerpts.
   // Reserve bounded markup space for every retained item so a non-empty
   // allocation can actually render an excerpt.
   let high = (supportContext?.workingContext?.readEvidence || []).reduce((total, item) => total + String(item?.excerpt || '').length + 1024, 0);
-  let best = await assemble(context, 0);
+  let best = baselinePrompt || await assemble(context, 0);
+  if (!high) return best;
   while (low <= high) {
     const candidateChars = Math.floor((low + high) / 2);
     const candidate = await assemble(context, candidateChars);
@@ -175,6 +176,7 @@ export async function buildContextForTurn({
     attachmentArtifactRoot,
     limits: { ...limits, workingContextChars },
     traceLogger,
+    persistBuildTrace: false,
     outputMode,
   });
 
@@ -194,7 +196,7 @@ export async function buildContextForTurn({
     phase: 'initial_assembly', budget: baselineBudget, contextThreshold: contextConfig.contextThreshold,
     compression: { attempted: false, compressed: false, reason: 'not_evaluated' },
   }));
-  let prompt = await assembleReadEvidenceWithinBudget({ assemble, context: turnContext, supportContext, baselineBudget, modelConfig, tools, contextThreshold: contextConfig.contextThreshold });
+  let prompt = await assembleReadEvidenceWithinBudget({ assemble, context: turnContext, supportContext, baselineBudget, baselinePrompt, modelConfig, tools, contextThreshold: contextConfig.contextThreshold });
   let promptPressureCompression = { compressed: false, reason: 'not_requested' };
   if (promptPressure) {
     promptPressureCompression = await compressContextForPromptPressure({
@@ -216,7 +218,7 @@ export async function buildContextForTurn({
       turnContext = promptPressureCompression.turnContext;
       baselinePrompt = await assemble(turnContext, 0);
       const compressedBaselineBudget = inspectAssembledPromptBudget({ prompt: baselinePrompt, modelConfig, tools });
-      prompt = await assembleReadEvidenceWithinBudget({ assemble, context: turnContext, supportContext, baselineBudget: compressedBaselineBudget, modelConfig, tools, contextThreshold: contextConfig.contextThreshold });
+      prompt = await assembleReadEvidenceWithinBudget({ assemble, context: turnContext, supportContext, baselineBudget: compressedBaselineBudget, baselinePrompt, modelConfig, tools, contextThreshold: contextConfig.contextThreshold });
       contextEvents.push(contextBuildEvent({
         phase: 'post_compression_rebuild', budget: inspectAssembledPromptBudget({ prompt, modelConfig, tools }), contextThreshold: contextConfig.contextThreshold,
         compression: { ...promptPressureCompression, attempted: true },

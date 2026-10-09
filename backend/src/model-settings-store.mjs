@@ -365,15 +365,16 @@ export function canonicalizeOauthConnection(connection, auth) {
   return { ...connection, apiType: 'openai-responses' };
 }
 
-export async function refreshAnthropicOauth(auth = {}, { fetchImpl = fetch, nowMs = Date.now() } = {}) {
+export async function refreshAnthropicOauth(auth = {}, { fetchImpl = fetch, nowMs = Date.now(), signal = null } = {}) {
+  signal?.throwIfAborted();
   const refreshToken = normalize(auth.refreshToken);
   if (!refreshToken) throw new Error('model_auth_refresh_token_required');
   const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: ANTHROPIC_OAUTH_CLIENT_ID });
   let lastError = null;
   for (const endpoint of ANTHROPIC_OAUTH_TOKEN_ENDPOINTS) {
     try {
-      const response = await fetchImpl(endpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body });
-      const data = await response.json().catch(() => ({}));
+      const response = await fetchImpl(endpoint, { method: 'POST', ...(signal ? { signal } : {}), headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body });
+      const data = await response.json().catch(() => { signal?.throwIfAborted(); return {}; });
       if (!response.ok) throw new Error(`model_auth_refresh_failed:${response.status}`);
       const accessToken = normalize(data.access_token);
       if (!accessToken) throw new Error('model_auth_refresh_missing_access_token');
@@ -383,7 +384,7 @@ export async function refreshAnthropicOauth(auth = {}, { fetchImpl = fetch, nowM
         refreshToken: normalize(data.refresh_token) || refreshToken,
         expiresAt: nowMs + (Math.max(1, Number(data.expires_in) || 3600) * 1000),
       };
-    } catch (error) { lastError = error; }
+    } catch (error) { signal?.throwIfAborted(); lastError = error; }
   }
   throw lastError || new Error('model_auth_refresh_failed');
 }

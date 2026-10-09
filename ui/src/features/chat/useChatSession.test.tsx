@@ -578,3 +578,24 @@ it('audit: preserves interrupted pending turn before reset but filters it after 
  await act(async()=>{await result.current.refreshConversation();});
  expect(result.current.turns).toEqual([]);
 });
+
+it.each([
+  [[], undefined],
+  [[{ type: 'run.started' }, { type: 'route.decided' }], 'preparing'],
+  [[{ type: 'model.started' }], 'request-intent'],
+  [[{ type: 'model.started' }, { type: 'model.completed' }], 'model-completed'],
+] as const)('recovers live stage from polling events, never the streaming phase: %j', async (events, stage) => {
+  apiMock.mockImplementation(async (path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
+    if (path.startsWith('/api/chat/runs/active?')) return { runs: [{ runId: 'recovered', agentId, sessionId, status: 'running', phase: 'streaming', progress: events }] };
+    throw new Error(path);
+  });
+  const { result, unmount } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('recovered'));
+  expect(result.current.runtimeRun?.stage).toBe(stage);
+  expect(result.current.runtimeRun?.progress).toEqual([]);
+  act(() => result.current.selectSession('other-session'));
+  expect(result.current.runtimeRun).toBeNull();
+  unmount();
+});

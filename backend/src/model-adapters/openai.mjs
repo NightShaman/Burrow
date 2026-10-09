@@ -1,3 +1,4 @@
+import { invokeProviderFetch } from './provider-fetch.mjs';
 import { apiMode, isChatGptBackendBaseUrl, responsesUrl, completionUrl } from './openai-transport.mjs';
 import { toolNames, responseApiTool, messagesToResponsesInput, readResponseSseBounded, normalizeResponseChoice, normalizeChoice, compactResponseCompletion, mergeStreamToolCall, openAIEnvelopeError } from './openai-transport.mjs';
 import { redactStructuredJsonText } from '../redaction.mjs';
@@ -161,7 +162,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         ts: clock(),
       });
 
-      const response = await fetchImpl(url, { method: 'POST', headers, body: serializedBody, ...(signal ? { signal } : {}) });
+      const response = await invokeProviderFetch(fetchImpl, url, { method: 'POST', headers, body: serializedBody, ...(signal ? { signal } : {}) }, { traceLogger, requestId, provider: 'openai-compatible', api: mode, model, clock });
       // Some OpenAI-compatible proxies silently ignore `stream: true`. Fall
       // back to their normal JSON response rather than converting a complete
       // answer into an empty streamed one.

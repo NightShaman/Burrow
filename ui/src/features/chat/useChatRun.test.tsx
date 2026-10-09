@@ -172,3 +172,42 @@ describe('FE-014 immediate acceptance', () => {
     expect(session.setDraft).not.toHaveBeenCalled();
   });
 });
+
+describe('truthful live stages', () => {
+  it('tracks preparation and request intent without manufacturing thought or final metadata; rejects stale callbacks', async () => {
+    let emit!: (event: unknown) => void;
+    let complete!: (value: Awaited<ReturnType<typeof streamChat>>) => void;
+    streamChatMock.mockImplementation(({ onEvent }) => { emit = onEvent; return new Promise((resolve) => { complete = resolve; }); });
+    const session = createSession();
+    const { result, rerender } = renderHook(({ agent }) => useChatRun({ selectedAgentId: agent, selected: undefined, savedProviders: [], session, setAgentActivity: vi.fn() }), { initialProps: { agent: 'nigel' } });
+    let pending!: Promise<void>;
+    act(() => { pending = result.current.sendMessage(); });
+    expect(result.current.liveStage).toBe('accepted');
+    act(() => emit({ type: 'run.started' }));
+    expect(result.current.liveStage).toBe('preparing');
+    act(() => emit({ type: 'route.decided' }));
+    expect(result.current.liveStage).toBe('preparing');
+    act(() => emit({ type: 'model.started' }));
+    expect(result.current.liveStage).toBe('request-intent');
+    act(() => emit({ type: 'assistant.delta', data: { modelCall: 1 } }));
+    expect(result.current.liveAnswer).toBe('');
+    expect(result.current.liveProgress).toEqual([]);
+    rerender({ agent: 'other' });
+    act(() => emit({ type: 'model.completed' }));
+    expect(result.current.liveStage).toBeUndefined();
+    rerender({ agent: 'nigel' });
+    expect(result.current.liveStage).toBe('model-completed');
+    await act(async () => { complete({ terminalType: 'run.completed', finalResult: { ok: true, answerText: 'Final-only answer' } }); await pending; });
+    expect(result.current.liveStage).toBeUndefined();
+    expect(session.appendTurn).toHaveBeenLastCalledWith('nigel', 'session-1', expect.objectContaining({ content: 'Final-only answer', metadata: undefined }));
+    // The previous stream no longer owns this selection.
+    act(() => { pending = result.current.sendMessage('Next'); });
+    const currentEmit = emit;
+    // Capture callbacks via the previous call rather than the new owner.
+    act(() => streamChatMock.mock.calls[0][0].onEvent({ type: 'model.completed' }));
+    expect(result.current.liveStage).toBe('accepted');
+    act(() => currentEmit({ type: 'model.started' }));
+    expect(result.current.liveStage).toBe('request-intent');
+    await act(async () => { complete({ terminalType: 'run.completed', finalResult: { ok: true, answerText: 'Next final' } }); await pending; });
+  });
+});

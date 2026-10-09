@@ -474,6 +474,7 @@ export async function assemblePrompt({
   attachmentArtifactRoot = null,
   limits = {},
   traceLogger,
+  persistBuildTrace = true,
   runId,
   outputMode = 'plain',
   supportContext = null,
@@ -482,7 +483,7 @@ export async function assemblePrompt({
   if (!rootDir) throw new Error('rootDir is required');
   if (!task || typeof task !== 'string') throw new Error('task is required');
 
-  const logger = traceLogger || createTraceLogger({ rootDir: await resolveRuntimeTraceRoot(rootDir), runId });
+  const logger = traceLogger || (persistBuildTrace ? createTraceLogger({ rootDir: await resolveRuntimeTraceRoot(rootDir), runId }) : null);
   // Skill instructions are loaded only by an explicit agent choice. The compact
   // capability catalog is always visible; no router silently judges relevance.
   const skillLimit = limits.skillChars ?? 64_000;
@@ -662,7 +663,7 @@ export async function assemblePrompt({
 
   const contextBuildReceipt = createContextBuildReceipt({ sections, text, stats });
   const result = { text, sections, modelMessages, stats, contextBuildReceipt };
-  await logger.router({
+  if (persistBuildTrace) await logger.router({
     stage: 'context-build',
     selectedSkills: stats.selectedSkills,
     promptEligibleSkills: stats.promptEligibleSkills,

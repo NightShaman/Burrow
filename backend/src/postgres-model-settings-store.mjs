@@ -173,7 +173,8 @@ export class PostgresModelSettingsStore {
     });
   }
 
-  async resolveAuth(id, { fetchImpl = fetch, nowMs = Date.now() } = {}) {
+  async resolveAuth(id, { fetchImpl = fetch, nowMs = Date.now(), signal = null } = {}) {
+    signal?.throwIfAborted();
     const connection = await this.get(id);
     if (!connection) throw new Error('model_connection_not_found');
     let auth = await this.auth(id);
@@ -182,11 +183,14 @@ export class PostgresModelSettingsStore {
       // The lock is session-scoped and held on the same pinned client used for
       // the re-read/write. This avoids a max=1 pool deadlock and lets ordinary
       // operator writes proceed until the short persistence transaction.
+      signal?.throwIfAborted();
       const client = await this.pool.connect();
       let locked = false;
       try {
+        signal?.throwIfAborted();
         await client.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [`${OAUTH_REFRESH_LOCK}:${id}`]);
         locked = true;
+        signal?.throwIfAborted();
         const current = await client.query(`${this.selectSql('WHERE c.id=$1')}`, [id]);
         if (!current.rows[0]) throw new Error('model_connection_not_found');
         const currentConnection = publicConnection(current.rows[0]);
@@ -195,9 +199,9 @@ export class PostgresModelSettingsStore {
         if (auth.type === 'oauth' && Number(auth.expiresAt) <= nowMs + 60_000) {
           const provider = auth.provider || currentConnection.provider;
           const refreshed = /openai/i.test(provider)
-            ? await refreshOpenAiOAuth(auth, { fetchImpl, nowMs })
+            ? await refreshOpenAiOAuth(auth, { fetchImpl, nowMs, signal })
             : /anthropic|claude/i.test(provider)
-              ? await refreshAnthropicOauth(auth, { fetchImpl, nowMs })
+              ? await refreshAnthropicOauth(auth, { fetchImpl, nowMs, signal })
               : (() => { throw new Error('model_auth_refresh_provider_unsupported'); })();
           await client.query('BEGIN');
           try {

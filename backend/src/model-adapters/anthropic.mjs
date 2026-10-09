@@ -1,3 +1,4 @@
+import { invokeProviderFetch } from './provider-fetch.mjs';
 import { CLAUDE_CODE_VERSION, CLAUDE_CODE_BILLING_SYSTEM_BLOCK } from './anthropic-transport.mjs';
 import { redactStructuredJsonText } from '../redaction.mjs';
 import { DEFAULT_MODEL_OUTPUT_TOKENS } from '../config.mjs';
@@ -364,6 +365,8 @@ async function readAnthropicSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_BYTE
   const limit = Number.isFinite(Number(maxBytes)) && Number(maxBytes) > 0 ? Number(maxBytes) : DEFAULT_MAX_RESPONSE_BYTES;
   const state = { message: {}, blocks: [] };
   const eventSequence = [];
+  let textChars = 0;
+  let thoughtChars = 0;
   let bytes = 0;
   let text = '';
   let lineCarry = '';
@@ -404,8 +407,16 @@ async function readAnthropicSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_BYTE
     }
     if (sawMessageStop) return; // Completion is sticky; trailing ping/metadata cannot undo it.
     if (type === 'message_stop') sawMessageStop = true;
-    if (event?.type === 'content_block_delta' && event.delta?.type === 'text_delta') await onTextDelta?.(event.delta.text || '');
-    if (event?.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') await onThoughtDelta?.(event.delta.thinking || '');
+    if (event?.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+      const delta = event.delta.text || '';
+      textChars += delta.length;
+      await onTextDelta?.({ delta, totalChars: textChars });
+    }
+    if (event?.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') {
+      const delta = event.delta.thinking || '';
+      thoughtChars += delta.length;
+      await onThoughtDelta?.({ delta, totalChars: thoughtChars });
+    }
     mergeAnthropicStreamEvent(state, event);
   };
   const consumeLine = async (line) => {
@@ -556,7 +567,7 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
     await onContextUsage?.(requestContextUsage);
     const stablePrefixHash = serializedMessageHash({ system: body.system || null, tools: body.tools || [] });
     await traceLogger?.model?.({ stage: 'model-request', requestId, provider: 'anthropic', api: 'anthropic-messages', model, url, headers: redactHeaders(headers), messageCount: body.messages.length, promptChars, bodyChars: serializedBody.length, continuation: false, toolCount: resolvedTools?.length || 0, toolNames: resolvedTools?.map((tool) => tool.name).filter(Boolean) || [], providerMessageManifest, stablePrefixHash, promptCaching, thinking: thinking.enabled ? { mode: thinking.mode, effort: thinking.effort || null, budgetTokens: thinking.budgetTokens || null } : null, providerRequestArtifact, ts: clock() });
-    const response = await fetchImpl(url, { method: 'POST', headers, body: serializedBody, ...(signal ? { signal } : {}) });
+    const response = await invokeProviderFetch(fetchImpl, url, { method: 'POST', headers, body: serializedBody, ...(signal ? { signal } : {}) }, { traceLogger, requestId, provider: 'anthropic', api: 'anthropic-messages', model, clock });
     const responseBody = streaming ? await readAnthropicSse(response, { maxBytes: config.maxResponseBytes, onTextDelta, onThoughtDelta }) : await readResponseTextBounded(response, config.maxResponseBytes);
     let data = streaming ? responseBody.data : null;
     if (!streaming) {

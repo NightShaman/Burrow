@@ -237,3 +237,27 @@ it('live Markdown blocks protocol-relative image requests until consent', () => 
  expect(view.container.querySelector('img[src="//external.invalid/pixel.png"]')).toBeNull();
  expect(screen.getByRole('button', {name:'Load external image: tracking'})).toBeTruthy();
 });
+
+it.each([
+  ['accepted', 'Waiting for runtime…'],
+  ['preparing', 'Preparing response…'],
+  ['request-intent', 'Model request prepared…'],
+  ['model-completed', 'Model response received; continuing…'],
+] as const)('shows evidence-based %s only in an otherwise empty live row', (stage, label) => {
+  const props = { selected: parent, parent, operator: { name: 'Rob', avatar: 'R' }, isNewSession: false, turns: [], isLoading: false, error: '', isSending: true, activeRunId: 'run', liveProgress: [], liveAnswer: '', liveStage: stage };
+  const { rerender } = render(<ChatTranscript {...props} />);
+  expect(screen.getByRole('status').textContent).toBe(label);
+  expect(screen.queryByText(/dispatch|sent to provider/i)).toBeNull();
+  rerender(<ChatTranscript {...props} liveAnswer="Visible text" />);
+  expect(screen.queryByText(label)).toBeNull();
+  expect(screen.getByText('Visible text')).toBeTruthy();
+  rerender(<ChatTranscript {...props} liveProgress={[{ id: 'thought', ts: '2026-10-09T00:00:00Z', text: 'Visible thought', status: 'streaming' }]} />);
+  expect(screen.queryByText(label)).toBeNull();
+  expect(screen.getByText('Visible thought')).toBeTruthy();
+  rerender(<ChatTranscript {...props} activeToolActivity={{ runId: 'run', status: 'running', items: [{ id: 'tool', label: 'Actual tool', status: 'pending' }] }} />);
+  expect(screen.queryByText(label)).toBeNull();
+  expect(screen.getAllByText('Actual tool')).toBeTruthy();
+  rerender(<ChatTranscript {...props} turns={[{ type: 'message', role: 'assistant', runId: 'run', content: 'Final only' }]} />);
+  expect(screen.queryByText(label)).toBeNull();
+  expect(screen.getByText('Final only')).toBeTruthy();
+});

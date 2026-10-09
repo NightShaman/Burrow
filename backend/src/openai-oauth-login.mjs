@@ -121,11 +121,12 @@ export async function exchangeOpenAiOAuthCode({ code, verifier, redirectUri: cal
   return authPayloadFromTokenJson(data, nowMs);
 }
 
-export async function refreshOpenAiOAuth(auth = {}, { tokenUrl = OPENAI_OAUTH_TOKEN_URL, fetchImpl = fetch, nowMs = Date.now() } = {}) {
+export async function refreshOpenAiOAuth(auth = {}, { tokenUrl = OPENAI_OAUTH_TOKEN_URL, fetchImpl = fetch, nowMs = Date.now(), signal = null } = {}) {
+  signal?.throwIfAborted();
   const refreshToken = normalize(auth.refreshToken || auth.refresh);
   if (!refreshToken) throw new Error('model_auth_refresh_token_required');
-  const response = await fetchImpl(tokenUrl, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: new URLSearchParams({ grant_type: 'refresh_token', client_id: OPENAI_OAUTH_CLIENT_ID, refresh_token: refreshToken }) });
-  const data = await response.json().catch(() => ({}));
+  const response = await fetchImpl(tokenUrl, { method: 'POST', ...(signal ? { signal } : {}), headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: new URLSearchParams({ grant_type: 'refresh_token', client_id: OPENAI_OAUTH_CLIENT_ID, refresh_token: refreshToken }) });
+  const data = await response.json().catch(() => { signal?.throwIfAborted(); return {}; });
   if (!response.ok) throw new Error(`model_auth_refresh_failed:${response.status}`);
   return { ...auth, ...authPayloadFromTokenJson(data, nowMs), provider: auth.provider || OPENAI_OAUTH_PROVIDER, source: auth.source || OPENAI_OAUTH_SOURCE };
 }

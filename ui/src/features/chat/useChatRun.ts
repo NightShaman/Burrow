@@ -4,7 +4,9 @@ import type { Agent, SavedProvider } from '../../app/types';
 import { streamChat } from './chatStream';
 import { appendThoughtDelta, finalizeThoughtProgress } from './chatThoughtProgress';
 
-type ActiveRun = { runId: string; agentId: string; sessionId: string };
+import { chatLiveStageFromEvent, type ChatLiveStage } from './chatLiveStage';
+
+type ActiveRun = { runId: string; agentId: string; sessionId: string; stage?: ChatLiveStage };
 type StreamToolEvent = { tool?: unknown; rawTool?: unknown; activityId?: unknown; ok?: unknown; status?: unknown; label?: unknown; detail?: unknown; provider?: unknown; mcpToolName?: unknown; command?: unknown; cwd?: unknown; filePath?: unknown; dirPath?: unknown; query?: unknown; reason?: unknown; result?: unknown; output?: unknown; error?: unknown };
 
 type ChatRunSession = {
@@ -70,7 +72,7 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
     const abortController = new AbortController();
     const targetKey = runKey(target.agentId, target.sessionId);
     streamAbortRef.current[targetKey] = abortController;
-    setActiveRuns((current) => ({ ...current, [targetKey]: { runId, ...target } }));
+    setActiveRuns((current) => ({ ...current, [targetKey]: { runId, ...target, stage: 'accepted' } }));
     setLiveProgressByRun((current) => ({ ...current, [targetKey]: [] }));
     setLiveAnswerByRun((current) => ({ ...current, [targetKey]: '' }));
     setAgentActivity(target.agentId, 'thinking'); session.clearError(); session.setDraft(''); onAccepted?.(); session.clearAttachment(); session.leaveNewSessionForMessage();
@@ -80,8 +82,14 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
     const scheduleLiveFlush = () => { if (!frame) frame = requestAnimationFrame(flushLiveText); };
     try {
       const handleEvent = (event: unknown) => {
-        if (!event || typeof event !== 'object') return;
+        if (streamAbortRef.current[targetKey] !== abortController || abortController.signal.aborted || !event || typeof event !== 'object') return;
         const envelope = event as { type?: string; ts?: unknown; data?: { delta?: unknown; response?: unknown; message?: unknown; status?: unknown; modelCall?: unknown } & StreamToolEvent };
+        setActiveRuns((current) => {
+          const owner = current[targetKey];
+          if (owner?.runId !== runId) return current;
+          const stage = chatLiveStageFromEvent(owner.stage, envelope.type);
+          return stage === owner.stage ? current : { ...current, [targetKey]: { ...owner, stage } };
+        });
         if (envelope.type === 'assistant.thought' && typeof envelope.data?.delta === 'string') {
           progressEntries = appendThoughtDelta(progressEntries, envelope, runId);
           scheduleLiveFlush();
@@ -161,5 +169,5 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
     catch (error) { if (controller.signal.aborted) return; session.reportError(error instanceof Error ? `Could not stop run: ${error.message}` : 'Could not stop run.'); }
   };
 
-  return { activeRunForSelection, activeRunId: activeRunForSelection?.runId ?? '', sendMessage, cancelRun, liveProgress: activeRunForSelection ? liveProgressByRun[runKey(activeRunForSelection.agentId, activeRunForSelection.sessionId)] ?? [] : [], liveAnswer: activeRunForSelection ? liveAnswerByRun[runKey(activeRunForSelection.agentId, activeRunForSelection.sessionId)] ?? '' : '' };
+  return { liveStage: activeRunForSelection?.stage, activeRunForSelection, activeRunId: activeRunForSelection?.runId ?? '', sendMessage, cancelRun, liveProgress: activeRunForSelection ? liveProgressByRun[runKey(activeRunForSelection.agentId, activeRunForSelection.sessionId)] ?? [] : [], liveAnswer: activeRunForSelection ? liveAnswerByRun[runKey(activeRunForSelection.agentId, activeRunForSelection.sessionId)] ?? '' : '' };
 }
