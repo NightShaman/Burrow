@@ -245,7 +245,6 @@ function modelInputForFollowupPrompt(promptText, baseModelInput = null) {
   // it. Keep the stable prefix and dialogue as messages, then append one
   // synthesized current user instruction. This gives fallback/final-synthesis
   // calls the same normalizer and manifest path as normal and vision requests.
-  if (baseModelInput?.vision) return { prompt: null, messages: multimodalUserMessages(promptText, baseModelInput.images || [], baseModelInput.stableMessages || []) };
   if (Array.isArray(baseModelInput?.messages) && baseModelInput.messages.length) {
     return {
       prompt: null,
@@ -513,14 +512,13 @@ export async function runPlainModelTurn({
         chatToolLoop.loopWarnings.push(warning);
         await traceLogger?.event?.('chat-tool-loop-warning', warning);
       }
-      const followupPrompt = toolLoopNoProgress
-        ? finalAnswerAfterToolLoopPrompt({ basePrompt: prompt.text, message, toolResults: promptEvidenceResults, skipped: chatToolLoop.skipped, modelConfig, contextThreshold, preparePrompt: followupBudgetPrompt })
-        : executedToolResultPrompt({ basePrompt: prompt.text, message, toolResults: promptEvidenceResults, skipped: chatToolLoop.skipped, toolCalls: model.choice.toolCalls, iteration, runtimeNotice: warningNotice, modelConfig, contextThreshold, preparePrompt: followupBudgetPrompt });
-      // Native continuations preserve the provider's assistant function call ↔
-      // function output pairing. The prose receipt prompt remains a compatibility
-      // fallback for adapters that do not implement this capability and for the
-      // explicit tool-less final synthesis path.
+      // Select the provider path before constructing/budgeting compatibility
+      // prose. An unused fallback must never veto a native continuation.
       const useNativeContinuation = !toolLoopNoProgress && typeof adapter.continueWithToolResults === 'function';
+      const continuationBase = modelInput?.vision || modelInput?.messages?.length ? '' : prompt.text;
+      const followupPrompt = useNativeContinuation ? null : toolLoopNoProgress
+        ? finalAnswerAfterToolLoopPrompt({ basePrompt: continuationBase, message: '', toolResults: promptEvidenceResults, skipped: chatToolLoop.skipped, modelConfig, contextThreshold, preparePrompt: followupBudgetPrompt })
+        : executedToolResultPrompt({ basePrompt: continuationBase, message: '', toolResults: promptEvidenceResults, skipped: chatToolLoop.skipped, toolCalls: model.choice.toolCalls, iteration, runtimeNotice: warningNotice, modelConfig, contextThreshold, preparePrompt: followupBudgetPrompt });
       const followupInput = useNativeContinuation ? null : modelInputForFollowupPrompt(followupPrompt, modelInput);
       await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-after-continuation-prompt-build', { iteration, followupPrompt: useNativeContinuation ? '[provider-native tool continuation]' : followupPrompt, followupInput, chatToolLoop, promptEvidenceResults });
       if (abortSignal?.aborted) throw abortSignal.reason || new Error('agent_stopped');
@@ -601,8 +599,8 @@ export async function runPlainModelTurn({
     if (terminalLoopVerdict) {
       const finalPrompt = finalAnswerAfterToolLoopPrompt({
         preparePrompt: followupBudgetPrompt,
-        basePrompt: prompt.text,
-        message,
+        basePrompt: modelInput?.vision || modelInput?.messages?.length ? '' : prompt.text,
+        message: '',
         toolResults: promptEvidenceResults,
         skipped: chatToolLoop.skipped,
         runtimeNotice: loopReceiptText(terminalLoopVerdict, { terminal: true }),

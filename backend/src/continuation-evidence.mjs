@@ -80,6 +80,17 @@ export function serializeContinuationEvidence({ toolResults = [], modelConfig = 
   // A missing/invalid runtime policy never revives legacy capped renderers.
   // Keep deterministic receipts only rather than inventing a threshold.
   if (!Number.isFinite(Number(contextThreshold)) || contextThreshold <= 0 || contextThreshold >= 1) return render({ included: cards, raw: [] });
+  const budgetFailure = (evidence) => {
+    const inspection = inspectAssembledPromptBudget({ prompt: preparePrompt(buildPrompt(evidence)), modelConfig, tools });
+    const limitTokens = Math.floor(inspection.contextTokens * contextThreshold);
+    const error = new Error(`continuation_evidence_preservation_budget_exceeded: estimatedTokens=${inspection.estimatedTokens}, limitTokens=${limitTokens}, contextTokens=${inspection.contextTokens}, threshold=${contextThreshold}`);
+    error.code = 'continuation_evidence_preservation_budget_exceeded';
+    error.estimatedTokens = inspection.estimatedTokens;
+    error.limitTokens = limitTokens;
+    error.contextTokens = inspection.contextTokens;
+    error.contextThreshold = contextThreshold;
+    return error;
+  };
   const fits = (evidence) => {
     const inspection = inspectAssembledPromptBudget({ prompt: preparePrompt(buildPrompt(evidence)), modelConfig, tools });
     return inspection.estimatedTokens <= Math.floor(inspection.contextTokens * contextThreshold);
@@ -88,7 +99,7 @@ export function serializeContinuationEvidence({ toolResults = [], modelConfig = 
   const included = [];
   let omitted = cards.length;
   if (!fits(render({ included, omitted, raw: [] }))) {
-    throw new Error('continuation_evidence_preservation_budget_exceeded');
+    throw budgetFailure(render({ included: [], omitted: cards.length, raw: [] }));
   }
   for (const card of cards) {
     if (fits(render({ included: [...included, card], omitted: omitted - 1, raw: [] }))) {
@@ -107,7 +118,7 @@ export function serializeContinuationEvidence({ toolResults = [], modelConfig = 
     if (fits(fallback)) return fallback;
     const minimal = render({ included: [], omitted: cards.length, raw: [] });
     if (fits(minimal)) return minimal;
-    throw new Error('continuation_evidence_preservation_budget_exceeded');
+    throw budgetFailure(render({ included: [], omitted: cards.length, raw: [] }));
   }
   for (const [index, source] of sources.entries()) {
     let low = 0; let high = source.text.length; let best = 0;
