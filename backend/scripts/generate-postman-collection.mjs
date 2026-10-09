@@ -237,6 +237,13 @@ const collection = {
       req('Forge artifact', 'GET', '/api/forge/jobs/{{forgeJobId}}/artifacts/{{forgeArtifactId}}', { query: [['agentId', '{{agentId}}'], ['download', '1']] }),
       req('Attach Forge artifact', 'POST', '/api/forge/jobs/{{forgeJobId}}/attach', { body: { agentId: '{{agentId}}', sessionId: '{{sessionId}}', artifactId: '{{forgeArtifactId}}' } }),
     ]),
+    folder('Brains Embeddings', [
+      req('Embedding settings and status', 'GET', '/api/settings/brain-embeddings'),
+      req('Configure optional embeddings', 'PUT', '/api/settings/brain-embeddings', { body: { enabled: false, connectionId: null, model: null } }),
+      req('Discover embedding models', 'GET', '/api/settings/brain-embeddings/models', { query: [['connectionId', '{{connectionId}}']] }),
+      req('Test embedding model', 'POST', '/api/settings/brain-embeddings/test', { body: { connectionId: '{{connectionId}}', model: 'embedding-model' } }),
+      req('Reindex Brains', 'POST', '/api/settings/brain-embeddings/reindex'),
+    ]),
     folder('Group Channels', [
       req('List group channels', 'GET', '/api/group-channels'),
       req('Create group channel', 'POST', '/api/group-channels', { body: { name: 'Room', participantAgentIds: ['hatchet', 'smatchet'] } }),

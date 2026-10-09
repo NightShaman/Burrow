@@ -16,6 +16,7 @@ import { SettingSection } from './SettingsPrimitives';
 import { McpConnections } from './McpConnections';
 import { ApiTokensSettings } from './ApiTokensSettings';
 import { AuthenticationSettings } from './AuthenticationSettings';
+import { BrainEmbeddingSettings } from './BrainEmbeddingSettings';
 import { CuratorSettings } from './CuratorSettings';
 import { RetentionSettings } from './RetentionSettings';
 import { loadModSettingsContributions, modContributionsChangedEvent, type ModContribution, type ModSettingsContribution } from '../../app/apiTargets';
@@ -135,7 +136,7 @@ export function Settings({ tab, setTab, agents, selected, savedProviders, onMode
         {tab === 'general' && generalSection === 'operator-profile' && <OperatorProfile onSaved={onOperatorProfileChanged} />}
         {tab === 'general' && generalSection === 'execution-boundaries' && <ExecutionBoundaries overflowTarget={overflowColumn} />}
         {tab === 'general' && generalSection === 'trace-retention' && <RetentionSettings />}
-        {tab === 'general' && generalSection === 'brain-memory' && <SettingSection title="Brain memory"><p className="settings-section-description">Brains are explicit saved memories owned by one agent. They have no time-to-live and are not automatically preloaded into conversations. Create, inspect, update, or delete them from the Brains workspace.</p><p className="settings-help">There are no automatic preload or retention controls for Brains. Saved memory is not verification of current runtime truth.</p></SettingSection>}
+        {tab === 'general' && generalSection === 'brain-memory' && <BrainEmbeddingSettings savedProviders={savedProviders} />}
         {tab === 'general' && generalSection === 'export' && <ExportSettings />}
         {tab === 'general' && generalSection === 'rail-panels' && <SettingSection title="Rail Panels"><div className="field-pair compact-fields"><RailPanelSettings side="Left" layout={leftRailLayout} setLayout={setLeftRailLayout} singlePanel={leftSinglePanel} setSinglePanel={setLeftSinglePanel} topPanel={leftTopPanel} setTopPanel={setLeftTopPanel} bottomPanel={leftBottomPanel} setBottomPanel={setLeftBottomPanel} onPanelSelected={setSelectedRailPanel} /><RailPanelSettings side="Right" layout={rightRailLayout} setLayout={setRightRailLayout} singlePanel={rightSinglePanel} setSinglePanel={setRightSinglePanel} topPanel={rightTopPanel} setTopPanel={setRightTopPanel} bottomPanel={rightBottomPanel} setBottomPanel={setRightBottomPanel} onPanelSelected={setSelectedRailPanel} /></div></SettingSection>}
         {tab === 'general' && generalSection === 'tiddle-signal' && <CuratorSettings savedProviders={savedProviders} />}

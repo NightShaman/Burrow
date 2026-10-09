@@ -5,7 +5,7 @@ export async function executeBrainTool({tool,arguments:args={},agentId,store}={}
   const input={...args,agentId};
   if (input.limit == null) delete input.limit;
   let result;
-  if (tool==='brain_search') result=await store.list(input);
+  if (tool==='brain_search') result=await (store.search ? store.search(input) : store.list(input));
   else if (tool==='brain_read') result=await store.get(input);
   else if (tool==='brain_save') result=await store.create(input);
   else if (tool==='brain_update') result=await store.update(input);

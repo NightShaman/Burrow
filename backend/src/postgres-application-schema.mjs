@@ -1,3 +1,4 @@
+import { POSTGRES_BRAIN_EMBEDDINGS_SQL } from './postgres-brain-embeddings.mjs';
 import { POSTGRES_BRAIN_SCHEMA_SQL, POSTGRES_BRAIN_LEGACY_IMPORT_SQL } from './postgres-brain-store.mjs';
 import { POSTGRES_DREAM_WINDOW_SQL } from './postgres-dream-window.mjs';
 import { POSTGRES_LOGICAL_MEMBER_SQL, POSTGRES_ARCHIVE_RELATIONAL_ID_SQL, POSTGRES_CATALOG_SCALAR_ID_SQL, POSTGRES_LOGICAL_LOOKUP_INDEX_SQL } from './postgres-lexical-identity.mjs';
@@ -116,4 +117,5 @@ CREATE TABLE brain_legacy_albdruck (
  legacy_id TEXT PRIMARY KEY, scope TEXT NOT NULL, snapshot JSONB NOT NULL
 );
 ` + POSTGRES_BRAIN_LEGACY_IMPORT_SQL },
+  { version: 47, name: 'optional-brain-embeddings', sql: POSTGRES_BRAIN_EMBEDDINGS_SQL },
 ]);

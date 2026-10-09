@@ -20,6 +20,8 @@ function fields(input) {
 function record(r) { return r ? { id:r.id, agentId:r.agent_id, title:r.title, content:r.content, sourceRefs:r.source_refs, revision:r.revision, operatorOwned:r.operator_owned, createdAt:r.created_at, updatedAt:r.updated_at, deletedAt:r.deleted_at, origin:r.origin || 'explicit_saved_memory', legacyStatus:r.legacy_status || null, legacySnapshot:r.legacy_snapshot || null, provenance:r.origin || 'explicit_saved_memory', evidenceDisclosure:'Saved memory is not verification of current runtime truth; referenced evidence may no longer be retained.' } : null; }
 export class PostgresBrainStore {
  constructor({pool}) { this.pool=pool; }
+ record(row) { return record(row); }
+ async search(input) { scope(input.agentId); if(typeof input.query !== 'string' && input.query !== undefined) fail('invalid_query'); return this.embeddings ? this.embeddings.search(input,this) : this.list(input); }
  // Default page is 50; callers may request any positive safe integer page size.
  // Immutable IDs provide a stable keyset; concurrent inserts are not a snapshot.
  async list({agentId,query='',limit=50,cursor=null}={}) {

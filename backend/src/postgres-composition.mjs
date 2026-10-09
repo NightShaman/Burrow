@@ -1,3 +1,4 @@
+import { PostgresBrainEmbeddings } from './postgres-brain-embeddings.mjs';
 import { PostgresBrainStore } from './postgres-brain-store.mjs';
 import { PostgresMcpProviderStateStore } from './postgres-mcp-provider-state-store.mjs';
 import { PostgresDreamExtractionStore } from './postgres-dream-extraction-store.mjs';
@@ -78,8 +79,11 @@ export async function createPostgresApplication({
     metadata: new PostgresSettingsMetadataStore({ ...common, ...(clock ? { clock } : {}) }),
     conversations: new PostgresSessionStore({ ...common, ...(clock ? { clock } : {}) }),
     };
+    stores.brainEmbeddings = new PostgresBrainEmbeddings({ pool: sharedPool, models: stores.models });
+    stores.brains.embeddings = stores.brainEmbeddings;
     stores.albdruck = new PostgresAlbdruckStore({ pool: sharedPool, resolveOriginal: (ref, client) => stores.conversations.resolveOriginal(ref, client), searchHistory: input => stores.conversations.history(input) });
     await stores.forge.init();
+    stores.brainEmbeddings.start();
     let closed = false;
     return Object.freeze({
     modDistributionRepositoryFactory: () => createPostgresModDistributionRepository({ pool: sharedPool }),
@@ -92,6 +96,7 @@ export async function createPostgresApplication({
     async close() {
       if (closed) return;
       closed = true;
+      await stores.brainEmbeddings.close();
       await stores.conversations.close();
       if (ownedPool) await closePostgresPool(sharedPool);
     },

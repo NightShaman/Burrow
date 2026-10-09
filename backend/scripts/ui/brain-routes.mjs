@@ -1,6 +1,20 @@
 /** Mounted only behind the existing UI authentication and browser-origin policy. */
-export function createBrainRoutes({store,readJsonBody,sendJson}) {
+export function createBrainRoutes({store,embeddings,readJsonBody,sendJson}) {
  return async ({req,res,url}) => {
+  if (url.pathname.startsWith('/api/settings/brain-embeddings')) {
+   const action=url.pathname.slice('/api/settings/brain-embeddings'.length);
+   try {
+    let result;
+    if(req.method==='GET' && action==='') result=await embeddings.status();
+    else if(req.method==='PUT' && action==='') result=await embeddings.configure(await readJsonBody(req));
+    else if(req.method==='GET' && action==='/models') result=await embeddings.provider.discover(url.searchParams.get('connectionId'));
+    else if(req.method==='POST' && action==='/test') result=await embeddings.test(await readJsonBody(req));
+    else if(req.method==='POST' && action==='/reindex') result=await embeddings.reindex();
+    else return false;
+    sendJson(res,200,result);
+   } catch { sendJson(res,400,{error:'brain_embedding_request_failed'}); }
+   return true;
+  }
   const match=/^\/api\/brains(?:\/([^/]+))?$/.exec(url.pathname); if (!match) return false;
   const agentId=url.searchParams.get('agentId');
   try {
