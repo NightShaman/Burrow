@@ -20,7 +20,10 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
   const turnStartedAt = new Date().toISOString();
   const lastOperatorMessageAt = await stores.conversations.lastOperatorMessageAt({ agentId });
   const metadata = await authority.metadata(resolvedSessionId);
-  const pendingActions = await authority.pendingActions(resolvedSessionId);
+  // Capture once before admission append. The same immutable snapshot is passed
+  // into context preparation; compression paths deliberately re-read later.
+  const sessionSnapshot = await authority.sessionSnapshot(resolvedSessionId);
+  const pendingActions = sessionSnapshot.pendingActions;
   const priorSession = {
     sessionId: resolvedSessionId,
     turnCount: Number(metadata?.turnCount || 0),
@@ -73,5 +76,5 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
   try {
     dreamPreload = await stores.workingMemory.getDreamPreload({ agentId: runtimeState.agentId, project: continuityScope }) || await stores.workingMemory.getDreamPreload({ agentId: runtimeState.agentId, project: 'global' });
   } catch { dreamPreload = null; }
-  return { turnStartedAt, lastOperatorMessageAt, priorSession, conversationId, resolvedWorkingRoot, continuityHandoffs, compatibilityScope, continuityScope, generatedContinuityScope, verifiedSubjectScope, deicticFiles, workspaceFiles, initialWorkingContext, ambientWorkingContext, dreamPreload };
+  return { turnStartedAt, lastOperatorMessageAt, priorSession, sessionSnapshot, conversationId, resolvedWorkingRoot, continuityHandoffs, compatibilityScope, continuityScope, generatedContinuityScope, verifiedSubjectScope, deicticFiles, workspaceFiles, initialWorkingContext, ambientWorkingContext, dreamPreload };
 }

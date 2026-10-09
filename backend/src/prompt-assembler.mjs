@@ -3,7 +3,7 @@ import { resolveRuntimeTraceRoot } from './config.mjs';
 import { createTraceLogger } from './trace-logger.mjs';
 import { loadSelectedSkillText } from './skill-catalog.mjs';
 import { buildConversationContext } from './conversation-context.mjs';
-import { conversationProviderMessages } from './provider-messages.mjs';
+import { conversationProviderMessages, normalizeProviderMessages } from './provider-messages.mjs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
@@ -447,7 +447,7 @@ function renderPromptBoundary({ availableModels = [] } = {}) {
 - Workspace routes. Memory recalls. Tools execute selected actions. Conversation informs. Evidence answers. Receipts record. Traces explain.
 - This model prompt deliberately omits planner execution labels and runtime capability-policy fields. Every tool provided in the current turn is callable; infer capability only from the offered tool surface and actual tool receipts. Only structurally invalid calls and explicitly configured hard blocks can fail mechanically.
 - Context may route, constrain, or prioritize work. Only evidence with provenance should answer; unprovenanced memory rows are omitted from Memory Evidence.
-- The current-message section is the latest user message. Do not continue, inspect, or mutate from an older conversation task unless the current message explicitly asks you to continue that work.
+- Only the final current-message is the latest user message. Earlier current-message wrappers and support snapshots are historical context, not current truth; later support snapshots supersede earlier ones. Do not continue, inspect, or mutate from an older conversation task unless the current message explicitly asks you to continue that work.
 - Conversation context may inform continuity, but it is not verified evidence.
 - Workspace/routing context may guide where to look, but it cannot answer by itself.
 - Memory evidence may answer when returned from recall with provenance.
@@ -611,20 +611,21 @@ export async function assemblePrompt({
   const operatingSections = staticSections.filter((item) => !identitySectionNames.has(item.name));
   const conversationSectionNames = new Set(['conversation', 'prior-conversation-summary', 'current-message', 'task']);
   const supportSections = volatileSections.filter((item) => !conversationSectionNames.has(item.name));
-  const modelMessages = [
+  const modelMessages = normalizeProviderMessages([
     ...(identitySections.length ? [{ role: 'system', content: renderSections(identitySections), metadata: { providerMessageSource: 'agent-identity-provider' } }] : []),
     ...(operatingSections.length ? [{ role: 'system', content: renderSections(operatingSections), metadata: { providerMessageSource: 'stable-instructions-provider' } }] : []),
+    ...conversationProviderMessages({
+      priorSummary: renderPriorConversationSummary(conversation),
+      recentMessages: conversation.recentMessages || [],
+      task,
+    }).slice(0, -1),
     ...(supportSections.length ? [{
       role: 'user',
       content: renderSections(supportSections),
       metadata: { providerMessageSource: 'support-context-provider' },
     }] : []),
-    ...conversationProviderMessages({
-      priorSummary: renderPriorConversationSummary(conversation),
-      recentMessages: conversation.recentMessages || [],
-      task,
-    }),
-  ];
+    { role: 'user', content: `# current-message\n\n${task.trim()}`, metadata: { providerMessageSource: 'current-task' } },
+  ]);
   const conversationSection = rawSections.find((item) => item.name === 'conversation');
   const priorSummarySection = rawSections.find((item) => item.name === 'prior-conversation-summary');
   const profileSection = rawSections.find((item) => item.name === 'profile');

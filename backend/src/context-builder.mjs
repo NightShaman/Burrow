@@ -5,7 +5,7 @@ import { inspectAssembledPromptBudget } from './prompt-budget.mjs';
 import { normalizeContextCompressionConfig } from './context-compression.mjs';
 
 export const PREPARED_CONTEXT_VERSION = 1;
-export const __test__ = { readEvidenceTargetTokens, contextThresholdState, contextBuildEvent }
+export const __test__ = { readEvidenceTargetTokens, contextThresholdState, contextBuildEvent, assembleReadEvidenceWithinBudget }
 
 export function normalizePreparedContext(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('prepared_context_invalid');
@@ -51,6 +51,13 @@ async function assembleReadEvidenceWithinBudget({ assemble, context, supportCont
   let high = (supportContext?.workingContext?.readEvidence || []).reduce((total, item) => total + String(item?.excerpt || '').length + 1024, 0);
   let best = baselinePrompt || await assemble(context, 0);
   if (!high) return best;
+  // Probe the complete allocation first. Most turns fit without trimming, and
+  // this avoids paying for a binary-search series of full prompt assemblies.
+  // Keep the inspection here (rather than trusting the baseline) because the
+  // allocation changes the rendered prompt and therefore its true budget.
+  const fullAllocation = await assemble(context, high);
+  const fullInspection = inspectAssembledPromptBudget({ prompt: fullAllocation, modelConfig, tools });
+  if (fullInspection.estimatedTokens <= targetTokens) return fullAllocation;
   while (low <= high) {
     const candidateChars = Math.floor((low + high) / 2);
     const candidate = await assemble(context, candidateChars);

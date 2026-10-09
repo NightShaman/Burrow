@@ -345,6 +345,9 @@ export async function runPlainModelTurn({
     } else {
       modelInput = modelInputForPlainTurn({ promptText: prompt.text, promptMessages: prompt.modelMessages, attachments, modelConfig, modelAdapter: adapter });
     }
+    if (!outputOnlyArtifact && modelInput.messages && prompt.persistProviderTurn) {
+      await prompt.persistProviderTurn(modelInput.messages);
+    }
     const toolArgs = enableChatToolLoop && !outputOnlyArtifact ? { tools: continuationToolSchemas(), toolChoice: 'auto' } : {};
     if (abortSignal?.aborted) throw abortSignal.reason || new Error('agent_stopped');
     await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-before-model-call', {

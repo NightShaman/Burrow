@@ -76,6 +76,13 @@ export function conversationAuthority({ store = null, agentId } = {}) {
     async entries(sessionId, options = {}) { return pg.read(scopedReadOptions(agentId, sessionId, options)); },
     async entriesAll(sessionId) { return readAllEntries(pg, agentId, sessionId); },
     async pendingActions(sessionId) { return readAllPending(pg, agentId, sessionId); },
+    // One pre-admission snapshot can serve both context preparation and the
+    // planner's pending-action projection. Callers must not reuse it after a
+    // turn is appended or compression persists a successor transcript.
+    async sessionSnapshot(sessionId) {
+      const entries = await readAllEntries(pg, agentId, sessionId);
+      return { entries, pendingActions: projectPendingActions(entries) };
+    },
     async compact(sessionId, { summary, tailEntries = [] } = {}) {
       if (typeof pg.compact !== 'function') throw new Error('conversation_store_compaction_unsupported');
       return pg.compact({ ...key(sessionId), summary, tailEntries });

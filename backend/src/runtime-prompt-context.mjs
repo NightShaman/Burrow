@@ -1,3 +1,4 @@
+import { appendRuntimeProviderTurn } from './runtime-session-writer.mjs';
 import { buildContextForTurn, prepareContextForTurn } from './context-builder.mjs';
 import { plainChatKernel } from './plain-chat-kernel.mjs';
 import os from 'node:os';
@@ -39,6 +40,12 @@ export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolv
   const turnContext = contextBuild.turnContext;
   const conversationContext = contextBuild.conversationContext;
   const prompt = contextBuild.prompt;
+  // Persist the exact selected provider turn after vision/fallback projection,
+  // before dispatch. Separate content storage avoids diagnostic metadata caps.
+  prompt.persistProviderTurn = async (messages) => {
+    await appendRuntimeProviderTurn({ messages, stores, agentId: runtimeState.agentId,
+      sessionId: resolvedSessionId, runId: logger.runId, traceDir: logger.traceDir });
+  };
   const finalPromptInspection = contextBuild.budget;
   const contextCompression = { initial: preparedContext.compressionResult, promptPressure: { ...contextBuild.promptPressureCompression, finalPromptInspection }, preCompressionInspection: preparedContext.preCompressionInspection };
   return { ...contextBuild, turnContext, conversationContext, prompt, finalPromptInspection, contextCompression };

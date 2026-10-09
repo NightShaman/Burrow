@@ -242,7 +242,16 @@ export function providerMessageManifest(messages = []) {
 export function conversationProviderMessages({ priorSummary = '', recentMessages = [], task = '' } = {}) {
   return normalizeProviderMessages([
     ...(text(priorSummary) ? [{ role: 'user', content: `# prior-conversation-summary\n\n${text(priorSummary)}` }] : []),
-    ...recentMessages,
+    ...recentMessages.flatMap((message) => {
+      const snapshot = message?.metadata?.providerTurn;
+      if (snapshot?.version === 1 && Array.isArray(snapshot.messages)) {
+        return snapshot.messages.map((entry) => ({ ...entry, metadata: {
+          providerMessageSource: entry.metadata?.providerMessageSource === 'support-context-provider'
+            ? 'historical-support-snapshot' : 'historical-user-turn',
+        } }));
+      }
+      return [message];
+    }),
     { role: 'user', content: `# current-message\n\n${text(task)}` },
   ]);
 }

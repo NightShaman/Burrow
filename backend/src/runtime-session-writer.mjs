@@ -18,10 +18,10 @@ export async function appendRuntimeSessionTurn({
 
 export async function appendRuntimeSessionEntry({
   sessionRoot, dataRoot = null, stores = null, conversationStore = null, agentId = 'hatchet',
-  sessionId, type, role, content, runId, traceDir, metadata = {}, visibility, entersPrompt, parentId,
+  sessionId, type, role, content, runId, traceDir, metadata = {}, visibility, entersPrompt, parentId, maxContentChars,
 } = {}) {
   const authority = resolveAuthority({ conversationStore, stores, agentId, sessionRoot, dataRoot });
-  const entry = { sessionId, type, role, content, runId, traceDir, metadata, ...(visibility !== undefined ? { visibility } : {}), ...(entersPrompt !== undefined ? { entersPrompt } : {}), ...(parentId !== undefined ? { parentId } : {}) };
+  const entry = { sessionId, type, role, content, runId, traceDir, metadata, ...(maxContentChars !== undefined ? { maxContentChars } : {}), ...(visibility !== undefined ? { visibility } : {}), ...(entersPrompt !== undefined ? { entersPrompt } : {}), ...(parentId !== undefined ? { parentId } : {}) };
   return authority.append(entry);
 }
 
@@ -42,4 +42,17 @@ export async function appendRuntimeActivity({
   const authority = resolveAuthority({ conversationStore, stores, agentId, sessionRoot, dataRoot });
   if (!Number.isSafeInteger(Number(sequence)) || Number(sequence) < 0) throw new Error('activity_sequence_invalid');
   return authority.append({ sessionId, maxContentChars: 4000, type: 'event', role: null, content, runId: runId || logger?.runId || null, traceDir: traceDir || logger?.traceDir || null, metadata: { ...metadata, activitySequence: Number(sequence) }, visibility: 'activity', entersPrompt: false });
+}
+
+// Provider input is durable content, not bounded diagnostic metadata. The user
+// transcript remains readable; replay joins this record to its originating run.
+export async function appendRuntimeProviderTurn({ messages = [], ...scope } = {}) {
+  const currentIndex = messages.length - 1;
+  if (currentIndex < 0 || messages[currentIndex]?.role !== 'user') throw new Error('provider_turn_current_user_required');
+  const supportIndex = currentIndex - 1;
+  const start = messages[supportIndex]?.metadata?.providerMessageSource === 'support-context-provider' ? supportIndex : currentIndex;
+  const turnMessages = messages.slice(start).map(({ role, content, metadata }) => ({ role, content, ...(metadata ? { metadata } : {}) }));
+  return appendRuntimeSessionEntry({ ...scope, type: 'provider_history',
+    content: JSON.stringify({ version: 1, messages: turnMessages }),
+    visibility: 'debug', entersPrompt: false, maxContentChars: Infinity });
 }

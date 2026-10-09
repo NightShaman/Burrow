@@ -8,7 +8,8 @@ function messageText(message) {
 }
 
 function messageChars(message) {
-  return messageText(message).length;
+  const snapshot = message?.metadata?.providerTurn;
+  return snapshot ? JSON.stringify(snapshot.messages).length : messageText(message).length;
 }
 
 function contentChars(entry) {
@@ -135,6 +136,20 @@ export function buildConversationContext({ transcript = [], limits = {} } = {}) 
   const excludedCounts = { events: 0, receipts: 0, debug: 0 };
   const excludedChars = { events: 0, receipts: 0, debug: 0 };
   const chatMessages = [];
+  const providerTurns = new Map();
+  for (const entry of entries) {
+    if (entry?.type !== 'provider_history' || !entry.runId) continue;
+    try {
+      const snapshot = JSON.parse(entry.content);
+      if (snapshot?.version === 1 && Array.isArray(snapshot.messages)
+        && snapshot.messages.length <= 2 && snapshot.messages.length > 0
+        && snapshot.messages.every((message) => message.role === 'user')
+        && (typeof snapshot.messages.at(-1).content === 'string' || Array.isArray(snapshot.messages.at(-1).content))) {
+        // First dispatch snapshot wins; retries cannot rewrite historical input.
+        if (!providerTurns.has(entry.runId)) providerTurns.set(entry.runId, snapshot);
+      }
+    } catch { /* Legacy/malformed diagnostics never become provider history. */ }
+  }
   const promptEnteringEntries = entries.filter((entry) => entry?.entersPrompt === true).map(promptEnteringProjection);
   const executionDigestEntries = entries.filter(isExecutionDigest);
   const retainedDigestEntries = new Set(maxPromptExecutionDigests === 0 ? [] : executionDigestEntries.slice(-maxPromptExecutionDigests));
@@ -152,7 +167,8 @@ export function buildConversationContext({ transcript = [], limits = {} } = {}) 
         content: executionDigest ? renderExecutionDigest(entry) : String(entry.content || '').trim(),
         metadata: executionDigest
           ? { ...(entry.metadata || {}), providerMessageSource: 'prior-execution-continuity' }
-          : (entry.metadata || {}),
+          : { ...(entry.metadata || {}), ...(['user', 'agent'].includes(entry.role) && providerTurns.has(entry.runId)
+            ? { providerTurn: providerTurns.get(entry.runId) } : {}) },
       });
       continue;
     }

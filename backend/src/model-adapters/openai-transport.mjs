@@ -241,19 +241,32 @@ function mergeStreamToolCall(calls, fragment = {}) {
 // Responses. Output text becomes the persisted assistant answer. Provider
 // reasoning is a separate, transient work stream for the active chat only;
 // neither it nor raw vendor events enter the transcript or retained response.
+function compactUsage(usage) {
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return null;
+  // Usage is telemetry, not provider output. Retain the bounded token counters
+  // and their nested cache/detail counters (not arbitrary vendor graphs).
+  const compact = {};
+  const scalarKeys = ['prompt_tokens', 'input_tokens', 'completion_tokens', 'output_tokens', 'total_tokens', 'cached_tokens', 'reasoning_tokens'];
+  for (const key of scalarKeys) {
+    if (Number.isFinite(Number(usage[key]))) compact[key] = Number(usage[key]);
+  }
+  for (const key of ['prompt_tokens_details', 'input_tokens_details', 'completion_tokens_details', 'output_tokens_details']) {
+    const details = usage[key];
+    if (!details || typeof details !== 'object' || Array.isArray(details)) continue;
+    const compactDetails = {};
+    for (const detailKey of ['cached_tokens', 'audio_tokens', 'text_tokens', 'reasoning_tokens']) {
+      if (Number.isFinite(Number(details[detailKey]))) compactDetails[detailKey] = Number(details[detailKey]);
+    }
+    if (Object.keys(compactDetails).length) compact[key] = compactDetails;
+  }
+  return Object.keys(compact).length ? compact : null;
+}
+
 function compactResponseCompletion(response = {}) {
   // `response.completed` can contain vendor reasoning, annotations, and output
   // graphs. The streaming adapter already owns bounded deltas; keep only the
   // terminal identifiers and usage telemetry it actually needs.
-  const usage = response?.usage && typeof response.usage === 'object'
-    ? {
-        prompt_tokens: Number.isFinite(Number(response.usage.prompt_tokens)) ? Number(response.usage.prompt_tokens) : undefined,
-        input_tokens: Number.isFinite(Number(response.usage.input_tokens)) ? Number(response.usage.input_tokens) : undefined,
-        completion_tokens: Number.isFinite(Number(response.usage.completion_tokens)) ? Number(response.usage.completion_tokens) : undefined,
-        output_tokens: Number.isFinite(Number(response.usage.output_tokens)) ? Number(response.usage.output_tokens) : undefined,
-        total_tokens: Number.isFinite(Number(response.usage.total_tokens)) ? Number(response.usage.total_tokens) : undefined,
-      }
-    : null;
+  const usage = compactUsage(response?.usage);
   const outputText = typeof response?.output_text === 'string'
     ? boundedText(response.output_text, MAX_MODEL_TEXT_CHARS)
     : '';
@@ -365,6 +378,9 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
       }
       return;
     }
+    // Providers may send a terminal usage-only event with choices: []. Keep
+    // its bounded telemetry before handling the normal choice path.
+    if (event?.usage && typeof event.usage === 'object') usage = compactUsage(event.usage) || usage;
     const choice = event?.choices?.[0];
     if (!choice) return;
     if (typeof choice.delta?.content === 'string') await emit(choice.delta.content);
@@ -377,7 +393,6 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
       if (!toolCallFailure && !mergeStreamToolCall(toolCalls, call)) recordToolCallFailure('model_tool_call_conflict');
     }
     if (choice.finish_reason) finishReason = choice.finish_reason;
-    if (event.usage) usage = event.usage;
   };
   try {
     while (true) {

@@ -133,7 +133,8 @@ export async function appendCompressionSummary({ rootDir, sessionId = 'default',
   // Canonical execution facts are durable history, not disposable prompt tail.
   // They remain in the active transcript even when their surrounding chat is
   // summarized for provider context.
-  const tailEntries = transcript.filter((entry) => !entry?.metadata?.compressionSummary && (String(entry?.type || '') === 'context_state' || isCanonicalExecutionEntry(entry) || !sourceIds.has(entry?.id)));
+  const retainedUserRuns = new Set(transcript.filter((entry) => ['user', 'agent'].includes(entry.role) && !sourceIds.has(entry.id)).map((entry) => entry.runId));
+  const tailEntries = transcript.filter((entry) => !entry?.metadata?.compressionSummary && (entry.type !== 'provider_history' || retainedUserRuns.has(entry.runId)) && (String(entry?.type || '') === 'context_state' || isCanonicalExecutionEntry(entry) || !sourceIds.has(entry?.id)));
   if (!conversation) throw new Error('conversation_store_required');
   const authority = conversation;
   const rotation = await authority.compact(sessionId, { summary, tailEntries });

@@ -1,3 +1,4 @@
+import { POSTGRES_OPERATOR_INSTANT_SQL } from './postgres-operator-instant.mjs';
 import { POSTGRES_BRAIN_EMBEDDINGS_SQL } from './postgres-brain-embeddings.mjs';
 import { POSTGRES_BRAIN_SCHEMA_SQL, POSTGRES_BRAIN_LEGACY_IMPORT_SQL } from './postgres-brain-store.mjs';
 import { POSTGRES_DREAM_WINDOW_SQL } from './postgres-dream-window.mjs';
@@ -118,4 +119,5 @@ CREATE TABLE brain_legacy_albdruck (
 );
 ` + POSTGRES_BRAIN_LEGACY_IMPORT_SQL },
   { version: 47, name: 'optional-brain-embeddings', sql: POSTGRES_BRAIN_EMBEDDINGS_SQL },
+  { version: 48, name: 'indexed-operator-message-instants', sql: POSTGRES_OPERATOR_INSTANT_SQL },
 ]);

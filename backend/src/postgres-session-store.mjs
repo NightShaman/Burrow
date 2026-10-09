@@ -1,3 +1,4 @@
+import { POSTGRES_OPERATOR_INSTANT_SQL } from './postgres-operator-instant.mjs';
 import { exportSessionRawEvidence } from './session-evidence-export.mjs';
 import { POSTGRES_LOGICAL_MEMBER_SQL, POSTGRES_ARCHIVE_RELATIONAL_ID_SQL, POSTGRES_CATALOG_SCALAR_ID_SQL, POSTGRES_LOGICAL_LOOKUP_INDEX_SQL } from './postgres-lexical-identity.mjs';
 import { retentionSessionCandidate } from './retention.mjs';
@@ -520,7 +521,7 @@ UPDATE conversation_entries SET has_payload_id=NULL;
 UPDATE conversation_archive_entries SET has_payload_id=NULL;
 `;
 
-export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL + POSTGRES_RESET_INSTANT_SQL + POSTGRES_HISTORY_KEYSET_SQL + POSTGRES_LOGICAL_MEMBER_SQL + POSTGRES_ARCHIVE_RELATIONAL_ID_SQL + POSTGRES_CATALOG_SCALAR_ID_SQL + POSTGRES_LOGICAL_LOOKUP_INDEX_SQL + POSTGRES_AGENT_DELIVERY_SCHEMA_SQL;
+export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL + POSTGRES_RESET_INSTANT_SQL + POSTGRES_HISTORY_KEYSET_SQL + POSTGRES_LOGICAL_MEMBER_SQL + POSTGRES_ARCHIVE_RELATIONAL_ID_SQL + POSTGRES_CATALOG_SCALAR_ID_SQL + POSTGRES_LOGICAL_LOOKUP_INDEX_SQL + POSTGRES_AGENT_DELIVERY_SCHEMA_SQL + POSTGRES_OPERATOR_INSTANT_SQL;
 
 const text = (value) => String(value ?? '');
 const required = (value, name) => { const result = text(value).trim(); if (!result) throw new Error(`${name} is required`); return result; };
@@ -950,25 +951,33 @@ export class PostgresSessionStore {
 
   async lastOperatorMessageAt({ agentId: rawAgentId } = {}) {
     const agentId = required(rawAgentId, 'agentId');
-    let newest = null;
-    const consider = (entry) => {
-      if (entry?.type !== 'message' || entry?.role !== 'user') return;
-      if (entry?.metadata?.source === 'scheduled' || String(entry?.runId || '').startsWith('scheduled-')) return;
-      const at = new Date(entry.ts);
-      if (Number.isFinite(at.getTime()) && (!newest || at > newest)) newest = at;
-    };
-    // Decode lossless JSON in JS; never unpack archive blobs or decode in SQL.
-    let position = null;
-    for (;;) {
-      const { rows } = await this.pool.query(`SELECT session_id,source_store,source_id,ordinal,entry
-        FROM conversation_original_rows WHERE agent_id=$1
-        AND ($2::text IS NULL OR (session_id,source_store,source_id,ordinal)>($2,$3,$4,$5::bigint))
-        ORDER BY session_id,source_store,source_id,ordinal LIMIT 256`,
-      [agentId, ...(position || [null,null,null,null])]);
-      for (const row of rows) consider(row.entry);
-      if (rows.length < 256) break;
-      const last = rows.at(-1);
-      position = [last.session_id,last.source_store,last.source_id,String(last.ordinal)];
+    // Native typed indexes answer the normal hot path in one scalar query.
+    // All retained generations count, including reset archives; no canonical
+    // identity reconciliation or storage-time substitution is appropriate here.
+    const { rows } = await this.pool.query(`SELECT max(at) AS at FROM (
+      SELECT max(operator_at) AS at FROM conversation_entries WHERE agent_id=$1 AND operator_at IS NOT NULL
+      UNION ALL
+      SELECT max(operator_at) AS at FROM conversation_archive_entries WHERE agent_id=$1 AND operator_at IS NOT NULL
+    ) latest`, [agentId]);
+    let newest = rows[0]?.at == null ? null : new Date(rows[0].at);
+    // Only ambiguous legacy timestamps need JS Date semantics. Transfer the
+    // scalar, never retained prose/payloads, and bound each batch.
+    for (const [table, key] of [['conversation_entries','session_id,sequence'], ['conversation_archive_entries','session_id,source_id,ordinal']]) {
+      let after = null;
+      for (;;) {
+        const archive = table === 'conversation_archive_entries';
+        const { rows: legacy } = await this.pool.query(`SELECT ${key},operator_ts_fallback AS ts FROM ${table}
+          WHERE agent_id=$1 AND operator_ts_fallback IS NOT NULL
+          AND ($2::text IS NULL OR (${key})>${archive ? '($2,$3,$4::bigint)' : '($2,$3::bigint)'})
+          ORDER BY ${key} LIMIT 256`, [agentId,...(after || (archive ? [null,null,null] : [null,null]))]);
+        for (const row of legacy) {
+          const at = new Date(JSON.parse(row.ts));
+          if (Number.isFinite(at.getTime()) && (!newest || at > newest)) newest = at;
+        }
+        if (legacy.length < 256) break;
+        const last = legacy.at(-1);
+        after = archive ? [last.session_id,last.source_id,String(last.ordinal)] : [last.session_id,String(last.sequence)];
+      }
     }
     return newest?.toISOString() || null;
   }

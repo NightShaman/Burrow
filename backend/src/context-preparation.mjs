@@ -95,6 +95,7 @@ export async function prepareSessionTurnContext({
   memoryStage = null,
   selectedSkills = [],
   transcript = null,
+  transcriptSnapshotSupplied = false,
   logger = null,
   agentWorkspaceRoot = null,
   agentDataRoot = null,
@@ -111,7 +112,7 @@ export async function prepareSessionTurnContext({
   // session has no history. A caller without a session data root can still use
   // an explicit empty transcript for ephemeral/CLI preparation.
   const useSuppliedTranscript = Array.isArray(transcript)
-    && (transcript.length > 0 || !dataRoot);
+    && (transcript.length > 0 || !dataRoot || transcriptSnapshotSupplied);
   const resolvedTranscript = useSuppliedTranscript
     ? transcript
     : await conversationAuthority({ store: stores?.conversations || null, agentId }).entriesAll(sessionId);
