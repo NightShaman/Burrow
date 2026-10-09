@@ -69,6 +69,17 @@ export function createTraceLogger({ rootDir, runId, sessionId, clock = nowIso, o
   const resolvedRunId = safeId(runId || `${clock()}-${randomUUID()}`);
   const traceDir = path.join(rootDir, resolvedRunId);
   let toolSequence = 0;
+  const diagnostics = new Set();
+  let diagnosticFailed = false;
+  function deferDiagnostic(operation) {
+    const task = Promise.resolve().then(operation).catch(() => { diagnosticFailed = true; });
+    diagnostics.add(task);
+    void task.then(() => diagnostics.delete(task));
+  }
+  async function flushDiagnostics() {
+    while (diagnostics.size) await Promise.all([...diagnostics]);
+    if (diagnosticFailed) throw new Error('provider_diagnostic_persistence_failed');
+  }
 
   async function ensureDir() {
     await fs.mkdir(traceDir, { recursive: true });
@@ -148,6 +159,8 @@ export function createTraceLogger({ rootDir, runId, sessionId, clock = nowIso, o
   }
 
   return {
+    deferDiagnostic,
+    flushDiagnostics,
     rootDir,
     runId: resolvedRunId,
     traceDir,
@@ -161,6 +174,7 @@ export function createTraceLogger({ rootDir, runId, sessionId, clock = nowIso, o
     verifier,
     artifact,
     async terminal() {
+      await flushDiagnostics();
       await fs.mkdir(rootDir, { recursive: true });
       await withTraceGuard(`${traceDir}.writer`, async () => {
         await ensureDir();

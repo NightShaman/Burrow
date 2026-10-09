@@ -583,6 +583,9 @@ it.each([
   [[], undefined],
   [[{ type: 'run.started' }, { type: 'route.decided' }], 'preparing'],
   [[{ type: 'model.started' }], 'request-intent'],
+  [[{ type: 'model.dispatched', data: { modelCall: 1 } }], 'dispatched'],
+  [[{ type: 'model.started', data: { modelCall: 2 } }, { type: 'model.dispatched', data: { modelCall: 1 } }], 'request-intent'],
+  [[{ type: 'model.started' }, { type: 'model.dispatched', runId: 'wrong', data: { modelCall: 1 } }], 'request-intent'],
   [[{ type: 'model.started' }, { type: 'model.completed' }], 'model-completed'],
 ] as const)('recovers live stage from polling events, never the streaming phase: %j', async (events, stage) => {
   apiMock.mockImplementation(async (path) => {

@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import { serializeSessionAdmission } from './session-admission.mjs';
 import { operatorTimezone } from './timezone.mjs';
 import { postgresContinuity } from './postgres-continuity.mjs';
@@ -63,7 +64,8 @@ export async function runAskChat(options = {}) {
   // Internal regression seam: stale-commit tests exercise the cross-process
   // continuity guard directly. Production callers always serialize here.
   if (options.testHooks?.bypassSessionExecutionQueue) return runAskChatUnserialized(options);
-  return serializeSessionExecution(options, () => runAskChatUnserialized(options));
+  const latencyTiming = { ...(options.latencyTiming || {}), runtimeQueuedMs: performance.now() };
+  return serializeSessionExecution(options, () => runAskChatUnserialized({ ...options, latencyTiming: { ...latencyTiming, runtimeAdmittedMs: performance.now() } }));
 }
 
 async function subagentDebugSnapshot({ dataRoot, legacyDataRoot = null, sessionId, compatibilityObserver = null, limit = 20 } = {}) {
@@ -116,6 +118,7 @@ async function runAskChatUnserialized({
   // Internal transport observer. It receives persisted trace records and is
   // intentionally not accepted through serialized request arguments.
   onTraceRecord = null,
+  latencyTiming = null,
   // Visible provider text only; never carried in serialized turn arguments.
   onModelTextDelta = null,
   // Transient provider work/reasoning stream; never persisted as a chat turn.
@@ -220,6 +223,7 @@ async function runAskChatUnserialized({
     sessionId: resolvedSessionId,
   });
   const logger = createTraceLogger({ rootDir: traceRoot, runId: resolvedRunId, sessionId: resolvedSessionId, onRecord: onTraceRecord });
+  if (latencyTiming) await logger.event('chat-admission-timing', { ...latencyTiming, clockDomain: 'server-process' });
   const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, logger, testHooks });
   const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, inboundEntryId, parentSignal = null }) => {
     const nestedRunId = `${resolvedRunId}-reply-${recipientRuntime.agentId}`;

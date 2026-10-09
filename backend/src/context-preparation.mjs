@@ -126,7 +126,7 @@ export async function prepareSessionTurnContext({
   });
   let compressionResult = null;
   try {
-    compressionResult = await compressionRunner({ rootDir: dataRoot, sessionId, config: contextConfig, contextBudget: preCompressionInspection.contextBudget, logger, stores, agentId });
+    compressionResult = await compressionRunner({ rootDir: dataRoot, sessionId, config: contextConfig, contextBudget: preCompressionInspection.contextBudget, transcriptSnapshot: resolvedTranscript, logger, stores, agentId });
   } catch (error) {
     compressionResult = { ok: false, compressed: false, reason: 'compression_failed', error: error?.message || String(error) };
     await logger?.event?.('context-compression-failed', compressionResult);

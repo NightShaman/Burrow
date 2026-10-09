@@ -241,13 +241,14 @@ it('live Markdown blocks protocol-relative image requests until consent', () => 
 it.each([
   ['accepted', 'Waiting for runtime…'],
   ['preparing', 'Preparing response…'],
+  ['dispatched', 'Model request dispatched…'],
   ['request-intent', 'Model request prepared…'],
   ['model-completed', 'Model response received; continuing…'],
 ] as const)('shows evidence-based %s only in an otherwise empty live row', (stage, label) => {
   const props = { selected: parent, parent, operator: { name: 'Rob', avatar: 'R' }, isNewSession: false, turns: [], isLoading: false, error: '', isSending: true, activeRunId: 'run', liveProgress: [], liveAnswer: '', liveStage: stage };
   const { rerender } = render(<ChatTranscript {...props} />);
   expect(screen.getByRole('status').textContent).toBe(label);
-  expect(screen.queryByText(/dispatch|sent to provider/i)).toBeNull();
+  expect(screen.queryByText(stage === 'dispatched' ? /accepted|sent to provider/i : /dispatch|sent to provider/i)).toBeNull();
   rerender(<ChatTranscript {...props} liveAnswer="Visible text" />);
   expect(screen.queryByText(label)).toBeNull();
   expect(screen.getByText('Visible text')).toBeTruthy();

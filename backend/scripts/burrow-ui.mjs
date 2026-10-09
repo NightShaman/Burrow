@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { performance } from 'node:perf_hooks';
 import { createChatStreamDelta } from '../src/chat-stream-delta.mjs';
 import { serializeSessionAdmission } from '../src/session-admission.mjs';
 import { createBrainRoutes } from './ui/brain-routes.mjs';
@@ -1823,6 +1824,9 @@ function publicChatProgress(record = {}) {
   if (record.type === 'router' && payload.stage === 'ask-chat-turn') {
     return { type: 'route.decided', data: { routeKind: payload.route?.kind || null, sessionKind: payload.runtimeTurn?.envelope?.route?.kind || null } };
   }
+  if (record.type === 'provider-dispatched') {
+    return { type: 'model.dispatched', data: { requestId: payload.requestId, modelCall: payload.modelCall || null, provider: payload.provider, api: payload.api, model: payload.model, invokedAt: payload.invokedAt, monotonicMs: payload.monotonicMs, clockDomain: payload.clockDomain, boundary: 'local-fetch-invocation', providerAcceptance: 'unknown' } };
+  }
   if (record.type === 'model' && payload.stage === 'model-request') {
     return { type: 'model.started', data: { provider: payload.provider || null, api: payload.api || null, model: payload.model || null, toolCount: Number(payload.toolCount || 0) } };
   }
@@ -2924,6 +2928,7 @@ async function handleChatCommand({ parsed, sessionId, agentRuntime } = {}) {
 }
 
 async function handleChat(req, res) {
+  const latencyTiming = { ingressMs: performance.now(), ingressAt: new Date().toISOString() };
   const body = validateBoundaryBody('chat', await readJsonBody(req));
   let agentRuntime;
   try {
@@ -2943,12 +2948,14 @@ async function handleChat(req, res) {
   res.once('close', disconnected);
   req.once('aborted', disconnected);
   if (req.aborted || res.destroyed) disconnected();
+  latencyTiming.httpQueuedMs = performance.now();
   try {
     return await serializeSessionChat({ agentId: agentRuntime.agentId, sessionId, signal: admission.signal, operation: () => {
+      latencyTiming.httpAdmittedMs = performance.now();
       // After admission preserve the existing detached-run policy.
       res.removeListener('close', disconnected);
       req.removeListener('aborted', disconnected);
-      return handleSerializedChat({ req, res, body, agentRuntime, sessionId });
+      return handleSerializedChat({ req, res, body, agentRuntime, sessionId, latencyTiming });
     } });
   } catch (error) {
     if (!admission.signal.aborted) throw error;
@@ -2958,7 +2965,7 @@ async function handleChat(req, res) {
   }
 }
 
-async function handleSerializedChat({ req, res, body, agentRuntime, sessionId }) {
+async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, latencyTiming = null }) {
   const streaming = acceptsNdjson(req);
   const command = parseChatCommand(body.message);
   if (command) {
@@ -2992,15 +2999,16 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId })
       agentRuntime,
       stores: postgresApplication.stores,
       resolveAgentRuntime,
+      latencyTiming,
       registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerActiveAgentRun(activeChatRuns, { agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
-      onTraceRecord: streaming ? (traceRecord) => {
+      onTraceRecord: (traceRecord) => {
         const progress = publicChatProgress(traceRecord);
         if (progress) {
           const event = { ...progress, runId, sessionId, ts: traceRecord.ts || new Date().toISOString() };
           record.progress = [...record.progress, event].slice(-50);
-          writeNdjson(res, event);
+          if (streaming) writeNdjson(res, event);
         }
-      } : null,
+      },
       onModelTextDelta: streaming ? createChatStreamDelta({ record, type: 'assistant.delta', runId, sessionId, write: (event) => writeNdjson(res, event) }) : null,
       onModelThoughtDelta: streaming ? createChatStreamDelta({ record, type: 'assistant.thought', runId, sessionId, write: (event) => writeNdjson(res, event) }) : null,
       onModelContextUsage: async (usage) => {

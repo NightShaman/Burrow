@@ -187,7 +187,7 @@ export type ActiveA2AActivity = {
   recipient?: { agentId?: string; sessionId?: string; runId?: string };
   parentAgentId?: string;
   messageMode?: string;
-  progress?: Array<{ type?: string; data?: Record<string, unknown>; ts?: string }>;
+  progress?: Array<{ type?: string; runId?: string; sessionId?: string; data?: Record<string, unknown>; ts?: string }>;
 };
 export type ActiveSubagentActivity = {
   kind?: string | null;
@@ -228,7 +228,7 @@ export type ActiveChatRun = {
   status: string;
   phase?: string;
   latestUserMessage?: string | null;
-  progress?: Array<{ type?: string; data?: Record<string, unknown>; ts?: string }>;
+  progress?: Array<{ type?: string; runId?: string; sessionId?: string; data?: Record<string, unknown>; ts?: string }>;
   source?: string | null;
   a2a?: { parentAgentId?: string; parentRunId?: string; messageMode?: string } | null;
   a2aActivities?: ActiveA2AActivity[];

@@ -1,4 +1,4 @@
-import { invokeProviderFetch } from './provider-fetch.mjs';
+import { invokeProviderFetch, providerTiming, flushProviderDiagnostics } from './provider-fetch.mjs';
 import { apiMode, isChatGptBackendBaseUrl, responsesUrl, completionUrl } from './openai-transport.mjs';
 import { toolNames, responseApiTool, messagesToResponsesInput, readResponseSseBounded, normalizeResponseChoice, normalizeChoice, compactResponseCompletion, mergeStreamToolCall, openAIEnvelopeError } from './openai-transport.mjs';
 import { redactStructuredJsonText } from '../redaction.mjs';
@@ -115,6 +115,8 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
 
   const complete = async ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens, tools = null, toolChoice = 'auto', traceLogger, signal = null, toolContinuation = null, onTextDelta = null, onThoughtDelta = null, onContextUsage = null, modelCall = null } = {}) => {
       const requestId = idFactory();
+    const timing = providerTiming({ traceLogger, requestId, provider: 'openai-compatible', api: mode, model, modelCall, clock });
+    try {
       const headers = {
         'content-type': 'application/json',
         ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
@@ -144,6 +146,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       await traceLogger?.model?.({
         stage: 'model-request',
         requestId,
+        modelCall,
         provider: 'openai-compatible',
         api: mode,
         model,
@@ -162,13 +165,13 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         ts: clock(),
       });
 
-      const response = await invokeProviderFetch(fetchImpl, url, { method: 'POST', headers, body: serializedBody, ...(signal ? { signal } : {}) }, { traceLogger, requestId, provider: 'openai-compatible', api: mode, model, clock });
+      const response = await invokeProviderFetch(fetchImpl, url, { method: 'POST', headers, body: serializedBody, ...(signal ? { signal } : {}) }, { traceLogger, requestId, provider: 'openai-compatible', api: mode, model, modelCall, clock, timing });
       // Some OpenAI-compatible proxies silently ignore `stream: true`. Fall
       // back to their normal JSON response rather than converting a complete
       // answer into an empty streamed one.
       const providerReturnedJson = streaming && /application\/json/i.test(String(response?.headers?.get?.('content-type') || ''));
       const responseBody = streaming && !providerReturnedJson
-        ? await readResponseSseBounded(response, { mode, maxBytes: config.maxResponseBytes, onTextDelta, onThoughtDelta })
+        ? await readResponseSseBounded(response, { mode, maxBytes: config.maxResponseBytes, onTextDelta: timing.wrap(onTextDelta, 'text'), onThoughtDelta: timing.wrap(onThoughtDelta, 'thought') })
         : await readResponseTextBounded(response, config.maxResponseBytes);
       const text = responseBody.text || '';
       let data = streaming && !providerReturnedJson ? responseBody.data : null;
@@ -188,6 +191,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       const result = {
         ok,
         requestId,
+        modelCall,
         provider: 'openai-compatible',
         api: mode,
         model,
@@ -211,10 +215,12 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         nativeTranscript,
       };
 
+      if (result.choice?.text || result.choice?.toolCalls?.length) timing.useful(result.choice?.toolCalls?.length ? 'tool' : 'final-text');
       await onContextUsage?.(result.contextUsage);
       await traceLogger?.model?.({
         stage: 'model-response',
         requestId,
+        modelCall,
         provider: 'openai-compatible',
         api: mode,
         model,
@@ -235,6 +241,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       });
 
       return result;
+      } finally { await flushProviderDiagnostics(traceLogger); }
     };
 
   return {

@@ -173,6 +173,27 @@ describe('FE-014 immediate acceptance', () => {
   });
 });
 
+it('records browser-local send, useful delta and React commit without dispatch-only timing', async () => {
+  let emit!: (event: unknown) => void;
+  let complete!: (value: Awaited<ReturnType<typeof streamChat>>) => void;
+  streamChatMock.mockImplementation(({ onEvent }) => { emit = onEvent; return new Promise((resolve) => { complete = resolve; }); });
+  const session = createSession();
+  const { result } = renderHook(() => useChatRun({ selectedAgentId: 'nigel', selected: undefined, savedProviders: [], session, setAgentActivity: vi.fn() }));
+  let pending!: Promise<void>;
+  act(() => { pending = result.current.sendMessage(); });
+  const runId = (streamChatMock.mock.calls[0][0].requestBody as { runId: string }).runId;
+  const prefix = `chat:${runId}:`;
+  expect(performance.getEntriesByName(`${prefix}send`)).toHaveLength(1);
+  act(() => emit({ type: 'model.dispatched', data: { modelCall: 1 } }));
+  expect(performance.getEntriesByName(`${prefix}first-useful`)).toHaveLength(0);
+  act(() => emit({ type: 'assistant.delta', data: { delta: 'Visible', modelCall: 1 } }));
+  await waitFor(() => expect(result.current.liveAnswer).toBe('Visible'));
+  expect(performance.getEntriesByName(`${prefix}first-useful`)).toHaveLength(1);
+  expect(performance.getEntriesByName(`${prefix}react-commit-observed`)).toHaveLength(1);
+  expect(performance.getEntriesByName(`${prefix}send-to-first-useful`)).toHaveLength(1);
+  await act(async () => { complete({ terminalType: 'run.completed', finalResult: { ok: true, answerText: 'Done' } }); await pending; });
+});
+
 describe('truthful live stages', () => {
   it('tracks preparation and request intent without manufacturing thought or final metadata; rejects stale callbacks', async () => {
     let emit!: (event: unknown) => void;
@@ -188,6 +209,13 @@ describe('truthful live stages', () => {
     act(() => emit({ type: 'route.decided' }));
     expect(result.current.liveStage).toBe('preparing');
     act(() => emit({ type: 'model.started' }));
+    expect(result.current.liveStage).toBe('request-intent');
+    act(() => emit({ type: 'model.dispatched', sessionId: 'wrong', data: { modelCall: 1 } }));
+    expect(result.current.liveStage).toBe('request-intent');
+    act(() => emit({ type: 'model.dispatched', data: { modelCall: 1 } }));
+    expect(result.current.liveStage).toBe('dispatched');
+    act(() => emit({ type: 'model.started', data: { modelCall: 2 } }));
+    act(() => emit({ type: 'model.dispatched', data: { modelCall: 1 } }));
     expect(result.current.liveStage).toBe('request-intent');
     act(() => emit({ type: 'assistant.delta', data: { modelCall: 1 } }));
     expect(result.current.liveAnswer).toBe('');

@@ -140,10 +140,10 @@ export async function appendCompressionSummary({ rootDir, sessionId = 'default',
   return { entry: rotation.summaryEntry, summary, rotation };
 }
 
-export async function runSessionCompression({ rootDir, sessionId = 'default', config = {}, contextBudget = null, maxChars = null, logger = null, stores = null, agentId = 'hatchet', conversation = null } = {}) {
+export async function runSessionCompression({ rootDir, sessionId = 'default', config = {}, contextBudget = null, maxChars = null, logger = null, stores = null, agentId = 'hatchet', conversation = null, transcriptSnapshot = null } = {}) {
   if (!conversation && !stores?.conversations) throw new Error('conversation_store_required');
   const authority = conversation || conversationAuthority({ store: stores?.conversations || null, agentId });
-  const transcript = await authority.entriesAll(sessionId);
+  const transcript = Array.isArray(transcriptSnapshot) ? transcriptSnapshot : await authority.entriesAll(sessionId);
   const existingSummaries = compressionSummariesFromTranscript(transcript);
   // The active successor already contains the current semantic summary. Only
   // its unsummarized chat tail is eligible for the next rotation.
@@ -161,6 +161,9 @@ export async function runSessionCompression({ rootDir, sessionId = 'default', co
     await logger?.event?.('context-compression-skip', result);
     return result;
   }
+  // A preparation snapshot is safe for assessment, not a mutation authority.
+  // Refresh/replan before rotation so intervening durable entries survive.
+  if (Array.isArray(transcriptSnapshot)) return runSessionCompression({ rootDir, sessionId, config, contextBudget, maxChars, logger, stores, agentId, conversation: authority });
   let appended;
   try {
     appended = await appendCompressionSummary({ rootDir, sessionId, transcript, plan, maxChars: maxChars ?? tokenTargetToCharBudget(config.summaryTargetTokens, 6000), conversation: authority });

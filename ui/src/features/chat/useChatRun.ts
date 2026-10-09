@@ -4,9 +4,9 @@ import type { Agent, SavedProvider } from '../../app/types';
 import { streamChat } from './chatStream';
 import { appendThoughtDelta, finalizeThoughtProgress } from './chatThoughtProgress';
 
-import { chatLiveStageFromEvent, type ChatLiveStage } from './chatLiveStage';
+import { projectLiveStage, type LiveStageProjection, type ChatLiveStage } from './chatLiveStage';
 
-type ActiveRun = { runId: string; agentId: string; sessionId: string; stage?: ChatLiveStage };
+type ActiveRun = { runId: string; agentId: string; sessionId: string; stage?: ChatLiveStage; projection?: LiveStageProjection };
 type StreamToolEvent = { tool?: unknown; rawTool?: unknown; activityId?: unknown; ok?: unknown; status?: unknown; label?: unknown; detail?: unknown; provider?: unknown; mcpToolName?: unknown; command?: unknown; cwd?: unknown; filePath?: unknown; dirPath?: unknown; query?: unknown; reason?: unknown; result?: unknown; output?: unknown; error?: unknown };
 
 type ChatRunSession = {
@@ -59,11 +59,20 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
   const streamAbortRef = useRef<Record<string, AbortController>>({});
   const activeRunForSelection = selectedAgentId && session.sessionId ? activeRuns[runKey(selectedAgentId, session.sessionId)] ?? null : null;
 
+  useEffect(() => {
+    const runId = activeRunForSelection?.runId;
+    if (!runId || !(liveAnswerByRun[runKey(selectedAgentId, session.sessionId)] || liveProgressByRun[runKey(selectedAgentId, session.sessionId)]?.some((item) => item.text))) return;
+    if (!performance.getEntriesByName(`chat:${runId}:first-useful`).length || performance.getEntriesByName(`chat:${runId}:react-commit-observed`).length) return;
+    performance.mark(`chat:${runId}:react-commit-observed`);
+    performance.measure(`chat:${runId}:first-useful-to-react-commit-observed`, `chat:${runId}:first-useful`, `chat:${runId}:react-commit-observed`);
+  }, [activeRunForSelection, liveAnswerByRun, liveProgressByRun, selectedAgentId, session.sessionId]);
+
   // Acceptance is synchronous; the returned promise still tracks run completion.
   const sendMessage = async (draftOverride?: string, onAccepted?: () => void) => {
     const message = (draftOverride ?? session.draft).trim() || (session.attached.length ? 'Please analyze the attached files.' : '');
     if (!message || !selectedAgentId || !session.sessionId || activeRunForSelection || streamAbortRef.current[runKey(selectedAgentId, session.sessionId)]) return;
     const target = { agentId: selectedAgentId, resourceAgentId: selected?.resourceId ?? selectedAgentId, sessionId: session.sessionId };
+    const sentAt = performance.now();
     const runId = createRunId(target.sessionId);
     const provider = savedProviders.find((item) => item.provider === selected?.provider) ?? savedProviders[0];
     const model = selected?.model || provider?.models[0];
@@ -77,18 +86,23 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
     setLiveAnswerByRun((current) => ({ ...current, [targetKey]: '' }));
     setAgentActivity(target.agentId, 'thinking'); session.clearError(); session.setDraft(''); onAccepted?.(); session.clearAttachment(); session.leaveNewSessionForMessage();
     session.appendTurn(target.agentId, target.sessionId, { type: 'message', role: 'user', content: message, ts: new Date().toISOString(), runId, ...(attachments.length ? { metadata: { attachments: attachments.map(({ name, type, size }, index) => ({ index, name, type, size, encoding: 'data-url', ...(type.startsWith('image/') ? { preview: attachments[index].content } : {}) })) } } : {}) });
+    performance.mark(`chat:${runId}:send`, { startTime: sentAt });
+    let firstUseful = false;
     let streamedAnswer = ''; let progressEntries: ProgressEntry[] = []; let toolSequence = 0; let frame = 0;
     const flushLiveText = () => { frame = 0; setLiveProgressByRun((current) => ({ ...current, [targetKey]: progressEntries })); setLiveAnswerByRun((current) => ({ ...current, [targetKey]: streamedAnswer })); };
     const scheduleLiveFlush = () => { if (!frame) frame = requestAnimationFrame(flushLiveText); };
     try {
       const handleEvent = (event: unknown) => {
         if (streamAbortRef.current[targetKey] !== abortController || abortController.signal.aborted || !event || typeof event !== 'object') return;
-        const envelope = event as { type?: string; ts?: unknown; data?: { delta?: unknown; response?: unknown; message?: unknown; status?: unknown; modelCall?: unknown } & StreamToolEvent };
+        const envelope = event as { type?: string; runId?: unknown; sessionId?: unknown; ts?: unknown; data?: { delta?: unknown; response?: unknown; message?: unknown; status?: unknown; modelCall?: unknown } & StreamToolEvent };
+        if ((envelope.runId !== undefined && envelope.runId !== runId) || (envelope.sessionId !== undefined && envelope.sessionId !== target.sessionId)) return;
+        const useful = ((envelope.type === 'assistant.delta' || envelope.type === 'assistant.thought') && typeof envelope.data?.delta === 'string' && envelope.data.delta.length > 0) || ((envelope.type === 'tool.started' || envelope.type === 'tool.completed') && typeof envelope.data?.tool === 'string' && Boolean(envelope.data.tool.trim()));
+        if (useful && !firstUseful) { firstUseful = true; performance.mark(`chat:${runId}:first-useful`); performance.measure(`chat:${runId}:send-to-first-useful`, `chat:${runId}:send`, `chat:${runId}:first-useful`); }
         setActiveRuns((current) => {
           const owner = current[targetKey];
           if (owner?.runId !== runId) return current;
-          const stage = chatLiveStageFromEvent(owner.stage, envelope.type);
-          return stage === owner.stage ? current : { ...current, [targetKey]: { ...owner, stage } };
+          const projection = projectLiveStage(owner.projection ?? { stage: owner.stage }, envelope);
+          return { ...current, [targetKey]: { ...owner, stage: projection.stage, projection } };
         });
         if (envelope.type === 'assistant.thought' && typeof envelope.data?.delta === 'string') {
           progressEntries = appendThoughtDelta(progressEntries, envelope, runId);

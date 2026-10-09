@@ -1,4 +1,4 @@
-import { chatLiveStageFromEvent, type ChatLiveStage } from './chatLiveStage';
+import { projectLiveStage, type LiveStageProjection, type ChatLiveStage } from './chatLiveStage';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isWithinAttachmentBudget } from '../../app/clientBudgets';
 import { api, textFromChatValue, type ActiveA2AActivity, type ActiveChatRun, type ActiveChatRunsResponse, type ActiveSubagent, type ChatAttachment, type ProgressEntry, type SessionSummary, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
@@ -51,7 +51,7 @@ function runtimeToolActivity(run: ActiveChatRun): ToolActivity | undefined {
 
 function runtimeRunForSelection(run: ActiveChatRun | undefined, targetId: string): RuntimeRunForSelection | null {
   if (!run) return null;
-  return { targetId, runId: run.runId, agentId: run.agentId, sessionId: run.sessionId, latestUserMessage: typeof run.latestUserMessage === 'string' ? run.latestUserMessage : '', stage: (run.progress ?? []).reduce<ChatLiveStage | undefined>((stage, event) => chatLiveStageFromEvent(stage, event.type), undefined), progress: runtimeRunProgress(run), toolActivity: runtimeToolActivity(run) };
+  return { targetId, runId: run.runId, agentId: run.agentId, sessionId: run.sessionId, latestUserMessage: typeof run.latestUserMessage === 'string' ? run.latestUserMessage : '', stage: (run.progress ?? []).reduce<LiveStageProjection>((state, event) => ((event.runId !== undefined && event.runId !== run.runId) || (event.sessionId !== undefined && event.sessionId !== run.sessionId)) ? state : projectLiveStage(state, event), {}).stage, progress: runtimeRunProgress(run), toolActivity: runtimeToolActivity(run) };
 }
 
 function formatElapsed(from?: string | null, to = Date.now()) {
