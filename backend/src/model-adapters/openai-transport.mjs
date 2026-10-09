@@ -22,6 +22,16 @@ export function openAIEnvelopeError(data, mode) {
   return normalized.text.trim() || normalized.toolCalls.length || media ? null : 'model_response_empty';
 }
 export function isChatGptBackendBaseUrl(value) { const raw=trimSlash(value); if (!raw) return false; try { const url=new URL(raw); const pathname=url.pathname.replace(/\/+$/,''); return url.hostname.toLowerCase()==='chatgpt.com' && ['/backend-api','/backend-api/v1','/backend-api/codex','/backend-api/codex/v1'].includes(pathname); } catch { return false; } }
+
+// Codex-LB is an OAuth-backed proxy for the same Codex backend contract. Its
+// origin is intentionally not chatgpt.com, so URL-only detection must also use
+// the trusted connection metadata supplied by the model settings store.
+export function isCodexBackendConfig(config = {}) {
+  if (isChatGptBackendBaseUrl(config.baseUrl || config.apiBaseUrl || config.url)) return true;
+  const provider = String(config.provider || config.providerName || '').toLowerCase();
+  const baseUrl = String(config.baseUrl || config.apiBaseUrl || config.url || '').toLowerCase();
+  return provider.includes('codex-lb') || provider.includes('codex lb') || baseUrl.includes('codex-lb') || /:\s*2455(?:\/|$)/.test(baseUrl);
+}
 function codexResponsesUrl(baseUrl) { const url=new URL(trimSlash(baseUrl)); url.pathname='/backend-api/codex/responses'; url.search=''; url.hash=''; return url.toString(); }
 export function completionUrl(config={}) { const baseUrl=trimSlash(config.baseUrl||config.apiBaseUrl||config.url); if(!baseUrl) throw new Error('model baseUrl is required'); if(isChatGptBackendBaseUrl(baseUrl)) return codexResponsesUrl(baseUrl); if(config.chatCompletionsPath) return `${baseUrl}/${String(config.chatCompletionsPath).replace(/^\/+/, '')}`; if(baseUrl.endsWith('/chat/completions')) return baseUrl; if(baseUrl.endsWith('/v1')||(isGoogleOpenAICompatible(config)&&baseUrl.endsWith('/openai'))) return `${baseUrl}/chat/completions`; return `${baseUrl}/v1/chat/completions`; }
 export function responsesUrl(config={}) { const baseUrl=trimSlash(config.baseUrl||config.apiBaseUrl||config.url); if(!baseUrl) throw new Error('model baseUrl is required'); if(isChatGptBackendBaseUrl(baseUrl)) return codexResponsesUrl(baseUrl); if(config.responsesPath) return `${baseUrl}/${String(config.responsesPath).replace(/^\/+/, '')}`; if(baseUrl.endsWith('/responses')) return baseUrl; if(baseUrl.endsWith('/v1')||(isGoogleOpenAICompatible(config)&&baseUrl.endsWith('/openai'))) return `${baseUrl}/responses`; return `${baseUrl}/v1/responses`; }

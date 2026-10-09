@@ -1,5 +1,5 @@
 import { invokeProviderFetch, providerTiming, flushProviderDiagnostics } from './provider-fetch.mjs';
-import { apiMode, isChatGptBackendBaseUrl, responsesUrl, completionUrl } from './openai-transport.mjs';
+import { apiMode, isChatGptBackendBaseUrl, isCodexBackendConfig, responsesUrl, completionUrl } from './openai-transport.mjs';
 import { toolNames, responseApiTool, messagesToResponsesInput, readResponseSseBounded, normalizeResponseChoice, normalizeChoice, compactResponseCompletion, mergeStreamToolCall, openAIEnvelopeError } from './openai-transport.mjs';
 import { redactStructuredJsonText } from '../redaction.mjs';
 import { googleCompatibleWireModel } from './google-wire.mjs';
@@ -21,6 +21,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
   if (!fetchImpl) throw new Error('fetch implementation is required');
   const mode = apiMode(config);
   const chatGptBackend = isChatGptBackendBaseUrl(config.baseUrl || config.apiBaseUrl || config.url);
+  const codexBackend = isCodexBackendConfig(config);
   const url = mode === 'openai-responses' ? responsesUrl(config) : completionUrl(config);
   const model = config.model;
   const wireModel = googleCompatibleWireModel(config);
@@ -135,7 +136,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
         ...(config.headers || {}),
       };
-      if (chatGptBackend) {
+      if (codexBackend) {
         const sessionId = codexAffinityId(config.codexSessionId || traceLogger?.sessionId);
         const threadId = codexAffinityId(config.codexThreadId || traceLogger?.conversationId || traceLogger?.sessionId);
         if (sessionId && !headers['session-id'] && !headers['Session-Id']) headers['session-id'] = sessionId;
@@ -186,7 +187,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       });
 
       const response = await invokeProviderFetch(fetchImpl, url, { method: 'POST', headers, body: serializedBody, ...(signal ? { signal } : {}) }, { traceLogger, requestId, provider: 'openai-compatible', api: mode, model, modelCall, clock, timing });
-      if (chatGptBackend) {
+      if (codexBackend) {
         const returnedTurnState = response?.headers?.get?.('x-codex-turn-state') || response?.headers?.get?.('x-codex-turn-state-token');
         if (returnedTurnState) codexTurnState = String(returnedTurnState);
       }
