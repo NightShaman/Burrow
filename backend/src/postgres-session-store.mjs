@@ -923,6 +923,9 @@ export class PostgresSessionStore {
 
   // Indexed candidate pages; final query/ranking/filter semantics stay in JS.
   async searchEvidencePage({ agentId, sessionId, query = '', includeResetHistory = false, after = null, limit = 256 } = {}) {
+    // Automatic terse-continuation recall deliberately uses null for no filter.
+    query = query ?? '';
+    if (typeof query !== 'string') throw new TypeError('query must be a string or null');
     const terms = [...new Set(query.toLowerCase().match(/[a-z0-9][a-z0-9._-]*/gu)?.filter(t => t.length >= 3) || [])];
     const grams = terms.map(t => [...new Set(Array.from({ length: t.length - 2 }, (_, i) => t.slice(i,i+3)))]);
     const candidate = grams.length ? `AND (r.has_compression_summary OR r.search_grams IS NULL OR ${grams.map((_,i) => `r.search_grams @> $${i+7}::text[]`).join(' OR ')})` : '';
