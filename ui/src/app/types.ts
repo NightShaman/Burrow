@@ -1,4 +1,4 @@
-export type Page = 'chat' | 'tasks' | 'archive' | 'albdruck' | 'forge' | 'settings';
+export type Page = 'chat' | 'tasks' | 'archive' | 'brains' | 'forge' | 'settings';
 export type SettingsTab = 'general' | 'agents' | 'skills' | 'connections' | 'mods' | `mod-settings:${string}:${string}`;
 export type FileNode = { name: string; path: string; type: 'file' | 'directory'; children?: FileNode[] };
 export type ContextDetails = { estimatedTokens: number | null; capacityTokens: number | null; pressure: string | null; source: string | null; compactionActive: boolean; summarizedTurnCount: number | null; rawRecentTurnCount: number | null; recallUsed?: boolean; recallScope?: string | null; recallSourceCount?: number };

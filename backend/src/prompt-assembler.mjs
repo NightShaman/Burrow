@@ -1,4 +1,3 @@
-import { resolveAlbdruckConfig } from './config.mjs';
 import { localTimestamp } from './timezone.mjs';
 import { resolveRuntimeTraceRoot } from './config.mjs';
 import { createTraceLogger } from './trace-logger.mjs';
@@ -576,9 +575,6 @@ export async function assemblePrompt({
     section('conversation', renderedConversation),
     section('prior-conversation-summary', clampText(renderPriorConversationSummary(conversation), limits.priorSummaryChars ?? 4_000)),
     section('support-group-channel', renderGroupChannel(supportContext?.groupChannel || null, limits.groupChannelChars ?? 12_000)),
-    section('support-session-recall', clampText(renderSessionRecall(supportContext?.sessionRecall || null), limits.sessionRecallChars ?? 6_000)),
-    section('selective-albdruck-knowledge', clampText(supportContext?.albdruckRecall?.items?.length ? 'Derived knowledge, not original evidence. Verify via cited originals before relying on mutable facts.\n' + JSON.stringify(supportContext.albdruckRecall.items.map(item => ({ id: item.id, state: item.state, document: item.document, evidence: item.evidence }))) : '', resolveAlbdruckConfig().promptMaxChars)),
-    section('relevant-run-evidence', clampText(supportContext?.runEvidence?.text || '', limits.runEvidenceChars ?? 6_000)),
     section('support-dream-preload', clampText(renderDreamPreload(supportContext?.dreamPreload || null), limits.dreamPreloadChars ?? 2_000)),
     section('support-working-context', renderWorkingContext(supportContext?.workingContext || null, limits.workingContextChars ?? 0)),
     section('runtime-host-context', clampText(renderRuntimeHostContext(supportContext?.runtimeHost || null), limits.runtimeHostChars ?? 1_000)),

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { forgeToolSchemas } from './forge-agent-tools.mjs';
 
-export const ALLOWED_TOOLS = new Set(['shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'attachment_view', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now', 'files_write', 'files_patch', 'spawn_subagent', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call', 'forge_catalog', 'forge_create_job', 'forge_list_jobs', 'forge_inspect_job', 'forge_attach_artifact', 'list_skills', 'load_skill']);
+export const ALLOWED_TOOLS = new Set(['run_evidence_search','brain_search','brain_read','brain_save','brain_update','brain_remove', 'shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'attachment_view', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now', 'files_write', 'files_patch', 'spawn_subagent', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call', 'forge_catalog', 'forge_create_job', 'forge_list_jobs', 'forge_inspect_job', 'forge_attach_artifact', 'list_skills', 'load_skill']);
 
 const TARGET_KIND_ALIASES = new Map([
   ['filesystem', 'filesystem'],
@@ -50,6 +50,8 @@ function normalizeAction(action, index) {
   if (tool && !ALLOWED_TOOLS.has(tool)) errors.push(`unsupported_tool:${tool}`);
 
   const normalized = {
+    brainId: action?.id || null,
+    expectedRevision: action?.expectedRevision,
     index,
     tool: tool || null,
     // Provider call identity is trusted runtime metadata, not a tool argument.
@@ -75,6 +77,11 @@ function normalizeAction(action, index) {
     query: action?.query ? String(action.query) : null,
     cursor: action?.cursor === undefined || action?.cursor === null ? null : String(action.cursor),
     attachmentId: action?.attachmentId || action?.id ? String(action.attachmentId || action.id).trim() : null,
+    since: action?.since || null,
+    until: action?.until || null,
+    sourceId: action?.sourceId || null,
+    sourceSessionId: action?.sourceSessionId || null,
+    neighborCount: action?.neighborCount ?? 1,
     sessionScope: action?.scope ? String(action.scope) : 'agent_sessions',
     project: action?.project ? String(action.project) : null,
     title: action?.title ? String(action.title) : null,
@@ -84,7 +91,7 @@ function normalizeAction(action, index) {
     priority: action?.priority ? String(action.priority) : null,
     assignedAgentId: action?.assignedAgentId === undefined || action?.assignedAgentId === null ? null : String(action.assignedAgentId),
     description: action?.description === undefined || action?.description === null ? null : String(action.description),
-    sourceRefs: Array.isArray(action?.sourceRefs) ? action.sourceRefs.map((ref) => String(ref).trim()).filter(Boolean).slice(0, 12) : [],
+    sourceRefs: Array.isArray(action?.sourceRefs) ? action.sourceRefs.map((ref) => String(ref).trim()).filter(Boolean) : [],
     sourceRef: action?.sourceRef ? String(action.sourceRef) : null,
     lifecycle: action?.lifecycle && typeof action.lifecycle === 'object' && !Array.isArray(action.lifecycle) ? action.lifecycle : null,
     tags: Array.isArray(action?.tags) ? action.tags.map((tag) => String(tag).trim()).filter(Boolean).slice(0, 12) : [],
@@ -139,7 +146,8 @@ function normalizeAction(action, index) {
   if (tool === 'files_find' && !normalized.pattern) errors.push('pattern_required');
   if (tool === 'files_search' && !normalized.query) errors.push('query_required');
   if (tool === 'files_edit' && (normalized.oldText === null || normalized.newText === null)) errors.push('oldText_and_newText_required');
-  if ((tool === 'session_search' || tool === 'memory_working_search' || tool === 'memory_rolling_search') && !normalized.query) errors.push('query_required');
+  if ((tool === 'session_search' || tool === 'memory_working_search' || tool === 'memory_rolling_search') && !normalized.query && !(tool === 'session_search' && normalized.sourceId)) errors.push('query_required');
+  if (tool === 'run_evidence_search' && !normalized.query?.trim()) errors.push('query_required');
   if (tool === 'session_search' && normalized.sessionScope !== 'agent_sessions') errors.push('session_history_scope_invalid');
   if (tool === 'attachment_view' && !normalized.attachmentId) errors.push('attachmentId_required');
   if (tool === 'memory_working_write') {
@@ -219,6 +227,8 @@ export function parseActionProposal(text) {
 // First-class spawn_subagent is the sole child-work surface.
 export function nativeToolSchemas({ includeForge = true, includeMutations = true, includeWorkingMemory = false, includeBrainMemory = false, includeAgentProfile = false, includeAgentChat = false, includeTaskBoard = false, includeDelegateWork = false, includeMcpMenu = false } = {}) {
   const tools = [
+    { type: 'function', function: { name: 'run_evidence_search', description: 'Explicit read-only search of this agent’s recorded historical run proof across sessions. Not current verification, recovery state, or authorization. No automatic injection. Records remain subject to existing evidence retention.', parameters: { type: 'object', additionalProperties: false, properties: { query: { type: 'string', minLength: 1 }, limit: { type: 'integer', minimum: 1, maximum: 100 }, reason: { type: 'string' } }, required: ['query'] } } },
+    ...['brain_search','brain_read','brain_save','brain_update','brain_remove'].map(name => ({ type:'function', function:{ name, description:'Explicit persistent agent-owned saved memory. No TTL or preload. Operator-owned records cannot be mutated by agents. Updates/removals require current revision and operator direction; never recreate removed memories. Search/read before relying on saved facts; provenance is not current verification.', parameters:{type:'object',additionalProperties:false,properties:{query:{type:'string'},cursor:{type:'string'},limit:{type:'integer',minimum:1},id:{type:'string'},title:{type:'string'},content:{type:'string'},sourceRefs:{type:'array',items:{type:'string'}},expectedRevision:{type:'integer',minimum:1},reason:{type:'string'}},required:name==='brain_search'?['query']:name==='brain_save'?['title','content']:name==='brain_update'?['id','expectedRevision','title','content']:name==='brain_remove'?['id','expectedRevision']:['id']}} })),
     ...(includeForge ? forgeToolSchemas : []),
 
     {
@@ -270,16 +280,19 @@ export function nativeToolSchemas({ includeForge = true, includeMutations = true
       type: 'function',
       function: {
         name: 'session_search',
-        description: 'Search this agent’s own historical session transcripts, including reset snapshots, for prior decisions, work, or exact history. Use this when the user refers to prior work, a previous conversation, an ambiguous reference, or a possible contradiction. Results are read-only evidence with session provenance and reset-archive status.',
+        description: 'Search this agent’s own historical session transcripts, including reset snapshots, for prior decisions, work, or exact history. Use this when the user refers to prior work, a previous conversation, an ambiguous reference, or a possible contradiction. Results include dates, neighboring dialogue and expandable original references. Use since/until to filter dates; sourceId and sourceSessionId to expand a full original. Results are read-only evidence with session provenance and reset-archive status.',
         parameters: {
           type: 'object',
           additionalProperties: false,
           properties: {
             query: { type: 'string' },
+            since: { type: 'string' }, until: { type: 'string' },
+            sourceId: { type: 'string' }, sourceSessionId: { type: 'string' },
+            neighborCount: { type: 'number' },
             limit: { type: 'number' },
             reason: { type: 'string' },
           },
-          required: ['query'],
+          required: [],
         },
       },
     },
@@ -437,6 +450,7 @@ export function nativeToolSchemas({ includeForge = true, includeMutations = true
   ];
   return tools.filter((tool) => (includeForge || !['forge_catalog','forge_create_job','forge_list_jobs','forge_inspect_job','forge_attach_artifact'].includes(tool.function?.name))
     && (includeMutations || !['files_write', 'files_edit', 'files_patch'].includes(tool.function?.name))
+    && (includeBrainMemory || !tool.function?.name?.startsWith('brain_'))
     && (includeWorkingMemory || !['memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_read_handoff', 'session_write_handoff'].includes(tool.function?.name))
     && (includeTaskBoard || !['tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete'].includes(tool.function?.name))
     && (includeAgentProfile || !['agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now'].includes(tool.function?.name))
@@ -450,10 +464,12 @@ export function actionFromNativeToolCall(call = {}, index = 0) {
   // Preserve provider call identity for every native tool. Remote execution
   // derives its stable operation identity from this runtime metadata.
   const normalizeNative = (action) => normalizeAction({ ...action, toolCallId: call.id }, index);
+  if (tool?.startsWith('brain_')) return normalizeNative({tool,...args});
   if (tool === 'shell_exec') return normalizeNative({ tool, reason: args.reason, command: args.command, cwd: args.cwd, protectedBindings: args.protectedBindings });
   if (tool === 'files_read') return normalizeNative({ tool, reason: args.reason, filePath: args.filePath, offsetBytes: args.offsetBytes, maxBytes: args.maxBytes });
   if (tool === 'attachment_view') return normalizeNative({ tool, reason: args.reason, attachmentId: args.attachmentId || args.id });
-  if (tool === 'session_search') return normalizeNative({ tool, reason: args.reason, query: args.query, scope: args.scope, limit: args.limit });
+  if (tool === 'run_evidence_search') return normalizeNative({ tool, query: args.query, limit: args.limit, reason: args.reason });
+  if (tool === 'session_search') return normalizeNative({ tool, reason: args.reason, query: args.query, scope: args.scope, limit: args.limit, since: args.since, until: args.until, sourceId: args.sourceId, sourceSessionId: args.sourceSessionId, neighborCount: args.neighborCount });
   if (tool === 'files_list') return normalizeNative({ tool, reason: args.reason, dirPath: args.dirPath, maxDepth: args.maxDepth, maxEntries: args.maxEntries });
   if (tool === 'files_find') return normalizeNative({ tool, reason: args.reason, pattern: args.pattern, dirPath: args.dirPath, maxDepth: args.maxDepth, maxEntries: args.maxEntries });
   if (tool === 'files_inspect') return normalizeNative({ tool, reason: args.reason, path: args.path });

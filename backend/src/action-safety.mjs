@@ -71,6 +71,11 @@ function reviewAction(action = {}, { workspaceRoot = null, executionContext = nu
     };
   }
 
+  if (['brain_search','brain_read','brain_save','brain_update','brain_remove'].includes(action.tool)) {
+    risk.push(['brain_search','brain_read'].includes(action.tool) ? 'read-only' : 'deliberate-memory-write');
+    return { index:action.index, tool:action.tool, status:blockers.length?'blocked':'allowed', risk, blockers, warnings };
+  }
+
   if (action.tool === 'mcp_providers' || action.tool === 'mcp_capabilities' || action.tool === 'list_skills' || action.tool === 'load_skill') {
     risk.push('read-only');
     return { index: action.index, tool: action.tool, status: blockers.length ? 'blocked' : 'allowed', risk, blockers: [...new Set(blockers)], warnings };
@@ -88,7 +93,7 @@ function reviewAction(action = {}, { workspaceRoot = null, executionContext = nu
     return { index: action.index, tool: action.tool, status: blockers.length ? 'blocked' : 'allowed', risk, blockers: [...new Set(blockers)], warnings };
   }
 
-  if (action.tool === 'session_search' || action.tool === 'session_read_handoff' || action.tool === 'attachment_view' || action.tool === 'memory_working_search' || action.tool === 'memory_rolling_search' || action.tool === 'tasks_list' || ['scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_job_runs'].includes(action.tool)) {
+  if (action.tool === 'run_evidence_search' || action.tool === 'session_search' || action.tool === 'session_read_handoff' || action.tool === 'attachment_view' || action.tool === 'memory_working_search' || action.tool === 'memory_rolling_search' || action.tool === 'tasks_list' || ['scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_job_runs'].includes(action.tool)) {
     risk.push('read-only');
     return {
       index: action.index,

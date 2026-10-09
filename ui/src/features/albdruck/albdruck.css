@@ -6,5 +6,12 @@
 .albdruck-page pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .albdruck-page textarea, .albdruck-page input, .albdruck-page select { color: inherit; background: var(--panel-bg, #20232a); border: 1px solid #777; border-radius: 4px; padding: 8px; max-width: 100%; }
 .albdruck-page button { margin: 4px; padding: 8px; }
+.albdruck-page ul { list-style: none; padding: 0; }
+.albdruck-page li { border-bottom: 1px solid var(--line-soft, #777); padding: 8px 0; }
+.albdruck-page li p { margin: 4px; color: var(--muted, #aaa); }
+.albdruck-page .brain-search { display: flex; align-items: end; gap: 8px; }
+.albdruck-page .brain-search label { flex: 1; }
+.albdruck-page textarea { width: 100%; resize: vertical; }
+.albdruck-page details { margin-top: 20px; }
 .albdruck-page article { border-bottom: 1px solid #777; padding: 8px 0; }
 @media(max-width: 800px) { .albdruck-columns { grid-template-columns: 1fr; } .albdruck-page { padding: 12px; } }

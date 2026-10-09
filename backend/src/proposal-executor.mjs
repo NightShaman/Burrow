@@ -1,3 +1,5 @@
+import { searchAgentRunEvidence } from './run-evidence.mjs';
+import { executeBrainTool } from './brain-tool-executor.mjs';
 import { redactText } from './redaction.mjs';
 import { runExec } from './harness/exec.mjs';
 import { createProcessExecutionRouter, resolveProcessExecutionTarget } from './process-execution-router.mjs';
@@ -375,6 +377,14 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       continue;
     }
 
+    if (action.tool === 'run_evidence_search') {
+      const started = await traceLogger?.toolStart?.({ tool: action.tool, query: action.query });
+      const result = await searchAgentRunEvidence({ conversationStore: conversationStore || executionContext?.conversationStore || executionContext?.stores?.conversations, agentId: agentId || executionContext?.agentId, sessionId: sessionId || executionContext?.sessionId, query: action.query, limit: action.limit });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, toolCallId: action.toolCallId || null, ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, resultCount: result.count, error: result.error || null });
+      continue;
+    }
+
     if (action.tool === 'session_search') {
       const started = await traceLogger?.toolStart?.({ tool: 'session_search', query: action.query, scope: action.sessionScope });
       const result = await searchAgentSessionEvidence({
@@ -388,6 +398,8 @@ export async function executeReviewedProposalActions({ conversationStore = null,
         query: action.query,
         scope: action.sessionScope,
         limit: action.limit,
+        since: action.since, until: action.until, sourceId: action.sourceId,
+        sourceSessionId: action.sourceSessionId, neighborCount: action.neighborCount,
       });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({
@@ -401,6 +413,13 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       continue;
     }
 
+    if (action.tool?.startsWith('brain_')) {
+      const started = await traceLogger?.toolStart?.({ tool: action.tool });
+      const result = await executeBrainTool({tool:action.tool, arguments:{...action,id:action.brainId}, agentId,store:executionContext?.stores?.brains});
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, toolCallId: action.toolCallId || null, ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, error: result.error || null });
+      continue;
+    }
     if (action.tool === 'memory_working_search') {
       const started = await traceLogger?.toolStart?.({ tool: 'memory_working_search', query: action.query, project: action.project || null });
       const result = await executeWorkingMemorySearchTool({ arguments: { query: action.query, project: action.project, limit: action.limit }, agentId, continuityScope: executionContext?.continuityScope, store: workingMemoryStore || executionContext?.stores?.workingMemory });

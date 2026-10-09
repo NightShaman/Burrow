@@ -1,86 +1,77 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Albdruck, parseDays, parseDocument } from './AlbdruckPage';
+import { Brains, type Brain } from './AlbdruckPage';
 import { api } from '../../app/api';
-vi.mock('../../app/api', () => ({ api: vi.fn(), jsonMutation: (method: string, body?: unknown) => ({ method, headers: { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }) }));
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
-const item = {id:'k',document:{claim:'Use PG',rationale:null,alternatives:[],constraints:[],relationships:[]},state:'active',updated_at:'2026-01-01T00:00:00Z'};
-function mockApi() { vi.mocked(api).mockImplementation(async (path) => {
-  if (path.endsWith('retention')) return {knowledgeDays:null,evidenceDays:30,revisionDays:null};
-  if (path.includes('/knowledge/k?')) return {...item,evidence:[{status:'live_original',sourceRef:{kind:'conversation_entry'},content:'original'},{status:'preserved_excerpt',content:'excerpt'},{status:'unavailable',content:null}],revisions:[]};
-  if (path.includes('/history')) return {items:[],nextCursor:null};
-  return {items:[item],nextCursor:'k'};
-}); }
-describe('Albdruck',()=>{
-  it('validates exact correction document and independent retention',()=>{
-    expect(parseDocument('{"claim":" x "}')).toEqual({claim:'x',rationale:null,alternatives:[],constraints:[],relationships:[]});
-    expect(()=>parseDocument('{"claim":"x","constraints":"bad"}')).toThrow();
-    expect(()=>parseDocument('{"claim":" "}')).toThrow();
-    expect(parseDays('')).toBe(null); expect(parseDays('30')).toBe(30);
-    for(const text of ['0','-1','1.5','bad']) expect(()=>parseDays(text)).toThrow();
+vi.mock('../../app/api', () => ({ api: vi.fn(), jsonMutation: (method: string, body?: unknown) => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) }));
+afterEach(() => { cleanup(); vi.resetAllMocks(); window.history.replaceState(null, '', '/'); });
+const brain = (patch: Partial<Brain> = {}): Brain => ({ id:'b1',agentId:'a',title:'Remember this',content:'content',sourceRefs:['ref'],revision:1,operatorOwned:true,createdAt:'2026-01-01',updatedAt:'2026-01-01',origin:'explicit_saved_memory',legacyStatus:null,legacySnapshot:null,...patch });
+const agents = [{id:'a',name:'Agent A'},{id:'b',name:'Agent B'}] as never;
+
+describe('Brains workspace', () => {
+  it('fences owner interleavings and keeps agentId in the URL', async () => {
+    let resolveA!: (value: unknown) => void;
+    vi.mocked(api).mockImplementation(async path => path.includes('agentId=a') ? new Promise(resolve => { resolveA=resolve; }) : {items:[brain({id:'b1',agentId:'b',title:'B memory'})],nextCursor:null});
+    render(<Brains agents={agents} />);
+    fireEvent.change(screen.getByLabelText('Agent owner'), {target:{value:'b'}});
+    expect(await screen.findByText('B memory')).toBeTruthy();
+    resolveA({items:[brain({title:'A memory'})],nextCursor:null});
+    await waitFor(() => expect(screen.queryByText('A memory')).toBeNull());
+    expect(window.location.search).toContain('agentId=b');
   });
-  it('uses scope, cursor and review contracts; distinguishes evidence',async()=>{
-    mockApi(); render(<Albdruck agents={[]}/>);
-    fireEvent.change(screen.getByLabelText('Scope'),{target:{value:'global'}});
-    fireEvent.click(await screen.findByText('Use PG'));
-    expect(await screen.findByText('Original conversation')).toBeTruthy();
-    expect(screen.getByText('Preserved excerpt')).toBeTruthy(); expect(screen.getByText('Unavailable')).toBeTruthy();
-    expect((screen.getByText('Apply correct') as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText('Reason (required)'),{target:{value:'Verified correction'}});
-    fireEvent.click(screen.getByText('Apply correct'));
-    await waitFor(()=>expect(vi.mocked(api).mock.calls.some(c=>c[1]?.method==='PUT' && JSON.parse(c[1]!.body as string).reason==='Verified correction')).toBe(true));
-    await waitFor(()=>expect(screen.getByText('Next page')).toBeTruthy());
-    fireEvent.click(screen.getByText('Next page'));
-    await waitFor(()=>expect(vi.mocked(api).mock.calls.some(c=>c[0].includes('cursor=k'))).toBe(true));
-    fireEvent.change(screen.getByLabelText('View'),{target:{value:'recall'}});
-    expect(screen.getByText(/full original conversation entries/)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Search originals'),{target:{value:'original'}});
-    fireEvent.click(screen.getByText('Search'));
-    await waitFor(()=>expect(vi.mocked(api).mock.calls.some(c=>c[0].includes('/history?scope=global') && c[1]?.method==='POST' && JSON.parse(c[1]!.body as string).query==='original')).toBe(true));
+  it('creates, updates, and deletes with the selected owner and expected revision', async () => {
+    const saved = brain();
+    vi.mocked(api).mockImplementation(async (_path, init) => !init ? {items:[],nextCursor:null} : init.method === 'POST' ? saved : init.method === 'PUT' ? {...saved,revision:2,title:'Changed'} : {...saved,revision:3});
+    render(<Brains agents={agents} />); await screen.findByText('No saved brains for this agent.');
+    fireEvent.click(screen.getByText('New brain')); fireEvent.change(screen.getByLabelText('Title'),{target:{value:'Remember this'}}); fireEvent.change(screen.getByLabelText('Content'),{target:{value:'content'}}); fireEvent.click(screen.getByText('Create brain'));
+    await screen.findByText(/revision 1/); fireEvent.change(screen.getByLabelText('Title'),{target:{value:'Changed'}}); fireEvent.click(screen.getByText('Save brain'));
+    await waitFor(() => expect(vi.mocked(api).mock.calls.some(([,i]) => i?.method === 'PUT' && JSON.parse(i.body as string).expectedRevision === 1)).toBe(true));
+    fireEvent.click(screen.getByText('Delete brain'));
+    await waitFor(() => expect(vi.mocked(api).mock.calls.some(([,i]) => i?.method === 'DELETE' && JSON.parse(i.body as string).expectedRevision === 2)).toBe(true));
+    expect(vi.mocked(api).mock.calls.filter(([,i]) => i).every(([path]) => path.includes('agentId=a'))).toBe(true);
   });
-  it('paginates full originals and labels live and reset archives without knowledge requests',async()=>{
-    const original = {agentId:'a',sessionId:'s',entryId:'e',timestamp:'2026-01-01T00:00:00Z',role:'user',content:'Complete original\nsecond line',sourceRef:{kind:'conversation_entry',agentId:'a',sessionId:'s',entryId:'e'},provenance:{store:'archive',reset:true,archiveId:'archive-1'}};
-    vi.mocked(api).mockImplementation(async (path,init)=> path.endsWith('retention') ? {knowledgeDays:null,evidenceDays:null,revisionDays:null} : path.includes('/history') ? JSON.parse(init?.body as string).cursor ? {items:[{...original,entryId:'f',provenance:{store:'live',reset:false}}],nextCursor:null} : {items:[original],nextCursor:'opaque'} : {items:[],nextCursor:null});
-    render(<Albdruck agents={[]}/>); fireEvent.change(screen.getByLabelText('Scope'),{target:{value:'global'}}); fireEvent.change(screen.getByLabelText('View'),{target:{value:'recall'}});
-    expect(screen.getByText('Search') as HTMLButtonElement).toHaveProperty('disabled',true);
-    fireEvent.change(screen.getByLabelText('Search originals'),{target:{value:'original'}}); fireEvent.click(screen.getByText('Search'));
-    expect(await screen.findByText(/Complete original second line/)).toBeTruthy(); expect(screen.getByText('Original conversation · Reset archive')).toBeTruthy();
-    fireEvent.click(screen.getByText('Next page')); await screen.findByText('Original conversation · Live');
-    expect(vi.mocked(api).mock.calls.some(c=>c[0].includes('/history?scope=global') && JSON.parse(c[1]?.body as string).cursor==='opaque')).toBe(true);
-    expect(vi.mocked(api).mock.calls.some(c=>c[0].includes('/recall?'))).toBe(false);
+  it('uses items/nextCursor pagination and preserves query in cursor requests', async () => {
+    vi.mocked(api).mockImplementation(async path => path.includes('cursor=opaque') ? {items:[brain({id:'b2',title:'Page two'})],nextCursor:null} : {items:[brain()],nextCursor:'opaque'});
+    render(<Brains agents={agents} />); await screen.findByText('Remember this');
+    fireEvent.change(screen.getByLabelText('Search brains'),{target:{value:'needle'}}); fireEvent.click(screen.getByText('Search'));
+    await screen.findByText('Next page'); fireEvent.click(screen.getByText('Next page')); await screen.findByText('Page two');
+    expect(vi.mocked(api).mock.calls.some(([path]) => path.includes('query=needle') && path.includes('cursor=opaque') && path.includes('agentId=a'))).toBe(true);
   });
-  it('roundtrips all six independent retention limits including null and explicit values', async () => {
-    const keys = ['knowledgeDays','evidenceDays','revisionDays','conversationDays','operationalDays','attachmentDays'] as const;
-    const initial = {knowledgeDays:null,evidenceDays:7,revisionDays:null,conversationDays:null,operationalDays:null,attachmentDays:30};
-    vi.mocked(api).mockImplementation(async (path,init) => path.endsWith('retention') ? init?.method === 'PUT' ? JSON.parse(init.body as string) : initial : {items:[],nextCursor:null});
-    render(<Albdruck agents={[]}/>);
-    const labels = ['Derived knowledge (days)','Preserved evidence excerpts (days)','Knowledge revisions (days)','Original conversations (days)','Operational traces (days)','Attachments (days)'];
-    for (let i=0;i<keys.length;i++) expect(await screen.findByLabelText(labels[i])).toHaveProperty('value',initial[keys[i]] === null ? '' : String(initial[keys[i]]));
-    const values = [1,null,3,4,5,null];
-    for (let i=0;i<keys.length;i++) fireEvent.change(screen.getByLabelText(labels[i]),{target:{value:values[i] === null ? '' : String(values[i])}});
-    fireEvent.click(screen.getByText('Save retention'));
-    await waitFor(() => expect(vi.mocked(api).mock.calls.find(c=>c[0].endsWith('retention') && c[1]?.method === 'PUT')).toBeTruthy());
-    const call = vi.mocked(api).mock.calls.find(c=>c[0].endsWith('retention') && c[1]?.method === 'PUT')!;
-    expect(JSON.parse(call[1]!.body as string)).toEqual(Object.fromEntries(keys.map((k,i)=>[k,values[i]])));
-    expect(screen.queryByText(/conversations are not deleted/i)).toBeNull();
+  it('reports revision conflicts, preserves the draft, and deliberately reloads detail', async () => {
+    const migrated = brain({origin:'migrated_albdruck',legacyStatus:'active',legacySnapshot:{knowledge:{id:'old'}}});
+    const fresh = brain({revision:2,title:'Server title',content:'server content'});
+    vi.mocked(api).mockImplementation(async (path, init) => { if (init?.method === 'PUT') throw new Error('409 brain_revision_conflict_or_operator_authority'); if (path.startsWith('/api/brains/b1')) return fresh; return {items:[migrated],nextCursor:null}; });
+    render(<Brains agents={agents} />); fireEvent.click(await screen.findByText('Remember this'));
+    expect(screen.getByText('Origin: Migrated from legacy Albdruck')).toBeTruthy(); fireEvent.click(screen.getByText('Legacy migration details')); expect(screen.getByText('Status: active')).toBeTruthy(); expect(screen.getByText(/"old"/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Title'), {target:{value:'My draft'}}); fireEvent.click(screen.getByText('Save brain'));
+    expect(await screen.findByText('Reload brain')).toBeTruthy(); expect(screen.getByLabelText('Title')).toHaveProperty('value','My draft');
+    fireEvent.click(screen.getByText('Reload brain')); await waitFor(() => expect(screen.getByLabelText('Title')).toHaveProperty('value','Server title'));
+    expect(vi.mocked(api).mock.calls.some(([path, init]) => path === '/api/brains/b1?agentId=a' && !init?.method)).toBe(true);
   });
-  it('labels soft deletion Archive while preserving DELETE operation and reason', async () => {
-    mockApi(); render(<Albdruck agents={[]}/>);
-    fireEvent.change(screen.getByLabelText('Scope'),{target:{value:'global'}});
-    fireEvent.click(await screen.findByText('Use PG'));
-    fireEvent.change(await screen.findByLabelText('Operation'),{target:{value:'delete'}});
-    expect(screen.getByText(/Archive is a soft deletion with a revision, not full erasure/)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Reason (required)'),{target:{value:'Outdated'}});
-    fireEvent.click(screen.getByText('Apply archive'));
-    await waitFor(()=>expect(vi.mocked(api).mock.calls.some(c=>c[1]?.method==='DELETE' && JSON.parse(c[1]!.body as string).reason==='Outdated')).toBe(true));
+  it('retries a failed first-page list request even when cursor and search are unchanged', async () => {
+    vi.mocked(api).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({items:[brain()],nextCursor:null});
+    render(<Brains agents={agents} />); expect(await screen.findByText('Retry')).toBeTruthy();
+    fireEvent.click(screen.getByText('Retry')); expect(await screen.findByText('Remember this')).toBeTruthy();
+    expect(vi.mocked(api)).toHaveBeenCalledTimes(2);
   });
-  it('ignores a stale list response after scope change',async()=>{
-    let resolveOld!: (value: unknown)=>void;
-    vi.mocked(api).mockImplementation(async (path)=>path.endsWith('retention') ? {knowledgeDays:null,evidenceDays:null,revisionDays:null} : path.includes('scope=agent') ? new Promise(r=>{resolveOld=r;}) : {items:[],nextCursor:null});
-    render(<Albdruck agents={[{id:'a',name:'A'} as never]}/>);
-    fireEvent.change(screen.getByLabelText('Scope'),{target:{value:'global'}});
-    await screen.findByText('No matching knowledge.');
-    await act(async()=>resolveOld({items:[item],nextCursor:null}));
-    expect(screen.queryByText('Use PG')).toBe(null);
+  it('fences a delayed save when its owner disappears and does not overwrite the replacement owner', async () => {
+    let resolveSave!: (value: Brain) => void;
+    vi.mocked(api).mockImplementation(async (path, init) => {
+      if (init?.method === 'PUT') return new Promise(resolve => { resolveSave=resolve; });
+      return path.includes('agentId=b') ? {items:[brain({id:'b2',agentId:'b',title:'B memory'})],nextCursor:null} : {items:[brain()],nextCursor:null};
+    });
+    const view = render(<Brains agents={agents} />); fireEvent.click(await screen.findByText('Remember this')); fireEvent.click(screen.getByText('Save brain'));
+    expect(screen.getByLabelText('Title')).toHaveProperty('disabled', true); expect(screen.getByLabelText('Agent owner')).toHaveProperty('disabled', true);
+    view.rerender(<Brains agents={[{id:'b',name:'Agent B'}] as never} />); expect(await screen.findByText('B memory')).toBeTruthy();
+    resolveSave(brain({revision:2,title:'Late A save'})); await waitFor(() => expect(screen.queryByText('Late A save')).toBeNull());
+    expect(screen.queryByLabelText('Brain editor')).toBeNull(); expect(window.location.search).toContain('agentId=b');
+  });
+  it('ignores a delayed detail reload after unmount', async () => {
+    let resolveDetail!: (value: Brain) => void;
+    vi.mocked(api).mockImplementation(async (path) => path.startsWith('/api/brains/b1') ? new Promise(resolve => { resolveDetail=resolve; }) : {items:[brain()],nextCursor:null});
+    const view = render(<Brains agents={agents} />); fireEvent.click(await screen.findByText('Remember this'));
+    // Produce a conflict control by replacing the API behavior for the write only.
+    vi.mocked(api).mockImplementation(async (path, init) => { if (init?.method === 'PUT') throw new Error('conflict'); if (path.startsWith('/api/brains/b1')) return new Promise(resolve => { resolveDetail=resolve; }); return {items:[brain()],nextCursor:null}; });
+    fireEvent.click(screen.getByText('Save brain')); fireEvent.click(await screen.findByText('Reload brain')); view.unmount(); resolveDetail(brain({revision:2}));
+    await Promise.resolve();
   });
 });

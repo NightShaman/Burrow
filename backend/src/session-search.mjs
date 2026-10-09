@@ -158,11 +158,11 @@ function parseTime(value) {
 
 function matchesTime(entry, { since = null, until = null } = {}) {
   const ts = parseTime(entry?.ts);
-  if (!ts) return true;
+  if (ts === null) return !since && !until;
   const after = parseTime(since);
   const before = parseTime(until);
-  if (after && ts < after) return false;
-  if (before && ts > before) return false;
+  if (after !== null && ts < after) return false;
+  if (before !== null && ts > before) return false;
   return true;
 }
 
@@ -263,7 +263,7 @@ export async function searchSessionEvidence({ conversationStore = null, agentId 
  * outside automatic prompt/context construction, but this explicit tool may
  * retrieve them with reset-archive provenance.
  */
-export async function searchAgentSessionEvidence({ conversationStore = null, continuityStore = null, rootDir, additionalRootDirs = [], dataRoot = null, agentId = null, sessionId = 'default', query = '', scope = 'agent_sessions', role = 'any', includeSummaries = true, limit = 12 } = {}) {
+export async function searchAgentSessionEvidence({ conversationStore = null, continuityStore = null, rootDir, additionalRootDirs = [], dataRoot = null, agentId = null, sessionId = 'default', query = '', scope = 'agent_sessions', role = 'any', includeSummaries = false, limit = 12, since = null, until = null, sourceId = null, sourceSessionId = null, neighborCount = 1 } = {}) {
   // Explicit retrieval may search reset snapshots; ordinary prompt/context never does.
   const normalizedScope = 'agent_sessions';
   const max = parseLimit(limit, 12);
@@ -276,21 +276,22 @@ export async function searchAgentSessionEvidence({ conversationStore = null, con
     ...sessionRecords.filter((record) => record.sessionId !== currentSessionId),
   ];
   const seenEntries = new Set();
-  const seenEvidence = new Set();
   const matches = [];
   for (const candidate of orderedSessions) {
+    if (sourceSessionId && candidate.sessionId !== sourceSessionId) continue;
     const transcript = typeof conversationStore?.searchEvidencePage === 'function'
-      ? await indexedEvidenceTranscript({ conversationStore, agentId, sessionId: candidate.sessionId, query, includeResetHistory: true })
+      ? await indexedEvidenceTranscript({ conversationStore, agentId, sessionId: candidate.sessionId, query: sourceId ? '' : query, includeResetHistory: true })
       : await evidenceTranscript({ conversationStore, agentId, rootDir: candidate.rootDir, sessionId: candidate.sessionId, includeResetHistory: true });
     for (const entry of transcript) {
       const entryKey = JSON.stringify([candidate.rootDir, candidate.sessionId, entry.id || [entry.ts, entry.role, entry.content]]);
-      if (seenEntries.has(entryKey) || !recallEligible(entry) || (!includeSummaries && entry.metadata?.compressionSummary) || !matchesRole(entry, role) || !matchesQuery(entry, query)) continue;
+      if (seenEntries.has(entryKey) || !recallEligible(entry) || (!includeSummaries && entry.metadata?.compressionSummary) || !matchesRole(entry, role) || !matchesTime(entry, { since, until }) || (sourceId ? entry.id !== sourceId : !matchesQuery(entry, query))) continue;
       seenEntries.add(entryKey);
-      const evidenceKey = normalized(entry.metadata?.compressionSummary?.text || entry.content).replace(/\s+/gu, ' ').trim();
-      if (evidenceKey && seenEvidence.has(evidenceKey)) continue;
-      if (evidenceKey) seenEvidence.add(evidenceKey);
+
       matches.push({
         ...compactEntry(entry, query),
+        original: sourceId ? entry : undefined,
+        sourceRef: { kind: 'conversation_entry', agentId, sessionId: candidate.sessionId, entryId: entry.id },
+        expandable: Boolean(entry.id),
         recallScore: recallScore(entry, query),
         source: {
           kind: 'session_transcript',
@@ -308,11 +309,28 @@ export async function searchAgentSessionEvidence({ conversationStore = null, con
     const current = Number(Boolean(right.source.currentSession)) - Number(Boolean(left.source.currentSession));
     return current || String(right.ts || '').localeCompare(String(left.ts || ''));
   });
+  // Neighbors are original dialogue, not search candidates. Resolve only the
+  // selected sessions so query pruning cannot turn distant matches into neighbors.
+  const neighborTranscripts = new Map();
+  for (const match of matches.slice(0, max)) {
+    const sid = match.source.sessionId;
+    if (!neighborTranscripts.has(sid)) neighborTranscripts.set(sid,
+      (await evidenceTranscript({ conversationStore, agentId, sessionId: sid, includeResetHistory: true }))
+        .filter(entry => recallEligible(entry) && !entry.metadata?.compressionSummary));
+    const dialogue = neighborTranscripts.get(sid);
+    const index = dialogue.findIndex(entry => entry.id === match.id);
+    const radius = Math.min(3, Math.max(0, Number(neighborCount) || 0));
+    match.neighbors = index < 0 ? [] : dialogue.slice(Math.max(0, index - radius), index + radius + 1)
+      .filter(entry => entry.id !== match.id).map(entry => ({ ...compactEntry(entry, ''),
+        sourceRef: { kind: 'conversation_entry', agentId, sessionId: sid, entryId: entry.id },
+        resetArchive: Boolean(entry.metadata?.resetArchive) }));
+  }
   const activeAgentId = String(agentId || '').trim();
-  const handoffs = activeAgentId && continuityStore
+  const handoffs = !sourceId && activeAgentId && continuityStore
     ? await continuityStore.list({ agentId: activeAgentId, limit: 5 })
     : [];
   const handoffMatches = handoffs
+    .filter((handoff) => matchesTime({ ts: handoff.updatedAt }, { since, until }))
     .filter((handoff) => matchesQuery({ id: handoff.id, type: 'handoff', content: `${handoff.title}\n${handoff.content}\n${handoff.evidenceSummary}` }, query))
     .map((handoff) => ({
       id: handoff.id,

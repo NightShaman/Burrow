@@ -1,3 +1,4 @@
+import { POSTGRES_BRAIN_SCHEMA_SQL, POSTGRES_BRAIN_LEGACY_IMPORT_SQL } from './postgres-brain-store.mjs';
 import { POSTGRES_DREAM_WINDOW_SQL } from './postgres-dream-window.mjs';
 import { POSTGRES_LOGICAL_MEMBER_SQL, POSTGRES_ARCHIVE_RELATIONAL_ID_SQL, POSTGRES_CATALOG_SCALAR_ID_SQL, POSTGRES_LOGICAL_LOOKUP_INDEX_SQL } from './postgres-lexical-identity.mjs';
 import { POSTGRES_HISTORY_KEYSET_SQL } from './postgres-history-keyset.mjs';
@@ -105,4 +106,14 @@ ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS effective_timezone TEXT;` },
   { version: 42, name: 'indexed-dream-occurrence-windows', sql: POSTGRES_DREAM_WINDOW_SQL },
   { version: 43, name: 'durable-agent-message-deliveries', sql: POSTGRES_AGENT_DELIVERY_SCHEMA_SQL },
   { version: 44, name: 'dream-quiet-day-setting', sql: 'ALTER TABLE dream_settings ADD COLUMN IF NOT EXISTS quiet_day_dreams BOOLEAN NOT NULL DEFAULT TRUE;' },
+  { version: 45, name: 'agent-owned-deliberate-brains', sql: POSTGRES_BRAIN_SCHEMA_SQL },
+  // Non-destructive snapshot; legacy globals belong to hatchet, never fan out.
+  { version: 46, name: 'legacy-albdruck-brain-snapshot', sql: `
+ALTER TABLE brain_memories ADD COLUMN origin TEXT NOT NULL DEFAULT 'explicit_saved_memory';
+ALTER TABLE brain_memories ADD COLUMN legacy_status TEXT;
+ALTER TABLE brain_memories ADD COLUMN legacy_snapshot JSONB;
+CREATE TABLE brain_legacy_albdruck (
+ legacy_id TEXT PRIMARY KEY, scope TEXT NOT NULL, snapshot JSONB NOT NULL
+);
+` + POSTGRES_BRAIN_LEGACY_IMPORT_SQL },
 ]);

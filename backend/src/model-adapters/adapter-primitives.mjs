@@ -228,6 +228,12 @@ function nativeToolReceipt(result = {}) {
   // already tool-selected public evidence; retain them without a second size
   // policy. prepareNativeToolContinuation owns the actual provider budget.
   const nativeFields = {
+    run_evidence_search: ['agentId', 'query', 'count', 'totalMatches', 'results', 'diagnostics', 'authority'],
+    brain_search: ['agentId', 'result'],
+    brain_read: ['agentId', 'result'],
+    brain_save: ['agentId', 'result'],
+    brain_update: ['agentId', 'result'],
+    brain_remove: ['agentId', 'result'],
     scheduled_jobs_list: ['jobs'],
     scheduled_jobs_read: ['job'],
     scheduled_jobs_create: ['job'],

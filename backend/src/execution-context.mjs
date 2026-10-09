@@ -52,7 +52,7 @@ export function createExecutionContext({
   conversationId = null,
   continuityScope = null,
   agentId = null,
-  includeBrainMemory = false,
+  includeBrainMemory = true,
   includeAgentChat = false,
   includeTaskBoard = false,
   agentRuntime = null,

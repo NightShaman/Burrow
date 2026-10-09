@@ -1,3 +1,4 @@
+import { PostgresBrainStore } from './postgres-brain-store.mjs';
 import { PostgresMcpProviderStateStore } from './postgres-mcp-provider-state-store.mjs';
 import { PostgresDreamExtractionStore } from './postgres-dream-extraction-store.mjs';
 import { PostgresAlbdruckStore } from './postgres-albdruck-store.mjs';
@@ -53,6 +54,7 @@ export async function createPostgresApplication({
     await migratePostgres(sharedPool);
     const workingMemoryRetention = new PostgresWorkingMemoryRetentionSettingsStore({ ...common, ...(clock ? { clock } : {}) });
     const stores = {
+    brains: new PostgresBrainStore(common),
     agents: new PostgresAgentRegistryStore({ ...common, bootstrapSampleIdentities }),
     profiles: new PostgresAgentProfileStore({ ...common, ...(clock ? { clock } : {}) }),
     models: new PostgresModelSettingsStore({ ...common, key: encryptionKey, ...(clock ? { clock } : {}), ...(bootstrapSampleIdentities !== undefined ? { bootstrapSampleIdentities } : {}) }),

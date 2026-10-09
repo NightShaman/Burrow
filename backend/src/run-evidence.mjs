@@ -250,10 +250,10 @@ export async function readRunEvidenceWithDiagnostics({ rootDir, sessionId = 'def
   };
 }
 
-export async function readRunEvidenceAcrossSessions({ rootDir, sessionId = 'default', limit = 64, conversationStore = null, agentId } = {}) {
+export async function readRunEvidenceAcrossSessions({ rootDir, sessionId = 'default', limit = 64, conversationStore = null, agentId, includeArchived = false } = {}) {
   if (!conversationStore) throw new Error('conversation_store_required');
-  const sessions = await conversationStore.listSessions({agentId,includeArchived:false});
-  const ids = unique([sessionId, ...sessions.map((item) => item.sessionId || item.id)], 512);
+  const sessions = await conversationStore.listSessions({agentId,includeArchived});
+  const ids = unique([sessionId, ...sessions.map((item) => item.sessionId || item.id)], Infinity);
   const records = [];
   let legacyCount = 0;
   let dedicatedCount = 0;
@@ -267,7 +267,7 @@ export async function readRunEvidenceAcrossSessions({ rootDir, sessionId = 'defa
     .filter((record) => record && record.runId)
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   return {
-    records: retained.slice(0, Math.max(1, Number(limit) || 64) * 32),
+    records: limit === null ? retained : retained.slice(0, Math.max(1, Number(limit) || 64) * 32),
     diagnostics: {
       rootDir: rootDir || null, sessionId: sessionId || null, sessionCount: ids.length,
       evidenceEntryCount: legacyCount, dedicatedEntryCount: dedicatedCount, retainedCount: retained.length,
@@ -282,3 +282,19 @@ export async function readRunEvidence(options = {}) {
 }
 
 export const RUN_EVIDENCE_LIMITS = { maxItems: MAX_ITEMS, maxItemChars: MAX_ITEM_CHARS, budget: DEFAULT_BUDGET };
+
+/** Explicit historical proof recall; never a prompt preload or authorization. */
+export async function searchAgentRunEvidence({ conversationStore, agentId, sessionId = 'default', query = '', limit = 12 } = {}) {
+  if (!agentId || !conversationStore) return { tool: 'run_evidence_search', ok: false, error: 'run_evidence_scope_unavailable' };
+  try {
+    const history = await readRunEvidenceAcrossSessions({ conversationStore, agentId, sessionId, limit: null, includeArchived: true });
+    const terms = String(query).trim().toLowerCase().split(/\s+/u).filter(Boolean);
+    if (!terms.length) throw new Error('query_required');
+    const matches = history.records.filter(record => (!record.agentId || record.agentId === agentId)
+      && terms.every(term => JSON.stringify(record).toLowerCase().includes(term)));
+    const max = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 12;
+    return { tool: 'run_evidence_search', ok: true, agentId, query, count: Math.min(max, matches.length),
+      totalMatches: matches.length, results: matches.slice(0, max), diagnostics: history.diagnostics,
+      authority: 'Historical recorded proof only; not current verification, recovery state, or authorization.' };
+  } catch (error) { return { tool: 'run_evidence_search', ok: false, error: error.message }; }
+}

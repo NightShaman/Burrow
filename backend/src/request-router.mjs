@@ -3,14 +3,9 @@ import { resolvePromptSkillPlan } from './prompt-skill-selection.mjs';
 import { inferActionObservability } from './route-action-observability.mjs';
 
 function memoryPlanFromTurnPlan(turnPlan = null) {
-  const request = turnPlan?.support?.memory;
-  if (request?.enabled === true && typeof request.resolvedQuery === 'string' && request.resolvedQuery.trim()) return {
-    needsMemory: true, reason: 'explicit_planner_recall', query: request.resolvedQuery.trim(), global: request.scope?.kind === 'global', maxChars: resolveAlbdruckConfig().promptMaxChars, request,
-    cues: [], projects: [], topics: [], routingTerms: request.routingTerms || [],
-  };
   return {
     needsMemory: false,
-    reason: 'memory_not_explicitly_requested',
+    reason: 'agent_tool_retrieval_only',
     cues: [],
     projects: [],
     topics: [],

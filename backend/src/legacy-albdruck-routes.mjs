@@ -1,3 +1,4 @@
+// Retired compatibility fixture adapter; never mounted by the application server.
 /** Runs behind the same authentication boundary as the other settings routes. */
 export function createAlbdruckRoutes({ store, readJsonBody, sendJson }) {
   return async ({ req, res, url }) => {

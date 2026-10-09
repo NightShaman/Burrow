@@ -317,8 +317,7 @@ async function runAskChatUnserialized({
   const explicitContinuityRequested = Boolean(compatibilityScope || normalizedArgs.continuity_scope || normalizedArgs.continuityScope || normalizedArgs.working_project || normalizedArgs.workingProject);
   const supportContext = await prepareRuntimeSupportContext({ stores, rootDir, sessionRoot, dataRoot, runtimeState, agentRuntime, resolvedSessionId, message, priorSession, continuityScope, explicitContinuityRequested, route, runtimeConfig, logger });
   const { sessionRecall, runEvidence, contextSupport } = supportContext;
-  const albdruckRecall = route.memory.needsMemory && stores.albdruck
-    ? await stores.albdruck.recall({ agentId: runtimeState.agentId, query: route.memory.query, scope: route.memory.global ? 'global' : 'agent' }) : null;
+  const albdruckRecall = null; // Saved knowledge requires an explicit agent tool call.
   const preparedContext = await prepareContextForTurn({
     rootDir: sessionRoot,
     dataRoot: sessionRoot,
