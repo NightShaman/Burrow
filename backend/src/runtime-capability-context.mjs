@@ -54,7 +54,7 @@ export function createRuntimeExecutionContext({ stores = null, runtimeState, res
     skillsRoot: agentRuntime?.skillsRoot,
     filesystemBoundaries: agentRuntime?.filesystemBoundaries || runtimeState.filesystemBoundaries,
     executionBoundaries,
-    toolSchemas: nativeToolSchemas({ includeWorkingMemory: Boolean(runtimeState.agentId), includeAgentProfile: Boolean(runtimeState.agentId), includeAgentChat, includeTaskBoard, includeMcpMenu: mcpConnections.size > 0 }),
+    toolSchemas: nativeToolSchemas({ includeWorkingMemory: Boolean(runtimeState.agentId), includeBrainMemory: Boolean(runtimeState.agentId), includeAgentProfile: Boolean(runtimeState.agentId), includeAgentChat, includeTaskBoard, includeMcpMenu: mcpConnections.size > 0 }),
     mcpTools,
     mcpConnections,
     protectedValues: new Map(),
