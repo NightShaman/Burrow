@@ -24,6 +24,10 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
   const url = mode === 'openai-responses' ? responsesUrl(config) : completionUrl(config);
   const model = config.model;
   const wireModel = googleCompatibleWireModel(config);
+  // GPT-6.1 deployments reject temperature, including values inherited from
+  // connection extras. Enforce the model contract at the final wire boundary.
+  const rejectsTemperature = /(?:^|\/)gpt-6[.-]1(?:-|$)/i.test(String(model || ''));
+
   // ChatGPT/Codex cache affinity is tied to the native session/thread headers,
   // not only to prompt_cache_key. Keep the turn token private to this adapter
   // instance; the provider may return it for subsequent calls in the same run.
@@ -103,6 +107,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       delete body.max_tokens;
       delete body.max_completion_tokens;
     }
+    if (rejectsTemperature || config.supportsTemperature === false || chatGptBackend) delete body.temperature;
     const providerMessages = mode === 'openai-responses' ? body.input : body.messages;
     const stablePrefixMessage = Array.isArray(providerMessages)
       ? providerMessages.find((message) => message?.role === 'system') || providerMessages[0]

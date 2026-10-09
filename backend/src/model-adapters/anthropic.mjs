@@ -156,12 +156,12 @@ function supportsAnthropicThinking(model = '') {
 
 function supportsAdaptiveAnthropicThinking(model = '') {
   const normalized = normalizeAnthropicModelId(model);
-  return /(^|-)claude-(?:fable-5|mythos-(?:5|preview)|opus-4-(?:6|7|8)|sonnet-(?:5|4-6))($|[^a-z0-9])/.test(normalized);
+  return /(^|-)claude-(?:fable-5|mythos-(?:5|preview)|opus-(?:4-(?:6|7|8)|5(?:-5)?)|sonnet-(?:5|4-6))($|[^a-z0-9])/.test(normalized);
 }
 
 function supportsAnthropicXhighEffort(model = '') {
   const normalized = normalizeAnthropicModelId(model);
-  return /(^|-)claude-(?:fable-5|mythos-5|opus-4-(?:7|8)|sonnet-5)($|[^a-z0-9])/.test(normalized);
+  return /(^|-)claude-(?:fable-5|mythos-5|opus-(?:4-(?:7|8)|5(?:-5)?)|sonnet-5)($|[^a-z0-9])/.test(normalized);
 }
 
 function anthropicReasoningEffort(config = {}) {
@@ -186,7 +186,8 @@ function anthropicExtraWithoutGenericReasoning(extra = {}, model = '') {
 
 function anthropicThinkingConfig({ model, config = {}, maxTokens = DEFAULT_MODEL_OUTPUT_TOKENS } = {}) {
   const effort = anthropicReasoningEffort(config);
-  if (effort === 'off' && supportsAnthropicThinking(model)) {
+  const adaptiveOnly = /(^|-)claude-opus-5(?:-5)?($|[^a-z0-9])/.test(normalizeAnthropicModelId(model));
+  if (effort === 'off' && supportsAnthropicThinking(model) && !adaptiveOnly) {
     const extra = { ...anthropicExtraWithoutGenericReasoning(config.extra, model) };
     // Explicit off must override inherited native thinking and effort, while
     // preserving unrelated output configuration (for example JSON schemas).
@@ -198,16 +199,18 @@ function anthropicThinkingConfig({ model, config = {}, maxTokens = DEFAULT_MODEL
     }
     return { enabled: false, thinking: { type: 'disabled' }, maxTokens, extra };
   }
-  if (!effort || !supportsAnthropicThinking(model)) return { enabled: false, maxTokens, extra: anthropicExtraWithoutGenericReasoning(config.extra, model) };
+  if ((!effort && !adaptiveOnly) || !supportsAnthropicThinking(model)) return { enabled: false, maxTokens, extra: anthropicExtraWithoutGenericReasoning(config.extra, model) };
   if (supportsAdaptiveAnthropicThinking(model)) {
-    const mappedEffort = ANTHROPIC_ADAPTIVE_EFFORTS[effort] || 'medium';
+    // Adaptive-only models cannot disable thinking; off maps to their lowest
+    // supported effort rather than emitting a request the provider rejects.
+    const mappedEffort = effort === 'off' ? 'low' : ANTHROPIC_ADAPTIVE_EFFORTS[effort] || 'medium';
     const finalEffort = mappedEffort === 'xhigh' && !supportsAnthropicXhighEffort(model) ? 'max' : mappedEffort;
     return {
       enabled: true,
       mode: 'adaptive',
       effort: finalEffort,
       thinking: { type: 'adaptive', display: config.anthropicThinkingDisplay || 'summarized' },
-      outputConfig: { effort: finalEffort },
+      outputConfig: { ...(config.extra?.output_config || {}), effort: finalEffort },
       maxTokens,
       extra: anthropicExtraWithoutGenericReasoning(config.extra, model),
     };
