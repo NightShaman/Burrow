@@ -63,18 +63,18 @@ export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: Sav
   const manual = !discovery?.models.some(m => m.id === model.trim());
   const locked = !!busy;
   return <SettingSection title="Brain memory"><div className="curator-card">
-    <p className="hint">Brains are explicit agent-owned saved memories, never automatically preloaded. Optional global embeddings are off by default and augment only agent-invoked brain_search. CRUD stays lexical and reads stay exact; Dreams and conversations are not embedded.</p>
+    <p className="hint">Memories are explicit agent-owned records, never automatically preloaded. Optional global embeddings are off by default and augment only agent-invoked brain_search. CRUD stays lexical and reads stay exact; Dreams and conversations are not embedded.</p>
     <label><input type="checkbox" checked={enabled} disabled={locked || !status} onChange={e => { edit(); setEnabled(e.target.checked); }} /> Enable Brains embeddings globally</label>
     <Field label="Existing model connection"><select value={connectionId} disabled={locked || !status} onChange={e => { edit(); setConnectionId(e.target.value); setModel(''); }}><option value="">Choose a connection</option>{connectionId && !savedProviders.some(p => p.id === connectionId) && <option value={connectionId}>Configured connection (unavailable)</option>}{savedProviders.map(p => <option key={p.id} value={p.id}>{p.provider}</option>)}</select></Field>
     <Field label="Discovered embedding model"><select value={discovery?.models.some(m => m.id === model) ? model : ''} disabled={locked || !discovery} onChange={e => { edit(); setModel(e.target.value); }}><option value="">Choose an embedding model or enter ID below</option>{discovery?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Field>
     {discovery && <p className="hint">{discovery.capabilityDisclosure}{!discovery.models.length && ' No embedding models advertised. Use a manual ID and test.'}</p>}
     {discoveryError && <p role="alert" className="settings-request-error">{discoveryError}</p>}
     <Field label="Embedding model ID (manual fallback)"><input value={model} disabled={locked || !status} onChange={e => { edit(); setModel(e.target.value); }} /></Field>
-    <label><input type="checkbox" checked={confirmed} disabled={locked} onChange={e => setConfirmed(e.target.checked)} /> I confirm provider requests: hosted providers receive test text and, when enabled or reindexed, saved Brain contents and search queries. Provider charges may apply.</label>
+    <label><input type="checkbox" checked={confirmed} disabled={locked} onChange={e => setConfirmed(e.target.checked)} /> I confirm provider requests: hosted providers receive test text and, when enabled or reindexed, saved memory contents and search queries. Provider charges may apply.</label>
     <button type="button" disabled={locked || !selected || !confirmed} onClick={() => void request('test')}>Test embedding model</button>
     {tested && <p role="status">{tested}</p>}
     <button type="button" className="primary" disabled={locked || !status || (enabled && (!selected || !confirmed || (manual && !tested)))} onClick={() => void request('save')}>Save embedding settings</button>
-    <button type="button" disabled={locked || !status?.enabled || !confirmed} onClick={() => void request('reindex')}>Reindex all Brains asynchronously</button>
+    <button type="button" disabled={locked || !status?.enabled || !confirmed} onClick={() => void request('reindex')}>Reindex all memories asynchronously</button>
     {busy && <p role="status">{busy === 'load' ? 'Loading settings…' : `${busy} request in progress…`}</p>}
     {status && <p role="status">{status.enabled ? 'Enabled' : 'Disabled'} · Generation {status.generation} · Indexed {status.indexed} / {status.total} · Pending {status.pending} · Failed {status.failed} · Storage {status.storage}. Partial coverage remains searchable lexically. Indexing runs asynchronously; status refreshes every 3 seconds.</p>}
     {status?.lastError && <p role="alert">Indexing error: {status.lastError}. Check provider availability and model support; failed jobs retry automatically.</p>}

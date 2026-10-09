@@ -15,3 +15,5 @@
 .albdruck-page details { margin-top: 20px; }
 .albdruck-page article { border-bottom: 1px solid #777; padding: 8px 0; }
 @media(max-width: 800px) { .albdruck-columns { grid-template-columns: 1fr; } .albdruck-page { padding: 12px; } }
+.memory-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.albdruck-page .memory-bulk label { flex-direction: row; align-items: center; margin: 0; }
