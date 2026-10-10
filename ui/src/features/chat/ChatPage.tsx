@@ -7,6 +7,7 @@ import { useComposerHistory } from './useComposerHistory';
 import { ChatTranscript } from './ChatTranscript';
 import { ChatComposer } from './ChatComposer';
 import { useLiveSteering } from './useLiveSteering';
+import { reconcileSteeringTurns } from './chatTurnReconciliation';
 export { ChatMessage } from './ChatTranscript';
 export { ChatComposer } from './ChatComposer';
 
@@ -81,7 +82,7 @@ export function Chat({ selected, parent, operator, draft, setDraft, attached, on
   }, []);
   const composerHistory = useComposerHistory(localDraft, turns.filter((turn) => turn.role === 'user').map((turn) => turn.content ?? ''), updateLocalDraft);
   const steering = useLiveSteering(resourceAgentId ?? selected.id, sessionId ?? '', activeRunId);
-  const transcriptTurns = useMemo(() => [...turns.filter(turn => !turn.metadata?.steering || !steering.inputs.some(input => input.id === turn.metadata?.steering?.id)), ...steering.inputs.map(input => ({ type: 'message', role: 'user', content: input.message, ts: input.createdAt, metadata: { steering: { id: input.id, status: input.status } } }))], [turns, steering.inputs]);
+  const transcriptTurns = useMemo(() => reconcileSteeringTurns(turns, steering.inputs), [turns, steering.inputs]);
   const [steeringError, setSteeringError] = useState('');
   const sendLocalDraft = useCallback(() => {
     const value = localDraftRef.current;

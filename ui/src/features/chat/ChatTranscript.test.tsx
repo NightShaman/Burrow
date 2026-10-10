@@ -272,3 +272,35 @@ it.each([
   expect(screen.getAllByText('Steer this run')).toHaveLength(1);
   expect(screen.queryByText('Delivered lifecycle')).toBeNull();
  });
+
+it('keeps steering at submission time exactly once across delivery, later turns and recovery', async () => {
+  const { reconcileSteeringTurns } = await import('./chatTurnReconciliation');
+  const input = {id: 'steer', status: 'pending' as const, message: 'Wait I believe you', createdAt: '2026-10-10T10:27:00Z'};
+  const later: SessionTurn[] = [
+    {type:'message', role:'user', content:'Later question', ts:'2026-10-10T10:28:00Z'},
+    {type:'message', role:'assistant', content:'Later answer', ts:'2026-10-10T10:29:00Z'},
+  ];
+  const original: SessionTurn = {type:'event', role:'user', content:input.message, ts:input.createdAt, metadata:{visibility:'chat', steering:{id:input.id, status:'pending', createdAt:input.createdAt}}};
+  const delivery: SessionTurn = {type:'event', role:null, content:'User steering delivered.', ts:'2026-10-10T10:30:00Z', metadata:{steering:{id:input.id,status:'delivered'}}};
+  const view = show(reconcileSteeringTurns(later, [input]), parent);
+  const check = () => {
+    expect(screen.getAllByText(input.message)).toHaveLength(1);
+    const text = view.container.textContent!;
+    expect(text.indexOf(input.message)).toBeLessThan(text.indexOf('Later question'));
+    expect(text.indexOf('Later question')).toBeLessThan(text.indexOf('Later answer'));
+    expect(screen.queryByText(delivery.content!)).toBeNull();
+  };
+  check();
+  const update = (turns: SessionTurn[]) => view.rerender(<ChatTranscript selected={parent} parent={parent} operator={{name:'Rob',avatar:'R'}} isNewSession={false} turns={turns} isLoading={false} error="" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" />);
+  update(reconcileSteeringTurns([original, ...later, delivery], [{...input,status:'delivered'}]));
+  check();
+  expect(view.container.textContent).toContain('DELIVERED TO RUN');
+  // Reload has no in-memory overlay; lifecycle evidence must still update the
+  // one original chat-visible entry, not produce another user message.
+  update(reconcileSteeringTurns([original, ...later, delivery], []));
+  check();
+  expect(view.container.textContent).toContain('DELIVERED TO RUN');
+  update(reconcileSteeringTurns([original, original, ...later, delivery], [input, input]));
+  check();
+  expect(view.container.textContent).toContain('DELIVERED TO RUN');
+});

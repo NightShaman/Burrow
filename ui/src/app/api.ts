@@ -268,7 +268,7 @@ export type SessionTurn = {
   ts?: string;
   runId?: string | null;
   metadata?: {
-    steering?: { id: string; status: string };
+    steering?: { id: string; status: string; createdAt?: string };
     toolActivity?: ToolActivity;
     attachments?: SessionAttachment[];
     outputArtifacts?: GeneratedArtifact[];

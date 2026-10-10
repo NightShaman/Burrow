@@ -64,3 +64,41 @@ export function reconcileSessionTurns(session: ChatSession, cachedTurns: Session
   const missing = cachedTurnsForSession(session, pendingTurns).filter((pending) => !reconciled.some((turn) => turn.runId === pending.runId && turn.role === pending.role));
   return [...reconciled, ...missing];
 }
+
+// Lifecycle/provider events share the steering id, but are not user bubbles.
+// Fold their status into the original chat entry rather than replacing it with
+// an overlay at the end of the transcript (or using delivery time for ordering).
+export function reconcileSteeringTurns(turns: SessionTurn[], inputs: import('./useLiveSteering').SteeringInput[]): SessionTurn[] {
+  const statuses = new Map<string, string>();
+  const updateStatus = (id: string, status: string) => {
+    if (!statuses.has(id) || status !== 'pending') statuses.set(id, status);
+  };
+  for (const turn of turns) {
+    const steering = turn.metadata?.steering;
+    if (steering) updateStatus(steering.id, steering.status);
+  }
+  for (const input of inputs) updateStatus(input.id, input.status);
+  const seen = new Set<string>();
+  const merged: SessionTurn[] = [];
+  for (const turn of turns) {
+    const steering = turn.metadata?.steering;
+    const isUserEntry = steering && turn.role === 'user' && turn.metadata?.visibility !== 'debug'
+      && (turn.type === 'message' || (turn.type === 'event' && turn.metadata?.visibility === 'chat'));
+    if (!isUserEntry) { merged.push(turn); continue; }
+    if (seen.has(steering.id)) continue;
+    seen.add(steering.id);
+    merged.push({...turn, ts: steering.createdAt ?? turn.ts, metadata: {...turn.metadata, steering: {...steering, status: statuses.get(steering.id)!}}});
+  }
+  for (const input of inputs) {
+    if (seen.has(input.id)) continue;
+    seen.add(input.id);
+    merged.push({type: 'message', role: 'user', content: input.message, ts: input.createdAt,
+      metadata: {steering: {id: input.id, status: statuses.get(input.id)!}}});
+  }
+  // Stable ties preserve session order. Undated legacy turns keep their relative
+  // position; only dated entries participate in chronological ordering.
+  const dated = merged.filter(turn => Number.isFinite(Date.parse(turn.ts ?? '')))
+    .sort((a, b) => Date.parse(a.ts!) - Date.parse(b.ts!));
+  let index = 0;
+  return merged.map(turn => Number.isFinite(Date.parse(turn.ts ?? '')) ? dated[index++] : turn);
+}
