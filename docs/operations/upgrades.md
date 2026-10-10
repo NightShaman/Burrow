@@ -24,7 +24,7 @@ Run as the installation owner:
 "$HOME/.burrow/bin/burrow" update --verbose
 ```
 
-The launcher enters the installed updater, which resolves the current public `main` SHA, downloads that immutable archive, and hands control to the incoming installer. The installer stages the replacement while the existing service remains active, swaps the app directory, updates the launcher/integrations, then restarts an existing managed user service.
+The launcher enters the installed updater, which resolves the current public `main` SHA, downloads that immutable archive, and hands control to the incoming installer. The installer stages the replacement while the existing service remains active, swaps the app directory, updates the launcher/integrations, then restarts an existing managed user service. It preserves the service enablement state, so a disabled service is not re-enabled. Existing manual installations remain manual; the automatic creation of a persistent service applies to fresh default installs only.
 
 Durable `burrow.env`, `config/`, `workspace/`, `cache/`, `reports/`, and integrations remain under the install root. Installer-owned path variables are reconciled. Existing listener values are preserved unless supplied explicitly:
 

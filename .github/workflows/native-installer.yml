@@ -1,0 +1,21 @@
+name: Native installer
+on:
+  pull_request:
+    paths: ['install.sh', 'scripts/install/**', '.github/workflows/native-installer.yml']
+  push:
+    branches: [main]
+    paths: ['install.sh', 'scripts/install/**', '.github/workflows/native-installer.yml']
+permissions:
+  contents: read
+jobs:
+  isolated-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - name: Check shell syntax
+        run: sh -n install.sh
+      - name: Test isolated installer and assembly contracts
+        run: node --test scripts/install/*.test.mjs scripts/assembly/*.test.mjs

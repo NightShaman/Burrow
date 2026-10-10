@@ -25,15 +25,16 @@ See [native installation](../getting-started/installation.md) or [containers](co
 
 ## Native user service
 
-After a successful install:
+A fresh default install creates, enables, and starts the persistent user service automatically. The complete automatic setup path is Ubuntu with systemd and a non-root installation owner with sudo access. After installation:
 
 ```sh
-"$HOME/.burrow/bin/burrow" service install
 "$HOME/.burrow/bin/burrow" service status
 "$HOME/.burrow/bin/burrow" service logs -n 100
 ```
 
-The launcher loads `burrow.env`, locates its own installation, and starts the PostgreSQL supervisor. The user unit is installed below `~/.config/systemd/user` unless `XDG_CONFIG_HOME` overrides it. Lingering is required for persistence across logout/reboot.
+The launcher loads `burrow.env`, locates its own installation, and starts the PostgreSQL supervisor. The user unit is installed below `~/.config/systemd/user` unless `XDG_CONFIG_HOME` overrides it. Lingering is required for persistence across logout/reboot; installation enables and verifies it, with a sudo fallback if needed. The installer waits for HTTP readiness and verifies the installed application version through this normal supervisor path.
+
+Use `sh install-burrow.sh --no-service` for foreground use or your own supervisor. Development installs with `--no-install-dependencies` also skip automatic service setup. To add the persistent service later, run `burrow service install`. Existing managed installations are updated/restarted without re-enabling a disabled service, while existing manual installations remain manual.
 
 Run service management as the installation owner. Do not mix a foreground `serve` process and a user service on the same port. Historical system-wide unit examples in supporting source are not the default installer workflow.
 

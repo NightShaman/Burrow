@@ -23,7 +23,9 @@ Burrow installs into one self-contained user home, `~/.burrow` by default:
 curl -fsSL https://raw.githubusercontent.com/NightShaman/Burrow/main/install.sh | sh
 ```
 
-Node.js, npm, `curl`, and `tar` must be available. Native managed installs require PostgreSQL 17 and pgvector; on Ubuntu the installer provisions missing packages automatically (requires sudo for APT), or configure an external PostgreSQL 17 server in `burrow.env`. Burrow itself runs as a non-root user; the installer does not require `/opt` or Docker.
+The complete automatic setup path is Ubuntu with systemd, run as a non-root user with sudo access. Have `curl`, `tar`, and gzip support available; the installer provisions Node.js 24 with npm when needed, plus missing PostgreSQL 17 and pgvector packages for the default managed database. It creates and starts a persistent user service and verifies HTTP readiness and the installed version before reporting success. Burrow itself runs as your user; it does not require `/opt` or Docker.
+
+Node provisioning also supports RHEL-family Linux 9+, but automatic PostgreSQL/pgvector provisioning is Ubuntu-only. On other hosts, supply the database prerequisites yourself or configure an external PostgreSQL 17 server in `burrow.env`. Use `--no-service` for a foreground runtime or your own supervisor.
 
 To install elsewhere, download the script first and pass `--dir`:
 
@@ -50,21 +52,24 @@ The installer downloads the assembled `main` revision, installs dependencies, bu
 
 ```text
 --dir PATH                    install root; defaults to ~/.burrow
---headless                    install runtime without bundled UI assets
 --host HOST                   listener host; defaults to 127.0.0.1
 --port PORT                   listener port; defaults to 42817
---no-install-dependencies     skip npm install/build; development use only
+--no-service                  skip automatic service setup; foreground/custom supervisor
+--install-node                compatibility alias; Node provisioning is already automatic
+--no-install-dependencies     skip npm install/build and auto service; development only
 --source-dir PATH             install from an assembled local Burrow checkout
 --help                        show all options
 ```
 
 ## Run and update
 
-Start Burrow:
+A fresh default install is already running. Check its status:
 
 ```sh
-~/.burrow/bin/burrow serve
+~/.burrow/bin/burrow service status
 ```
+
+For an installation made with `--no-service`, start it in the foreground with `~/.burrow/bin/burrow serve`. Do not run a foreground process alongside the service on the same port.
 
 The default listener is `127.0.0.1:42817`. Configure it explicitly during unattended installation, for example `sh install.sh --host 0.0.0.0 --port 42817`. Re-running the installer without listener flags preserves the existing values; supplying either flag updates that value and restarts a managed service after activation.
 
@@ -74,11 +79,11 @@ Update in place:
 ~/.burrow/bin/burrow update
 ```
 
-An update downloads the current assembled Burrow revision and atomically replaces only `~/.burrow/app`. It preserves `burrow.env`, `config/`, `workspace/`, `cache/`, `reports/`, and `integrations/`.
+An update downloads the current assembled Burrow revision and atomically replaces only `~/.burrow/app`. It preserves `burrow.env`, `config/`, `workspace/`, `cache/`, `reports/`, and `integrations/`. Existing managed services are updated/restarted without re-enabling a disabled service; existing manual installations remain manual.
 
 ### Run as a user service
 
-On Linux hosts with systemd user services, install and start a persistent service:
+Fresh default installs set up the persistent service automatically. To opt into it later after a manual installation, run:
 
 ```sh
 ~/.burrow/bin/burrow service install
@@ -95,7 +100,7 @@ Management commands are:
 ~/.burrow/bin/burrow service uninstall
 ```
 
-The service uses `~/.burrow/burrow.env`, restarts after failures, and persists across logout and reboot. Installation requires `loginctl` to enable and verify systemd user lingering. If lingering or systemd user services are unavailable, service installation fails rather than creating a session-only service; run `burrow serve` under your own supervisor instead.
+The service uses `~/.burrow/burrow.env`, restarts after failures, and persists across logout and reboot. Installation requires `loginctl` to enable and verify systemd user lingering, with a sudo fallback if enabling it as your user is denied. If lingering or systemd user services are unavailable, service installation fails rather than creating a session-only service; install with `--no-service` and run `burrow serve` under your own supervisor instead.
 
 ## Docker
 

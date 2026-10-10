@@ -9,24 +9,22 @@ Burrow runs as a local Node.js application with PostgreSQL and an optional brows
 
 | Component | Native requirement |
 |---|---|
-| Node.js | Version 24 or newer, with npm |
+| Node.js | Version 24 or newer, with npm; provisioned automatically on supported Linux hosts when needed |
 | Download/extraction | `curl`, `tar`, and gzip support |
 | Database | PostgreSQL 17 with pgvector, managed locally or external |
 | Managed database account | Non-root OS account |
 | Persistent Linux service | systemd user manager and permission to enable user lingering |
 | Disk | Space for application staging, dependencies, database, workspaces, and a separate backup |
 
-The installer can provision missing PostgreSQL 17 and pgvector packages on Ubuntu through PGDG, requiring sudo for package installation. On other hosts, install these prerequisites yourself or use [external PostgreSQL](../operations/deployment.md#external-postgresql). The source does not define a universal minimum RAM/disk requirement; size the host for model integrations, database growth, and tool workloads.
+The complete automatic provisioning path is Ubuntu with systemd, run as the non-root account that will own Burrow with sudo access. The installer provisions Node.js 24 with npm when needed and missing PostgreSQL 17 and pgvector packages through PGDG, requiring sudo for package installation. On other hosts, install these prerequisites yourself or use [external PostgreSQL](../operations/deployment.md#external-postgresql). The source does not define a universal minimum RAM/disk requirement; size the host for model integrations, database growth, and tool workloads.
 
-`--install-node` supports NodeSource provisioning on Ubuntu and RHEL-family Linux 9+. Assembly revision resolution now uses shell tools rather than Node; the earlier bootstrap-order caveat no longer applies. The repository does not establish a supported native Windows or macOS installer workflow.
+Automatic NodeSource provisioning supports Ubuntu and RHEL-family Linux 9+; `--install-node` remains a compatibility alias for this default behavior. Automatic PostgreSQL/pgvector provisioning is Ubuntu-only, so Node provisioning alone does not make RHEL-family hosts a complete automatic setup path. The repository does not establish a supported native Windows or macOS installer workflow.
 
 ## Native installation
 
 Run as the account that will own Burrow:
 
 ```sh
-node --version
-npm --version
 curl -fsSLo install-burrow.sh \
   https://raw.githubusercontent.com/NightShaman/Burrow/main/install.sh
 sh install-burrow.sh --help
@@ -40,20 +38,25 @@ sh install-burrow.sh
 
 The default location is `$HOME/.burrow`. The installer resolves the current public `main` commit and obtains that immutable assembly, stages production dependencies, installs runtime integrations, and activates the application. Existing prebuilt UI assets are reused; an assembled source without them may require a UI build.
 
-Start in the foreground:
+A fresh default install creates, enables, and starts a persistent systemd user service. It enables and verifies lingering, using sudo as a fallback when needed, so the service survives logout and reboot. The service starts through Burrow's normal PostgreSQL supervisor; installation succeeds only after HTTP readiness reports the installed version.
+
+Open `http://127.0.0.1:42817`, then follow [initial setup](initial-setup.md). Inspect the running service with:
 
 ```sh
+"$HOME/.burrow/bin/burrow" service status
+"$HOME/.burrow/bin/burrow" service logs -n 100
+```
+
+For foreground use, an operator-managed supervisor, or a host without persistent systemd user services, opt out explicitly:
+
+```sh
+sh install-burrow.sh --no-service
 "$HOME/.burrow/bin/burrow" serve
 ```
 
-Open `http://127.0.0.1:42817`, then follow [initial setup](initial-setup.md). Keep this terminal running, or stop it cleanly before installing the persistent service:
+Keep that terminal running. Do not run a foreground process and a user service on the same port. You can opt into service management later with `burrow service install`.
 
-```sh
-"$HOME/.burrow/bin/burrow" service install
-"$HOME/.burrow/bin/burrow" service status
-```
-
-Service installation enables and verifies lingering so the user service can survive logout and reboot. If the host cannot provide that, use `burrow serve` under an operator-managed supervisor; a failed service installation is not proof that the app cannot run.
+Re-running the installer updates/restarts an existing managed service without re-enabling a disabled service. Existing manual installations remain manual; a reinstall does not silently add a service.
 
 ## Installer options
 
@@ -61,11 +64,11 @@ Service installation enables and verifies lingering so the user service can surv
 |---|---|
 | `--dir PATH` | Choose application and durable-state root |
 | `--source-dir PATH` | Use a local assembled checkout instead of downloading |
-| `--headless` | Omit bundled UI assets |
 | `--host HOST` | Set listener; fresh native default is `127.0.0.1` |
 | `--port PORT` | Set listener port; default is `42817` |
-| `--install-node` | Provision Node 24 on supported Linux hosts when needed |
-| `--no-install-dependencies` | Skip dependency installation/build; development only |
+| `--install-node` | Compatibility alias; Node 24 provisioning is already automatic when needed |
+| `--no-service` | Skip automatic service setup for foreground use or an operator-managed supervisor |
+| `--no-install-dependencies` | Skip dependency installation/build and automatic service setup; development only |
 | `--verbose` | Show timestamped installer/update diagnostics |
 | `--help` | Display installer usage |
 
@@ -73,10 +76,10 @@ Example custom location, retaining loopback access:
 
 ```sh
 sh install-burrow.sh --dir "$HOME/apps/burrow" --host 127.0.0.1 --port 42817
-"$HOME/apps/burrow/bin/burrow" serve
+"$HOME/apps/burrow/bin/burrow" service status
 ```
 
-`--source-dir` requires an assembled tree containing both `backend/` and `ui/`, including for headless installation. A Backend-only checkout is not an assembled install source.
+`--source-dir` requires an assembled tree containing both `backend/` and `ui/`. A Backend-only checkout is not an assembled install source.
 
 ## Installed layout
 
