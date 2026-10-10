@@ -26,7 +26,7 @@ import { POSTGRES_MOD_DISTRIBUTION_SCHEMA_SQL } from './postgres-mod-distributio
 import { POSTGRES_MOD_SCHEMA_SQL } from './postgres-mod-store.mjs';
 import { POSTGRES_AGENT_REGISTRY_SCHEMA_SQL } from './postgres-agent-registry.mjs';
 import { POSTGRES_AGENT_PROFILE_SCHEMA_SQL } from './postgres-agent-profile-store.mjs';
-import { POSTGRES_MODEL_SETTINGS_SCHEMA_SQL } from './postgres-model-settings-store.mjs';
+import { POSTGRES_MODEL_SETTINGS_SCHEMA_SQL, POSTGRES_MINION_MODEL_SETTINGS_SCHEMA_SQL } from './postgres-model-settings-store.mjs';
 import { POSTGRES_MCP_SETTINGS_SCHEMA_SQL } from './postgres-mcp-settings-store.mjs';
 import { POSTGRES_TASK_BOARD_SCHEMA_SQL } from './postgres-task-board-store.mjs';
 import { POSTGRES_SCHEDULED_JOB_SCHEMA_SQL } from './postgres-scheduled-job-store.mjs';
@@ -122,4 +122,5 @@ CREATE TABLE brain_legacy_albdruck (
   { version: 47, name: 'optional-brain-embeddings', sql: POSTGRES_BRAIN_EMBEDDINGS_SQL },
   { version: 48, name: 'indexed-operator-message-instants', sql: POSTGRES_OPERATOR_INSTANT_SQL },
   { version: 49, name: 'live-run-steering', sql: POSTGRES_LIVE_RUN_STEERING_SQL },
+  { version: 50, name: 'agent-minion-model-defaults', sql: POSTGRES_MINION_MODEL_SETTINGS_SCHEMA_SQL },
 ]);

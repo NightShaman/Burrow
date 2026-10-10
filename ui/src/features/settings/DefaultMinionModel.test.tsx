@@ -1,0 +1,83 @@
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { api } from '../../app/api';
+import type { SavedProvider } from '../../app/types';
+import { ConfirmProvider } from '../../app/ConfirmDialog';
+import { AgentSettings } from './AgentSettings';
+import type { Agent } from '../../app/types';
+import { DefaultMinionModel } from './DefaultMinionModel';
+vi.mock('../../app/api', () => ({ api: vi.fn() }));
+const providers: SavedProvider[] = ['a', 'b'].map(id => ({ id, provider: 'Same provider', apiType: '', url: '', apiKey: '', models: ['model'], modelEfforts: { model: ['low', 'high'] }, defaultEfforts: { model: 'high' } }));
+const selection = { connectionId: 'b', model: 'model', reasoningEffort: 'low', temperature: 0.7 };
+const view = (id = 'agent') => <DefaultMinionModel key={id} resourceId={id} savedProviders={providers} />;
+afterEach(cleanup);
+beforeEach(() => vi.mocked(api).mockReset());
+describe('Default Minion Model', () => {
+  it('keeps primary controls in Agent details, not the overflow target, and uses resource identity', async () => {
+    vi.mocked(api).mockResolvedValue({ selection: null });
+    const overflow = document.createElement('div'); document.body.append(overflow);
+    const agent: Agent = { id: 'target::agent', resourceId: 'agent/name', name: 'Agent', avatar: '', activity: 'Idle', context: null, provider: '', model: '', effort: '', temperature: 0.2, workspace: '', files: [], subagents: [] };
+    const { container, unmount } = render(<ConfirmProvider><AgentSettings selected={agent} savedProviders={providers} onAgentsChanged={vi.fn()} section="details" overflowTarget={overflow} /></ConfirmProvider>);
+    await waitFor(() => expect((screen.getByText('Save minion model') as HTMLButtonElement).disabled).toBe(false));
+    expect(container.contains(screen.getByLabelText('Default Minion Model'))).toBe(true);
+    expect(overflow.childElementCount).toBe(0);
+    expect(vi.mocked(api).mock.calls[0][0]).toBe('/api/agents/agent%2Fname/minion-model-selection');
+    unmount(); overflow.remove();
+  });
+  it('loads exact connection identity and saves effort/temperature, then clears with nulls', async () => {
+    vi.mocked(api).mockResolvedValueOnce({ selection }).mockResolvedValueOnce({ selection: { ...selection, reasoningEffort: 'off', temperature: 1.2 } }).mockResolvedValueOnce({ selection: null });
+    render(view());
+    await waitFor(() => expect((screen.getByLabelText('Default Minion Model') as HTMLSelectElement).value).toBe(JSON.stringify(['b', 'model'])));
+    fireEvent.change(screen.getByLabelText('Minion reasoning effort'), { target: { value: 'off' } });
+    fireEvent.change(screen.getByLabelText('Minion temperature'), { target: { value: '1.2' } });
+    fireEvent.click(screen.getByText('Save minion model'));
+    await screen.findByText('Default minion model saved.');
+    expect(JSON.parse(vi.mocked(api).mock.calls[1][1]!.body as string)).toEqual({ ...selection, reasoningEffort: 'off', temperature: 1.2 });
+    fireEvent.change(screen.getByLabelText('Default Minion Model'), { target: { value: '' } });
+    fireEvent.click(screen.getByText('Save minion model'));
+    await screen.findByText('Default minion model saved.');
+    expect(JSON.parse(vi.mocked(api).mock.calls[2][1]!.body as string)).toEqual({ connectionId: null, model: null });
+  });
+  it('inherits with zero providers and never substitutes unavailable saved models', async () => {
+    vi.mocked(api).mockResolvedValue({ selection: { ...selection, connectionId: 'missing' } });
+    render(<DefaultMinionModel resourceId="agent" savedProviders={[]} />);
+    await screen.findByText('Unavailable · missing · model');
+    expect((screen.getByText('Save minion model') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('Default Minion Model'), { target: { value: '' } });
+    expect((screen.getByText('Save minion model') as HTMLButtonElement).disabled).toBe(false);
+  });
+  it('shows load failure, retries, and retains the draft after save failure', async () => {
+    vi.mocked(api).mockRejectedValueOnce(new Error('load denied')).mockResolvedValueOnce({ selection: null }).mockRejectedValueOnce(new Error('save denied'));
+    render(view());
+    await screen.findByText(/load denied/);
+    fireEvent.click(screen.getByText('Retry minion model'));
+    await waitFor(() => expect((screen.getByText('Save minion model') as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText('Default Minion Model'), { target: { value: JSON.stringify(['a', 'model']) } });
+    fireEvent.click(screen.getByText('Save minion model'));
+    await screen.findByText(/save denied/);
+    expect((screen.getByLabelText('Default Minion Model') as HTMLSelectElement).value).toBe(JSON.stringify(['a', 'model']));
+    expect(screen.queryByText('Default minion model saved.')).toBeNull();
+  });
+  it('ignores stale loads after switching owners', async () => {
+    let release!: (value: unknown) => void;
+    vi.mocked(api).mockImplementationOnce(() => new Promise(resolve => { release = resolve; })).mockResolvedValueOnce({ selection: null });
+    const { rerender } = render(view('old'));
+    rerender(view('new'));
+    await waitFor(() => expect((screen.getByText('Save minion model') as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => release({ selection }));
+    expect((screen.getByLabelText('Default Minion Model') as HTMLSelectElement).value).toBe('');
+  });
+  it('ignores stale saves and blocks duplicate saves while pending', async () => {
+    let release!: (value: unknown) => void;
+    vi.mocked(api).mockResolvedValueOnce({ selection }).mockImplementationOnce(() => new Promise(resolve => { release = resolve; })).mockResolvedValueOnce({ selection: null });
+    const { rerender } = render(view('old'));
+    await screen.findByLabelText('Minion reasoning effort');
+    fireEvent.click(screen.getByText('Save minion model'));
+    expect((screen.getByText('Saving minion model…') as HTMLButtonElement).disabled).toBe(true);
+    rerender(view('new'));
+    await waitFor(() => expect((screen.getByText('Save minion model') as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => release({ selection }));
+    expect(screen.queryByText('Default minion model saved.')).toBeNull();
+    expect((screen.getByLabelText('Default Minion Model') as HTMLSelectElement).value).toBe('');
+  });
+});

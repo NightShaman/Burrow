@@ -40,6 +40,15 @@ CREATE TABLE IF NOT EXISTS agent_model_selections (
   updated_at TEXT NOT NULL
 );
 `;
+export const POSTGRES_MINION_MODEL_SETTINGS_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS agent_minion_model_selections (
+  agent_id TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+  connection_id TEXT NOT NULL REFERENCES model_connections(id) ON DELETE RESTRICT,
+  model_id TEXT NOT NULL, reasoning_effort TEXT NOT NULL DEFAULT 'off',
+  temperature DOUBLE PRECISION NOT NULL DEFAULT 0.2 CHECK (temperature >= 0 AND temperature <= 2),
+  updated_at TIMESTAMPTZ NOT NULL
+);
+`;
 const now = () => new Date().toISOString();
 const AUTH = 'providerAuth';
 const API_KEY = 'apiKey';
@@ -133,18 +142,23 @@ export class PostgresModelSettingsStore {
     await this.saveSecret(client, id, AUTH, JSON.stringify(auth), stamp);
     await client.query(`INSERT INTO model_auth_previews(connection_id,value_json,updated_at) VALUES($1,$2,$3) ON CONFLICT(connection_id) DO UPDATE SET value_json=EXCLUDED.value_json,updated_at=EXCLUDED.updated_at`, [id, JSON.stringify(secretPreview(auth, provider)), stamp]);
   }
-  async modelSelection(agentId) {
+  async modelSelection(agentId, { minion = false } = {}) {
     const agent = String(agentId ?? '').trim();
     if (!agent) throw new Error('agent_id_invalid');
-    const result = await this.pool.query('SELECT agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at FROM agent_model_selections WHERE agent_id=$1', [agent]);
+    const table = minion ? 'agent_minion_model_selections' : 'agent_model_selections';
+    const result = await this.pool.query(`SELECT agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at FROM ${table} WHERE agent_id=$1`, [agent]);
     const row = result.rows[0];
     return row ? { agentId: row.agent_id, connectionId: row.connection_id, model: row.model_id, reasoningEffort: row.reasoning_effort, temperature: Number(row.temperature), updatedAt: row.updated_at } : null;
   }
-  async saveModelSelection({ agentId, connectionId, model, reasoningEffort = 'off', temperature = undefined } = {}) {
+  async saveModelSelection({ agentId, connectionId, model, reasoningEffort = 'off', temperature = undefined, minion = false } = {}) {
     const agent = String(agentId ?? '').trim();
     if (!agent) throw new Error('agent_id_invalid');
     const id = String(connectionId ?? '').trim();
     const modelId = String(model ?? '').trim();
+    if (minion && !id && !modelId) {
+      await this.pool.query('DELETE FROM agent_minion_model_selections WHERE agent_id=$1', [agent]);
+      return null;
+    }
     return withPostgresTransaction(this.pool, async (client) => {
       const connectionRow = await client.query('SELECT * FROM model_connections WHERE id=$1 FOR SHARE', [id]);
       if (!connectionRow.rows[0]) throw new Error('model_connection_not_found');
@@ -156,16 +170,17 @@ export class PostgresModelSettingsStore {
       if (!await this.authWithClient(client, id, connection.provider)) throw new Error('model_connection_auth_required');
       const effort = normalizeReasoningEffort(reasoningEffort);
       if (enabled.reasoningEfforts?.length && effort !== 'off' && !enabled.reasoningEfforts.includes(effort)) throw new Error('model_reasoning_effort_not_supported');
-      let priorResult = await client.query('SELECT agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at FROM agent_model_selections WHERE agent_id=$1 FOR UPDATE', [agent]);
+      const table = minion ? 'agent_minion_model_selections' : 'agent_model_selections';
+      let priorResult = await client.query(`SELECT agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at FROM ${table} WHERE agent_id=$1 FOR UPDATE`, [agent]);
       let prior = priorResult.rows[0];
       if (!prior) {
         await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`agent-model-selection:${agent}`]);
-        priorResult = await client.query('SELECT agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at FROM agent_model_selections WHERE agent_id=$1 FOR UPDATE', [agent]);
+        priorResult = await client.query(`SELECT agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at FROM ${table} WHERE agent_id=$1 FOR UPDATE`, [agent]);
         prior = priorResult.rows[0];
       }
       const selectedTemperature = normalizeTemperature(temperature, prior ? Number(prior.temperature) : 0.2);
       const stamp = this.clock();
-      const result = await client.query(`INSERT INTO agent_model_selections (agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at) VALUES ($1,$2,$3,$4,$5,$6)
+      const result = await client.query(`INSERT INTO ${table} (agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at) VALUES ($1,$2,$3,$4,$5,$6)
         ON CONFLICT(agent_id) DO UPDATE SET connection_id=EXCLUDED.connection_id,model_id=EXCLUDED.model_id,reasoning_effort=EXCLUDED.reasoning_effort,temperature=EXCLUDED.temperature,updated_at=EXCLUDED.updated_at
         RETURNING agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at`, [agent, connection.id, modelId, effort, selectedTemperature, stamp]);
       const row = result.rows[0];

@@ -1,4 +1,4 @@
-export function createSettingsRoutes({ timezoneSettings, saveTimezoneSettings, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, archiveSummaryModelSelection, saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection, setupStatus, completeSetup, completeSetupOperation, listSkills, createSkill, getSkill, updateSkill, deleteSkill, agentSkills, saveAgentSkills } = {}) {
+export function createSettingsRoutes({ timezoneSettings, saveTimezoneSettings, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, agentMinionModelSelection, saveAgentMinionModelSelection, archiveSummaryModelSelection, saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection, setupStatus, completeSetup, completeSetupOperation, listSkills, createSkill, getSkill, updateSkill, deleteSkill, agentSkills, saveAgentSkills } = {}) {
   const resultResponse = (res, result, success = 200) => {
     sendJson(res, result.ok ? success : (result.status || 500), result);
     return true;
@@ -57,6 +57,11 @@ export function createSettingsRoutes({ timezoneSettings, saveTimezoneSettings, r
       const agentId = decodeURIComponent(url.pathname.slice('/api/agents/'.length, -'/archive-summary-model-selection'.length));
       if (req.method === 'GET') { sendJson(res, 200, await archiveSummaryModelSelection(agentId)); return true; }
       if (req.method === 'PUT') return resultResponse(res, await saveArchiveSummaryModelSelection(agentId, await readJsonBody(req)));
+    }
+    if (url.pathname.startsWith('/api/agents/') && url.pathname.endsWith('/minion-model-selection')) {
+      const agentId = decodeURIComponent(url.pathname.slice('/api/agents/'.length, -'/minion-model-selection'.length));
+      if (req.method === 'GET') { sendJson(res, 200, await agentMinionModelSelection(agentId)); return true; }
+      if (req.method === 'PUT') return resultResponse(res, await saveAgentMinionModelSelection(agentId, await readJsonBody(req)));
     }
     if (url.pathname.startsWith('/api/agents/') && url.pathname.endsWith('/model-selection')) {
       const agentId = decodeURIComponent(url.pathname.slice('/api/agents/'.length, -'/model-selection'.length));

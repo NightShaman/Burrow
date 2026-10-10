@@ -19,15 +19,16 @@ describe('Brain embedding settings', () => {
     fireEvent.click(screen.getByText('Save embedding settings'));
     await waitFor(() => expect(mocked).toHaveBeenCalledWith('/api/settings/brain-embeddings', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ enabled: false, connectionId: null, model: null }) })));
   });
-  it('uses embedding discovery, manual fallback and explicit confirmation before testing or enabling', async () => {
+  it('uses embedding discovery, manual fallback without acknowledgment gates', async () => {
     await mount(); fireEvent.change(screen.getByLabelText('Existing model connection'), { target: { value: 'a' } });
     await screen.findByText(/No advertised capabilities/);
     expect(screen.queryByText('chat-only')).toBeNull();
     fireEvent.change(screen.getByLabelText('Embedding model ID (manual fallback)'), { target: { value: 'embed-manual' } });
     fireEvent.click(screen.getByLabelText('Enable Brains embeddings globally'));
     const test = screen.getByText('Test embedding model') as HTMLButtonElement;
-    expect(test.disabled).toBe(true);
-    fireEvent.click(screen.getByLabelText(/I confirm provider requests/));
+    expect(test.disabled).toBe(false);
+    expect(screen.queryByLabelText(/I confirm provider requests/)).toBeNull();
+    expect(screen.queryByText(/Memories are explicit agent-owned records/)).toBeNull();
     expect((screen.getByText('Save embedding settings') as HTMLButtonElement).disabled).toBe(true);
     mocked.mockImplementation(async path => path.endsWith('/test') ? { ok: true, dimensions: 768 } : status);
     fireEvent.click(test); await screen.findByText('Test successful · 768 dimensions');
@@ -64,7 +65,7 @@ describe('Brain embedding settings', () => {
     await waitFor(() => expect((screen.getByLabelText('Existing model connection') as HTMLSelectElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText('Existing model connection'), { target: { value: 'a' } });
     fireEvent.change(screen.getByLabelText('Embedding model ID (manual fallback)'), { target: { value: 'manual' } });
-    fireEvent.click(screen.getByLabelText(/I confirm provider requests/)); fireEvent.click(screen.getByText('Test embedding model'));
+    fireEvent.click(screen.getByText('Test embedding model'));
     view.unmount(); await mount(); await act(async () => old.resolve({ ok: true, dimensions: 999 }));
     expect(screen.queryByText(/999 dimensions/)).toBeNull();
   });

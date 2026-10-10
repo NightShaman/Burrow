@@ -145,7 +145,13 @@ export async function resolveModelConfig(args = {}) {
     runtimeId: 'direct-api',
     selectionSource: agentSelection ? 'agent-default' : 'turn-override',
   };
-  Object.defineProperty(result, 'resolveChildModel', { enumerable: false, value: async (childId) => resolveModelConfig({ ...args, model_connection_id: connection.id, modelConnectionId: connection.id, model: childId }) });
+  Object.defineProperty(result, 'resolveChildModel', { enumerable: false, value: async (childId = null) => {
+    if (childId) return resolveModelConfig({ ...args, model_connection_id: connection.id, modelConnectionId: connection.id, model: childId });
+    const configured = args.modelSettings || args.stores?.models || args.runtimeStores?.models;
+    const selection = configured?.modelSelection ? await configured.modelSelection(text(args.agent_id ?? args.agentId), { minion: true }) : null;
+    if (!selection?.connectionId || !selection?.model) return result;
+    return resolveModelConfig({ ...args, model_connection_id: selection.connectionId, modelConnectionId: selection.connectionId, model: selection.model, model_reasoning_effort: selection.reasoningEffort, reasoning_effort: selection.reasoningEffort, temperature: selection.temperature });
+  } });
   return result;
 }
 export function redactModelConfig(modelConfig) {

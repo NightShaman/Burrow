@@ -1,3 +1,4 @@
+import { reasoningEffortsForModel, defaultReasoningEffort } from '../../app/modelSelectionOptions';
 import type { ChatLiveStage } from './chatLiveStage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
@@ -20,7 +21,7 @@ export function ChatModelSelector({ selected, savedProviders, updateAgent, sessi
   const modelEfforts = provider?.modelEfforts?.[model] ?? [];
   // "off" is a runtime-supported override, even when a provider only advertises
   // its enabled reasoning levels for a model.
-  const efforts = ['off', ...modelEfforts.filter((item) => item !== 'off')];
+  const efforts = reasoningEffortsForModel(provider, model);
   const effort = efforts.includes(selected.effort) ? selected.effort : provider?.defaultEfforts?.[model] ?? modelEfforts[0] ?? 'off';
   const temperature = Number.isFinite(selected.temperature) ? Math.max(0, Math.min(2, selected.temperature)) : 0.2;
   const selectableSessions = sessions.filter((session) => {
@@ -33,7 +34,7 @@ export function ChatModelSelector({ selected, savedProviders, updateAgent, sessi
       && !id.startsWith('group-')
       && !id.startsWith('artifact-');
   });
-  const updateForModel = (next: SavedProvider | undefined, nextModel: string) => updateAgent({ provider: next?.provider ?? '', model: nextModel, effort: next?.defaultEfforts?.[nextModel] ?? next?.modelEfforts?.[nextModel]?.[0] ?? 'off' });
+  const updateForModel = (next: SavedProvider | undefined, nextModel: string) => updateAgent({ provider: next?.provider ?? '', model: nextModel, effort: defaultReasoningEffort(next, nextModel) });
   const chooseProvider = (providerName: string) => { const next = savedProviders.find((item) => item.provider === providerName); updateForModel(next, next?.models[0] ?? ''); };
   const chooseModel = (nextModel: string) => updateForModel(provider, nextModel);
   const chooseTemperature = (value: string) => updateAgent({ temperature: Number(value) });

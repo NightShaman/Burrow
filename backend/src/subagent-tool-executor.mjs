@@ -204,8 +204,8 @@ export async function executeSpawnSubagentTool({
 
   const requestedModel = compactString(args.model || args.modelId || args.model_id) || null;
   let childModelConfig = modelConfig;
-  if (requestedModel && modelConfig?.resolveChildModel) {
-    try { childModelConfig = await modelConfig.resolveChildModel(requestedModel); } catch { childModelConfig = null; blockers.push(`subagent_model_unavailable:${requestedModel}`); }
+  if (modelConfig?.resolveChildModel) {
+    try { childModelConfig = await modelConfig.resolveChildModel(requestedModel); } catch { childModelConfig = null; blockers.push(`subagent_model_unavailable:${requestedModel || 'default'}`); }
   } else if (requestedModel) blockers.push(`subagent_model_unavailable:${requestedModel}`);
   const requestedModelProfile = compactString(args.modelProfile || args.model_profile || args.profile) || null;
   const modelSelection = {
