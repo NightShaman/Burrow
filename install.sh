@@ -4,12 +4,13 @@ set -eu
 REPOSITORY="NightShaman/Burrow"
 INSTALL_DIR="${HOME}/.burrow"
 SOURCE_DIR=""
-MODE="ui"
 INSTALL_DEPS=1
 UNINSTALL=0
 PURGE=0
 ASSUME_YES=0
-INSTALL_NODE=0
+INSTALL_NODE=1
+INSTALL_SERVICE=1
+FRESH_INSTALL=0
 LISTEN_HOST=""
 LISTEN_PORT=""
 RESTART_SERVICE=0
@@ -18,9 +19,9 @@ usage() { cat <<USAGE
 Usage: install.sh [options]
   --dir PATH                    installation and durable-state root
   --source-dir PATH             assembled Burrow checkout; do not download
-  --headless                    install runtime without web UI assets
+  --no-service                  do not create a service on a fresh install
   --no-install-dependencies     skip npm ci/build (development only)
-  --install-node                install Node.js 24 LTS on supported Linux when required
+  --install-node                compatibility alias; missing Node.js 24+ is installed by default
   --host HOST                   listener host; default 127.0.0.1 on first install
   --port PORT                   listener port; default 42817 on first install
   --uninstall                   remove installed application files
@@ -40,8 +41,8 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --dir) INSTALL_DIR=${2:?--dir requires a path}; shift 2 ;;
     --source-dir) SOURCE_DIR=${2:?--source-dir requires a path}; shift 2 ;;
-    --headless) MODE=headless; shift ;;
-    --no-install-dependencies) INSTALL_DEPS=0; shift ;;
+    --no-service) INSTALL_SERVICE=0; shift ;;
+    --no-install-dependencies) INSTALL_DEPS=0; INSTALL_SERVICE=0; shift ;;
     --install-node) INSTALL_NODE=1; shift ;;
     --host) LISTEN_HOST=${2:?--host requires a value}; shift 2 ;;
     --port) LISTEN_PORT=${2:?--port requires a value}; shift 2 ;;
@@ -92,7 +93,7 @@ if [ "$UNINSTALL" -eq 1 ]; then
     case "$answer" in y|Y|yes|YES) ;; *) echo "Burrow uninstall: cancelled."; exit 0 ;; esac
   fi
   SERVICE_UNIT="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/burrow.service"
-  if [ -f "$SERVICE_UNIT" ] && command -v systemctl >/dev/null 2>&1; then
+  if [ -f "$SERVICE_UNIT" ] && grep -Fxq "ExecStart=$INSTALL_DIR/bin/burrow serve" "$SERVICE_UNIT" && command -v systemctl >/dev/null 2>&1; then
     systemctl --user disable --now burrow.service >/dev/null 2>&1 || true
     rm -f "$SERVICE_UNIT"
     systemctl --user daemon-reload >/dev/null 2>&1 || true
@@ -139,7 +140,7 @@ install_node_24_ubuntu() {
   $SUDO apt-get update
   $SUDO apt-get install -y ca-certificates curl gnupg
   $SUDO install -d -m 0755 /etc/apt/keyrings
-  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | $SUDO gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | $SUDO gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
   printf '%s\n' 'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main' | $SUDO tee /etc/apt/sources.list.d/nodesource.list >/dev/null
   $SUDO apt-get update
   $SUDO apt-get install -y nodejs
@@ -180,16 +181,7 @@ install_node_24() {
 
 ensure_node_24() {
   node_is_supported && return 0
-  if [ "$INSTALL_NODE" -eq 1 ]; then
-    install_node_24
-  elif [ -t 0 ]; then
-    printf 'Burrow requires Node.js 24 LTS or newer. Install Node.js 24 LTS now? [y/N] '
-    read -r answer || answer=""
-    case "$answer" in y|Y|yes|YES) install_node_24 ;; *) echo "Burrow install: Node.js 24+ is required. Re-run with --install-node on Ubuntu or RHEL-family Linux, or install it manually." >&2; exit 1 ;; esac
-  else
-    echo "Burrow install: Node.js 24+ is required. Re-run with --install-node on Ubuntu or RHEL-family Linux, or install it manually." >&2
-    exit 1
-  fi
+  install_node_24
   node_is_supported || { echo "Burrow install: Node.js 24+ installation did not produce a supported node/npm runtime." >&2; exit 1; }
 }
 
@@ -208,9 +200,11 @@ prepare_service_restart() {
   [ -d "$INSTALL_DIR/app" ] || return 0
   SERVICE_UNIT="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/burrow.service"
   [ -f "$SERVICE_UNIT" ] || return 0
+  grep -Fxq "ExecStart=$INSTALL_DIR/bin/burrow serve" "$SERVICE_UNIT" || { echo "Burrow update: burrow.service belongs to another installation; refusing to restart it." >&2; exit 1; }
   command -v systemctl >/dev/null 2>&1 || { echo "Burrow update: a Burrow user service exists but systemctl is unavailable; refusing an update that cannot restart it." >&2; exit 1; }
   user_systemctl show-environment >/dev/null 2>&1 || { echo "Burrow update: could not reach the Burrow user-service manager; refusing an update that cannot restart it." >&2; exit 1; }
-  RESTART_SERVICE=1
+  # Preserve stopped/disabled service policy: update files without starting it.
+  if user_systemctl is-active --quiet burrow.service; then RESTART_SERVICE=1; fi
   verbose_log "managed service detected: $SERVICE_UNIT"
 }
 
@@ -234,17 +228,22 @@ verify_restarted_runtime() {
   verbose_log "waiting for new service invocation after ${previous_invocation:-none}; expected build $expected_version"
   last_unit_state=unknown
   last_health=unreachable
+  health_version=""
   # Database migrations can legitimately outlast a short HTTP-start deadline.
-  readiness_seconds=${BURROW_UPDATE_READINESS_SECONDS:-1800}
-  case "$readiness_seconds" in ''|*[!0-9]*|0) echo "BURROW_UPDATE_READINESS_SECONDS must be a positive integer" >&2; exit 1 ;; esac
+  readiness_seconds=${BURROW_INSTALL_READINESS_SECONDS:-${BURROW_UPDATE_READINESS_SECONDS:-1800}}
+  case "$readiness_seconds" in ''|*[!0-9]*|0) echo "Burrow readiness timeout must be a positive integer" >&2; exit 1 ;; esac
   for attempt in $(seq 1 "$readiness_seconds"); do
     last_unit_state=$(user_systemctl is-active burrow.service 2>/dev/null || true)
     current_invocation=$(user_systemctl show burrow.service -p InvocationID --value 2>/dev/null || true)
     if [ "$last_unit_state" = active ] && { [ -z "$previous_invocation" ] || [ "$current_invocation" != "$previous_invocation" ]; }; then
-      last_health=$(curl -fsS --max-time 2 "http://$host:$port/api/health" 2>/dev/null || true)
-      health_version=$(printf '%s' "$last_health" | node -e 'let body=""; process.stdin.on("data", chunk => { body += chunk; }).on("end", () => { try { process.stdout.write(String(JSON.parse(body).version || "")); } catch {} });')
+      last_health=$(curl -fsS --noproxy '*' --max-time 2 "http://$host:$port/api/health" 2>/dev/null || true)
+      health_version=$(printf '%s' "$last_health" | node -e 'let body=""; process.stdin.on("data", chunk => { body += chunk; }).on("end", () => { try { process.stdout.write(String(JSON.parse(body).ok === true && JSON.parse(body).runtime === "burrow" ? JSON.parse(body).version || "" : "")); } catch {} });')
       verbose_log "start check $attempt/$readiness_seconds: invocation=${current_invocation:-unknown}; health_version=${health_version:-none}"
       [ "$health_version" = "$expected_version" ] && { verbose_log "service healthy on build $health_version"; return 0; }
+    fi
+    case "$last_unit_state" in failed|inactive) break ;; esac
+    if [ "$attempt" -eq 1 ] || [ "$((attempt % 30))" -eq 0 ]; then
+      printf '%s\n' "Burrow install: waiting for HTTP readiness (database initialization/migrations may take time)..."
     fi
     sleep 1
   done
@@ -283,7 +282,7 @@ if [ -z "$SOURCE_DIR" ]; then
   # uses the installer semantics shipped with the payload it is activating.
   # Without this handoff, every installer migration takes effect one update late.
   set -- --source-dir "$SOURCE_DIR" --dir "$INSTALL_DIR"
-  [ "$MODE" != headless ] || set -- "$@" --headless
+  [ "$INSTALL_SERVICE" -ne 0 ] || set -- "$@" --no-service
   [ "$INSTALL_DEPS" -ne 0 ] || set -- "$@" --no-install-dependencies
   [ "$INSTALL_NODE" -ne 1 ] || set -- "$@" --install-node
   [ -z "$LISTEN_HOST" ] || set -- "$@" --host "$LISTEN_HOST"
@@ -296,6 +295,13 @@ if [ -z "$SOURCE_DIR" ]; then
 fi
 [ -n "$SOURCE_DIR" ] && [ -f "$SOURCE_DIR/backend/package.json" ] && [ -f "$SOURCE_DIR/ui/package.json" ] || { echo "Burrow install: source is not an assembled Burrow checkout: ${SOURCE_DIR:-unknown}" >&2; exit 1; }
 INSTALL_DIR=$(mkdir -p "$INSTALL_DIR" && cd "$INSTALL_DIR" && pwd)
+# Fresh installation opts into persistence; updates never change service policy.
+[ -d "$INSTALL_DIR/app" ] && [ ! -f "$INSTALL_DIR/.service-install-pending" ] || FRESH_INSTALL=1
+if [ "$FRESH_INSTALL" -eq 1 ] && [ "$INSTALL_SERVICE" -eq 1 ]; then
+  command -v systemctl >/dev/null 2>&1 && command -v loginctl >/dev/null 2>&1 || { echo "Burrow install: persistent installation requires systemd and loginctl; use --no-service for an operator-managed supervisor." >&2; exit 1; }
+  SERVICE_UNIT="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/burrow.service"
+  [ ! -f "$SERVICE_UNIT" ] || { [ -f "$INSTALL_DIR/.service-install-pending" ] && grep -Fxq "ExecStart=$INSTALL_DIR/bin/burrow serve" "$SERVICE_UNIT"; } || { echo "Burrow install: an existing burrow.service may belong to another root; refusing to replace it. Use --no-service or uninstall that service first." >&2; exit 1; }
+fi
 # Atomic per-root lock; never steal a possibly live updater's lock. A stale
 # owner requires explicit operator recovery rather than unsafe PID reuse guesses.
 if mkdir "$INSTALL_DIR/.install-lock" 2>/dev/null; then
@@ -418,20 +424,18 @@ cp "$SOURCE_DIR/install.sh" "$STAGING/install.sh"
 [ -f "$SOURCE_DIR/SOURCE_VERSIONS" ] && cp "$SOURCE_DIR/SOURCE_VERSIONS" "$STAGING/SOURCE_VERSIONS" || true
 chmod 0755 "$STAGING/install.sh"
 [ "$INSTALL_DEPS" -ne 1 ] || ensure_node_24
-if [ "$MODE" = "ui" ]; then
-  cp -R "$SOURCE_DIR/ui" "$STAGING/ui"
-  # GitHub assemblies contain a prebuilt UI. Updating from one must activate
-  # those immutable assets, not reinstall 129 packages and rebuild Vite on the
-  # live host. Source-directory installs retain the build fallback.
-  if [ -d "$SOURCE_DIR/ui/dist" ]; then
-    verbose_log "using prebuilt UI assets from assembly"
-    mkdir -p "$STAGING/backend/public/ui"
-    cp -R "$SOURCE_DIR/ui/dist/." "$STAGING/backend/public/ui/"
-  elif [ "$INSTALL_DEPS" -eq 1 ]; then
-    verbose_log "building UI because source has no prebuilt assets"
-    (cd "$STAGING/ui" && npm ci --no-audit --no-fund --loglevel=error && npm run build --silent)
-    mkdir -p "$STAGING/backend/public/ui"; cp -R "$STAGING/ui/dist/." "$STAGING/backend/public/ui/"
-  fi
+cp -R "$SOURCE_DIR/ui" "$STAGING/ui"
+# GitHub assemblies contain a prebuilt UI. Updating from one must activate
+# those immutable assets, not reinstall 129 packages and rebuild Vite on the
+# live host. Source-directory installs retain the build fallback.
+if [ -d "$SOURCE_DIR/ui/dist" ]; then
+  verbose_log "using prebuilt UI assets from assembly"
+  mkdir -p "$STAGING/backend/public/ui"
+  cp -R "$SOURCE_DIR/ui/dist/." "$STAGING/backend/public/ui/"
+elif [ "$INSTALL_DEPS" -eq 1 ]; then
+  verbose_log "building UI because source has no prebuilt assets"
+  (cd "$STAGING/ui" && npm ci --no-audit --no-fund --loglevel=error && npm run build --silent)
+  mkdir -p "$STAGING/backend/public/ui"; cp -R "$STAGING/ui/dist/." "$STAGING/backend/public/ui/"
 fi
 if [ "$INSTALL_DEPS" -eq 1 ]; then
   # These are runtime-owned integrations, not application dependencies. Stage
@@ -542,17 +546,34 @@ case "${1:-}" in
     SERVICE_ACTION="${1:-status}"
     SERVICE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
     SERVICE_UNIT="$SERVICE_DIR/burrow.service"
+    if [ -f "$SERVICE_UNIT" ] && ! grep -Fxq "ExecStart=$BURROW_HOME/bin/burrow serve" "$SERVICE_UNIT"; then
+      echo "Burrow service: existing burrow.service belongs to another installation; refusing to change it." >&2
+      exit 1
+    fi
     command -v systemctl >/dev/null 2>&1 || { echo "Burrow service: systemd user services are unavailable." >&2; exit 1; }
+    user_systemctl() {
+      if [ -z "${XDG_RUNTIME_DIR:-}" ] && [ -d "/run/user/$(id -u)" ]; then
+        XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user "$@"
+      else
+        systemctl --user "$@"
+      fi
+    }
     case "$SERVICE_ACTION" in
       install)
         # A service install promises persistence across logout and reboot.
         # `burrow serve` remains the explicit session-only option.
         command -v loginctl >/dev/null 2>&1 || { echo "Burrow service: loginctl is required to enable persistent user services; use 'burrow serve' for a session-only runtime." >&2; exit 1; }
         SERVICE_USER="$(id -un)"
-        if ! loginctl enable-linger "$SERVICE_USER" >/dev/null 2>&1 || [ "$(loginctl show-user "$SERVICE_USER" -p Linger --value 2>/dev/null || true)" != "yes" ]; then
+        if [ "$(loginctl show-user "$SERVICE_USER" -p Linger --value 2>/dev/null || true)" != yes ]; then
+          if ! loginctl enable-linger "$SERVICE_USER" >/dev/null 2>&1; then
+            command -v sudo >/dev/null 2>&1 && sudo loginctl enable-linger "$SERVICE_USER" || { echo "Burrow service: enabling lingering requires permission (or sudo)." >&2; exit 1; }
+          fi
+        fi
+        if [ "$(loginctl show-user "$SERVICE_USER" -p Linger --value 2>/dev/null || true)" != "yes" ]; then
           echo "Burrow service: could not enable lingering for $SERVICE_USER; service installation requires lingering to persist after logout and reboot. Use 'burrow serve' for a session-only runtime." >&2
           exit 1
         fi
+        user_systemctl show-environment >/dev/null 2>&1 || { echo "Burrow service: cannot reach the systemd user manager after enabling lingering; log in as $SERVICE_USER and retry." >&2; exit 1; }
         mkdir -p "$SERVICE_DIR"
         # systemd user services do not inherit the login shell PATH. Preserve
         # the current baseline and include npm's user-global bin directory so
@@ -583,17 +604,17 @@ RestartSec=5
 [Install]
 WantedBy=default.target
 UNIT
-        systemctl --user daemon-reload
-        systemctl --user enable --now burrow.service
-        echo "Burrow service: installed, started, and persistent for $SERVICE_USER."
+        user_systemctl daemon-reload
+        user_systemctl enable --now burrow.service
+        echo "Burrow service: enabled and startup requested; persistent for $SERVICE_USER."
         ;;
       uninstall)
-        systemctl --user disable --now burrow.service || true
+        user_systemctl disable --now burrow.service || true
         rm -f "$SERVICE_UNIT"
-        systemctl --user daemon-reload
+        user_systemctl daemon-reload
         echo "Burrow service: removed."
         ;;
-      start|stop|restart|status) exec systemctl --user "$SERVICE_ACTION" burrow.service ;;
+      start|stop|restart|status) user_systemctl "$SERVICE_ACTION" burrow.service ;;
       logs) shift; exec journalctl --user-unit burrow.service --no-pager "$@" ;;
       *) echo "Usage: burrow service {install|uninstall|start|stop|restart|status|logs}" >&2; exit 2 ;;
     esac
@@ -616,6 +637,9 @@ if [ "$RESTART_SERVICE" -eq 1 ]; then
   previous_invocation=$(user_systemctl show burrow.service -p InvocationID --value 2>/dev/null || true)
   verbose_log "captured managed service invocation ${previous_invocation:-unknown} before atomic activation"
 fi
+if [ "$FRESH_INSTALL" -eq 1 ] && [ "$INSTALL_SERVICE" -eq 1 ]; then
+  touch "$INSTALL_DIR/.service-install-pending"
+fi
 mv -f "$WRAPPER_TMP" "$INSTALL_DIR/bin/burrow"
 [ ! -d "$INSTALL_DIR/app" ] || mv "$INSTALL_DIR/app" "$PREVIOUS"
 if ! mv "$STAGING" "$INSTALL_DIR/app"; then [ ! -d "$PREVIOUS" ] || mv "$PREVIOUS" "$INSTALL_DIR/app"; echo "Burrow install: could not activate new app payload." >&2; exit 1; fi
@@ -632,7 +656,12 @@ if [ "$RESTART_SERVICE" -eq 1 ]; then
   verbose_log "restarting burrow.service after atomic payload activation"
   user_systemctl restart burrow.service
   verify_restarted_runtime "$previous_invocation"
+elif [ "$FRESH_INSTALL" -eq 1 ] && [ "$INSTALL_SERVICE" -eq 1 ]; then
+  update_log "installing persistent user service..."
+  "$INSTALL_DIR/bin/burrow" service install
+  verify_restarted_runtime
 fi
+rm -f "$INSTALL_DIR/.service-install-pending"
 # Deleting the prior app can take tens of seconds when it contains installed
 # dependencies. It is cleanup, not activation; never hold runtime downtime
 # hostage to recursive deletion.
@@ -641,4 +670,10 @@ if [ -d "$PREVIOUS" ]; then
   rm -rf "$PREVIOUS"
 fi
 verbose_log "activation complete"
-printf "%s\\n" "Burrow install: ok" "Home: $INSTALL_DIR" "Application: $INSTALL_DIR/app" "State: $INSTALL_DIR/{config,workspace,cache}" "Run: $INSTALL_DIR/bin/burrow serve" "Update: $INSTALL_DIR/bin/burrow update"
+printf "%s\\n" "Burrow install: ok" "Home: $INSTALL_DIR" "Application: $INSTALL_DIR/app" "State: $INSTALL_DIR/{config,workspace,cache}" "Update: $INSTALL_DIR/bin/burrow update"
+if [ "$FRESH_INSTALL" -eq 1 ] && [ "$INSTALL_SERVICE" -eq 1 ] || [ "$RESTART_SERVICE" -eq 1 ]; then
+  runtime_endpoint
+  printf '%s\n' "Ready: http://$host:$port" "Service: $INSTALL_DIR/bin/burrow service status"
+else
+  printf '%s\n' "Service policy unchanged. Start manually if needed: $INSTALL_DIR/bin/burrow serve"
+fi
