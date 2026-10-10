@@ -286,6 +286,8 @@ export function subagentVisibilitySummary(record = {}) {
     result: record.result ? {
       ok: Boolean(record.result.ok),
       summary: record.result.summary || '',
+      outcome: record.result.outcome || null,
+      blockerReasons: Array.isArray(record.result.blockers) ? record.result.blockers : [],
       blockers: Array.isArray(record.result.blockers) ? record.result.blockers.length : 0,
       warnings: Array.isArray(record.result.warnings) ? record.result.warnings.length : 0,
       evidence: Array.isArray(record.result.evidence) ? record.result.evidence.length : 0,

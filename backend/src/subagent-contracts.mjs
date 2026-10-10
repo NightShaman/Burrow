@@ -188,6 +188,7 @@ function normalizeResult(result = null) {
   return {
     ok: Boolean(result.ok),
     summary: compactString(result.summary),
+    ...(['completed', 'incomplete', 'failed'].includes(result.outcome) ? { outcome: result.outcome } : {}),
     blockers: safeArray(result.blockers),
     warnings: safeArray(result.warnings),
     evidence: Array.isArray(result.evidence) ? result.evidence : [],

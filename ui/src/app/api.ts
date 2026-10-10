@@ -72,6 +72,7 @@ export type AgentStatus = {
   status?: string;
   since?: string;
   subagentId?: string;
+  result?: import('./minionOutcome').MinionResult;
 };
 
 export type ContextStatus = {
@@ -219,7 +220,7 @@ export type ActiveSubagent = {
   trace?: { runId?: string | null; childSessionId?: string | null; traceDir?: string | null } | Record<string, unknown> | null;
   label?: string | null;
   purpose?: string | null;
-  result?: { ok?: boolean; summary?: string; blockers?: number; warnings?: number } | null;
+  result?: import('./minionOutcome').MinionResult & { warnings?: number } | null;
 };
 export type ActiveChatRun = {
   runId: string;
@@ -312,7 +313,7 @@ export type ArchiveRunDetail = {
   context?: { budget: Record<string, unknown> | null; compression: { status?: 'applied' | 'not_needed' | 'failed' | 'not_recorded'; label?: string; detail?: string; reason?: string | null; summarizedTurnCount?: number | null; retainedTurnCount?: number | null; source?: string | null } | null; attachments: number; summary?: string | null; contextEvents?: Array<Record<string, unknown>>; attachmentManifest?: Array<Record<string, unknown>>; currentAttachmentManifest?: Array<Record<string, unknown>>; retainedAttachmentManifest?: Array<Record<string, unknown>> } | null;
   timeline: Array<{ kind: 'tool_call' | 'tool_result' | 'tool_trace' | string; status: string; ts?: string | null; summary: string; evidence: 'session_execution' | 'trace_receipt' | 'archive_inference' | string }>;
   references: { trace: Record<string, unknown> | null; sourceRefs: string[] };
-  subagents: Array<{ id: string; status: string | null; phase: string | null; purpose: string; label?: string | null; createdAt: string | null; completedAt: string | null; model: Record<string, unknown> | null; result: { ok?: boolean; summary?: string; blockers?: number; warnings?: number; evidence?: number; artifacts?: number; changedFiles?: number; memoryWrites?: number; sideEffectsApplied?: boolean } | null; verification?: { status: 'passed' | 'failed' | 'failed_expected' | 'not_run'; expected: boolean; check: string | null; observed: string | null; actionRequired: boolean } | null; trace: Record<string, unknown> }>;
+  subagents: Array<{ id: string; status: string | null; phase: string | null; purpose: string; label?: string | null; createdAt: string | null; completedAt: string | null; model: Record<string, unknown> | null; result: { ok?: boolean; summary?: string; blockers?: number | string[]; blockerReasons?: string[]; outcome?: string | null; warnings?: number; evidence?: number; artifacts?: number; changedFiles?: number; memoryWrites?: number; sideEffectsApplied?: boolean } | null; verification?: { status: 'passed' | 'failed' | 'failed_expected' | 'not_run'; expected: boolean; check: string | null; observed: string | null; actionRequired: boolean } | null; trace: Record<string, unknown> }>;
 };
 export type ArchiveRunListResponse = { ok: true; runs: ArchiveRunDetail[] };
 export type ArchiveRunResponse = { ok: true; run: ArchiveRunDetail };

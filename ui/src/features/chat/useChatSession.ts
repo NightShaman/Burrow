@@ -1,3 +1,4 @@
+import { minionOutcome } from '../../app/minionOutcome';
 import { projectLiveStage, type LiveStageProjection, type ChatLiveStage } from './chatLiveStage';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isWithinAttachmentBudget } from '../../app/clientBudgets';
@@ -69,8 +70,10 @@ function formatElapsed(from?: string | null, to = Date.now()) {
 function subagentToolActivity(child: ActiveSubagent, now = Date.now()): ToolActivity {
   const activity = child.activity ?? {};
   const status = String(activity.status || child.status || '').toLowerCase();
-  const final = child.final === true || ['completed', 'failed', 'cancelled'].includes(status);
-  const hasError = Boolean(activity.error) || status === 'failed';
+  const final = child.final === true || ['completed', 'succeeded', 'failed', 'cancelled', 'incomplete', 'timed_out'].includes(status);
+  const outcome = minionOutcome(child.status, child.result);
+  const hasError = Boolean(activity.error) || outcome.label === 'Error' || (status === 'failed' && outcome.label !== 'Incomplete');
+  const hasWarning = hasError || outcome.label === 'Incomplete';
   const rawLabel = activity.tool || activity.label || activity.model || activity.phase || child.phase || child.status || 'Subagent activity';
   const age = formatElapsed(activity.lastActualActivityAt || child.lastActualActivityAt, now);
   const elapsed = formatElapsed(activity.startedAt, now);
@@ -80,13 +83,14 @@ function subagentToolActivity(child: ActiveSubagent, now = Date.now()): ToolActi
     elapsed ? `elapsed ${elapsed}` : null,
     age ? `last actual event ${age} ago` : null,
     activity.error || null,
+    outcome.reason,
   ].filter(Boolean).join(' · ');
   return {
     runId: child.runId || child.id,
-    status: hasError ? 'warn' : final ? 'ok' : 'running',
+    status: hasWarning ? 'warn' : final ? 'ok' : 'running',
     title: final ? 'Minion activity' : 'Minion running',
     summary: detail || undefined,
-    items: [{ id: `${child.id}:${activity.sequence ?? 'activity'}`, label: String(rawLabel), status: hasError ? 'error' : final ? 'ok' : 'pending', ...(detail ? { detail } : {}) }],
+    items: [{ id: `${child.id}:${activity.sequence ?? 'activity'}`, label: activity.error ? 'Error' : outcome.label ?? String(rawLabel), status: hasWarning ? 'error' : final ? 'ok' : 'pending', ...(detail ? { detail } : {}) }],
   };
 }
 

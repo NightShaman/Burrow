@@ -106,6 +106,8 @@ describe('useRuntimeAgents registry state', () => {
         status: { agents: [
           { sessionId: 'default', status: 'THINKING' },
           { sessionId: 'child-1', parentSessionId: 'default', label: 'CSS audit', status: 'VERIFYING', subagentId: 'sub-1' },
+          { sessionId: 'child-2', parentSessionId: 'default', label: 'Incomplete audit', status: 'ERROR', result: { summary: 'Audit stopped', blockers: ['subagent_incomplete'] } },
+          { sessionId: 'child-3', parentSessionId: 'default', label: 'Failed audit', status: 'ERROR', result: { blockers: ['subagent_spawn_failed'] } },
         ] },
         contexts: {
           default: { context: { percent: 42 } },
@@ -122,5 +124,7 @@ describe('useRuntimeAgents registry state', () => {
     expect(apiMock).toHaveBeenNthCalledWith(2, '/api/agents/overview', expect.objectContaining({ method: 'POST', signal: expect.any(AbortSignal) }));
     expect(result.current.agents[0]).toMatchObject({ name: 'Smatchet UI', activity: 'Thinking', context: 42 });
     expect(result.current.agents[0].subagents[0]).toMatchObject({ name: 'CSS audit', activity: 'Verifying', context: 12 });
+    expect(result.current.agents[0].subagents[1]).toMatchObject({ activity: 'Incomplete', outcomeReason: 'Audit stopped · subagent_incomplete' });
+    expect(result.current.agents[0].subagents[2]).toMatchObject({ activity: 'Error' });
   });
 });

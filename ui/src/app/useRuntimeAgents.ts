@@ -1,3 +1,4 @@
+import { minionOutcome } from './minionOutcome';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type AgentStatus, type ContextStatus, type RuntimeAgent } from './api';
 import type { Agent, ContextDetails, SavedProvider, Subagent } from './types';
@@ -129,7 +130,7 @@ export function useRuntimeAgents({ selectedAgentId, setSelectedAgentId, parentSe
         const childStatuses = entry.status.agents.filter((item) => item.parentSessionId === parentStatus?.sessionId);
         const subagents: Subagent[] = childStatuses.map((child) => {
           const childContext = entry.contexts[child.sessionId] ?? {};
-          return { id: child.sessionId, resourceId: child.sessionId, targetId: 'local', name: child.label || child.subagentId || 'Minion', avatar: '↳', activity: formatAgentActivity(child.status), context: contextPercent(childContext), contextDetails: contextDetails(childContext), stream: child.sessionId, subagentId: child.subagentId };
+          return { id: child.sessionId, resourceId: child.sessionId, targetId: 'local', name: child.label || child.subagentId || 'Minion', avatar: '↳', activity: minionOutcome(child.status, child.result).label ?? formatAgentActivity(child.status), outcomeReason: minionOutcome(child.status, child.result).reason, context: contextPercent(childContext), contextDetails: contextDetails(childContext), stream: child.sessionId, subagentId: child.subagentId };
         });
         const selection = entry.selection;
         const selectedProvider = runtimeProviders.current.find((item) => item.id === selection?.connectionId && item.models.includes(selection.model));

@@ -602,3 +602,24 @@ it.each([
   expect(result.current.runtimeRun).toBeNull();
   unmount();
 });
+
+it.each([
+  [{ blockers: 1, blockerReasons: ['needs_review'], outcome: 'incomplete' }, undefined, 'Incomplete'],
+  [{ blockers: ['subagent_incomplete'] }, undefined, 'Incomplete'],
+  [{ blockerReasons: ['subagent_incomplete', 'subagent_model_failed:offline'], outcome: 'incomplete' }, undefined, 'Error'],
+  [{ blockerReasons: ['needs_review'], outcome: 'incomplete' }, 'dispatch failed', 'Error'],
+])('shows terminal incomplete as warning and execution failures as Error', async (childResult, error, label) => {
+  apiMock.mockImplementation(async (path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
+    if (path.startsWith('/api/chat/runs/active?')) return { runs: [], subagents: [{
+      id: 'child-warning', agentId, runId: 'child-run', sessionId: 'child-session', parentSessionId: sessionId,
+      status: 'failed', final: false, result: childResult, activity: { status: 'failed', error },
+    }] };
+    throw new Error(path);
+  });
+  const { result, unmount } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.runtimeChildActivities).toHaveLength(1));
+  expect(result.current.runtimeChildActivities[0]).toMatchObject({ status: 'warn', items: [{ label, status: 'error' }] });
+  unmount();
+});

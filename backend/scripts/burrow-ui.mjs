@@ -2771,6 +2771,7 @@ async function agentStatusForSession(sessionId = 'default', agentRuntime = null)
         status: statusFor(child),
         since: child.updatedAt || null,
         subagentId: child.id,
+        result: child.result || null,
       }],
     };
   }
@@ -2783,6 +2784,7 @@ async function agentStatusForSession(sessionId = 'default', agentRuntime = null)
       status: statusFor(item),
       since: item.updatedAt || null,
       subagentId: item.id,
+      result: item.result || null,
     }));
   const active = [...activeChatRuns.values()].find((run) => run.agentId === agentRuntime?.agentId && run.sessionId === sessionId && !run.controller.signal.aborted) || null;
   return {

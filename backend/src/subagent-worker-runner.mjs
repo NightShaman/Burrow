@@ -386,9 +386,10 @@ function retainChildResults(history, results, { limit = CHAT_TOOL_RESULT_HISTORY
   }
 }
 
-function subagentResult({ ok, summary, blockers = [], warnings = [], verification = null, toolResults = [], target = null } = {}) {
+function subagentResult({ ok, summary, outcome = null, blockers = [], warnings = [], verification = null, toolResults = [], target = null } = {}) {
   return {
     ok: Boolean(ok),
+    ...(outcome ? { outcome } : {}),
     summary: compactText(summary, 12_000) || (ok ? 'Minion completed.' : 'Minion failed.'),
     blockers: blockers.slice(0, 20),
     warnings: warnings.slice(0, 20),
@@ -445,8 +446,8 @@ function terminalResultFromToolCalls(toolCalls = [], { toolResults = [], target 
     actionRequired: Boolean(args.verification.actionRequired),
   } : null;
   if (!summary) return subagentResult({ ok: false, summary: 'Minion terminal signal omitted summary.', blockers: ['subagent_terminal_summary_required'], warnings, verification, toolResults, target });
-  if (status === 'completed') return subagentResult({ ok: true, summary, blockers, warnings, verification, toolResults, target });
-  return subagentResult({ ok: false, summary, blockers: blockers.length ? blockers : [`subagent_${status || 'incomplete'}`], warnings, verification, toolResults, target });
+  if (status === 'completed') return subagentResult({ ok: true, summary, outcome: status, blockers, warnings, verification, toolResults, target });
+  return subagentResult({ ok: false, summary, outcome: status, blockers: blockers.length ? blockers : [`subagent_${status || 'incomplete'}`], warnings, verification, toolResults, target });
 }
 
 function finalSynthesisPrompt({ prompt, toolResults = [] } = {}) {
