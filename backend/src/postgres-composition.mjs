@@ -1,3 +1,4 @@
+import { startOperatorInstantBackfill } from './postgres-operator-backfill.mjs';
 import { PostgresBrainEmbeddings } from './postgres-brain-embeddings.mjs';
 import { PostgresBrainStore } from './postgres-brain-store.mjs';
 import { PostgresMcpProviderStateStore } from './postgres-mcp-provider-state-store.mjs';
@@ -47,6 +48,7 @@ export async function createPostgresApplication({
   ownerId,
   clock,
   bootstrapSampleIdentities,
+  operatorBackfillOptions,
 } = {}) {
   const ownedPool = !pool;
   const sharedPool = pool || createPostgresPool({ config: poolConfig, ...(PoolClass ? { PoolClass } : {}) });
@@ -84,6 +86,7 @@ export async function createPostgresApplication({
     stores.albdruck = new PostgresAlbdruckStore({ pool: sharedPool, resolveOriginal: (ref, client) => stores.conversations.resolveOriginal(ref, client), searchHistory: input => stores.conversations.history(input) });
     await stores.forge.init();
     stores.brainEmbeddings.start();
+    const operatorBackfill = startOperatorInstantBackfill(sharedPool, operatorBackfillOptions);
     let closed = false;
     return Object.freeze({
     modDistributionRepositoryFactory: () => createPostgresModDistributionRepository({ pool: sharedPool }),
@@ -96,6 +99,7 @@ export async function createPostgresApplication({
     async close() {
       if (closed) return;
       closed = true;
+      await operatorBackfill.close();
       await stores.brainEmbeddings.close();
       await stores.conversations.close();
       if (ownedPool) await closePostgresPool(sharedPool);

@@ -20,9 +20,8 @@ export function renderDreamMemoryDocument(items = [], { generatedAt = new Date()
   } else {
     lines.push('');
     for (const item of normalized) {
-      const refs = Array.isArray(item.sourceRefs) && item.sourceRefs.length ? ` Sources: ${item.sourceRefs.join(', ')}.` : '';
       const expires = item.expiresAt ? ` Expires: ${item.expiresAt.slice(0, 10)}.` : '';
-      lines.push(`- ${kindLabel(item.kind)}: ${clamp(item.title, 180)} — ${clamp(item.content, 700)}${refs}${expires}`);
+      lines.push(`- ${kindLabel(item.kind)}: ${clamp(item.title, 180)} — ${clamp(item.content, 700)}${expires}`);
     }
   }
   lines.push('', `Updated: ${generatedAt}`);

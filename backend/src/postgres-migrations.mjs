@@ -1,3 +1,4 @@
+import { applyOperatorInstantMigration } from './postgres-operator-backfill.mjs';
 import { applyLogicalMemberMigration } from './postgres-logical-metadata-migration.mjs';
 import { POSTGRES_LOSSLESS_NATIVE_CATALOGS_SQL } from './postgres-remaining-json.mjs';
 import { applyLegacyContinuity } from './postgres-lossless-continuity.mjs';
@@ -32,7 +33,8 @@ function validateManifest(migrations) {
 
 /**
  * Apply only pending migrations while holding a transaction advisory lock. Migration
- * SQL is supplied by the owning module and is never rewritten or regex-translated.
+ * Published SQL/checksums are immutable; selected built-in versions have explicit
+ * checksum-preserving execution adapters for compatible installation.
  */
 export async function migratePostgres(pool, { migrations = POSTGRES_MIGRATIONS, lockNamespace = 'burrow-schema', applicationVersion = null } = {}) {
   const ordered = validateManifest(migrations);
@@ -63,6 +65,7 @@ export async function migratePostgres(pool, { migrations = POSTGRES_MIGRATIONS, 
       if ([18,26].includes(migration.version) && migration === POSTGRES_MIGRATIONS[migration.version-1]) await applyLegacyContinuity(client, migration);
       else if (migration.version === 38 && migration === POSTGRES_MIGRATIONS[37]) await applyLogicalMemberMigration(client, migration);
       else if (migration.version === 32 && migration === POSTGRES_MIGRATIONS[31]) await client.query(POSTGRES_LOSSLESS_NATIVE_CATALOGS_SQL);
+      else if (migration.version === 48 && migration === POSTGRES_MIGRATIONS[47]) await applyOperatorInstantMigration(client);
       else await client.query(migration.sql);
       await client.query('INSERT INTO burrow_schema_migrations(version,name,checksum) VALUES($1,$2,$3)', [migration.version, migration.name, checksum]);
     }

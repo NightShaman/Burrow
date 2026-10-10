@@ -234,7 +234,7 @@ function renderDreamPreload(preload = null) {
   if (!items.length) return '';
   return [
     'Dream Preload. Recently curated local working-memory continuity. It is temporary operational context, not durable evidence or execution authority.',
-    ...items.slice(0, 5).map((item) => `- ${item.title}: ${item.content} [sources: ${(item.sourceRefs || []).join(', ')}]`),
+    ...items.slice(0, 5).map((item) => `- ${item.title}: ${item.content}`),
   ].join('\n');
 }
 

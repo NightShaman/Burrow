@@ -951,35 +951,61 @@ export class PostgresSessionStore {
 
   async lastOperatorMessageAt({ agentId: rawAgentId } = {}) {
     const agentId = required(rawAgentId, 'agentId');
-    // Native typed indexes answer the normal hot path in one scalar query.
-    // All retained generations count, including reset archives; no canonical
-    // identity reconciliation or storage-time substitution is appropriate here.
-    const { rows } = await this.pool.query(`SELECT max(at) AS at FROM (
-      SELECT max(operator_at) AS at FROM conversation_entries WHERE agent_id=$1 AND operator_at IS NOT NULL
-      UNION ALL
-      SELECT max(operator_at) AS at FROM conversation_archive_entries WHERE agent_id=$1 AND operator_at IS NOT NULL
-    ) latest`, [agentId]);
-    let newest = rows[0]?.at == null ? null : new Date(rows[0].at);
-    // Only ambiguous legacy timestamps need JS Date semantics. Transfer the
-    // scalar, never retained prose/payloads, and bound each batch.
-    for (const [table, key] of [['conversation_entries','session_id,sequence'], ['conversation_archive_entries','session_id,source_id,ordinal']]) {
-      let after = null;
-      for (;;) {
-        const archive = table === 'conversation_archive_entries';
-        const { rows: legacy } = await this.pool.query(`SELECT ${key},operator_ts_fallback AS ts FROM ${table}
-          WHERE agent_id=$1 AND operator_ts_fallback IS NOT NULL
-          AND ($2::text IS NULL OR (${key})>${archive ? '($2,$3,$4::bigint)' : '($2,$3::bigint)'})
-          ORDER BY ${key} LIMIT 256`, [agentId,...(after || (archive ? [null,null,null] : [null,null]))]);
-        for (const row of legacy) {
-          const at = new Date(JSON.parse(row.ts));
-          if (Number.isFinite(at.getTime()) && (!newest || at > newest)) newest = at;
+    return withPostgresTransaction(this.pool, async client => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      // Adapter-installed v48 can be queried before its durable worker finishes.
+      // Only scalar clocks leave PostgreSQL, not historical message bodies.
+      const pendingSchema = (await client.query("SELECT to_regclass('burrow_operator_backfill') AS relation")).rows[0]?.relation;
+      // Native typed indexes answer the normal hot path in one scalar query.
+      // All retained generations count, including reset archives; no canonical
+      // identity reconciliation or storage-time substitution is appropriate here.
+      const { rows } = await client.query(`SELECT max(at) AS at FROM (
+        SELECT max(operator_at) AS at FROM conversation_entries WHERE agent_id=$1 AND operator_at IS NOT NULL
+        UNION ALL
+        SELECT max(operator_at) AS at FROM conversation_archive_entries WHERE agent_id=$1 AND operator_at IS NOT NULL
+      ) latest`, [agentId]);
+      let newest = rows[0]?.at == null ? null : new Date(rows[0].at);
+      // Only ambiguous legacy timestamps need JS Date semantics. Transfer the
+      // scalar, never retained prose/payloads, and bound each batch.
+      for (const [table, key] of [['conversation_entries','session_id,sequence'], ['conversation_archive_entries','session_id,source_id,ordinal']]) {
+        let after = null;
+        for (;;) {
+          const archive = table === 'conversation_archive_entries';
+          const { rows: legacy } = await client.query(`SELECT ${key},operator_ts_fallback AS ts FROM ${table}
+            WHERE agent_id=$1 AND operator_ts_fallback IS NOT NULL
+            AND ($2::text IS NULL OR (${key})>${archive ? '($2,$3,$4::bigint)' : '($2,$3::bigint)'})
+            ORDER BY ${key} LIMIT 256`, [agentId,...(after || (archive ? [null,null,null] : [null,null]))]);
+          for (const row of legacy) {
+            const at = new Date(JSON.parse(row.ts));
+            if (Number.isFinite(at.getTime()) && (!newest || at > newest)) newest = at;
+          }
+          if (legacy.length < 256) break;
+          const last = legacy.at(-1);
+          after = archive ? [last.session_id,last.source_id,String(last.ordinal)] : [last.session_id,String(last.sequence)];
         }
-        if (legacy.length < 256) break;
-        const last = legacy.at(-1);
-        after = archive ? [last.session_id,last.source_id,String(last.ordinal)] : [last.session_id,String(last.sequence)];
       }
-    }
-    return newest?.toISOString() || null;
+      if (pendingSchema) {
+        for (const [table,key] of [['conversation_entries','session_id,sequence'],['conversation_archive_entries','session_id,source_id,ordinal']]) {
+          const archive = table === 'conversation_archive_entries';
+          let after = null;
+          for (;;) {
+            const { rows: pending } = await client.query(`SELECT ${key},p.at,p.fallback AS ts FROM ${table} t
+              LEFT JOIN LATERAL burrow_operator_projection(t.entry) p ON true
+              WHERE agent_id=$1 AND NOT operator_projected
+              AND ($2::text IS NULL OR (${key})>${archive ? '($2,$3,$4::bigint)' : '($2,$3::bigint)'})
+              ORDER BY ${key} LIMIT 256`,[agentId,...(after || (archive ? [null,null,null] : [null,null]))]);
+            for (const row of pending) {
+              const at = row.at != null ? new Date(row.at) : row.ts != null ? new Date(JSON.parse(row.ts)) : null;
+              if (at && Number.isFinite(at.getTime()) && (!newest || at > newest)) newest = at;
+            }
+            if (pending.length < 256) break;
+            const last = pending.at(-1);
+            after = archive ? [last.session_id,last.source_id,String(last.ordinal)] : [last.session_id,String(last.sequence)];
+          }
+        }
+      }
+      return newest?.toISOString() || null;
+    });
   }
 
   async listSessions({ agentId: rawAgentId, includeArchived = true } = {}) {
