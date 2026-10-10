@@ -31,7 +31,7 @@ Only those five fields are accepted. `attachments`, `sourceAttachments` and gene
 
 Poll job detail for a terminal result and inspect `errorDetails` when present. Artifact GET supports `download=1`. There is no general Forge cancellation endpoint in this reference. A successful generation does not prove attachment delivery.
 
-Attach with exactly `agentId`, `sessionId` and `artifactId` to an existing destination session after job success. The implementation intends idempotent delivery, but this baseline has source-visible exceptional paths described in [known limitations](../../project/known-limitations.md#artifact-attachment-has-source-visible-exceptional-paths); verify destination records and bytes separately.
+Attach with exactly `agentId`, `sessionId` and `artifactId` to an existing destination session after job success. Delivery has an idempotency path; verify destination records and bytes separately from generation. The previously missing path import in attachment cleanup is present in this build. [Current attachment implementation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-forge-store.mjs).
 
 [Forge route responses](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/forge-routes.mjs#L1-L23) · [Create/idempotency](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-forge-store.mjs#L270-L354) · [Attachment](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-forge-store.mjs#L505-L557)
 

@@ -11,17 +11,16 @@ A complete recovery set contains both PostgreSQL state and the associated filesy
 | PostgreSQL logical dump | One database's schema and data | Does not include local files, encryption key, or cluster-wide roles |
 | Portable API export | Selected configuration categories | Does not replace history/artifact/database backup |
 
-Keep backups outside the live install root and outside public repositories. Use a unique, previously unused output filename: the backup helper can replace an existing archive, and a failed archive command removes that output path. Restrict access: even encrypted database fields depend on a key that may be present in the same recovery set.
+Keep backups outside the live install root and outside public repositories. Use a unique, previously unused output filename. The helper rejects existing output unless `--overwrite` is explicit, builds and validates an archive in staging, and publishes it only after validation. Restrict access: even encrypted database fields depend on a key that may be present in the same recovery set.
 
 ## Native managed database: cold full-install backup
 
-The portable backup command copies raw files. It does not stop PostgreSQL or use an online backup protocol. PostgreSQL requires a shutdown for an ordinary filesystem copy to be usable; coordinate all involved directories if you use an alternative snapshot system. See [PostgreSQL 17 filesystem backups](https://www.postgresql.org/docs/17/backup-file.html).
+The portable backup command copies raw files. It does not stop PostgreSQL or use an online backup protocol. It now refuses an existing `postmaster.pid` and requires `pg_controldata` to report a cleanly shut-down managed cluster, checking before copying and again before publishing the archive. PostgreSQL requires a shutdown for an ordinary filesystem copy to be usable; coordinate all involved directories if you use an alternative snapshot system. See [PostgreSQL 17 filesystem backups](https://www.postgresql.org/docs/17/backup-file.html).
 
-Preview the backup before the maintenance window:
+Choose the output path before the maintenance window:
 
 ```sh
 BACKUP="$HOME/backups/burrow-install-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
-"$HOME/.burrow/bin/burrow" install-backup --output "$BACKUP"
 ```
 
 For the default managed user-service install:
@@ -33,23 +32,24 @@ For the default managed user-service install:
 
 Confirm the service and its managed database have stopped. A nonzero status for an inactive unit is expected; unexpected stop errors need investigation. If you use a different supervisor, stop it through that supervisor instead.
 
-Then create the archive:
+Preview after shutdown, then create the archive:
 
 ```sh
 umask 077
+"$HOME/.burrow/bin/burrow" install-backup --output "$BACKUP"
 "$HOME/.burrow/bin/burrow" install-backup --output "$BACKUP" --confirm
 "$HOME/.burrow/bin/burrow" service start
 ```
 
 Check the backup command's success before treating the archive as valid. If backup fails, investigate the output and deliberately restart the service when safe; do not leave an unplanned outage. Keep a dated copy and restore-test it.
 
-The helper copies only the install-root tree and does not dereference symlinks. Custom PostgreSQL data directories, workspaces, artifact locations, or symlink targets outside that tree need their own coordinated backup. Inventory your effective paths first.
+The helper copies only the install-root tree and does not dereference symlinks. Managed PostgreSQL data outside the install root or reached through an external symlink is rejected. External databases, workspaces, artifact locations, and external symlink targets require separate coordinated backup. Restore also rejects absolute/out-of-tree or unresolved symlinks, so inspect such installations before assuming the tree archive is usable. Inventory your effective paths first.
 
 The archive includes `burrow.env`; losing its `BURROW_SETTINGS_KEY` while retaining the encrypted database can make stored credentials unusable. Do not regenerate that key during recovery.
 
 ## Restore a native full-install archive
 
-For a straightforward managed-cluster restore, use an isolated target host with the **same OS username** as the original database owner, plus compatible OS/architecture, Node, PostgreSQL 17, and pgvector prerequisites. Raw database files are not a cross-major or cross-platform migration format. Stop any target runtime first. The restore destination is **`<home>/.burrow`**, regardless of the original custom install directory.
+For a straightforward managed-cluster restore, use an isolated target host with the **same OS username and target-home UID** as the original database owner, plus compatible OS/architecture, Node, PostgreSQL 17, and pgvector prerequisites. Raw database files are not a cross-major or cross-platform migration format. Stop any target runtime first. The restore destination is **`<home>/.burrow`**, regardless of the original custom install directory.
 
 Use a Burrow launcher from a compatible available installation:
 
@@ -59,11 +59,13 @@ Use a Burrow launcher from a compatible available installation:
   --home /home/ORIGINAL_OS_USER
 ```
 
-Review the preview, then repeat with `--confirm`. Existing nonempty destinations are rejected unless `--replace --confirm` is explicitly supplied; replacement deletes that target tree. Rehearse into an empty isolated home before replacing valuable state.
+Review the preview's environment inventory. For every entry marked `requiresMapping`, prepare a private JSON mapping file whose keys are the listed environment names and whose string values identify the intended target paths/database settings. Repeat the launcher command with `--mapping-file /safe/restore-mapping.json --confirm`. Do not copy production destinations into a rehearsal mapping without reviewing them. Use the main `burrow` launcher: the standalone helper parser does not accept `--mapping-file`.
 
-Restore preserves file modes, rebases installer-owned paths, assigns the target-home owner's UID/GID, and reinstalls runtime integrations with npm. Filesystem chown does not rename PostgreSQL roles: startup connects as the current OS username. A differently named account requires a separately planned database role/ownership migration, rather than simply changing `--home`. It needs network access and does not install missing host prerequisites. It does not recreate the systemd service.
+Existing nonempty destinations require `--replace --confirm`. The restore is prepared and validated in staging before moving the previous tree and activating the replacement; the previous tree is restored if activation fails. Successful replacement removes the old tree during cleanup. Rehearse into an empty isolated home before replacing valuable state.
 
-Before the first start, inspect retained absolute paths. Restore rebases only runtime root, workspace root, cache root, and the Claude executable path. Explicit PostgreSQL data/socket/log paths, PostgreSQL binary locations, external database URLs, and other overrides remain unchanged. Point these at the isolated intended destination before starting; a restored configuration must not accidentally reuse the original cluster.
+Restore preserves file modes, rebases installer-owned paths, assigns the target-home owner's UID/GID, and reinstalls runtime integrations with npm. Filesystem chown does not rename PostgreSQL roles: startup connects as the current OS username. Managed physical restore now rejects a different source owner name or target UID, rather than attempting that migration. Use a separately planned logical database/role migration for another owner. It needs network access and does not install missing host prerequisites. It does not recreate the systemd service.
+
+Before the first start, inspect retained absolute paths. Restore rebases only runtime root, workspace root, cache root, and the Claude executable path. Explicit PostgreSQL data/socket/log paths, PostgreSQL binary locations, external database URLs, and other absolute overrides must be acknowledged through the mapping file. Missing required mappings fail before activation. Verify the resulting environment before starting; a restored configuration must not accidentally reuse the original cluster.
 
 As the target account, after checking paths and key:
 
@@ -91,7 +93,7 @@ Use the actual configured socket if overridden. A logical dump is consistent for
 
 Restore trusted custom-format archives with `pg_restore` into a deliberately selected isolated database, using the database owner's procedure. Do not use destructive restore flags against a live destination as a trial. [PostgreSQL 17 pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html)
 
-The bundled `scripts/runtime-backup.mjs` is narrower than a full install backup: it dumps a database and selected per-agent `skills`, `tools`, and `artifacts`. Its connection fallback and omitted key/config/global workspace mean it must not be treated as a complete recovery procedure.
+The bundled `scripts/runtime-backup.mjs` is narrower than a full install backup: it dumps a database and selected per-agent `skills`, `tools`, and `artifacts`. It now derives its PostgreSQL destination from authoritative runtime configuration and clears conflicting ambient libpq variables. Its omitted key/config/global workspace still mean it must not be treated as a complete recovery procedure.
 
 ## Containers
 
@@ -101,11 +103,11 @@ Stop Burrow cleanly and use your container/volume backup tooling to capture all 
 
 The UI/API export catalog supports selected agents/profiles, settings, model connections, MCP connections, UI authentication, and task-board records. Secret-bearing exports require a password. MCP environment-variable plaintext is not included.
 
-These exports do not capture complete conversations, original archives, Albdruck knowledge, Dream diaries, traces, or filesystem attachments/generated artifacts. A canonical session transcript can be exported separately through `/api/sessions/{sessionId}/export`. See [HTTP API](../reference/api.md).
+These exports do not capture complete conversations, original archives, Brain knowledge, Dream diaries, traces, or filesystem attachments/generated artifacts. A canonical session transcript can be exported separately through `/api/sessions/{sessionId}/export`. See [HTTP API](../reference/api.md).
 
 ## Recovery acceptance
 
-- Health reports the intended version and runtime paths
+- Health reports the intended version/build identity; inspect authenticated runtime status separately for runtime paths
 - Matching settings decrypt and the expected agents/models appear
 - Known conversation history and one attachment/artifact are readable
 - Required MCP connections and per-agent grants still work
@@ -114,7 +116,10 @@ These exports do not capture complete conversations, original archives, Albdruck
 
 ## Source evidence
 
-- [Portable backup and restore implementation](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/portable-install-backup.mjs)
-- [Database-only/selected-files backup](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/runtime-backup.mjs)
-- [Export catalog and encryption](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/export-service.mjs)
-- [Managed connection selection](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-startup.mjs#L6-L33)
+- [Portable backup and restore implementation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/portable-install-backup.mjs)
+- [Database-only/selected-files backup](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/runtime-backup.mjs)
+- [Export catalog and encryption](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/export-service.mjs)
+- [Managed connection selection](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-startup.mjs)
+
+- [Cold-backup checks and restore inventory](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/portable-backup-policy.mjs)
+- [Launcher restore mapping dispatch](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/bin/burrow.mjs#L326-L332)

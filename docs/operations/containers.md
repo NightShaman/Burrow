@@ -9,7 +9,7 @@ This core-only example binds to loopback on the Docker host. It intentionally sh
 ```yaml
 services:
   burrow:
-    image: ghcr.io/nightshaman/burrow:2026.10.02.7
+    image: ghcr.io/nightshaman/burrow:2026.10.10.4
     init: true
     user: "4226:4226"
     environment:
@@ -95,7 +95,7 @@ Do not run the native `burrow update` procedure inside a container as a substitu
 git clone https://github.com/NightShaman/Burrow.git
 cd Burrow
 git checkout 2d979fecca8434fe02a6ed2e8225c46eb4690098
-docker build -t burrow-local:2026.10.02.7 .
+docker build -t burrow-local:2026.10.10.4 .
 ```
 
 This is a build command, not a deployment to an existing runtime. The build needs access to npm, Debian/PGDG packages, and base images.

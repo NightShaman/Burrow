@@ -11,14 +11,14 @@ The API serves BURROW's UI and external clients. It is an operator-level control
 | [Sessions and Archive](api/sessions.md) | Current/original history, reset/fork/archive, context, handoffs |
 | [Tasks, schedules and groups](api/work.md) | Task board, recurring jobs, group chat, legacy workbench |
 | [Settings and integrations](api/settings.md) | Auth, models/OAuth, MCP grants, skills, timezone, retention, API tokens |
-| [Memory and Dreams](api/memory.md) | Albdruck, original recall, purge, Tiddle, Dream controls |
+| [Memory and Dreams](api/memory.md) | Brains, explicit conversation recall, Tiddle, Dream controls |
 | [Files, Forge and exports](api/artifacts.md) | Workspace editing, attachments, generated artifacts, selective export/import |
 | [Mods](api/mods.md) | Distribution, lifecycle, extension routes and UI assets |
 | [Health and diagnostics](api/diagnostics.md) | Health, metrics, traces, diagnostic projections and provider usage |
 
 ## Contract download and provenance
 
-[Download the pinned OpenAPI JSON](../assets/reference/openapi-2026.08.25.json)
+[Download the historical OpenAPI JSON](../assets/reference/openapi-2026.08.25.json)
 
 | Property | Value |
 |---|---|
@@ -26,10 +26,10 @@ The API serves BURROW's UI and external clients. It is an operator-level control
 | Contract `info.version` | `2026.08.25` |
 | Inventory | 150 paths, 193 operations, 112 component schemas |
 | Contract artifact source revision | Backend `b20376440086340e8746507ca700a4cd9e07bf96` |
-| Documented assembled baseline | `2026.10.02.7`, commit `2d979fecca8434fe02a6ed2e8225c46eb4690098` |
+| Documented assembled baseline | `2026.10.10.4`, commit `c15064dd177788afcdda357a5e545510f754a754` |
 | SHA-256 | `e91eb15cd7a4c17d3a104aee6156ff8c559ad4306ae53c7aaf90492dca4ae564` |
 
-The download is the unchanged contract from the fully inspected `.6` Backend snapshot. The `.7` assembled delta does not contain a replacement contract; this site does not claim to have retrieved a newer upstream schema. Current route behavior is checked against the frozen `.7` public source. The pages above reconcile implementation behavior and add implemented routes absent from it. The [route index](../assets/reference/api-route-index.json) maps contract operations and documented source additions to their reference pages. It is a documentation coverage aid, not a runtime-generated discovery API.
+The download and [route index](../assets/reference/api-route-index.json) are unchanged historical artifacts from the October 2 audit. They are not the current runtime contract. In particular, their `/api/albdruck/*` operations are retired and are not mounted in this build. Current memory routes use `/api/brains`; original recall uses `/api/session/search` and source expansion. See the source-backed endpoint pages above. This refresh does not claim to have regenerated the upstream OpenAPI contract.
 
 !!! warning "The schema is incomplete"
     It has no authentication security schemes, omits seven Dream operations and the non-API OIDC/logout routes, and contains broad open-object schemas. Its Forge request/catalog and mod-catalog shapes lag implementation. Do not infer anonymous access, unsupported features or complete client compatibility from generated types alone.
@@ -67,12 +67,12 @@ That file is absent from this public assembled snapshot. The explorer shell can 
 - JSON requests use `Content-Type: application/json`; empty bodies are parsed as `{}`
 - Supply real `agentId` and `sessionId` values rather than relying on default-agent resolution in automation; `default` is a common session default
 - Identity in a route/query/body selects an application object. It is not a separate authentication principal or tenant boundary
-- Most JSON routes return an `ok` field, but this is not universal; Albdruck and byte-download endpoints differ
+- Most JSON routes return an `ok` field, but this is not universal; some memory and byte-download endpoints differ
 - Check both HTTP status and the endpoint's application outcome. HTTP 200, a run ID or a queued response alone does not prove successful execution
 - Pagination conventions differ: opaque `cursor`, transcript `before`/`from`/`to`, or simple `limit`. Follow each endpoint and do not manufacture cursors
 - There is no general HTTP API version prefix, universal idempotency header or WebSocket protocol in this surface. Forge has a body-level idempotency contract
 
-Invalid JSON returns `400 invalid_json`. Selected route boundaries reject non-object bodies and required fields; the server does not apply a universal OpenAPI request validator. General JSON ingestion buffers the request body before parsing. Apply deployment-level request limits as appropriate.
+Invalid JSON returns `400 invalid_json`. Selected route boundaries reject non-object bodies and required fields; the server does not apply a universal OpenAPI request validator. JSON ingestion is bounded before parsing; route families can impose stricter limits. Browser-origin and JSON content-type checks apply to mutations. These checks do not replace authentication or deployment-level request limits. See [trust boundaries](../security/trust-boundaries.md).
 
 [Parsing/validation](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L1835-L1873) · [Route composition and errors](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L3151-L3289)
 

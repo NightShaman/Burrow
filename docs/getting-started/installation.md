@@ -18,7 +18,7 @@ Burrow runs as a local Node.js application with PostgreSQL and an optional brows
 
 The installer can provision missing PostgreSQL 17 and pgvector packages on Ubuntu through PGDG, requiring sudo for package installation. On other hosts, install these prerequisites yourself or use [external PostgreSQL](../operations/deployment.md#external-postgresql). The source does not define a universal minimum RAM/disk requirement; size the host for model integrations, database growth, and tool workloads.
 
-`--install-node` supports NodeSource provisioning on Ubuntu and RHEL-family Linux 9+. Install Node first when using the remote download path: resolving the assembly revision already invokes Node before the later provisioning check. The repository does not establish a supported native Windows or macOS installer workflow.
+`--install-node` supports NodeSource provisioning on Ubuntu and RHEL-family Linux 9+. Assembly revision resolution now uses shell tools rather than Node; the earlier bootstrap-order caveat no longer applies. The repository does not establish a supported native Windows or macOS installer workflow.
 
 ## Native installation
 
@@ -103,12 +103,12 @@ curl -fsS http://127.0.0.1:42817/health
 "$HOME/.burrow/bin/burrow" service logs -n 100
 ```
 
-Inspect the JSON `ok` and `version` fields. `/health` is public in this snapshot; authenticated `/api/health` is a separate route. Health does not prove that a model is configured or that a chat has succeeded.
+Inspect the JSON `ok` and `version` fields. Both `/health` and `/api/health` are public readiness/build-identity routes in this snapshot. Health does not prove that a model is configured or that a chat has succeeded.
 
 Next: [initial setup](initial-setup.md), [deployment](../operations/deployment.md), [upgrades](../operations/upgrades.md), and [backup and recovery](../operations/backup-recovery.md).
 
 ## Source evidence
 
-- [Native installer](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/install.sh#L1-L613)
-- [Database supervisor](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/postgres-supervisor.mjs)
-- [Managed lifecycle](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-lifecycle.mjs)
+- [Native installer](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/install.sh)
+- [Database supervisor](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/postgres-supervisor.mjs)
+- [Managed lifecycle](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-lifecycle.mjs)

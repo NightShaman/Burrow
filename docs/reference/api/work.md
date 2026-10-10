@@ -6,7 +6,7 @@ BURROW exposes several work surfaces with different state models. The task board
 
 Create a project with `{name}`. Create a task with at least `projectId` and `title`; optional state, priority, description and assigned-agent fields are validated by the store. Read available statuses/priorities rather than inventing identifiers. List filters are `projectId`, `status`, `priority` and `assignedAgentId`.
 
-`POST /api/task-board/tasks/{id}/execute` is intended to launch work through the assigned agent. The current controller calls asynchronous task/project lookups without awaiting them, so it can reject a normal task as unassigned. Verify the outcome and consult [known limitations](../../project/known-limitations.md). Its response is not final task completion, and execution does not automatically move the task through board columns. The current UI shows five columns and creates tasks in To Do; the API/store default is Backlog.
+`POST /api/task-board/tasks/{id}/execute` launches work through the assigned agent after awaiting the task/project lookups and execution record. Verify the returned outcome and then inspect the terminal execution receipt. [Current controller](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs). Its response is not final task completion, and execution does not automatically move the task through board columns. The current UI shows five columns and creates tasks in To Do; the API/store default is Backlog.
 
 A conversation can bind an active project. GET/DELETE use `agentId` and optional `sessionId` (default `default`); PUT additionally requires `projectId`. The binding supports continuity and task context, not filesystem confinement.
 
@@ -19,7 +19,7 @@ Create requires nonblank `agentId`, `name`, `prompt` and a five-field `cron` exp
 `POST /api/scheduled-jobs/{jobId}/trigger` returns 202 admission. Inspect run history for terminal outcome. To cancel an active run, POST its `/runs/{runId}/cancel` path with optional `reason`; a non-active run returns 404. Cancellation does not undo completed tools.
 
 !!! warning "Validate execution, not only scheduling"
-    The documented baseline has a source-visible default scheduler/store-wiring gap. Saving a cron job or receiving a trigger acknowledgement does not establish successful unattended execution. Inspect [known limitations](../../project/known-limitations.md#scheduled-execution-wiring-requires-validation) and terminal receipts before relying on it.
+    The current scheduler receives the composed stores; the old missing-store wiring defect is resolved. Saving a cron job or receiving a trigger acknowledgement still does not establish successful unattended execution. Inspect terminal receipts and try a harmless job before relying on it. [Current scheduler](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/scheduled-job-scheduler.mjs).
 
 [Schedule routes](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/scheduled-channel-routes.mjs#L1-L14)
 

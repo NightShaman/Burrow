@@ -8,11 +8,17 @@ These are privileged operator routes. They share the normal interactive authenti
 
 Create an API token with `name`, optional `scopes` (currently only `diagnostics:read`) and optional future `expiresAt`. The plaintext appears only in the creation result; list returns metadata. DELETE revokes rather than returning the secret. Tokens cannot create more tokens or administer settings.
 
-[Auth settings](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L699-L778) · [Token store](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-api-token-store.mjs#L3-L35)
+[Auth settings](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs) · [Token store](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-api-token-store.mjs)
 
 ## Model connections and provider login
 
-Save/discover connections before selecting an enabled model for an agent. A per-agent selection uses `connectionId` and `model`, with optional reasoning/temperature preferences. Discovery refreshes provider/catalog facts while preserving explicit operator capability overrides. Archive-summary selection is independent and can be cleared.
+In the UI, use **Settings → Connections → Model providers → Connect**, select the models to enable, and **Save**. Select a saved provider card to edit it. Select the agent in **Chat**, then use its **Provider**, **Model**, **Effort**, and **Temp** controls to persist that agent's selection. Agent details has no model selector. See the [operator walkthrough](../../getting-started/initial-setup.md#configure-a-usable-model).
+
+Connection save accepts `provider`, `apiType`, `baseUrl`, and `models`; include `id` to update an existing connection. Omit `apiKey` to preserve an existing credential, or supply a nonblank replacement. Discovery refreshes provider/catalog facts while preserving explicit operator capability overrides. Discovery, connection authentication, model enablement, and agent selection are separate state transitions.
+
+A per-agent selection uses `connectionId` and `model`, with optional `reasoningEffort` (default `off`) and `temperature` (0–2; omission preserves the prior value or defaults to 0.2). The backend rejects an unknown connection, a model not enabled in its catalog, absent authentication, or an advertised unsupported reasoning effort. Archive-summary selection is independent and can be cleared. Adapter compatibility rules can omit a saved temperature from the provider request.
+
+Prompt-cache flags, arbitrary request extras and cache-retention controls are not exposed by the standard model-connection form. See [current cache semantics](../../concepts/models.md#what-caching-currently-means) before treating an adapter option as a supported settings field.
 
 Provider login endpoints are distinct from UI OIDC authentication:
 
@@ -22,7 +28,7 @@ Provider login endpoints are distinct from UI OIDC authentication:
 
 These flows can establish ongoing provider access. Handle credentials through the supported operator flow, never diagnostic tokens, and do not log raw callback content. Capability/provider-specific details are in [models](../../concepts/models.md).
 
-[Model/login routes](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/settings-routes.mjs#L22-L47) · [Agent selection](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L600-L624)
+[Model/login routes](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/ui/settings-routes.mjs) · [Agent selection validation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-model-settings-store.mjs) · [Chat selection persistence](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/app/useModelSelectionWriter.ts) · [Connection editor](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/settings/useModelConnectionEditor.ts)
 
 ## MCP configuration and grants
 
@@ -32,7 +38,7 @@ Discover/diagnose use `connectionId`; Diagnose may also receive `toolName` and a
 
 Agent grants use `{ "tools": [{ "connectionId": "…", "toolName": "…" }] }`; PUT replaces the full set. Read-modify-write deliberately. Secret update rules and the asynchronous delete-acknowledgement caveat are in [MCP](../../concepts/mcp.md).
 
-[Input validation](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/mcp-settings-store.mjs#L30-L54) · [Diagnose and grants](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L402-L410)
+[Input validation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/mcp-settings-store.mjs) · [Diagnose and grants](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs)
 
 ## Skills, identities and policy
 
@@ -40,9 +46,9 @@ Managed skills are central text records with per-agent assignments. They describ
 
 Timezone GET/PUT manages the operator's IANA timezone. Explicit-timezone schedules retain that timezone; inherited schedules track the current operator zone. Execution-boundary GET/PUT manages concrete configured blockers; see [enforcement limits](../../security/permissions.md).
 
-Trace retention supports read/save, a non-deleting preview and an explicit run. `/api/retention` and `/api/retention/cleanup` are compatibility aliases; new clients use `/api/settings/retention/*`. This policy does not replace [Albdruck retention](memory.md).
+Trace retention supports read/save, a non-deleting preview and an explicit run. `/api/retention` and `/api/retention/cleanup` are compatibility aliases; new clients use `/api/settings/retention/*`. This is trace retention, not a per-conversation purge API. Retired Albdruck routes are not a supported cleanup path; see [memory boundaries](memory.md).
 
-[General settings](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/general-settings-routes.mjs#L1-L46) · [Skills](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/settings-routes.mjs#L11-L21)
+[General settings](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/ui/general-settings-routes.mjs) · [Skills](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/ui/settings-routes.mjs)
 
 
 ## Endpoint inventory

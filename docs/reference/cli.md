@@ -32,10 +32,10 @@ See [installation](../getting-started/installation.md), [upgrades](../operations
 | `plan` | `--message TEXT`, optional workspace/action hints | Advertised planning surface; store-wiring gap below |
 | `trace` | `--run-id ID` or `--latest`, optional `--tool-output` | Summarize trace with PostgreSQL evidence |
 | `session-search` | `--session-id`, optional `--query`, `--role`, `--source-id`, `--agent-id` | Search stored session evidence |
-| `doctor` | optional `--check-memory` | Advertised diagnostic surface; store-wiring gap below |
+| `doctor` | `--root`, optional `--agent-id` | PostgreSQL-backed diagnostics, redacted model/runtime status and tool checks |
 | `retention` | optional `--confirm`, `--summary`, `--agent-id` | Preview by default; confirmed cleanup mutates state |
 
-These examples assume the shell already selects the correct database. For a default managed install, put each desired command inside the [managed connection subshell](#managed-reader-connection), replacing its final trace command; the subshell does not configure later commands:
+For an installed runtime, the launcher loads its private environment and CLI readers derive the managed socket from lifecycle settings. Keep PostgreSQL running and select the actual agent owner:
 
 ```sh
 "$HOME/.burrow/bin/burrow" session-search \
@@ -51,32 +51,17 @@ PostgreSQL-backed readers need a running reachable database and settings key. Th
 
 ### Managed reader connection
 
-`session-search`, `trace`, and `retention` compose PostgreSQL stores, but they do not derive the managed socket from lifecycle settings. The installed launcher alone does not fill these connection fields. For the default managed installation, this subshell loads the trusted installer-created environment/key and explicitly selects its private database:
+`session-search`, `trace`, `retention` and `doctor` compose PostgreSQL stores through `withCliPostgres`. In managed mode, the helper resolves the configured socket directory, port 5432, database `postgres` and current OS database owner; it clears URL/password overrides in the connection environment. In external mode it uses the configured external connection. The helper does not start PostgreSQL. Use the installed launcher rather than manually overriding connection fields from an older example. [CLI store composition](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/cli-postgres.mjs) · [Lifecycle-derived connection](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-startup.mjs)
 
-```sh
-(
-  set -a
-  . "$HOME/.burrow/burrow.env"
-  set +a
-  unset BURROW_POSTGRES_URL DATABASE_URL BURROW_POSTGRES_PASSWORD
-  export BURROW_POSTGRES_HOST="$HOME/.burrow/postgres-socket"
-  export BURROW_POSTGRES_PORT=5432
-  export BURROW_POSTGRES_DATABASE=postgres
-  export BURROW_POSTGRES_USER="$(id -un)"
-  node "$HOME/.burrow/app/backend/bin/burrow.mjs" trace \
-    --root "$HOME/.burrow/app/backend" --agent-id assistant --latest
-)
-```
-
-Substitute your actual runtime/socket path and agent ID. Keep PostgreSQL running. Replace the final command with the desired reader/retention command; do not use this managed configuration for an external database. The subshell avoids changing the caller's long-lived environment and does not print the key.
+For a raw source invocation, load the trusted environment for that isolated runtime first and supply `--root`. Do not point development diagnostics at a live deployment unintentionally. `doctor` can create/check runtime directories and run `node`, `npm` and `git` version probes; it is not a strictly read-only command. Its result includes `ready`, `degraded` or `blocked`, blockers/warnings, effective skills and redacted model settings. Shared help still advertises `--check-memory`, but the current diagnostic implementation does not implement a separate check for that flag. [Doctor implementation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/doctor.mjs)
 
 ### CLI retention policy
 
-CLI retention uses environment/default policy, not the persisted UI/Albdruck policy or its enabled flag. Defaults are 60 days for eligible main-kind sessions, 30 for task sessions, and 7 for subagent sessions; trace age/byte caps require explicit environment settings. Preview without `--summary` to inspect candidate identities before ever adding `--confirm`. See [retention maintenance](../operations/procedures.md#retention-maintenance).
+CLI retention uses environment/default policy, not the persisted UI trace-retention policy or its enabled flag. Defaults are 60 days for eligible main-kind sessions, 30 for task sessions, and 7 for subagent sessions; trace age/byte caps require explicit environment settings. Preview without `--summary` to inspect candidate identities before ever adding `--confirm`. See [retention maintenance](../operations/procedures.md#retention-maintenance).
 
 ### Legacy store-wiring gap
 
-The CLI's shared model/planning dispatch calls `resolveModelConfig(args)` without a model store. The resolver requires a store and raises `model_settings_store_required`. This affects the advertised `ask`, `chat`, `plan`, `run`, `factory`, and Dream branches before they reach their intended behavior. `doctor` also calls the resolver without store injection. HTTP chat composes/injects application stores separately. These are source-confirmed CLI wiring limitations, not reasons to recreate retired JSON configuration or pass raw provider keys on the command line.
+The CLI's shared model/planning dispatch calls `resolveModelConfig(args, loaded.config)` without a model store. The resolver requires a store and raises `model_settings_store_required`. This affects the advertised `ask`, `chat`, `plan`, `run`, and `factory` branches before they reach their intended behavior. `doctor` has a separate PostgreSQL-composed path and is not affected by this gap. HTTP chat composes/injects application stores separately. These are source-confirmed CLI wiring limitations, not reasons to recreate retired JSON configuration or pass raw provider keys on the command line.
 
 ## Execution-oriented commands
 
@@ -104,9 +89,9 @@ burrow postgres-access create|rotate|revoke|list [--name NAME] [--json]
 
 The private socket gains role-specific SCRAM rules. This does not isolate readers from an OS account that already controls the database owner, and it does not make sensitive tables nonsensitive.
 
-## Advertised Dream CLI commands
+## Dream controls
 
-`dream-memory` and `dream-cycle` appear in shared help and the accepted command list, but this snapshot has no dedicated dispatch branch for them and also reaches the shared store-wiring gap. Do not use them as a documented way to start a Dream cycle. Use supported UI/API Dream settings and controls described in [Dreams](../concepts/dreams.md).
+`dream-memory` and `dream-cycle` are removed from the CLI help and accepted command list in this release. Use the UI/API Dream settings, consolidation and cycle controls described in [Dreams](../concepts/dreams.md) and the [memory API](api/memory.md). They are not supported shell commands.
 
 ## Chat slash commands
 
@@ -125,8 +110,8 @@ These are messages handled by the HTTP chat path, separate from shell commands:
 
 ## Source evidence
 
-- [Backend CLI usage and dispatch](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/bin/burrow.mjs)
-- [Installed launcher](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/install.sh#L493-L578)
-- [Model-store requirement](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/config.mjs#L94-L96)
-- [Managed PostgreSQL access](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/managed-postgres-access.mjs)
-- [Slash-command dispatch](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L2830-L2875)
+- [Backend CLI usage and dispatch](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/bin/burrow.mjs)
+- [Installed launcher](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/install.sh)
+- [Model-store requirement](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/config.mjs)
+- [Managed PostgreSQL access](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/managed-postgres-access.mjs)
+- [Slash-command dispatch](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs)

@@ -40,6 +40,15 @@ This manual explains the runtime an operator installs and the code a developer e
 
 </div>
 
+## What do you want to do?
+
+- [Connect a model and send your first message](getting-started/initial-setup.md)
+- [Use Chat, follow tool progress, and stop work](concepts/interface.md#chat-and-sessions)
+- [Save or correct a memory in Brains](concepts/memory.md)
+- [Find an earlier conversation](concepts/conversation-history.md)
+- [Start, restart, and inspect Burrow](operations/procedures.md)
+- [Fix a setup or connection problem](operations/troubleshooting.md)
+
 ## Before first use
 
 1. Read [core concepts](concepts/core-concepts.md) to distinguish agents, sessions, Minions, workers, and tools.
@@ -52,6 +61,6 @@ This manual explains the runtime an operator installs and the code a developer e
 
 ## Documentation baseline
 
-This documentation pass is pinned to assembled build **2026.10.02.7**, commit [`2d979fe`](https://github.com/NightShaman/Burrow/tree/2d979fecca8434fe02a6ed2e8225c46eb4690098). The initial full audit of .6 was followed by a complete review of the .7 source delta. Exact source pins, inspection scope, and validation limits are recorded in [Source and coverage](project/source-map.md). References distinguish current behavior, compatibility paths, source-visible gaps, and unverified deployment behavior.
+The operator guides are updated for assembled build **2026.10.10.4**, commit [`c15064d`](https://github.com/NightShaman/Burrow/tree/c15064dd177788afcdda357a5e545510f754a754). Exact source pins, inspection scope, and validation limits are recorded in [Source and coverage](project/source-map.md). References distinguish current behavior, compatibility paths, source-visible gaps, and unverified deployment behavior.
 
 For precise values, use the [configuration](reference/configuration.md), [environment](reference/environment.md), and [CLI](reference/cli.md) references rather than older examples from unrelated releases.
