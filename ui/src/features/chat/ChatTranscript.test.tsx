@@ -262,3 +262,13 @@ it.each([
   expect(screen.queryByText(label)).toBeNull();
   expect(screen.getByText('Final only')).toBeTruthy();
 });
+
+ it('renders accepted chat-visible user events once and hides lifecycle and canonical projections', () => {
+  show([
+    { type: 'event', role: 'user', content: 'Steer this run', metadata: { visibility: 'chat' } },
+    { type: 'message', role: 'user', content: 'Steer this run', metadata: { visibility: 'debug' } },
+    { type: 'event', role: 'system', content: 'Delivered lifecycle', metadata: { visibility: 'chat' } },
+  ]);
+  expect(screen.getAllByText('Steer this run')).toHaveLength(1);
+  expect(screen.queryByText('Delivered lifecycle')).toBeNull();
+ });
