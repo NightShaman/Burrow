@@ -18,6 +18,7 @@ type RuntimeRunForSelection = {
   agentId: string;
   sessionId: string;
   latestUserMessage: string;
+  answerText?: string;
   progress: ProgressEntry[];
   stage?: ChatLiveStage;
   toolActivity?: ToolActivity;
@@ -52,7 +53,7 @@ function runtimeToolActivity(run: ActiveChatRun): ToolActivity | undefined {
 
 function runtimeRunForSelection(run: ActiveChatRun | undefined, targetId: string): RuntimeRunForSelection | null {
   if (!run) return null;
-  return { targetId, runId: run.runId, agentId: run.agentId, sessionId: run.sessionId, latestUserMessage: typeof run.latestUserMessage === 'string' ? run.latestUserMessage : '', stage: (run.progress ?? []).reduce<LiveStageProjection>((state, event) => ((event.runId !== undefined && event.runId !== run.runId) || (event.sessionId !== undefined && event.sessionId !== run.sessionId)) ? state : projectLiveStage(state, event), {}).stage, progress: runtimeRunProgress(run), toolActivity: runtimeToolActivity(run) };
+  return { targetId, runId: run.runId, agentId: run.agentId, sessionId: run.sessionId, answerText: typeof run.answerText === 'string' ? run.answerText : '', latestUserMessage: typeof run.latestUserMessage === 'string' ? run.latestUserMessage : '', stage: (run.progress ?? []).reduce<LiveStageProjection>((state, event) => ((event.runId !== undefined && event.runId !== run.runId) || (event.sessionId !== undefined && event.sessionId !== run.sessionId)) ? state : projectLiveStage(state, event), {}).stage, progress: runtimeRunProgress(run), toolActivity: runtimeToolActivity(run) };
 }
 
 function formatElapsed(from?: string | null, to = Date.now()) {
@@ -388,15 +389,15 @@ export function useChatSession(selectedAgentId: string) {
     return () => { cancelled = true; controller.abort(); if (timer !== undefined) window.clearTimeout(timer); };
   }, [isNewSession, selectedAgentId, sessionId, sessionRepository]);
 
-  const selectSession = useCallback((targetSessionId: string) => {
+  const selectSession = useCallback((targetSessionId: string, targetAgentId = selectedAgentId) => {
     setRuntimeRun(null);
     setRuntimeChildActivities([]);
-    if (!selectedAgentId || !targetSessionId || targetSessionId === sessionId) return;
+    if (!targetAgentId || !targetSessionId || (targetAgentId === selectedAgentId && targetSessionId === sessionId)) return;
     // Remember explicit choices before React state changes so concurrent list
     // refreshes cannot restore the previous session.
-    sessionIdByAgentRef.current[selectedAgentId] = targetSessionId;
+    sessionIdByAgentRef.current[targetAgentId] = targetSessionId;
     setSessionId(targetSessionId);
-    setTurns(conversationCacheRef.current[conversationCacheKey(selectedAgentId, targetSessionId)] ?? []);
+    setTurns(conversationCacheRef.current[conversationCacheKey(targetAgentId, targetSessionId)] ?? []);
     setIsNewSession(false);
     setChatError('');
   }, [selectedAgentId, sessionId]);

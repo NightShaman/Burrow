@@ -623,3 +623,32 @@ it.each([
   expect(result.current.runtimeChildActivities[0]).toMatchObject({ status: 'warn', items: [{ label, status: 'error' }] });
   unmount();
 });
+
+it('recovers externally dispatched work on assigned agent and after navigation away/return', async () => {
+ const target = 'assigned'; const dispatched = 'task-session';
+ apiMock.mockImplementation(async path => {
+  if (path.startsWith('/api/sessions?')) return { sessions: [{ id: 'default' }] };
+  if (path.startsWith('/api/sessions/')) return { session: { turns: [{ role: 'user', content: 'External task', ts: '2026-01-01' }] } };
+  if (path.startsWith('/api/chat/runs/active?')) {
+   const query = new URLSearchParams(path.split('?')[1]);
+   return { runs: query.get('agentId') === target && query.get('sessionId') === dispatched ? [{ runId: 'external-run', agentId: target, sessionId: dispatched, status: 'running', answerText: 'Partial answer\nwith whitespace ', progress: [{ type: 'model.dispatched', data: { modelCall: 1 } }] }] : [] };
+  }
+  throw new Error(path);
+ });
+ const { result, rerender, unmount } = renderHook(({ selected }) => useChatSession(selected), { initialProps: { selected: agentId } });
+ await waitFor(() => expect(result.current.sessionId).toBe('default'));
+ act(() => result.current.selectSession(dispatched, target));
+ rerender({ selected: target });
+ await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('external-run'));
+ expect(result.current.sessionId).toBe(dispatched);
+ expect(result.current.runtimeRun?.stage).toBe('dispatched');
+ expect(result.current.runtimeRun?.answerText).toBe('Partial answer\nwith whitespace ');
+ await waitFor(() => expect(result.current.turns[0]?.content).toBe('External task'));
+ rerender({ selected: agentId });
+ await waitFor(() => expect(result.current.runtimeRun).toBeNull());
+ rerender({ selected: target });
+ await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('external-run'));
+ expect(result.current.sessionId).toBe(dispatched);
+ expect(result.current.runtimeRun?.answerText).toBe('Partial answer\nwith whitespace ');
+ unmount();
+});

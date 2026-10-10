@@ -223,6 +223,7 @@ export type ActiveSubagent = {
   result?: import('./minionOutcome').MinionResult & { warnings?: number } | null;
 };
 export type ActiveChatRun = {
+  answerText?: string;
   runId: string;
   agentId: string;
   sessionId: string;
