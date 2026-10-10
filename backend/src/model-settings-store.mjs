@@ -311,6 +311,37 @@ export function normalizeAuth(input = {}, fallbackProvider = '') {
   return apiKey ? { type: 'api_key', provider: fallbackProvider, source: 'legacy-api-key', apiKey } : null;
 }
 
+// Operator credential replacement, not a new OAuth login. Called under the
+// connection write lock; blank fields never erase retained credentials.
+export function mergeOpenAiOAuthTokens(prior, patch) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('model_oauth_tokens_invalid');
+  if (Object.keys(patch).some(key => !['id_token', 'access_token', 'refresh_token'].includes(key))) throw new Error('model_oauth_tokens_invalid');
+  if (Object.values(patch).some(value => typeof value !== 'string')) throw new Error('model_oauth_tokens_invalid');
+  if (prior?.type !== 'oauth' || prior.provider?.toLowerCase() !== 'openai') throw new Error('model_openai_oauth_connection_required');
+  const values = Object.fromEntries(Object.entries(patch).map(([key, value]) => [key, value.trim()]).filter(([, value]) => value));
+  const next = { ...prior };
+  if (values.id_token) next.idToken = values.id_token;
+  if (values.refresh_token) next.refreshToken = values.refresh_token;
+  if (values.access_token) {
+    let payload;
+    try {
+      const parts = values.access_token.split('.');
+      if (parts.length !== 3) throw new Error();
+      payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    } catch { throw new Error('model_oauth_access_token_expiry_required'); }
+    // JWT claims are metadata, not proof of authorization; the provider still
+    // validates the token when used. Never reuse the old token's expiry/identity.
+    if (typeof payload?.exp !== 'number' || !Number.isFinite(payload.exp) || payload.exp <= 0) throw new Error('model_oauth_access_token_expiry_required');
+    next.accessToken = values.access_token;
+    next.expiresAt = payload.exp * 1000;
+    delete next.accountId;
+    delete next.planType;
+    delete next.email;
+    Object.assign(next, openaiOAuthIdentity(next.accessToken));
+  }
+  return next;
+}
+
 function authToken(auth = {}) {
   if (auth.type === 'oauth') return auth.accessToken || '';
   if (auth.type === 'token' || auth.type === 'bearer_token') return auth.token || '';

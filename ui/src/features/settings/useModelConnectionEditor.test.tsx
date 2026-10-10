@@ -210,6 +210,106 @@ describe('useModelConnectionEditor', () => {
     expect(result.current.availableModels[0].acceptedInputOverride).toBeUndefined();
   });
 
+  const fillTokens = (editor: ReturnType<typeof useModelConnectionEditor>) => {
+    editor.setOauthIdToken(' id-secret ');
+    editor.setOauthAccessToken(' access-secret ');
+    editor.setOauthRefreshToken(' refresh-secret ');
+  };
+  const tokens = (editor: ReturnType<typeof useModelConnectionEditor>) =>
+    [editor.oauthIdToken, editor.oauthAccessToken, editor.oauthRefreshToken];
+
+  it('posts exact OAuth token keys on the existing connection without changing model metadata', async () => {
+    apiMock.mockResolvedValue({});
+    const { result } = renderEditor();
+    act(() => result.current.editProvider(savedProvider));
+    const models = result.current.availableModels;
+    act(() => fillTokens(result.current));
+    await act(() => result.current.saveProvider());
+    expect(apiMock).toHaveBeenCalledExactlyOnceWith('/api/settings/model-connections', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: savedProvider.id, provider: savedProvider.provider,
+        apiType: savedProvider.apiType, baseUrl: savedProvider.url,
+        oauthTokens: { id_token: 'id-secret', access_token: 'access-secret', refresh_token: 'refresh-secret' }, models }),
+    });
+    expect(tokens(result.current)).toEqual(['', '', '']);
+  });
+
+  it.each([false, true])('omits blank token fields and the whole empty object (partial=%s)', async (partial) => {
+    apiMock.mockResolvedValue({});
+    const { result } = renderEditor();
+    act(() => result.current.editProvider(savedProvider));
+    act(() => {
+      result.current.setOauthIdToken('   ');
+      result.current.setOauthAccessToken(partial ? ' access ' : '\t');
+      result.current.setOauthRefreshToken('');
+      result.current.setApiKey('   ');
+    });
+    await act(() => result.current.saveProvider());
+    const payload = JSON.parse(apiMock.mock.calls[0][1]!.body as string);
+    expect(payload.id).toBe(savedProvider.id);
+    expect(payload).not.toHaveProperty('apiKey');
+    if (partial) expect(payload.oauthTokens).toEqual({ access_token: 'access' });
+    else expect(payload).not.toHaveProperty('oauthTokens');
+  });
+
+  it('clears secrets after a successful POST while refresh is still pending and subsequently fails', async () => {
+    let rejectRefresh!: (error: Error) => void;
+    const refresh = vi.fn(() => new Promise<void>((_, reject) => { rejectRefresh = reject; }));
+    apiMock.mockResolvedValue({});
+    const { result } = renderEditor(refresh);
+    act(() => result.current.editProvider(savedProvider));
+    act(() => { fillTokens(result.current); result.current.setApiKey('key-secret'); });
+    let saving!: Promise<void>;
+    await act(async () => { saving = result.current.saveProvider(); await Promise.resolve(); });
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(result.current.requestState).toBe('saving');
+    expect(tokens(result.current)).toEqual(['', '', '']);
+    expect(result.current.apiKey).toBe('');
+    await act(async () => { rejectRefresh(new Error('refresh failed')); await saving; });
+    expect(result.current.requestError).toContain('refresh failed');
+    expect(tokens(result.current)).toEqual(['', '', '']);
+    expect(result.current.editingId).toBe(savedProvider.id);
+  });
+
+  it('retains token drafts after a failed POST and submits the same payload on retry', async () => {
+    apiMock.mockRejectedValueOnce(new Error('write failed')).mockResolvedValueOnce({});
+    const { result, onModelConnectionsChanged } = renderEditor();
+    act(() => result.current.editProvider(savedProvider));
+    act(() => fillTokens(result.current));
+    await act(() => result.current.saveProvider());
+    expect(tokens(result.current)).toEqual([' id-secret ', ' access-secret ', ' refresh-secret ']);
+    expect(result.current.requestError).toContain('write failed');
+    expect(onModelConnectionsChanged).not.toHaveBeenCalled();
+    await act(() => result.current.saveProvider());
+    expect(apiMock.mock.calls[1]).toEqual(apiMock.mock.calls[0]);
+    expect(tokens(result.current)).toEqual(['', '', '']);
+    expect(onModelConnectionsChanged).toHaveBeenCalledOnce();
+  });
+
+  it.each(['cancel', 'switch'])('clears token drafts on %s', (action) => {
+    const { result } = renderEditor();
+    act(() => result.current.editProvider(savedProvider));
+    act(() => fillTokens(result.current));
+    act(() => action === 'cancel' ? result.current.resetProvider()
+      : result.current.editProvider({ ...savedProvider, id: 'other' }));
+    expect(tokens(result.current)).toEqual(['', '', '']);
+    expect(result.current.editingId).toBe(action === 'cancel' ? null : 'other');
+  });
+
+  it.each([
+    [{ auth: { provider: 'OpenAI' } }, true],
+    [{ auth: { type: 'oauth' } }, true],
+    [{ auth: { source: 'openai-oauth' } }, true],
+    [{ authSource: 'openai-oauth' }, true],
+    [{ oauthConfigured: true }, true],
+    [{ auth: { type: 'api_key' }, apiKeyConfigured: true }, false],
+    [{}, false],
+  ] as const)('detects OAuth from saved metadata %j', (metadata, expected) => {
+    const { result } = renderEditor();
+    act(() => result.current.editProvider({ ...savedProvider, ...metadata }));
+    expect(result.current.oauthConnection).toBe(expected);
+  });
+
   it('confirms deletion and refreshes saved connections', async () => {
     apiMock.mockResolvedValue({});
     const { result, onModelConnectionsChanged } = renderEditor();

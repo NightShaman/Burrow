@@ -49,6 +49,11 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
           openAi={editor.openAiFlow}
           claude={editor.claudeFlow}
         />}
+        {editor.editingId && editor.oauthConnection && editor.apiType === 'openai-responses' && <div className="field-pair oauth-token-fields">
+          <Field label="OpenAI ID token"><input type="password" autoComplete="off" value={editor.oauthIdToken} onChange={(event) => editor.setOauthIdToken(event.target.value)} placeholder="Leave blank to keep current token" /></Field>
+          <Field label="OpenAI access token"><input type="password" autoComplete="off" value={editor.oauthAccessToken} onChange={(event) => editor.setOauthAccessToken(event.target.value)} placeholder="Leave blank to keep current token" /></Field>
+          <Field label="OpenAI refresh token"><input type="password" autoComplete="off" value={editor.oauthRefreshToken} onChange={(event) => editor.setOauthRefreshToken(event.target.value)} placeholder="Leave blank to keep current token" /></Field>
+        </div>}
         <div className="field-pair">
           <Field label="URL"><input value={editor.url} onChange={(event) => editor.setUrl(event.target.value)} placeholder={editor.apiType === 'anthropic-messages' ? 'https://api.anthropic.com' : 'https://api.example.com/v1'} /></Field>
           <Field label="API key"><input type="password" value={editor.apiKey} onChange={(event) => editor.setApiKey(event.target.value)} placeholder={editor.apiKeyConfigured ? '•••••••• (configured — enter a new key to replace it)' : 'Enter API key'} /></Field>

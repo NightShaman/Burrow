@@ -81,6 +81,7 @@ export function asCodexAccount(account: CodexLbAccount, index: number): Account 
 }
 
 export const isOpenAiOAuthConnection = (provider?: Pick<SavedProvider, 'auth' | 'authSource' | 'oauthConfigured'>) =>
+  provider?.auth?.provider?.toLowerCase() === 'openai' ||
   provider?.auth?.type === 'oauth' ||
   provider?.auth?.source === 'oauth' ||
   provider?.auth?.source === 'openai-oauth' ||

@@ -2,7 +2,7 @@ import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { randomUUID } from 'node:crypto';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 import {
-  assertConnection, canonicalizeOauthConnection, decrypt, encrypt, normalizeAuth,
+  assertConnection, canonicalizeOauthConnection, decrypt, encrypt, normalizeAuth, mergeOpenAiOAuthTokens,
   publicConnection, secretPreview, normalizeModels, normalizeReasoningEffort, normalizeTemperature, assertIdentity,
   refreshAnthropicOauth, discoverModels,
 } from './model-settings-store.mjs';
@@ -121,7 +121,11 @@ export class PostgresModelSettingsStore {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [id]);
       const existing = await client.query('SELECT id,provider FROM model_connections WHERE id=$1 FOR UPDATE', [id]);
       const priorAuth = existing.rows[0] ? await this.authWithClient(client, id, existing.rows[0].provider) : null;
-      const supplied = normalizeAuth(input, input.provider); const auth = supplied || priorAuth;
+      if (input.oauthTokens !== undefined && (input.auth !== undefined || input.apiKey)) throw new Error('model_oauth_tokens_conflicting_auth');
+      const supplied = input.oauthTokens !== undefined
+        ? mergeOpenAiOAuthTokens(priorAuth, input.oauthTokens)
+        : normalizeAuth(input, input.provider);
+      const auth = supplied || priorAuth;
       const connection = canonicalizeOauthConnection(assertConnection(input), auth);
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [connection.provider.toLowerCase()]);
       const duplicate = await client.query(`SELECT id FROM model_connections WHERE translate(provider,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')=translate($1,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') AND id<>$2 FOR UPDATE`, [connection.provider, id]);

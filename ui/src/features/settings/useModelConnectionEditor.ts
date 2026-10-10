@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, type RuntimeModel } from '../../app/api';
 import { useConfirm } from '../../app/ConfirmDialog';
 import type { SavedProvider } from '../../app/types';
+import { isOpenAiOAuthConnection } from '../../app/useRuntimeDashboard';
 import { modelConnectionsApi, type OpenAiOAuthConnection } from './modelConnectionsApi';
 import { useClaudeCodeLoginFlow } from './useClaudeCodeLoginFlow';
 import { useOpenAiOAuthConnectionFlow } from './useOpenAiOAuthConnectionFlow';
@@ -25,6 +26,10 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
   const [url, setUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
+  const [oauthConnection, setOauthConnection] = useState(false);
+  const [oauthIdToken, setOauthIdToken] = useState('');
+  const [oauthAccessToken, setOauthAccessToken] = useState('');
+  const [oauthRefreshToken, setOauthRefreshToken] = useState('');
   const [availableModels, setAvailableModels] = useState<RuntimeModel[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [manualModel, setManualModel] = useState('');
@@ -42,6 +47,10 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     setUrl('');
     setApiKey('');
     setApiKeyConfigured(false);
+    setOauthConnection(false);
+    setOauthIdToken('');
+    setOauthAccessToken('');
+    setOauthRefreshToken('');
     setAvailableModels([]);
     setSelectedModelId(null);
     setManualModel('');
@@ -102,10 +111,20 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
           provider: provider.trim(),
           apiType,
           baseUrl: url.trim(),
-          ...(apiKey ? { apiKey } : {}),
+          ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+          ...((oauthIdToken.trim() || oauthAccessToken.trim() || oauthRefreshToken.trim()) ? { oauthTokens: {
+            ...(oauthIdToken.trim() ? { id_token: oauthIdToken.trim() } : {}),
+            ...(oauthAccessToken.trim() ? { access_token: oauthAccessToken.trim() } : {}),
+            ...(oauthRefreshToken.trim() ? { refresh_token: oauthRefreshToken.trim() } : {}),
+          } } : {}),
           models,
         }),
       });
+      // Clear secrets immediately after the successful write; refresh may be slow or fail.
+      setApiKey('');
+      setOauthIdToken('');
+      setOauthAccessToken('');
+      setOauthRefreshToken('');
       await onModelConnectionsChanged();
       setSavedProvidersOpen(true);
       resetProvider();
@@ -124,6 +143,7 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     setUrl(connection.baseUrl ?? 'https://chatgpt.com/backend-api');
     setApiKey('');
     setApiKeyConfigured(Boolean(connection.apiKeyConfigured || connection.authConfigured));
+    setOauthConnection(Boolean(connection.authConfigured));
     const models = selectedRuntimeModels(connection.models).map((model) => ({ ...model, selected: true }));
     setAvailableModels(models);
     setSelectedModelId(models[0]?.id ?? null);
@@ -217,7 +237,11 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     setApiType(item.apiType);
     setUrl(item.url);
     setApiKey('');
+    setOauthIdToken('');
+    setOauthAccessToken('');
+    setOauthRefreshToken('');
     setApiKeyConfigured(item.apiKeyConfigured === true);
+    setOauthConnection(isOpenAiOAuthConnection(item));
     const models = item.connectionModels ?? item.models.map((id) => {
       const discoveredInput = item.modelDiscoveredInputs?.[id];
       const acceptedInputOverride = item.modelInputOverrides?.[id];
@@ -285,6 +309,13 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     apiKey,
     setApiKey,
     apiKeyConfigured,
+    oauthConnection,
+    oauthIdToken,
+    setOauthIdToken,
+    oauthAccessToken,
+    setOauthAccessToken,
+    oauthRefreshToken,
+    setOauthRefreshToken,
     availableModels,
     manualModel,
     setManualModel,
