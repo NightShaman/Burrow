@@ -9,14 +9,15 @@ BURROW stores operator-managed configuration in PostgreSQL. The service environm
 | Setting | Authoritative surface | Operator entry point |
 |---|---|---|
 | Agents, identities, six profile documents | PostgreSQL registry, identity and profile stores | Settings → Agents; General operator profile |
-| Model connections, credentials, enabled models, agent selection | PostgreSQL model settings | Settings → Connections → Model providers; agent model selector |
+| Model connections, credentials, enabled models, agent selection | PostgreSQL model settings | Settings → Connections → Model providers; Chat toolbar model selector |
 | MCP connections, discovered catalog and per-agent tool grants | PostgreSQL MCP settings | Settings → Connections → MCP servers; agent MCP tools |
 | UI authentication | PostgreSQL settings and secret store, with explicit environment overrides | Settings → Connections → Authentication |
 | Execution hard boundaries | PostgreSQL metadata | Settings → General |
 | Operator timezone | PostgreSQL metadata | Settings → General |
 | Skills and per-agent assignments | PostgreSQL skill store | Settings → Skills; per-agent assignments under Agents |
 | Dream schedule and model selection | PostgreSQL agent Dream settings | Agent Dreams settings |
-| Retention | Separate trace policy and Albdruck memory/conversation policies | General and Albdruck |
+| Retention | Saved trace policy; separate CLI session-retention policy | Settings → General → Trace retention; deliberate CLI maintenance |
+| Brains | Agent-owned saved memories; optional embedding settings | Brains; Settings → General → Brain memory |
 | Database, listener, process paths, encryption key | Service environment and installer/container configuration | Service environment file or deployment configuration |
 | Theme, rail layout, drafts, cached conversations | Browser-local storage/state | UI appearance and navigation |
 

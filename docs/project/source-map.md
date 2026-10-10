@@ -6,41 +6,31 @@ This manual is grounded in the assembled BURROW repository and the exact Backend
 
 | Component | Revision |
 |---|---|
-| Assembled release | `2026.10.02.7` |
-| Public BURROW commit | `2d979fecca8434fe02a6ed2e8225c46eb4690098` |
-| Backend source pin | `5dcfa0b495441f9f12c733521b8aa431b14f50f8` |
-| UI source pin | `b0aff4c0191ece14730bc3d7fd92018e6e126368` |
+| Published assembled release | `2026.10.10.4` |
+| Public BURROW commit | `c15064dd177788afcdda357a5e545510f754a754` |
+| Backend source pin | `2bf4844c0834e67e0993049131a8c86d5baad024` |
+| UI source pin | `86dee9ec34bdec9f415e1d7a924cb3cc990bab60` |
+| Node Goblin source pin (provenance only) | `53ad311dfa5a41839d219c94a574f07b0a8b036f` |
 
-These pins come from [`SOURCE_VERSIONS`](https://github.com/NightShaman/Burrow/blob/2d979fecca8434fe02a6ed2e8225c46eb4690098/SOURCE_VERSIONS). The public repository is a generated deployment assembly, not a Git submodule collection. Read [repository structure](../development/repository.md) and [release flow](../development/releases.md) before changing generated files.
+These pins come from [`SOURCE_VERSIONS`](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/SOURCE_VERSIONS). The [release](https://github.com/NightShaman/Burrow/releases/tag/v2026.10.10.4) was published on 10 October 2026 at 03:39 UTC. This is a fixed documentation baseline, not a promise that a local installation or moving `main` is the same version.
 
-## Inspection scope
+## Inspection scope and limits
 
-Before writing this manual, all **475 tracked paths** in the initial .6 snapshot were inspected or classified:
+The October 10 refresh checks operator-facing changes against the assembled source: setup, model connections and selection, provider cache behavior, Chat activity and steering, Brains and optional embeddings, explicit conversation recall, task execution, maintenance and the older known-limitations list. Storage coverage includes the migration manifest through version 49. Steps name current UI controls and separate an accepted action from its observed result.
 
-| Area | Paths | Inspection |
-|---|---:|---|
-| Runtime, model adapters, tools, context, workers | 122 | Full source reads |
-| Persistence, memory, retention, conversations | 68 | Full source reads |
-| UI, interfaces, security, MCP/mod boundaries | 236 | Source/config/test/style reads; binary and generated asset inventory |
-| Installation, distribution, CLI, server routes, scripts | 49 | Source/config/document reads; lockfile and binary classification; excluded-mod bootstrap inventory |
+The initial manual was based on the October 2 `.6`/`.7` audit. Historical immutable source links remain where that background has not been independently re-audited in full; they are evidence for their cited revision, not proof that every line is unchanged. The refresh is not an exhaustive audit of all intervening runtime changes. The downloadable OpenAPI artifact is explicitly historical; use the current source-backed endpoint pages for newly added or retired routes.
 
-Images, minified bundles, and dependency lockfiles were identified as generated or binary artifacts rather than misrepresented as hand-authored source. The excluded Node Goblin mod was not documented. The in-repository core execution-target and extension interfaces remain covered where needed to explain BURROW itself.
+No production installation, paid model call, database migration, destructive cleanup, OAuth login, or restore was executed for this documentation refresh. Static source review and documentation checks do not certify runtime behavior or deployment security. Node Goblin deployment/integration instructions remain outside this manual's scope.
 
-Supporting Backend/UI snapshots were materialized at the recorded pins and checked against Git blob identities. All upstream files absent from, or differing from, the assembly were inventoried and classified; relevant documentation, schemas, scripts, and tests were inspected to corroborate public implementation. This does not claim exhaustive execution or line-by-line review of every upstream test assertion.
+## Documentation ownership
 
-### Release delta and freeze
-
-A final repository comparison found .7 while the documentation was being written. Its 25 changed paths, including five new persistence modules, received a further source review; the current public snapshot contains **480 tracked paths**. The documentation incorporates the native PostgreSQL state stores and migration ledger through version 26 from that update.
-
-This pass intentionally freezes at .7 while upstream development continues. Source links retain the original .6 commit for unchanged implementation and use .7 for changed/new behavior. They are immutable evidence, not links that silently follow `main`. Later releases require a new source-difference review before their behavior is claimed here.
-
-The initially materialized supporting Backend/UI trees correspond to .6's exact pins. The .7 delta was reviewed from the public assembled implementation; the UI source pin is unchanged. Upstream-only test/schema artifacts remain labeled with their actual source revision rather than being represented as newly regenerated.
+The public assembly preserves root `docs/`, `mkdocs.yml`, documentation dependencies, `scripts/docs/`, and the documentation workflow. These are the correct source for this site. Assembly replaces `backend/`, `ui/`, and the root README; change the upstream Backend deployment README for any permanent root README edit. See [documentation development](../development/documentation.md) and [assembly workflow](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/.github/workflows/assemble.yml).
 
 ## Evidence precedence
 
 When artifacts disagree, this manual follows the executable code and configuration at the pinned revision, with schemas, scripts, tests, comments, and existing docs used as supporting evidence. Disagreement is recorded instead of resolved by inventing behavior.
 
-Examples include inactive JSON configuration loading, incomplete Dream CLI dispatch, missing packaged API schema, historical runbooks, and generated API types that lag server behavior. See [known limitations](known-limitations.md).
+Examples include inactive JSON configuration loading, retired Dream CLI commands, missing packaged API schema, historical runbooks, and generated API types that lag server behavior. See [known limitations](known-limitations.md).
 
 ## Coverage map
 

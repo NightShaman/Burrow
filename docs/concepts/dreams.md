@@ -1,12 +1,14 @@
 # Dream cycles
 
-Dream periodically revisits original conversation evidence to extract, reconcile and retain useful context. It can update compact DreamMemory, propose preferences, reinforce Albdruck knowledge and write an operator-facing diary. Those outputs have different authority and retention rules.
+Dream periodically revisits original conversation evidence to extract, reconcile and retain useful context. It can update compact DreamMemory, propose preferences and write an operator-facing diary. Those outputs have different authority and retention rules.
 
 ## Schedule and model
 
 Dream is enabled by default for an agent's settings, with cron `0 4 * * *`. A null timezone inherits the operator timezone, with UTC as the fallback. An explicit model override requires both a connection and a valid selected model; otherwise the runtime resolves its configured model. A schedule alone does not guarantee a successful provider call. See [Models](models.md) and [Configuration](../reference/configuration.md). [Dream settings](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-dream-settings-store.mjs#L21-L65)
 
 The scheduler checks every 30 seconds, starts with an immediate tick and processes agents serially. PostgreSQL locks and the unique `(agent_id, scheduled_for)` occurrence identity prevent duplicate claims for an occurrence. Completion rereads current settings before calculating the next run. [Cycle scheduling and receipts](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-dream-cycle-receipt-store.mjs#L49-L84), [scheduler](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/dream-cycle-runner.mjs#L789-L816)
+
+The **Quiet-day dreams** setting controls whether diary prose is generated when no new material needs processing. With it off, a quiet run can complete without a new diary entry; existing DreamMemory and preferences are preserved. This is not evidence that scheduling failed. [Current cycle](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/dream-cycle-runner.mjs).
 
 ## Three evidence windows
 
@@ -36,7 +38,6 @@ flowchart TB
     Check --> Cached[Reuse valid pre-reconciliation candidates]
     Days --> Reconcile[Chronological reconciliation for each phase]
     Cached --> Reconcile
-    Reconcile --> Knowledge[Optional Albdruck relationships]
     Reconcile --> Preferences[User-grounded preference signals]
     Reconcile --> Diary[Operator-only diary]
     Reconcile --> REM[REM candidates]
@@ -67,9 +68,9 @@ Preloads, Dream ledgers and scope-review candidates now have native entry tables
 
 User-grounded preference candidates become learning signals. The preference adjudicator compares them with the existing `PREFERENCES` document, validates the proposed update and commits document/state/audit changes together. A diary passage or an assistant's unsupported inference is not preference authority. See [Memory and continuity](memory.md#profiles-and-preferences). [Signal processing](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/dream-cycle-runner.mjs#L640-L657), [atomic profile update](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-agent-profile-store.mjs#L76-L110)
 
-### Albdruck relationships
+### Brains is separate
 
-For decisions and findings, Dream may compare candidates with active knowledge and select `new`, `reinforce`, `supersede`, `contradiction` or `review`. The comparison pages through active scoped knowledge rather than treating an arbitrary first page as complete. Writes re-resolve originals and check target fingerprints; supersession requires user evidence. Ambiguous relations remain reviewable. Optional Albdruck failures are recorded without failing an otherwise successful phase. [Knowledge reconciliation](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/dream-cycle-runner.mjs#L539-L603), [phase integration](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/dream-cycle-runner.mjs#L721-L738)
+Dream does not automatically populate Brains or keep the retired Albdruck write path active. Brains is deliberate saved memory owned by an agent. Ask for a memory to be saved or use the Brains editor when you want a durable explicit record; inspect it afterward. The retained legacy reconciliation helper is not called by the current cycle. [Current cycle](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/dream-cycle-runner.mjs).
 
 ### Diary
 
@@ -86,7 +87,7 @@ When diagnosing a missing update:
 1. Check enabled state, cron and effective timezone
 2. Check the selected connection/model and provider availability
 3. Inspect the cycle's source coverage and phase errors
-4. Distinguish diary success, optional Albdruck errors and REM extraction/reconciliation failure
+4. Distinguish diary success and REM extraction/reconciliation failure
 5. Remember that a failed REM extraction or reconciliation deliberately preserves the old DreamMemory
 
 See [Observability](../operations/observability.md), [Troubleshooting](../operations/troubleshooting.md) and the [API reference](../reference/api.md). Independent retention cleanup is scheduled separately and can continue even when Dream is disabled. [Retention scheduler](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/retention-scheduler.mjs#L3-L49)

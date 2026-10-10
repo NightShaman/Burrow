@@ -56,8 +56,8 @@ npm run postman:check
 
 These check schema structure, literal-route coverage, generated TypeScript, and generated Postman content. They do not replace method/body/authorization review against handlers.
 
-!!! note "Aggregate script gaps"
-    In this snapshot `openapi:check` references missing `tests/live-api-contract.test.mjs`; `runtime:restore:rehearsal` references a missing script. Use the valid individual checks relevant to the change and report the missing stage explicitly. Do not claim an aggregate passed because a subset passed.
+!!! note "Check scripts against the source checkout"
+    `openapi:check` includes `tests/live-api-contract.test.mjs`; the public assembly does not ship the backend test tree, so confirm that stage exists in your authorized Backend checkout before running the aggregate. `runtime:restore:rehearsal` is no longer defined in the published backend package. Use the supported lifecycle rehearsal below for its documented coverage. Report missing/skipped stages explicitly; a subset passing is not an aggregate pass.
 
 ## Database migration development
 
@@ -78,8 +78,8 @@ Source pushes can trigger assembly through the upstream dispatch workflow. A sou
 
 ## Source evidence
 
-- [Backend scripts](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/package.json)
-- [Test isolation runner](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/test-runtime.mjs)
-- [PostgreSQL lifecycle rehearsal](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/postgres-lifecycle-rehearsal.mjs)
-- [UI package scripts](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/ui/package.json)
-- [Assembly verification](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/.github/workflows/assemble.yml)
+- [Backend scripts](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/package.json)
+- [Test isolation runner](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/test-runtime.mjs)
+- [PostgreSQL lifecycle rehearsal](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/postgres-lifecycle-rehearsal.mjs)
+- [UI package scripts](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/package.json)
+- [Assembly verification](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/.github/workflows/assemble.yml)

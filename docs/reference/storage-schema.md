@@ -1,6 +1,6 @@
 # Storage schema
 
-This reference describes the current PostgreSQL schema at application migration **26**, plus runtime-owned filesystem data. It is an ownership and relationship guide, not a supported direct-write API. Use the application stores or [API](api.md) for mutation so validation, evidence checks, encryption and lifecycle rules remain intact.
+This reference describes the current PostgreSQL schema at application migration **49**, plus runtime-owned filesystem data. It is an ownership and relationship guide, not a supported direct-write API. Use the application stores or [API](api.md) for mutation so validation, evidence checks, encryption and lifecycle rules remain intact.
 
 See [Persistence architecture](../architecture/persistence.md) for the data flow and [Backup and recovery](../operations/backup-recovery.md) for recovery scope.
 
@@ -36,6 +36,29 @@ See [Persistence architecture](../architecture/persistence.md) for the data flow
 | 24 | `mcp-provider-lifecycle-state` |
 | 25 | `native-dream-state-entries` |
 | 26 | `native-tiddle-entries-and-scheduling` |
+| 27 | `lossless-continuity-payloads` |
+| 28 | `forge-mcp-native-persistence-boundaries` |
+| 29 | `stable-dream-scope-review-identity` |
+| 30 | `native-dream-tiddle-identity` |
+| 31 | `typed-mod-lifecycle-boundary` |
+| 32 | `native-model-mcp-catalogs` |
+| 33 | `lossless-settings-json` |
+| 34 | `native-timestamps-and-agent-identities` |
+| 35 | `restore-required-instant-contracts` |
+| 36 | `safe-session-reset-instant` |
+| 37 | `history-keyset-order-and-precedence` |
+| 38 | `logical-json-member-identity` |
+| 39 | `archive-relational-fallback-identity` |
+| 40 | `catalog-lossless-scalar-identity` |
+| 41 | `logical-original-lookup-indexes` |
+| 42 | `indexed-dream-occurrence-windows` |
+| 43 | `durable-agent-message-deliveries` |
+| 44 | `dream-quiet-day-setting` |
+| 45 | `agent-owned-deliberate-brains` |
+| 46 | `legacy-albdruck-brain-snapshot` |
+| 47 | `optional-brain-embeddings` |
+| 48 | `indexed-operator-message-instants` |
+| 49 | `live-run-steering` |
 
 Early schema constants intentionally remain immutable. Read them together with later migrations: for example, the original `conversation_archives.entries` column is removed by version 19, and timezone columns introduced as non-null become nullable in versions 11 and 12.
 
@@ -120,7 +143,18 @@ Migration 25 splits legacy Dream collections from `working_memory_meta` into env
 
 Diary phase permits `light`, `deep`, `rem` and `manual`. Incremental batches are successful derived checkpoints, including empty candidate results; they are not another store of original transcripts. The compact DreamMemory result lives in `agent_profile_documents`, not a dedicated DreamMemory table. See [Dream cycles](../concepts/dreams.md).
 
-## Albdruck knowledge
+## Brains and optional embeddings
+
+`brain_memories` is keyed by `(agent_id, id)` and stores title, content, source references, revision, operator ownership, timestamps and a soft-delete marker. Operator-owned entries cannot be changed by agent tools; edits require the expected revision. Migration 46 preserves legacy snapshots in `brain_legacy_albdruck` and adds origin/status/snapshot fields to migrated memories. Legacy global entries are assigned to `hatchet`, not copied to every agent.
+
+Optional embedding configuration, vectors and pending jobs live in `brain_embedding_settings`, `brain_embedding_vectors` and `brain_embedding_jobs`. Embeddings start disabled. Revision/generation checks keep stale vectors from becoming current; disabling semantic search does not delete the saved memory itself.
+
+[Memory schema](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-brain-store.mjs) · [Embedding schema](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-brain-embeddings.mjs) · [Current manifest](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-application-schema.mjs).
+
+## Legacy Albdruck knowledge
+
+These tables remain in the database for compatibility and migration. They do not establish a current Albdruck UI or mounted HTTP route. Use [Brains and recall](../concepts/memory.md) for current operator behavior.
+
 
 | Table | Key / relationship | Stored data |
 |---|---|---|

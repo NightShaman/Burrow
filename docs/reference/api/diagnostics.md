@@ -4,11 +4,12 @@ Health, operational projections and conversation/trace evidence expose different
 
 ## Health and metrics
 
-`GET /health` is before the authentication gate and returns runtime status including source/workspace metadata, selected model details and policy/trace status. Restrict it at the proxy when exposing the service. `/api/health` and `/api/status` return the corresponding gated status. A status payload can have `ok: false` despite HTTP 200.
+`GET /health` and `GET /api/health` both precede authentication and return minimal build identity: `ok: true`, `runtime: "burrow"`, `version`, `buildIdentity`, and optional release provenance. A configured smoke token is echoed only on a matching `x-burrow-smoke-token` request. These are liveness/build checks, not full database/model readiness or detailed runtime configuration. Host checks and applicable browser-origin checks run before these routes.
 
+`GET /api/status` remains gated and returns detailed runtime status, including roots and model/policy/trace metadata. Its payload can have `ok: false` despite HTTP 200.
 `/api/metrics` returns bounded operational metrics. `/api/diagnostics/inventory` exposes only configured MCP and installed/enabled mod counts. `/api/diagnostics/postgres` reports PostgreSQL availability and pgvector installation without exposing its password. See [observability](../../operations/observability.md).
 
-[Public/gated order](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L3151-L3170) · [Runtime status](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L2264-L2290) · [Inventory](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L3190-L3203)
+[Public/gated order](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs#L3219-L3248) · [Runtime status](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs#L2316-L2342) · [Inventory](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs#L3268-L3281)
 
 ## Traces and authority
 
@@ -16,7 +17,7 @@ List traces for `agentId` and `sessionId` (default `default`). Detail uses `runI
 
 Traces and context/session endpoints can contain private user or tool content. Review before sharing and do not confuse output truncation with secret redaction.
 
-[Trace routes](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/observability-routes.mjs#L13-L15)
+[Trace routes](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/ui/observability-routes.mjs#L20-L22)
 
 ## Narrow diagnostic projections
 
@@ -24,7 +25,7 @@ Forge diagnostics list uses `limit` (default 50) and opaque `cursor`; UUID job d
 
 Mod diagnostics list reports opt-in status. Job list/detail uses the extension's bounded sanitized diagnostic capability; `/pending` shows active host capability operations. Unsupported and unavailable diagnostics are distinct from an empty successful list. These routes do not run arbitrary mod GET handlers.
 
-[Diagnostic routing](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L3166-L3190) · [Mod sanitizer](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/mod-diagnostics.mjs#L1-L53)
+[Diagnostic routing](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs#L3244-L3268) · [Mod sanitizer](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/mod-diagnostics.mjs#L1-L53)
 
 ## Scoped Bearer clients
 
@@ -36,7 +37,7 @@ Do not describe the whole token scope as content-free merely because inventory a
 
 Codex-LB accounts and Anthropic/OpenAI OAuth usage are integration-specific interactive-auth endpoints. OAuth usage accepts `connectionId` and `force=true`; its ordinary cache interval is 60 seconds. These helpers depend on provider compatibility and available credentials and are not granted by a diagnostics Bearer token. Failure is not proof that ordinary chat is broken.
 
-[Usage routes](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/observability-routes.mjs#L1-L9) · [Usage caches](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L146-L152)
+[Usage routes](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/ui/observability-routes.mjs#L3-L11) · [Usage caches](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs#L158-L164)
 
 ## Auth flow endpoints
 
@@ -44,13 +45,15 @@ The contract includes `GET /api/auth/session`. Source also implements:
 
 | Method | Path | Behavior |
 |---|---|---|
+| `GET` | `/api/auth/discovery` | Public auth mode and enabled flag |
+| `GET` | `/api/auth/validate` | Gated validation; HTTP 401 when auth is disabled |
 | `GET` | `/auth/oidc/login` | Begin configured OIDC authorization |
 | `GET` | `/auth/oidc/callback` | Validate callback and set session cookie |
-| `POST` | `/auth/logout` | Clear OIDC cookies |
+| `POST` | `/auth/logout` | Clear OIDC and Basic cookies |
 
-These handlers precede the main gate. Session inspection is OIDC-specific and logout is not a general demonstrated Basic-session logout endpoint. Follow [authentication](../../security/authentication.md) for state/nonce/cookie behavior.
+Discovery, session inspection, OIDC login/callback and logout precede the main gate; validation follows it. Session inspection remains OIDC-specific. Logout clears the Basic cookie too, but a client still sending Basic credentials can authenticate again. Follow [authentication](../../security/authentication.md) for state/nonce/cookie behavior.
 
-[Auth routes](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/auth-routes.mjs#L1-L28)
+[Auth routes](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/ui/auth-routes.mjs#L1-L34)
 
 
 ## Endpoint inventory
@@ -59,8 +62,8 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/health` | Public runtime health |
-| `GET` | `/api/health` | Authenticated runtime health |
+| `GET` | `/health` | Public minimal build identity |
+| `GET` | `/api/health` | Public minimal build identity |
 | `GET` | `/api/status` | Runtime status |
 | `GET` | `/api/metrics` | Bounded operational metrics |
 | `GET` | `/api/diagnostics/inventory` | Safe diagnostics inventory counts |

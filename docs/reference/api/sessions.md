@@ -16,9 +16,9 @@ For `/api/sessions/{sessionId}` and its actions, pass `agentId` in the query. Re
 | `unarchive` | Clears the archive flag |
 | `fork` | Optional `targetSessionId`, otherwise `<source>-fork`; separate copy/provenance, not a live branch |
 
-Reset and archive retain original evidence. For irreversible removal use the dedicated, guarded [Albdruck purge](memory.md#original-history-and-purge) operation. Do not conflate hiding a session with deleting retained content.
+Reset and archive retain original evidence. The former Albdruck purge endpoint is retired. The current retention preview/run controls manage traces, not individual conversation purge; see [retention and deletion](../../concepts/conversation-history.md#retention-and-deletion). Do not conflate hiding a session with deleting retained content.
 
-[Session routes](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/session-routes.mjs#L152-L201) · [Store lifecycle](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-session-store.mjs#L833-L930)
+[Session routes](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/ui/session-routes.mjs) · [Store lifecycle](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-session-store.mjs)
 
 ## Context, search and continuity
 
@@ -26,9 +26,19 @@ Reset and archive retain original evidence. For irreversible removal use the ded
 
 Session search accepts `q`, `role`, `limit` (default 50), `sourceId`, `since`, `until`, `agentId`, `sessionId`, `scope` and `archived`. Scope defaults to `session` when an agent/session/source selector is present, otherwise `burrow`. Explicit `scope=session` targets one selected session; broader search gathers enabled-agent evidence and includes archives unless `archived=false`.
 
+### Agent recall is a separate tool contract
+
+The explicit `session_search` agent tool searches only its current agent's historical sessions, including reset snapshots. It is not equivalent to passing `scope=agent_sessions` to the operator HTTP route: any non-`session` HTTP scope takes the broader enabled-agent search branch. Use explicit `scope=session`, `agentId` and `sessionId` when an operator query must stay within one session.
+
+Tool results include source references, dates and neighboring dialogue. The tool supports `since`, `until`, `sourceId`, `sourceSessionId`, `neighborCount` and `limit`. To expand an original, pass the returned `sourceRef.entryId` as `sourceId` with its session ID as `sourceSessionId`; the result then includes `original`. Default tool result limit is 12; neighbor radius defaults to one and is capped at three. Original source content remains distinct from a handoff or compression recap.
+
+No historical search is automatically run before a turn: the compatibility recall helper reports `automatic_recall_disabled`, and the support builder supplies no automatic session recall. Ask the agent to retrieve previous discussion explicitly, or use Archive/session search yourself.
+
+[Tool schema and expansion](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/action-proposal.mjs) · [Agent evidence search](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/session-search.mjs) · [Recall boundary](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/session-recall.mjs) · [Support builder](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/runtime-support-context.mjs)
+
 Continuity scope is an operator-selected namespace. GET/DELETE use query fields; PUT accepts agent/session plus `continuityScope` (or `scope`). It is not a path, cwd or execution-target selector. Handoff and handoff-candidate endpoints persist continuity evidence; they do not grant authority to change agent identity.
 
-[Context/search](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/session-routes.mjs#L44-L95) · [Continuity helpers](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L2381-L2420)
+[Context/search](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/ui/session-routes.mjs) · [Continuity helpers](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs)
 
 ## Archive pagination
 
@@ -45,7 +55,7 @@ Use server-returned cursors and completeness/continuation information. A visible
 
 Authority endpoints return execution explanations, not a new permission grant. Archive proof success, child completion, verification and final delivery are separate pieces of evidence.
 
-[Archive routing](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/session-routes.mjs#L96-L151) · [Archive UI](../../concepts/interface.md)
+[Archive routing](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/ui/session-routes.mjs) · [Archive UI](../../concepts/interface.md)
 
 
 ## Endpoint inventory

@@ -100,7 +100,7 @@ Managed startup removes connection URLs/passwords and supplies its Unix socket, 
 | `BURROW_ALBDRUCK_PROMPT_MAX_CHARS` | `4000` |
 | `BURROW_ALBDRUCK_MAX_PAGE_SIZE` | `200` |
 
-Compression controls normalize invalid values to supported defaults; Albdruck limits require positive safe integers. These are prompt/work bounds, not retention settings.
+Compression controls normalize invalid values to supported defaults. The retained `BURROW_ALBDRUCK_*` configuration names are compatibility values, not switches that restore the retired Albdruck UI/API. Positive safe integers are required. Explicit history lookup also accepts `BURROW_HISTORY_QUERY_BUDGET_MS` (15000) and `BURROW_HISTORY_LOCK_TIMEOUT_MS` (1000). These are work bounds, not retention settings. [Current mapping](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/config.mjs).
 
 [Compression mapping](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/config.mjs#L248-L274) · [Defaults](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/context-compression.mjs#L57-L79)
 

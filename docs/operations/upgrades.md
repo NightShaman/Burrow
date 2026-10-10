@@ -10,7 +10,9 @@ Upgrade the deployment through its own distribution path: the native launcher fo
 4. Allow space for new and previous application payloads and dependency staging
 5. Plan a maintenance window for active agent work, provider calls, and schema migration
 
-The reviewed 2026.10.02.7 build includes migrations through version 26, including native continuity, Forge, MCP lifecycle, Dream, and Tiddle state. Existing history can require data backfill; allow migration time and keep a restorable pre-upgrade copy. See [storage schema](../reference/storage-schema.md) for the exact ledger.
+The reviewed 2026.10.10.4 build includes PostgreSQL migrations through version 49, including deliberate Brains and live-run steering. Existing history can require data backfill; allow migration time and keep a restorable pre-upgrade copy. See [storage schema](../reference/storage-schema.md) for the exact ledger.
+
+If startup appears to wait on PostgreSQL, use [long-migration checks](troubleshooting.md#upgrade-waits-on-a-database-migration) to distinguish elapsed time, CPU activity and lock waits before taking action.
 
 Application version and database schema are distinct. A previous app may reject a newer migration ledger; an image/app rollback is not a database rollback.
 
@@ -43,8 +45,8 @@ cat "$HOME/.burrow/app/SOURCE_VERSIONS"
 
 Check the returned version against the installed build, then verify a normal conversation and one required integration. Do not infer completion from a Git push, downloaded files, or an active systemd unit alone.
 
-!!! note "Authenticated health verification"
-    This snapshot's installer checks `/api/health` without authentication after restarting. On an authenticated installation, that check can fail even when the new service is running. Inspect status/logs and an authorized health response before retrying. See [troubleshooting](troubleshooting.md#update-reports-health-failure).
+!!! note "Public readiness verification"
+    The installer checks `/api/health` after restarting. Both health paths now run before authentication and report readiness/build identity. If verification fails, inspect the service invocation, listener, logs, and expected version; authentication alone is no longer the source-backed explanation. Health does not validate a complete model or integration workflow.
 
 If no managed user service exists, the installer does not manage your external supervisor. Restart and validate it through the supervisor you own.
 
@@ -60,7 +62,7 @@ Pin the intended image tag, then follow [container upgrade](containers.md#upgrad
 
 ## Source evidence
 
-- [Download and incoming-installer handoff](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/install.sh#L211-L289)
-- [Staging, activation, restart, cleanup](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/install.sh#L383-L613)
-- [Migration validation](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-migrations.mjs)
-- [Release assembly](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/.github/workflows/assemble.yml)
+- [Download and incoming-installer handoff](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/install.sh)
+- [Staging, activation, restart, cleanup](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/install.sh)
+- [Migration validation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-migrations.mjs)
+- [Release assembly](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/.github/workflows/assemble.yml)
