@@ -11,7 +11,7 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 const discover = (connectionId: string) => ({ connectionId, provider: 'ollama', models: [] as { id: string; name: string }[], capabilityDisclosure: 'No advertised capabilities' });
 beforeEach(() => { mocked.mockReset(); mocked.mockImplementation(async path => path.includes('/models') ? discover(new URL(path, 'http://test').searchParams.get('connectionId')!) : status); });
 afterEach(cleanup);
-async function mount() { render(<BrainEmbeddingSettings savedProviders={providers} />); await waitFor(() => expect((screen.getByLabelText('Existing model connection') as HTMLSelectElement).disabled).toBe(false)); }
+async function mount() { render(<BrainEmbeddingSettings savedProviders={providers} />); await waitFor(() => expect((screen.getByLabelText('Provider') as HTMLSelectElement).disabled).toBe(false)); }
 describe('Brain embedding settings', () => {
   it('keeps disabled defaults and exact string counts; disabling never needs consent', async () => {
     await mount(); expect((screen.getByLabelText('Enable Brains embeddings globally') as HTMLInputElement).checked).toBe(false);
@@ -20,7 +20,7 @@ describe('Brain embedding settings', () => {
     await waitFor(() => expect(mocked).toHaveBeenCalledWith('/api/settings/brain-embeddings', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ enabled: false, connectionId: null, model: null }) })));
   });
   it('uses embedding discovery, manual fallback without acknowledgment gates', async () => {
-    await mount(); fireEvent.change(screen.getByLabelText('Existing model connection'), { target: { value: 'a' } });
+    await mount(); fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'a' } });
     await screen.findByText(/No advertised capabilities/);
     expect(screen.queryByText('chat-only')).toBeNull();
     fireEvent.change(screen.getByLabelText('Embedding model ID (manual fallback)'), { target: { value: 'embed-manual' } });
@@ -38,8 +38,8 @@ describe('Brain embedding settings', () => {
   it('discards deferred discovery for a previous connection', async () => {
     const old = deferred<ReturnType<typeof discover>>();
     mocked.mockImplementation(async path => path.includes('connectionId=a') ? old.promise : path.includes('/models') ? discover('b') : status);
-    await mount(); fireEvent.change(screen.getByLabelText('Existing model connection'), { target: { value: 'a' } });
-    fireEvent.change(screen.getByLabelText('Existing model connection'), { target: { value: 'b' } });
+    await mount(); fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'a' } });
+    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'b' } });
     await screen.findByText(/No advertised capabilities/);
     await act(async () => old.resolve({ ...discover('a'), models: [{ id: 'stale', name: 'STALE MODEL' }] }));
     expect(screen.queryByText('STALE MODEL')).toBeNull();
@@ -62,8 +62,8 @@ describe('Brain embedding settings', () => {
     const old = deferred<{ ok: true; dimensions: number }>();
     mocked.mockImplementation(async path => path.endsWith('/test') ? old.promise : path.includes('/models') ? discover('a') : status);
     const view = render(<BrainEmbeddingSettings savedProviders={providers} />);
-    await waitFor(() => expect((screen.getByLabelText('Existing model connection') as HTMLSelectElement).disabled).toBe(false));
-    fireEvent.change(screen.getByLabelText('Existing model connection'), { target: { value: 'a' } });
+    await waitFor(() => expect((screen.getByLabelText('Provider') as HTMLSelectElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'a' } });
     fireEvent.change(screen.getByLabelText('Embedding model ID (manual fallback)'), { target: { value: 'manual' } });
     fireEvent.click(screen.getByText('Test embedding model'));
     view.unmount(); await mount(); await act(async () => old.resolve({ ok: true, dimensions: 999 }));

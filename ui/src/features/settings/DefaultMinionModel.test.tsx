@@ -12,14 +12,14 @@ const selection = { connectionId: 'b', model: 'model', reasoningEffort: 'low', t
 const view = (id = 'agent') => <DefaultMinionModel key={id} resourceId={id} savedProviders={providers} />;
 afterEach(cleanup);
 beforeEach(() => vi.mocked(api).mockReset());
-describe('Default Minion Model', () => {
+describe('Default minion provider', () => {
   it('keeps primary controls in Agent details, not the overflow target, and uses resource identity', async () => {
     vi.mocked(api).mockResolvedValue({ selection: null });
     const overflow = document.createElement('div'); document.body.append(overflow);
     const agent: Agent = { id: 'target::agent', resourceId: 'agent/name', name: 'Agent', avatar: '', activity: 'Idle', context: null, provider: '', model: '', effort: '', temperature: 0.2, workspace: '', files: [], subagents: [] };
     const { container, unmount } = render(<ConfirmProvider><AgentSettings selected={agent} savedProviders={providers} onAgentsChanged={vi.fn()} section="details" overflowTarget={overflow} /></ConfirmProvider>);
     await waitFor(() => expect((screen.getByText('Save minion model') as HTMLButtonElement).disabled).toBe(false));
-    expect(container.contains(screen.getByLabelText('Default Minion Model'))).toBe(true);
+    expect(container.contains(screen.getByLabelText('Default minion provider'))).toBe(true);
     expect(overflow.childElementCount).toBe(0);
     expect(vi.mocked(api).mock.calls[0][0]).toBe('/api/agents/agent%2Fname/minion-model-selection');
     unmount(); overflow.remove();
@@ -27,13 +27,14 @@ describe('Default Minion Model', () => {
   it('loads exact connection identity and saves effort/temperature, then clears with nulls', async () => {
     vi.mocked(api).mockResolvedValueOnce({ selection }).mockResolvedValueOnce({ selection: { ...selection, reasoningEffort: 'off', temperature: 1.2 } }).mockResolvedValueOnce({ selection: null });
     render(view());
-    await waitFor(() => expect((screen.getByLabelText('Default Minion Model') as HTMLSelectElement).value).toBe(JSON.stringify(['b', 'model'])));
+    await waitFor(() => expect((screen.getByLabelText('Default minion provider') as HTMLSelectElement).value).toBe('b'));
+    expect((screen.getByLabelText('Default minion model') as HTMLSelectElement).value).toBe('model');
     fireEvent.change(screen.getByLabelText('Minion reasoning effort'), { target: { value: 'off' } });
     fireEvent.change(screen.getByLabelText('Minion temperature'), { target: { value: '1.2' } });
     fireEvent.click(screen.getByText('Save minion model'));
     await screen.findByText('Default minion model saved.');
     expect(JSON.parse(vi.mocked(api).mock.calls[1][1]!.body as string)).toEqual({ ...selection, reasoningEffort: 'off', temperature: 1.2 });
-    fireEvent.change(screen.getByLabelText('Default Minion Model'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Default minion provider'), { target: { value: '' } });
     fireEvent.click(screen.getByText('Save minion model'));
     await screen.findByText('Default minion model saved.');
     expect(JSON.parse(vi.mocked(api).mock.calls[2][1]!.body as string)).toEqual({ connectionId: null, model: null });
@@ -41,9 +42,10 @@ describe('Default Minion Model', () => {
   it('inherits with zero providers and never substitutes unavailable saved models', async () => {
     vi.mocked(api).mockResolvedValue({ selection: { ...selection, connectionId: 'missing' } });
     render(<DefaultMinionModel resourceId="agent" savedProviders={[]} />);
-    await screen.findByText('Unavailable · missing · model');
+    await screen.findByText('Unavailable · missing');
+    expect((screen.getByLabelText('Default minion model') as HTMLSelectElement).value).toBe('model');
     expect((screen.getByText('Save minion model') as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText('Default Minion Model'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Default minion provider'), { target: { value: '' } });
     expect((screen.getByText('Save minion model') as HTMLButtonElement).disabled).toBe(false);
   });
   it('shows load failure, retries, and retains the draft after save failure', async () => {
@@ -52,10 +54,10 @@ describe('Default Minion Model', () => {
     await screen.findByText(/load denied/);
     fireEvent.click(screen.getByText('Retry minion model'));
     await waitFor(() => expect((screen.getByText('Save minion model') as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.change(screen.getByLabelText('Default Minion Model'), { target: { value: JSON.stringify(['a', 'model']) } });
+    fireEvent.change(screen.getByLabelText('Default minion provider'), { target: { value: 'a' } });
     fireEvent.click(screen.getByText('Save minion model'));
     await screen.findByText(/save denied/);
-    expect((screen.getByLabelText('Default Minion Model') as HTMLSelectElement).value).toBe(JSON.stringify(['a', 'model']));
+    expect((screen.getByLabelText('Default minion provider') as HTMLSelectElement).value).toBe('a');
     expect(screen.queryByText('Default minion model saved.')).toBeNull();
   });
   it('ignores stale loads after switching owners', async () => {
@@ -65,7 +67,7 @@ describe('Default Minion Model', () => {
     rerender(view('new'));
     await waitFor(() => expect((screen.getByText('Save minion model') as HTMLButtonElement).disabled).toBe(false));
     await act(async () => release({ selection }));
-    expect((screen.getByLabelText('Default Minion Model') as HTMLSelectElement).value).toBe('');
+    expect((screen.getByLabelText('Default minion provider') as HTMLSelectElement).value).toBe('');
   });
   it('ignores stale saves and blocks duplicate saves while pending', async () => {
     let release!: (value: unknown) => void;
@@ -78,6 +80,6 @@ describe('Default Minion Model', () => {
     await waitFor(() => expect((screen.getByText('Save minion model') as HTMLButtonElement).disabled).toBe(false));
     await act(async () => release({ selection }));
     expect(screen.queryByText('Default minion model saved.')).toBeNull();
-    expect((screen.getByLabelText('Default Minion Model') as HTMLSelectElement).value).toBe('');
+    expect((screen.getByLabelText('Default minion provider') as HTMLSelectElement).value).toBe('');
   });
 });

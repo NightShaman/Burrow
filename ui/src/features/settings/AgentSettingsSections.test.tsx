@@ -72,7 +72,8 @@ describe('agent settings sections', () => {
     await screen.findByText('No cron jobs configured for this agent.');
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Briefing' } });
     fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Prepare it.' } });
-    fireEvent.change(screen.getByRole('combobox', { name: /Model/ }), { target: { value: JSON.stringify(['connection-1', 'model-1']) } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Provider' }), { target: { value: 'connection-1' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), { target: { value: 'model-1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add job' }));
 
     await waitFor(() => expect(apiMock.mock.calls.some(([path, init]) => path === '/api/scheduled-jobs' && init?.method === 'POST')).toBe(true));
@@ -101,7 +102,7 @@ describe('agent settings sections', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /Briefing.*0 9/ }));
     expect(screen.getByRole('alert').textContent).toContain('will not silently fall back');
-    expect((screen.getByRole('combobox', { name: /Model/ }) as HTMLSelectElement).value).toBe(JSON.stringify(['removed', 'gone']));
+    expect((screen.getByRole('combobox', { name: /Model/ }) as HTMLSelectElement).value).toBe('gone');
     expect(screen.getByRole('button', { name: 'Save job' }).getAttribute('disabled')).not.toBeNull();
   });
 
@@ -206,7 +207,7 @@ describe('agent settings sections', () => {
 
     expect(screen.getByLabelText('Enable scheduled dreaming').getAttribute('disabled')).not.toBeNull();
     expect(screen.getByLabelText('Cron').getAttribute('disabled')).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Dream model' }).getAttribute('disabled')).not.toBeNull();
+    expect(screen.getByRole('combobox', { name: 'Provider' }).getAttribute('disabled')).not.toBeNull();
     expect(screen.getByLabelText('Dream prompt').getAttribute('disabled')).not.toBeNull();
 
     await act(async () => { load.resolve({ settings: dreamSettings() }); });
@@ -241,7 +242,8 @@ describe('agent settings sections', () => {
     apiMock.mockResolvedValue({ settings: { enabled: false, cron: '0 4 * * *', timezone: 'UTC', prompt: '', modelConnectionId: 'removed-connection', model: 'gone-model' } });
     render(<AgentDreams agentId="smatchet" savedProviders={[]} />);
 
-    expect(await screen.findByText('Unavailable model · removed-connection · gone-model')).toBeTruthy();
+    expect(await screen.findByText('Unavailable · removed-connection')).toBeTruthy();
+    expect((screen.getByRole('combobox', { name: 'Model' }) as HTMLSelectElement).value).toBe('gone-model');
   });
 
   it('shows an unconfigured effective model and its resolution error', async () => {
@@ -263,9 +265,8 @@ describe('agent settings sections', () => {
     apiMock.mockResolvedValue({ settings: { enabled: false, cron: '0 4 * * *', timezone: 'UTC', prompt: '', modelConnectionId: 'connection-1', model: 'model-1' } });
     render(<AgentDreams agentId="smatchet" savedProviders={[{ id: 'connection-1', provider: 'Claude', apiType: 'anthropic-messages', url: '', apiKey: '', models: ['model-1'] }]} />);
 
-    await screen.findByText('Claude · model-1');
-    fireEvent.click(screen.getByRole('button', { name: 'Dream model' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Use agent chat model' }));
+    await waitFor(() => expect((screen.getByRole('combobox', { name: 'Model' }) as HTMLSelectElement).value).toBe('model-1'));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Provider' }), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save dream settings' }));
 
     await waitFor(() => expect(apiMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true));

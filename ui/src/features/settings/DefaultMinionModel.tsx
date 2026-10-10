@@ -3,6 +3,7 @@ import { api } from '../../app/api';
 import type { SavedProvider } from '../../app/types';
 import { defaultReasoningEffort, reasoningEffortsForModel } from '../../app/modelSelectionOptions';
 import { Field } from './SettingsPrimitives';
+import { ProviderModelFields } from './ProviderModelFields';
 
 type Selection = { connectionId: string; model: string; reasoningEffort: string; temperature?: number } | null;
 
@@ -50,16 +51,11 @@ export function DefaultMinionModel({ resourceId, savedProviders }: { resourceId:
   };
   const disabled = state !== 'idle';
   return <>
-    <Field label="Default Minion Model"><select disabled={disabled} value={selection ? JSON.stringify([selection.connectionId, selection.model]) : ''} onChange={event => {
-      if (!event.target.value) { change(null); return; }
-      const [connectionId, model] = JSON.parse(event.target.value) as [string, string];
+    <ProviderModelFields providers={savedProviders} connectionId={selection?.connectionId} model={selection?.model} inheritLabel="Inherit current parent turn" disabled={disabled} providerLabel="Default minion provider" modelLabel="Default minion model" onChange={(connectionId, model) => {
+      if (!connectionId) { change(null); return; }
       const next = savedProviders.find(item => item.id === connectionId);
-      change({ connectionId, model, reasoningEffort: defaultReasoningEffort(next, model), temperature: selection?.temperature ?? 0.2 });
-    }}>
-      <option value="">Inherit current parent turn</option>
-      {!available && selection && <option value={JSON.stringify([selection.connectionId, selection.model])}>Unavailable · {selection.connectionId} · {selection.model}</option>}
-      {savedProviders.flatMap(item => item.models.map(model => <option key={JSON.stringify([item.id, model])} value={JSON.stringify([item.id, model])}>{item.provider} · {item.id} · {item.modelLabels?.[model] ?? model}</option>))}
-    </select></Field>
+      change({ connectionId, model: model ?? '', reasoningEffort: defaultReasoningEffort(next, model ?? ''), temperature: selection?.temperature ?? 0.2 });
+    }} />
     <p className="settings-description">Used when this agent spawns a minion. Inherit uses the current parent turn’s model selection. An explicit spawn model overrides this default.</p>
     {state === 'loading' && <p role="status">Loading default minion model…</p>}
     {!available && <p className="settings-help">The saved connection or model is unavailable. Choose an available model or inherit; no replacement has been selected automatically.</p>}
