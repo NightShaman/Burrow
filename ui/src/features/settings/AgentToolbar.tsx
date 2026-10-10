@@ -1,3 +1,4 @@
+import { secureUuid } from '../../app/secureUuid';
 import { retainedOperation, completeOperation } from '../../app/durableOperation';
 import { AccessibleModal } from '../../app/AccessibleModal';
 import React, { useEffect, useRef, useState } from 'react';
@@ -193,8 +194,10 @@ export function AgentToolbar({ agents, selectedId, onSelect, onAgentsChanged, on
   const owner = setupOwner.current;
   const current = () => setupOwner.current === owner;
   setupBusy.current = true; setState('creating'); setError('');
+  let attempted = false;
   try {
-   const payload = retainedOperation(key, () => ({ operationId: crypto.randomUUID(), operator: { name: operatorName.trim(), avatar: operatorAvatar }, agent: { id: agentIdFromName(name.trim()), name: name.trim(), enabled: true }, agentIdentity: { avatar }, documents: profileDocumentKinds.map(kind => ({ kind, markdown: kind === 'SOUL' ? soul : '' })), ...(connectionId && model ? { modelSelection: { connectionId, model } } : {}) }));
+   const payload = retainedOperation(key, () => ({ operationId: secureUuid(), operator: { name: operatorName.trim(), avatar: operatorAvatar }, agent: { id: agentIdFromName(name.trim()), name: name.trim(), enabled: true }, agentIdentity: { avatar }, documents: profileDocumentKinds.map(kind => ({ kind, markdown: kind === 'SOUL' ? soul : '' })), ...(connectionId && model ? { modelSelection: { connectionId, model } } : {}) }));
+   attempted = true;
    const result = await api<{ agent: { id: string } }>('/api/setup/operation', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
    completeOperation(key, payload.operationId);
    if (!current()) return;
@@ -202,7 +205,7 @@ export function AgentToolbar({ agents, selectedId, onSelect, onAgentsChanged, on
    await Promise.all([onModelConnectionsChanged(), onAgentsChanged()]);
    if (!current()) return;
    onSelect(result.agent.id); setCelebrating(true);
-  } catch (cause) { if (current()) setError(`Could not finish first-run setup: ${cause instanceof Error ? cause.message : 'Unknown error'}. Retry to recover the original submission.`); }
+  } catch (cause) { if (current()) setError(`Could not finish first-run setup: ${cause instanceof Error ? cause.message : 'Unknown error'}.${attempted ? ' Retry to recover the original submission.' : ''}`); }
   finally { setupBusy.current = false; if (current()) setState('idle'); }
  };
  const provider = providers.find(item => item.id === connectionId);

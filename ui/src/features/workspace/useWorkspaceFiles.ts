@@ -1,3 +1,4 @@
+import { secureUuid } from '../../app/secureUuid';
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { api } from '../../app/api';
 import type { FileNode, Tab } from '../../app/types';
@@ -36,7 +37,7 @@ export function useWorkspaceFiles({ tabs, selectedAgentId, setTabs, setActiveTab
       setTabs(all => all.some(tab => tab.id === tabId) ? all : [...all, pending]);
       return;
     }
-    const loadId = crypto.randomUUID();
+    const loadId = secureUuid();
     const loadingTab: Tab = { id: tabId, path: file.path, label: file.name, kind: 'file', content: '', fileLoadId: loadId, fileLoaded: false, fileLoading: true, workspaceAgentId: agentId };
     pendingLoads.current.set(tabId, loadingTab);
     setTabs((all) => all.some(tab => tab.id === tabId) ? all.map(tab => tab.id === tabId ? { ...tab, fileLoadId: loadId, fileLoading: true, fileError: undefined } : tab) : [...all, loadingTab]);

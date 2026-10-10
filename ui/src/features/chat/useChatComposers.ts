@@ -1,3 +1,4 @@
+import { secureUuid } from '../../app/secureUuid';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { api, type SessionSummary } from '../../app/api';
@@ -98,7 +99,7 @@ export function useChatComposers({ sessionId = '', selectedAgentId, activeRunId,
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(targetSessionId)) return setSessionError('Use 1–80 letters, numbers, hyphens, or underscores; start with a letter or number.');
     const storageKey = `hc.sessionOperation:${selectedAgentId}:${targetSessionId}`;
     if (!localStorage.getItem(storageKey) && sessions.some((session) => session.id === targetSessionId)) return setSessionError(`A session named “${targetSessionId}” already exists.`);
-    const payload = retainedOperation(storageKey, () => ({ agentId: selectedAgentId, sessionId: targetSessionId, operationId: crypto.randomUUID() }));
+    const payload = retainedOperation(storageKey, () => ({ agentId: selectedAgentId, sessionId: targetSessionId, operationId: secureUuid() }));
     const operation = {};
     mutationRef.current = operation;
     const current = () => scopeRef.current === scope && mutationRef.current === operation;

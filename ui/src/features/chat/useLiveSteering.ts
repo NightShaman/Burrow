@@ -1,3 +1,4 @@
+import { secureUuid } from '../../app/secureUuid';
 import { useEffect, useRef, useState } from 'react';
 import { api, type ChatAttachment } from '../../app/api';
 const emptyInputs: SteeringInput[] = [];
@@ -39,7 +40,7 @@ export function useLiveSteering(agentId: string, sessionId: string, activeRunId:
     if (busy.current) return null;
     busy.current = true;
     const signature = JSON.stringify({runId: activeRunId, agentId, sessionId, message, attachments});
-    if (retry.current?.signature !== signature) retry.current = {signature, key: crypto.randomUUID()};
+    if (retry.current?.signature !== signature) retry.current = {signature, key: secureUuid()};
     try {
       const response = await api<{steering: SteeringInput}>(`/api/chat/${encodeURIComponent(activeRunId)}/steer`, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({agentId, sessionId, idempotencyKey: retry.current.key, message, ...(attachments.length ? {attachments} : {})})});
       if (currentScope.current !== scope) return null;

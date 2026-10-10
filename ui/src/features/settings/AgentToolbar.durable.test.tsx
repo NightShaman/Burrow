@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { AgentToolbar } from './AgentToolbar';
 import { api } from '../../app/api';
 vi.mock('../../app/api', async original => ({ ...await original<typeof import('../../app/api')>(), api: vi.fn() }));
-afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const callbacks = () => ({ onSelect: vi.fn(), onAgentsChanged: vi.fn(async () => {}), onModelConnectionsChanged: vi.fn(async () => {}), onOperatorProfileChanged: vi.fn(), onFirstRunComplete: vi.fn() });
 async function mount(props = callbacks()) {
  let view!: ReturnType<typeof render>;
@@ -73,4 +73,29 @@ it('real wizard reports unavailable durable storage without sending an unrecover
  expect(writes()).toHaveLength(0);
  expect(screen.getByRole('alert').textContent).toContain('quota exceeded');
  expect(screen.getByText('Skip / Finish').hasAttribute('disabled')).toBe(false);
+});
+it('first run works without randomUUID and retries the retained payload after a lost response', async () => {
+ vi.stubGlobal('crypto', { getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto) });
+ expect(typeof crypto.randomUUID).toBe('undefined');
+ vi.mocked(api).mockImplementation(async path => {
+  if (path === '/api/setup/operation') throw new Error('response lost');
+  return { connections: [] };
+ });
+ await mount(); fill();
+ await act(async () => { fireEvent.click(screen.getByText('Skip / Finish')); });
+ const original = writes()[0];
+ expect(original.operationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+ await act(async () => { fireEvent.click(screen.getByText('Skip / Finish')); });
+ expect(writes()).toEqual([original, original]);
+ expect(screen.getByRole('alert').textContent).toContain('Retry to recover the original submission');
+});
+it('payload generation failure does not claim an original submission was sent', async () => {
+ vi.mocked(api).mockResolvedValue({ connections: [] });
+ await mount(); fill();
+ vi.spyOn(crypto, 'randomUUID').mockImplementation(() => { throw new Error('randomness unavailable'); });
+ await act(async () => { fireEvent.click(screen.getByText('Skip / Finish')); });
+ expect(writes()).toHaveLength(0);
+ expect(localStorage.getItem('hc.setupOperation')).toBeNull();
+ expect(screen.getByRole('alert').textContent).toContain('randomness unavailable');
+ expect(screen.getByRole('alert').textContent).not.toContain('Retry to recover');
 });
