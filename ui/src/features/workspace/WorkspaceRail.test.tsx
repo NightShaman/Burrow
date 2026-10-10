@@ -51,6 +51,15 @@ describe('AgentsPanel', () => {
     expect(onSelectSubagent).toHaveBeenCalledWith('smatchet', 'child');
   });
 
+  it.each(['Error', 'Incomplete'])('keeps %s rail status free of diagnostic text', (activity) => {
+    const child = { ...agent.subagents[0], activity, outcomeReason: 'Recorded diagnostic reason' };
+    render(<AgentsPanel agents={[{ ...agent, subagents: [child] }]} selectedStreamId="child" expandedAgents={new Set(['smatchet'])} onSelectAgent={vi.fn()} onToggleAgent={vi.fn()} onSelectSubagent={vi.fn()} />);
+    const status = screen.getByRole('button', { name: 'Select Child' }).querySelector('small');
+    expect(status?.textContent).toBe(activity);
+    expect(status?.getAttribute('title')).toBeNull();
+    expect(screen.queryByText(/Recorded diagnostic reason/)).toBeNull();
+  });
+
   it('renders compact view without sidebar configuration controls', () => {
     const view = render(<AgentsPanel agents={[agent]} view="compact" order={[]} selectedStreamId="smatchet" expandedAgents={new Set()} onSelectAgent={vi.fn()} onToggleAgent={vi.fn()} onSelectSubagent={vi.fn()} />);
     expect(view.container.querySelector('.context-usage')).toBeNull();
