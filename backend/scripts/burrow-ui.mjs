@@ -294,6 +294,9 @@ async function executeBoardTask(taskId) {
     agentRuntime,
     stores: postgresApplication.stores,
     resolveAgentRuntime,
+    registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerActiveAgentRun(activeChatRuns, { agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
+    onModelTextDelta: createChatStreamDelta({ record, type: 'assistant.delta', runId, sessionId, write: () => {} }),
+    onModelThoughtDelta: createChatStreamDelta({ record, type: 'assistant.thought', runId, sessionId, write: () => {} }),
     onTraceRecord: (traceRecord) => {
       const progress = publicChatProgress(traceRecord);
       if (!progress) return;

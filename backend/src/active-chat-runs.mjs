@@ -11,6 +11,7 @@ export function activeChatRunSummary(record = {}) {
     phase: record.phase || 'thinking',
     startedAt: record.startedAt || null,
     latestUserMessage: record.latestUserMessage || null,
+    answerText: record.answerText || null,
     progress: Array.isArray(record.progress) ? record.progress.slice(-50) : [],
     contextUsage: record.contextUsage || null,
     detached: record.detached === true,
