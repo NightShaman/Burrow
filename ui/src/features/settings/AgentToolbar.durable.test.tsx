@@ -26,6 +26,10 @@ it('real wizard retains submission while delayed, blocks duplicate sends, and ig
  const { view, props } = await mount(); fill();
  fireEvent.click(screen.getByText('Skip / Finish'));
  const payload = writes()[0];
+ expect(payload.documents).toEqual([
+  { kind: 'SOUL', markdown: 'Original soul' },
+  ...['RULES', 'ORIENTATION', 'PREFERENCES', 'TOOLS', 'DREAM_MEMORY'].map(kind => ({ kind, markdown: '' })),
+ ]);
  expect(JSON.parse(localStorage.getItem('hc.setupOperation')!)).toEqual(payload);
  expect(screen.getByText('Creating…').hasAttribute('disabled')).toBe(true);
  fireEvent.click(screen.getByText('Creating…'));
@@ -98,4 +102,47 @@ it('payload generation failure does not claim an original submission was sent', 
  expect(localStorage.getItem('hc.setupOperation')).toBeNull();
  expect(screen.getByRole('alert').textContent).toContain('randomness unavailable');
  expect(screen.getByRole('alert').textContent).not.toContain('Retry to recover');
+});
+
+it('repairs only the old five-kind retained submission durably and retries with its original identity', async () => {
+ const original = {
+  operationId: 'retained-pre-fix-id', operator: { name: 'Saved operator', avatar: 'operator-avatar' },
+  agent: { id: 'saved-agent', name: 'Saved agent', enabled: true }, agentIdentity: { avatar: 'agent-avatar' },
+  documents: ['SOUL', 'RULES', 'ORIENTATION', 'TOOLS', 'DREAM_MEMORY'].map(kind => ({ kind, markdown: `Saved ${kind}` })),
+  modelSelection: { connectionId: 'saved-connection', model: 'saved-model' },
+ };
+ const repaired = { ...original, documents: [
+  ...original.documents.slice(0, 3), { kind: 'PREFERENCES', markdown: '' }, ...original.documents.slice(3),
+ ] };
+ localStorage.setItem('hc.setupOperation', JSON.stringify(original));
+ vi.mocked(api).mockImplementation(async path => {
+  if (path === '/api/setup/operation') {
+   expect(JSON.parse(localStorage.getItem('hc.setupOperation')!)).toEqual(repaired);
+   throw new Error('response lost');
+  }
+  return { connections: [] };
+ });
+ const first = await mount();
+ await act(async () => { fireEvent.click(screen.getByText('Skip / Finish')); });
+ expect(writes()).toEqual([repaired]);
+ first.view.unmount();
+ const second = await mount();
+ vi.mocked(api).mockImplementation(async path => path === '/api/setup/operation' ? { agent: { id: original.agent.id } } : { connections: [] });
+ await act(async () => { fireEvent.click(screen.getByText('Skip / Finish')); });
+ expect(writes()).toEqual([repaired, repaired]);
+ expect(second.props.onSelect).toHaveBeenCalledWith(original.agent.id);
+ expect(localStorage.getItem('hc.setupOperation')).toBeNull();
+});
+it('does not send a legacy repair when durable persistence fails', async () => {
+ const original = { operationId: 'old-id', operator: { name: 'Operator', avatar: '' },
+  agent: { id: 'agent', name: 'Agent', enabled: true }, agentIdentity: { avatar: '' },
+  documents: ['SOUL', 'RULES', 'ORIENTATION', 'TOOLS', 'DREAM_MEMORY'].map(kind => ({ kind, markdown: '' })) };
+ localStorage.setItem('hc.setupOperation', JSON.stringify(original));
+ vi.mocked(api).mockResolvedValue({ connections: [] });
+ await mount();
+ vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota exceeded'); });
+ await act(async () => { fireEvent.click(screen.getByText('Skip / Finish')); });
+ expect(writes()).toHaveLength(0);
+ expect(JSON.parse(localStorage.getItem('hc.setupOperation')!)).toEqual(original);
+ expect(screen.getByRole('alert').textContent).toContain('quota exceeded');
 });
