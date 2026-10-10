@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Agent, PanelId, SavedProvider, SettingsTab } from '../../app/types';
 import { api, type SetupStatus } from '../../app/api';
 import { railLayouts, themes, themeDetails } from '../../app/usePersistedLayout';
@@ -41,6 +41,7 @@ export function Settings({ tab, setTab, agents, selected, savedProviders, onMode
   const [selectedRailPanel, setSelectedRailPanel] = useState<PanelId | null>(null);
   const [modNavigationColumn, setModNavigationColumn] = useState<HTMLElement | null>(null);
   const [targetContributions, setTargetContributions] = useState<ModContribution[]>([]);
+  const setupFinished = useRef(false);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [overflowColumn, setOverflowColumn] = useState<HTMLElement | null>(null);
   const [configurationColumn, setConfigurationColumn] = useState<HTMLElement | null>(null);
@@ -66,12 +67,13 @@ export function Settings({ tab, setTab, agents, selected, savedProviders, onMode
   }, []);
   useEffect(() => {
     let cancelled = false;
-    void api<SetupStatus>('/api/setup/status').then((status) => { if (!cancelled) setSetupStatus(status); }).catch(() => { if (!cancelled) setSetupStatus(null); });
+    void api<SetupStatus>('/api/setup/status').then((status) => { if (!cancelled && !setupFinished.current) setSetupStatus(status); }).catch(() => { if (!cancelled && !setupFinished.current) setSetupStatus(null); });
     return () => { cancelled = true; };
   }, []);
   useEffect(() => { writeStoredValue(settingsUtilityPanelStorageKey, 1, utilityPanelOpen); }, [utilityPanelOpen]);
   const completeFirstRun = async () => {
     const status = await api<SetupStatus>('/api/setup/complete', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    setupFinished.current = true;
     setSetupStatus(status);
   };
   const nativeSettingMatch = tab.match(/^mod-settings:([^:]+):(.+)$/);
@@ -158,7 +160,7 @@ export function Settings({ tab, setTab, agents, selected, savedProviders, onMode
       </aside>
       {!utilityPanelOpen && <button className="settings-utility-panel-toggle" type="button" onClick={() => setUtilityPanelOpen(true)} aria-label="Open system statistics" aria-expanded="false"><Chevron direction="left" /></button>}
     </main>
-    <div className="settings-baseline-hidden" aria-hidden="true"><div className="settings-view"><nav className="settings-rail">{builtInTabs.map((item) => <button className={tab === item ? 'active' : ''} onClick={() => setTab(item)} key={item}>{item === 'connections' ? 'Connections' : item[0].toUpperCase() + item.slice(1)}</button>)}{targetContributions.flatMap((item) => item.settings?.map((setting) => { const itemTab = `mod-settings:${item.modId}:${setting.id}` as SettingsTab; return <button className={tab === itemTab ? 'active' : ''} onClick={() => setTab(itemTab)} key={`${item.modId}:${setting.id}`}>{item.name}</button>; }) ?? [])}</nav><div className="settings-content"><header className="settings-heading"><span className="eyebrow">CONFIGURATION</span><h1>{heading}</h1></header>{tab === 'agents' && <AgentToolbar agents={agents} selectedId={settingsSelected.id} onSelect={setSettingsAgentId} onAgentsChanged={onAgentsChanged} onModelConnectionsChanged={onModelConnectionsChanged} onOperatorProfileChanged={onOperatorProfileChanged} onFirstRunComplete={onFirstRunComplete} onSetupComplete={completeFirstRun} firstRun={previewFirstRun || setupStatus?.wizardStep === 'fresh' || setupStatus?.wizardStep === 'incomplete'} />}<div className="settings-panels">
+    <div className="settings-baseline-hidden" aria-hidden="true"><div className="settings-view"><nav className="settings-rail">{builtInTabs.map((item) => <button className={tab === item ? 'active' : ''} onClick={() => setTab(item)} key={item}>{item === 'connections' ? 'Connections' : item[0].toUpperCase() + item.slice(1)}</button>)}{targetContributions.flatMap((item) => item.settings?.map((setting) => { const itemTab = `mod-settings:${item.modId}:${setting.id}` as SettingsTab; return <button className={tab === itemTab ? 'active' : ''} onClick={() => setTab(itemTab)} key={`${item.modId}:${setting.id}`}>{item.name}</button>; }) ?? [])}</nav><div className="settings-content"><header className="settings-heading"><span className="eyebrow">CONFIGURATION</span><h1>{heading}</h1></header><div className="settings-panels">
     {tab === 'connections' && <AuthenticationSettings />}
     {tab === 'general' && <><div className="general-profile-column"><OperatorProfile onSaved={onOperatorProfileChanged} /><ExecutionBoundaries /><RetentionSettings /><ExportSettings /></div><div className="general-rail-column"><SettingSection title="Rail Panels"><div className="field-pair compact-fields"><RailPanelSettings side="Left" layout={leftRailLayout} setLayout={setLeftRailLayout} singlePanel={leftSinglePanel} setSinglePanel={setLeftSinglePanel} topPanel={leftTopPanel} setTopPanel={setLeftTopPanel} bottomPanel={leftBottomPanel} setBottomPanel={setLeftBottomPanel} /><RailPanelSettings side="Right" layout={rightRailLayout} setLayout={setRightRailLayout} singlePanel={rightSinglePanel} setSinglePanel={setRightSinglePanel} topPanel={rightTopPanel} setTopPanel={setRightTopPanel} bottomPanel={rightBottomPanel} setBottomPanel={setRightBottomPanel} /></div></SettingSection><CuratorSettings savedProviders={savedProviders} /></div><SettingSection title="Appearance"><fieldset className="theme-picker"><legend>Theme</legend><div>{themes.map((option) => <button type="button" className={theme === option ? 'active' : ''} onClick={() => setTheme(option)} aria-pressed={theme === option} key={option}><i className={`theme-swatch ${option}`} aria-hidden="true" /><span><b>{themeDetails[option].label}</b><small>{themeDetails[option].description}</small></span></button>)}</div></fieldset></SettingSection></>}
     {tab === 'connections' &&<ModelConnections savedProviders={savedProviders} onModelConnectionsChanged={onModelConnectionsChanged} mcpConnections={<McpConnections />} />}

@@ -40,19 +40,20 @@ function AppContent() {
   const [runtimeIdentity, setRuntimeIdentity] = useState<RuntimeHealth['releaseProvenance']>(undefined);
   useEffect(() => { let live = true; void api<RuntimeHealth>('/api/health').then((health) => { if (live) setRuntimeVersion(health.version ?? null); setRuntimeIdentity(health.releaseProvenance); }).catch(() => {}); return () => { live = false; }; }, []);
   const previewFirstRun = new URLSearchParams(window.location.search).get('previewFirstRun') === '1';
+  const setupFinished = useRef(false);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const firstRun = previewFirstRun || setupStatus?.wizardStep === 'fresh' || setupStatus?.wizardStep === 'incomplete';
   const [page, setPage] = useState<Page>(() => previewFirstRun ? 'settings' : 'chat'); const [settingsTab, setSettingsTab] = useState<SettingsTab>(() => previewFirstRun ? 'agents' : 'general');
   useEffect(() => {
     if (previewFirstRun) return;
     let cancelled = false;
-    void api<SetupStatus>('/api/setup/status').then((status) => { if (!cancelled) setSetupStatus(status); }).catch(() => { if (!cancelled) setSetupStatus(null); });
+    void api<SetupStatus>('/api/setup/status').then((status) => { if (!cancelled && !setupFinished.current) setSetupStatus(status); }).catch(() => { if (!cancelled && !setupFinished.current) setSetupStatus(null); });
     return () => { cancelled = true; };
   }, [previewFirstRun]);
   useEffect(() => {
     if (firstRun) { setPage('settings'); setSettingsTab('agents'); }
   }, [firstRun]);
-  const completeFirstRun = () => { setSetupStatus((status) => status ? { ...status, wizardStep: 'ready', configured: true } : status); setPage('chat'); };
+  const completeFirstRun = () => { setupFinished.current = true; setSetupStatus((status) => status ? { ...status, wizardStep: 'ready', configured: true } : status); setPage('chat'); };
   // Burrow is a single local runtime. Node Goblin integrations are explicit mod-owned APIs.
   const [modPanels, setModPanels] = useState<ModPanel[]>([]);
   const [modsLoaded, setModsLoaded] = useState(false);
