@@ -98,6 +98,7 @@ export function chatTurnInputFromBody({ body = {}, rootDir, dataRoot, agentDataR
       ...(body.modelConnectionId ? { model_connection_id: String(body.modelConnectionId) } : {}),
       ...(body.continuityScope ? { continuity_scope: String(body.continuityScope) } : body.workingProject ? { working_project: String(body.workingProject) } : {}),
       ...(attachments.length ? { attachments } : {}),
+      ...(body.liveSteering ? { live_steering: body.liveSteering } : {}),
       ...(body.abortSignal ? { abort_signal: body.abortSignal } : {}),
     },
     json: true,

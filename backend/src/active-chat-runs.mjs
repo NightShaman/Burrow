@@ -29,6 +29,7 @@ export function activeChatRunSummaries(activeChatRuns, { agentId = null, session
 
 export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'default', runId, message = '', source = 'internal', a2a = null, parentSignal = null } = {}) {
   if (!agentId || !runId) throw new Error('active_agent_run_identity_required');
+  if (activeChatRuns.has(activeChatRunKey(agentId, runId))) throw Object.assign(new Error('chat_run_id_already_used'), { statusCode: 409 });
   const controller = new AbortController();
   const record = {
     agentId: String(agentId), runId: String(runId), sessionId: String(sessionId || 'default'), controller,

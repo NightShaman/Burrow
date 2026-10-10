@@ -26,7 +26,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectSessionContext, inspectSessionContextStatus } from '../src/context-engine.mjs';
 import { activeConversationLimits } from '../src/context-preparation.mjs';
-import { createChatTurnRunId, runChatTurnFromBody, runChatTurnFromWorkbenchContinuation, chatTurnResponse, chatTurnProgressResponse, chatTurnErrorResponse, loadRuntimeConfig } from '../src/chat-turn-controller.mjs';
+import { chatTurnInputFromBody, createChatTurnRunId, runChatTurnFromBody, runChatTurnFromWorkbenchContinuation, chatTurnResponse, chatTurnProgressResponse, chatTurnErrorResponse, loadRuntimeConfig } from '../src/chat-turn-controller.mjs';
 import { resolveModelConfig, resolveRuntimeTracePath } from '../src/config.mjs';
 import { API_TOKEN_SCOPES } from '../src/api-token-store.mjs';
 import { loadEffectiveSkillCatalog, skillManifest } from '../src/skill-catalog.mjs';
@@ -2979,6 +2979,7 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
     return sendJson(res, result.status, result.response);
   }
   const runId = body.runId ? String(body.runId) : createChatTurnRunId({ sessionId, prefix: 'ui' });
+  if (activeChatRuns.has(activeChatRunKey(agentRuntime.agentId, runId))) throw Object.assign(new Error('chat_run_id_already_used'), { statusCode: 409 });
   const controller = new AbortController();
   const record = { agentId: agentRuntime.agentId, runId, sessionId, controller, startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: String(body.message || '').trim().slice(0, 16_000), progress: [], contextUsage: null, cancelled: false, reason: null, detached: false };
   const headKey = sessionContinuityHeadKey(agentRuntime.agentId, sessionId);
@@ -3078,8 +3079,31 @@ async function cancelChatRun(runId, body = {}, agentRuntime = null) {
   return cancelActiveChatRun(activeChatRuns, runId, { body, agentId: agentRuntime?.agentId || null });
 }
 
+async function steerChatRun(runId, body, agentRuntime) {
+  const input = chatTurnInputFromBody({ body });
+  const identity = { agentId: agentRuntime.agentId, sessionId: input.sessionId, runId };
+  const record = activeChatRuns.get(activeChatRunKey(identity.agentId, runId));
+  // Stop closes acceptance even while the provider is unwinding.
+  if (!record || record.controller.signal.aborted) await postgresApplication.stores.steering.boundary(identity, { finish: true });
+  const steering = await postgresApplication.stores.steering.submit({ ...identity, idempotencyKey: body.idempotencyKey, message: input.message, attachments: input.args.attachments || [] });
+  return { ok: true, runId, sessionId: identity.sessionId, steering };
+}
+
+async function listChatSteering(runId, body, agentRuntime) {
+  const identity = { agentId: agentRuntime.agentId, sessionId: String(body.sessionId || 'default'), runId };
+  if (!activeChatRuns.has(activeChatRunKey(identity.agentId, runId))) {
+    try { await postgresApplication.stores.steering.boundary(identity, { finish: true }); }
+    catch (error) { if (error.statusCode !== 404) throw error; }
+  }
+  return { ok: true, ...identity, steering: await postgresApplication.stores.steering.list(identity) };
+}
+
 async function currentActiveChatRunSummaries({ agentId = null, sessionId = null } = {}) {
   const runs = activeChatRunSummaries(activeChatRuns, { agentId, sessionId });
+  for (const run of runs) {
+    try { run.steering = await postgresApplication.stores.steering.list(run); }
+    catch (error) { if (error.statusCode !== 404) throw error; run.steering = []; }
+  }
   const childRecords = [];
   const runtimes = agentId ? [await resolveAgentRuntime(agentId)] : await Promise.all((await agentsStore().list()).map((agent) => resolveAgentRuntime(agent.id)));
   for (const agentRuntime of runtimes) {
@@ -3126,7 +3150,7 @@ const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJso
 const observabilityRoute = createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, codexLbAccounts, anthropicOauthUsage, openaiOauthUsage, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore: postgresApplication.stores.conversations, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
 const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJson, validateBoundaryBody, withScheduledJobs, scheduler, listGroupChannels, createGroupChannel, readGroupChannelTurns, groupChannelRuns, startGroupChannelMessage, cancelGroupChannelRun, runtimeDataRoot, conversationStore: postgresApplication.stores.conversations });
 const authRoute = createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
-const chatRoute = createChatRoutes({ handleChat, readJsonBody, sendJson, selectedAgentRuntime, cancelChatRun });
+const chatRoute = createChatRoutes({ handleChat, readJsonBody, sendJson, selectedAgentRuntime, cancelChatRun, steerChatRun, listChatSteering });
 const modsRuntimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
 const modLoadOptions = { stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, disabledModIds: postgresApplication.disabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), resolveAgentWorkspaceRoot: async (id) => {
   const agent = await agentsStore().get(id);

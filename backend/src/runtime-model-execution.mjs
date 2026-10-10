@@ -39,6 +39,7 @@ export async function runRuntimeModelExecution({ continuityAuthority = null, run
       executionPolicy,
       executionContext,
       abortSignal: normalizedArgs.abort_signal || normalizedArgs.abortSignal || null,
+      liveSteering: normalizedArgs.live_steering || null,
       onTextDelta,
       onThoughtDelta,
       onContextUsage,

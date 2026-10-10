@@ -68,7 +68,7 @@ function isPromptChatMessage(entry) {
     || (entry?.role === 'assistant' && /^\s*\{\s*"type"\s*:\s*"toolCall"/.test(content));
   return (isExecutionDigest(entry) || ((entry?.type ?? 'message') === 'message'
     && ['user', 'assistant', 'agent'].includes(String(entry?.role || ''))
-    && (entry?.visibility ?? 'chat') === 'chat'
+    && ((entry?.visibility ?? 'chat') === 'chat' || (entry?.metadata?.steering?.status === 'delivered' && entry?.metadata?.providerTurn))
     && (entry?.entersPrompt ?? true) === true))
     && !isToolProtocolRecord
     && content;
@@ -167,7 +167,7 @@ export function buildConversationContext({ transcript = [], limits = {} } = {}) 
         content: executionDigest ? renderExecutionDigest(entry) : String(entry.content || '').trim(),
         metadata: executionDigest
           ? { ...(entry.metadata || {}), providerMessageSource: 'prior-execution-continuity' }
-          : { ...(entry.metadata || {}), ...(['user', 'agent'].includes(entry.role) && providerTurns.has(entry.runId)
+          : { ...(entry.metadata || {}), ...(!entry.metadata?.providerTurn && ['user', 'agent'].includes(entry.role) && providerTurns.has(entry.runId)
             ? { providerTurn: providerTurns.get(entry.runId) } : {}) },
       });
       continue;

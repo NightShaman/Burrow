@@ -171,6 +171,12 @@ async function runAskChatUnserialized({
   // unrelated CLI/test turns into one apparent runaway trace.
   const resolvedRunId = runId || normalizedArgs.run_id || defaults.runId || createFallbackRunId();
   const resolvedSessionId = sessionId || normalizedArgs.session_id || normalizedArgs.run_id || 'default';
+  const steeringIdentity = { agentId: runtimeState.agentId, sessionId: resolvedSessionId, runId: resolvedRunId };
+  if (stores.steering) {
+    await stores.steering.open(steeringIdentity);
+    normalizedArgs.live_steering = { boundary: options => stores.steering.boundary(steeringIdentity, options) };
+  }
+  try {
   const continuityAuthority = postgresContinuity({ store: stores.conversations, agentId: runtimeState.agentId });
   const continuity = await continuityAuthority.claim({
     rootDir: sessionRoot,
@@ -455,6 +461,9 @@ async function runAskChatUnserialized({
     }
   }
   return result;
+  } finally {
+    if (stores.steering) await stores.steering.boundary(steeringIdentity, { finish: true });
+  }
 }
 
 export async function readTextFileIfExists(filePath) {

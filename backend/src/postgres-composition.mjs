@@ -1,3 +1,4 @@
+import { PostgresLiveRunSteering } from './postgres-live-run-steering.mjs';
 import { startOperatorInstantBackfill } from './postgres-operator-backfill.mjs';
 import { PostgresBrainEmbeddings } from './postgres-brain-embeddings.mjs';
 import { PostgresBrainStore } from './postgres-brain-store.mjs';
@@ -57,6 +58,7 @@ export async function createPostgresApplication({
     await migratePostgres(sharedPool);
     const workingMemoryRetention = new PostgresWorkingMemoryRetentionSettingsStore({ ...common, ...(clock ? { clock } : {}) });
     const stores = {
+    steering: new PostgresLiveRunSteering({ ...common, ...(clock ? { clock } : {}) }),
     brains: new PostgresBrainStore(common),
     agents: new PostgresAgentRegistryStore({ ...common, bootstrapSampleIdentities }),
     profiles: new PostgresAgentProfileStore({ ...common, ...(clock ? { clock } : {}) }),

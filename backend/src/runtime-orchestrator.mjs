@@ -282,6 +282,7 @@ export async function runPlainModelTurn({
   onTextDelta = null,
   onThoughtDelta = null,
   onContextUsage = null,
+  liveSteering = null,
 } = {}) {
   if (!prompt?.text) throw new Error('prompt.text is required');
   if (!shouldCallModel) {
@@ -348,6 +349,20 @@ export async function runPlainModelTurn({
     if (!outputOnlyArtifact && modelInput.messages && prompt.persistProviderTurn) {
       await prompt.persistProviderTurn(modelInput.messages);
     }
+    const steeringMessages = async (terminal = false) => {
+      if (!liveSteering || outputOnlyArtifact) return [];
+      if (abortSignal?.aborted) throw abortSignal.reason || new Error('agent_stopped');
+      const project = input => {
+        const textAttachments = (input.attachments || []).filter(a => !String(a.type).startsWith('image/'));
+        const content = [input.message, ...textAttachments.map(a => `Attachment: ${a.name}\n${a.content}`)].join('\n\n');
+        const prepared = modelInputForPlainTurn({ promptText: content, promptMessages: [{ role: 'user', content }], attachments: input.attachments || [], modelConfig, modelAdapter: adapter });
+        return prepared.messages || [{ role: 'user', content: prepared.prompt }];
+      };
+      const inputs = await liveSteering.boundary({ terminal, project, precedingAssistant: terminal ? model?.choice?.text : null });
+      return inputs.flatMap(input => input.providerMessages || project(input));
+    };
+    const initialSteering = await steeringMessages();
+    if (initialSteering.length) modelInput = { ...modelInput, prompt: null, messages: [...(modelInput.messages || [{ role: 'user', content: modelInput.prompt || prompt.text }]), ...initialSteering] };
     const toolArgs = enableChatToolLoop && !outputOnlyArtifact ? { tools: continuationToolSchemas(), toolChoice: 'auto' } : {};
     if (abortSignal?.aborted) throw abortSignal.reason || new Error('agent_stopped');
     await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-before-model-call', {
@@ -388,6 +403,7 @@ export async function runPlainModelTurn({
     let pendingLoopWarning = null;
     const observedEvidence = new Set();
     const semanticInspectionHistory = new Map();
+    while (true) {
     while (enableChatToolLoop && !outputOnlyArtifact && hasNativeToolCalls(model) && (!stopOnNoProgress || !toolLoopNoProgress)) {
       const loopVerdict = exactRepeatVerdict(model.choice.toolCalls, completedToolCallHistory, { loopWarningThreshold, loopBlockThreshold });
       if (loopVerdict?.action === 'block') {
@@ -536,6 +552,14 @@ export async function runPlainModelTurn({
             tools: continuationToolSchemas(),
           })
         : null;
+      const pendingSteering = await steeringMessages();
+      if (pendingSteering.length) {
+        if (nativeContinuation) nativeContinuation.messages.push(...pendingSteering);
+        else {
+          followupInput.messages = [...(followupInput.messages || [{ role: 'user', content: followupInput.prompt }]), ...pendingSteering];
+          followupInput.prompt = null;
+        }
+      }
       if (nativeContinuation?.compacted) await traceLogger?.event?.('native-continuation-prepared', {
         compacted: true,
         estimatedTokens: nativeContinuation.inspection?.estimatedTokens ?? null,
@@ -566,6 +590,10 @@ export async function runPlainModelTurn({
             ...(emitThoughtDelta ? { onThoughtDelta: emitThoughtDelta } : {}),
             ...(emitContextUsage ? { onContextUsage: emitContextUsage, modelCall } : {}),
           });
+      if (!useNativeContinuation && followupInput.messages) {
+        nativeTranscript = followupInput.messages;
+        if (liveSteering) modelInput = { ...modelInput, messages: nativeTranscript, prompt: null };
+      }
       // The adapter has now transformed raw results into bounded native receipts.
       // Do not let the executor envelope or original tool graph survive into the
       // next iteration through loop state, diagnostics, or closures.
@@ -622,6 +650,23 @@ export async function runPlainModelTurn({
         ...(emitThoughtDelta ? { onThoughtDelta: emitThoughtDelta } : {}),
         ...(emitContextUsage ? { onContextUsage: emitContextUsage, modelCall } : {}),
       });
+    }
+
+    // Atomically check pending input and seal only if none exists. A final
+    // response arriving concurrently with Send cannot silently drop the Send.
+    if (!model?.ok || outputOnlyArtifact || !liveSteering) break;
+    const finalSteering = await steeringMessages(true);
+    if (!finalSteering.length) break;
+    const preceding = Array.isArray(model.nativeTranscript) ? model.nativeTranscript : nativeTranscript;
+    const assistantPresent = preceding?.at(-1)?.role === 'assistant' && messageTextContent(preceding.at(-1).content) === (model.choice?.text || '');
+    nativeTranscript = [...(preceding || []), ...(!assistantPresent ? [{ role: 'assistant', content: model.choice?.text || '' }] : []), ...finalSteering];
+    modelInput = { ...modelInput, messages: nativeTranscript, prompt: null };
+    modelCall += 1;
+    model = await adapter.complete({ messages: nativeTranscript, ...toolArgs, traceLogger, signal: abortSignal || undefined,
+      ...(emitTextDelta ? { onTextDelta: emitTextDelta } : {}), ...(emitThoughtDelta ? { onThoughtDelta: emitThoughtDelta } : {}),
+      ...(emitContextUsage ? { onContextUsage: emitContextUsage, modelCall } : {}) });
+    toolLoopNoProgress = false;
+    terminalLoopVerdict = null;
     }
 
   } catch (error) {

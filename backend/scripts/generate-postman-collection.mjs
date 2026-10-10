@@ -64,6 +64,8 @@ const collection = {
       req('Forge diagnostic job', 'GET', '/api/diagnostics/forge/jobs/{{forgeJobId}}'),
       req('Codex-LB accounts', 'GET', '/api/codex-lb/accounts'),
       req('Agent status', 'GET', '/api/agent-status', { query: [['agentId', '{{agentId}}'], ['sessionId', '{{sessionId}}']] }),
+      req('Steer existing chat run', 'POST', '/api/chat/{{runId}}/steer', { body: { agentId: '{{agentId}}', sessionId: '{{sessionId}}', idempotencyKey: 'client-steering-1', message: 'Additional instruction' } }),
+      req('Run steering status', 'GET', '/api/chat/{{runId}}/steering', { query: [['agentId', '{{agentId}}'], ['sessionId', '{{sessionId}}']] }),
       req('Active chat runs', 'GET', '/api/chat/runs/active', { query: [['agentId', '{{agentId}}'], ['sessionId', '{{sessionId}}']] }),
     ]),
     folder('Agents', [
