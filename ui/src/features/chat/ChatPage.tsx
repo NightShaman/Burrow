@@ -1,11 +1,12 @@
 import type { ChatLiveStage } from './chatLiveStage';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { ChatAttachment, ProgressEntry, SessionTurn, ToolActivity } from '../../app/api';
 import type { Agent, SavedProvider, Subagent, Tab } from '../../app/types';
 import { useComposerHistory } from './useComposerHistory';
 import { ChatTranscript } from './ChatTranscript';
 import { ChatComposer } from './ChatComposer';
+import { useLiveSteering } from './useLiveSteering';
 export { ChatMessage } from './ChatTranscript';
 export { ChatComposer } from './ChatComposer';
 
@@ -79,18 +80,34 @@ export function Chat({ selected, parent, operator, draft, setDraft, attached, on
     setLocalDraft(value);
   }, []);
   const composerHistory = useComposerHistory(localDraft, turns.filter((turn) => turn.role === 'user').map((turn) => turn.content ?? ''), updateLocalDraft);
+  const steering = useLiveSteering(resourceAgentId ?? selected.id, sessionId ?? '', activeRunId);
+  const transcriptTurns = useMemo(() => [...turns.filter(turn => !turn.metadata?.steering || !steering.inputs.some(input => input.id === turn.metadata?.steering?.id)), ...steering.inputs.map(input => ({ type: 'message', role: 'user', content: input.message, ts: input.createdAt, metadata: { steering: { id: input.id, status: input.status } } }))], [turns, steering.inputs]);
+  const [steeringError, setSteeringError] = useState('');
   const sendLocalDraft = useCallback(() => {
     const value = localDraftRef.current;
+    if (isSending) {
+      const message = value.trim() || (attached.length ? 'Please analyze the attached files.' : '');
+      if (!message) return;
+      setSteeringError('');
+      void steering.submit(message, attached).then(input => {
+        if (!input) return;
+        if (localDraftRef.current === value) { setDraft(''); localDraftRef.current = ''; setLocalDraft(''); }
+        attached.forEach((_, index) => onRemoveAttachment(attached.length - index - 1));
+      }).catch(error => setSteeringError(`Could not steer this run: ${error.message}. Your draft has been preserved.`));
+      return;
+    }
     onSend(value, () => {
       setDraft('');
       localDraftRef.current = '';
       setLocalDraft('');
     });
-  }, [onSend, setDraft]);
+  }, [onSend, setDraft, isSending, attached, steering, onRemoveAttachment]);
 
   return <div className="chat-view">
-    <ChatTranscript selected={selected} parent={parent} operator={operator} isNewSession={isNewSession} turns={turns} isLoading={isLoading} error={error} isSending={isSending} activeRunId={activeRunId} activeToolActivity={activeToolActivity} liveProgress={liveProgress} liveAnswer={liveAnswer} liveStage={liveStage} a2aActivities={a2aActivities} runtimeUserMessage={runtimeUserMessage} runtimeChildActivities={runtimeChildActivities} attachmentAgentId={resourceAgentId ?? selected.id} />
-    <ChatComposer draft={localDraft} setDraft={composerHistory.setDraft} attached={attached} onAttach={onAttach} onRemoveAttachment={onRemoveAttachment} disabled={isSending} onSend={sendLocalDraft} selectedAgentId={selectedAgentId} resourceAgentId={resourceAgentId} sessionId={sessionId} onCancel={onCancel} onKeyDown={composerHistory.onKeyDown} conversationTurns={turns} assistantName={selected.name} operatorName={operator.name} agentNames={new Map([[parent.id, parent.name], [selected.id, selected.name]])} placeholder={isNewSession ? `Message ${selected.name}…` : 'Message the active agent…'} />
+    <ChatTranscript selected={selected} parent={parent} operator={operator} isNewSession={isNewSession} turns={transcriptTurns} isLoading={isLoading} error={error} isSending={isSending} activeRunId={activeRunId} activeToolActivity={activeToolActivity} liveProgress={liveProgress} liveAnswer={liveAnswer} liveStage={liveStage} a2aActivities={a2aActivities} runtimeUserMessage={runtimeUserMessage} runtimeChildActivities={runtimeChildActivities} attachmentAgentId={resourceAgentId ?? selected.id} />
+
+    {steeringError && <p className="error" role="alert">{steeringError}</p>}
+    <ChatComposer draft={localDraft} setDraft={composerHistory.setDraft} attached={attached} onAttach={onAttach} onRemoveAttachment={onRemoveAttachment} disabled={false} steeringActive={isSending} onSend={sendLocalDraft} selectedAgentId={selectedAgentId} resourceAgentId={resourceAgentId} sessionId={sessionId} onCancel={onCancel} onKeyDown={composerHistory.onKeyDown} conversationTurns={turns} assistantName={selected.name} operatorName={operator.name} agentNames={new Map([[parent.id, parent.name], [selected.id, selected.name]])} placeholder={isNewSession ? `Message ${selected.name}…` : 'Message the active agent…'} />
   </div>;
 }
 
