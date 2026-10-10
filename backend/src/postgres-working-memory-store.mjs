@@ -300,11 +300,9 @@ export class PostgresWorkingMemoryStore {
       throw Error("dream_preload_scope_required");
     const normalized = (Array.isArray(items) ? items : [])
       .map((i) => {
-        if (text(i.content).length > MAX_COMPACT_CONTENT_CHARS)
-          throw Error("dream_preload_content_too_large");
         return {
           id: text(i.id),
-          title: bounded(i.title, 240),
+          title: text(i.title),
           content: text(i.content),
           sourceRefs: (i.sourceRefs || [])
             .map(text)

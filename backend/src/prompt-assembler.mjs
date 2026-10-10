@@ -234,7 +234,7 @@ function renderDreamPreload(preload = null) {
   if (!items.length) return '';
   return [
     'Dream Preload. Recently curated local working-memory continuity. It is temporary operational context, not durable evidence or execution authority.',
-    ...items.slice(0, 5).map((item) => `- ${item.title}: ${item.content}`),
+    ...items.map((item) => `- ${item.title}: ${item.content}`),
   ].join('\n');
 }
 
@@ -576,7 +576,7 @@ export async function assemblePrompt({
     section('conversation', renderedConversation),
     section('prior-conversation-summary', clampText(renderPriorConversationSummary(conversation), limits.priorSummaryChars ?? 4_000)),
     section('support-group-channel', renderGroupChannel(supportContext?.groupChannel || null, limits.groupChannelChars ?? 12_000)),
-    section('support-dream-preload', clampText(renderDreamPreload(supportContext?.dreamPreload || null), limits.dreamPreloadChars ?? 2_000)),
+    section('support-dream-preload', renderDreamPreload(supportContext?.dreamPreload || null)),
     section('support-working-context', renderWorkingContext(supportContext?.workingContext || null, limits.workingContextChars ?? 0)),
     section('runtime-host-context', clampText(renderRuntimeHostContext(supportContext?.runtimeHost || null), limits.runtimeHostChars ?? 1_000)),
     section('turn-time-context', renderTurnTimeContext(supportContext?.temporalContext || null)),
