@@ -123,6 +123,24 @@ describe('useModelConnectionEditor', () => {
     expect(result.current.editingId).toBeNull();
   });
 
+  it('reauthorizes an edited OpenAI connection in place and leaves its settings intact when start fails', async () => {
+    vi.spyOn(modelConnectionsApi, 'startOpenAiOAuth').mockRejectedValue(new Error('operator cancelled'));
+    const { result } = renderEditor();
+    act(() => result.current.editProvider(savedProvider));
+
+    act(() => result.current.openOpenAiOAuth());
+    expect(result.current.editingId).toBe('provider-1');
+    expect(result.current.provider).toBe('Example');
+    expect(result.current.availableModels.map((model) => model.id)).toEqual(['vision', 'manual']);
+
+    await act(() => result.current.openAiFlow.start(result.current.editingId ?? undefined));
+    expect(modelConnectionsApi.startOpenAiOAuth).toHaveBeenCalledWith('provider-1');
+    expect(result.current.editingId).toBe('provider-1');
+    expect(result.current.provider).toBe('Example');
+    expect(result.current.availableModels.map((model) => model.id)).toEqual(['vision', 'manual']);
+    expect(result.current.openAiFlow.error).toContain('operator cancelled');
+  });
+
   it('does not close OpenAI authorization when refreshing connections fails', async () => {
     const connection = { id: 'oauth-1', authConfigured: true, models: [] };
     vi.spyOn(modelConnectionsApi, 'startOpenAiOAuth').mockResolvedValue({ connection, login: { id: 'login-1', status: 'waiting_for_code' } });

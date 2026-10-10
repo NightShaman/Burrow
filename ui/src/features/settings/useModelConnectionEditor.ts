@@ -265,7 +265,8 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
   };
 
   const openOpenAiOAuth = () => {
-    resetProvider();
+    if (editingId) resetOpenAiOAuth();
+    else resetProvider();
     setOauthModal('openai');
   };
   const openAnthropicOAuth = () => {

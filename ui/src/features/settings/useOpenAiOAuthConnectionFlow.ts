@@ -73,13 +73,13 @@ export function useOpenAiOAuthConnectionFlow({ onConnection, onAuthorized }: Opt
     };
   }, [login?.id, login?.status]);
 
-  const start = async () => {
+  const start = async (existingConnectionId?: string) => {
     const generation = ++actionGeneration.current;
     completedLoginId.current = null;
     setRequestState('starting');
     setError('');
     try {
-      const result = await modelConnectionsApi.startOpenAiOAuth();
+      const result = await modelConnectionsApi.startOpenAiOAuth(existingConnectionId);
       if (!mounted.current || generation !== actionGeneration.current) return;
       onConnectionRef.current(result.connection);
       setLogin(result.login);

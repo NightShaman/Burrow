@@ -40,8 +40,8 @@ export const modelConnectionsApi = {
   discover: (connection: { id?: string; provider: string; apiType: string; baseUrl: string; apiKey: string; models: RuntimeModel[] }) =>
     api<{ models: RuntimeModel[]; discovery?: { status?: string; error?: string } }>('/api/settings/model-connections/discover', jsonPost(connection)),
 
-  startOpenAiOAuth: () =>
-    api<{ connection: OpenAiOAuthConnection; login: OpenAiOAuthLogin }>('/api/settings/model-connections/openai-oauth/start', jsonPost({})),
+  startOpenAiOAuth: (connectionId?: string) =>
+    api<{ connection: OpenAiOAuthConnection; login: OpenAiOAuthLogin }>('/api/settings/model-connections/openai-oauth/start', jsonPost(connectionId ? { connectionId } : {})),
   getOpenAiOAuthLogin: (loginId: string) =>
     api<{ login: OpenAiOAuthLogin }>(`/api/settings/model-connections/openai-oauth/${encodeURIComponent(loginId)}`),
   submitOpenAiOAuthCode: (loginId: string, input: string) =>
