@@ -42,7 +42,7 @@ describe('Default minion provider', () => {
   it('inherits with zero providers and never substitutes unavailable saved models', async () => {
     vi.mocked(api).mockResolvedValue({ selection: { ...selection, connectionId: 'missing' } });
     render(<DefaultMinionModel resourceId="agent" savedProviders={[]} />);
-    await screen.findByText('Unavailable · missing');
+    await screen.findByText('Configured connection (unavailable)');
     expect((screen.getByLabelText('Default minion model') as HTMLSelectElement).value).toBe('model');
     expect((screen.getByText('Save minion model') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText('Default minion provider'), { target: { value: '' } });

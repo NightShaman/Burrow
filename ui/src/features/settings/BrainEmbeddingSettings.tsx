@@ -1,3 +1,4 @@
+import { providerOptionLabel } from './ProviderModelFields';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../app/api';
 import { usePolling } from '../../app/usePolling';
@@ -63,8 +64,8 @@ export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: Sav
   const locked = !!busy;
   return <SettingSection title="Brain memory"><div className="curator-card">
     <label><input type="checkbox" checked={enabled} disabled={locked || !status} onChange={e => { edit(); setEnabled(e.target.checked); }} /> Enable Brains embeddings globally</label>
-    <Field label="Provider"><select value={connectionId} disabled={locked || !status} onChange={e => { edit(); setConnectionId(e.target.value); setModel(''); }}><option value="">Choose a connection</option>{connectionId && !savedProviders.some(p => p.id === connectionId) && <option value={connectionId}>Configured connection (unavailable)</option>}{savedProviders.map(p => <option key={p.id} value={p.id}>{p.provider} · {p.id}</option>)}</select></Field>
-    <Field label="Model"><select value={discovery?.models.some(m => m.id === model) ? model : ''} disabled={locked || !discovery} onChange={e => { edit(); setModel(e.target.value); }}><option value="">Choose an embedding model or enter ID below</option>{discovery?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Field>
+    <div className="field-pair provider-model-fields"><Field label="Provider"><select value={connectionId} disabled={locked || !status} onChange={e => { edit(); setConnectionId(e.target.value); setModel(''); }}><option value="">Choose a connection</option>{connectionId && !savedProviders.some(p => p.id === connectionId) && <option value={connectionId}>Configured connection (unavailable)</option>}{savedProviders.map(p => <option key={p.id} value={p.id}>{providerOptionLabel(savedProviders, p)}</option>)}</select></Field>
+    <Field label="Model"><select value={discovery?.models.some(m => m.id === model) ? model : ''} disabled={locked || !discovery} onChange={e => { edit(); setModel(e.target.value); }}><option value="">Choose an embedding model or enter ID below</option>{discovery?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Field></div>
     {discovery && <p className="hint">{discovery.capabilityDisclosure}{!discovery.models.length && ' No embedding models advertised. Use a manual ID and test.'}</p>}
     {discoveryError && <p role="alert" className="settings-request-error">{discoveryError}</p>}
     <Field label="Embedding model ID (manual fallback)"><input value={model} disabled={locked || !status} onChange={e => { edit(); setModel(e.target.value); }} /></Field>

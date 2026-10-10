@@ -242,7 +242,7 @@ describe('agent settings sections', () => {
     apiMock.mockResolvedValue({ settings: { enabled: false, cron: '0 4 * * *', timezone: 'UTC', prompt: '', modelConnectionId: 'removed-connection', model: 'gone-model' } });
     render(<AgentDreams agentId="smatchet" savedProviders={[]} />);
 
-    expect(await screen.findByText('Unavailable · removed-connection')).toBeTruthy();
+    expect(await screen.findByText('Configured connection (unavailable)')).toBeTruthy();
     expect((screen.getByRole('combobox', { name: 'Model' }) as HTMLSelectElement).value).toBe('gone-model');
   });
 

@@ -14,7 +14,10 @@ afterEach(cleanup);
 async function mount() { render(<BrainEmbeddingSettings savedProviders={providers} />); await waitFor(() => expect((screen.getByLabelText('Provider') as HTMLSelectElement).disabled).toBe(false)); }
 describe('Brain embedding settings', () => {
   it('keeps disabled defaults and exact string counts; disabling never needs consent', async () => {
-    await mount(); expect((screen.getByLabelText('Enable Brains embeddings globally') as HTMLInputElement).checked).toBe(false);
+    await mount();
+    expect(screen.getByLabelText('Provider').parentElement?.parentElement).toBe(screen.getByLabelText('Model').parentElement?.parentElement);
+    expect(screen.getByRole('option', { name: 'a' })).toHaveProperty('value', 'a');
+    expect((screen.getByLabelText('Enable Brains embeddings globally') as HTMLInputElement).checked).toBe(false);
     expect(screen.getByText(/Indexed 2 \/ 9007199254740995/).textContent).toContain('Generation 9007199254740993');
     fireEvent.click(screen.getByText('Save embedding settings'));
     await waitFor(() => expect(mocked).toHaveBeenCalledWith('/api/settings/brain-embeddings', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ enabled: false, connectionId: null, model: null }) })));

@@ -746,3 +746,8 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .skill-effective small{color:var(--muted)}
 .skill-effective p{margin:3px 0}
 .settings-prototype-overflow>.setting-section{min-width:0;overflow-wrap:anywhere}
+
+/* Keep connection/model controls together; wrap based on available column width. */
+.field-pair.provider-model-fields{grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));min-width:0;align-items:start}
+.provider-model-fields>.field,.provider-model-fields select{min-width:0;width:100%}
+.dream-schedule-fields>.provider-model-fields,.curator-model-row>.provider-model-fields{grid-column:1/-1}

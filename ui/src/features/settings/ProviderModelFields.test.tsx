@@ -10,14 +10,23 @@ const providers: SavedProvider[] = [
 ];
 afterEach(cleanup);
 describe('ProviderModelFields', () => {
+  it('uses readable names without UUIDs and keeps both fields in one shared row', () => {
+    const id = '12345678-1234-1234-1234-123456789abc';
+    render(<ProviderModelFields providers={[{ ...providers[0], id, provider: 'My saved connection' }]} connectionId={id} model="shared" onChange={vi.fn()} />);
+    const provider = screen.getByLabelText('Provider') as HTMLSelectElement;
+    expect(provider.selectedOptions[0].textContent).toBe('My saved connection');
+    expect(provider.parentElement?.parentElement).toBe(screen.getByLabelText('Model').parentElement?.parentElement);
+    expect(provider.parentElement?.parentElement?.className).toBe('field-pair provider-model-fields');
+    expect(screen.queryByText(new RegExp(id))).toBeNull();
+  });
   it('filters models by exact connection and deduplicates model IDs with display labels', () => {
     const onChange = vi.fn();
     const view = render(<ProviderModelFields providers={providers} connectionId="a" model="shared" onChange={onChange} />);
     const model = screen.getByLabelText('Model') as HTMLSelectElement;
     expect([...model.options].map(option => option.value)).toEqual(['', 'shared', 'only-a']);
     expect(model.selectedOptions[0].textContent).toBe('Friendly');
-    expect(screen.getByRole('option', { name: 'Same · a' })).toBeTruthy();
-    expect(screen.getByRole('option', { name: 'Same · b' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Same · 1' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Same · 2' })).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'b' } });
     expect(onChange).toHaveBeenLastCalledWith('b', 'shared');
     view.rerender(<ProviderModelFields providers={providers} connectionId="b" model="shared" onChange={onChange} />);
