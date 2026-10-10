@@ -4,7 +4,7 @@ import { AgentToolbar } from './AgentToolbar';
 import { api } from '../../app/api';
 vi.mock('../../app/api', async original => ({ ...await original<typeof import('../../app/api')>(), api: vi.fn() }));
 afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-const callbacks = () => ({ onSelect: vi.fn(), onAgentsChanged: vi.fn(async () => {}), onModelConnectionsChanged: vi.fn(async () => {}), onOperatorProfileChanged: vi.fn(), onFirstRunComplete: vi.fn() });
+const callbacks = () => ({ onSelect: vi.fn(), onAgentsChanged: vi.fn(async () => {}), onModelConnectionsChanged: vi.fn(async () => {}), onOperatorProfileChanged: vi.fn(), onFirstRunComplete: vi.fn(), onSetupComplete: vi.fn(async () => {}) });
 async function mount(props = callbacks()) {
  let view!: ReturnType<typeof render>;
  await act(async () => { view = render(<AgentToolbar agents={[]} selectedId="" firstRun {...props} />); });
@@ -66,7 +66,22 @@ it('real wizard reloads a lost-response submission and retries its exact origina
  expect(second.props.onSelect).toHaveBeenCalledWith(original.agent.id);
  expect(second.props.onAgentsChanged).toHaveBeenCalledTimes(1);
  expect(second.props.onModelConnectionsChanged).toHaveBeenCalledTimes(1);
+ expect(second.props.onSetupComplete).toHaveBeenCalledTimes(1);
  expect(localStorage.getItem('hc.setupOperation')).toBeNull();
+ expect(screen.getByText('You magnificent thing.')).toBeTruthy();
+});
+it('completes provider-backed setup before preserving the existing finale', async () => {
+ const provider = { id: 'openai-main', provider: 'OpenAI', apiType: 'openai-responses', baseUrl: 'https://example.test', models: ['gpt-test'] };
+ vi.mocked(api).mockImplementation(async path => path === '/api/setup/operation'
+  ? { agent: { id: 'original-agent' } }
+  : path === '/api/settings/model-connections' ? { connections: [provider] } : {});
+ const { props } = await mount(); fill();
+ fireEvent.change(screen.getByLabelText('Provider'), { target: { value: provider.id } });
+ fireEvent.change(screen.getByLabelText('Model'), { target: { value: provider.models[0] } });
+ await act(async () => { fireEvent.click(screen.getByText('Skip / Finish')); });
+ expect(writes()[0].modelSelection).toEqual({ connectionId: provider.id, model: provider.models[0] });
+ expect(props.onSetupComplete).toHaveBeenCalledTimes(1);
+ expect(props.onFirstRunComplete).not.toHaveBeenCalled();
  expect(screen.getByText('You magnificent thing.')).toBeTruthy();
 });
 it('real wizard reports unavailable durable storage without sending an unrecoverable write', async () => {

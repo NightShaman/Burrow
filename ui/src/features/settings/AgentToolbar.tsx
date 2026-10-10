@@ -216,6 +216,8 @@ export function AgentToolbar({ agents, selectedId, onSelect, onAgentsChanged, on
    onOperatorProfileChanged?.(payload.operator);
    await Promise.all([onModelConnectionsChanged(), onAgentsChanged()]);
    if (!current()) return;
+   await markSetupComplete();
+   if (!current()) return;
    onSelect(result.agent.id); setCelebrating(true);
   } catch (cause) { if (current()) setError(`Could not finish first-run setup: ${cause instanceof Error ? cause.message : 'Unknown error'}.${attempted ? ' Retry to recover the original submission.' : ''}`); }
   finally { setupBusy.current = false; if (current()) setState('idle'); }
