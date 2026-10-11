@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Brains, type Brain } from './AlbdruckPage';
+import { Brains, type Brain } from './BrainsPage';
 import { api } from '../../app/api';
 vi.mock('../../app/api', () => ({ api: vi.fn(), jsonMutation: (method: string, body?: unknown) => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); window.history.replaceState(null, '', '/'); });
@@ -8,6 +8,17 @@ const brain = (patch: Partial<Brain> = {}): Brain => ({ id:'b1',agentId:'a',titl
 const agents = [{id:'a',name:'Agent A'},{id:'b',name:'Agent B'}] as never;
 
 describe('Brains workspace', () => {
+  it('provides a detail empty state and identifies the opened memory card', async () => {
+    vi.mocked(api).mockResolvedValue({items:[brain()],nextCursor:null});
+    render(<Brains agents={agents} />);
+    expect(screen.getByRole('region', {name:'Memory detail'})).toBeTruthy();
+    const card = await screen.findByRole('button', {name:/Remember this.*Explicit saved memory/});
+    fireEvent.click(card);
+    expect(card.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByRole('region', {name:'Memory detail'})).toBeNull();
+    expect(screen.getByRole('region', {name:'Memory editor'})).toBeTruthy();
+  });
+
   it('fences owner interleavings and keeps agentId in the URL', async () => {
     let resolveA!: (value: unknown) => void;
     vi.mocked(api).mockImplementation(async path => path.includes('agentId=a') ? new Promise(resolve => { resolveA=resolve; }) : {items:[brain({id:'b1',agentId:'b',title:'B memory'})],nextCursor:null});

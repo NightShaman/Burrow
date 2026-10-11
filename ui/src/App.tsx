@@ -30,7 +30,7 @@ import { useWorkspaceFiles } from './features/workspace/useWorkspaceFiles';
 import { useChatSession } from './features/chat/useChatSession';
 const Settings = lazy(() => import('./features/settings/SettingsPage').then(({ Settings }) => ({ default: Settings })));
 const Tasks = lazy(() => import('./features/tasks/TasksPage').then(({ Tasks }) => ({ default: Tasks })));
-const Brains = lazy(() => import('./features/albdruck/AlbdruckPage').then(({ Brains }) => ({ default: Brains })));
+const Brains = lazy(() => import('./features/brains/BrainsPage').then(({ Brains }) => ({ default: Brains })));
 const Archive = lazy(() => import('./features/tasks/ArchivePage').then(({ Archive }) => ({ default: Archive })));
 import { GroupChannelsPage } from './features/groups/GroupChannelsPage';
 import { Forge } from './features/forge/ForgePage';
