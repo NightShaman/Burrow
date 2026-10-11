@@ -9,7 +9,7 @@ import { createGroupChannelMessageStarter } from '../src/group-channel-message.m
 import { buildIdentity } from './build-identity.mjs';
 import { releaseProvenance } from './release-provenance.mjs';
 import { httpAuthorityConfig, hostAuthorityPolicy } from '../src/http-authority.mjs';
-import { browserOriginConfig, browserRequestPolicy } from '../src/browser-origin-policy.mjs';
+import { browserOriginConfig, browserOriginSettings, saveBrowserOriginSettings, browserRequestPolicy } from '../src/browser-origin-policy.mjs';
 import { artifactResponseHeaders } from '../src/artifact-response-policy.mjs';
 import { postgresTransactionContext, withPostgresTransaction } from '../src/postgres-foundation.mjs';
 import { readJsonBody } from '../src/request-resource-budgets.mjs';
@@ -134,7 +134,7 @@ const apiDocsRoot = path.join(sourceRoot, 'public', 'api-docs');
 const port = Number(process.env.BURROW_UI_PORT || process.argv.find((arg) => arg.startsWith('--port='))?.split('=')[1] || 42817);
 const host = process.env.BURROW_UI_HOST || '0.0.0.0';
 const authorityConfig = httpAuthorityConfig({ host, port });
-const originConfig = browserOriginConfig();
+browserOriginConfig(); // Validate optional environment override at startup.
 const activeChatRuns = new Map();
 const executionProviders = createExecutionProviderRegistry();
 const sessionContinuityHeads = new Map();
@@ -1573,9 +1573,10 @@ function sendJson(res, status, body) {
   res.end(data);
 }
 
-function applyApiCors(req, res, url) {
+async function applyApiCors(req, res, url) {
   if (!url.pathname.startsWith('/api/') && !url.pathname.startsWith('/auth/')) return false;
-  const policy = browserRequestPolicy(req, url, originConfig);
+  const { effective } = await browserOriginSettings({ metadata: metadataStore() });
+  const policy = browserRequestPolicy(req, url, effective);
   if (policy.error) { sendJson(res, policy.status, { ok: false, error: policy.error }); return true; }
   if (policy.origin) {
     res.setHeader('access-control-allow-origin', policy.origin);
@@ -1654,6 +1655,11 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
 
   };
   if (categories.settings && typeof categories.settings === 'object') {
+    if (categories.settings.browserOrigin !== undefined) {
+      const result = await write('settings:browser-origin', () => saveBrowserOriginSettings(categories.settings.browserOrigin, { metadata: metadataStore() }));
+      if (!result.ok) return failure(result);
+      imported.push('settings:browser-origin');
+    }
     if (categories.settings.executionBoundaries) {
       const result = await write('settings:execution-boundaries', () => saveExecutionBoundaries(categories.settings.executionBoundaries, { metadataStore: postgresApplication.stores.metadata, }));
       if (!result.ok) return failure(result);
@@ -1789,6 +1795,7 @@ async function exportSnapshot(categories = []) {
   if (categories.includes('settings')) {
     data.settings = {
       schema: 'burrow.portable-settings/v1',
+      browserOrigin: (await browserOriginSettings({ metadata: metadataStore() })).settings,
       executionBoundaries: await readExecutionBoundaries({ metadataStore: postgresApplication.stores.metadata, }),
       curatorSelection: await readCuratorSelection({ stores: postgresApplication.stores, root: curatorRoot() }),
       ownership: [{ id: 'core-persistence', authority: 'postgres', storage: 'PostgreSQL' }],
@@ -3166,7 +3173,7 @@ const settingsRoute = createSettingsRoutes({ timezoneSettings: async () => ({ ok
 const agentRoute = createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession, agentOverview });
 const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
 const brainRoute = createBrainRoutes({ store: postgresApplication.stores.brains, embeddings: postgresApplication.stores.brainEmbeddings, readJsonBody, sendJson });
-const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
+const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, browserOriginSettings: () => browserOriginSettings({ metadata: metadataStore() }), saveBrowserOriginSettings: body => saveBrowserOriginSettings(body, { metadata: metadataStore() }), executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
 const observabilityRoute = createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, codexLbAccounts, anthropicOauthUsage, openaiOauthUsage, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore: postgresApplication.stores.conversations, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
 const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJson, validateBoundaryBody, withScheduledJobs, scheduler, listGroupChannels, createGroupChannel, readGroupChannelTurns, groupChannelRuns, startGroupChannelMessage, cancelGroupChannelRun, runtimeDataRoot, conversationStore: postgresApplication.stores.conversations });
 const authRoute = createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
@@ -3248,7 +3255,7 @@ const server = createServer(async (req, res) => {
     // Absolute-form request targets cannot override the checked authority.
     if (authorityConfig.enabled && url.host !== authority.authority) return sendJson(res, 403, { ok: false, error: 'host_authority_not_allowed' });
     const origin = `${url.protocol}//${url.host}`;
-    if (applyApiCors(req, res, url)) return;
+    if (await applyApiCors(req, res, url)) return;
     if (await authRoute({ req, res, url, origin })) return;
     if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/api/health')) return sendJson(res, 200, { ok: true, runtime: 'burrow', version: releaseVersion, buildIdentity: healthBuildIdentity, ...(healthReleaseProvenance ? { releaseProvenance: healthReleaseProvenance } : {}), ...(process.env.BURROW_SMOKE_TOKEN && req.headers['x-burrow-smoke-token'] === process.env.BURROW_SMOKE_TOKEN ? { smokeToken: process.env.BURROW_SMOKE_TOKEN } : {}) });
     if (!(await authorizeRequest(req, res, url))) return;
