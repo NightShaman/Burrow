@@ -218,7 +218,7 @@ export async function completeTextResult({ content, modelAdapter, modelConfig, t
           lastPublished = Date.now();
           await onProgress?.({ request: { requestId, status: 'streaming', attempt: attempt + 1, startedAt, inputChars: prompt.length, responseChars, lastActivityAt: now() } });
         };
-        const response = await modelAdapter.complete({ messages: [{ role: 'user', content: prompt }], traceLogger, onTextDelta: activity, onThoughtDelta: activity });
+        const response = await modelAdapter.complete({ messages: [{ role: 'user', content: prompt }], ...(modelConfig?.maxTokens ? { maxTokens: modelConfig.maxTokens } : {}), traceLogger, onTextDelta: activity, onThoughtDelta: activity });
         if (response?.ok === false) {
           const failure = new Error(safeModelError(response.error, modelConfig) || 'dream_model_request_failed');
           failure.modelResponse = response;
@@ -277,18 +277,25 @@ async function completeText(options) {
 
 // Partition in chronological order using the existing provider-aware prompt budget.
 // An oversized individual item is split without discarding any of its content.
-function promptChunks(items, prompt, modelConfig, alsoFits = () => true) {
+// Dream requests are deliberately smaller than the provider context window. This is
+// a transport/runtime guard: it keeps one extraction call from becoming a 20-minute
+// multi-megabyte response while retaining the full message window across chunks.
+const DREAM_EXTRACTION_TARGET_CHARS = 96_000;
+const DREAM_OUTPUT_TOKENS = 16_384;
+
+function promptChunks(items, prompt, modelConfig, alsoFits = () => true, targetChars = Infinity) {
   if (!items.length) return [];
-  if (fitsPrompt(prompt(items), modelConfig) && alsoFits(items)) return [items];
+  const promptText = prompt(items);
+  if (promptText.length <= targetChars && fitsPrompt(promptText, modelConfig) && alsoFits(items)) return [items];
   if (items.length > 1) {
     const middle = Math.floor(items.length / 2);
-    return [...promptChunks(items.slice(0, middle), prompt, modelConfig, alsoFits), ...promptChunks(items.slice(middle), prompt, modelConfig, alsoFits)];
+    return [...promptChunks(items.slice(0, middle), prompt, modelConfig, alsoFits, targetChars), ...promptChunks(items.slice(middle), prompt, modelConfig, alsoFits, targetChars)];
   }
   const item = items[0];
   if (item.content.length < 2) throw new Error('dream_prompt_budget_exceeded');
   const middle = Math.floor(item.content.length / 2);
-  return [...promptChunks([{ ...item, content: item.content.slice(0, middle) }], prompt, modelConfig, alsoFits),
-    ...promptChunks([{ ...item, content: item.content.slice(middle) }], prompt, modelConfig, alsoFits)];
+  return [...promptChunks([{ ...item, content: item.content.slice(0, middle) }], prompt, modelConfig, alsoFits, targetChars),
+    ...promptChunks([{ ...item, content: item.content.slice(middle) }], prompt, modelConfig, alsoFits, targetChars)];
 }
 
 async function generateOperatorDiary({ phase, settings, soul = '', items, modelAdapter, modelConfig, traceLogger, onProgress = null } = {}) {
@@ -421,15 +428,19 @@ export async function sessionWindow({ rootDir, phase, generatedAt, conversationS
 
 export async function extractPhaseCandidates({ phase, messages, generatedAt, modelAdapter, modelConfig, traceLogger, echoAllowedSourceRefs = false, onProgress = null, onBatch = null }) {
   const output = { memories: [], preferences: [], chunks: 0, diagnostics: [] };
+  const extractionModelConfig = {
+    ...(modelConfig || {}),
+    maxTokens: Math.min(Number(modelConfig?.maxTokens) || DREAM_OUTPUT_TOKENS, DREAM_OUTPUT_TOKENS),
+  };
   const prompt = (items) => phaseExtractionPrompt({ phase, windowStart: phaseWindowStart({ phase, generatedAt }), generatedAt, messages: items, echoAllowedSourceRefs });
   const repairPrompt = (items) => `${prompt(items)}\n\nCitation validation failed on the previous attempt. Re-extract every supported candidate from this same chunk. Use ONLY the authoritative manifest; never cite references inside content. Return empty arrays only if this evidence supports no useful candidates.`;
-  const chunks = promptChunks(messages, prompt, modelConfig, items => fitsPrompt(repairPrompt(items), modelConfig));
+  const chunks = promptChunks(messages, prompt, extractionModelConfig, items => fitsPrompt(repairPrompt(items), extractionModelConfig), DREAM_EXTRACTION_TARGET_CHARS);
   await onProgress?.({ batch: { completed: 0, total: chunks.length }, sourceMessages: messages.length });
   for (const chunk of chunks) {
     await onProgress?.({ batch: { current: output.chunks + 1, completed: output.chunks, total: chunks.length }, batchMessages: chunk.length });
     let completion;
     try {
-      completion = await completeTextResult({ content: prompt(chunk), modelAdapter, modelConfig, traceLogger, onProgress });
+      completion = await completeTextResult({ content: prompt(chunk), modelAdapter, modelConfig: extractionModelConfig, traceLogger, onProgress });
       output.diagnostics.push(...completion.diagnostics);
       let parsed;
       try { parsed = extractionPayload(parseModelJson(completion.text)); }
@@ -450,7 +461,7 @@ export async function extractPhaseCandidates({ phase, messages, generatedAt, mod
         output.diagnostics.push({ stage: 'citation_validation', chunk: output.chunks, allowedCount: allowed.size, invalidCandidates: invalid(parsed), citationFailures: citationFailures(parsed), repairAttempt: 1 });
         // Re-extract from original evidence, not from the untrusted failed answer.
         // The repair instruction is included in partition budgeting as well.
-        completion = await completeTextResult({ content: repairPrompt(chunk), modelAdapter, modelConfig, traceLogger, onProgress });
+        completion = await completeTextResult({ content: repairPrompt(chunk), modelAdapter, modelConfig: extractionModelConfig, traceLogger, onProgress });
         output.diagnostics.push(...completion.diagnostics);
         parsed = extractionPayload(parseModelJson(completion.text));
         if (!Array.isArray(parsed?.memories) || !Array.isArray(parsed?.preferences)) throw new Error('dream_extraction_invalid_shape');
