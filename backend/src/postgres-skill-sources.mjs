@@ -42,6 +42,19 @@ export async function skillLock(client,id,{tryOnly=false}={}) {
  const {rows}=await client.query(`SELECT ${tryOnly?'pg_try_advisory_xact_lock':'pg_advisory_xact_lock'}(hashtextextended($1,0)) AS locked`,['skill:'+id]);
  if(tryOnly && !rows[0].locked) throw skillSourceError('skill_sync_running',409);
 }
+export function normalizeSkillSource(input={},old=null,clock=()=>new Date().toISOString()) {
+   const value={repository:input.repository??old?.repository,ref:input.ref??old?.ref??'HEAD',path:input.path??old?.path};
+   try {validateGitSkillSource(value);} catch {throw skillSourceError('skill_source_invalid');}
+   const enabled=input.enabled??old?.enabled??false;
+   if(typeof enabled!=='boolean') throw skillSourceError('skill_source_enabled_invalid');
+   const cron=input.cron===undefined?(old?.cron??null):input.cron;
+   const timezone=input.timezone??old?.timezone??'UTC';
+   let next=null;
+   try {new Intl.DateTimeFormat('en',{timeZone:timezone});if(cron!==null) parseCron(cron);if(enabled){if(!cron)throw Error();next=nextCronOccurrence(cron,timezone,new Date(clock()));}} catch {throw skillSourceError('skill_source_schedule_invalid');}
+   const timeout=input.fetchTimeoutMs??old?.fetchTimeoutMs??120000;
+   if(!Number.isSafeInteger(timeout)||timeout<=0||timeout>2147483647) throw skillSourceError('skill_source_timeout_invalid');
+   return {value,enabled,cron,timezone,timeout,next};
+}
 export class PostgresSkillSources {
  constructor({pool,clock=()=>new Date().toISOString()}={}) {this.pool=normalizePostgresPool(pool);this.clock=clock;}
  async get(id,client=this.pool) {return skillSourceRow((await client.query('SELECT * FROM skill_git_sources WHERE skill_id=$1',[id])).rows[0]);}
@@ -50,16 +63,7 @@ export class PostgresSkillSources {
   return withPostgresTransaction(this.pool,async c=>{
    await skillLock(c,id);
    const old=await this.get(id,c);
-   const value={repository:input.repository??old?.repository,ref:input.ref??old?.ref??'HEAD',path:input.path??old?.path};
-   try {validateGitSkillSource(value);} catch {throw skillSourceError('skill_source_invalid');}
-   const enabled=input.enabled??old?.enabled??false;
-   if(typeof enabled!=='boolean') throw skillSourceError('skill_source_enabled_invalid');
-   const cron=input.cron===undefined?(old?.cron??null):input.cron;
-   const timezone=input.timezone??old?.timezone??'UTC';
-   let next=null;
-   try {new Intl.DateTimeFormat('en',{timeZone:timezone});if(cron!==null) parseCron(cron);if(enabled){if(!cron)throw Error();next=nextCronOccurrence(cron,timezone,new Date(this.clock()));}} catch {throw skillSourceError('skill_source_schedule_invalid');}
-   const timeout=input.fetchTimeoutMs??old?.fetchTimeoutMs??120000;
-   if(!Number.isSafeInteger(timeout)||timeout<=0||timeout>2147483647) throw skillSourceError('skill_source_timeout_invalid');
+   const {value,enabled,cron,timezone,timeout,next}=normalizeSkillSource(input,old,this.clock);
    const skill=(await c.query('SELECT id FROM skills WHERE id=$1 FOR UPDATE',[id])).rows[0];
    if(!skill) throw skillSourceError('skill_not_found',404);
    // Attaching a source does not replace the installed copy. Publication is explicit sync.

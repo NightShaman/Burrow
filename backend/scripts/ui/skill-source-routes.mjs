@@ -5,6 +5,15 @@ import { skillSourceError } from '../../src/postgres-skill-sources.mjs';
 /** Operator management API; uses existing HTTP auth/origin/JSON boundaries. */
 export function createSkillSourceRoutes({sources,skills,sync,pool,readJsonBody,sendJson}={}) {
  return async ({req,res,url})=>{
+  if(['/api/settings/skills/git/preview','/api/settings/skills/git/import'].includes(url.pathname)) {
+   try {
+    if(req.method!=='POST')throw skillSourceError('method_not_allowed',405);
+    const importing=url.pathname.endsWith('/import');
+    const result=await sync[importing?'import':'preview'](await readJsonBody(req));
+    sendJson(res,importing?201:200,result);
+   } catch(e){sendJson(res,e.statusCode||500,{ok:false,error:e.statusCode?e.message:'skill_source_failed'});}
+   return true;
+  }
   const match=/^\/api\/settings\/skills\/([^/]+)\/(source|sync|history|files)(?:\/(.+))?$/.exec(url.pathname);
   if(!match)return false;
   const id=decodeURIComponent(match[1]), action=match[2];

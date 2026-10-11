@@ -157,18 +157,42 @@ it('renders a standalone three-pane workspace with search, filters, supported ed
   const details = screen.getByRole('region', { name: 'Skill details and assignments' });
   const source = screen.getByRole('complementary', { name: 'Skill source and updates' });
   fireEvent.click(await within(library).findByRole('button', {name:/^Review/}));
-  expect(within(details).getByDisplayValue('# Review')).toBeTruthy();
-  expect(within(details).getByRole('checkbox', {name:'Agent'})).toBeTruthy();
+  expect(within(details).getByText('# Review')).toBeTruthy();
+  expect(within(details).queryByRole('textbox')).toBeNull();
+  expect(within(source).getByRole('checkbox', {name:'Agent', hidden:true})).toBeTruthy();
   expect(within(source).getByText('sha256:123')).toBeTruthy();
   expect(within(source).getByText('Not supplied by catalog')).toBeTruthy();
-  expect(within(source).getByText('Not available')).toBeTruthy();
+  expect(within(source).getByRole('button', { name: 'Connect Git source' })).toBeTruthy();
   expect(within(source).queryByRole('button', {name:/sync/i})).toBeNull();
   fireEvent.change(screen.getByRole('searchbox', {name:'Search skills'}),{target:{value:'other'}});
   expect(within(library).queryByRole('button',{name:/^Review/})).toBeNull();
-  expect(within(details).getByDisplayValue('# Review')).toBeTruthy();
+  expect(within(details).getByText('# Review')).toBeTruthy();
+  expect(within(details).queryByRole('textbox')).toBeNull();
   fireEvent.change(screen.getByRole('combobox', {name:'Lifecycle filter'}),{target:{value:'available'}});
   expect(screen.getByText('No skills match these filters.')).toBeTruthy();
   fireEvent.change(screen.getByRole('combobox', {name:'Lifecycle filter'}),{target:{value:'all'}});
   fireEvent.change(screen.getByRole('combobox', {name:'Assignment filter'}),{target:{value:'unassigned'}});
   expect(within(library).queryByRole('button',{name:/Other/})).toBeNull();
 });
+
+ it('keeps repository-backed skills in read mode and management collapsed', async () => {
+ const managed = {...skill, contentOwner:'git', gitSource:{repository:'https://example.com/skills.git',ref:'main',path:'review',enabled:false,cron:'0 * * * *',timezone:'UTC',fetchTimeoutMs:120000}};
+ mocked.mockImplementation(async path => (path === '/api/settings/skills' ? {skills:[managed]} : path.endsWith('/source') ? {source:managed.gitSource} : path.includes('/history') ? {history:[],nextCursor:null} : path.endsWith('/files') ? {files:[]} : grants) as never);
+ render(<SkillsSettings workspace agents={agents} agentId="agent" />);
+ fireEvent.click(await screen.findByRole('button',{name:/^Review/}));
+ expect(screen.getByText('# Review')).toBeTruthy();
+ expect(screen.queryByRole('button',{name:'Edit text'})).toBeNull();
+ expect(screen.queryByRole('textbox',{name:'Content'})).toBeNull();
+ expect(screen.getByText('Installed details & source settings').closest('details')).not.toHaveProperty('open',true);
+ expect(screen.getByText('Assignments & lifecycle').closest('details')).not.toHaveProperty('open',true);
+ expect(mocked.mock.calls.some(([,init])=>init?.method)).toBe(false);
+ });
+ it('opens manual creation only as a separate explicit workflow', async () => {
+ mocked.mockImplementation(async path => (path === '/api/settings/skills' ? {skills:[]} : grants) as never);
+ render(<SkillsSettings workspace agents={agents} agentId="agent" />);
+ await screen.findByRole('button',{name:'New text skill'});
+ expect(screen.queryByRole('textbox',{name:'Name'})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'New text skill'}));
+ expect(screen.getByRole('textbox',{name:'Name'})).toBeTruthy();
+ expect(screen.getByRole('button',{name:'Create skill'})).toBeTruthy();
+ });

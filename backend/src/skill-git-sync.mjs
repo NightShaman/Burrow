@@ -2,8 +2,9 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fetchGitSkill, skillFilesHash } from './git-skill-fetch.mjs';
-import { withPostgresTransaction } from './postgres-foundation.mjs';
-import { PostgresSkillSources, skillLock, skillSourceError } from './postgres-skill-sources.mjs';
+import { withPostgresTransaction, postgresTransactionContext } from './postgres-foundation.mjs';
+import { PostgresSkillSources, skillLock, skillSourceError, normalizeSkillSource } from './postgres-skill-sources.mjs';
+import { PostgresSkillSettingsStore } from './postgres-skill-settings-store.mjs';
 import { nextCronOccurrence } from './scheduled-job-store.mjs';
 
 export async function installedSkillFiles(root) {
@@ -59,25 +60,7 @@ export class SkillGitSync {
      const files=old.storage==='filesystem'?await installedSkillFiles(old.installed_path):[{path:'SKILL.md',bytes:Buffer.from(old.content),mode:0o644}];
      if(skillFilesHash(files)!==old.installed_hash)throw skillSourceError('skill_local_changes',409);
     }
-    hash=fetched.storage==='postgres'?skillFilesHash([{path:'SKILL.md',bytes:Buffer.from(fetched.content),mode:0o644}]):fetched.contentHash;
-    if(old.content_owner==='git'&&old.installed_hash===hash)status='unchanged';
-    else {
-     if(fetched.storage==='filesystem') {
-      const staging=path.join(this.packageRoot,'.staging-'+id+'-'+randomUUID());
-      publishedPath=path.join(this.packageRoot,id,hash.replace('sha256:',''));
-      await fs.mkdir(staging,{recursive:true});
-      try {
-       for(const file of fetched.files){const destination=path.join(staging,file.path);await fs.mkdir(path.dirname(destination),{recursive:true});await fs.writeFile(destination,file.bytes,{mode:file.mode});await fs.chmod(destination,file.mode);}
-       await fs.mkdir(path.dirname(publishedPath),{recursive:true});
-       try {await fs.rename(staging,publishedPath);createdPath=publishedPath;}catch(e){if(!['EEXIST','ENOTEMPTY'].includes(e.code))throw e;if(skillFilesHash(await installedSkillFiles(publishedPath))!==hash)throw skillSourceError('skill_local_changes',409);}
-      } finally {await fs.rm(staging,{recursive:true,force:true}).catch(()=>this.onError(skillSourceError('skill_package_cleanup_failed')));}
-     }
-     await c.query('DELETE FROM skill_package_files WHERE skill_id=$1',[id]);
-     if(fetched.storage==='filesystem')for(const file of fetched.files)await c.query('INSERT INTO skill_package_files(skill_id,file_path,bytes,executable) VALUES($1,$2,$3,$4)',[id,file.path,file.bytes.length,file.mode===0o755]);
-     await c.query("UPDATE skills SET name=$2,description=$3,content=$4,storage=$5,content_owner='git',installed_path=$6,installed_hash=$7,updated_at=$8 WHERE id=$1",[id,fetched.name||id,fetched.description,fetched.content,fetched.storage,publishedPath,hash,this.clock()]);
-     if(old.installed_path && old.installed_path!==publishedPath) await fs.utimes(old.installed_path,new Date(this.clock()),new Date(this.clock())).catch(()=>{});
-     status='updated';
-    }
+    ({hash,status,publishedPath}=await this.publish(c,id,old,fetched,p=>{createdPath=p;}));
    }catch(e){
     await c.query('ROLLBACK TO SAVEPOINT skill_publication');
     error=e.message==='skill_local_changes'?'skill_local_changes':e.message?.includes('timed out')?'skill_sync_timeout':'skill_sync_failed';
@@ -90,6 +73,80 @@ export class SkillGitSync {
    const {rows}=await c.query('INSERT INTO skill_sync_history(skill_id,status,revision,content_hash,error,installed_path,started_at) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING sequence',[id,status,revision,hash,error,publishedPath,started]);
    return {ok:status!=='failed',status,...(error?{error}:{}),receiptId:String(rows[0].sequence),source:await sources.get(id)};
   });
+ }
+ async fetchImport(input={}) {
+  const options=normalizeSkillSource(input,null,this.clock);
+  let fetched;
+  try {fetched=await this.fetchSkill({...options.value,timeoutMs:options.timeout});}
+  catch(e){throw skillSourceError(e.message?.includes('timed out')?'skill_sync_timeout':'skill_git_invalid',400);}
+  if(!fetched.content.trim())throw skillSourceError('skill_git_invalid');
+  if(input.expectedRevision!==undefined && input.expectedRevision!==fetched.revision)throw skillSourceError('skill_revision_changed',409);
+  return {fetched,options};
+ }
+ previewRecord(fetched,options) {
+  const suggestedId=fetched.name.normalize('NFKD').replace(/[^A-Za-z0-9._-]+/g,'-').replace(/^[^A-Za-z0-9]+|[-.]+$/g,'').slice(0,128)||'skill';
+  return {name:fetched.name,description:fetched.description,content:fetched.content,suggestedId,
+   storage:fetched.storage,revision:fetched.revision,contentHash:fetched.contentHash,
+   files:fetched.files.map(f=>({path:f.path,bytes:f.bytes.length,executable:f.mode===0o755})),
+   source:{...options.value,enabled:options.enabled,cron:options.cron,timezone:options.timezone,fetchTimeoutMs:options.timeout}};
+ }
+ async preview(input={}) {
+  const {fetched,options}=await this.fetchImport(input);
+  return {ok:true,preview:this.previewRecord(fetched,options)};
+ }
+ async import(input={}) {
+  // All network/object validation precedes any persistent mutation. Preview is not trusted.
+  const {fetched,options}=await this.fetchImport(input);
+  const id=String(input.id??this.previewRecord(fetched,options).suggestedId).trim();
+  if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id))throw skillSourceError('skill_id_invalid');
+  let createdPath=null;
+  return withPostgresTransaction(this.pool,async c=>{
+   // Hold the ID lock through rollback compensation: another importer cannot reuse
+   // the tree while a failed publication is removing its own newly created copy.
+   await skillLock(c,id);
+   await c.query('SAVEPOINT skill_import');
+   try {
+    const context=postgresTransactionContext(c);
+    const skills=new PostgresSkillSettingsStore({pool:context,clock:this.clock});
+    const sources=new PostgresSkillSources({pool:context,clock:this.clock});
+    await skills.create({id,name:fetched.name,description:fetched.description,content:fetched.content,lifecycle:input.lifecycle,global:input.global});
+    await sources.save(id,input);
+    const {hash,publishedPath}=await this.publish(c,id,{},fetched,p=>{createdPath=p;});
+    await c.query('UPDATE skill_git_sources SET installed_revision=$2,observed_revision=$2,last_checked_at=$3,last_success_at=$3 WHERE skill_id=$1',[id,fetched.revision,this.clock()]);
+    const {rows}=await c.query("INSERT INTO skill_sync_history(skill_id,status,revision,content_hash,installed_path,started_at) VALUES($1,'updated',$2,$3,$4,$5) RETURNING sequence",[id,fetched.revision,hash,publishedPath,this.clock()]);
+    const result={ok:true,status:'updated',receiptId:String(rows[0].sequence),skill:await skills.get(id),source:await sources.get(id)};
+    await c.query('RELEASE SAVEPOINT skill_import');
+    return result;
+   } catch(e) {
+    await c.query('ROLLBACK TO SAVEPOINT skill_import');
+    if(createdPath)await fs.rm(createdPath,{recursive:true,force:true});
+    await c.query('RELEASE SAVEPOINT skill_import');
+    throw e;
+   }
+  });
+ }
+ async publish(c,id,old,fetched,onCreated=()=>{}) {
+    const hash=fetched.storage==='postgres'?skillFilesHash([{path:'SKILL.md',bytes:Buffer.from(fetched.content),mode:0o644}]):fetched.contentHash;
+    let status, publishedPath=null;
+    if(old.content_owner==='git'&&old.installed_hash===hash)status='unchanged';
+    else {
+     if(fetched.storage==='filesystem') {
+      const staging=path.join(this.packageRoot,'.staging-'+id+'-'+randomUUID());
+      publishedPath=path.join(this.packageRoot,id,hash.replace('sha256:',''));
+      await fs.mkdir(staging,{recursive:true});
+      try {
+       for(const file of fetched.files){const destination=path.join(staging,file.path);await fs.mkdir(path.dirname(destination),{recursive:true});await fs.writeFile(destination,file.bytes,{mode:file.mode});await fs.chmod(destination,file.mode);}
+       await fs.mkdir(path.dirname(publishedPath),{recursive:true});
+       try {await fs.rename(staging,publishedPath);onCreated(publishedPath);}catch(e){if(!['EEXIST','ENOTEMPTY'].includes(e.code))throw e;if(skillFilesHash(await installedSkillFiles(publishedPath))!==hash)throw skillSourceError('skill_local_changes',409);}
+      } finally {await fs.rm(staging,{recursive:true,force:true}).catch(()=>this.onError(skillSourceError('skill_package_cleanup_failed')));}
+     }
+     await c.query('DELETE FROM skill_package_files WHERE skill_id=$1',[id]);
+     if(fetched.storage==='filesystem')for(const file of fetched.files)await c.query('INSERT INTO skill_package_files(skill_id,file_path,bytes,executable) VALUES($1,$2,$3,$4)',[id,file.path,file.bytes.length,file.mode===0o755]);
+     await c.query("UPDATE skills SET name=$2,description=$3,content=$4,storage=$5,content_owner='git',installed_path=$6,installed_hash=$7,updated_at=$8 WHERE id=$1",[id,fetched.name||id,fetched.description,fetched.content,fetched.storage,publishedPath,hash,this.clock()]);
+     if(old.installed_path && old.installed_path!==publishedPath) await fs.utimes(old.installed_path,new Date(this.clock()),new Date(this.clock())).catch(()=>{});
+     status='updated';
+    }
+    return {hash,status,publishedPath};
  }
  async cleanupPackages() {
   // Grace covers catalogs already returned to an in-flight turn. History records
