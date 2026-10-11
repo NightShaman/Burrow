@@ -1,3 +1,4 @@
+import { contextUsageFromRequest } from './model-adapters/adapter-primitives.mjs';
 import { summarizeSessionTurns } from './session-entry.mjs';
 import { compressionSummariesFromTranscript } from './session-compression.mjs';
 import { contextStatesFromTranscript, renderContextStates } from './session-context-state.mjs';
@@ -9,7 +10,20 @@ function messageText(message) {
 
 function messageChars(message) {
   const snapshot = message?.metadata?.providerTurn;
-  return snapshot ? JSON.stringify(snapshot.messages).length : messageText(message).length;
+  if (!snapshot) return messageText(message).length;
+  // Provider snapshots include image data URIs. Wire bytes are not text tokens;
+  // use the same text/image estimate as the provider request, without altering
+  // the persisted snapshot or the verbatim payload replayed to the model.
+  let promptChars = 0;
+  let imageCount = 0;
+  for (const entry of snapshot.messages || []) {
+    if (typeof entry.content === 'string') promptChars += entry.content.length;
+    else for (const part of Array.isArray(entry.content) ? entry.content : []) {
+      promptChars += String(part?.text || '').length;
+      if (part?.type === 'image_url' || part?.type === 'input_image' || part?.image_url || part?.input_image) imageCount++;
+    }
+  }
+  return contextUsageFromRequest({ promptChars, imageCount }).estimatedTokens * 4;
 }
 
 function contentChars(entry) {

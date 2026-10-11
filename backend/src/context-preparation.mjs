@@ -125,9 +125,16 @@ export async function prepareSessionTurnContext({
     contextWindow: modelConfig?.contextWindow,
     contextTokens: modelConfig?.contextTokens,
   });
+  // A previous successful request is telemetry, not proof that today's raw
+  // history fits. If shaping displaced uncovered entries, make that coverage
+  // boundary actionable even when the old receipt says below threshold.
+  const uncoveredEntryIds = (turnContext.conversation?.priorMessages || []).map(entry => entry.id).filter(Boolean);
+  const compressionBudget = uncoveredEntryIds.length
+    ? { ...preCompressionInspection.contextBudget, uncoveredEntryIds }
+    : preCompressionInspection.contextBudget;
   let compressionResult = null;
   try {
-    compressionResult = await compressionRunner({ rootDir: dataRoot, sessionId, config: contextConfig, contextBudget: preCompressionInspection.contextBudget, transcriptSnapshot: resolvedTranscript, logger, stores, agentId });
+    compressionResult = await compressionRunner({ rootDir: dataRoot, sessionId, config: contextConfig, contextBudget: compressionBudget, transcriptSnapshot: resolvedTranscript, logger, stores, agentId });
   } catch (error) {
     compressionResult = { ok: false, compressed: false, reason: 'compression_failed', error: error?.message || String(error) };
     await logger?.event?.('context-compression-failed', compressionResult);

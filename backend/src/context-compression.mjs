@@ -8,7 +8,7 @@ function isExecutionDigest(entry) {
 function isPromptChatMessage(entry) {
   return (isExecutionDigest(entry) || ((entry?.type ?? 'message') === 'message'
     && ['user', 'assistant', 'agent'].includes(String(entry?.role || ''))
-    && (entry?.visibility ?? 'chat') === 'chat'
+    && ((entry?.visibility ?? 'chat') === 'chat' || (entry?.metadata?.steering?.status === 'delivered' && entry?.metadata?.providerTurn))
     && (entry?.entersPrompt ?? true) === true))
     && String(entry?.content || '').trim();
 }
@@ -147,6 +147,16 @@ export function planContextCompression({ transcript = [], config = {}, contextBu
     }
   }
 
+  // Preparation's actual displaced-history boundary takes precedence over a
+  // stale request meter or a preferred survivor size. Cover every displaced
+  // entry, but never consume the newest continuity anchor.
+  const uncoveredIds = new Set(contextBudget?.uncoveredEntryIds || []);
+  const lastUncoveredIndex = chatMessages.findLastIndex(message => uncoveredIds.has(message.id));
+  const coverageBoundary = Math.min(lastUncoveredIndex + 1, Math.max(0, chatMessages.length - 1));
+  const preferredBoundary = chatMessages.length - keptMessages.length;
+  if (coverageBoundary > preferredBoundary) keptMessages.splice(0, coverageBoundary - preferredBoundary);
+  const coverageTriggers = coverageBoundary > 0;
+
   const eligibleMessages = chatMessages.slice(0, Math.max(0, chatMessages.length - keptMessages.length));
   const eligibleChars = eligibleMessages.reduce((total, message, index) => total + messageChars(message) + (index ? 2 : 0), 0);
   const estimatedEligibleTokens = estimateTokensFromChars(eligibleChars);
@@ -158,11 +168,12 @@ export function planContextCompression({ transcript = [], config = {}, contextBu
   const retentionBoundary = eligibleMessages.length > 0;
   const unknownCapacitySafety = usageRatio === null
     && estimatedEligibleTokens >= Math.min(compression.leafChunkTokens, Math.max(1, compression.summaryTargetTokens));
-  const shouldCompress = eligibleMessages.length > 0 && (pressureTriggers || unknownCapacitySafety);
+  const shouldCompress = eligibleMessages.length > 0 && (pressureTriggers || unknownCapacitySafety || coverageTriggers);
 
   return {
     shouldCompress,
     reason: !eligibleMessages.length ? 'no_eligible_messages'
+      : coverageTriggers ? 'uncovered_history'
       : pressureTriggers ? 'context_pressure'
         : unknownCapacitySafety ? 'unknown_capacity_safety'
           : 'below_threshold',

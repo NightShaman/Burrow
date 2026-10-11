@@ -13,7 +13,7 @@ function isExecutionDigest(entry) {
 function isPromptChatMessage(entry) {
   return (isExecutionDigest(entry) || ((entry?.type ?? 'message') === 'message'
     && ['user', 'assistant', 'agent'].includes(String(entry?.role || ''))
-    && (entry?.visibility ?? 'chat') === 'chat'
+    && ((entry?.visibility ?? 'chat') === 'chat' || (entry?.metadata?.steering?.status === 'delivered' && entry?.metadata?.providerTurn))
     && (entry?.entersPrompt ?? true) === true))
     && String(entry?.content || '').trim();
 }
