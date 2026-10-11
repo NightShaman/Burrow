@@ -17,7 +17,7 @@ export async function forgeDiagnosticJobs(pool, { limit = 50, cursor } = {}) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 100 || (cursor !== undefined && (!/^[1-9]\d*$/.test(cursor) || !Number.isSafeInteger(Number(cursor)))))
     throw Object.assign(new Error('invalid_diagnostics_query'), { statusCode: 400 });
   // Query only records after the cursor; this avoids loading unbounded prompt data.
-  const result = await pool.query(`SELECT id, record->>'status' AS status, record->>'mode' AS mode,
+  const result = await pool.query(`SELECT id, record->>'status' AS status, COALESCE(record->>'mode', CASE WHEN record->>'kind' IN ('image','video') THEN record->>'kind' END) AS mode,
     record->>'createdAt' AS created_at, record->>'updatedAt' AS updated_at,
     CASE WHEN jsonb_typeof(record->'artifacts') = 'array' THEN jsonb_array_length(record->'artifacts') ELSE 0 END AS artifact_count,
     ordinal FROM forge_jobs WHERE ($1::bigint IS NULL OR ordinal < $1::bigint)
@@ -27,7 +27,7 @@ export async function forgeDiagnosticJobs(pool, { limit = 50, cursor } = {}) {
 }
 export async function forgeDiagnosticJob(pool, id) {
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw Object.assign(new Error('invalid_diagnostics_query'), { statusCode: 400 });
-  const result = await pool.query(`SELECT id, record->>'status' AS status, record->>'mode' AS mode,
+  const result = await pool.query(`SELECT id, record->>'status' AS status, COALESCE(record->>'mode', CASE WHEN record->>'kind' IN ('image','video') THEN record->>'kind' END) AS mode,
     record->>'createdAt' AS created_at, record->>'updatedAt' AS updated_at,
     CASE WHEN jsonb_typeof(record->'artifacts') = 'array' THEN jsonb_array_length(record->'artifacts') ELSE 0 END AS artifact_count
     FROM forge_jobs WHERE id = $1`, [id]);
