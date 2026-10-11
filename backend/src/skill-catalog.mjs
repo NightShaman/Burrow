@@ -140,9 +140,9 @@ export async function loadEffectiveSkillCatalog({ workspaceRoot, agentId, agentR
     const ownsStore = !skillStore;
     try {
       databaseSkills = (await store.effective(resolvedAgentId)).map((skill) => ({
-        ...skill, priority: 0, path: null, sourcePath: null, absolutePath: null,
+        ...skill, priority: 0, path: skill.storage === 'filesystem' ? 'SKILL.md' : null, sourcePath: null, absolutePath: skill.storage === 'filesystem' ? path.join(skill.installedPath,'SKILL.md') : null,
         sourceExists: true, owner: { scope: skill.global ? 'global' : 'agent', agentId: skill.global ? null : resolvedAgentId },
-        ownership: { scope: 'postgres', agentId: skill.global ? null : resolvedAgentId, storage: 'skills' },
+        ownership: { scope: skill.storage || 'postgres', agentId: skill.global ? null : resolvedAgentId, contentOwner: skill.contentOwner, storage: skill.storage || 'postgres' },
         portability: { memoryIndexable: true, memoryStoresBody: false },
       }));
     } finally { if (ownsStore) await store.close?.(); }
@@ -188,7 +188,7 @@ export function selectCatalogSkills({ catalog = [], ids = [], source = 'model-se
     }
     selected.push({
       ...compactSkill(skill),
-      ...(skill.source === 'postgres' ? { source: 'postgres', skillContent: skill.content } : {}),
+      ...(skill.source === 'postgres' || skill.contentOwner === 'git' ? { source: 'postgres', skillContent: skill.content } : {}),
       selection: {
         source,
         owner: skill.owner || null,

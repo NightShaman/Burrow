@@ -23,7 +23,9 @@ it('renders both system rails when metrics omit the retired settings database fo
 
   render(<><SystemPanel provider="Test" providerConnectionStatus="connected" /><SystemStatsRail active /></>);
   expect(await screen.findByText('Healthy')).toBeTruthy();
-  expect(screen.getAllByText('Trace storage')).toHaveLength(2);
+  // Trace storage remains in the workspace rail, not the consolidated stats rail.
+  expect(screen.getAllByText('Trace storage')).toHaveLength(1);
+  expect(screen.getByText('UI').nextElementSibling?.textContent).toBe('development');
   expect(screen.getByText('Local runtime')).toBeTruthy();
   expect(screen.queryByText('Settings database')).toBeNull();
 });

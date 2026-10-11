@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { SkillGitSync } from '../src/skill-git-sync.mjs';
+import { createSkillSourceRoutes } from './ui/skill-source-routes.mjs';
 import { performance } from 'node:perf_hooks';
 import { createChatStreamDelta } from '../src/chat-stream-delta.mjs';
 import { serializeSessionAdmission } from '../src/session-admission.mjs';
@@ -3165,11 +3167,13 @@ const forgeStoreFactory = () => postgresApplication.stores.forge;
 configureForgeStoreFactory(forgeStoreFactory);
 const forgeRoute = createForgeRoutes({ store: forgeStoreFactory, readJsonBody, sendJson, sendStaticFile });
 const dreamRoute = createDreamRoutes({ readJsonBody, sendJson, agentDreamSettings, agentDreamDiary, agentDreamMemoryConsolidate, agentDreamCycle });
+const skillGitSync = new SkillGitSync({ pool: postgresApplication.pool, skills: postgresApplication.stores.skills, sources: postgresApplication.stores.skillSources, packageRoot: path.join(runtimeRoot,'skill-packages'), onError: error => { void serverLogger.event('skill_sync_error',{error: error.statusCode ? error.message : 'skill_sync_failed'}); } });
+const skillSourceRoute = createSkillSourceRoutes({ sources: postgresApplication.stores.skillSources, skills: postgresApplication.stores.skills, sync: skillGitSync, pool: postgresApplication.pool, readJsonBody, sendJson });
 const skillStoreCall = async (operation) => operation(postgresApplication.stores.skills);
 const skillApi = {
-  listSkills: async () => ({ ok: true, skills: await skillStoreCall(async store => await store.list()) }),
+  listSkills: async () => { const [skills,sources]=await Promise.all([postgresApplication.stores.skills.list(),postgresApplication.stores.skillSources.list()]);const byId=new Map(sources.map(source=>[source.skillId,source]));return {ok:true,skills:skills.map(skill=>({...skill,gitSource:byId.get(skill.id)||null}))}; },
   createSkill: async (body) => ({ ok: true, skill: await skillStoreCall(store => store.create(body)) }),
-  getSkill: async (id) => { const skill = await skillStoreCall(async store => await store.get(id)); return skill ? { ok: true, skill } : { ok: false, status: 404, error: 'skill_not_found' }; },
+  getSkill: async (id) => { const skill = await skillStoreCall(async store => await store.get(id)); return skill ? { ok: true, skill:{...skill,gitSource:await postgresApplication.stores.skillSources.get(id)} } : { ok: false, status: 404, error: 'skill_not_found' }; },
   updateSkill: async (id, body) => { const skill = await skillStoreCall(async store => await store.update(id, body)); return skill ? { ok: true, skill } : { ok: false, status: 404, error: 'skill_not_found' }; },
   deleteSkill: async (id) => await skillStoreCall(async store => await store.delete(id)) ? { ok: true } : { ok: false, status: 404, error: 'skill_not_found' },
   agentSkills: async (id) => { const runtime = await resolveAgentContext(id); const assignments = await skillStoreCall(store => store.assignments(runtime.agentId)); const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: runtime.workspaceRoot, agentRuntime: runtime, skillStore: postgresApplication.stores.skills }); return { ok: true, ...assignments, effectiveSkills: catalog.skills.map(skillManifest) }; },
@@ -3399,6 +3403,7 @@ const server = createServer(async (req, res) => {
     if (await brainRoute({ req, res, url })) return;
     if (await generalSettingsRoute({ req, res, url })) return;
     if (await dreamRoute({ req, res, url })) return;
+    if (await skillSourceRoute({ req, res, url })) return;
     if (await settingsRoute({ req, res, url })) return;
     if (req.method === 'GET' && url.pathname === '/api/memory/brain-promotion-candidates') return sendJson(res, 200, await brainPromotionCandidates(Object.fromEntries(url.searchParams)));
     if (req.method === 'PATCH' && url.pathname === '/api/memory/brain-promotion-candidates') return sendJson(res, 200, await updateBrainPromotionCandidate(await readJsonBody(req)));
@@ -3425,6 +3430,7 @@ async function shutdownRuntime(signal, { exitCode = signal === 'SIGINT' ? 130 : 
     await recordActiveRunInterruptions({ stores:postgresApplication.stores, activeRuns: activeChatRuns, resolveAgentRuntime, reason: signal === 'SIGINT' ? 'service_interrupt' : 'service_shutdown' });
     server.closeIdleConnections?.();
     await Promise.race([closePromise, new Promise((resolve) => setTimeout(() => { forced = true; server.closeAllConnections?.(); resolve(); }, SHUTDOWN_DRAIN_MS))]);
+    await skillGitSync.close();
     await modDistribution.close();
     await cleanupMods(loadedMods);
     await postgresApplication?.close();
@@ -3459,6 +3465,7 @@ server.listen(port, host, async () => {
   await serverLogger.event('listener_started', { host, port, pid: process.pid, version: releaseVersion });
   await postgresApplication.stores.dreamCycles.reconcileInterrupted();
   if (backgroundSchedulersEnabled()) {
+    void skillGitSync.start().catch(error => serverLogger.event('skill_sync_startup_failed',{error:'skill_sync_failed'}));
     const store = postgresApplication.stores.scheduledJobs;
     try { await store.markMissedRuns(); await store.markMissedSchedules({ activeOwnerModIds: loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id) }); } finally { /* Shared application store remains open. */ }
     await scheduler().start();

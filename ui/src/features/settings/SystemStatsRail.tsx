@@ -47,7 +47,7 @@ function Meter({ value, tone = 'accent' }: { value: number | null; tone?: 'accen
 }
 
 function Stat({ label, value, detail, meter, warning = false }: { label: string; value: string; detail?: string; meter?: number | null; warning?: boolean }) {
-  return <div className="system-rail-stat"><div><span>{label}</span><b>{value}</b></div>{detail && <small>{detail}</small>}{meter !== undefined && <Meter value={meter} tone={warning ? 'warning' : 'accent'} />}</div>;
+  return <div className="system-rail-stat"><div><span>{label}</span><b title={value}>{value}</b></div>{detail && <small>{detail}</small>}{meter !== undefined && <Meter value={meter} tone={warning ? 'warning' : 'accent'} />}</div>;
 }
 
 export function SystemStatsRail({ active }: { active: boolean }) {
@@ -78,7 +78,6 @@ export function SystemStatsRail({ active }: { active: boolean }) {
   const diskUsed = percent(metrics?.filesystem.usedBytes, metrics?.filesystem.totalBytes);
   const heapUsed = percent(metrics?.process.heapUsedBytes, metrics?.process.heapTotalBytes);
   const model = health?.model;
-  const traceRate = health?.traces?.rateLastHour;
   const status = error ? 'Unavailable' : health?.ok && metrics?.ok ? 'Healthy' : 'Loading';
   const updated = useMemo(() => updatedAt?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) ?? 'Waiting for data', [updatedAt]);
 
@@ -86,6 +85,9 @@ export function SystemStatsRail({ active }: { active: boolean }) {
     <section className="system-rail-summary">
       <div><span className={`system-rail-status ${error ? 'error' : health?.ok ? 'healthy' : 'loading'}`}><i />{status}</span><small>Updated {updated}</small></div>
       <strong>{health?.runtime ?? 'Burrow'} <span>{health?.version ?? '—'}</span></strong>
+
+      <Stat label="UI" value={__BURROW_UI_BUILD_IDENTITY__ || 'Unavailable'} />
+      <Stat label="Backend" value={health?.releaseProvenance?.backend ?? 'Unavailable'} />
     </section>
 
     <section className="system-rail-group">
@@ -100,12 +102,6 @@ export function SystemStatsRail({ active }: { active: boolean }) {
       <Stat label="Resident memory" value={formatBytes(metrics?.process.rssBytes)} />
       <Stat label="JavaScript heap" value={heapUsed == null ? '—' : `${heapUsed.toFixed(1)}%`} detail={metrics ? `${formatBytes(metrics.process.heapUsedBytes)} / ${formatBytes(metrics.process.heapTotalBytes)}` : undefined} meter={heapUsed} warning={(heapUsed ?? 0) >= 85} />
       <Stat label="External memory" value={formatBytes(metrics?.process.externalBytes)} />
-    </section>
-
-    <section className="system-rail-group">
-      <h3>Storage</h3>
-      <Stat label="Trace storage" value={formatBytes(health?.traces?.logicalBytes)} detail={`${health?.traces?.count ?? '—'} runs`} />
-      <Stat label="Last hour" value={`${traceRate?.runs ?? '—'} runs`} detail={traceRate ? `${formatBytes(traceRate.allocatedBytes)} allocated` : undefined} />
     </section>
 
     <section className="system-rail-group">

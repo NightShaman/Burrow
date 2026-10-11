@@ -45,9 +45,10 @@ async function syncBundledTextSkill({ skillRoot, skillId, skillStore = null }) {
   if (existing) {
     // Shipped IDs are release-owned. Preserve operator availability/assignments,
     // but publish the complete current release text and metadata.
-    if (existing.content === content && existing.name === shipped.name && existing.description === shipped.description) return false;
-    await store.update(skillId, { name: shipped.name, description: shipped.description, content });
-  } else await store.create(shipped);
+    if (existing.content === content && existing.name === shipped.name && existing.description === shipped.description && (!store.publishBundled || existing.contentOwner === 'bundled')) return false;
+    if (store.publishBundled) await store.publishBundled(skillId, shipped);
+    else await store.update(skillId, { name: shipped.name, description: shipped.description, content });
+  } else { await store.create(shipped); if (store.publishBundled) await store.publishBundled(skillId,shipped); }
   return true;
 }
 

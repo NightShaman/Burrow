@@ -5,19 +5,22 @@ import { api } from '../../app/api';
 import type { Agent } from '../../app/types';
 import { Field, SettingSection } from './SettingsPrimitives';
 
-type Skill = { id: string; name: string; description: string; content: string; lifecycle: string; global: boolean; source: 'sqlite'; version: string };
+type Skill = { id: string; name: string; description: string; content: string; lifecycle: string; global: boolean; source: 'postgres' | 'sqlite'; version: string; createdAt?: string; updatedAt?: string };
 type Grants = { assignedSkillIds: string[]; globalSkillIds: string[] };
 type Draft = { id: string; name: string; description: string; content: string; lifecycle: string; global: boolean };
 const empty: Draft = { id: '', name: '', description: '', content: '', lifecycle: 'available', global: false };
 const body = (value: unknown, method = 'PUT'): RequestInit => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) });
 
-export function SkillsSettings({ agents, agentId, configurationTarget, overflowTarget, agentView = false }: { agents: Agent[]; agentId: string; configurationTarget?: HTMLElement | null; overflowTarget?: HTMLElement | null; agentView?: boolean }) {
+export function SkillsSettings({ agents, agentId, configurationTarget, overflowTarget, agentView = false, workspace = false }: { agents: Agent[]; agentId: string; configurationTarget?: HTMLElement | null; overflowTarget?: HTMLElement | null; agentView?: boolean; workspace?: boolean }) {
   const confirm = useConfirm();
   const deleting = useRef(false);
   const deletionOwner = useRef<object | null>(null);
   useEffect(() => { const owner = {}; deletionOwner.current = owner; return () => { deletionOwner.current = null; }; }, [agentId]);
   const resourceId = agentId.includes('::') ? agentId.slice(agentId.indexOf('::') + 2) : agentId;
   const request = <T,>(path: string, init?: RequestInit) => api<T>(path, init);
+  const [search, setSearch] = useState('');
+  const [lifecycleFilter, setLifecycleFilter] = useState('all');
+  const [assignmentFilter, setAssignmentFilter] = useState('all');
   const [skills, setSkills] = useState<Skill[]>([]);
   const [assignments, setAssignments] = useState<Record<string, Grants>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -106,7 +109,7 @@ export function SkillsSettings({ agents, agentId, configurationTarget, overflowT
   };
 
   const editor = <SettingSection title={selected ? `Edit ${selected.name}` : 'Create text skill'}>
-    <p className="hint">Database text skills have one shared copy. Filesystem and asset skills remain read-only.</p>
+    <p className="hint">Core text skills have one shared database copy. Review content before saving.</p>
     {!selected && <div className="skill-import"><span className="skill-import-label">Import text skill</span><input ref={importInputRef} className="skill-import-input" type="file" aria-label="Import text skill" accept=".md,.markdown,.txt,text/markdown,text/plain" disabled={busy} onChange={event => { void importText(event.target.files?.[0]); event.target.value = ''; }} /><div className="skill-import-control"><button type="button" className="secondary skill-import-trigger" disabled={busy} onClick={() => importInputRef.current?.click()}>Choose text file</button><span className={importedFileName ? 'skill-import-name selected' : 'skill-import-name'} aria-live="polite">{importedFileName || 'No file selected'}</span></div><small>Markdown or plain text · .md, .markdown, .txt. Loads the complete file for review; nothing is saved until you create the skill.</small></div>}
     <div className="skill-fields">
       <Field label="ID"><input value={draft.id} disabled={busy || Boolean(selected)} onChange={event => setDraft({ ...draft, id: event.target.value })} placeholder="skill-id" /></Field>
@@ -119,8 +122,39 @@ export function SkillsSettings({ agents, agentId, configurationTarget, overflowT
     </div>
   </SettingSection>;
 
-  const libraryAssignments = <SettingSection title="Assignments"><p className="hint">Assign the selected database skill globally or to specific agents. These are assignments, not separate copies.</p>{!selected ? <p className="hint">Select a database skill to manage assignments.</p> : selected.global ? <p><strong>Global</strong><br /><small>Available to every agent.</small></p> : agents.length ? agents.map(agent => <label className="skill-check" key={agent.id}><input type="checkbox" checked={assignments[agent.id]?.assignedSkillIds.includes(selected.id) ?? false} disabled={busy} onChange={() => toggleAssignment(agent, selected.id)} /> {agent.name}</label>) : <p className="hint">No agents configured.</p>}</SettingSection>;
+  const libraryAssignments = <SettingSection title="Assignments"><p className="hint">Assign the selected text skill globally or to specific agents. These are assignments, not separate copies.</p>{!selected ? <p className="hint">Save a text skill to manage agent assignments.</p> : selected.global ? <p><strong>Global</strong><br /><small>Available to every agent.</small></p> : agents.length ? agents.map(agent => <label className="skill-check" key={agent.id}><input type="checkbox" checked={assignments[agent.id]?.assignedSkillIds.includes(selected.id) ?? false} disabled={busy} onChange={() => toggleAssignment(agent, selected.id)} /> {agent.name}</label>) : <p className="hint">No agents configured.</p>}</SettingSection>;
   const agentAssignments = <SettingSection title={`${selectedAgent?.name ?? 'Agent'} skills`}><p className="hint">Direct assignments supplement global skills. Filesystem and asset-backed skills are managed outside Settings.</p>{!selectedGrants ? <p className="hint">Loading assignments…</p> : <><h3>Database skills</h3>{skills.length ? skills.map(skill => <label className="skill-check" key={skill.id}><input type="checkbox" checked={selectedGrants.assignedSkillIds.includes(skill.id)} disabled={busy || selectedGrants.globalSkillIds.includes(skill.id)} onChange={() => selectedAgent && toggleAssignment(selectedAgent, skill.id)} /> {skill.name} {selectedGrants.globalSkillIds.includes(skill.id) && <small>(global)</small>}</label>) : <p className="hint">No database text skills.</p>}</>}</SettingSection>;
+
+  const visibleSkills = skills.filter(skill => {
+    const matchesSearch = `${skill.name} ${skill.id} ${skill.description}`.toLowerCase().includes(search.trim().toLowerCase());
+    const assigned = skill.global || Object.values(assignments).some(grants => grants.assignedSkillIds.includes(skill.id));
+    return matchesSearch && (lifecycleFilter === 'all' || skill.lifecycle === lifecycleFilter)
+      && (assignmentFilter === 'all' || (assignmentFilter === 'assigned' ? assigned : !assigned));
+  });
+  if (workspace) return <>
+    <section className="settings-blank-column settings-prototype-sections skills-library-pane" aria-label="Skill library">
+      <header className="skills-pane-heading"><h2>Library</h2><span>{skills.length} skills</span></header>
+      <button className="secondary" type="button" disabled={busy || !loaded || Boolean(error)} onClick={() => { setSelectedId(null); setDraft(empty); setImportedFileName(''); }}>New text skill</button>
+      <Field label="Search skills"><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Name, ID, description" /></Field>
+      <div className="skill-library-filters"><Field label="Lifecycle filter"><select value={lifecycleFilter} onChange={event => setLifecycleFilter(event.target.value)}><option value="all">All lifecycles</option>{['available', 'experimental', 'deprecated', 'disabled'].map(value => <option key={value}>{value}</option>)}</select></Field>
+      <Field label="Assignment filter"><select value={assignmentFilter} onChange={event => setAssignmentFilter(event.target.value)}><option value="all">All assignments</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option></select></Field></div>
+      <p className="hint">Core · shared text library. Filesystem skills are not included in this catalog.</p>
+      {!loaded ? <p role="status" className="hint">Loading skills…</p> : <nav className="settings-prototype-section-items skills-library-list" aria-label="Skills library">{visibleSkills.map(skill => <button type="button" key={skill.id} disabled={busy} className={selectedId === skill.id ? 'active' : ''} aria-current={selectedId === skill.id ? 'true' : undefined} onClick={() => setSelectedId(skill.id)}><strong>{skill.name}</strong><small>{skill.id} · {skill.lifecycle}{skill.global ? ' · global' : ''}</small>{skill.description && <span>{skill.description}</span>}</button>)}</nav>}
+      {loaded && !error && !visibleSkills.length && <p className="hint" role="status">{skills.length ? 'No skills match these filters.' : 'No text skills yet. Create one or import a text file.'}</p>}
+    </section>
+    <section className="settings-blank-column settings-prototype-configuration skills-detail-pane" aria-label="Skill details and assignments">
+      <header className="skills-pane-heading"><h2>{selected?.name ?? 'New text skill'}</h2><span>{selected ? selected.lifecycle : 'Unsaved draft'}</span></header>
+      {error && <div className="settings-error" role="alert">{error}<button type="button" className="secondary" disabled={busy} onClick={() => setRevision(value => value + 1)}>Reload skills</button></div>}
+      {loaded && !error && <>{editor}{libraryAssignments}</>}
+    </section>
+    <aside className="settings-blank-column settings-prototype-overflow skills-source-pane" aria-label="Skill source and updates">
+      <header className="skills-pane-heading"><h2>Source &amp; updates</h2><span>Core</span></header>
+      <SettingSection title="Source configuration"><dl className="skill-source-facts"><dt>Source</dt><dd>{selected ? 'Database text' : 'Manual / text import'}</dd><dt>Ownership</dt><dd>{selected ? 'Not supplied by catalog' : 'Operator-created draft'}</dd><dt>Storage</dt><dd>{selected?.source === 'sqlite' ? 'Database text (legacy catalog)' : 'PostgreSQL text'}</dd></dl><p className="hint">Edit this shared copy in the center pane. Imported text is reviewed before it is saved. The catalog does not expose upstream provenance.</p></SettingSection>
+      <SettingSection title="Git synchronization"><p className="skill-capability-state">Not available</p><p className="hint">Repository, ref, skill path, and update schedule configuration require backend source-management support. No Git source is connected through this workspace.</p></SettingSection>
+      <SettingSection title="Revision history">{selected ? <dl className="skill-source-facts"><dt>Installed content version</dt><dd><code>{selected.version || 'Not supplied'}</code></dd>{selected.updatedAt && <><dt>Last updated</dt><dd>{selected.updatedAt}</dd></>}</dl> : <p className="hint">Save a skill to see its installed content version.</p>}<p className="hint">Historical revisions and rollback are not exposed by the current API.</p></SettingSection>
+      <SettingSection title="Update status"><p className="skill-capability-state">Manual updates only</p><p className="hint">Automatic checks and validated upstream replacement are not implemented in the current contract. Sync attempts and failures cannot be reported yet.</p></SettingSection>
+    </aside>
+  </>;
 
   return <>
     {!agentView && <nav className="settings-prototype-section-items skill-library" aria-label="Skills library"><button type="button" className={!selectedId ? 'active' : ''} onClick={() => setSelectedId(null)}>New text skill</button>{skills.map(skill => <button type="button" key={skill.id} className={selectedId === skill.id ? 'active' : ''} onClick={() => setSelectedId(skill.id)}>{skill.name}<small>{skill.id}{skill.global ? ' · global' : ''}</small></button>)}</nav>}

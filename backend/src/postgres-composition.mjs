@@ -1,3 +1,4 @@
+import { PostgresSkillSources } from './postgres-skill-sources.mjs';
 import { PostgresLiveRunSteering } from './postgres-live-run-steering.mjs';
 import { startOperatorInstantBackfill } from './postgres-operator-backfill.mjs';
 import { PostgresBrainEmbeddings } from './postgres-brain-embeddings.mjs';
@@ -75,6 +76,7 @@ export async function createPostgresApplication({
     forge: new PostgresForgeStore({ ...common, runtimeRoot, resolveAgent, resolveOperator, connections, resolveConfig, ...(ownerId ? { ownerId } : {}) }),
     workingMemory: new PostgresWorkingMemoryStore({ ...common, retention: retention || (client => workingMemoryRetention.read(client)), ...(clock ? { clock } : {}) }),
     apiTokens: new PostgresApiTokenStore({ pool: sharedPool, ...(clock ? { clock } : {}) }),
+    skillSources: new PostgresSkillSources({ ...common, ...(clock ? { clock } : {}) }),
     skills: new PostgresSkillSettingsStore({ ...common, ...(clock ? { clock } : {}) }),
     setupState: new PostgresSetupStateStore({ ...common, ...(clock ? { clock } : {}) }),
     retentionSettings: new PostgresRetentionSettingsStore({ ...common, ...(clock ? { clock } : {}) }),

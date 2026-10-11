@@ -751,3 +751,25 @@ button:disabled{cursor:not-allowed;opacity:.45}
 
 /* Compact checkbox rows: never inherit text-field sizing or stack the label. */
 .settings-checkbox-row{display:flex;align-items:center;gap:8px;min-width:0;cursor:pointer}
+
+/* Skills content within the shared Settings columns. */
+.skills-pane-heading{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--line-soft)}
+.skills-pane-heading h2{margin:0;font-size:15px;color:var(--text-strong);overflow-wrap:anywhere}
+.skills-pane-heading>span{font-size:11px;color:var(--muted);flex-shrink:0}
+.skills-library-pane>.secondary{width:100%}.skill-library-filters{display:grid;gap:8px}.skill-library-filters .field{margin:0}
+.skills-library-list{display:grid;gap:6px;margin-top:14px}
+/* Skills uses the same column surfaces, cards and navigation states as Settings. */
+.skills-library-list button{display:grid;gap:5px;width:100%;min-width:0;text-align:left}
+.skills-library-list small,.skills-library-list span{color:var(--muted);font-size:11px;overflow-wrap:anywhere}.skills-library-list strong{overflow-wrap:anywhere}
+.skills-library-pane .field{min-width:0}.skills-library-pane .field :is(input,select){box-sizing:border-box;width:100%;min-width:0}
+.skills-detail-pane textarea{font-family:var(--mono,monospace);line-height:1.5;resize:vertical;min-height:240px}
+.skill-source-facts{display:grid;gap:6px;margin:0;font-size:12px}.skill-source-facts dt{color:var(--muted);font-size:11px}.skill-source-facts dd{margin:0 0 8px;overflow-wrap:anywhere;color:var(--text)}.skill-source-facts code{font-size:11px;white-space:normal}
+.skill-capability-state{display:inline-block;margin:0;padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:11px;color:var(--muted)}
+.skills-detail-pane .settings-error{display:grid;gap:10px}
+
+.settings-blank-slate.has-top-navigation{grid-template-columns:minmax(0,.434fr) minmax(0,1fr) minmax(0,1fr)}
+.settings-blank-slate.has-top-navigation.has-utility-panel{grid-template-columns:minmax(0,.434fr) minmax(0,.8fr) minmax(0,.8fr) minmax(240px,.4fr)}
+.has-top-navigation>.settings-prototype-agent-selector{grid-column:1 / -1}
+.has-top-navigation.has-utility-panel>.settings-prototype-agent-selector{grid-column:1 / 4}
+.has-top-navigation.has-utility-panel>.settings-utility-panel{grid-column:4}
+@media(max-width:1200px){.settings-blank-slate.has-top-navigation{grid-template-columns:180px minmax(300px,1fr) minmax(260px,1fr)}.settings-blank-slate.has-top-navigation.has-utility-panel{grid-template-columns:180px minmax(300px,.8fr) minmax(260px,.8fr) minmax(240px,.4fr)}}

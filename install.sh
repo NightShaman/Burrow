@@ -179,6 +179,19 @@ install_node_24() {
   esac
 }
 
+ensure_skill_git() {
+  command -v git >/dev/null 2>&1 && command -v ssh >/dev/null 2>&1 && return 0
+  if [ "$(id -u)" -eq 0 ]; then SUDO="";
+  elif command -v sudo >/dev/null 2>&1; then SUDO="sudo";
+  else echo "Burrow install: sudo is required to install Git/SSH for skill synchronization." >&2; exit 1; fi
+  if command -v apt-get >/dev/null 2>&1; then
+    $SUDO apt-get update
+    $SUDO apt-get install -y git openssh-client
+  elif command -v dnf >/dev/null 2>&1; then
+    $SUDO dnf install -y git openssh-clients
+  else echo "Burrow install: install Git and an SSH client, then retry." >&2; exit 1; fi
+}
+
 ensure_node_24() {
   node_is_supported && return 0
   install_node_24
@@ -424,6 +437,7 @@ cp "$SOURCE_DIR/install.sh" "$STAGING/install.sh"
 [ -f "$SOURCE_DIR/SOURCE_VERSIONS" ] && cp "$SOURCE_DIR/SOURCE_VERSIONS" "$STAGING/SOURCE_VERSIONS" || true
 chmod 0755 "$STAGING/install.sh"
 [ "$INSTALL_DEPS" -ne 1 ] || ensure_node_24
+[ "$INSTALL_DEPS" -ne 1 ] || ensure_skill_git
 cp -R "$SOURCE_DIR/ui" "$STAGING/ui"
 # GitHub assemblies contain a prebuilt UI. Updating from one must activate
 # those immutable assets, not reinstall 129 packages and rebuild Vite on the

@@ -2,6 +2,7 @@ import { useState, type ComponentProps } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Settings } from './SettingsPage';
+import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { api } from '../../app/api';
 import type { SettingsTab } from '../../app/types';
 vi.mock('../../app/api', async original => ({ ...await original<typeof import('../../app/api')>(), api: vi.fn() }));
@@ -47,4 +48,52 @@ it('shows agent options from active rail selections without focusing a dropdown'
  expect(screen.queryByText('Agent panel options')).toBeNull();
  fireEvent.change(screen.getByLabelText('Left · layout'), { target: { value: 'divided' } });
  expect(screen.getByText('Agent panel options')).toBeTruthy();
+});
+
+it('places Skills navigation in the supplied card without duplicating it in the workspace', async () => {
+ vi.mocked(api).mockImplementation(async path => {
+  if (path === '/api/settings/skills') return { skills: [] };
+  if (path.includes('/skills')) return { skills: [] };
+  return { wizardStep: 'ready' };
+ });
+ const navigationTarget = document.createElement('div');
+ document.body.append(navigationTarget);
+ const { container, unmount } = render(<ConfirmProvider><Settings {...{ navigationTarget, tab: 'skills', setTab: vi.fn(), agents: [], selected: { id: '', name: '' }, savedProviders: [], onOperatorProfileChanged: vi.fn(), agentRailPreferences: { view: 'regular', order: [] } } as unknown as ComponentProps<typeof Settings>} /></ConfirmProvider>);
+ expect(navigationTarget.querySelector('nav[aria-label="Settings sections"]')).not.toBeNull();
+ expect(container.querySelector('nav[aria-label="Settings sections"]')).toBeNull();
+ expect(screen.getAllByRole('navigation', { name: 'Settings sections' })).toHaveLength(1);
+ const layout = container.querySelector('.settings-blank-slate.has-top-navigation');
+ expect(layout?.querySelectorAll(':scope > .settings-blank-column')).toHaveLength(3);
+ expect(container.querySelector('.skills-settings-workspace')).toBeNull();
+ expect(screen.getByRole('region', { name: 'Skill library' }).classList.contains('settings-prototype-sections')).toBe(true);
+ expect(screen.getByRole('region', { name: 'Skill details and assignments' }).classList.contains('settings-prototype-configuration')).toBe(true);
+ expect(screen.getByRole('complementary', { name: 'Skill source and updates' }).classList.contains('settings-prototype-overflow')).toBe(true);
+ fireEvent.click(screen.getByRole('button', { name: 'Open system statistics' }));
+ expect(layout?.classList.contains('has-utility-panel')).toBe(true);
+ expect(screen.getByRole('complementary', { name: 'System statistics' })).toBeTruthy();
+ fireEvent.click(screen.getByRole('button', { name: 'Collapse system statistics' }));
+ expect(layout?.classList.contains('has-utility-panel')).toBe(false);
+ await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalled());
+ unmount();
+ expect(navigationTarget.childElementCount).toBe(0);
+ navigationTarget.remove();
+});
+
+it('uses the top menu for General while retaining the three content columns', async () => {
+ vi.mocked(api).mockImplementation(async path => path === '/api/settings/identities' ? { operator: { name: 'Test', avatar: '' } } : { wizardStep: 'ready' });
+ const navigationTarget = document.createElement('div');
+ document.body.append(navigationTarget);
+ const { container, unmount } = render(<Settings {...{ navigationTarget, tab: 'general', setTab: vi.fn(), agents: [], selected: { id: '', name: '' }, savedProviders: [], onOperatorProfileChanged: vi.fn(), agentRailPreferences: { view: 'regular', order: [] } } as unknown as ComponentProps<typeof Settings>} />);
+ await screen.findByDisplayValue('Test');
+ expect(navigationTarget.querySelector('nav[aria-label="Settings sections"]')).not.toBeNull();
+ expect(container.querySelector('.settings-prototype-menu')).toBeNull();
+ const layout = container.querySelector('.settings-blank-slate.has-top-navigation');
+ expect(layout).not.toBeNull();
+ expect(layout?.querySelectorAll(':scope > .settings-blank-column')).toHaveLength(3);
+ expect(container.querySelector('.settings-prototype-sections')).not.toBeNull();
+ expect(container.querySelector('.settings-prototype-configuration')).not.toBeNull();
+ expect(container.querySelector('.settings-prototype-overflow')).not.toBeNull();
+ unmount();
+ expect(navigationTarget.childElementCount).toBe(0);
+ navigationTarget.remove();
 });

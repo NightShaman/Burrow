@@ -24,7 +24,7 @@ ENV NODE_ENV=production \
 # Keep the binary major explicit: the lifecycle refuses to start incompatible
 # data directories. Explicit external/disabled lifecycle overrides remain supported.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+    && apt-get install -y --no-install-recommends ca-certificates curl gnupg git openssh-client \
     && install -d -m 0755 /etc/apt/keyrings \
     && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \

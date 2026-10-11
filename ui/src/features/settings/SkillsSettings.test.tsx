@@ -120,7 +120,7 @@ it('preserves dirty content through membership/catalog refresh and saves that dr
  mocked.mockImplementation(async (path, init) => (init?.method ? {} : path === '/api/settings/skills' ? {skills:[{...skill, content}]} : grants) as never);
  const configuration=document.createElement('div');document.body.append(configuration);
  const view=render(<SkillsSettings agents={agents} agentId={agents[0].id} configurationTarget={configuration}/>);
- fireEvent.click(await screen.findByRole('button',{name:/Review/}));
+ fireEvent.click(await screen.findByRole('button',{name:/^Review/}));
  fireEvent.change(screen.getByLabelText('Content'),{target:{value:'# Unsaved'}});
  content='# Updated catalog';
  view.rerender(<SkillsSettings agents={[...agents,{id:'new',name:'New'} as Agent]} agentId={agents[0].id} configurationTarget={configuration}/>);
@@ -148,4 +148,27 @@ it('confirms shared skill deletion and does not delete on cancellation', async (
   fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete skill' }));
   await waitFor(() => expect(mocked).toHaveBeenCalledWith('/api/settings/skills/review', { method: 'DELETE' }));
   view.unmount(); configuration.remove();
+});
+
+it('renders a standalone three-pane workspace with search, filters, supported edits and honest source status', async () => {
+  mocked.mockImplementation(async (path) => (path === '/api/settings/skills' ? { skills: [skill, {...skill,id:'other',name:'Other', lifecycle:'disabled',global:true}] } : grants) as never);
+  render(<SkillsSettings workspace agents={agents} agentId="agent" />);
+  const library = screen.getByRole('region', { name: 'Skill library' });
+  const details = screen.getByRole('region', { name: 'Skill details and assignments' });
+  const source = screen.getByRole('complementary', { name: 'Skill source and updates' });
+  fireEvent.click(await within(library).findByRole('button', {name:/^Review/}));
+  expect(within(details).getByDisplayValue('# Review')).toBeTruthy();
+  expect(within(details).getByRole('checkbox', {name:'Agent'})).toBeTruthy();
+  expect(within(source).getByText('sha256:123')).toBeTruthy();
+  expect(within(source).getByText('Not supplied by catalog')).toBeTruthy();
+  expect(within(source).getByText('Not available')).toBeTruthy();
+  expect(within(source).queryByRole('button', {name:/sync/i})).toBeNull();
+  fireEvent.change(screen.getByRole('searchbox', {name:'Search skills'}),{target:{value:'other'}});
+  expect(within(library).queryByRole('button',{name:/^Review/})).toBeNull();
+  expect(within(details).getByDisplayValue('# Review')).toBeTruthy();
+  fireEvent.change(screen.getByRole('combobox', {name:'Lifecycle filter'}),{target:{value:'available'}});
+  expect(screen.getByText('No skills match these filters.')).toBeTruthy();
+  fireEvent.change(screen.getByRole('combobox', {name:'Lifecycle filter'}),{target:{value:'all'}});
+  fireEvent.change(screen.getByRole('combobox', {name:'Assignment filter'}),{target:{value:'unassigned'}});
+  expect(within(library).queryByRole('button',{name:/Other/})).toBeNull();
 });
