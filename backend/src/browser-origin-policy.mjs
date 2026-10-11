@@ -1,6 +1,16 @@
-export function browserRequestPolicy(req, url, { allowedOrigins = [] } = {}) {
+// Listener policy is service-owned, like Host-authority configuration.
+export function browserOriginConfig({ env = process.env } = {}) {
+  const value = String(env.BURROW_UI_ORIGIN_CHECK ?? 'true').trim().toLowerCase();
+  if (!['true', 'false'].includes(value)) throw new Error('BURROW_UI_ORIGIN_CHECK requires true or false');
+  return {
+    checkOrigin: value === 'true',
+    allowedOrigins: String(env.BURROW_UI_ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean),
+  };
+}
+
+export function browserRequestPolicy(req, url, { allowedOrigins = [], checkOrigin = true } = {}) {
   const origin = req.headers?.origin;
-  if (origin) {
+  if (origin && checkOrigin) {
     const trusted = new Set([url.origin, ...allowedOrigins]);
     // The server URL uses HTTP behind TLS-terminating proxies. Host is the
     // request authority; do not infer browser scheme from the backend socket

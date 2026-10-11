@@ -9,7 +9,7 @@ import { createGroupChannelMessageStarter } from '../src/group-channel-message.m
 import { buildIdentity } from './build-identity.mjs';
 import { releaseProvenance } from './release-provenance.mjs';
 import { httpAuthorityConfig, hostAuthorityPolicy } from '../src/http-authority.mjs';
-import { browserRequestPolicy } from '../src/browser-origin-policy.mjs';
+import { browserOriginConfig, browserRequestPolicy } from '../src/browser-origin-policy.mjs';
 import { artifactResponseHeaders } from '../src/artifact-response-policy.mjs';
 import { postgresTransactionContext, withPostgresTransaction } from '../src/postgres-foundation.mjs';
 import { readJsonBody } from '../src/request-resource-budgets.mjs';
@@ -134,6 +134,7 @@ const apiDocsRoot = path.join(sourceRoot, 'public', 'api-docs');
 const port = Number(process.env.BURROW_UI_PORT || process.argv.find((arg) => arg.startsWith('--port='))?.split('=')[1] || 42817);
 const host = process.env.BURROW_UI_HOST || '0.0.0.0';
 const authorityConfig = httpAuthorityConfig({ host, port });
+const originConfig = browserOriginConfig();
 const activeChatRuns = new Map();
 const executionProviders = createExecutionProviderRegistry();
 const sessionContinuityHeads = new Map();
@@ -1574,8 +1575,7 @@ function sendJson(res, status, body) {
 
 function applyApiCors(req, res, url) {
   if (!url.pathname.startsWith('/api/') && !url.pathname.startsWith('/auth/')) return false;
-  const allowedOrigins = String(process.env.BURROW_UI_ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean);
-  const policy = browserRequestPolicy(req, url, { allowedOrigins });
+  const policy = browserRequestPolicy(req, url, originConfig);
   if (policy.error) { sendJson(res, policy.status, { ok: false, error: policy.error }); return true; }
   if (policy.origin) {
     res.setHeader('access-control-allow-origin', policy.origin);
