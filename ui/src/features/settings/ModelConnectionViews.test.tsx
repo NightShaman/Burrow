@@ -131,11 +131,21 @@ describe('Model connection views', () => {
 });
 
 describe('Google Developer API model metadata', () => {
+  it('preserves unknown capabilities and false/zero provider values without inferring modalities', () => {
+    render(<ModelCapabilityEditor model={{ id: 'google-unknown', supportedGenerationMethods: [], googleMetadata: { thinking: false, temperature: 0, version: 'v1' } }} onToggleModelInput={vi.fn()} onSetModelInputAuto={vi.fn()} onToggleModelOutput={vi.fn()} onSetModelOutputAuto={vi.fn()} />);
+    expect(screen.getAllByText('Unknown')).toHaveLength(3);
+    expect((screen.getByLabelText('Output token limit') as HTMLInputElement).value).toBe('Unknown');
+    expect((screen.getByLabelText('Thinking') as HTMLTextAreaElement).value).toBe('false');
+    expect((screen.getByLabelText('Temperature') as HTMLTextAreaElement).value).toBe('0');
+    expect((screen.getByLabelText('Generation methods') as HTMLInputElement).value).toBe('None reported');
+  });
   it('offers native API type and renders discovered methods and token limits', () => {
     expect(modelConnectionApiTypes).toContainEqual({ value: 'google-generative-language', label: 'Google Gemini (Developer API)' });
     render(<ModelCapabilityEditor model={{ id: 'models/gemini-test', supportedGenerationMethods: ['generateContent'], googleMetadata: { description: 'Test model', inputTokenLimit: 1234, outputTokenLimit: 321 }, discoveredOutput: ['text'] }} onToggleModelInput={() => {}} onSetModelInputAuto={() => {}} onToggleModelOutput={() => {}} onSetModelOutputAuto={() => {}} />);
-    expect(screen.getByText('Google methods: generateContent')).toBeTruthy();
-    expect(screen.getByText('Input limit: 1,234 tokens')).toBeTruthy();
-    expect(screen.getByText('Output limit: 321 tokens')).toBeTruthy();
+    expect((screen.getByLabelText('Generation methods') as HTMLInputElement).value).toBe('generateContent');
+    expect(screen.getByText('Provider metadata').parentElement?.hasAttribute('open')).toBe(false);
+    expect(screen.queryByLabelText('Provider model metadata')).toBeNull();
+    expect(screen.getByText('Discovered: 1,234 tokens')).toBeTruthy();
+    expect((screen.getByLabelText('Output token limit') as HTMLInputElement).value).toBe('321');
   });
 });

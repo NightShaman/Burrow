@@ -34,11 +34,9 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
           <Field label="Provider"><input value={editor.provider} onChange={(event) => editor.setProvider(event.target.value)} placeholder="OpenAI" /></Field>
           <Field label="API type"><select value={editor.apiType} onChange={(event) => editor.setApiType(event.target.value)}>{modelConnectionApiTypes.map((type) => <option value={type.value} key={type.value}>{type.label}</option>)}</select></Field>
         </div>
-        <p className="settings-description">{editor.apiType === 'anthropic-messages'
+        {editor.apiType !== 'google-generative-language' && <p className="settings-description">{editor.apiType === 'anthropic-messages'
           ? 'Anthropic Messages uses Anthropic’s native API contract and provider authentication. Model discovery is handled by Burrow, not an OpenAI-compatible /models probe.'
-          : editor.apiType === 'google-generative-language'
-            ? 'Google Gemini Developer API uses an API key and native model discovery, chat, tools and streaming. Verified image and Lyria music models support prompt-only Forge generation; speech and video are unavailable. No Vertex or OAuth support.'
-            : 'OpenAI-compatible connections discover models through the provider’s /models endpoint.'}</p>
+          : 'OpenAI-compatible connections discover models through the provider’s /models endpoint.'}</p>}
         <div className="oauth-shortcuts">
           <button className={`oauth-trigger${editor.apiType !== 'anthropic-messages' ? ' active' : ''}`} type="button" onClick={editor.openOpenAiOAuth}><span>OpenAI OAuth</span><small>Sign in with ChatGPT</small></button>
           <button className={`oauth-trigger${editor.apiType === 'anthropic-messages' ? ' active' : ''}`} type="button" onClick={editor.openAnthropicOAuth}><span>Anthropic OAuth</span><small>Claude Code login</small></button>
