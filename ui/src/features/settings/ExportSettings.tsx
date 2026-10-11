@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, downloadExport, importExport } from '../../app/api';
+import { useConfirm } from '../../app/ConfirmDialog';
 import { Field, SettingSection } from './SettingsPrimitives';
 
 type ExportCategory = { id: string; label: string; description: string; containsSecrets: boolean };
@@ -22,6 +23,10 @@ function importSummary(value: unknown) {
 }
 
 export function ExportSettings() {
+  const confirm = useConfirm();
+  const applying = useRef(false);
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [categories, setCategories] = useState<ExportCategory[]>([]);
   const [selected, setSelected] = useState<string[]>(['settings']);
   const [password, setPassword] = useState('');
@@ -34,7 +39,7 @@ export function ExportSettings() {
   const [previewedInputs, setPreviewedInputs] = useState<string | null>(null);
   const [passwordNeeded, setPasswordNeeded] = useState(false);
   const previewSequence = useRef(0);
-  const [importState, setImportState] = useState<'idle' | 'previewing' | 'importing'>('idle');
+  const [importState, setImportState] = useState<'idle' | 'previewing' | 'confirming' | 'importing'>('idle');
   const [conflictPolicy, setConflictPolicy] = useState<'error' | 'skip' | 'replace'>('error');
   const importInput = useRef<HTMLInputElement>(null);
 
@@ -88,14 +93,16 @@ export function ExportSettings() {
   const previewIsCurrent = Boolean(importPreview && previewedInputs === JSON.stringify([importPayload, importPassword, conflictPolicy]));
   const applyImport = async () => {
     if (importState !== 'idle' || !previewIsCurrent || !importPayload || (importPreview?.requiresPassword && !importPassword.trim())) return;
-    if (!window.confirm('Import this export? Existing matching data may be changed according to the selected conflict policy.')) return;
-    setError(''); setImportState('importing');
+    if (applying.current) return;
+    applying.current = true; setImportState('confirming');
     try {
+      if (!await confirm({ title: 'Import this export?', message: 'Existing matching data may be changed according to the selected conflict policy. This cannot be undone from the UI.', confirmLabel: 'Import export', tone: 'danger' }) || !mounted.current) return;
+      setError(''); setImportState('importing');
       await importExport({ payload: importPayload, ...(importPassword ? { password: importPassword } : {}), confirm: true, conflictPolicy });
       setImportPayload(''); setImportName(''); setImportPassword(''); setImportPreview(null); setPreviewedInputs(null); setPasswordNeeded(false);
       if (importInput.current) importInput.current.value = '';
     } catch (reason) { setError(importErrorMessage(reason)); }
-    finally { setImportState('idle'); }
+    finally { applying.current = false; if (mounted.current) setImportState('idle'); }
   };
 
   return <>

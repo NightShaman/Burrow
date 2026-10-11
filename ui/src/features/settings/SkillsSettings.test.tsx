@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { ConfirmProvider } from '../../app/ConfirmDialog';
+import { cleanup, fireEvent, render as baseRender, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../../app/api';
 import type { Agent } from '../../app/types';
@@ -129,4 +130,22 @@ it('preserves dirty content through membership/catalog refresh and saves that dr
  fireEvent.click(screen.getByRole('button',{name:'Save skill'}));
  await waitFor(()=>expect(mocked).toHaveBeenCalledWith('/api/settings/skills/review',expect.objectContaining({method:'PATCH',body:expect.stringContaining('# Unsaved')})));
  view.unmount();configuration.remove();
+});
+
+function render(ui: Parameters<typeof baseRender>[0]) { return baseRender(ui, { wrapper: ConfirmProvider }); }
+
+it('confirms shared skill deletion and does not delete on cancellation', async () => {
+  mocked.mockImplementation(async (path, init) => (init?.method ? {} : path === '/api/settings/skills' ? { skills: [skill] } : grants) as never);
+  const configuration = document.createElement('div'); document.body.append(configuration);
+  const view = render(<SkillsSettings agents={agents} agentId="agent" configurationTarget={configuration} />);
+  fireEvent.click(await screen.findByRole('button', { name: /Review/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete skill' }));
+  expect(screen.getByRole('alertdialog', { name: 'Delete skill?' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+  expect(mocked.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Delete skill' }));
+  fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete skill' }));
+  await waitFor(() => expect(mocked).toHaveBeenCalledWith('/api/settings/skills/review', { method: 'DELETE' }));
+  view.unmount(); configuration.remove();
 });

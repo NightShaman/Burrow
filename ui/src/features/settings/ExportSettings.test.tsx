@@ -1,5 +1,6 @@
+import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render as baseRender, screen, waitFor } from '@testing-library/react';
 import { api, importExport } from '../../app/api';
 import { ExportSettings } from './ExportSettings';
 
@@ -42,4 +43,23 @@ it('does not allow apply for password challenge or a changed password', async ()
   expect(await screen.findByRole('button', { name: 'Import export' })).toBeTruthy();
   fireEvent.change(screen.getByLabelText('Export password'), { target: { value: 'second' } });
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Import export' })).toBeNull());
+});
+
+function render(ui: Parameters<typeof baseRender>[0]) { return baseRender(ui, { wrapper: ConfirmProvider }); }
+
+it('uses shared confirmation, cancels without applying, and applies once after approval', async () => {
+  vi.mocked(api).mockResolvedValue({ categories: [], passwordMinLength: 12 });
+  vi.mocked(importExport).mockResolvedValue({ supported: ['settings'] });
+  render(<ExportSettings />);
+  await choose();
+  fireEvent.click(screen.getByRole('button', { name: 'Import export' }));
+  expect(screen.getByRole('alertdialog', { name: 'Import this export?' })).toBeTruthy();
+  expect(screen.getByLabelText('Conflict handling')).toHaveProperty('disabled', true);
+  expect(vi.mocked(importExport).mock.calls).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.getByLabelText('Conflict handling')).toHaveProperty('disabled', false));
+  fireEvent.click(screen.getByRole('button', { name: 'Import export' }));
+  fireEvent.click(screen.getByRole('alertdialog').querySelector('button.danger')!);
+  await waitFor(() => expect(vi.mocked(importExport).mock.calls).toHaveLength(2));
+  expect(vi.mocked(importExport).mock.calls[1][0]).toMatchObject({ confirm: true, conflictPolicy: 'error' });
 });

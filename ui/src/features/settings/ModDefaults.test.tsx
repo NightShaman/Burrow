@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { ConfirmProvider } from '../../app/ConfirmDialog';
+import { cleanup, fireEvent, render as baseRender, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { DeclarativeSection } from './ModSettingsHost';
 import { validateSettingsContribution } from './SettingsContribution';
@@ -21,3 +22,5 @@ it('submits successful actions',async()=>{
 });
 
 it('refreshes untouched defaults',()=>{const first=make('old');const view=render(<DeclarativeSection contribution={first} section={first.sections[0]} module={{}} overflowTarget={null}/>);const next=make('fresh');view.rerender(<DeclarativeSection contribution={next} section={next.sections[0]} module={{}} overflowTarget={null}/>);expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('fresh');});
+
+function render(ui: Parameters<typeof baseRender>[0]) { return baseRender(ui, { wrapper: ConfirmProvider }); }

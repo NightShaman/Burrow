@@ -37,6 +37,8 @@ describe('agent settings sections', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Zone job/ }));
     expect((screen.getByRole('checkbox', { name: 'Use operator timezone' }) as HTMLInputElement).checked).toBe(false);
     expect(screen.getByDisplayValue('Europe/London')).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: 'Use operator timezone' }).closest('label')?.parentElement?.tagName).toBe('DIV');
+    expect(screen.getByRole('checkbox', { name: 'Use operator timezone' }).closest('label')?.className).toBe('settings-checkbox-row');
     fireEvent.click(screen.getByRole('button', { name: 'Save job' }));
     await waitFor(() => expect(apiMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(true));
     expect(JSON.parse(apiMock.mock.calls.find(([, init]) => init?.method === 'PATCH')![1]!.body as string).timezone).toBe('Europe/London');
@@ -52,6 +54,8 @@ describe('agent settings sections', () => {
     apiMock.mockImplementation((path) => Promise.resolve(path.includes('dream-settings') ? { settings: dreamSettings({ timezone: null, effectiveTimezone: 'America/Chicago' }) } : { receipts: [] }));
     render(<AgentDreams agentId="smatchet" savedProviders={[]} />);
     expect(await screen.findByText(/Effective timezone: America\/Chicago/)).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: 'Use operator timezone' }).closest('label')?.parentElement?.tagName).toBe('DIV');
+    expect(screen.getByRole('checkbox', { name: 'Use operator timezone' }).closest('label')?.className).toBe('settings-checkbox-row');
     fireEvent.click(screen.getByRole('button', { name: 'Save dream settings' }));
     await waitFor(() => expect(apiMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true));
     const body = JSON.parse(apiMock.mock.calls.find(([, init]) => init?.method === 'PUT')![1]!.body as string);

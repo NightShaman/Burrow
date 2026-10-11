@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, within } from '@testing-library/react';
+import { ConfirmProvider } from '../../app/ConfirmDialog';
+import { cleanup, fireEvent, render as baseRender, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { DeclarativeSection } from './ModSettingsHost';
 import { validateSettingsContribution } from './SettingsContribution';
@@ -18,3 +19,5 @@ it.each(['list-detail','form','form-inventory'])('honors controls and boolean pa
  fireEvent.click(ui.getByLabelText('Enabled')); fireEvent.click(ui.getByText('Save'));
  expect(handler).toHaveBeenCalledWith('save',{secret:'hidden',enabled:false,count:'2',text:'plain',choice:'a'});
 });
+
+function render(ui: Parameters<typeof baseRender>[0]) { return baseRender(ui, { wrapper: ConfirmProvider }); }

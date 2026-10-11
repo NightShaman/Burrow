@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
+import { useConfirm } from '../../app/ConfirmDialog';
 import { api } from '../../app/api';
 import type { Agent } from '../../app/types';
 import { Field, SettingSection } from './SettingsPrimitives';
@@ -11,6 +12,10 @@ const empty: Draft = { id: '', name: '', description: '', content: '', lifecycle
 const body = (value: unknown, method = 'PUT'): RequestInit => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) });
 
 export function SkillsSettings({ agents, agentId, configurationTarget, overflowTarget, agentView = false }: { agents: Agent[]; agentId: string; configurationTarget?: HTMLElement | null; overflowTarget?: HTMLElement | null; agentView?: boolean }) {
+  const confirm = useConfirm();
+  const deleting = useRef(false);
+  const deletionOwner = useRef<object | null>(null);
+  useEffect(() => { const owner = {}; deletionOwner.current = owner; return () => { deletionOwner.current = null; }; }, [agentId]);
   const resourceId = agentId.includes('::') ? agentId.slice(agentId.indexOf('::') + 2) : agentId;
   const request = <T,>(path: string, init?: RequestInit) => api<T>(path, init);
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -90,6 +95,16 @@ export function SkillsSettings({ agents, agentId, configurationTarget, overflowT
     }
   };
 
+  const removeSkill = async () => {
+    if (!selected || busy || deleting.current) return;
+    deleting.current = true;
+    const owner = deletionOwner.current;
+    try {
+      if (!await confirm({ title: 'Delete skill?', message: `Delete skill “${selected.name}”? Its shared copy and assignments will be removed.`, confirmLabel: 'Delete skill', tone: 'danger' }) || !owner || deletionOwner.current !== owner) return;
+      await act(async () => { await request(`/api/settings/skills/${encodeURIComponent(selected.id)}`, { method: 'DELETE' }); setSelectedId(null); });
+    } finally { deleting.current = false; }
+  };
+
   const editor = <SettingSection title={selected ? `Edit ${selected.name}` : 'Create text skill'}>
     <p className="hint">Database text skills have one shared copy. Filesystem and asset skills remain read-only.</p>
     {!selected && <div className="skill-import"><span className="skill-import-label">Import text skill</span><input ref={importInputRef} className="skill-import-input" type="file" aria-label="Import text skill" accept=".md,.markdown,.txt,text/markdown,text/plain" disabled={busy} onChange={event => { void importText(event.target.files?.[0]); event.target.value = ''; }} /><div className="skill-import-control"><button type="button" className="secondary skill-import-trigger" disabled={busy} onClick={() => importInputRef.current?.click()}>Choose text file</button><span className={importedFileName ? 'skill-import-name selected' : 'skill-import-name'} aria-live="polite">{importedFileName || 'No file selected'}</span></div><small>Markdown or plain text · .md, .markdown, .txt. Loads the complete file for review; nothing is saved until you create the skill.</small></div>}
@@ -100,7 +115,7 @@ export function SkillsSettings({ agents, agentId, configurationTarget, overflowT
       <Field label="Lifecycle"><select value={draft.lifecycle} disabled={busy} onChange={event => setDraft({ ...draft, lifecycle: event.target.value })}>{['available', 'experimental', 'deprecated', 'disabled'].map(value => <option key={value}>{value}</option>)}</select></Field>
       <Field label="Content"><textarea rows={12} value={draft.content} disabled={busy} onChange={event => setDraft({ ...draft, content: event.target.value })} /></Field>
       <label className="skill-check"><input type="checkbox" checked={draft.global} disabled={busy} onChange={event => setDraft({ ...draft, global: event.target.checked })} /> Assign globally</label>
-      <div className="skill-actions"><button type="button" disabled={busy || !draft.id.trim() || !draft.name.trim()} onClick={save}>{selected ? 'Save skill' : 'Create skill'}</button>{selected && <button type="button" className="danger" disabled={busy} onClick={() => { if (window.confirm(`Delete skill “${selected.name}”?`)) void act(async () => { await request(`/api/settings/skills/${encodeURIComponent(selected.id)}`, { method: 'DELETE' }); setSelectedId(null); }); }}>Delete skill</button>}</div>
+      <div className="skill-actions"><button type="button" disabled={busy || !draft.id.trim() || !draft.name.trim()} onClick={save}>{selected ? 'Save skill' : 'Create skill'}</button>{selected && <button type="button" className="danger" disabled={busy} onClick={() => void removeSkill()}>Delete skill</button>}</div>
     </div>
   </SettingSection>;
 

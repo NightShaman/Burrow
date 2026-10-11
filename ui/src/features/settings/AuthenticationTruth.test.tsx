@@ -22,3 +22,14 @@ it('describes blank TTL as 12 hours and reconciles the normalized saved TTL', as
  await waitFor(() => expect(ttl.value).toBe('12'));
  expect(JSON.parse(vi.mocked(api).mock.calls[1][1]?.body as string).basic.sessionTtlSeconds).toBeNull();
 });
+it('mounts Browser origin as an integrated sibling section with an independent save', async () => {
+ vi.mocked(api).mockImplementation(async path => (path === '/api/settings/browser-origin' ? { settings: { checkOrigin: true }, effective: { checkOrigin: true, source: 'default' } } : { auth: { mode: 'none' } }) as never);
+ const view = render(<div className="settings-prototype-configuration"><AuthenticationSettings /></div>);
+ await screen.findByText(/Effective: On/);
+ const sections = view.container.querySelectorAll('.settings-prototype-configuration > .setting-section');
+ expect(sections).toHaveLength(2);
+ expect(sections[0].querySelector('h2')?.textContent).toBe('Authentication');
+ expect(sections[1].querySelector('h2')?.textContent).toBe('Browser origin');
+ expect(sections[0].querySelectorAll('button')).toHaveLength(1);
+ expect(sections[1].querySelector('button')?.textContent).toBe('Save browser origin');
+});

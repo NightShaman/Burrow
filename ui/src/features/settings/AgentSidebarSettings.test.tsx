@@ -26,6 +26,7 @@ describe('AgentSidebarSettings', () => {
     let current = { view: 'regular' as const, order: ['smatchet', 'hatchet'] };
     const setPreferences = vi.fn((update) => { current = typeof update === 'function' ? update(current) : update; });
     render(<AgentSidebarSettings agents={agents} preferences={current} setPreferences={setPreferences} />);
+    expect(screen.queryByRole('button', { name: /^Move / })).toBeNull();
     const source = screen.getByText('Hatchet').closest('[draggable="true"]') as HTMLElement;
     const target = screen.getByText('Smatchet').closest('[draggable="true"]') as HTMLElement;
     const data = new Map<string, string>();

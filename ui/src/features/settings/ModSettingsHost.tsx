@@ -1,4 +1,4 @@
-import { AccessibleModal } from '../../app/AccessibleModal';
+import { useConfirm } from '../../app/ConfirmDialog';
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import type { Agent } from '../../app/types';
@@ -44,7 +44,10 @@ export function DeclarativeSection({ contribution, section, module, overflowTarg
   const [values, setValues] = useState<Record<string, string | boolean>>(() => definition ? defaultFieldValues(definition) : {});
   const previousDefaults = useRef({ sectionId: section.id, values: definition ? defaultFieldValues(definition) : {} });
   const [actionState, setActionState] = useState<{ id: string; status: 'saving' | 'success' | 'error'; message: string } | null>(null);
-  const [pendingConfirmation, setPendingConfirmation] = useState<{ actionId: string; message: string } | null>(null);
+  const confirm = useConfirm();
+  const actionPending = useRef(false);
+  const actionOwner = useRef<object | null>(null);
+  useEffect(() => { const owner = {}; actionOwner.current = owner; return () => { actionOwner.current = null; }; }, [section.id, definition]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState(definition?.items?.[0]?.id ?? '');
   useEffect(() => {
@@ -55,7 +58,7 @@ export function DeclarativeSection({ contribution, section, module, overflowTarg
       previous.sectionId === section.id && Object.hasOwn(previous.values, id) && current[id] !== previous.values[id] ? current[id] : value,
     ])));
     previousDefaults.current = { sectionId: section.id, values: defaults };
-    setActionState(null); setPendingConfirmation(null); setEditingId(null);
+    setActionState(null); setEditingId(null);
     setSelectedId((current) => definition.items?.some((item) => item.id === current) ? current : definition.items?.[0]?.id ?? '');
   }, [definition, section.id]);
   if (!definition) return null;
@@ -66,10 +69,17 @@ export function DeclarativeSection({ contribution, section, module, overflowTarg
     try { if (typeof module.handleSettingsAction !== 'function') throw new Error('The mod does not provide an action handler.'); await module.handleSettingsAction(actionId, actionValues); setActionState({ id: actionId, status: 'success', message: 'Saved.' }); setValues(current => Object.fromEntries(Object.entries(current).map(([id, value]) => [id, [...(definition.fields ?? []), ...(definition.items?.flatMap(item => item.fields ?? []) ?? [])].some(field => field.id === id && field.control === 'password') ? '' : value]))); if (definition.fields?.length) setEditingId(null); }
     catch (cause) { setActionState({ id: actionId, status: 'error', message: cause instanceof Error ? cause.message : 'The action could not be completed.' }); }
   };
-  const actions = (items: SettingsAction[] | undefined) => items?.length ? <>
-    <div className="card-actions">{items.map((action) => { const saving = actionState?.id === action.id && actionState?.status === 'saving'; return <button type="button" className={action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : ''} disabled={actionState?.status === 'saving'} key={action.id} onClick={() => action.confirm ? setPendingConfirmation({ actionId: action.id, message: action.confirm }) : void runAction(action.id)}>{saving ? 'Saving…' : action.label}</button>; })}</div>
-    {pendingConfirmation && items.some(action => action.id === pendingConfirmation.actionId) && <div className="settings-confirm-backdrop" role="presentation" onMouseDown={() => setPendingConfirmation(null)}><AccessibleModal className="settings-confirm-dialog" role="dialog" aria-labelledby="settings-confirm-title" onMouseDown={(event) => event.stopPropagation()} onClose={() => setPendingConfirmation(null)}><header><div><span className="eyebrow">CONFIRM ACTION</span><h2 id="settings-confirm-title">Are you sure?</h2></div><button className="settings-confirm-close" type="button" aria-label="Close confirmation" onClick={() => setPendingConfirmation(null)}>×</button></header><p>{pendingConfirmation.message}</p><div className="card-actions"><button type="button" onClick={() => setPendingConfirmation(null)}>Cancel</button><button type="button" className="danger" onClick={() => { const { actionId } = pendingConfirmation; setPendingConfirmation(null); void runAction(actionId); }}>Continue</button></div></AccessibleModal></div>}
-  </> : null;
+  const requestAction = async (action: SettingsAction) => {
+    if (actionPending.current) return;
+    actionPending.current = true;
+    const owner = actionOwner.current;
+    try {
+      if (action.confirm && !await confirm({ title: action.label, message: action.confirm, confirmLabel: action.label, tone: action.tone === 'danger' ? 'danger' : 'default' })) return;
+      if (!owner || actionOwner.current !== owner) return;
+      await runAction(action.id);
+    } finally { actionPending.current = false; }
+  };
+  const actions = (items: SettingsAction[] | undefined) => items?.length ? <div className="card-actions">{items.map((action) => { const saving = actionState?.id === action.id && actionState?.status === 'saving'; return <button type="button" className={action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : ''} disabled={actionState?.status === 'saving'} key={action.id} onClick={() => void requestAction(action)}>{saving ? 'Saving…' : action.label}</button>; })}</div> : null;
   const feedback = actionState && <p className={actionState.status === 'error' ? 'settings-request-error' : 'settings-help'} role={actionState.status === 'error' ? 'alert' : 'status'}>{actionState.message}</p>;
   if (definition.layout === 'form-inventory') {
     const editing = definition.items?.find(item => item.id === editingId) ?? (!definition.fields?.length ? definition.items?.[0] : undefined);

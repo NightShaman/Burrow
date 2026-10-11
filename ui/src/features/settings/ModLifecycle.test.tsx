@@ -1,5 +1,6 @@
+import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { StrictMode } from 'react';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render as baseRender, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ModSettingsHost } from './ModSettingsHost';
 const { mountSettings } = vi.hoisted(() => ({mountSettings:vi.fn()}));
@@ -43,3 +44,5 @@ it('FE038 contains real settings factory synchronous errors',async()=>{
  render(<ModSettingsHost {...props} settingsUrl="./ModFactoryFixture"/>);
  expect((await screen.findByRole('alert')).textContent).toContain('factory failure');
 });
+
+function render(ui: Parameters<typeof baseRender>[0]) { return baseRender(ui, { wrapper: ConfirmProvider }); }

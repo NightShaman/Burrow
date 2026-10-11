@@ -31,3 +31,20 @@ it('mounts only the selected configuration, with no hidden duplicate reads', asy
  expect(paths).not.toContain('/api/settings/mcp-connections');
  expect(paths).not.toContain('/api/settings/model-connections');
 });
+it('shows agent options from active rail selections without focusing a dropdown', () => {
+ vi.mocked(api).mockResolvedValue({ wizardStep: 'ready' });
+ function Parent() {
+  const [leftSinglePanel, setLeftSinglePanel] = useState<'agents' | 'workspace'>('agents');
+  const [leftRailLayout, setLeftRailLayout] = useState<'single' | 'divided'>('single');
+  return <Settings {...{ tab: 'general', setTab: vi.fn(), agents: [], selected: { id: '', name: '' }, savedProviders: [], onOperatorProfileChanged: vi.fn(), agentRailPreferences: { view: 'regular', order: [] }, setAgentRailPreferences: vi.fn(), leftSinglePanel, setLeftSinglePanel, leftRailLayout, setLeftRailLayout, leftTopPanel: 'agents', leftBottomPanel: 'workspace', rightRailLayout: 'single', rightSinglePanel: 'workspace', rightTopPanel: 'agents', rightBottomPanel: 'workspace' } as unknown as ComponentProps<typeof Settings>} />;
+ }
+ render(<Parent />);
+ fireEvent.click(screen.getByRole('button', { name: 'Rail panels' }));
+ expect(screen.getByText('Agent panel options')).toBeTruthy();
+ fireEvent.focus(screen.getByLabelText('Right · panel'));
+ expect(screen.getByText('Agent panel options')).toBeTruthy();
+ fireEvent.change(screen.getByLabelText('Left · panel'), { target: { value: 'workspace' } });
+ expect(screen.queryByText('Agent panel options')).toBeNull();
+ fireEvent.change(screen.getByLabelText('Left · layout'), { target: { value: 'divided' } });
+ expect(screen.getByText('Agent panel options')).toBeTruthy();
+});

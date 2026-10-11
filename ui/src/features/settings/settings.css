@@ -36,10 +36,6 @@ button:disabled{cursor:not-allowed;opacity:.45}
 
 .settings-request-error{margin:10px 0 0;color:var(--danger);font-size:12px;line-height:1.4}
 .mod-management-settings{display:grid;gap:12px;min-width:0}.mod-restart-notice{margin:0}.memory-connection strong:has(.mod-system-badge){display:flex;align-items:center;gap:7px}.mod-system-badge{display:inline-flex;align-items:center;min-height:18px;padding:0 6px;border:1px solid var(--line);border-radius:999px;background:var(--surface-sunken);color:var(--muted);font-size:9px;font-weight:800;letter-spacing:.05em;line-height:1;text-transform:uppercase}
-.settings-confirm-backdrop{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:20px;background:var(--overlay)}
-.settings-confirm-dialog{width:min(420px,100%);padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:0 18px 48px rgb(0 0 0 / 38%)}
-.settings-confirm-dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.settings-confirm-dialog h2{margin:4px 0 0;color:var(--text-strong);font-size:18px}.settings-confirm-dialog p{margin:16px 0 0;color:var(--text);line-height:1.5}.settings-confirm-close{width:30px;height:30px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:22px;line-height:1}.settings-confirm-close:hover{background:var(--surface-hover);color:var(--text)}
-@media (prefers-reduced-motion:reduce){.settings-confirm-backdrop{animation:none}}
 .agent-settings-dreams{grid-column:1/-1;min-width:0}.agent-settings-dreams .setting-section{margin-top:12px}.settings-description{margin:0 0 14px;color:var(--muted);line-height:1.45}.dream-settings-fields{display:grid;gap:12px}.dream-schedule-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.dream-schedule-fields .field{min-width:0}.dream-settings-fields textarea,.dream-diary textarea,.dream-diary select{width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--surface-input);color:var(--text);font:inherit;resize:vertical}.dream-diary{display:grid;gap:10px;margin-top:12px}.dream-diary-header{display:flex;align-items:center;justify-content:space-between;gap:10px}.dream-diary h3,.dream-diary-header h3{margin:0;font-size:13px}.dream-diary-header .dream-phase-select{width:132px;flex:0 0 132px}.dream-entry{padding:10px;border:1px solid var(--line-soft);border-radius:7px;background:var(--surface-raised)}.dream-entry-meta{color:var(--muted);font-size:11px;font-weight:750;text-transform:capitalize}.dream-entry p{margin:6px 0 0;line-height:1.5;white-space:pre-wrap}
 
 .credential-state{margin:0;color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.02em}.credential-state.configured{color:var(--ok)}.credential-state.missing{color:var(--warn)}
@@ -653,13 +649,16 @@ button:disabled{cursor:not-allowed;opacity:.45}
   border-bottom: 1px solid var(--line-soft);
   font-size: 14px;
 }
-.mod-settings-mount input[type='checkbox'] {
+:is(.settings-mode, .settings-view, .mod-settings-mount) input[type='checkbox'] {
   appearance: none;
   box-sizing: border-box;
   width: 16px;
   height: 16px;
   min-width: 16px;
   min-height: 16px;
+  max-width: 16px;
+  max-height: 16px;
+  padding: 0;
   margin: 0;
   flex: 0 0 16px;
   border: 1px solid var(--line);
@@ -670,7 +669,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
   display: inline-grid;
   place-content: center;
 }
-.mod-settings-mount input[type='checkbox']::before {
+:is(.settings-mode, .settings-view, .mod-settings-mount) input[type='checkbox']::before {
   width: 8px;
   height: 5px;
   border: solid currentColor;
@@ -679,24 +678,24 @@ button:disabled{cursor:not-allowed;opacity:.45}
   transform: rotate(-45deg) scale(0);
   transition: transform .12s ease-in-out;
 }
-.mod-settings-mount input[type='checkbox']:checked {
+:is(.settings-mode, .settings-view, .mod-settings-mount) input[type='checkbox']:checked {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-contrast, #fff);
 }
-.mod-settings-mount input[type='checkbox']:checked::before {
+:is(.settings-mode, .settings-view, .mod-settings-mount) input[type='checkbox']:checked::before {
   transform: rotate(-45deg) scale(1);
 }
-.mod-settings-mount input[type='checkbox']:focus-visible {
+:is(.settings-mode, .settings-view, .mod-settings-mount) input[type='checkbox']:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.mod-settings-mount input[type='checkbox']:disabled {
+:is(.settings-mode, .settings-view, .mod-settings-mount) input[type='checkbox']:disabled {
   cursor: not-allowed;
   opacity: .5;
 }
 @media (prefers-reduced-motion: reduce) {
-  .mod-settings-mount input[type='checkbox']::before {
+  :is(.settings-mode, .settings-view, .mod-settings-mount) input[type='checkbox']::before {
     transition: none;
   }
 }
@@ -705,7 +704,6 @@ button:disabled{cursor:not-allowed;opacity:.45}
 
 .settings-inventory-card{display:flex;align-items:center;gap:8px;min-width:0;overflow-wrap:anywhere}
 .settings-inventory-card>div:first-child{min-width:0}
-.settings-inventory-card.active{border-color:var(--accent);background:var(--accent-subtle);box-shadow:inset 3px 0 var(--accent)}
 .settings-inventory-select{flex:1;min-width:0;align-self:stretch;text-align:left;border:0;background:transparent;color:var(--text);padding:0;white-space:normal;overflow-wrap:anywhere}
 .settings-inventory-select:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
 .settings-inventory-card .card-actions{margin:0;flex-shrink:0}
@@ -750,3 +748,6 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .field-pair.provider-model-fields{grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));min-width:0;align-items:start}
 .provider-model-fields>.field,.provider-model-fields select{min-width:0;width:100%}
 .dream-schedule-fields>.provider-model-fields,.curator-model-row>.provider-model-fields{grid-column:1/-1}
+
+/* Compact checkbox rows: never inherit text-field sizing or stack the label. */
+.settings-checkbox-row{display:flex;align-items:center;gap:8px;min-width:0;cursor:pointer}

@@ -1,5 +1,6 @@
+import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, render as baseRender, waitFor } from '@testing-library/react';
 import { ModSettingsHost } from './ModSettingsHost';
 
 const { mountSettings } = vi.hoisted(() => ({ mountSettings: vi.fn() }));
@@ -17,3 +18,5 @@ it('mounts locally scoped Settings API regardless of selected remote target', as
   expect(fetch.mock.calls[0][0]).toBe('/api/mods/example/status');
   expect(fetch.mock.calls[0][0]).not.toContain('remote.example');
 });
+
+function render(ui: Parameters<typeof baseRender>[0]) { return baseRender(ui, { wrapper: ConfirmProvider }); }

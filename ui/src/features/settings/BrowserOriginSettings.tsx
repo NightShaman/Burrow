@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { SettingSection } from './SettingsPrimitives';
 import { api } from '../../app/api';
 
 type OriginSettings = {
@@ -45,15 +46,14 @@ export function BrowserOriginSettings() {
       if (ticket !== null && owner.current === ticket) setState('idle');
     }
   };
-  return <div className="auth-mode-fields">
-    <h3>Browser origin</h3>
+  return <SettingSection title="Browser origin">
     <label className="agent-enabled"><input type="checkbox" checked={checkOrigin} disabled={state !== 'idle' || !result} onChange={event => { setCheckOrigin(event.target.checked); setNotice(''); setError(''); }} /><span>Check browser origin</span></label>
-    <p className="settings-description">Reject requests from unapproved browser origins.</p>
+    <p className="settings-description">Reject requests from unapproved browser origins. This check is independent of authentication and is saved separately.</p>
     {result && <p className={result.effective.source === 'environment' ? 'settings-auth-warning' : 'settings-description'} role="status">Effective: {result.effective.checkOrigin ? 'On' : 'Off'}{result.effective.source === 'environment' ? ' · Environment override controls this runtime.' : ''}</p>}
     <div className="auth-actions"><button type="button" className="primary" disabled={state !== 'idle' || !result} onClick={() => void save()}>{state === 'saving' ? 'Saving…' : 'Save browser origin'}</button></div>
     {state === 'loading' && <p role="status">Loading browser origin settings…</p>}
     {state === 'error' && <button type="button" onClick={() => setRetry(value => value + 1)}>Retry browser origin</button>}
     {error && <p className="settings-request-error" role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
-  </div>;
+  </SettingSection>;
 }

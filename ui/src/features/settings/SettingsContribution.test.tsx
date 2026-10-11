@@ -1,4 +1,5 @@
-import { fireEvent, render, waitFor, within } from '@testing-library/react';
+import { ConfirmProvider } from '../../app/ConfirmDialog';
+import { fireEvent, render as baseRender, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { DeclarativeSection } from './ModSettingsHost';
 import { validateSettingsContribution } from './SettingsContribution';
@@ -123,4 +124,23 @@ it('selects credential forms without conflating selection and revoke, and clears
   expect(within(view.container).getByLabelText('Gateway ID')).toBeTruthy();
   fireEvent.click(within(overflow).getByRole('button', { name: 'Hatchet' }));
   expect((within(view.container).getByLabelText('New secret') as HTMLInputElement).value).toBe('');
+});
+
+function render(ui: Parameters<typeof baseRender>[0]) { return baseRender(ui, { wrapper: ConfirmProvider }); }
+
+it('uses shared confirmation for overflow actions and cancels without invoking the mod', async () => {
+  const contribution = validateSettingsContribution({ sections: [{ id: 'gateways', label: 'Gateways', layout: 'form-inventory', fields: [{ id: 'new-id', label: 'Gateway ID' }], items: [{ id: 'safe', label: 'Fixture gateway', actions: [{ id: 'revoke:safe', label: 'Revoke', tone: 'danger', confirm: 'Revoke the fixture gateway?' }] }] }] })!;
+  const overflow = document.createElement('div'); document.body.append(overflow);
+  const handler = vi.fn().mockResolvedValue(undefined);
+  const view = render(<DeclarativeSection contribution={contribution} section={contribution.sections[0]} module={{ handleSettingsAction: handler }} overflowTarget={overflow} />);
+  fireEvent.click(within(overflow).getByRole('button', { name: 'Revoke' }));
+  const dialog = screen.getByRole('alertdialog', { name: 'Revoke' });
+  expect(dialog.className).toBe('confirm-dialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+  expect(handler).not.toHaveBeenCalled();
+  fireEvent.click(within(overflow).getByRole('button', { name: 'Revoke' }));
+  fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Revoke' }));
+  await waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
+  view.unmount(); overflow.remove();
 });
