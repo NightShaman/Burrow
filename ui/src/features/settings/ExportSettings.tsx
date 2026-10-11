@@ -31,6 +31,9 @@ export function ExportSettings() {
   const [importName, setImportName] = useState('');
   const [importPassword, setImportPassword] = useState('');
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
+  const [previewedInputs, setPreviewedInputs] = useState<string | null>(null);
+  const [passwordNeeded, setPasswordNeeded] = useState(false);
+  const previewSequence = useRef(0);
   const [importState, setImportState] = useState<'idle' | 'previewing' | 'importing'>('idle');
   const [conflictPolicy, setConflictPolicy] = useState<'error' | 'skip' | 'replace'>('error');
   const importInput = useRef<HTMLInputElement>(null);
@@ -54,36 +57,42 @@ export function ExportSettings() {
   };
 
   const previewImport = async (payload: string, passwordValue = '') => {
-    setError(''); setImportState('previewing');
+    const sequence = ++previewSequence.current;
+    const inputs = JSON.stringify([payload, passwordValue, conflictPolicy]);
+    setPreviewedInputs(null); setImportPreview(null); setError(''); setImportState('previewing');
     try {
       const preview = await importExport({ payload, ...(passwordValue ? { password: passwordValue } : {}), conflictPolicy }, true) as ImportPreview;
-      setImportPreview(preview);
+      if (sequence === previewSequence.current) { setImportPreview(preview); setPreviewedInputs(inputs); }
     } catch (reason) {
+      if (sequence !== previewSequence.current) return;
       if (reason instanceof Error && reason.message === 'import_password_required') {
-        setImportPreview({ encrypted: true, requiresPassword: true });
+        setPasswordNeeded(true); setImportPreview({ encrypted: true, requiresPassword: true });
         setError('This export is encrypted. Enter its password, then preview it again.');
       } else setError(importErrorMessage(reason));
-    } finally { setImportState('idle'); }
+    } finally { if (sequence === previewSequence.current) setImportState('idle'); }
   };
 
   const readImportFile = async (file?: File) => {
     if (!file) return;
-    setError(''); setImportState('previewing'); setImportPreview(null); setImportPassword('');
+    const sequence = ++previewSequence.current;
+    setError(''); setImportState('previewing'); setImportPreview(null); setPreviewedInputs(null); setPasswordNeeded(false); setImportPassword(''); setImportPayload(''); setImportName(file.name);
     try {
       const payload = await fileToBase64(file);
-      setImportPayload(payload); setImportName(file.name);
+      if (sequence !== previewSequence.current) return;
+      setImportPayload(payload);
       await previewImport(payload);
-    } catch (reason) { setError(importErrorMessage(reason)); setImportPayload(''); setImportName(''); }
-    finally { setImportState('idle'); }
+    } catch (reason) { if (sequence === previewSequence.current) { setError(importErrorMessage(reason)); setImportPayload(''); setImportName(''); } }
+    finally { if (sequence === previewSequence.current) setImportState('idle'); }
   };
 
+  const previewIsCurrent = Boolean(importPreview && previewedInputs === JSON.stringify([importPayload, importPassword, conflictPolicy]));
   const applyImport = async () => {
-    if (!importPayload || (importPreview?.requiresPassword && !importPassword.trim())) return;
+    if (importState !== 'idle' || !previewIsCurrent || !importPayload || (importPreview?.requiresPassword && !importPassword.trim())) return;
     if (!window.confirm('Import this export? Existing matching data may be changed according to the selected conflict policy.')) return;
     setError(''); setImportState('importing');
     try {
       await importExport({ payload: importPayload, ...(importPassword ? { password: importPassword } : {}), confirm: true, conflictPolicy });
-      setImportPayload(''); setImportName(''); setImportPassword(''); setImportPreview(null);
+      setImportPayload(''); setImportName(''); setImportPassword(''); setImportPreview(null); setPreviewedInputs(null); setPasswordNeeded(false);
       if (importInput.current) importInput.current.value = '';
     } catch (reason) { setError(importErrorMessage(reason)); }
     finally { setImportState('idle'); }
@@ -103,10 +112,13 @@ export function ExportSettings() {
     </SettingSection>
     <SettingSection title="Import">
       <p className="settings-help">Restore data from a Burrow export. Review the preview before applying changes.</p>
-      <input ref={importInput} className="export-file-input" type="file" accept=".json.gz,.gz,.hc-export,.tar,.bin,application/octet-stream,application/gzip" onChange={(event) => { void readImportFile(event.target.files?.[0]); }} />
+      <input ref={importInput} className="export-file-input" disabled={importState !== 'idle'} type="file" accept=".json.gz,.gz,.hc-export,.tar,.bin,application/octet-stream,application/gzip" onChange={(event) => { void readImportFile(event.target.files?.[0]); }} />
       <button className="secondary" type="button" onClick={() => importInput.current?.click()} disabled={importState !== 'idle'}>{importState === 'previewing' ? 'Reading export…' : 'Choose export file'}</button>
       {importName && <p className="import-file-name" role="status">Selected: <strong>{importName}</strong></p>}
-      {importPreview && <div className="import-preview" aria-live="polite"><strong>Export preview</strong><span>Supported: {importSummary(importPreview.supported ?? importPreview.categories)}</span>{importPreview.unsupported !== undefined && <span>Unsupported: {importSummary(importPreview.unsupported)}</span>}<Field label="Conflict handling"><select value={conflictPolicy} onChange={(event) => setConflictPolicy(event.target.value as typeof conflictPolicy)}><option value="error">Stop if conflicts exist</option><option value="skip">Skip conflicting items</option><option value="replace">Replace conflicting items</option></select></Field>{(importPreview.requiresPassword || importPreview.encrypted) && <><Field label="Export password"><input type="password" value={importPassword} onChange={(event) => setImportPassword(event.target.value)} autoComplete="off" /></Field><button className="secondary" type="button" onClick={() => void previewImport(importPayload, importPassword)} disabled={importState !== 'idle' || !importPassword.trim()}>{importState === 'previewing' ? 'Checking password…' : 'Preview with password'}</button></>}<p className="import-warning">Importing changes Burrow data. This cannot be undone from the UI.</p><button className="primary" type="button" onClick={() => void applyImport()} disabled={importState !== 'idle' || Boolean(importPreview.requiresPassword || importPreview.encrypted) && !importPassword.trim()}>{importState === 'importing' ? 'Importing…' : 'Import export'}</button></div>}
+      {importName && <Field label="Conflict handling"><select disabled={importState !== 'idle'} value={conflictPolicy} onChange={(event) => { setConflictPolicy(event.target.value as typeof conflictPolicy); setImportPreview(null); setPreviewedInputs(null); }}><option value="error">Stop if conflicts exist</option><option value="skip">Skip conflicting items</option><option value="replace">Replace conflicting items</option></select></Field>}
+      {passwordNeeded && <Field label="Export password"><input type="password" disabled={importState !== 'idle'} value={importPassword} onChange={(event) => { setImportPassword(event.target.value); setImportPreview(null); setPreviewedInputs(null); }} autoComplete="off" /></Field>}
+      {importName && importPayload && importState === 'idle' && !previewIsCurrent && <button className="secondary" type="button" onClick={() => void previewImport(importPayload, importPassword)}>Preview export</button>}
+      {previewIsCurrent && importPreview && <div className="import-preview" aria-live="polite"><strong>Export preview</strong><span>Supported: {importSummary(importPreview.supported ?? importPreview.categories)}</span>{importPreview.unsupported !== undefined && <span>Unsupported: {importSummary(importPreview.unsupported)}</span>}<p className="import-warning">Importing changes Burrow data. This cannot be undone from the UI.</p><button className="primary" type="button" onClick={() => void applyImport()} disabled={importState !== 'idle' || !previewIsCurrent || Boolean(importPreview.requiresPassword || importPreview.encrypted) && !importPassword.trim()}>{importState === 'importing' ? 'Importing…' : 'Import export'}</button></div>}
       {error && <p className="settings-error" role="alert">{error}</p>}
     </SettingSection>
   </>;

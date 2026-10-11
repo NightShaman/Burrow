@@ -1,5 +1,5 @@
 import { ProviderModelFields } from './ProviderModelFields';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../app/api';
 import type { SavedProvider } from '../../app/types';
 import { Field, SettingSection } from './SettingsPrimitives';
@@ -29,17 +29,20 @@ export function CuratorSettings({ savedProviders }: { savedProviders: SavedProvi
   const [gpuLayers, setGpuLayers] = useState('0');
   const [temperature, setTemperature] = useState('0');
   const [status, setStatus] = useState<CuratorStatus | null>(null);
-  const [requestState, setRequestState] = useState<'loading' | 'idle' | 'saving'>('loading');
+  const [requestState, setRequestState] = useState<'loading' | 'idle' | 'saving' | 'error'>('loading');
   const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
+  const owner = useRef<object | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    const ticket = {}; owner.current = ticket;
+    const controller = new AbortController();
     const load = async () => {
-      setRequestState('loading'); setError('');
+      setRequestState('loading'); setStatus(null); setError('');
       try {
-        const result = await api<CuratorStatus>('/api/settings/curator');
-        if (cancelled) return;
-        setStatus(result);
+        const result = await api<CuratorStatus>('/api/settings/curator', { signal: controller.signal });
+        if (owner.current !== ticket) return;
+        setStatus(result); setRequestState('idle');
         if (result.selection?.kind === 'external') {
           setMode('external');
           setExternalValue(JSON.stringify({ connectionId: result.selection.connectionId, model: result.selection.model }));
@@ -52,14 +55,16 @@ export function CuratorSettings({ savedProviders }: { savedProviders: SavedProvi
           setTemperature(String(result.selection.temperature ?? 0));
         }
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? `Could not load curator settings: ${cause.message}` : 'Could not load curator settings.');
-      } finally { if (!cancelled) setRequestState('idle'); }
+        if (owner.current === ticket) { setError(cause instanceof Error ? `Could not load curator settings: ${cause.message}` : 'Could not load curator settings.'); setRequestState('error'); }
+      }
     };
     load();
-    return () => { cancelled = true; };
-  }, []);
+    return () => { owner.current = null; controller.abort(); };
+  }, [retry]);
 
   const save = async () => {
+    if (requestState !== 'idle' || !status || !owner.current) return;
+    const ticket = owner.current;
     setRequestState('saving'); setError('');
     try {
       const nextTemperature = Math.min(0.5, Math.max(0, Number(temperature) || 0));
@@ -75,14 +80,15 @@ export function CuratorSettings({ savedProviders }: { savedProviders: SavedProvi
         body = { kind: 'local', modelPath: nextPath, contextSize: Number(contextSize) || 4096, gpuLayers: Number(gpuLayers) || 0, temperature: nextTemperature };
       }
       const result = await api<CuratorStatus>('/api/settings/curator', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      if (owner.current !== ticket) return;
       setStatus(result);
       setTemperature(String(result.selection?.temperature ?? nextTemperature));
     } catch (cause) {
-      setError(cause instanceof Error ? `Could not save curator settings: ${cause.message}` : 'Could not save curator settings.');
-    } finally { setRequestState('idle'); }
+      if (owner.current === ticket) setError(cause instanceof Error ? `Could not save curator settings: ${cause.message}` : 'Could not save curator settings.');
+    } finally { if (owner.current === ticket) setRequestState('idle'); }
   };
 
-  const disabled = requestState === 'loading' || requestState === 'saving';
+  const disabled = requestState !== 'idle' || !status;
 
-  return <SettingSection title="Tiddle Signal"><div className="curator-card"><p className="hint">Maintains warm conversational continuity by periodically reviewing recent session activity for recurring people, projects, threads, decisions, and other meaningful context. Uses rolling continuity cards with roughly a 30-day horizon. It does not control active task state or automatically steer the current conversation.</p><div className="curator-mode" role="radiogroup" aria-label="Tiddle Signal model source"><label><input type="radio" name="curator-mode" checked={mode === 'external'} onChange={() => setMode('external')} /> Existing model connection</label><label><input type="radio" name="curator-mode" checked={mode === 'local'} onChange={() => setMode('local')} /> Local GGUF</label></div>{mode === 'external' ? <div className="curator-model-row"><ProviderModelFields providers={savedProviders} connectionId={externalValue ? (JSON.parse(externalValue) as { connectionId: string }).connectionId : null} model={externalValue ? (JSON.parse(externalValue) as { model: string }).model : null} disabled={disabled} onChange={(connectionId, model) => setExternalValue(connectionId ? JSON.stringify({ connectionId, model: model ?? '' }) : '')} /><Field label={`Temperature · ${Number(temperature).toFixed(2)}`}><input type="range" min="0" max="0.5" step="0.01" value={temperature} onChange={(event) => setTemperature(event.target.value)} disabled={disabled} aria-describedby="tiddle-temperature-help" /></Field></div> : <><Field label="Model path"><input value={localPath} onChange={(event) => setLocalPath(event.target.value)} placeholder="models/LFM2.5-2.6B-Q4_K_M.gguf" disabled={disabled} /></Field><div className="field-pair compact-fields"><Field label="Context size"><input type="number" min="1" step="1" value={contextSize} onChange={(event) => setContextSize(event.target.value)} disabled={disabled} /></Field><Field label="GPU layers"><input type="number" min="0" step="1" value={gpuLayers} onChange={(event) => setGpuLayers(event.target.value)} disabled={disabled} /></Field></div><Field label={`Temperature · ${Number(temperature).toFixed(2)}`}><input type="range" min="0" max="0.5" step="0.01" value={temperature} onChange={(event) => setTemperature(event.target.value)} disabled={disabled} aria-describedby="tiddle-temperature-help" /></Field></>}<p className="hint" id="tiddle-temperature-help">Controls how much variation Tiddle Signal uses when creating continuity cards. Lower values are more consistent; higher values are warmer and more varied.</p>{status && <p className={`curator-status ${status.available ? 'available' : 'unavailable'}`}>{status.available ? 'Available' : 'Unavailable'}{status.reason ? ` · ${status.reason}` : ''}{status.root ? ` · root: ${status.root}` : ''}</p>}{mode === 'external' && externalOptions.length === 0 && <p className="settings-request-error" role="alert">Add a model connection before selecting an external curator model.</p>}{error && <p className="settings-request-error" role="alert">{error}</p>}<button type="button" className="primary" onClick={save} disabled={disabled}>{requestState === 'saving' ? 'Saving…' : 'Save Tiddle Settings'}</button></div></SettingSection>;
+  return <SettingSection title="Tiddle Signal"><div className="curator-card"><p className="hint">Maintains warm conversational continuity by periodically reviewing recent session activity for recurring people, projects, threads, decisions, and other meaningful context. Uses rolling continuity cards with roughly a 30-day horizon. It does not control active task state or automatically steer the current conversation.</p><div className="curator-mode" role="radiogroup" aria-label="Tiddle Signal model source"><label><input type="radio" name="curator-mode" checked={mode === 'external'} disabled={disabled} onChange={() => setMode('external')} /> Existing model connection</label><label><input type="radio" name="curator-mode" checked={mode === 'local'} disabled={disabled} onChange={() => setMode('local')} /> Local GGUF</label></div>{mode === 'external' ? <div className="curator-model-row"><ProviderModelFields providers={savedProviders} connectionId={externalValue ? (JSON.parse(externalValue) as { connectionId: string }).connectionId : null} model={externalValue ? (JSON.parse(externalValue) as { model: string }).model : null} disabled={disabled} onChange={(connectionId, model) => setExternalValue(connectionId ? JSON.stringify({ connectionId, model: model ?? '' }) : '')} /><Field label={`Temperature · ${Number(temperature).toFixed(2)}`}><input type="range" min="0" max="0.5" step="0.01" value={temperature} onChange={(event) => setTemperature(event.target.value)} disabled={disabled} aria-describedby="tiddle-temperature-help" /></Field></div> : <><Field label="Model path"><input value={localPath} onChange={(event) => setLocalPath(event.target.value)} placeholder="models/LFM2.5-2.6B-Q4_K_M.gguf" disabled={disabled} /></Field><div className="field-pair compact-fields"><Field label="Context size"><input type="number" min="1" step="1" value={contextSize} onChange={(event) => setContextSize(event.target.value)} disabled={disabled} /></Field><Field label="GPU layers"><input type="number" min="0" step="1" value={gpuLayers} onChange={(event) => setGpuLayers(event.target.value)} disabled={disabled} /></Field></div><Field label={`Temperature · ${Number(temperature).toFixed(2)}`}><input type="range" min="0" max="0.5" step="0.01" value={temperature} onChange={(event) => setTemperature(event.target.value)} disabled={disabled} aria-describedby="tiddle-temperature-help" /></Field></>}<p className="hint" id="tiddle-temperature-help">Controls how much variation Tiddle Signal uses when creating continuity cards. Lower values are more consistent; higher values are warmer and more varied.</p>{status && <p className={`curator-status ${status.available ? 'available' : 'unavailable'}`}>{status.available ? 'Available' : 'Unavailable'}{status.reason ? ` · ${status.reason}` : ''}{status.root ? ` · root: ${status.root}` : ''}</p>}{mode === 'external' && externalOptions.length === 0 && <p className="settings-request-error" role="alert">Add a model connection before selecting an external curator model.</p>}{requestState === 'error' && <button type="button" onClick={() => setRetry(value => value + 1)}>Retry Tiddle Settings</button>}{error && <p className="settings-request-error" role="alert">{error}</p>}<button type="button" className="primary" onClick={save} disabled={disabled}>{requestState === 'saving' ? 'Saving…' : 'Save Tiddle Settings'}</button></div></SettingSection>;
 }

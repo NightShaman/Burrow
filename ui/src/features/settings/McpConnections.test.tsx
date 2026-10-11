@@ -94,3 +94,31 @@ it('keeps environment name focus and row identity while typing and deleting a pr
  fireEvent.click(screen.getByRole('button', { name: /Remove.*BW_SESSION/ }));
  expect(screen.getByLabelText('Environment variable 1 name')).toBe(second);
 });
+
+describe('MCP inventory failures', () => {
+  it('does not describe a failed initial read as an empty inventory; retry recovers', async () => {
+    vi.mocked(api).mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ connections: [] });
+    render(<ConfirmProvider><McpConnections /></ConfirmProvider>);
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('offline'));
+    expect(screen.queryByText('No MCP servers saved yet.')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('No MCP servers saved yet.')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('retains draft and reports saved-but-refresh-failed, disabling duplicate save until retry', async () => {
+    vi.mocked(api).mockResolvedValueOnce({ connections: [] }).mockResolvedValueOnce({ ok: true })
+      .mockRejectedValueOnce(new Error('refresh offline')).mockResolvedValueOnce({ connections: [] });
+    render(<ConfirmProvider><McpConnections /></ConfirmProvider>);
+    await screen.findByText('No MCP servers saved yet.');
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Draft' } });
+    fireEvent.change(screen.getByLabelText('Server URL'), { target: { value: 'https://example.test/mcp' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add MCP server' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('saved, but could not refresh'));
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Draft');
+    expect((screen.getByRole('button', { name: 'Add MCP server' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry loading' }));
+    await waitFor(() => expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe(''));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+});

@@ -254,7 +254,6 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .connections-models-column .model-actions button{position:relative}
 
 /* Blank-slate Settings prototype: establish only the permanent four-column frame. */
-.settings-baseline-hidden{display:none}
 .settings-blank-slate{
   box-sizing:border-box;
   display:grid;
