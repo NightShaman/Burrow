@@ -902,7 +902,8 @@ async function runtimeConfig(agentId = 'hatchet') {
   return loadRuntimeConfig({ rootDir: projectRoot, args: { agent_id: String(agentId || 'hatchet') }, stores: postgresApplication.stores, tolerateModelResolutionError: true });
 }
 
-async function resolveAgentRuntime(agentId = null) {
+// Settings management needs identity/context, not permission to execute a turn.
+async function resolveAgentContext(agentId = null) {
   const runtime = await runtimeConfig();
   const id = String(agentId || runtime.runtimeState.agentId || 'hatchet').trim();
   const agent = await agentsStore().resolve(id) || (id === 'hatchet' ? await agentsStore().bootstrap() : null);
@@ -911,12 +912,17 @@ async function resolveAgentRuntime(agentId = null) {
     error.statusCode = 404;
     throw error;
   }
+  return agentRuntimeContext({ runtimeState: runtime.runtimeState, agent });
+}
+
+async function resolveAgentRuntime(agentId = null) {
+  const resolved = await resolveAgentContext(agentId);
+  const { agent } = resolved;
   if (!agent.enabled) {
     const error = new Error('agent_disabled');
     error.statusCode = 409;
     throw error;
   }
-  const resolved = agentRuntimeContext({ runtimeState: runtime.runtimeState, agent });
   const executionEnvironment = Object.freeze(agent.executionEnvironment
     ? { ...agent.executionEnvironment }
     : { kind: 'local', workspaceRoot: resolved.agentWorkspaceRoot });
@@ -3166,8 +3172,8 @@ const skillApi = {
   getSkill: async (id) => { const skill = await skillStoreCall(async store => await store.get(id)); return skill ? { ok: true, skill } : { ok: false, status: 404, error: 'skill_not_found' }; },
   updateSkill: async (id, body) => { const skill = await skillStoreCall(async store => await store.update(id, body)); return skill ? { ok: true, skill } : { ok: false, status: 404, error: 'skill_not_found' }; },
   deleteSkill: async (id) => await skillStoreCall(async store => await store.delete(id)) ? { ok: true } : { ok: false, status: 404, error: 'skill_not_found' },
-  agentSkills: async (id) => { const runtime = await resolveAgentRuntime(id); const assignments = await skillStoreCall(store => store.assignments(runtime.agentId)); const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: runtime.workspaceRoot, agentRuntime: runtime, skillStore: postgresApplication.stores.skills }); return { ok: true, ...assignments, effectiveSkills: catalog.skills.map(skillManifest) }; },
-  saveAgentSkills: async (id, body) => { const runtime = await resolveAgentRuntime(id); await skillStoreCall(store => store.replaceAssignments(runtime.agentId, body.skillIds)); return skillApi.agentSkills(runtime.agentId); },
+  agentSkills: async (id) => { const runtime = await resolveAgentContext(id); const assignments = await skillStoreCall(store => store.assignments(runtime.agentId)); const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: runtime.workspaceRoot, agentRuntime: runtime, skillStore: postgresApplication.stores.skills }); return { ok: true, ...assignments, effectiveSkills: catalog.skills.map(skillManifest) }; },
+  saveAgentSkills: async (id, body) => { const runtime = await resolveAgentContext(id); await skillStoreCall(store => store.replaceAssignments(runtime.agentId, body.skillIds)); return skillApi.agentSkills(runtime.agentId); },
 };
 const settingsRoute = createSettingsRoutes({ timezoneSettings: async () => ({ ok: true, timezone: await operatorTimezone(postgresApplication.stores.metadata) }), saveTimezoneSettings: (body) => saveOperatorTimezone(postgresApplication.stores.metadata, body), ...skillApi, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, agentMinionModelSelection, saveAgentMinionModelSelection, archiveSummaryModelSelection: async (agentId) => ({ ok: true, selection: await archiveSummarySelection((await resolveAgentRuntime(agentId)).agentId) }), saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection: async (id) => await modelsStore().remove(id), completeSetupOperation: async body => { try { return await completeSetupOperation({ pool: postgresApplication.pool, encryptionKey: modelsStore().key, body }); } catch (error) { return { ok: false, status: error.message === 'setup_operation_conflict' || error.message === 'agent_id_exists' ? 409 : 400, error: error.message }; } }, setupStatus: async () => postgresApplication.stores.setupState.readStatus(), completeSetup: async () => postgresApplication.stores.setupState.completeSetup() });
 const agentRoute = createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession, agentOverview });
