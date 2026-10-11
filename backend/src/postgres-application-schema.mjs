@@ -38,7 +38,7 @@ import { POSTGRES_CONTINUITY_HANDOFF_SCHEMA_SQL } from './postgres-continuity-ha
 import { POSTGRES_FORGE_SCHEMA_SQL } from './postgres-forge-store.mjs';
 import { POSTGRES_WORKING_MEMORY_SCHEMA_SQL } from './postgres-working-memory-store.mjs';
 import { POSTGRES_API_TOKEN_SCHEMA_SQL } from './postgres-api-token-store.mjs';
-import { POSTGRES_SKILL_SETTINGS_SCHEMA_SQL } from './postgres-skill-settings-store.mjs';
+import { POSTGRES_SKILL_SETTINGS_SCHEMA_SQL, POSTGRES_OFFICIAL_SKILL_DEFAULT_SQL } from './postgres-skill-settings-store.mjs';
 import { POSTGRES_SETUP_STATE_SCHEMA_SQL } from './postgres-setup-state-store.mjs';
 import { POSTGRES_RETENTION_SETTINGS_SCHEMA_SQL } from './postgres-retention-settings-store.mjs';
 import { POSTGRES_WORKING_MEMORY_RETENTION_SCHEMA_SQL } from './postgres-working-memory-retention-settings-store.mjs';
@@ -125,4 +125,5 @@ CREATE TABLE brain_legacy_albdruck (
   { version: 49, name: 'live-run-steering', sql: POSTGRES_LIVE_RUN_STEERING_SQL },
   { version: 50, name: 'agent-minion-model-defaults', sql: POSTGRES_MINION_MODEL_SETTINGS_SCHEMA_SQL },
   { version: 51, name: 'git-managed-skills', sql: POSTGRES_SKILL_SOURCES_SQL },
+  { version: 52, name: 'official-runtime-source-adoption', sql: POSTGRES_OFFICIAL_SKILL_DEFAULT_SQL },
 ]);

@@ -33,7 +33,7 @@ async function syncBundledTextSkill({ skillRoot, skillId, skillStore = null }) {
   const content = await fs.readFile(path.join(skillRoot, 'SKILL.md'), 'utf8');
   const metadata = frontmatterMetadata(content);
   const store = skillStore;
-  const existing = await store.get(skillId);
+  const existing = skillId === 'burrow-runtime' && store.adoptOfficialRuntime ? null : await store.get(skillId);
   const shipped = {
     id: skillId,
     name: metadata.name || skillId,
@@ -42,6 +42,7 @@ async function syncBundledTextSkill({ skillRoot, skillId, skillStore = null }) {
     lifecycle: 'available',
     global: true,
   };
+  if (skillId === 'burrow-runtime' && store.adoptOfficialRuntime) return store.adoptOfficialRuntime(shipped);
   if (existing) {
     // Shipped IDs are release-owned. Preserve operator availability/assignments,
     // but publish the complete current release text and metadata.

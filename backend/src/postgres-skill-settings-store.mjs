@@ -2,6 +2,7 @@ import {promises as fs} from 'node:fs';
 import { skillLock, skillSourceError } from './postgres-skill-sources.mjs';
 import { normalizePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 import { createHash } from 'node:crypto';
+export const POSTGRES_OFFICIAL_SKILL_DEFAULT_SQL = `CREATE TABLE official_skill_default_adoptions (skill_id TEXT PRIMARY KEY, adopted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);`;
 export const POSTGRES_SKILL_SETTINGS_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY,name TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',content TEXT NOT NULL,lifecycle TEXT NOT NULL DEFAULT 'available',created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS skill_global_assignments (skill_id TEXT PRIMARY KEY REFERENCES skills(id) ON DELETE CASCADE,created_at TEXT NOT NULL);
@@ -20,6 +21,31 @@ export class PostgresSkillSettingsStore {
  async create(i = {}) { const id = validId(i.id), name = text(i.name || id).trim(), content = text(i.content), description = text(i.description), state = life(i.lifecycle), ts = this.clock(); if (!name) throw Object.assign(new Error('skill_name_required'), { statusCode: 400 }); try { await withPostgresTransaction(this.pool, async (c) => { await c.query('INSERT INTO skills(id,name,description,content,lifecycle,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$6)', [id, name, description, content, state, ts]); if (i.global === true) await c.query('INSERT INTO skill_global_assignments(skill_id,created_at) VALUES($1,$2)', [id, ts]); }); } catch (e) { if (e.code === '23505') throw Object.assign(new Error('skill_already_exists'), { statusCode: 409 }); throw e; } return this.get(id); }
  async update(id, i = {}) { const result = await withPostgresTransaction(this.pool, async (c) => { await skillLock(c,text(id)); const { rows } = await c.query(`${select} WHERE s.id=$1 FOR UPDATE`, [text(id)]); const old = rec(rows[0]); if (!old) return null; if (['content','name','description'].some(key => i[key] !== undefined && text(i[key]) !== text(old[key])) && (old.contentOwner !== 'operator' || (await c.query('SELECT 1 FROM skill_git_sources WHERE skill_id=$1',[old.id])).rowCount)) throw skillSourceError('skill_content_upstream_managed',409); const name = i.name === undefined ? old.name : text(i.name).trim(); if (!name) throw Object.assign(new Error('skill_name_required'), { statusCode: 400 }); await c.query('UPDATE skills SET name=$1,description=$2,content=$3,lifecycle=$4,updated_at=$5 WHERE id=$6', [name, i.description === undefined ? old.description : text(i.description), i.content === undefined ? old.content : text(i.content), i.lifecycle === undefined ? old.lifecycle : life(i.lifecycle), this.clock(), old.id]); if (i.global !== undefined) { if (i.global === true) await c.query('INSERT INTO skill_global_assignments(skill_id,created_at) VALUES($1,$2) ON CONFLICT DO NOTHING', [old.id, this.clock()]); else await c.query('DELETE FROM skill_global_assignments WHERE skill_id=$1', [old.id]); } return old.id; }); return result === null ? null : this.get(result); }
  async publishBundled(id,i) { return withPostgresTransaction(this.pool,async c=>{await skillLock(c,id);if((await c.query('SELECT 1 FROM skill_git_sources WHERE skill_id=$1',[id])).rowCount)return false;await c.query("UPDATE skills SET content_owner='bundled',name=$2,description=$3,content=$4,updated_at=$5 WHERE id=$1",[id,i.name,i.description,i.content,this.clock()]);return true;}); }
+ /** One-time, offline adoption of the official runtime source. The fallback and source
+  * are committed together; an operator detach is never silently undone on reboot. */
+ async adoptOfficialRuntime(i) {
+  const id='burrow-runtime', ts=this.clock();
+  return withPostgresTransaction(this.pool, async c=>{
+   await skillLock(c,id);
+   if ((await c.query('SELECT 1 FROM official_skill_default_adoptions WHERE skill_id=$1',[id])).rowCount) return false;
+   const old=(await c.query('SELECT id,content_owner FROM skills WHERE id=$1 FOR UPDATE',[id])).rows[0];
+   const source=(await c.query('SELECT 1 FROM skill_git_sources WHERE skill_id=$1',[id])).rowCount>0;
+   if (!old) {
+    await c.query('INSERT INTO skills(id,name,description,content,lifecycle,content_owner,created_at,updated_at) VALUES($1,$2,$3,$4,\'available\',\'bundled\',$5,$5)',[id,i.name,i.description,i.content,ts]);
+    await c.query('INSERT INTO skill_global_assignments(skill_id,created_at) VALUES($1,$2)',[id,ts]);
+   } else if (old.content_owner==='bundled' && !source) {
+    await c.query('UPDATE skills SET name=$2,description=$3,content=$4,updated_at=$5 WHERE id=$1',[id,i.name,i.description,i.content,ts]);
+   }
+   // Operator-owned IDs are not converted into upstream-managed instructions.
+   if (!source && (!old || old.content_owner==='bundled')) {
+    await c.query(`INSERT INTO skill_git_sources(skill_id,repository,git_ref,skill_path,enabled,cron_expression,timezone,next_sync_at)
+     VALUES($1,$2,'main','burrow-runtime/SKILL.md',TRUE,'0 */6 * * *','UTC',$3)`,[id,'https://github.com/NightShaman/Burrow-Skills.git',ts]);
+   }
+   // An already configured source (including disabled) is intentionally untouched.
+   await c.query('INSERT INTO official_skill_default_adoptions(skill_id) VALUES($1)',[id]);
+   return true;
+  });
+ }
  async delete(id) { return withPostgresTransaction(this.pool,async c=>{await skillLock(c,text(id));const installed=(await c.query('SELECT installed_path FROM skills WHERE id=$1',[text(id)])).rows[0]?.installed_path;if(installed)await fs.utimes(installed,new Date(this.clock()),new Date(this.clock())).catch(()=>{});const r=await c.query('DELETE FROM skills WHERE id=$1',[text(id)]);return r.rowCount>0;}); }
  async setGlobal(id, on) { if (!await this.get(id)) throw Object.assign(new Error('skill_not_found'), { statusCode: 404 }); if (on) await this.pool.query('INSERT INTO skill_global_assignments(skill_id,created_at) VALUES($1,$2) ON CONFLICT DO NOTHING', [text(id), this.clock()]); else await this.pool.query('DELETE FROM skill_global_assignments WHERE skill_id=$1', [text(id)]); }
  async assignments(agentId) { const [a, g] = await Promise.all([this.pool.query('SELECT skill_id FROM agent_skill_assignments WHERE agent_id=$1 ORDER BY skill_id', [text(agentId)]), this.pool.query('SELECT skill_id FROM skill_global_assignments')]); const assigned = a.rows.map(r => r.skill_id), global = g.rows.map(r => r.skill_id); return { agentId: text(agentId), assignedSkillIds: assigned, globalSkillIds: global, effectiveSkillIds: [...new Set([...global, ...assigned])].sort() }; }

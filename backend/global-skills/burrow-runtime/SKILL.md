@@ -40,8 +40,8 @@ Follow current instructions over older continuity. Follow live evidence over rem
 
 Burrow can expose global resources, agent-owned resources, project workspaces, and runtime data. Do not assume they have the same purpose.
 
-- Shared skills live under `workspace/global/skills`.
-- Shared tool resources live under `workspace/global/tools`.
+- Text skills live in PostgreSQL; artifact-based skills use published filesystem packages. Discover installed locations through the catalog, not guessed paths.
+- Discover shared tool resources separately from skill and project storage.
 - Agent-owned skills and files live in that agent's workspace.
 - Project source belongs in its resolved repository or project root.
 - Runtime data, caches, traces, and agent data are not automatically project source.
@@ -149,18 +149,32 @@ Use a handoff when unfinished work must survive a session boundary. Keep it conc
 
 ### Durable Brain memory
 
-Durable curated knowledge is available only through explicitly granted Brain MCP capabilities. Use it deliberately for stable preferences, decisions, ownership boundaries, verified environment facts, or compact project state worth retaining.
+Use native `brain_search`, `brain_read`, `brain_save`, `brain_update`, and `brain_remove` when supplied. Brains is explicit persistent agent-owned saved memory with no TTL or automatic preload. Search/read before relying on saved facts. Operator-owned records cannot be mutated by agents. Updates/removals require current revision and operator direction; never recreate removed memories. Integration memory tools are separate capabilities, not substitutes for the native contract.
 
 Do not use durable memory as a transcript mirror, scratchpad, log archive, secret store, or substitute for project documentation. Search before writing, avoid duplicates, include provenance, and verify important writes.
 
 An empty memory result means only that the search found no matching record. It does not prove the fact never existed.
+
+## Discover and load skills
+
+Use `list_skills` for capability cards and `load_skill` for full instructions when relevant. Loading records the installed version/hash; it does not grant authorization or install dependencies.
+
+Git supplies upstream content; PostgreSQL and published package files supply runtime copies. Use catalog-provided artifact locations, not disposable sync checkouts. Installation does not execute scripts or authorize their execution. Inspect supporting scripts before using them for an authorized task.
+
+Settings → Skills supports repository-first preview/import, source configuration, assignments, lifecycle, automatic updates, status, history and artifact downloads. Preview does not install. Import validates again and rejects ID collisions and changed revisions. Text-only content uses PostgreSQL; packages retain supporting files together. Failed updates preserve the installed copy. Do not silently change upstream-owned instructions or bypass ownership checks. A skill cannot supply tools absent from the runtime.
+
+## Generate media only when requested
+
+Discover models with `forge_catalog`. `forge_create_job` can incur cost and requires an operator generation request. Follow `forge_inspect_job` until terminal, then attach succeeded artifacts with `forge_attach_artifact`. Do not claim unsupported modes or tuning are available.
 
 ## Use other agents without abandoning the task
 
 Another agent may own a domain or be useful for isolated work.
 
 - Discover the correct agent rather than inventing an ID.
-- Delegate a clear target, scope, and expected result.
+- Delegate a clear target, scope, and expected result. Hand off behavior and API contracts without taking over another owner’s design decisions.
+- `spawn_subagent` uses the exact filesystem target schema. Omit model to use the configured default minion model, falling back to parent inheritance when unset. An explicit supported model overrides the default.
+- Board assignment does not dispatch execution. Peer messaging and minion spawning are separate operations.
 - Respect the delegated filesystem and authority boundary.
 - Review the returned evidence or changes.
 - Continue until the user's requested outcome is complete.
