@@ -1,3 +1,4 @@
+import { googleNativeApi, discoverGoogleModels } from './model-adapters/google-native-catalog.mjs';
 import { randomBytes, randomUUID, createCipheriv, createDecipheriv } from 'node:crypto';
 import { openaiOAuthIdentity, refreshOpenAiOAuth } from './openai-oauth-login.mjs';
 import { anthropicSupportsTemperature, isAnthropicMessagesConnection } from './anthropic-model-capabilities.mjs';
@@ -169,6 +170,8 @@ function safeModelMetadata(model = {}, { provider = '', apiType = '' } = {}) {
   const contextWindow = contextWindowOverride ?? discoveredContextWindow;
   const capabilityProvenance = normalizeCapabilityProvenance(model.capabilityProvenance);
   return {
+    ...(Array.isArray(model.supportedGenerationMethods) ? { supportedGenerationMethods: model.supportedGenerationMethods.filter(x => typeof x === 'string') } : {}),
+    ...(model.googleMetadata && typeof model.googleMetadata === 'object' ? { googleMetadata: Object.fromEntries(['name','baseModelId','version','description','inputTokenLimit','outputTokenLimit','thinking','temperature','maxTemperature','topP','topK','metadataSource','outputCapabilitySource'].filter(k => model.googleMetadata[k] !== undefined).map(k => [k, model.googleMetadata[k]])) } : {}),
     ...(displayName ? { displayName } : {}),
     ...(capabilityProvenance ? { capabilityProvenance } : {}),
     ...(reasoningEfforts.length ? { reasoningEfforts } : {}),
@@ -586,6 +589,7 @@ function modelsDevProviderIdentity({ provider = '', apiType = '', baseUrl = '', 
 }
 
 export async function discoverModels({ baseUrl, provider = '', useModelsDev = false, apiType = 'openai-responses', apiKey, auth = {}, fetchImpl = fetch, catalogFetchImpl = fetchImpl, catalogUrl = MODELS_DEV_CATALOG_URL, catalogTtlMs = MODELS_DEV_CATALOG_CACHE_TTL_MS, signal = undefined, store = null, codexClientVersion = undefined, nowMs = Date.now() } = {}) {
+  if (googleNativeApi({ apiType })) return normalizeModels(await discoverGoogleModels({ baseUrl, apiKey, auth }, { fetchImpl, signal }), { provider, apiType });
   const catalogProvider = modelsDevProviderIdentity({ provider, apiType, baseUrl, auth });
   const catalogSnapshot = useModelsDev && catalogProvider ? await modelsDevSnapshot({ store, fetchImpl: catalogFetchImpl, signal, nowMs, catalogUrl, ttlMs: catalogTtlMs }) : null;
   const enrich = (models) => catalogSnapshot?.catalog

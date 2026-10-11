@@ -1,3 +1,5 @@
+import { googleNativeApi, googleMediaKind } from './model-adapters/google-native-catalog.mjs';
+import { createGoogleMediaAdapter } from './model-adapters/google-media.mjs';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { PostgresAlbdruckStore } from './postgres-albdruck-store.mjs';
 import { findSessionReplay, PostgresSessionStore } from './postgres-session-store.mjs';
@@ -451,15 +453,18 @@ export class PostgresForgeStore {
       job.status = "running";
       if (!(await this.save(job))) return;
       config = await this.resolveConfig(job.connectionId, job.modelId);
-      const google = job.kind === "audio" && googleLyriaSupported(config);
+      const nativeGoogle = googleNativeApi(config) && googleMediaKind(config) === job.kind;
+      const google = job.kind === "audio" && googleLyriaSupported(config) && googleMediaKind(config) === "audio";
       if (
         !config ||
-        (!google &&
+        (!google && !nativeGoogle &&
           (generatedArtifactKind(config) !== job.kind ||
             !/^openai-/.test(config.api)))
       )
         throw new Error("unavailable");
-      const adapter = google
+      const adapter = nativeGoogle
+        ? createGoogleMediaAdapter({ config })
+        : google
         ? this.googleAdapterFactory({ config })
         : this.adapterFactory({ config });
       stage = "provider";

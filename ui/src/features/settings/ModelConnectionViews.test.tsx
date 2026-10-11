@@ -2,7 +2,7 @@ import React from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { RuntimeModel } from '../../app/api';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ModelCapabilityEditor, ModelResults, SavedProviders } from './ModelConnectionViews';
+import { ModelCapabilityEditor, ModelResults, SavedProviders, modelConnectionApiTypes } from './ModelConnectionViews';
 import { claudeLoginStatusLabel, openAiLoginStatusLabel } from './ModelConnectionOAuthDialog';
 
 afterEach(cleanup);
@@ -127,5 +127,15 @@ describe('Model connection views', () => {
     expect(openAiLoginStatusLabel('future_status')).toBe('future status');
     expect(claudeLoginStatusLabel('ready_to_import')).toBe('Ready to import');
     expect(claudeLoginStatusLabel()).toBe('Idle');
+  });
+});
+
+describe('Google Developer API model metadata', () => {
+  it('offers native API type and renders discovered methods and token limits', () => {
+    expect(modelConnectionApiTypes).toContainEqual({ value: 'google-generative-language', label: 'Google Gemini (Developer API)' });
+    render(<ModelCapabilityEditor model={{ id: 'models/gemini-test', supportedGenerationMethods: ['generateContent'], googleMetadata: { description: 'Test model', inputTokenLimit: 1234, outputTokenLimit: 321 }, discoveredOutput: ['text'] }} onToggleModelInput={() => {}} onSetModelInputAuto={() => {}} onToggleModelOutput={() => {}} onSetModelOutputAuto={() => {}} />);
+    expect(screen.getByText('Google methods: generateContent')).toBeTruthy();
+    expect(screen.getByText('Input limit: 1,234 tokens')).toBeTruthy();
+    expect(screen.getByText('Output limit: 321 tokens')).toBeTruthy();
   });
 });

@@ -1,3 +1,5 @@
+import { googleNativeApi } from './model-adapters/google-native-catalog.mjs';
+import { createGoogleNativeModelAdapter } from './model-adapters/google.mjs';
 import { normalizeChoice, normalizeResponseChoice, responseApiTool, messagesToResponsesInput, toolNames, readResponseSseBounded, compactResponseCompletion, mergeStreamToolCall } from './model-adapters/openai-transport.mjs';
 import { apiMode, completionUrl, responsesUrl } from './model-adapters/openai-transport.mjs';
 import { createOpenAICompatibleModelAdapter } from './model-adapters/openai.mjs';
@@ -21,6 +23,7 @@ export { createOpenAIGeneratedArtifactAdapter } from './model-adapters/openai-ge
 
 export function createModelAdapter(options = {}) {
   const config = options.config || {};
+  if (googleNativeApi(config)) return createGoogleNativeModelAdapter(options);
   const mode = apiMode(config);
   if (mode === 'anthropic-messages') return createAnthropicMessagesModelAdapter(options);
   // Lyria is a separate Forge dispatch path, not a chat model transport.
@@ -55,3 +58,5 @@ export const __test__ = {
   generatedArtifactEndpoint: generatedArtifactTest.endpoint,
   generatedArtifactRequestHeaders: generatedArtifactTest.requestHeaders,
 };
+
+export { createGoogleNativeModelAdapter } from './model-adapters/google.mjs';

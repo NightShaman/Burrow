@@ -1,3 +1,4 @@
+import { googleNativeBase, discoverGoogleModels } from './model-adapters/google-native-catalog.mjs';
 export function embeddingTimeout(value=process.env.BURROW_BRAIN_EMBEDDING_TIMEOUT_MS) {
  const n=Number(value ?? 30000);
  if(!Number.isSafeInteger(n) || n<1 || n>300000) throw new Error('brain_embedding_timeout_invalid');
@@ -30,7 +31,7 @@ export class BrainEmbeddingProvider {
   const auth=kind==='google' ? await this.models.auth(connectionId) : null;
   if(kind==='google' && (auth?.type!=='api_key' || !auth.apiKey)) throw new Error('brain_embedding_api_key_required');
   let base=connection.baseUrl.replace(/\/$/,'').replace(kind==='ollama' ? /\/(?:api|v1)$/ : /\/(?:models|openai)$/,'');
-  if(kind==='google' && !/\/v1(?:beta)?$/.test(base)) base+='/v1beta';
+  if(kind==='google') base=googleNativeBase(connection);
   return {connection,kind,base,headers:kind==='google'?{'x-goog-api-key':auth.apiKey}:{}};
  }
  async request(url,options,signal) {
@@ -60,13 +61,8 @@ export class BrainEmbeddingProvider {
  async discover(connectionId) {
   const c=await this.context(connectionId),models=[];
   if(c.kind==='google') {
-   let pageToken='';
-   do {
-    const url=new URL(`${c.base}/models`); if(pageToken) url.searchParams.set('pageToken',pageToken);
-    const data=await this.request(url,{headers:c.headers});
-    for(const m of data.models || []) if(m.supportedGenerationMethods?.includes('embedContent')) models.push({id:m.name.replace(/^models\//,''),name:m.displayName || m.name});
-    pageToken=data.nextPageToken || '';
-   } while(pageToken);
+   const discovered = await discoverGoogleModels({ baseUrl:c.base, apiKey:c.headers['x-goog-api-key'] }, { fetchImpl:(url,options) => this.fetch(url,{...options,signal:AbortSignal.timeout(this.timeoutMs)}) }).catch(() => { throw providerFailure('brain_embedding_provider_request_failed',true); });
+   for (const m of discovered) if (m.supportedGenerationMethods.includes('embedContent')) models.push({id:m.id.replace(/^models\//,''),name:m.displayName || m.id});
   } else {
    const data=await this.request(`${c.base}/api/tags`,{headers:c.headers});
    for(const m of data.models || []) {

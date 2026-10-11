@@ -6,6 +6,7 @@ export const modelConnectionApiTypes = [
   { value: 'openai-chat-completions', label: 'OpenAI Chat Completions' },
   { value: 'openai-responses', label: 'OpenAI Responses' },
   { value: 'anthropic-messages', label: 'Anthropic Messages' },
+  { value: 'google-generative-language', label: 'Google Gemini (Developer API)' },
 ];
 
 type ModelResultsProps = {
@@ -50,6 +51,15 @@ export function ModelCapabilityEditor({ model, onToggleModelInput, onSetModelInp
   const outputValues = model.acceptedOutput ?? ['text'];
   return <div className="model-capability-editor">
     <div className="model-detail-heading"><div><span className="settings-kicker">Model capabilities</span><h3>{model.displayName ?? model.id}</h3><code>{model.id}</code></div><span className="model-detail-state">{model.manual ? 'Manual model' : 'Discovered model'}</span></div>
+    {(model.supportedGenerationMethods || model.googleMetadata || model.outputTokens) && <div className="model-capability-note" aria-label="Provider model metadata">
+      {model.supportedGenerationMethods && <p>Google methods: {model.supportedGenerationMethods.length ? model.supportedGenerationMethods.join(', ') : 'None reported'}</p>}
+      {model.googleMetadata?.description && <p>{model.googleMetadata.description}</p>}
+      {model.googleMetadata?.baseModelId && <p>Base model: {model.googleMetadata.baseModelId}</p>}
+      {model.googleMetadata?.version && <p>Version: {model.googleMetadata.version}</p>}
+      {model.googleMetadata?.thinking !== undefined && <p>Thinking: {model.googleMetadata.thinking ? 'supported' : 'not reported as supported'}</p>}
+      {(model.googleMetadata?.inputTokenLimit || model.discoveredContextWindow) && <p>Input limit: {(model.googleMetadata?.inputTokenLimit ?? model.discoveredContextWindow)?.toLocaleString()} tokens</p>}
+      {(model.googleMetadata?.outputTokenLimit || model.outputTokens) && <p>Output limit: {(model.googleMetadata?.outputTokenLimit ?? model.outputTokens)?.toLocaleString()} tokens</p>}
+    </div>}
     <ContextWindowEditor model={model} onAutoChange={(enabled) => onSetModelContextAuto?.(model.id, enabled)} onOverrideChange={(value) => onSetModelContextOverride?.(model.id, value)} />
     <CapabilityGroup title="Input" discovered={model.discoveredInput} auto={inputAuto} onAutoChange={(enabled) => onSetModelInputAuto(model.id, enabled)}>
       {(['text', 'image'] as const).map((value) => <label key={value}><input type="checkbox" aria-label={`Input ${value}`} checked={inputValues.includes(value)} disabled={inputAuto} onChange={() => onToggleModelInput(model.id, value)} /><span>{value}</span></label>)}

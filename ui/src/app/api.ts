@@ -104,6 +104,9 @@ export type RuntimeModel = {
   id: string;
   selected?: boolean;
   displayName?: string;
+  supportedGenerationMethods?: string[];
+  googleMetadata?: { name?: string; baseModelId?: string; version?: string; description?: string; inputTokenLimit?: number; outputTokenLimit?: number; thinking?: boolean; temperature?: number; maxTemperature?: number; topP?: number; topK?: number };
+  outputTokens?: number;
   reasoningEfforts?: string[];
   defaultReasoningEffort?: string;
   contextWindow?: number;

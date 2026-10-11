@@ -36,7 +36,9 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
         </div>
         <p className="settings-description">{editor.apiType === 'anthropic-messages'
           ? 'Anthropic Messages uses Anthropic’s native API contract and provider authentication. Model discovery is handled by Burrow, not an OpenAI-compatible /models probe.'
-          : 'OpenAI-compatible connections discover models through the provider’s /models endpoint.'}</p>
+          : editor.apiType === 'google-generative-language'
+            ? 'Google Gemini Developer API uses an API key and native model discovery, chat, tools and streaming. Verified image and Lyria music models support prompt-only Forge generation; speech and video are unavailable. No Vertex or OAuth support.'
+            : 'OpenAI-compatible connections discover models through the provider’s /models endpoint.'}</p>
         <div className="oauth-shortcuts">
           <button className={`oauth-trigger${editor.apiType !== 'anthropic-messages' ? ' active' : ''}`} type="button" onClick={editor.openOpenAiOAuth}><span>OpenAI OAuth</span><small>Sign in with ChatGPT</small></button>
           <button className={`oauth-trigger${editor.apiType === 'anthropic-messages' ? ' active' : ''}`} type="button" onClick={editor.openAnthropicOAuth}><span>Anthropic OAuth</span><small>Claude Code login</small></button>
@@ -55,7 +57,7 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
           <Field label="OpenAI refresh token"><input type="password" autoComplete="off" value={editor.oauthRefreshToken} onChange={(event) => editor.setOauthRefreshToken(event.target.value)} placeholder="Leave blank to keep current token" /></Field>
         </div>}
         <div className="field-pair">
-          <Field label="URL"><input value={editor.url} onChange={(event) => editor.setUrl(event.target.value)} placeholder={editor.apiType === 'anthropic-messages' ? 'https://api.anthropic.com' : 'https://api.example.com/v1'} /></Field>
+          <Field label="URL"><input value={editor.url} onChange={(event) => editor.setUrl(event.target.value)} placeholder={editor.apiType === 'anthropic-messages' ? 'https://api.anthropic.com' : editor.apiType === 'google-generative-language' ? 'https://generativelanguage.googleapis.com/v1beta' : 'https://api.example.com/v1'} /></Field>
           <Field label="API key"><input type="password" value={editor.apiKey} onChange={(event) => editor.setApiKey(event.target.value)} placeholder={editor.apiKeyConfigured ? '•••••••• (configured — enter a new key to replace it)' : 'Enter API key'} /></Field>
         </div>
         <div className="model-actions">
