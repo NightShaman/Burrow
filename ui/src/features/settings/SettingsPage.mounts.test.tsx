@@ -31,6 +31,19 @@ it('mounts only the selected configuration, with no hidden duplicate reads', asy
  expect(paths.filter(path => path === '/api/settings/ui-auth')).toHaveLength(1);
  expect(paths).not.toContain('/api/settings/mcp-connections');
  expect(paths).not.toContain('/api/settings/model-connections');
+ expect(paths).not.toContain('/api/settings/browser-origin');
+ expect(screen.queryByRole('button', { name: 'Save browser origin' })).toBeNull();
+ const originButton = screen.getByRole('button', { name: 'Browser origin' });
+ expect(originButton.closest('.settings-prototype-sections')).toBeTruthy();
+ fireEvent.click(originButton);
+ await waitFor(() => expect(screen.getByRole('button', { name: 'Save browser origin' }).hasAttribute('disabled')).toBe(false));
+ expect(originButton.getAttribute('aria-current')).toBe('page');
+ expect(screen.getByRole('heading', { name: 'Browser origin' }).closest('.settings-prototype-configuration')).toBeTruthy();
+ expect(screen.queryByRole('button', { name: 'Save authentication' })).toBeNull();
+ expect(vi.mocked(api).mock.calls.filter(([path]) => path === '/api/settings/browser-origin')).toHaveLength(1);
+ fireEvent.click(screen.getByRole('button', { name: /^Authentication$/ }));
+ await screen.findByRole('button', { name: 'Save authentication' });
+ expect(screen.queryByRole('button', { name: 'Save browser origin' })).toBeNull();
 });
 it('shows agent options from active rail selections without focusing a dropdown', () => {
  vi.mocked(api).mockResolvedValue({ wizardStep: 'ready' });

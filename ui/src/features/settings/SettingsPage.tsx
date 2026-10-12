@@ -17,6 +17,7 @@ import { SettingSection } from './SettingsPrimitives';
 import { McpConnections } from './McpConnections';
 import { ApiTokensSettings } from './ApiTokensSettings';
 import { AuthenticationSettings } from './AuthenticationSettings';
+import { BrowserOriginSettings } from './BrowserOriginSettings';
 import { BrainEmbeddingSettings } from './BrainEmbeddingSettings';
 import { CuratorSettings } from './CuratorSettings';
 import { RetentionSettings } from './RetentionSettings';
@@ -37,7 +38,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
   const [settingsAgentId, setSettingsAgentId] = useState(selected.id);
   const [agentSection, setAgentSection] = useState<'details' | 'profile-documents' | 'mcp-tools' | 'cron-jobs' | 'dreams' | 'skills'>('details');
   const [generalSection, setGeneralSection] = useState<'operator-timezone' | 'operator-profile' | 'execution-boundaries' | 'trace-retention' | 'brain-memory' | 'export' | 'rail-panels' | 'tiddle-signal' | 'appearance'>('operator-profile');
-  const [connectionSection, setConnectionSection] = useState<'authentication' | 'model-providers' | 'mcp-servers' | 'api-tokens'>('authentication');
+  const [connectionSection, setConnectionSection] = useState<'authentication' | 'browser-origin' | 'model-providers' | 'mcp-servers' | 'api-tokens'>('authentication');
   const [skillsSection, setSkillsSection] = useState<'installed' | 'repo' | 'text'>('installed');
   const [modsSection, setModsSection] = useState<'installed' | 'sources' | 'automatic-checks'>('installed');
   const hasAgentsPanel = (leftRailLayout === 'divided' ? [leftTopPanel, leftBottomPanel] : [leftSinglePanel])
@@ -124,6 +125,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
         {tab === 'connections' && <nav className="settings-prototype-section-items" aria-label="Connection settings sections">
           {([
             ['authentication', 'Authentication'],
+            ['browser-origin', 'Browser origin'],
             ['model-providers', 'Model providers'],
             ['mcp-servers', 'MCP servers'],
             ['api-tokens', 'API tokens'],
@@ -151,6 +153,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
         {tab === 'agents' && (agents.length === 0 ? <SettingSection title="Agent setup"><p className="hint">No agents configured yet. Create your first agent to unlock the rest of the agent settings.</p></SettingSection> : agentSection === 'skills' ? <SkillsSettings agentView agents={agents} agentId={settingsSelected.id} overflowTarget={overflowColumn} /> : agentSection === 'mcp-tools' ? <AgentMcpTools agentId={settingsSelected.id} overflowTarget={overflowColumn} /> : <AgentSettings selected={settingsSelected} savedProviders={savedProviders} onAgentsChanged={onAgentsChanged} section={agentSection} overflowTarget={overflowColumn} />)}
         {tab === 'skills' && <SkillsSettings agents={agents} agentId={settingsSelected.id} section={skillsSection} onSectionChange={setSkillsSection} overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'authentication' && <AuthenticationSettings />}
+        {tab === 'connections' && connectionSection === 'browser-origin' && <BrowserOriginSettings />}
         {tab === 'connections' && connectionSection === 'model-providers' && <ModelConnections savedProviders={savedProviders} onModelConnectionsChanged={onModelConnectionsChanged} mcpConnections={null} overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'mcp-servers' && <McpConnections overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'api-tokens' && <ApiTokensSettings overflowTarget={overflowColumn} />}

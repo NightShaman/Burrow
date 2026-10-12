@@ -8,7 +8,7 @@ vi.mock('../../app/api', () => ({ api: vi.fn() }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 for (const [Component, save, result] of [
  [ExecutionBoundaries, 'Save boundaries', { boundaries: { hardBlocks: [] } }],
- [() => <AuthenticationSettings showBrowserOrigin={false} />, 'Save authentication', { auth: { mode: 'none' } }],
+ [() => <AuthenticationSettings />, 'Save authentication', { auth: { mode: 'none' } }],
  [RetentionSettings, 'Save policy', { policy: { enabled: false } }],
 ] as const) it(`${save} fails closed and retries`, async () => {
  vi.mocked(api).mockRejectedValueOnce(new Error('offline')).mockResolvedValue(result);
