@@ -1,0 +1,20 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import { createForgeEffects } from './forgeEffects';
+afterEach(()=>{document.body.innerHTML='';vi.restoreAllMocks();vi.unstubAllGlobals();});
+it('owns deterministic damage, bounded long-running sparks and reveal/resize cleanup',()=>{
+ const gradient={addColorStop:vi.fn()};
+ const context={setTransform:vi.fn(),clearRect:vi.fn(),save:vi.fn(),restore:vi.fn(),beginPath:vi.fn(),moveTo:vi.fn(),lineTo:vi.fn(),stroke:vi.fn(),createRadialGradient:vi.fn(()=>gradient),fillRect:vi.fn(),arc:vi.fn(),fill:vi.fn(),translate:vi.fn(),rotate:vi.fn()};
+ vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D);
+ const disconnect=vi.fn();vi.stubGlobal('ResizeObserver',class {observe(){} disconnect=disconnect;});
+ document.body.innerHTML='<main class="forge-machine"><div class="forge-grid"><canvas class="forge-seam-sparks"></canvas><section class="forge-studio"><div class="forge-pressure"></div></section><section class="forge-preview"><div class="forge-viewer-body"><canvas class="forge-blast"></canvas></div></section><section class="forge-history"></section></div></main>';
+ vi.spyOn(Element.prototype,'getBoundingClientRect').mockReturnValue({width:700,height:500,left:0,top:0,right:700,bottom:500,x:0,y:0,toJSON(){}});
+ const root=document.querySelector<HTMLElement>('main')!,effect=createForgeEffects(root);
+ expect(root.querySelectorAll('.forge-fracture')).toHaveLength(14);
+ effect.drawWorking(3600,false);expect(context.stroke).toHaveBeenCalled();expect(context.stroke.mock.calls.length).toBeLessThan(500);
+ effect.drawBlast(.23,false);expect(root.classList.contains('forge-reveal-ready')).toBe(false);
+ effect.drawBlast(.24,false);expect(root.classList.contains('forge-reveal-ready')).toBe(true);expect(context.fillRect).toHaveBeenCalled();
+ context.stroke.mockClear();effect.drawWorking(4000,true);expect(context.stroke).not.toHaveBeenCalled();
+ effect.dispose();effect.dispose();expect(disconnect).toHaveBeenCalledTimes(2);
+ expect(root.querySelectorAll('.forge-damage-layer')).toHaveLength(0);
+ expect(root.style.getPropertyValue('--forge-pressure')).toBe('');
+});
