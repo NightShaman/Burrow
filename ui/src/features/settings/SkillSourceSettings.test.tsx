@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { api, fetchApi } from '../../app/api';
+import { api } from '../../app/api';
 import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { SkillSourceSettings, type SkillRecord } from './SkillSourceSettings';
 vi.mock('../../app/api', () => ({ api: vi.fn(), fetchApi: vi.fn() }));
@@ -27,7 +27,8 @@ it('connects and edits a complete Git source and manually syncs with JSON', asyn
   fireEvent.change(screen.getByLabelText('Skill path'), { target: { value: 'skills/test' } });
   fireEvent.click(screen.getByLabelText('Automatic sync'));
   fireEvent.click(screen.getByRole('button', { name: 'Connect Git source' }));
-  await waitFor(() => expect(mocked).toHaveBeenCalledWith('/api/settings/skills/test/source', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ repository: 'https://example.org/repo.git', ref: 'main', path: 'skills/test', enabled: true, cron: '0 */6 * * *', timezone: 'UTC', fetchTimeoutMs: 120000 }) })));
+  expect(screen.queryByLabelText('Sync timezone')).toBeNull();
+  await waitFor(() => expect(mocked).toHaveBeenCalledWith('/api/settings/skills/test/source', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ repository: 'https://example.org/repo.git', ref: 'main', path: 'skills/test', enabled: true, cron: '0 */6 * * *', fetchTimeoutMs: 120000 }) })));
   fireEvent.click(await screen.findByRole('button', { name: 'Sync now' }));
   await waitFor(() => expect(mocked).toHaveBeenCalledWith('/api/settings/skills/test/sync', expect.objectContaining({ method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })));
   expect(await screen.findByText('Sync updated.')).toBeTruthy();
@@ -38,12 +39,13 @@ it('requires confirmation before detaching text and retains recorded history', a
   expect(await screen.findByRole('alertdialog')).toBeTruthy();
   expect(mocked.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
   fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove source' }));
+  expect(screen.queryByLabelText('Sync timezone')).toBeNull();
   await waitFor(() => expect(mocked).toHaveBeenCalledWith('/api/settings/skills/test/source', { method: 'DELETE' }));
-  expect(screen.getByText('fetch failed')).toBeTruthy();
+  expect(mocked.mock.calls.some(([path]) => path.includes('/history'))).toBe(false);
 });
 it('shows package artifacts and forbids detach while allowing schedule edits', async () => {
   setup(source, 'filesystem');
-  await screen.findByRole('button', { name: 'Download assets/icon.svg' });
+  await waitFor(() => expect(screen.getByLabelText('Repository').closest('fieldset')?.disabled).toBe(false));
   expect(screen.getByRole('button', { name: 'Remove source' })).toHaveProperty('disabled', true);
   expect(screen.getByLabelText('Automatic sync').closest('fieldset')?.disabled).toBe(false);
   expect(screen.getByText(/Packages cannot be detached/)).toBeTruthy();
@@ -72,13 +74,11 @@ it('keeps request timeout distinct from terminal sync failure', async () => {
   fireEvent.click(await screen.findByRole('button', { name: 'Sync now' }));
   expect((await screen.findByRole('alert')).textContent).toContain('may still be running');
 });
-it('downloads nested artifacts through the authenticated raw-body API', async () => {
-  setup(source, 'filesystem');
-  vi.mocked(fetchApi).mockResolvedValue(new Response('artifact'));
-  const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test');
-  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-  fireEvent.click(await screen.findByRole('button', { name: 'Download assets/icon.svg' }));
-  await waitFor(() => expect(fetchApi).toHaveBeenCalledWith('/api/settings/skills/test/files/assets%2Ficon.svg'));
-  await waitFor(() => expect(click).toHaveBeenCalled());
-  create.mockRestore(); click.mockRestore();
+it('loads only configuration, never history or installed artifacts', async () => {
+ setup(source,'filesystem');
+ await waitFor(() => expect(screen.getByLabelText('Repository').closest('fieldset')?.disabled).toBe(false));
+ expect(mocked.mock.calls.every(([path])=>path.endsWith('/source'))).toBe(true);
+ expect(screen.queryByText('Sync history')).toBeNull();
+ expect(screen.queryByText('Installed path')).toBeNull();
+ expect(screen.queryByRole('button',{name:/Download/})).toBeNull();
 });

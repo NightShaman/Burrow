@@ -126,4 +126,11 @@ CREATE TABLE brain_legacy_albdruck (
   { version: 50, name: 'agent-minion-model-defaults', sql: POSTGRES_MINION_MODEL_SETTINGS_SCHEMA_SQL },
   { version: 51, name: 'git-managed-skills', sql: POSTGRES_SKILL_SOURCES_SQL },
   { version: 52, name: 'official-runtime-source-adoption', sql: POSTGRES_OFFICIAL_SKILL_DEFAULT_SQL },
+  // Invalidate pending timezone caches; scheduler reconciliation computes from now,
+  // never catching up occurrences belonging to a retired override.
+  { version: 53, name: 'operator-only-scheduling-timezone', sql: `
+UPDATE scheduled_jobs SET timezone=NULL,effective_timezone=NULL;
+UPDATE dream_settings SET timezone=NULL;
+ALTER TABLE skill_git_sources ADD COLUMN effective_timezone TEXT;
+` },
 ]);

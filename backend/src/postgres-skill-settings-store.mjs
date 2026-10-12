@@ -1,6 +1,6 @@
 import {promises as fs} from 'node:fs';
-import { skillLock, skillSourceError } from './postgres-skill-sources.mjs';
-import { normalizePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
+import { PostgresSkillSources, skillLock, skillSourceError } from './postgres-skill-sources.mjs';
+import { normalizePostgresPool, withPostgresTransaction, postgresTransactionContext } from './postgres-foundation.mjs';
 import { createHash } from 'node:crypto';
 export const POSTGRES_OFFICIAL_SKILL_DEFAULT_SQL = `CREATE TABLE official_skill_default_adoptions (skill_id TEXT PRIMARY KEY, adopted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);`;
 export const POSTGRES_SKILL_SETTINGS_SCHEMA_SQL = `
@@ -38,8 +38,7 @@ export class PostgresSkillSettingsStore {
    }
    // Operator-owned IDs are not converted into upstream-managed instructions.
    if (!source && (!old || old.content_owner==='bundled')) {
-    await c.query(`INSERT INTO skill_git_sources(skill_id,repository,git_ref,skill_path,enabled,cron_expression,timezone,next_sync_at)
-     VALUES($1,$2,'main','burrow-runtime/SKILL.md',TRUE,'0 */6 * * *','UTC',$3)`,[id,'https://github.com/NightShaman/Burrow-Skills.git',ts]);
+    await new PostgresSkillSources({pool:postgresTransactionContext(c),clock:this.clock}).save(id,{repository:'https://github.com/NightShaman/Burrow-Skills.git',ref:'main',path:'burrow-runtime/SKILL.md',enabled:true,cron:'0 */6 * * *'});
    }
    // An already configured source (including disabled) is intentionally untouched.
    await c.query('INSERT INTO official_skill_default_adoptions(skill_id) VALUES($1)',[id]);

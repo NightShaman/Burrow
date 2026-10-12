@@ -29,7 +29,10 @@ it('previews without creating a placeholder, derives metadata and installs the e
  fireEvent.click(screen.getByRole('checkbox',{name:'Assign globally'}));
  fireEvent.click(screen.getByRole('button',{name:'Install skill'}));
  await waitFor(()=>expect(onInstalled).toHaveBeenCalledWith(skill));
- expect(JSON.parse(String(mocked.mock.calls[1][1]?.body))).toEqual({...preview.source,id:'custom-review',global:true,lifecycle:'available',expectedRevision:'abc123'});
+ const { timezone: _legacyTimezone, ...sourceWithoutTimezone } = preview.source;
+ expect(JSON.parse(String(mocked.mock.calls[0][1]?.body))).not.toHaveProperty('timezone');
+ expect(screen.queryByLabelText('Sync timezone')).toBeNull();
+ expect(JSON.parse(String(mocked.mock.calls[1][1]?.body))).toEqual({...sourceWithoutTimezone,id:'custom-review',global:true,lifecycle:'available',expectedRevision:'abc123'});
 });
 it('invalidates preview when the source changes, including advanced options', async () => {
  mocked.mockResolvedValue({preview} as never);

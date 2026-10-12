@@ -58,7 +58,7 @@ export class PostgresDreamCycleReceiptStore {
       // Completion must reconcile against settings changed while the model ran,
       // not the snapshot captured when the run started.
       let configured = (await client.query('SELECT enabled,cron_expression,timezone FROM dream_settings WHERE agent_id=$1', [id])).rows[0] || settings;
-      configured = { ...configured, effectiveTimezone: configured.timezone ?? await operatorTimezone(new PostgresSettingsMetadataStore({ pool: client })) };
+      configured = { ...configured, effectiveTimezone: await operatorTimezone(new PostgresSettingsMetadataStore({ pool: client })) };
       const state = { ...reconciledDreamCycleState({ agentId: id, settings: configured, current: existing || {}, at }), lastRunAt: settings.lastRunAt || existing?.lastRunAt || null };
       await upsertState(client, state, at);
       return state;
@@ -71,7 +71,7 @@ export class PostgresDreamCycleReceiptStore {
       if (!agent.rows[0]) throw new Error('agent_not_found');
       let configured = (await client.query('SELECT enabled,cron_expression,timezone FROM dream_settings WHERE agent_id=$1', [id])).rows[0];
       if (!configured) return null;
-      configured = { ...configured, effectiveTimezone: configured.timezone ?? await operatorTimezone(new PostgresSettingsMetadataStore({ pool: client })) };
+      configured = { ...configured, effectiveTimezone: await operatorTimezone(new PostgresSettingsMetadataStore({ pool: client })) };
       const current = readState((await readLockedState(client, id)).rows[0]);
       const state = reconciledDreamCycleState({ agentId: id, settings: configured, current: current || {}, at });
       const scheduledFor = state.nextRunAt;

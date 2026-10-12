@@ -13,15 +13,14 @@ type Draft = { id: string; name: string; description: string; content: string; l
 const empty: Draft = { id: '', name: '', description: '', content: '', lifecycle: 'available', global: false };
 const body = (value: unknown, method = 'PUT'): RequestInit => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) });
 
-export function SkillsSettings({ agents, agentId, configurationTarget, overflowTarget, agentView = false, workspace = false }: { agents: Agent[]; agentId: string; configurationTarget?: HTMLElement | null; overflowTarget?: HTMLElement | null; agentView?: boolean; workspace?: boolean }) {
+export function SkillsSettings({ agents, agentId, configurationTarget, overflowTarget, agentView = false, section = 'text', onSectionChange }: { agents: Agent[]; agentId: string; configurationTarget?: HTMLElement | null; overflowTarget?: HTMLElement | null; agentView?: boolean; section?: 'installed' | 'repo' | 'text'; onSectionChange?: (section: 'installed' | 'repo' | 'text') => void }) {
   const confirm = useConfirm();
   const deleting = useRef(false);
   const deletionOwner = useRef<object | null>(null);
   useEffect(() => { const owner = {}; deletionOwner.current = owner; return () => { deletionOwner.current = null; }; }, [agentId]);
   const resourceId = agentId.includes('::') ? agentId.slice(agentId.indexOf('::') + 2) : agentId;
   const request = <T,>(path: string, init?: RequestInit) => api<T>(path, init);
-  const [workflow, setWorkflow] = useState<'inspect' | 'text' | 'repo'>('inspect');
-  const [editing, setEditing] = useState(false);
+  useEffect(() => { if (section !== 'installed') { setSelectedId(null); setDraft(empty); draftBaseline.current = null; setImportedFileName(''); } }, [section]);
   const [search, setSearch] = useState('');
   const [lifecycleFilter, setLifecycleFilter] = useState('all');
   const [assignmentFilter, setAssignmentFilter] = useState('all');
@@ -74,7 +73,7 @@ export function SkillsSettings({ agents, agentId, configurationTarget, overflowT
     const { id, ...updates } = draft;
     await request(url, body(selected ? (selected.gitSource || (selected.contentOwner && selected.contentOwner !== 'operator') ? { lifecycle: draft.lifecycle, global: draft.global } : updates) : draft, selected ? 'PATCH' : 'POST'));
     if (!selected) setSelectedId(id);
-    setWorkflow('inspect'); setEditing(false);
+    onSectionChange?.('installed');
   });
   const toggleAssignment = (agent: Agent, skillId: string) => act(async () => {
     const grants = assignments[agent.id]; if (!grants) return;
@@ -95,7 +94,7 @@ export function SkillsSettings({ agents, agentId, configurationTarget, overflowT
       const baseName = file.name.replace(/\.(?:md|markdown|txt)$/i, '');
       const id = baseName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       const name = baseName.replace(/[-_]+/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
-      setSelectedId(null); setWorkflow('text');
+      setSelectedId(null);
       setDraft({ ...empty, id, name, content });
       setImportedFileName(file.name);
     } catch {
@@ -115,17 +114,17 @@ export function SkillsSettings({ agents, agentId, configurationTarget, overflowT
   };
 
   const upstreamManaged = Boolean(selected && (selected.gitSource || (selected.contentOwner && selected.contentOwner !== 'operator')));
-  const editor = <SettingSection title={selected ? `Edit ${selected.name}` : 'Create text skill'}>
+  const editor = <SettingSection title={selected ? selected.name : 'Create text skill'}>
     <p className="hint">{upstreamManaged ? 'Upstream-managed instructions are read-only. Lifecycle and assignments remain editable.' : 'Review the shared instruction text before saving.'}</p>
     {!selected && <div className="skill-import"><span className="skill-import-label">Import text skill</span><input ref={importInputRef} className="skill-import-input" type="file" aria-label="Import text skill" accept=".md,.markdown,.txt,text/markdown,text/plain" disabled={busy} onChange={event => { void importText(event.target.files?.[0]); event.target.value = ''; }} /><div className="skill-import-control"><button type="button" className="secondary skill-import-trigger" disabled={busy} onClick={() => importInputRef.current?.click()}>Choose text file</button><span className={importedFileName ? 'skill-import-name selected' : 'skill-import-name'} aria-live="polite">{importedFileName || 'No file selected'}</span></div><small>Markdown or plain text · .md, .markdown, .txt. Loads the complete file for review; nothing is saved until you create the skill.</small></div>}
-    <div className="skill-fields">
-      <Field label="ID"><input value={draft.id} disabled={busy || Boolean(selected)} onChange={event => setDraft({ ...draft, id: event.target.value })} placeholder="skill-id" /></Field>
+    <div className="skill-source-fields">
+      {!upstreamManaged && <><div className="field-pair skill-field-pair"><Field label="ID"><input value={draft.id} disabled={busy || Boolean(selected)} onChange={event => setDraft({ ...draft, id: event.target.value })} placeholder="skill-id" /></Field>
       <Field label="Name"><input value={draft.name} disabled={busy || upstreamManaged} onChange={event => setDraft({ ...draft, name: event.target.value })} /></Field>
-      <Field label="Description"><input value={draft.description} disabled={busy || upstreamManaged} onChange={event => setDraft({ ...draft, description: event.target.value })} /></Field>
-      <Field label="Lifecycle"><select value={draft.lifecycle} disabled={busy} onChange={event => setDraft({ ...draft, lifecycle: event.target.value })}>{['available', 'experimental', 'deprecated', 'disabled'].map(value => <option key={value}>{value}</option>)}</select></Field>
-      <Field label="Content"><textarea rows={12} value={draft.content} readOnly={upstreamManaged} disabled={busy} onChange={event => setDraft({ ...draft, content: event.target.value })} /></Field>
+      </div><Field label="Description"><input value={draft.description} disabled={busy || upstreamManaged} onChange={event => setDraft({ ...draft, description: event.target.value })} /></Field>
+      </>}<Field label="Lifecycle"><select value={draft.lifecycle} disabled={busy} onChange={event => setDraft({ ...draft, lifecycle: event.target.value })}>{['available', 'experimental', 'deprecated', 'disabled'].map(value => <option key={value}>{value}</option>)}</select></Field>
+      {!upstreamManaged && <Field label="Content"><textarea className="mcp-arguments" rows={12} value={draft.content} readOnly={upstreamManaged} disabled={busy} onChange={event => setDraft({ ...draft, content: event.target.value })} /></Field>}
       <label className="skill-check"><input type="checkbox" checked={draft.global} disabled={busy} onChange={event => setDraft({ ...draft, global: event.target.checked })} /> Assign globally</label>
-      <div className="skill-actions"><button type="button" disabled={busy || !draft.id.trim() || !draft.name.trim()} onClick={save}>{selected ? 'Save skill' : 'Create skill'}</button>{selected && <button type="button" className="danger" disabled={busy} onClick={() => void removeSkill()}>Delete skill</button>}</div>
+      <div className="model-actions"><button type="button" disabled={busy || !draft.id.trim() || !draft.name.trim()} onClick={save}>{selected ? 'Save skill' : 'Create skill'}</button>{selected && <button type="button" className="danger" disabled={busy} onClick={() => void removeSkill()}>Delete skill</button>}</div>
     </div>
   </SettingSection>;
 
@@ -138,36 +137,19 @@ export function SkillsSettings({ agents, agentId, configurationTarget, overflowT
     return matchesSearch && (lifecycleFilter === 'all' || skill.lifecycle === lifecycleFilter)
       && (assignmentFilter === 'all' || (assignmentFilter === 'assigned' ? assigned : !assigned));
   });
-  if (workspace) return <>
-    <section className="settings-blank-column settings-prototype-sections skills-library-pane" aria-label="Skill library">
-      <header className="skills-pane-heading"><h2>Library</h2><span>{skills.length} skills</span></header>
-      <button className="secondary" type="button" disabled={busy || !loaded} onClick={() => { setSelectedId(null); setWorkflow('repo'); setEditing(false); }}>Import from repository</button>
-      <button className="secondary" type="button" disabled={busy || !loaded || Boolean(error)} onClick={() => { setSelectedId(null); setWorkflow('text'); setEditing(false); setDraft(empty); setImportedFileName(''); }}>New text skill</button>
-      <Field label="Search skills"><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Name, ID, description" /></Field>
-      <div className="skill-library-filters"><Field label="Lifecycle filter"><select value={lifecycleFilter} onChange={event => setLifecycleFilter(event.target.value)}><option value="all">All lifecycles</option>{['available', 'experimental', 'deprecated', 'disabled'].map(value => <option key={value}>{value}</option>)}</select></Field>
-      <Field label="Assignment filter"><select value={assignmentFilter} onChange={event => setAssignmentFilter(event.target.value)}><option value="all">All assignments</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option></select></Field></div>
-      <p className="hint">Shared instruction library · text and installed packages.</p>
-      {!loaded ? <p role="status" className="hint">Loading skills…</p> : <nav className="settings-prototype-section-items skills-library-list" aria-label="Skills library">{visibleSkills.map(skill => <button type="button" key={skill.id} disabled={busy} className={selectedId === skill.id ? 'active' : ''} aria-current={selectedId === skill.id ? 'true' : undefined} onClick={() => { setSelectedId(skill.id); setWorkflow('inspect'); setEditing(false); }}><strong>{skill.name}</strong><small>{skill.id} · {skill.lifecycle}{skill.storage === 'filesystem' ? ' · package' : ''}{skill.global ? ' · global' : ''}</small>{skill.description && <span>{skill.description}</span>}</button>)}</nav>}
-      {loaded && !error && !visibleSkills.length && <p className="hint" role="status">{skills.length ? 'No skills match these filters.' : 'No installed skills. Import from a repository or create a text skill.'}</p>}
-    </section>
-    <section className="settings-blank-column settings-prototype-configuration skills-detail-pane" aria-label="Skill details and assignments">
-      <header className="skills-pane-heading"><h2>{selected?.name ?? (workflow === 'text' ? 'New text skill' : workflow === 'repo' ? 'Import from repository' : 'Skills')}</h2><span>{selected ? selected.lifecycle : workflow === 'inspect' ? 'Library' : 'Not installed'}</span></header>
-      {error && <div className="settings-error" role="alert">{error}<button type="button" className="secondary" disabled={busy} onClick={() => setRevision(value => value + 1)}>Reload skills</button></div>}
-      {loaded && <>{selected ? <>
-        <p className="hint">{selected.description || 'Shared agent instructions.'}</p>
-        <div className="skill-actions">{!upstreamManaged && <button type="button" className="secondary" onClick={() => setEditing(value => !value)}>{editing ? 'Close editor' : 'Edit text'}</button>}<button type="button" className="danger" disabled={busy} onClick={() => void removeSkill()}>Delete skill</button></div>
-        {editing && !upstreamManaged ? editor : <SettingSection title="Instructions"><pre className="skill-instructions">{selected.content}</pre></SettingSection>}
-      </> : workflow === 'text' ? editor : workflow === 'repo' ? <SkillRepositoryImport onInstalled={skill => { setSkills(current => [...current.filter(item => item.id !== skill.id), skill]); setSelectedId(skill.id); setWorkflow('inspect'); refreshSkills(); }} /> : <SettingSection title="Inspect a skill"><p className="hint">Select an installed skill to read its instructions and manage updates. Import directly from a repository, or create a separate text skill.</p></SettingSection>}</>}
-    </section>
-    <aside className="settings-blank-column settings-prototype-overflow skills-source-pane" aria-label="Skill source and updates">
-      <header className="skills-pane-heading"><h2>Source &amp; updates</h2><span>Core</span></header>
-      {selected ? <><SkillSourceSettings key={selected.id} skill={selected} onRefresh={refreshSkills} compact /><details className="skill-disclosure"><summary>Assignments &amp; lifecycle</summary><SettingSection title="Availability"><Field label="Lifecycle"><select value={draft.lifecycle} disabled={busy} onChange={event => setDraft({ ...draft, lifecycle: event.target.value })}>{['available', 'experimental', 'deprecated', 'disabled'].map(value => <option key={value}>{value}</option>)}</select></Field><label className="skill-check"><input type="checkbox" checked={draft.global} disabled={busy} onChange={event => setDraft({ ...draft, global: event.target.checked })} /> Assign globally</label><button type="button" disabled={busy} onClick={() => void act(async () => { await request(`/api/settings/skills/${encodeURIComponent(selected.id)}`, body({ lifecycle: draft.lifecycle, global: draft.global }, 'PATCH')); })}>Save availability</button></SettingSection>{libraryAssignments}</details></> : <SettingSection title="Manage installed skills"><p className="hint">Source status, updates and assignments appear here when you select an installed skill.</p></SettingSection>}
-    </aside>
+  const inventory = <div className="settings-overflow-content memory-saved">
+    <Field label="Search skills"><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Name, ID, description" /></Field>
+    <div className="field-pair"><Field label="Lifecycle filter"><select value={lifecycleFilter} onChange={event => setLifecycleFilter(event.target.value)}><option value="all">All lifecycles</option>{['available', 'experimental', 'deprecated', 'disabled'].map(value => <option key={value}>{value}</option>)}</select></Field><Field label="Assignment filter"><select value={assignmentFilter} onChange={event => setAssignmentFilter(event.target.value)}><option value="all">All assignments</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option></select></Field></div>
+    {!loaded ? <p className="settings-empty" role="status">Loading skills…</p> : <div className="memory-connection-list">{visibleSkills.map(skill => <article className="memory-connection" key={skill.id}><button type="button" className="memory-connection-select" disabled={busy} aria-pressed={selectedId === skill.id} onClick={() => { setSelectedId(skill.id); onSectionChange?.('installed'); }}><strong>{skill.name}</strong><small>{skill.id} · {skill.lifecycle}{skill.global ? ' · global' : ''}</small></button></article>)}</div>}
+    {loaded && !error && !visibleSkills.length && <p className="settings-empty">{skills.length ? 'No skills match these filters.' : 'No installed skills.'}</p>}
+  </div>;
+  const primary = <>
+    {error && <p className="settings-request-error" role="alert">{error}<button type="button" className="secondary" disabled={busy} onClick={refreshSkills}>Reload skills</button></p>}
+    {!loaded && <p className="settings-empty" role="status">Loading skills…</p>}
+    {loaded && (agentView ? agentAssignments : selected ? <>{editor}<SkillSourceSettings key={selected.id} skill={selected} onRefresh={refreshSkills} />{libraryAssignments}</> : section === 'repo' ? <SkillRepositoryImport onInstalled={skill => { setSkills(current => [...current.filter(item => item.id !== skill.id), skill]); setSelectedId(skill.id); onSectionChange?.('installed'); refreshSkills(); }} /> : section === 'text' ? editor : <SettingSection title="Installed skills"><p className="settings-description">Select a skill to configure its instructions, source, availability and assignments. Import a repository or create a text skill using the sections on the left.</p></SettingSection>)}
   </>;
-
   return <>
-    {!agentView && <nav className="settings-prototype-section-items skill-library" aria-label="Skills library"><button type="button" className={!selectedId ? 'active' : ''} onClick={() => setSelectedId(null)}>New text skill</button>{skills.map(skill => <button type="button" key={skill.id} className={selectedId === skill.id ? 'active' : ''} onClick={() => setSelectedId(skill.id)}>{skill.name}<small>{skill.id}{skill.global ? ' · global' : ''}</small></button>)}</nav>}
-    {error && <p className="settings-error" role="alert">{error}</p>}{!loaded && <p className="hint">Loading skills…</p>}
-    {loaded && (agentView ? agentAssignments : <>{configurationTarget && createPortal(editor, configurationTarget)}{overflowTarget && createPortal(libraryAssignments, overflowTarget)}</>)}
+    {configurationTarget ? createPortal(primary, configurationTarget) : primary}
+    {!agentView && section === 'installed' && (overflowTarget ? createPortal(inventory, overflowTarget) : inventory)}
   </>;
 }

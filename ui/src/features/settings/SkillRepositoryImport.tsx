@@ -5,7 +5,7 @@ import { Field, SettingSection } from './SettingsPrimitives';
 
 type Source = Omit<GitSkillSource, 'cron'> & { cron: string | null };
 export type SkillPreview = { name: string; description: string; content: string; suggestedId: string; storage: string; revision: string; contentHash: string; files: { path: string; bytes: number; executable: boolean }[]; source: Source };
-const initial = { repository: '', path: '', ref: 'HEAD', enabled: false, cron: '0 */6 * * *', timezone: 'UTC', fetchTimeoutMs: 120000 };
+const initial = { repository: '', path: '', ref: 'HEAD', enabled: false, cron: '0 */6 * * *', fetchTimeoutMs: 120000 };
 
 export function SkillRepositoryImport({ onInstalled }: { onInstalled: (skill: SkillRecord) => void }) {
   const [draft, setDraft] = useState(initial);
@@ -17,7 +17,7 @@ export function SkillRepositoryImport({ onInstalled }: { onInstalled: (skill: Sk
   const [error, setError] = useState('');
   const request = useRef<AbortController | null>(null);
   useEffect(() => () => request.current?.abort(), []);
-  const valid = draft.repository.trim() && draft.path.trim() && draft.ref.trim() && draft.timezone.trim() && (!draft.enabled || draft.cron.trim()) && Number.isInteger(draft.fetchTimeoutMs) && draft.fetchTimeoutMs > 0 && draft.fetchTimeoutMs <= 2147483647;
+  const valid = draft.repository.trim() && draft.path.trim() && draft.ref.trim() && (!draft.enabled || draft.cron.trim()) && Number.isInteger(draft.fetchTimeoutMs) && draft.fetchTimeoutMs > 0 && draft.fetchTimeoutMs <= 2147483647;
   const change = (updates: Partial<typeof initial>) => { setDraft(value => ({ ...value, ...updates })); setPreview(null); setError(''); };
   const run = async (install: boolean) => {
     if (request.current || !valid || (install && (!preview || !id.trim()))) return;
@@ -25,7 +25,8 @@ export function SkillRepositoryImport({ onInstalled }: { onInstalled: (skill: Sk
     setBusy(install ? 'install' : 'preview'); setError('');
     try {
       if (install && preview) {
-        const result = await api<{ skill: SkillRecord }>('/api/settings/skills/git/import', jsonMutation('POST', { ...preview.source, id: id.trim(), global, lifecycle, expectedRevision: preview.revision }, { signal: controller.signal }));
+        const { repository, ref, path, enabled, cron, fetchTimeoutMs } = preview.source;
+        const result = await api<{ skill: SkillRecord }>('/api/settings/skills/git/import', jsonMutation('POST', { repository, ref, path, enabled, cron, fetchTimeoutMs, id: id.trim(), global, lifecycle, expectedRevision: preview.revision }, { signal: controller.signal }));
         if (!controller.signal.aborted) onInstalled(result.skill);
       } else {
         const result = await api<{ preview: SkillPreview }>('/api/settings/skills/git/preview', jsonMutation('POST', { ...draft, repository: draft.repository.trim(), path: draft.path.trim(), cron: draft.enabled ? draft.cron : null }, { signal: controller.signal }));
@@ -50,12 +51,11 @@ export function SkillRepositoryImport({ onInstalled }: { onInstalled: (skill: Sk
       <Field label="Skill path"><input value={draft.path} onChange={e => change({ path: e.target.value })} placeholder="skills/my-skill or ." /></Field>
       <p className="hint">Select a directory to include companion files, or SKILL.md for instructions only.</p>
       <details className="skill-disclosure"><summary>Ref &amp; automatic updates</summary><div className="skill-source-fields">
-        <Field label="Ref"><input value={draft.ref} onChange={e => change({ ref: e.target.value })} /></Field>
-        <label className="skill-check"><input type="checkbox" checked={draft.enabled} onChange={e => change({ enabled: e.target.checked })} /> Automatic sync</label>
-        {draft.enabled && <Field label="Sync schedule"><input value={draft.cron} onChange={e => change({ cron: e.target.value })} /></Field>}
-        <Field label="Sync timezone"><input value={draft.timezone} onChange={e => change({ timezone: e.target.value })} /></Field>
+        <div className="skill-compact-field"><Field label="Ref"><input value={draft.ref} onChange={e => change({ ref: e.target.value })} /></Field>
+</div><label className="skill-check"><input type="checkbox" checked={draft.enabled} onChange={e => change({ enabled: e.target.checked })} /> Automatic sync</label>
+        <div className="field-pair skill-field-pair">{draft.enabled && <Field label="Sync schedule"><input value={draft.cron} onChange={e => change({ cron: e.target.value })} /></Field>}
         <Field label="Fetch timeout (ms)"><input type="number" min="1" max="2147483647" value={draft.fetchTimeoutMs} onChange={e => change({ fetchTimeoutMs: Number(e.target.value) })} /></Field>
-        <p className="hint">HEAD uses the repository default. Tags and commits stay pinned. Automatic sync is off unless enabled.</p>
+        </div><p className="hint">HEAD uses the repository default. Tags and commits stay pinned. Automatic sync is off unless enabled. Sync schedules use the operator timezone.</p>
       </div></details>
       <button type="button" disabled={!valid} onClick={() => void run(false)}>{busy === 'preview' ? 'Fetching preview…' : preview ? 'Refresh preview' : 'Preview skill'}</button>
     </fieldset>

@@ -32,6 +32,7 @@ export class SkillGitSync {
   const token=randomUUID(),started=this.clock();
   const source=await withPostgresTransaction(this.pool,async c=>{
    await skillLock(c,id,{tryOnly:true});
+   await new PostgresSkillSources({pool:c,clock:this.clock}).reconcile(id,c);
    const row=(await c.query('SELECT * FROM skill_git_sources WHERE skill_id=$1 FOR UPDATE',[id])).rows[0];
    if(!row)throw skillSourceError('skill_source_not_found',404);
    if(row.sync_token && Date.parse(row.sync_expires_at)>Date.parse(this.clock()))throw skillSourceError('skill_sync_running',409);
@@ -67,7 +68,9 @@ export class SkillGitSync {
     if(createdPath)await fs.rm(createdPath,{recursive:true,force:true}).catch(()=>this.onError(skillSourceError('skill_package_cleanup_failed')));
    }
    await c.query('RELEASE SAVEPOINT skill_publication');
-   const next=source.enabled?nextCronOccurrence(source.cron,source.timezone,new Date(this.clock())):null;
+   const zone=await sources.zone(c);
+   const next=source.enabled?nextCronOccurrence(source.cron,zone,new Date(this.clock())):null;
+   await c.query('UPDATE skill_git_sources SET timezone=$2,effective_timezone=$2 WHERE skill_id=$1',[id,zone]);
    await c.query(`UPDATE skill_git_sources SET sync_token=NULL,sync_expires_at=NULL,last_checked_at=$2,observed_revision=COALESCE($3,observed_revision),last_error=$4,next_sync_at=$5,
     last_success_at=CASE WHEN $6 THEN $2 ELSE last_success_at END,installed_revision=CASE WHEN $6 THEN $3 ELSE installed_revision END,updated_at=$2 WHERE skill_id=$1`,[id,this.clock(),revision,error,next,status!=='failed']);
    const {rows}=await c.query('INSERT INTO skill_sync_history(skill_id,status,revision,content_hash,error,installed_path,started_at) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING sequence',[id,status,revision,hash,error,publishedPath,started]);
@@ -75,7 +78,7 @@ export class SkillGitSync {
   });
  }
  async fetchImport(input={}) {
-  const options=normalizeSkillSource(input,null,this.clock);
+  const options=normalizeSkillSource(input,null,this.clock,await this.sources.zone());
   let fetched;
   try {fetched=await this.fetchSkill({...options.value,timeoutMs:options.timeout});}
   catch(e){throw skillSourceError(e.message?.includes('timed out')?'skill_sync_timeout':'skill_git_invalid',400);}

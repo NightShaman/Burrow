@@ -1,3 +1,5 @@
+import { operatorTimezone } from './timezone.mjs';
+import { PostgresSettingsMetadataStore } from './postgres-settings-metadata-store.mjs';
 import { normalizePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 import { parseCron, nextCronOccurrence } from './scheduled-job-store.mjs';
 import { validateGitSkillSource } from './git-skill-fetch.mjs';
@@ -42,13 +44,12 @@ export async function skillLock(client,id,{tryOnly=false}={}) {
  const {rows}=await client.query(`SELECT ${tryOnly?'pg_try_advisory_xact_lock':'pg_advisory_xact_lock'}(hashtextextended($1,0)) AS locked`,['skill:'+id]);
  if(tryOnly && !rows[0].locked) throw skillSourceError('skill_sync_running',409);
 }
-export function normalizeSkillSource(input={},old=null,clock=()=>new Date().toISOString()) {
+export function normalizeSkillSource(input={},old=null,clock=()=>new Date().toISOString(),timezone='UTC') {
    const value={repository:input.repository??old?.repository,ref:input.ref??old?.ref??'HEAD',path:input.path??old?.path};
    try {validateGitSkillSource(value);} catch {throw skillSourceError('skill_source_invalid');}
    const enabled=input.enabled??old?.enabled??false;
    if(typeof enabled!=='boolean') throw skillSourceError('skill_source_enabled_invalid');
    const cron=input.cron===undefined?(old?.cron??null):input.cron;
-   const timezone=input.timezone??old?.timezone??'UTC';
    let next=null;
    try {new Intl.DateTimeFormat('en',{timeZone:timezone});if(cron!==null) parseCron(cron);if(enabled){if(!cron)throw Error();next=nextCronOccurrence(cron,timezone,new Date(clock()));}} catch {throw skillSourceError('skill_source_schedule_invalid');}
    const timeout=input.fetchTimeoutMs??old?.fetchTimeoutMs??120000;
@@ -57,18 +58,27 @@ export function normalizeSkillSource(input={},old=null,clock=()=>new Date().toIS
 }
 export class PostgresSkillSources {
  constructor({pool,clock=()=>new Date().toISOString()}={}) {this.pool=normalizePostgresPool(pool);this.clock=clock;}
- async get(id,client=this.pool) {return skillSourceRow((await client.query('SELECT * FROM skill_git_sources WHERE skill_id=$1',[id])).rows[0]);}
- async list() {return (await this.pool.query('SELECT * FROM skill_git_sources ORDER BY skill_id')).rows.map(skillSourceRow);}
+ async zone(client=this.pool) {return operatorTimezone(new PostgresSettingsMetadataStore({pool:client}));}
+ async reconcile(id,c,at=this.clock()) {
+  await skillLock(c,id);
+  const row=(await c.query('SELECT * FROM skill_git_sources WHERE skill_id=$1 FOR UPDATE',[id])).rows[0];
+  if(!row)return;
+  const zone=await this.zone(c);
+  if(row.effective_timezone!==zone)await c.query('UPDATE skill_git_sources SET timezone=$2,effective_timezone=$2,next_sync_at=$3 WHERE skill_id=$1',[id,zone,row.enabled?nextCronOccurrence(row.cron_expression,zone,new Date(at)):null]);
+ }
+ async get(id,client=this.pool) {const source=skillSourceRow((await client.query('SELECT * FROM skill_git_sources WHERE skill_id=$1',[id])).rows[0]);if(!source)return null;const zone=await this.zone(client);return {...source,timezone:zone,effectiveTimezone:zone};}
+ async list() {const zone=await this.zone();return (await this.pool.query('SELECT * FROM skill_git_sources ORDER BY skill_id')).rows.map(r=>({...skillSourceRow(r),timezone:zone,effectiveTimezone:zone}));}
  async save(id,input={}) {
   return withPostgresTransaction(this.pool,async c=>{
    await skillLock(c,id);
    const old=await this.get(id,c);
-   const {value,enabled,cron,timezone,timeout,next}=normalizeSkillSource(input,old,this.clock);
+   const {value,enabled,cron,timezone,timeout,next}=normalizeSkillSource(input,old,this.clock,await this.zone(c));
    const skill=(await c.query('SELECT id FROM skills WHERE id=$1 FOR UPDATE',[id])).rows[0];
    if(!skill) throw skillSourceError('skill_not_found',404);
    // Attaching a source does not replace the installed copy. Publication is explicit sync.
    await c.query(`INSERT INTO skill_git_sources(skill_id,repository,git_ref,skill_path,enabled,cron_expression,timezone,fetch_timeout_ms,next_sync_at)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(skill_id) DO UPDATE SET repository=$2,git_ref=$3,skill_path=$4,enabled=$5,cron_expression=$6,timezone=$7,fetch_timeout_ms=$8,next_sync_at=$9,sync_token=NULL,sync_expires_at=NULL,updated_at=CURRENT_TIMESTAMP`,[id,value.repository,value.ref,value.path,enabled,cron,timezone,timeout,next]);
+   await c.query('UPDATE skill_git_sources SET effective_timezone=$2 WHERE skill_id=$1',[id,timezone]);
    return this.get(id,c);
   });
  }
@@ -78,5 +88,8 @@ export class PostgresSkillSources {
   const {rows}=await this.pool.query('SELECT * FROM skill_sync_history WHERE skill_id=$1 AND ($2::bigint IS NULL OR sequence<$2) ORDER BY sequence DESC LIMIT $3',[id,before,limit]);
   return {history:rows.map(r=>({id:String(r.sequence),skillId:r.skill_id,status:r.status,revision:r.revision,contentHash:r.content_hash,error:r.error,startedAt:r.started_at,completedAt:r.completed_at})),nextCursor:rows.length===limit?String(rows.at(-1).sequence):null};
  }
- async due(at=this.clock()) {return (await this.pool.query('SELECT skill_id FROM skill_git_sources WHERE enabled AND next_sync_at<=$1 ORDER BY next_sync_at',[at])).rows.map(r=>r.skill_id);}
+ async due(at=this.clock()) {return withPostgresTransaction(this.pool,async c=>{
+  for(const row of (await c.query('SELECT skill_id FROM skill_git_sources WHERE effective_timezone IS DISTINCT FROM $1 ORDER BY skill_id',[await this.zone(c)])).rows)await this.reconcile(row.skill_id,c,at);
+  return (await c.query('SELECT skill_id FROM skill_git_sources WHERE enabled AND next_sync_at<=$1 ORDER BY next_sync_at',[at])).rows.map(r=>r.skill_id);
+ });}
 }

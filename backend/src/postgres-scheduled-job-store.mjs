@@ -42,14 +42,6 @@ const id = (value, field) => {
   return result;
 };
 const timestamp = (clock) => clock();
-function validTimezone(value) {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
-    return true;
-  } catch {
-    return false;
-  }
-}
 function jobRow(row) {
   return (
     row && {
@@ -59,7 +51,7 @@ function jobRow(row) {
       name: row.name,
       prompt: row.prompt,
       cron: row.cron_expression,
-      timezone: row.timezone,
+      timezone: null,
       sessionId: row.session_id,
       modelConnectionId: row.model_connection_id || null,
       model: row.model || null,
@@ -130,11 +122,8 @@ function jobInput(input, { partial = false } = {}) {
   }
   if (!partial || input.cron !== undefined)
     result.cron = parseCron(input.cron).expression;
-  if (!partial || input.timezone !== undefined) {
-    result.timezone = input.timezone == null ? null : text(input.timezone);
-    if (result.timezone !== null && !validTimezone(result.timezone))
-      throw new Error("scheduled_job_timezone_invalid");
-  }
+  // Legacy payload timezone is accepted but never authoritative.
+  if (!partial) result.timezone = null;
   if (input.sessionId !== undefined) {
     result.sessionId = text(input.sessionId) || "default";
     if (!/^[A-Za-z0-9._-]{1,96}$/.test(result.sessionId))
@@ -168,11 +157,11 @@ export class PostgresScheduledJobStore {
     this.ownsPool = ownsPool;
     this.clock = clock;
   }
-  async effective(timezone, client = this.pool) { return timezone ?? await operatorTimezone(new PostgresSettingsMetadataStore({ pool: client })); }
+  async effective(timezone, client = this.pool) { return await operatorTimezone(new PostgresSettingsMetadataStore({ pool: client })); }
   async resolved(row, client = this.pool) { const job = jobRow(row); return job && { ...job, effectiveTimezone: await this.effective(job.timezone, client) }; }
   async reconcileInherited(client, at) {
     const zone = await this.effective(null, client);
-    const rows = await client.query('SELECT * FROM scheduled_jobs WHERE timezone IS NULL AND effective_timezone IS DISTINCT FROM $1 ORDER BY id FOR UPDATE', [zone]);
+    const rows = await client.query('SELECT * FROM scheduled_jobs WHERE effective_timezone IS DISTINCT FROM $1 ORDER BY id FOR UPDATE', [zone]);
     for (const row of rows.rows) {
       if (row.effective_timezone === zone) continue;
       const next = row.enabled ? nextCronOccurrence(row.cron_expression, zone, new Date(at)) : null;
@@ -301,7 +290,7 @@ export class PostgresScheduledJobStore {
       const stamp = timestamp(this.clock);
       const recompute =
         patch.cron !== undefined ||
-        patch.timezone !== undefined ||
+        result.rows[0].effective_timezone !== await this.effective(null, client) ||
         patch.enabled !== undefined;
       const nextRun = !next.enabled
         ? null

@@ -19,12 +19,12 @@ describe('shared Skills settings', () => {
       return (path === '/api/settings/skills' ? { skills: [skill] } : grants) as never;
     });
     const configuration = document.createElement('div'); const overflow = document.createElement('div'); document.body.append(configuration, overflow);
-    const { unmount } = render(<SkillsSettings agents={agents} agentId={agents[0].id} configurationTarget={configuration} overflowTarget={overflow} />);
+    const { unmount } = render(<SkillsSettings section="installed" agents={agents} agentId={agents[0].id} configurationTarget={configuration} overflowTarget={overflow} />);
     fireEvent.click(await screen.findByRole('button', { name: /Review/ }));
     fireEvent.change(within(configuration).getByDisplayValue('# Review'), { target: { value: '# Revised' } });
     fireEvent.click(within(configuration).getByRole('button', { name: 'Save skill' }));
     await waitFor(() => expect(mocked).toHaveBeenCalledWith( '/api/settings/skills/review', expect.objectContaining({ method: 'PATCH', body: expect.stringContaining('# Revised') })));
-    fireEvent.click(within(overflow).getByRole('checkbox', { name: 'Agent' }));
+    fireEvent.click(within(configuration).getByRole('checkbox', { name: 'Agent' }));
     await waitFor(() => expect(mocked).toHaveBeenCalledWith( '/api/agents/agent/skills', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ skillIds: ['review'] }) })));
     unmount(); configuration.remove(); overflow.remove();
   });
@@ -46,7 +46,7 @@ describe('shared Skills settings', () => {
     });
     const configuration = document.createElement('div'); document.body.append(configuration);
     const content = '# Imported\n' + 'complete content '.repeat(300);
-    const { unmount } = render(<SkillsSettings agents={agents} agentId={agents[0].id} configurationTarget={configuration} />);
+    const { unmount } = render(<SkillsSettings section="text" agents={agents} agentId={agents[0].id} configurationTarget={configuration} />);
     const input = await within(configuration).findByLabelText('Import text skill');
     expect(input).toHaveProperty('className', 'skill-import-input');
     expect(within(configuration).getByRole('button', { name: 'Choose text file' })).toBeTruthy();
@@ -68,7 +68,7 @@ describe('shared Skills settings', () => {
   it('rejects unsupported imports and reports file read errors', async () => {
     mocked.mockImplementation(async (path) => (path === '/api/settings/skills' ? { skills: [] } : grants) as never);
     const configuration = document.createElement('div'); document.body.append(configuration);
-    const { unmount } = render(<SkillsSettings agents={agents} agentId={agents[0].id} configurationTarget={configuration} />);
+    const { unmount } = render(<SkillsSettings section="text" agents={agents} agentId={agents[0].id} configurationTarget={configuration} />);
     const input = await within(configuration).findByLabelText('Import text skill');
     fireEvent.change(input, { target: { files: [new File(['zip'], 'skill.zip')] } });
     expect((await screen.findByRole('alert')).textContent).toContain('Markdown or plain-text');
@@ -86,7 +86,7 @@ describe('shared Skills settings', () => {
     });
     const configuration = document.createElement('div'); document.body.append(configuration);
     const longContent = '# Shared\n' + 'full text '.repeat(200);
-    const { unmount } = render(<SkillsSettings agents={agents} agentId={agents[0].id} configurationTarget={configuration} />);
+    const { unmount } = render(<SkillsSettings section="text" agents={agents} agentId={agents[0].id} configurationTarget={configuration} />);
     await within(configuration).findByRole('button', { name: 'Create skill' });
     fireEvent.change(within(configuration).getByLabelText('ID'), { target: { value: 'shared' } });
     fireEvent.change(within(configuration).getByLabelText('Name'), { target: { value: 'Shared' } });
@@ -105,11 +105,11 @@ describe('shared Skills settings', () => {
 it('preserves skill drafts without catalog or assignment refetch on registry identity refresh', async () => {
  mocked.mockImplementation(async (path) => (path === '/api/settings/skills' ? { skills: [skill] } : grants) as never);
  const configuration = document.createElement('div'); document.body.append(configuration);
- const { rerender, unmount } = render(<SkillsSettings agents={agents} agentId={agents[0].id} configurationTarget={configuration} />);
+ const { rerender, unmount } = render(<SkillsSettings section="installed" agents={agents} agentId={agents[0].id} configurationTarget={configuration} />);
  fireEvent.click(await screen.findByRole('button', { name: /Review/ }));
  fireEvent.change(screen.getByDisplayValue('# Review'), { target: { value: '# Draft' } });
  const count = mocked.mock.calls.length;
- rerender(<SkillsSettings agents={agents.map(agent => ({ ...agent }))} agentId={agents[0].id} configurationTarget={configuration} />);
+ rerender(<SkillsSettings section="installed" agents={agents.map(agent => ({ ...agent }))} agentId={agents[0].id} configurationTarget={configuration} />);
  await waitFor(() => expect(mocked.mock.calls.length).toBe(count));
  expect(screen.getByDisplayValue('# Draft')).toBeTruthy();
  unmount(); configuration.remove();
@@ -119,11 +119,11 @@ it('preserves dirty content through membership/catalog refresh and saves that dr
  let content = '# Review';
  mocked.mockImplementation(async (path, init) => (init?.method ? {} : path === '/api/settings/skills' ? {skills:[{...skill, content}]} : grants) as never);
  const configuration=document.createElement('div');document.body.append(configuration);
- const view=render(<SkillsSettings agents={agents} agentId={agents[0].id} configurationTarget={configuration}/>);
+ const view=render(<SkillsSettings section="installed" agents={agents} agentId={agents[0].id} configurationTarget={configuration}/>);
  fireEvent.click(await screen.findByRole('button',{name:/^Review/}));
  fireEvent.change(screen.getByLabelText('Content'),{target:{value:'# Unsaved'}});
  content='# Updated catalog';
- view.rerender(<SkillsSettings agents={[...agents,{id:'new',name:'New'} as Agent]} agentId={agents[0].id} configurationTarget={configuration}/>);
+ view.rerender(<SkillsSettings section="installed" agents={[...agents,{id:'new',name:'New'} as Agent]} agentId={agents[0].id} configurationTarget={configuration}/>);
  await waitFor(()=>expect(mocked.mock.calls.some(([path])=>path==='/api/agents/new/skills')).toBe(true));
  await within(configuration).findByRole('button',{name:'Save skill'});
  expect(screen.getByLabelText('Content')).toHaveProperty('value','# Unsaved');
@@ -137,7 +137,7 @@ function render(ui: Parameters<typeof baseRender>[0]) { return baseRender(ui, { 
 it('confirms shared skill deletion and does not delete on cancellation', async () => {
   mocked.mockImplementation(async (path, init) => (init?.method ? {} : path === '/api/settings/skills' ? { skills: [skill] } : grants) as never);
   const configuration = document.createElement('div'); document.body.append(configuration);
-  const view = render(<SkillsSettings agents={agents} agentId="agent" configurationTarget={configuration} />);
+  const view = render(<SkillsSettings section="installed" agents={agents} agentId="agent" configurationTarget={configuration} />);
   fireEvent.click(await screen.findByRole('button', { name: /Review/ }));
   fireEvent.click(screen.getByRole('button', { name: 'Delete skill' }));
   expect(screen.getByRole('alertdialog', { name: 'Delete skill?' })).toBeTruthy();
@@ -150,49 +150,55 @@ it('confirms shared skill deletion and does not delete on cancellation', async (
   view.unmount(); configuration.remove();
 });
 
-it('renders a standalone three-pane workspace with search, filters, supported edits and honest source status', async () => {
-  mocked.mockImplementation(async (path) => (path === '/api/settings/skills' ? { skills: [skill, {...skill,id:'other',name:'Other', lifecycle:'disabled',global:true}] } : grants) as never);
-  render(<SkillsSettings workspace agents={agents} agentId="agent" />);
-  const library = screen.getByRole('region', { name: 'Skill library' });
-  const details = screen.getByRole('region', { name: 'Skill details and assignments' });
-  const source = screen.getByRole('complementary', { name: 'Skill source and updates' });
-  fireEvent.click(await within(library).findByRole('button', {name:/^Review/}));
-  expect(within(details).getByText('# Review')).toBeTruthy();
-  expect(within(details).queryByRole('textbox')).toBeNull();
-  expect(within(source).getByRole('checkbox', {name:'Agent', hidden:true})).toBeTruthy();
-  expect(within(source).getByText('sha256:123')).toBeTruthy();
-  expect(within(source).getByText('Not supplied by catalog')).toBeTruthy();
-  expect(within(source).getByRole('button', { name: 'Connect Git source' })).toBeTruthy();
-  expect(within(source).queryByRole('button', {name:/sync/i})).toBeNull();
-  fireEvent.change(screen.getByRole('searchbox', {name:'Search skills'}),{target:{value:'other'}});
-  expect(within(library).queryByRole('button',{name:/^Review/})).toBeNull();
-  expect(within(details).getByText('# Review')).toBeTruthy();
-  expect(within(details).queryByRole('textbox')).toBeNull();
-  fireEvent.change(screen.getByRole('combobox', {name:'Lifecycle filter'}),{target:{value:'available'}});
-  expect(screen.getByText('No skills match these filters.')).toBeTruthy();
-  fireEvent.change(screen.getByRole('combobox', {name:'Lifecycle filter'}),{target:{value:'all'}});
-  fireEvent.change(screen.getByRole('combobox', {name:'Assignment filter'}),{target:{value:'unassigned'}});
-  expect(within(library).queryByRole('button',{name:/Other/})).toBeNull();
+it('uses the Settings primary surface and portals only the inventory', async () => {
+ mocked.mockImplementation(async path => (path === '/api/settings/skills' ? {skills:[skill]} : path.endsWith('/source') ? {source:null} : grants) as never);
+ const overflow=document.createElement('div'); document.body.append(overflow);
+ const view=render(<SkillsSettings section="installed" agents={agents} agentId="agent" overflowTarget={overflow}/>);
+ await within(overflow).findByRole('button',{name:/^Review/});
+ expect(screen.queryByLabelText('Content')).toBeNull();
+ fireEvent.click(within(overflow).getByRole('button',{name:/^Review/}));
+ expect(screen.getByLabelText('Content')).toHaveProperty('value','# Review');
+ expect(overflow.querySelector('textarea')).toBeNull();
+ expect(within(overflow).queryByRole('button',{name:'Save skill'})).toBeNull();
+ expect(screen.getByRole('checkbox',{name:'Agent'}).closest('.settings-overflow-content')).toBeNull();
+ fireEvent.change(within(overflow).getByLabelText('Search skills'),{target:{value:'missing'}});
+ expect(within(overflow).getByText('No skills match these filters.')).toBeTruthy();
+ expect(screen.getByLabelText('Content')).toHaveProperty('value','# Review');
+ view.unmount(); overflow.remove();
+});
+it('keeps upstream content out of editable fields and does not request evidence', async () => {
+ const managed={...skill,contentOwner:'git',gitSource:{repository:'https://example.org/skills.git',ref:'main',path:'.',enabled:false,cron:null,timezone:'UTC',fetchTimeoutMs:120000}};
+ mocked.mockImplementation(async path => (path === '/api/settings/skills' ? {skills:[managed]} : path.endsWith('/source') ? {source:managed.gitSource} : grants) as never);
+ render(<SkillsSettings section="installed" agents={[]} agentId="agent"/>);
+ fireEvent.click(await screen.findByRole('button',{name:/^Review/}));
+ expect(screen.queryByLabelText('Content')).toBeNull();
+ expect(screen.getByLabelText('Lifecycle')).toBeTruthy();
+ expect(screen.getByLabelText('Repository')).toBeTruthy();
+ expect(screen.getByText('No agents configured.')).toBeTruthy();
+ expect(mocked.mock.calls.some(([path])=>/history|files/.test(path))).toBe(false);
+ expect(screen.queryByText('Sync history')).toBeNull();
+});
+it('keeps repository import separate from text creation', async () => {
+ mocked.mockImplementation(async path => (path === '/api/settings/skills' ? {skills:[]} : grants) as never);
+ const view=render(<SkillsSettings section="repo" agents={[]} agentId="agent"/>);
+ await screen.findByRole('button',{name:'Preview skill'});
+ expect(screen.queryByLabelText('Name')).toBeNull();
+ view.rerender(<SkillsSettings section="text" agents={[]} agentId="agent"/>);
+ expect(screen.getByLabelText('Name')).toBeTruthy();
+ expect(screen.getByRole('button',{name:'Create skill'})).toBeTruthy();
 });
 
- it('keeps repository-backed skills in read mode and management collapsed', async () => {
- const managed = {...skill, contentOwner:'git', gitSource:{repository:'https://example.com/skills.git',ref:'main',path:'review',enabled:false,cron:'0 * * * *',timezone:'UTC',fetchTimeoutMs:120000}};
- mocked.mockImplementation(async path => (path === '/api/settings/skills' ? {skills:[managed]} : path.endsWith('/source') ? {source:managed.gitSource} : path.includes('/history') ? {history:[],nextCursor:null} : path.endsWith('/files') ? {files:[]} : grants) as never);
- render(<SkillsSettings workspace agents={agents} agentId="agent" />);
- fireEvent.click(await screen.findByRole('button',{name:/^Review/}));
- expect(screen.getByText('# Review')).toBeTruthy();
- expect(screen.queryByRole('button',{name:'Edit text'})).toBeNull();
- expect(screen.queryByRole('textbox',{name:'Content'})).toBeNull();
- expect(screen.getByText('Installed details & source settings').closest('details')).not.toHaveProperty('open',true);
- expect(screen.getByText('Assignments & lifecycle').closest('details')).not.toHaveProperty('open',true);
- expect(mocked.mock.calls.some(([,init])=>init?.method)).toBe(false);
- });
- it('opens manual creation only as a separate explicit workflow', async () => {
- mocked.mockImplementation(async path => (path === '/api/settings/skills' ? {skills:[]} : grants) as never);
- render(<SkillsSettings workspace agents={agents} agentId="agent" />);
- await screen.findByRole('button',{name:'New text skill'});
- expect(screen.queryByRole('textbox',{name:'Name'})).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'New text skill'}));
- expect(screen.getByRole('textbox',{name:'Name'})).toBeTruthy();
- expect(screen.getByRole('button',{name:'Create skill'})).toBeTruthy();
- });
+it('shows inventory only for Installed skills and restores it on return', async () => {
+ mocked.mockImplementation(async path => (path === '/api/settings/skills' ? {skills:[skill]} : grants) as never);
+ const overflow=document.createElement('div'); document.body.append(overflow);
+ const view=render(<SkillsSettings section="installed" agents={[]} agentId="agent" overflowTarget={overflow}/>);
+ await within(overflow).findByRole('button',{name:/^Review/});
+ for (const section of ['repo','text'] as const) {
+   view.rerender(<SkillsSettings section={section} agents={[]} agentId="agent" overflowTarget={overflow}/>);
+   expect(overflow.childElementCount).toBe(0);
+   expect(screen.queryByLabelText('Search skills')).toBeNull();
+ }
+ view.rerender(<SkillsSettings section="installed" agents={[]} agentId="agent" overflowTarget={overflow}/>);
+ expect(within(overflow).getByRole('button',{name:/^Review/})).toBeTruthy();
+ view.unmount(); overflow.remove();
+});
