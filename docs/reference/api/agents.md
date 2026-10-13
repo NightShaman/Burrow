@@ -8,7 +8,7 @@ Setup status distinguishes `fresh`, `incomplete` and `ready`. `POST /api/setup/c
 
 Use the [initial setup guide](../../getting-started/initial-setup.md). The current wizard calls `POST /api/setup/operation` with an `operationId`, operator identity, agent, agent identity, a documents array and optional model selection. These durable stages share one transaction. A completed operation can be replayed with the same ID and identical input; changed input with that ID conflicts.
 
-The wizard still sends five profile kinds against a six-kind backend contract. This now rolls back the operation's writes, rather than leaving a newly created agent behind. Separately created provider connections are outside the transaction. See the [fresh-install recovery procedure](../../operations/troubleshooting.md#first-run-profile-error).
+The current wizard sends all six profile kinds. Before retrying its known retained legacy five-kind submission, it inserts empty `PREFERENCES` and persists that repair while preserving the operation ID and every other field. Complete retained submissions replay unchanged. Profile validation failures roll back the operation's writes and do not record a replay ID; a changed payload against an already committed ID conflicts. Separately created provider connections are outside the transaction. See the [recovery procedure](../../operations/troubleshooting.md#first-run-profile-error) and [wizard repair](https://github.com/NightShaman/Burrow-UI/blob/da6e9c7e4eef6866e1127bc16a3b03db63bb1757/src/features/settings/AgentToolbar.tsx#L191-L224).
 
 [Current setup operation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/setup-operation.mjs).
 

@@ -16,10 +16,12 @@ An import can replace conflicting portable records. Only use an export you trust
 
 Setup completion is based on persisted records: a nonempty operator name and at least one named agent. A model is optional for completing setup, but is needed for model-backed chat. Once completion is persisted, deleting the last agent does not automatically turn the installation back into a fresh setup.
 
-!!! warning "First-run profile error in 2026.10.10.4"
-    The wizard still submits five profile kinds, while the backend requires six, including `PREFERENCES`. A fresh submission can fail with `agent_profile_documents_complete_set_required`. The current `/api/setup/operation` wraps identity, agent, profile and completion writes in one transaction, so that failed operation rolls them back. Older installations may still have partial records. Check the [targeted recovery procedure](../operations/troubleshooting.md#first-run-profile-error); do not assume an agent was created or repeatedly change its name. This documentation does not repair the runtime.
+The current wizard submits all six profile kinds: `SOUL`, `RULES`, `ORIENTATION`, `PREFERENCES`, `TOOLS`, and `DREAM_MEMORY`. `/api/setup/operation` commits identity, agent, profiles, completion and its replay record together in one PostgreSQL transaction.
 
-For a lost response or transient error, the wizard retains its original submission in this browser and retries the same operation. Retrying does not repair the profile-kind mismatch above. OAuth connections created separately are outside that setup transaction.
+!!! note "Recovering the historical 2026.10.10.4 profile error"
+    That wizard omitted `PREFERENCES` and could fail with `agent_profile_documents_complete_set_required`. The current UI repairs its known retained five-document submission by adding empty `PREFERENCES` and saving the repaired payload in this browser before sending. It preserves the operation ID, existing text and all other input. Failed profile validation does not commit that operation. Older installations may have partial records; use the [targeted recovery procedure](../operations/troubleshooting.md#first-run-profile-error) rather than assuming an agent exists or changing its name repeatedly.
+
+For a lost response or transient error, retry in the same browser to recover the original submission. Complete six-document submissions are replayed unchanged: do not clear browser storage or change a committed operation's input. If saving the legacy repair to browser storage fails, no request is sent; restore storage access and retry. OAuth connections created separately are outside the setup transaction.
 
 ## Configure a usable model
 
@@ -78,3 +80,4 @@ The main UI also has **Tasks**, **Archive**, **Brains**, **Forge**, and **Settin
 - [Chat model selector](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/chat/ChatPage.tsx) and [persisted selection writer](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/app/useModelSelectionWriter.ts)
 - [OAuth dialog](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/settings/ModelConnectionOAuthDialog.tsx) and [editor lifecycle](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/settings/useModelConnectionEditor.ts)
 - [Transactional first-run operation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/setup-operation.mjs)
+- [Six-document wizard and retained-operation repair](https://github.com/NightShaman/Burrow-UI/blob/da6e9c7e4eef6866e1127bc16a3b03db63bb1757/src/features/settings/AgentToolbar.tsx#L191-L224)

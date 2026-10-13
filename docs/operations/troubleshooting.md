@@ -32,12 +32,12 @@ The managed database lives below the runtime root and uses a private socket. It 
 
 ## First-run profile error
 
-The `2026.10.10.4` wizard sends five profile kinds; the backend requires six, including `PREFERENCES`. The error is `agent_profile_documents_complete_set_required`. Retrying the same payload cannot repair it.
+The historical `2026.10.10.4` wizard sent five profile kinds and could fail with `agent_profile_documents_complete_set_required`; the backend requires six, including `PREFERENCES`. The current UI creates all six and repairs only its known retained five-document submission before retrying. Complete retained submissions, including lost-response retries, remain unchanged.
 
 1. Check `GET /api/setup/status` and `GET /api/agents` using your deployment's normal authentication.
-2. If the failed attempt was the current wizard's `/api/setup/operation`, its identity, agent, profile and completion writes roll back together. Do not assume there is an agent to repair. A separately created OAuth connection may remain.
+2. Reopen the corrected wizard in the same browser and retry the retained operation. It inserts empty `PREFERENCES` into the known legacy five-kind payload, persists the repair before sending, and keeps the operation ID and all other input. Do not clear its retained submission or change a committed operation's payload. A browser-storage failure blocks sending the repair; restore storage access and retry. Profile-validation failures roll back the setup writes, so do not assume there is an agent to repair. A separately created OAuth connection may remain.
 3. If an older install already has an agent, preserve its existing profile text. Use **Settings → Agents → Profile documents** when accessible, or the complete six-kind profile replacement API. Never replace existing documents with blank examples. Once the named operator, named agent and repaired profiles are present, finish with `POST /api/setup/complete`, check that setup status is ready, and reload.
-4. For a genuinely fresh installation, either use a release with the wizard mismatch corrected, or have its operator submit a complete setup operation through the existing API as below. This is a source-backed workaround, not a runtime fix or an independently executed setup test.
+4. For a genuinely fresh installation, use the corrected six-document wizard. If an installed older release cannot be updated yet, its operator can submit a complete setup operation through the existing API as below. This remains a fallback for that older release, not a required recovery step in the current UI or an independently executed setup test.
 
 ### Fresh-install API workaround
 
@@ -194,3 +194,4 @@ Include build version/source pins, deployment shape, sanitized exact error, rele
 - [Complete-set validation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-agent-profile-store.mjs)
 - [Update verification](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/install.sh)
 - [API spec file read](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs)
+- [Current wizard repair and durable retry](https://github.com/NightShaman/Burrow-UI/blob/da6e9c7e4eef6866e1127bc16a3b03db63bb1757/src/features/settings/AgentToolbar.tsx#L191-L224)
