@@ -136,6 +136,10 @@ jobs:
           mkdir backend ui
           for path in bin global-skills public scripts src; do cp -a "../backend-source/$path" "backend/$path"; done
           cp -a ../backend-source/package.json ../backend-source/package-lock.json backend/
+          # The running /api/openapi.json route reads this contract from its
+          # backend root. Do not ship the canonical source's entire docs tree.
+          install -d backend/docs
+          cp ../backend-source/docs/openapi.json backend/docs/openapi.json
           for path in src public dist scripts; do cp -a "../ui-source/$path" "ui/$path"; done
           cp -a ../ui-source/package.json ../ui-source/package-lock.json ../ui-source/index.html ../ui-source/tsconfig.json ../ui-source/vite.config.ts ../ui-source/vitest.config.ts ui/
           cp ../backend-source/deploy/installer/install.sh install.sh

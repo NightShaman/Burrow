@@ -26,8 +26,17 @@ trusted component gate, it builds the deployment image once with `load: true`,
 with the image's bundled managed PostgreSQL in a disposable named container and
 volume on a random localhost port. Smoke validates `/health` version, all release
 provenance pins and a per-run token, launcher executability, and served UI index,
-JS/CSS assets and UI SHA. Cleanup runs on success and failure. Only after smoke
-passes are the assembly and the very same local image tags published; no rebuild.
+JS/CSS assets and UI SHA. It enables disposable Basic auth, proves unauthenticated
+schema access is denied, then authenticates and parses `/api/openapi.json` for the
+current sessions operation and fetches `/api/docs` plus both locally served Scalar
+assets. The same assembled root is passed through the native installer with an
+isolated home and `--no-install-dependencies --no-service`; it verifies the
+installed schema bytes and assets but does **not** claim native HTTP readiness.
+Only `backend/docs/openapi.json` is shipped from the canonical backend docs tree;
+source-only npm OpenAPI generation/check scripts may need other canonical docs and
+are not release validation commands. Disposable container/volume and native home
+are removed on success and failure. Only after smoke passes are the assembly and
+the very same local image tags published; no rebuild.
 
 Run all contracts: `node --test scripts/assembly/*.test.mjs`.
 Run smoke: `node scripts/assembly/packaged-smoke.mjs IMAGE ASSEMBLED_ROOT`.
