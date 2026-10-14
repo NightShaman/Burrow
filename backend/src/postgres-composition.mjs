@@ -1,3 +1,4 @@
+import { attemptResourceClosers } from './background-lifecycle.mjs';
 import { PostgresSkillSources } from './postgres-skill-sources.mjs';
 import { PostgresLiveRunSteering } from './postgres-live-run-steering.mjs';
 import { startOperatorInstantBackfill } from './postgres-operator-backfill.mjs';
@@ -33,8 +34,8 @@ import PostgresWorkingMemoryRetentionSettingsStore, { POSTGRES_WORKING_MEMORY_RE
 import { migratePostgres } from './postgres-migrations.mjs';
 import { POSTGRES_APPLICATION_SCHEMA_SQL } from './postgres-application-schema.mjs';
 
-/** Compose all staged stores around one explicitly owned pool. This is isolated plumbing;
- * callers must opt in and production startup deliberately does not call this factory. */
+/** Compose PostgreSQL stores around one explicitly owned or borrowed pool.
+ * CLI readers use this factory; the UI server composes its own startup stores. */
 export async function createPostgresApplication({
   pool,
   poolConfig,
@@ -91,7 +92,7 @@ export async function createPostgresApplication({
     await stores.forge.init();
     stores.brainEmbeddings.start();
     const operatorBackfill = startOperatorInstantBackfill(sharedPool, operatorBackfillOptions);
-    let closed = false;
+    let closePromise = null;
     return Object.freeze({
     modDistributionRepositoryFactory: () => createPostgresModDistributionRepository({ pool: sharedPool }),
     modStoreFactory: postgresModStoreFactory({ pool: sharedPool, key: encryptionKey }),
@@ -100,13 +101,14 @@ export async function createPostgresApplication({
     pool: sharedPool,
     ownsPool: ownedPool,
     stores: Object.freeze(stores),
-    async close() {
-      if (closed) return;
-      closed = true;
-      await operatorBackfill.close();
-      await stores.brainEmbeddings.close();
-      await stores.conversations.close();
-      if (ownedPool) await closePostgresPool(sharedPool);
+    close() {
+      closePromise ||= attemptResourceClosers([
+        () => operatorBackfill.close(),
+        () => stores.brainEmbeddings.close(),
+        () => stores.conversations.close(),
+        ...(ownedPool ? [() => closePostgresPool(sharedPool)] : []),
+      ]);
+      return closePromise;
     },
     });
   } catch (error) {

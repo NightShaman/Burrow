@@ -1,12 +1,8 @@
 import { randomBytes, randomUUID, createCipheriv, createDecipheriv } from 'node:crypto';
 
 const AAD_PREFIX = 'burrow-mcp-secret-v1';
-const now = () => new Date().toISOString();
 const text = (value) => String(value ?? '').trim();
 const id = (value, field = 'id') => { const result = text(value); if (!/^[A-Za-z0-9._-]{1,96}$/.test(result)) throw new Error(`${field}_invalid`); return result; };
-const parseJson = (value, fallback = []) => { try { return JSON.parse(value); } catch { return fallback; } };
-const json = (value) => JSON.stringify(value ?? []);
-
 export function settingsKeyFromEnvironment(env = process.env) {
   const encoded = text(env.BURROW_SETTINGS_KEY);
   if (!encoded) throw new Error('settings_encryption_key_missing');
@@ -54,19 +50,6 @@ export function normalizeMcpInput(value = {}) {
   if (args.some((item) => item.length > 2_000)) throw new Error('mcp_args_invalid');
   return { name, transport, lifecycle, baseUrl: transport === 'http' ? baseUrl : '', command: transport === 'stdio' ? command : null, args: transport === 'stdio' ? args : [], enabled: value.enabled !== false, tools: normalizeMcpTools(value.tools), environmentVariables: normalizeMcpEnvironmentVariables(value) };
 }
-function publicConnection(row, environmentVariables = []) {
-  if (!row) return null;
-  const modManaged = row.id.startsWith('mod.') && row.base_url?.startsWith('mod://');
-  const transport = modManaged ? 'mod' : row.connection_kind || row.transport;
-  const catalog = normalizeMcpTools(parseJson(row.tools_json));
-  if (modManaged) {
-    const rawTools = parseJson(row.tools_json);
-    const availability = new Map((Array.isArray(rawTools) ? rawTools : []).map((tool) => [tool?.name, tool?.availability]));
-    for (const tool of catalog) tool.availability = availability.get(tool.name) === 'mod-authorized' ? 'mod-authorized' : 'grant-required';
-  }
-  return { id: row.id, name: row.name, transport, baseUrl: transport === 'http' ? row.base_url : null, command: row.command || null, args: parseJson(row.args_json, []), lifecycle: row.lifecycle || 'ephemeral', enabled: Boolean(row.enabled), tools: catalog, apiKeyConfigured: Boolean(row.secret_id), environmentVariables, createdAt: row.created_at, updatedAt: row.updated_at };
-}
-
 // Compatibility export only; persistence requires the PostgreSQL store.
 export class McpSettingsStore {
   constructor() { throw new Error('postgres_required'); }

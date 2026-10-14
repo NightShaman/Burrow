@@ -317,18 +317,6 @@ function renderPriorConversationSummary(context = null) {
   ].join('\n');
 }
 
-function renderRecentDialogue(turns = []) {
-  const filtered = (turns || [])
-    .filter((turn) => ['user', 'assistant', 'agent'].includes(String(turn?.role || '')))
-    .filter((turn) => String(turn?.content || '').trim());
-  if (!filtered.length) return '';
-  return [
-    'Recent Conversation Context, newest last. Treat this as active conversation, not archival memory or verified evidence. Resolve pronouns, references, and short fragments such as "that", "this", "it", "the issue", and elliptical follow-ups from these recent turns before asking for clarification. If the user challenges your prior assumption, correct that assumption in context instead of giving a generic explanation.',
-    '',
-    ...filtered.map((turn) => turn.role === 'agent' ? `[Agent message from ${turn.metadata?.fromAgentName || turn.metadata?.fromAgentId || 'another agent'}]: ${String(turn.content || '').trim()}` : `${turn.role}: ${String(turn.content || '').trim()}`),
-  ].join('\n');
-}
-
 function renderList(title, values) {
   if (!Array.isArray(values) || !values.length) return '';
   return [`${title}:`, ...values.map((value) => `- ${String(value).trim()}`)].join('\n');
@@ -425,19 +413,6 @@ function renderGroupChannel(group = null, budget = 12_000) {
     lines.push(line); remaining -= line.length + 1;
   }
   return [header, ...(lines.length < group.turns.length ? [omitted] : []), ...lines.reverse()].join('\n').slice(0, budget);
-}
-
-function renderSessionRecall(recall = null) {
-  if (!recall?.used || !Array.isArray(recall.results) || !recall.results.length) return '';
-  const items = recall.results.slice(0, 6).map((result) => {
-    const source = result.source || {};
-    return `- Session ${source.sessionId || result.sessionId || 'unknown'}${source.currentSession ? ' (current)' : ''}, ${result.ts || 'time unknown'}: ${String(result.contentSnippet || result.compressionSummary?.textSnippet || '').trim()}`;
-  });
-  return [
-    'Prior-session recall: read-only transcript evidence selected because the user referenced earlier work or a prior decision. Treat it as continuity context, not independently verified external fact.',
-    `Query: ${recall.query || 'unknown'}`,
-    ...items,
-  ].join('\n');
 }
 
 function renderPromptBoundary({ availableModels = [] } = {}) {

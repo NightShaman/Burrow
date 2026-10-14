@@ -46,19 +46,6 @@ function hasFailedMutationToolResult(toolResults = []) {
 
 const MUTATION_REPAIR_MAX_ATTEMPTS = 5;
 
-function mutationFailureSummary(result = {}) {
-  if (!result) return 'unknown mutation failure';
-  return [
-    `Tool: ${result.tool || 'mutation'}`,
-    `OK: ${result.ok ? 'true' : 'false'}`,
-    result.filePath ? `Path: ${result.filePath}` : null,
-    result.touchedFiles?.length ? `Touched files: ${result.touchedFiles.join(', ')}` : null,
-    result.failureClass ? `Failure class: ${result.failureClass}` : null,
-    result.gitApplyExitCode != null ? `git apply exit code: ${result.gitApplyExitCode}` : null,
-    result.error ? `Error:\n${String(result.error).slice(0, 4000)}` : null,
-  ].filter(Boolean).join('\n');
-}
-
 function structuredFollowupInput({ prompt, content }) {
   const messages = Array.isArray(prompt?.modelMessages) && prompt.modelMessages.length
     ? normalizeProviderMessages([...prompt.modelMessages, { role: 'user', content }])

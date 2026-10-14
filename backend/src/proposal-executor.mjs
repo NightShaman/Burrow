@@ -23,7 +23,7 @@ import { grantedMcpTool, mcpCapabilitiesReceipt, mcpProvidersReceipt } from './m
 import { activeModToolConnection } from './mod-agent-tools.mjs';
 import { executeForgeTool, forgeFailure } from './forge-agent-tools.mjs';
 import { credentialProducer, protectMcpOutput, protectToolOutput, resolveManagedProtectedBindings } from './protected-values.mjs';
-import { loadEffectiveSkillCatalog, loadSelectedSkillText, skillManifest, selectCatalogSkills } from './skill-catalog.mjs';
+import { executeSkillTool } from './skill-tool-executor.mjs';
 import path from 'node:path';
 
 function workspacePath(filePath, workspaceRoot, rootDir) {
@@ -268,32 +268,17 @@ export async function executeReviewedProposalActions({ conversationStore = null,
     }
 
     if (action.tool === 'list_skills' || action.tool === 'load_skill') {
-      const skillsWorkspace = executionContext?.agentWorkspaceRoot ? path.dirname(executionContext.agentWorkspaceRoot) : executionRoot;
-      const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: skillsWorkspace, agentId: agentId || executionContext?.agentId || 'hatchet', agentRuntime: agentRuntime || executionContext?.agentRuntime || null, overrides: executionContext?.skillOverrides || {}, skillStore: executionContext?.stores?.skills || null });
-      const started = await traceLogger?.toolStart?.({ tool: action.tool, skillId: action.skillId || null, catalogCount: catalog.availableSkills.length });
-      let result;
-      if (action.tool === 'list_skills') {
-        result = { tool: 'list_skills', ok: true, skills: catalog.availableSkills.map(skillManifest) };
-      } else {
-        const choice = selectCatalogSkills({ catalog: catalog.skills, ids: [action.skillId], source: 'agent-requested' });
-        if (!choice.selected.length) result = { tool: 'load_skill', ok: false, skillId: action.skillId, error: choice.rejected[0]?.reason || 'skill_not_found' };
-        else {
-          const loaded = await loadSelectedSkillText(skillsWorkspace, choice.selected);
-          const skill = loaded[0];
-          result = skill.missing ? { tool: 'load_skill', ok: false, skillId: action.skillId, error: skill.error || 'skill_source_missing' } : { tool: 'load_skill', ok: true, skill: { ...skillManifest(skill), version: skill.version, content: skill.content, contentTruncated: skill.contentTruncated } };
-        }
-      }
-      toolResults.push(result);
-      await (traceLogger?.toolEnd || traceLogger?.tool)?.({
-        tool: action.tool,
-        ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}),
-        ok: result.ok,
-        skillId: action.skillId || null,
-        version: result.skill?.version || null,
-        // Preserve discovery cards, but never loaded skill body in trace events.
-        skills: action.tool === 'list_skills' ? result.skills.map(({ id, name, description, lifecycle, available, owner, ownership }) => ({ id, name, description, lifecycle, available, owner, ownership: ownership ? { scope: ownership.scope, agentId: ownership.agentId } : null })) : undefined,
-        error: result.error || null,
+      const { result, finishTrace } = await executeSkillTool({
+        action,
+        skillsWorkspace: executionContext?.agentWorkspaceRoot ? path.dirname(executionContext.agentWorkspaceRoot) : executionRoot,
+        agentId: agentId || executionContext?.agentId,
+        agentRuntime: agentRuntime || executionContext?.agentRuntime || null,
+        overrides: executionContext?.skillOverrides || {},
+        skillStore: executionContext?.stores?.skills || null,
+        traceLogger,
       });
+      toolResults.push(result);
+      await finishTrace();
       continue;
     }
 

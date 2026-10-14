@@ -182,3 +182,74 @@ it('FE022 agent switch rejects late pagination rows in the rendered shelf', asyn
   expect(screen.queryByText('Stale intruder')).toBeNull();
   expect(screen.queryByText('Old owner')).toBeNull();
 });
+
+describe('BCA03 shelf-owned retry and status', () => {
+  function shelves() {
+    const sessions = vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([]));
+    const dreams = vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([]));
+    const tiddle = vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([]));
+    vi.spyOn(archiveRepository, 'listCalendarAvailability').mockImplementation(async (kind, month) => ({ ok: true, kind, month, dates: [] }));
+    return { sessions, dreams, tiddle };
+  }
+
+  it.each([
+    ['chat', 'Retry conversations', 'No conversations match this shelf.'],
+    ['dreams', 'Retry dreams', 'No dreams match this shelf.'],
+    ['tiddle', 'Retry warm cards', 'No warm cards match this shelf.'],
+  ] as const)('retries only the failed %s shelf and uses its own empty state', async (kind, retry, empty) => {
+    const lists = shelves();
+    render(<Archive agents={[]} repository={archiveRepository} />);
+    await screen.findByText('No conversations match this shelf.');
+    const list = kind === 'chat' ? lists.sessions : kind === 'dreams' ? lists.dreams : lists.tiddle;
+    list.mockRejectedValueOnce(new Error(`${kind} offline`));
+    if (kind === 'chat') fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'fail' } });
+    else fireEvent.click(screen.getByRole('button', { name: kind === 'dreams' ? /Dreams/ : /Tiddle/ }));
+    const button = await screen.findByRole('button', { name: retry });
+    const counts = [lists.sessions.mock.calls.length, lists.dreams.mock.calls.length, lists.tiddle.mock.calls.length];
+    fireEvent.click(button);
+    expect(await screen.findByText(empty)).toBeTruthy();
+    expect([lists.sessions.mock.calls.length, lists.dreams.mock.calls.length, lists.tiddle.mock.calls.length])
+      .toEqual(counts.map((count, index) => count + (index === ['chat', 'dreams', 'tiddle'].indexOf(kind) ? 1 : 0)));
+    expect(screen.queryByRole('alert')).toBeNull();
+    if (kind !== 'chat') expect(screen.queryByText('No conversations match this shelf.')).toBeNull();
+  });
+
+  it.each(['dreams', 'tiddle'] as const)('does not carry cached Chat status into %s or accept its late failure', async (kind) => {
+    const { archiveQueryCacheKey, writeArchiveSessionCache } = await import('./archiveCache');
+    writeArchiveSessionCache(archiveQueryCacheKey({ target: 'local', agent: '', query: '', date: '', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, kind: 'chat' }), []);
+    const lists = shelves();
+    let reject!: (error: Error) => void;
+    lists.sessions.mockReturnValueOnce(new Promise((_, no) => { reject = no; }));
+    render(<Archive agents={[]} repository={archiveRepository} />);
+    await waitFor(() => expect(lists.sessions).toHaveBeenCalledOnce());
+    expect(screen.getByText('Showing stale cached conversations while revalidating.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: kind === 'dreams' ? /Dreams/ : /Tiddle/ }));
+    await screen.findByText(kind === 'dreams' ? 'No dreams match this shelf.' : 'No warm cards match this shelf.');
+    await act(async () => reject(new Error('late Chat failure')));
+    expect(lists.sessions.mock.calls[0][1]?.aborted).toBe(true);
+    expect(screen.queryByText('late Chat failure')).toBeNull();
+    expect(screen.queryByText('Showing stale cached conversations while revalidating.')).toBeNull();
+    expect(screen.queryByText('Loading conversations…')).toBeNull();
+  });
+
+  it.each(['dreams', 'tiddle'] as const)('aborts failed %s revalidation when switching shelves', async (kind) => {
+    const lists = shelves();
+    render(<Archive agents={[]} repository={archiveRepository} />);
+    await screen.findByText('No conversations match this shelf.');
+    const list = kind === 'dreams' ? lists.dreams : lists.tiddle;
+    list.mockRejectedValueOnce(new Error('First failure'));
+    fireEvent.click(screen.getByRole('button', { name: kind === 'dreams' ? /Dreams/ : /Tiddle/ }));
+    const retry = await screen.findByRole('button', { name: kind === 'dreams' ? 'Retry dreams' : 'Retry warm cards' });
+    let reject!: (error: Error) => void;
+    if (kind === 'dreams') lists.dreams.mockReturnValueOnce(new Promise((_, no) => { reject = no; }));
+    else lists.tiddle.mockReturnValueOnce(new Promise((_, no) => { reject = no; }));
+    fireEvent.click(retry);
+    const signal = kind === 'dreams' ? lists.dreams.mock.calls.at(-1)![0] : lists.tiddle.mock.calls.at(-1)![1];
+    fireEvent.click(screen.getByRole('button', { name: /^Chat/ }));
+    await screen.findByText('No conversations match this shelf.');
+    await act(async () => reject(new Error('Late shelf failure')));
+    expect(signal?.aborted).toBe(true);
+    expect(screen.queryByText('Late shelf failure')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+});

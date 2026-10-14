@@ -3,8 +3,6 @@ export const AGENT_PROFILE_KINDS = Object.freeze(['SOUL', 'RULES', 'ORIENTATION'
 const PROFILE_KIND_NAMES = Object.freeze({ DREAMMEMORY: 'DREAM_MEMORY', PREFERENCESMD: 'PREFERENCES' });
 const MAX_DOCUMENT_CHARS = 48_000;
 const text = (value) => String(value ?? '').trim();
-const now = () => new Date().toISOString();
-
 function agentId(value) {
   const result = text(value);
   if (!/^[A-Za-z0-9._-]{1,96}$/.test(result)) throw new Error('agent_id_invalid');
@@ -21,16 +19,6 @@ function markdown(value) {
   if (typeof value !== 'string') throw new Error('agent_profile_markdown_required');
   if (value.length > MAX_DOCUMENT_CHARS) throw new Error('agent_profile_markdown_too_large');
   return value;
-}
-
-function document(row) {
-  return row && {
-    kind: row.kind,
-    markdown: row.markdown,
-    format: 'markdown',
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
 }
 
 // Compatibility export only; persistence requires the PostgreSQL store.

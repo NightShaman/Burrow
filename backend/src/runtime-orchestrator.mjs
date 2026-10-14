@@ -75,28 +75,6 @@ function allSkippedChatTools(chatToolLoop = {}) {
   return chatToolLoop.skipped || (chatToolLoop.iterations || []).flatMap((iteration) => iteration.proposalExecution?.skipped || []);
 }
 
-function skippedMutationOrUnverifiedExec(skipped = []) {
-  return (skipped || []).filter((item) => ['files_write', 'files_patch'].includes(String(item.tool || '')));
-}
-
-function hasExecutedMutationEvidence(toolResults = []) {
-  return (toolResults || []).some((result) => result?.ok === true && ['files_write', 'files_patch'].includes(String(result.tool || '')));
-}
-
-function mutationNotExecutedAnswer({ skipped = [], toolResults = [] } = {}) {
-  const skippedMutations = skippedMutationOrUnverifiedExec(skipped);
-  if (!skippedMutations.length || hasExecutedMutationEvidence(toolResults)) return null;
-  const skippedText = skippedToolSummary(skippedMutations);
-  const readOnlyCount = (toolResults || []).filter((result) => result?.ok === true && result?.tool === 'files_read').length;
-  return [
-    'I did not edit the file.',
-    'A mutation tool call was requested but was NOT EXECUTED. Inspect the recorded skipped-tool receipt for its structural or configured hard-block reason.',
-    skippedText,
-    readOnlyCount ? `I only executed ${readOnlyCount} read-only inspection tool${readOnlyCount === 1 ? '' : 's'}.` : null,
-  ].filter(Boolean).join('\n\n');
-}
-
-
 async function executeChatToolCalls({ model, workspaceRoot = null, rootDir = null, dataRoot = null, sessionId = null, conversationId = null, iteration = 0, traceLogger = null, executionPolicy = null, modelConfig = null, executionContext = null, abortSignal = null } = {}) {
   const toolCalls = normalizeNativeToolCalls(model?.choice?.toolCalls || []);
   const proposal = proposalFromNativeToolCalls(toolCalls, model?.choice?.text ?? '', executionContext);

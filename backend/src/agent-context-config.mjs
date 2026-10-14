@@ -14,13 +14,6 @@ function ids(value, field) {
   return normalized;
 }
 
-function positiveInteger(value, field, { min, max } = {}) {
-  if (value === undefined || value === null || value === '') return undefined;
-  const number = Number(value);
-  if (!Number.isInteger(number) || number < min || number > max) throw new Error(`${field}_invalid`);
-  return number;
-}
-
 function uiTarget(value) {
   if (value === undefined) return undefined;
   if (value === null) return null;

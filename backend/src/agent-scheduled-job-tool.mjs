@@ -1,4 +1,4 @@
-import { createScheduledJobScheduler, scheduledJobSchedulerForStores } from './scheduled-job-scheduler.mjs';
+import { scheduledJobSchedulerForStores } from './scheduled-job-scheduler.mjs';
 
 async function owned(store, agentId, jobId) {
   const job = await store.getJob(jobId);
@@ -31,7 +31,8 @@ export async function executeAgentScheduledJobTool({ action, agentId, sessionId,
     if (action.tool === 'scheduled_jobs_update') return { tool: action.tool, ok: true, job: await store.updateJob(job.id, input(action, { sessionId })) };
     if (action.tool === 'scheduled_jobs_delete') return { tool: action.tool, ok: true, job: await store.deleteJob(job.id) };
     if (action.tool === 'scheduled_jobs_run_now') {
-      const scheduler = scheduledJobSchedulerForStores(stores) || createScheduledJobScheduler({ storeFactory: () => store, closeStore: async () => {}, resolveAgentRuntime, rootDir, stores });
+      // Load runtime composition only for the non-server/manual fallback.
+      const scheduler = scheduledJobSchedulerForStores(stores) || (await import('./scheduled-job-runtime.mjs')).createRuntimeScheduledJobScheduler({ storeFactory: () => store, closeStore: async () => {}, resolveAgentRuntime, rootDir, stores });
       return { tool: action.tool, ...(await scheduler.trigger(job.id)) };
     }
     return fail('scheduled_job_tool_unsupported');

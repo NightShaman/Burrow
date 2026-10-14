@@ -262,9 +262,6 @@ function compressionOutcome(context) {
   }
   return { status: 'not_recorded', label: 'Not recorded', detail: 'No compression decision was recorded for this older run.', reason: null, source: null, ...counts };
 }
-function effectiveCompression(context) {
-  return compressionOutcome(context);
-}
 function contextSummary(context) {
   if (!context) return null;
   return compressionOutcome(context).detail;

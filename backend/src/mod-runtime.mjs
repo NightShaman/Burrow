@@ -164,23 +164,6 @@ function matchRoute(route, value) {
   if (!match) return null;
   return Object.fromEntries(route.names.map((name, index) => [name, decodeURIComponent(match[index + 1])]));
 }
-function apiRegistrar(mod) {
-  const routes = [];
-  const add = (method, routePath, handler) => {
-    const relative = String(routePath || '').trim();
-    if (!relative.startsWith('/') || relative.includes('?') || relative.split('/').includes('..') || typeof handler !== 'function') throw new Error(`mod_route_invalid:${mod.id}`);
-    const normalized = relative === '/' ? '' : relative.replace(/\/$/, '');
-    routes.push({ method, path: normalized, handler, ...compileRoute(normalized) });
-  };
-  return { routes, api: Object.freeze({ get: (p, h) => add('GET', p, h), post: (p, h) => add('POST', p, h), put: (p, h) => add('PUT', p, h), patch: (p, h) => add('PATCH', p, h), delete: (p, h) => add('DELETE', p, h) }) };
-}
-
-function modCleanupHandle(value) {
-  if (typeof value === 'function') return value;
-  if (value && typeof value === 'object' && typeof value.close === 'function') return () => value.close();
-  return null;
-}
-
 async function closeModStore(mod, logger) {
   const store = mod.store;
   mod.store = null;

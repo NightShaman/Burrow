@@ -18,8 +18,9 @@ type Options = {
 
 export function useModelConnectionEditor({ onModelConnectionsChanged }: Options) {
   const confirm = useConfirm();
-  const discoveryGeneration = useRef(0);
-  useEffect(() => () => { discoveryGeneration.current += 1; }, []);
+  const editorGeneration = useRef(0);
+  const isEditorCurrent = (generation: number) => generation === editorGeneration.current;
+  useEffect(() => () => { editorGeneration.current += 1; }, []);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [provider, setProvider] = useState('');
   const [apiType, setApiType] = useState('openai-chat-completions');
@@ -40,7 +41,7 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
   const [oauthModal, setOauthModal] = useState<'openai' | 'anthropic' | null>(null);
 
   const resetProvider = () => {
-    discoveryGeneration.current += 1;
+    editorGeneration.current += 1;
     setEditingId(null);
     setProvider('');
     setApiType('openai-chat-completions');
@@ -65,8 +66,8 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     const discoveryProvider = connection ? connection.provider ?? 'OpenAI' : provider;
     const discoveryUrl = connection ? connection.baseUrl ?? 'https://chatgpt.com/backend-api' : url;
     if (!discoveryProvider.trim() || !discoveryUrl.trim()) return availableModels;
-    const generation = ++discoveryGeneration.current;
-    const current = () => generation === discoveryGeneration.current && isCurrent();
+    const generation = ++editorGeneration.current;
+    const current = () => isEditorCurrent(generation) && isCurrent();
     setRequestState('connecting');
     setRequestError('');
     try {
@@ -100,6 +101,7 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
   const saveProvider = async (modelsOverride?: RuntimeModel[]) => {
     const models = modelsOverride ?? availableModels;
     if (!provider.trim() || !url.trim() || !models.some((model) => model.selected !== false)) return;
+    const generation = ++editorGeneration.current;
     setRequestState('saving');
     setRequestError('');
     try {
@@ -120,23 +122,26 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
           models,
         }),
       });
-      // Clear secrets immediately after the successful write; refresh may be slow or fail.
-      setApiKey('');
-      setOauthIdToken('');
-      setOauthAccessToken('');
-      setOauthRefreshToken('');
+      if (isEditorCurrent(generation)) {
+        // Clear secrets immediately after the successful write; refresh may be slow or fail.
+        setApiKey('');
+        setOauthIdToken('');
+        setOauthAccessToken('');
+        setOauthRefreshToken('');
+      }
       await onModelConnectionsChanged();
+      if (!isEditorCurrent(generation)) return;
       setSavedProvidersOpen(true);
       resetProvider();
     } catch (error) {
-      setRequestError(error instanceof Error ? `Could not save provider: ${error.message}` : 'Could not save provider.');
+      if (isEditorCurrent(generation)) setRequestError(error instanceof Error ? `Could not save provider: ${error.message}` : 'Could not save provider.');
     } finally {
-      setRequestState('idle');
+      if (isEditorCurrent(generation)) setRequestState('idle');
     }
   };
 
   const applyOAuthConnection = (connection: OpenAiOAuthConnection) => {
-    discoveryGeneration.current += 1;
+    editorGeneration.current += 1;
     setEditingId(connection.id);
     setProvider(connection.provider ?? 'OpenAI');
     setApiType(connection.apiType ?? 'openai-responses');
@@ -155,8 +160,9 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     onAuthorized: async (connection, isCurrent) => {
       await connect(connection, isCurrent);
       if (!isCurrent()) return;
+      const generation = editorGeneration.current;
       await onModelConnectionsChanged();
-      if (isCurrent()) setOauthModal(null);
+      if (isEditorCurrent(generation) && isCurrent()) setOauthModal(null);
     },
   });
   const claudeFlow = useClaudeCodeLoginFlow({
@@ -230,7 +236,7 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
   const deleteManualModel = (id: string) => setAvailableModels((all) => all.filter((model) => model.id !== id));
 
   const editProvider = (item: SavedProvider) => {
-    discoveryGeneration.current += 1;
+    editorGeneration.current += 1;
     setRequestState('idle');
     setEditingId(item.id);
     setProvider(item.provider);
@@ -272,19 +278,20 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
   };
 
   const deleteProvider = async (item: SavedProvider) => {
+    const generation = editorGeneration.current;
     if (!await confirm({
       title: 'Delete provider?',
       message: `Delete ${item.provider}? This removes its saved connection.`,
       confirmLabel: 'Delete provider',
       tone: 'danger',
     })) return;
-    setRequestError('');
+    if (isEditorCurrent(generation)) setRequestError('');
     try {
       await api(`/api/settings/model-connections/${encodeURIComponent(item.id)}`, { method: 'DELETE' });
       await onModelConnectionsChanged();
-      if (editingId === item.id) resetProvider();
+      if (isEditorCurrent(generation) && editingId === item.id) resetProvider();
     } catch (error) {
-      setRequestError(error instanceof Error ? `Could not delete provider: ${error.message}` : 'Could not delete provider.');
+      if (isEditorCurrent(generation)) setRequestError(error instanceof Error ? `Could not delete provider: ${error.message}` : 'Could not delete provider.');
     }
   };
 

@@ -5,9 +5,7 @@ import { mergeAgentContextConfig, normalizeAgentContextConfig } from './agent-co
 const ID = /^[a-zA-Z0-9._-]{1,96}$/;
 const DEFAULT_CAPABILITIES = Object.freeze(['chat', 'files', 'skills']);
 
-function now() { return new Date().toISOString(); }
 function text(value) { return String(value ?? '').trim(); }
-function json(value) { return JSON.stringify(value); }
 function parseJson(value, fallback = []) { try { return JSON.parse(value); } catch { return fallback; } }
 function executionEnvironment(value) {
   if (value == null) return null;

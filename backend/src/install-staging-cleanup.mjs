@@ -1,3 +1,4 @@
+import { createBackgroundLifecycle } from './background-lifecycle.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
@@ -35,12 +36,15 @@ export async function cleanupStaleInstallStaging({ runtimeRoot, maxAgeMs = DEFAU
 }
 
 export function createInstallStagingCleanupScheduler({ runtimeRoot, intervalMs = 24 * 60 * 60 * 1000, runCleanup = cleanupStaleInstallStaging } = {}) {
+  const lifecycle = createBackgroundLifecycle({ name: 'install_staging_cleanup_scheduler' });
   let timer = null;
-  async function tick() { return runCleanup({ runtimeRoot }); }
+  function tick() { return lifecycle.stopped ? Promise.resolve(null) : lifecycle.track(() => lifecycle.stopped ? null : runCleanup({ runtimeRoot })); }
   function start() {
+    if (lifecycle.stopped) return Promise.resolve(null);
     if (!timer) { timer = setInterval(() => { void tick().catch(() => {}); }, intervalMs); timer.unref?.(); }
     return tick();
   }
-  function stop() { if (timer) clearInterval(timer); timer = null; }
-  return { start, stop, tick };
+  function stop() { lifecycle.stop(); if (timer) clearInterval(timer); timer = null; }
+  function close() { stop(); return lifecycle.close(); }
+  return { start, stop, close, tick, health: lifecycle.health };
 }

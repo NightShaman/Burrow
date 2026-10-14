@@ -271,6 +271,122 @@ describe('useModelConnectionEditor', () => {
     expect(result.current.editingId).toBe(savedProvider.id);
   });
 
+  it.each([false, true])('ignores stale save success after A→B→A while preserving inventory refresh (refreshFails=%s)', async (refreshFails) => {
+    let resolvePost!: (value: unknown) => void;
+    const post = new Promise((resolve) => { resolvePost = resolve; });
+    apiMock.mockImplementation(() => post);
+    const refresh = vi.fn(() => refreshFails ? Promise.reject(new Error('refresh failed')) : Promise.resolve());
+    const { result } = renderEditor(refresh);
+    act(() => result.current.editProvider(savedProvider));
+    act(() => { fillTokens(result.current); result.current.setApiKey('old-a-secret'); });
+    let saving!: Promise<void>;
+    await act(async () => { saving = result.current.saveProvider(); await Promise.resolve(); });
+    expect(result.current.requestState).toBe('saving');
+
+    act(() => result.current.editProvider({ ...savedProvider, id: 'provider-b', provider: 'Provider B', models: ['b'] }));
+    act(() => result.current.editProvider(savedProvider));
+    act(() => {
+      result.current.setApiKey('new-a-secret');
+      result.current.setOauthIdToken('new-id');
+      result.current.setOauthAccessToken('new-access');
+      result.current.setOauthRefreshToken('new-refresh');
+    });
+
+    await act(async () => { resolvePost({}); await saving; });
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(result.current.editingId).toBe(savedProvider.id);
+    expect(result.current.provider).toBe(savedProvider.provider);
+    expect(result.current.apiKey).toBe('new-a-secret');
+    expect(tokens(result.current)).toEqual(['new-id', 'new-access', 'new-refresh']);
+    expect(result.current.requestState).toBe('idle');
+    expect(result.current.requestError).toBe('');
+    expect(result.current.savedProvidersOpen).toBe(false);
+  });
+
+  it('ignores stale save success after cancel and new editor without clearing new secrets', async () => {
+    let resolvePost!: (value: unknown) => void;
+    const post = new Promise((resolve) => { resolvePost = resolve; });
+    apiMock.mockImplementation(() => post);
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderEditor(refresh);
+    act(() => result.current.editProvider(savedProvider));
+    act(() => { fillTokens(result.current); result.current.setApiKey('old-secret'); });
+    let saving!: Promise<void>;
+    await act(async () => { saving = result.current.saveProvider(); await Promise.resolve(); });
+
+    act(() => result.current.resetProvider());
+    act(() => {
+      result.current.setProvider('New Provider');
+      result.current.setUrl('https://new.example/v1');
+      result.current.setApiKey('new-secret');
+      result.current.setOauthAccessToken('new-token');
+      result.current.setManualModel('new-model');
+    });
+    act(() => result.current.addManualModel());
+
+    await act(async () => { resolvePost({}); await saving; });
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(result.current.editingId).toBeNull();
+    expect(result.current.provider).toBe('New Provider');
+    expect(result.current.url).toBe('https://new.example/v1');
+    expect(result.current.apiKey).toBe('new-secret');
+    expect(tokens(result.current)).toEqual(['', 'new-token', '']);
+    expect(result.current.availableModels).toEqual([expect.objectContaining({ id: 'new-model' })]);
+    expect(result.current.requestState).toBe('idle');
+    expect(result.current.requestError).toBe('');
+  });
+
+  it('ignores stale POST failure after switching editors', async () => {
+    let rejectPost!: (error: Error) => void;
+    const post = new Promise((_, reject) => { rejectPost = reject; });
+    apiMock.mockImplementation(() => post);
+    const { result, onModelConnectionsChanged } = renderEditor();
+    act(() => result.current.editProvider(savedProvider));
+    let saving!: Promise<void>;
+    await act(async () => { saving = result.current.saveProvider(); await Promise.resolve(); });
+
+    act(() => result.current.editProvider({ ...savedProvider, id: 'provider-b', provider: 'Provider B', models: ['b'] }));
+    await act(async () => { rejectPost(new Error('late write failed')); await saving; });
+    expect(onModelConnectionsChanged).not.toHaveBeenCalled();
+    expect(result.current.editingId).toBe('provider-b');
+    expect(result.current.provider).toBe('Provider B');
+    expect(result.current.availableModels.map((model) => model.id)).toEqual(['b']);
+    expect(result.current.requestState).toBe('idle');
+    expect(result.current.requestError).toBe('');
+  });
+
+  it.each([false, true])('keeps B drafts and busy state when A finishes a delayed refresh (refreshFails=%s)', async (refreshFails) => {
+    let resolveRefresh!: () => void;
+    let rejectRefresh!: (error: Error) => void;
+    const refreshPending = new Promise<void>((resolve, reject) => { resolveRefresh = resolve; rejectRefresh = reject; });
+    let resolveB!: (value: unknown) => void;
+    apiMock.mockResolvedValueOnce({}).mockImplementationOnce(() => new Promise((resolve) => { resolveB = resolve; }));
+    const refresh = vi.fn().mockReturnValueOnce(refreshPending).mockResolvedValue(undefined);
+    const { result } = renderEditor(refresh);
+    act(() => result.current.editProvider(savedProvider));
+    act(() => result.current.setApiKey('a-secret'));
+    let savingA!: Promise<void>;
+    await act(async () => { savingA = result.current.saveProvider(); await Promise.resolve(); });
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(result.current.apiKey).toBe('');
+
+    act(() => result.current.editProvider({ ...savedProvider, id: 'provider-b', provider: 'Provider B', models: ['b'] }));
+    act(() => { result.current.setApiKey('b-secret'); fillTokens(result.current); });
+    let savingB!: Promise<void>;
+    await act(async () => { savingB = result.current.saveProvider(); await Promise.resolve(); });
+    await act(async () => { if (refreshFails) rejectRefresh(new Error('late refresh failed')); else resolveRefresh(); await savingA; });
+    expect(result.current.editingId).toBe('provider-b');
+    expect(result.current.apiKey).toBe('b-secret');
+    expect(tokens(result.current)).toEqual([' id-secret ', ' access-secret ', ' refresh-secret ']);
+    expect(result.current.requestState).toBe('saving');
+    expect(result.current.requestError).toBe('');
+    expect(JSON.parse(apiMock.mock.calls[1][1]!.body as string)).toEqual(expect.objectContaining({ id: 'provider-b', apiKey: 'b-secret' }));
+    await act(async () => { resolveB({}); await savingB; });
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(result.current.editingId).toBeNull();
+    expect(result.current.requestState).toBe('idle');
+  });
+
   it('retains token drafts after a failed POST and submits the same payload on retry', async () => {
     apiMock.mockRejectedValueOnce(new Error('write failed')).mockResolvedValueOnce({});
     const { result, onModelConnectionsChanged } = renderEditor();
@@ -318,6 +434,24 @@ describe('useModelConnectionEditor', () => {
     expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete provider?', tone: 'danger' }));
     expect(apiMock).toHaveBeenCalledWith('/api/settings/model-connections/provider-1', { method: 'DELETE' });
     expect(onModelConnectionsChanged).toHaveBeenCalledOnce();
+  });
+
+  it('does not reset the current editor after a late delete refresh for a previously edited provider', async () => {
+    let resolveDelete!: (value: unknown) => void;
+    apiMock.mockImplementation(() => new Promise((resolve) => { resolveDelete = resolve; }));
+    const { result, onModelConnectionsChanged } = renderEditor();
+    act(() => result.current.editProvider(savedProvider));
+    let deleting!: Promise<void>;
+    await act(async () => { deleting = result.current.deleteProvider(savedProvider); await Promise.resolve(); });
+
+    act(() => result.current.editProvider({ ...savedProvider, id: 'provider-b', provider: 'Provider B', models: ['b'] }));
+    await act(async () => { resolveDelete({}); await deleting; });
+
+    expect(onModelConnectionsChanged).toHaveBeenCalledOnce();
+    expect(result.current.editingId).toBe('provider-b');
+    expect(result.current.provider).toBe('Provider B');
+    expect(result.current.availableModels.map((model) => model.id)).toEqual(['b']);
+    expect(result.current.requestError).toBe('');
   });
 });
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { createProviderUsageService } from '../src/provider-usage-service.mjs';
+import { createBackgroundLifecycle, createCoordinatedShutdown } from '../src/background-lifecycle.mjs';
 import { SkillGitSync } from '../src/skill-git-sync.mjs';
 import { createSkillSourceRoutes } from './ui/skill-source-routes.mjs';
 import { performance } from 'node:perf_hooks';
@@ -36,7 +38,7 @@ import { loadEffectiveSkillCatalog, skillManifest } from '../src/skill-catalog.m
 import { collectTraceObservability } from '../src/trace-observability.mjs';
 import { listSubagentRecords, subagentVisibilitySummary } from '../src/subagent-store.mjs';
 import { buildContinuityHandoff } from '../src/continuity-handoff-store.mjs';
-import { runPendingRecoveryContinuations } from '../src/recovery-continuation-runner.mjs';
+import { createRecoveryContinuationScheduler } from '../src/recovery-continuation-runner.mjs';
 import { recordActiveRunInterruptions } from '../src/interrupted-run-recovery.mjs';
 import { generateArchiveSummary } from '../src/archive-summary.mjs';
 import { readArchiveRun } from '../src/archive-proof.mjs';
@@ -137,6 +139,7 @@ const port = Number(process.env.BURROW_UI_PORT || process.argv.find((arg) => arg
 const host = process.env.BURROW_UI_HOST || '0.0.0.0';
 const authorityConfig = httpAuthorityConfig({ host, port });
 browserOriginConfig(); // Validate optional environment override at startup.
+const requestLifecycle = createBackgroundLifecycle({ name: 'runtime_request' });
 const activeChatRuns = new Map();
 const executionProviders = createExecutionProviderRegistry();
 const sessionContinuityHeads = new Map();
@@ -158,14 +161,11 @@ let dreamCycleScheduler = null;
 let tiddleScheduler = null;
 let retentionScheduler = null;
 let installStagingCleanupScheduler = null;
+let recoveryContinuationScheduler = null;
 const traceStatusCache = new Map();
 const TRACE_STATUS_CACHE_MS = 30_000;
-const ANTHROPIC_USAGE_CACHE_MS = 60_000;
-const OPENAI_OAUTH_USAGE_CACHE_MS = 60_000;
 const BASIC_SESSION_COOKIE = 'hc_basic_session';
 const OPENAI_OAUTH_USAGE_URL = process.env.BURROW_OPENAI_OAUTH_USAGE_URL || 'https://chatgpt.com/backend-api/wham/usage';
-const anthropicUsageCache = new Map();
-const openaiOauthUsageCache = new Map();
 const runtimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
 // PostgreSQL owns server persistence; startup fails if composition is unavailable.
 const serverLogger = createRuntimeServerLogger({ runtimeRoot });
@@ -177,6 +177,7 @@ const postgresApplication = await createPostgresApplication({
   connections: async (filter) => postgresApplication.stores.models.list(filter),
   resolveConfig: (connectionId, modelId) => resolveModelConfig({ stores: postgresApplication.stores, modelConnectionId: connectionId, model: modelId }),
 });
+const { anthropicOauthUsage, openaiOauthUsage } = createProviderUsageService({ modelLookup: modelsStore, authSecretToken, fetchImpl: globalThis.fetch, clock: Date.now, openaiUsageUrl: OPENAI_OAUTH_USAGE_URL });
 configureMcpProviderStateStore(postgresApplication.stores.mcpProviderStates);
 await hydrateMcpProviderStates({ runtimeRoot: process.env.BURROW_MCPORTER_ROOT || path.join(runtimeRoot, 'integrations', 'mcporter') }).catch((error) => serverLogger.event('mcp_provider_state_hydration_failed', { error: String(error?.message || error) }));
 const runtimeMetrics = createRuntimeMetricsCollector({
@@ -199,6 +200,7 @@ function scheduler() {
     const borrowedStore = postgresApplication.stores.scheduledJobs;
     scheduledJobScheduler = createScheduledJobScheduler({
       storeFactory: () => borrowedStore,
+      executeTurn: runChatTurnFromBody, createRunId: createChatTurnRunId,
       closeStore: async () => {},
       resolveAgentRuntime, rootDir: projectRoot, stores: postgresApplication.stores,
       activeOwnerModIds: () => loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id),
@@ -270,6 +272,7 @@ function taskExecutionMessage(task, project) {
 }
 
 async function executeBoardTask(taskId) {
+  const lifecycle = typeof requestLifecycle === 'undefined' ? null : requestLifecycle;
   const dispatch = await withTaskBoard(async (store) => {
     const task = await store.getTask(taskId);
     if (!task) return { ok: false, error: 'task_not_found' };
@@ -282,6 +285,7 @@ async function executeBoardTask(taskId) {
     // is the durable execution owner.
     const sessionId = 'default';
     const runId = createChatTurnRunId({ sessionId, prefix: 'task' });
+    lifecycle?.signal.throwIfAborted();
     const updated = await store.startExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId });
     return { ok: true, task, project, agentRuntime, sessionId, runId, updated };
   });
@@ -292,7 +296,8 @@ async function executeBoardTask(taskId) {
   const headKey = sessionContinuityHeadKey(agentRuntime.agentId, sessionId);
   sessionContinuityHeads.set(headKey, record);
   activeChatRuns.set(activeChatRunKey(agentRuntime.agentId, runId), record);
-  void runChatTurnFromBody({
+  if (lifecycle?.stopped) controller.abort(lifecycle.signal.reason);
+  const runTaskTurn = () => runChatTurnFromBody({
     body: { message: record.latestUserMessage, sessionId, runId, abortSignal: controller.signal },
     rootDir: projectRoot,
     agentRuntime,
@@ -325,6 +330,7 @@ async function executeBoardTask(taskId) {
   }).finally(() => {
     if (activeChatRuns.get(activeChatRunKey(agentRuntime.agentId, runId)) === record) activeChatRuns.delete(activeChatRunKey(agentRuntime.agentId, runId));
   });
+  void (lifecycle ? lifecycle.track(runTaskTurn, 'task_board') : runTaskTurn()).catch(() => {});
   return { ok: true, task: updated, execution: updated.execution };
 }
 
@@ -362,16 +368,25 @@ function agentRuntimeArgs(agentRuntime, dataRoot) {
 
 
 let codexClientVersionRefreshInterval = null;
+const versionRefreshLifecycle = createBackgroundLifecycle({ name: 'codex_client_version_refresh' });
 function refreshCodexClientVersionNow() {
-  void refreshCodexClientVersionCache({ store: modelsStore(), signal: AbortSignal.timeout(15_000) }).catch((error) => {
-    console.warn(`Codex client version refresh failed: ${String(error?.message || error)}`);
-  });
+  if (versionRefreshLifecycle.stopped) return;
+  void versionRefreshLifecycle.track(async () => {
+    versionRefreshLifecycle.signal.throwIfAborted();
+    await refreshCodexClientVersionCache({ store: modelsStore(), signal: AbortSignal.any([versionRefreshLifecycle.signal, AbortSignal.timeout(15_000)]) });
+  }).catch(() => {});
 }
 function startCodexClientVersionRefresh() {
+  if (versionRefreshLifecycle.stopped) return;
   refreshCodexClientVersionNow();
   if (!codexClientVersionRefreshInterval) codexClientVersionRefreshInterval = setInterval(refreshCodexClientVersionNow, CODEX_CLIENT_VERSION_CACHE_TTL_MS);
   codexClientVersionRefreshInterval.unref?.();
 }
+const versionRefreshProducer = {
+  stop() { versionRefreshLifecycle.stop(); clearInterval(codexClientVersionRefreshInterval); codexClientVersionRefreshInterval = null; },
+  close() { this.stop(); return versionRefreshLifecycle.close(); },
+};
+const startupLifecycle = createBackgroundLifecycle({ name: 'runtime_startup' });
 
 let metadataStoreFactory = () => postgresApplication.stores.metadata;
 let uiAuthSecretStoreFactory = () => postgresApplication.stores.uiAuthSecrets;
@@ -1161,226 +1176,6 @@ async function codexLbAccounts() {
     };
   } catch (error) {
     return { ok: false, status: 502, error: 'codex_lb_accounts_unavailable', detail: String(error?.message || error), accounts: [] };
-  }
-}
-
-function anthropicConnectionCandidate(connection = {}) {
-  const provider = String(connection.provider || '').toLowerCase();
-  const apiType = String(connection.apiType || connection.api_type || '').toLowerCase();
-  const baseUrl = String(connection.baseUrl || connection.base_url || '').toLowerCase();
-  return provider.includes('anthropic') || provider.includes('claude') || apiType === 'anthropic-messages' || baseUrl.includes('anthropic.com');
-}
-
-function openaiOauthConnectionCandidate(connection = {}) {
-  const provider = String(connection.provider || '').toLowerCase();
-  const apiType = String(connection.apiType || connection.api_type || '').toLowerCase();
-  const baseUrl = String(connection.baseUrl || connection.base_url || '').toLowerCase();
-  return provider.includes('openai') || apiType.startsWith('openai-') || baseUrl.includes('chatgpt.com');
-}
-
-function originFromUrl(value = '') {
-  try { return new URL(value).origin; } catch { return null; }
-}
-
-async function resolveAnthropicUsageSource(connectionId = '') {
-  const store = modelsStore();
-  const requestedId = String(connectionId || '').trim();
-  const connections = await store.list();
-  const candidates = requestedId ? connections.filter((connection) => connection.id === requestedId) : connections.filter(anthropicConnectionCandidate);
-  for (const connection of candidates) {
-    if (!anthropicConnectionCandidate(connection)) continue;
-    const auth = await store.resolveAuth(connection.id);
-    if (String(auth?.type || '').toLowerCase() !== 'oauth') continue;
-    const token = authSecretToken(auth);
-    const origin = originFromUrl(connection.baseUrl || 'https://api.anthropic.com') || 'https://api.anthropic.com';
-    if (token) return { origin, token, connectionId: connection.id, provider: connection.provider || 'Anthropic', expiresAt: auth.expiresAt || null };
-  }
-  return null;
-}
-
-async function resolveOpenAiOauthUsageSource(connectionId = '') {
-  const store = modelsStore();
-  const requestedId = String(connectionId || '').trim();
-  const connections = await store.list();
-  const candidates = requestedId ? connections.filter((connection) => connection.id === requestedId) : connections.filter(openaiOauthConnectionCandidate);
-  for (const connection of candidates) {
-    if (!openaiOauthConnectionCandidate(connection)) continue;
-    const auth = await store.resolveAuth(connection.id);
-    if (String(auth?.type || '').toLowerCase() !== 'oauth') continue;
-    const authProvider = String(auth.provider || '').toLowerCase();
-    if (authProvider && authProvider !== 'openai') continue;
-    const token = authSecretToken(auth);
-    if (token) return { token, accountId: auth.accountId || null, connectionId: connection.id, provider: connection.provider || 'OpenAI', expiresAt: auth.expiresAt || null };
-  }
-  return null;
-}
-
-function isoOrNull(value) {
-  if (!value) return null;
-  const text = String(value);
-  const ms = Number(text);
-  if (Number.isFinite(ms) && ms > 0) return new Date(ms < 10_000_000_000 ? ms * 1000 : ms).toISOString();
-  const date = new Date(text);
-  return Number.isNaN(date.getTime()) ? text : date.toISOString();
-}
-
-function sanitizeAnthropicUsageWindow(key, raw = null) {
-  if (!raw || typeof raw !== 'object') return null;
-  const utilization = Number(raw.utilization ?? raw.used_percentage ?? raw.usedPercent);
-  return {
-    key,
-    label: key.split('_').map((part) => part ? part[0].toUpperCase() + part.slice(1) : part).join(' '),
-    usedPercent: Number.isFinite(utilization) ? Math.max(0, Math.min(100, Math.round(utilization))) : null,
-    resetAt: isoOrNull(raw.resets_at ?? raw.resetAt ?? raw.resetsAt),
-  };
-}
-
-function sanitizeAnthropicUsage(data = {}) {
-  const windows = ['five_hour', 'seven_day', 'seven_day_sonnet', 'seven_day_opus']
-    .map((key) => sanitizeAnthropicUsageWindow(key, data?.[key]))
-    .filter(Boolean);
-  const extra = data?.extra_usage && typeof data.extra_usage === 'object' ? data.extra_usage : null;
-  return {
-    windows,
-    extraUsage: extra ? {
-      isEnabled: Boolean(extra.is_enabled ?? extra.isEnabled),
-      monthlyLimit: Number.isFinite(Number(extra.monthly_limit ?? extra.monthlyLimit)) ? Number(extra.monthly_limit ?? extra.monthlyLimit) : null,
-      usedCredits: Number.isFinite(Number(extra.used_credits ?? extra.usedCredits)) ? Number(extra.used_credits ?? extra.usedCredits) : null,
-      usedPercent: Number.isFinite(Number(extra.utilization ?? extra.used_percentage)) ? Math.max(0, Math.min(100, Math.round(Number(extra.utilization ?? extra.used_percentage)))) : null,
-    } : null,
-  };
-}
-
-
-function clampUsagePercent(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? Math.max(0, Math.min(100, Math.round(number))) : null;
-}
-
-function labelForWindowSeconds(seconds) {
-  const value = Number(seconds);
-  if (!Number.isFinite(value) || value <= 0) return 'Window';
-  const days = value / 86_400;
-  if (days >= 28) return `${Math.round(days)}d`;
-  if (Math.abs(days - Math.round(days)) < 0.05 && days >= 1) return `${Math.round(days)}d`;
-  const hours = value / 3_600;
-  if (Math.abs(hours - Math.round(hours)) < 0.05 && hours >= 1) return `${Math.round(hours)}h`;
-  return `${Math.round(value / 60)}m`;
-}
-
-function sanitizeOpenAiUsageWindow(key, raw = null) {
-  if (!raw || typeof raw !== 'object') return null;
-  const windowSeconds = Number(raw.limit_window_seconds ?? raw.limitWindowSeconds ?? raw.window_seconds ?? raw.windowSeconds);
-  const usedPercent = clampUsagePercent(raw.used_percent ?? raw.usedPercent ?? raw.utilization);
-  const resetAt = isoOrNull(raw.reset_at ?? raw.resetAt ?? raw.resets_at ?? raw.resetsAt);
-  if (usedPercent === null && !resetAt && !Number.isFinite(windowSeconds)) return null;
-  return {
-    key,
-    label: labelForWindowSeconds(windowSeconds),
-    usedPercent,
-    resetAt,
-    windowSeconds: Number.isFinite(windowSeconds) ? windowSeconds : null,
-  };
-}
-
-function sanitizeAdditionalOpenAiRateLimits(additional) {
-  if (!additional || typeof additional !== 'object') return [];
-  const entries = Array.isArray(additional) ? additional.map((value, index) => [`additional_${index + 1}`, value]) : Object.entries(additional);
-  const windows = [];
-  for (const [name, value] of entries) {
-    if (!value || typeof value !== 'object') continue;
-    const direct = sanitizeOpenAiUsageWindow(String(name), value);
-    if (direct) windows.push(direct);
-    for (const [childName, childValue] of Object.entries(value)) {
-      const child = sanitizeOpenAiUsageWindow(`${name}_${childName}`, childValue);
-      if (child) windows.push(child);
-    }
-  }
-  return windows;
-}
-
-function sanitizeOpenAiOauthUsage(data = {}) {
-  const rateLimit = data?.rate_limit && typeof data.rate_limit === 'object' ? data.rate_limit : data?.rateLimit;
-  const windows = [
-    sanitizeOpenAiUsageWindow('primary', rateLimit?.primary_window ?? rateLimit?.primaryWindow),
-    sanitizeOpenAiUsageWindow('secondary', rateLimit?.secondary_window ?? rateLimit?.secondaryWindow),
-    ...sanitizeAdditionalOpenAiRateLimits(data?.additional_rate_limits ?? data?.additionalRateLimits),
-  ].filter(Boolean);
-  return {
-    planType: typeof data.plan_type === 'string' ? data.plan_type : (typeof data.planType === 'string' ? data.planType : null),
-    blocked: Boolean(rateLimit?.limit_reached ?? rateLimit?.limitReached ?? data.rate_limit_reached_type ?? data.rateLimitReachedType),
-    reachedType: typeof data.rate_limit_reached_type === 'string' ? data.rate_limit_reached_type : (typeof data.rateLimitReachedType === 'string' ? data.rateLimitReachedType : null),
-    windows,
-    credits: data?.credits && typeof data.credits === 'object' ? {
-      hasCredits: typeof data.credits.has_credits === 'boolean' ? data.credits.has_credits : (typeof data.credits.hasCredits === 'boolean' ? data.credits.hasCredits : null),
-      unlimited: typeof data.credits.unlimited === 'boolean' ? data.credits.unlimited : null,
-      balance: Number.isFinite(Number(data.credits.balance)) ? Number(data.credits.balance) : null,
-      overageLimitReached: Boolean(data.credits.overage_limit_reached ?? data.credits.overageLimitReached),
-    } : null,
-  };
-}
-
-async function anthropicOauthUsage({ connectionId = '', force = false } = {}) {
-  const source = await resolveAnthropicUsageSource(connectionId);
-  if (!source?.origin || !source?.token) return { ok: false, status: 503, error: 'anthropic_oauth_usage_config_missing', usage: null };
-  const cacheKey = source.connectionId;
-  const cached = anthropicUsageCache.get(cacheKey);
-  const nowMs = Date.now();
-  if (!force && cached && nowMs - cached.fetchedAtMs < ANTHROPIC_USAGE_CACHE_MS) return { ...cached.result, cached: true, cacheTtlMs: Math.max(0, ANTHROPIC_USAGE_CACHE_MS - (nowMs - cached.fetchedAtMs)) };
-  try {
-    const response = await fetch(`${source.origin}/api/oauth/usage`, {
-      headers: { accept: 'application/json', authorization: `Bearer ${source.token}`, 'anthropic-beta': 'oauth-2025-04-20' },
-      signal: AbortSignal.timeout(10_000),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) return { ok: false, status: response.status, error: `anthropic_oauth_usage_failed:${response.status}`, usage: null };
-    const result = {
-      ok: true,
-      source: 'anthropic-oauth',
-      endpoint: '/api/oauth/usage',
-      connectionId: source.connectionId,
-      provider: source.provider,
-      cached: false,
-      cacheTtlMs: ANTHROPIC_USAGE_CACHE_MS,
-      fetchedAt: new Date(nowMs).toISOString(),
-      usage: sanitizeAnthropicUsage(data),
-    };
-    anthropicUsageCache.set(cacheKey, { fetchedAtMs: nowMs, result });
-    return result;
-  } catch (error) {
-    return { ok: false, status: 502, error: 'anthropic_oauth_usage_unavailable', detail: String(error?.message || error), usage: null };
-  }
-}
-
-
-async function openaiOauthUsage({ connectionId = '', force = false } = {}) {
-  const source = await resolveOpenAiOauthUsageSource(connectionId);
-  if (!source?.token) return { ok: false, status: 503, error: 'openai_oauth_usage_config_missing', usage: null };
-  const cacheKey = source.connectionId;
-  const cached = openaiOauthUsageCache.get(cacheKey);
-  const nowMs = Date.now();
-  if (!force && cached && nowMs - cached.fetchedAtMs < OPENAI_OAUTH_USAGE_CACHE_MS) return { ...cached.result, cached: true, cacheTtlMs: Math.max(0, OPENAI_OAUTH_USAGE_CACHE_MS - (nowMs - cached.fetchedAtMs)) };
-  try {
-    const headers = { accept: 'application/json', authorization: `Bearer ${source.token}`, originator: 'burrow', 'user-agent': 'burrow/dev' };
-    if (source.accountId) headers['ChatGPT-Account-Id'] = source.accountId;
-    const response = await fetch(OPENAI_OAUTH_USAGE_URL, { headers, signal: AbortSignal.timeout(10_000) });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) return { ok: false, status: response.status, error: `openai_oauth_usage_failed:${response.status}`, usage: null };
-    const result = {
-      ok: true,
-      source: 'openai-oauth-wham',
-      endpoint: '/backend-api/wham/usage',
-      connectionId: source.connectionId,
-      provider: source.provider,
-      cached: false,
-      cacheTtlMs: OPENAI_OAUTH_USAGE_CACHE_MS,
-      fetchedAt: new Date(nowMs).toISOString(),
-      usage: sanitizeOpenAiOauthUsage(data),
-    };
-    openaiOauthUsageCache.set(cacheKey, { fetchedAtMs: nowMs, result });
-    return result;
-  } catch (error) {
-    return { ok: false, status: 502, error: 'openai_oauth_usage_unavailable', detail: String(error?.message || error), usage: null };
   }
 }
 
@@ -3001,6 +2796,7 @@ async function handleChat(req, res) {
 }
 
 async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, latencyTiming = null }) {
+  if (typeof requestLifecycle !== 'undefined') requestLifecycle.signal.throwIfAborted();
   const streaming = acceptsNdjson(req);
   const command = parseChatCommand(body.message);
   if (command) {
@@ -3099,7 +2895,7 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
   }
 }
 
-const startGroupChannelMessage = createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgentRuntime, conversationStore: postgresApplication.stores.conversations, stores: postgresApplication.stores, retentionDays: async () => (await postgresApplication.stores.albdruck.readRetention()).attachmentDays, projectRoot, groupChannelRuns, groupChannelRunKey, runChatTurnFromBody });
+const startGroupChannelMessage = createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgentRuntime, conversationStore: postgresApplication.stores.conversations, stores: postgresApplication.stores, retentionDays: async () => (await postgresApplication.stores.albdruck.readRetention()).attachmentDays, projectRoot, groupChannelRuns, groupChannelRunKey, runChatTurnFromBody, lifecycle: requestLifecycle });
 
 async function cancelGroupChannelRun(channelId, runId, body = {}) {
   const record = [...groupChannelRuns.values()].find((item) => item.channelId === channelId && item.runId === runId);
@@ -3253,7 +3049,14 @@ const modDistribution = createModDistribution({
 await modDistribution.ready;
 const modManagementRoute = createModManagementRoute({ distribution: modDistribution, readJsonBody, sendJson });
 
-const server = createServer(async (req, res) => {
+const server = createServer((req, res) => {
+  void requestLifecycle.track(() => handleRequest(req, res)).catch(error => {
+    console.error(`Burrow request failed: ${String(error?.message || error)}`);
+    res.destroy(error);
+  });
+});
+async function handleRequest(req, res) {
+  if (shuttingDown) return sendJson(res, 503, { ok: false, error: 'runtime_shutting_down' });
   const startedAt = Date.now();
   let responseStatus = null;
   res.once('finish', () => { void serverLogger.event('http_request', { method: req.method || null, path: String(req.url || '/').split('?')[0], status: responseStatus || res.statusCode, durationMs: Date.now() - startedAt }); });
@@ -3417,28 +3220,60 @@ const server = createServer(async (req, res) => {
     void serverLogger.event('request_error', { method: req.method || null, path: req.url || null, status, error: String(error?.message || error), durationMs: Date.now() - startedAt });
     return sendJson(res, status, { ok: false, error: String(error?.message || error), ...(error?.details ? { details: error.details } : {}), stack: process.env.NODE_ENV === 'development' ? error?.stack : undefined });
   }
-});
+}
 
 let shuttingDown = false;
 const SHUTDOWN_DRAIN_MS = Math.max(1_000, Number(process.env.BURROW_SHUTDOWN_DRAIN_MS || 10_000));
-async function shutdownRuntime(signal, { exitCode = signal === 'SIGINT' ? 130 : signal === 'unhandledRejection' ? 1 : 0 } = {}) {
-  if (shuttingDown) return;
-  shuttingDown = true; let forced = false;
-  try {
-    await serverLogger.event('shutdown_started', { signal, activeRuns: activeChatRuns.size });
-    const closePromise = new Promise((resolve) => server.close(() => resolve()));
-    await recordActiveRunInterruptions({ stores:postgresApplication.stores, activeRuns: activeChatRuns, resolveAgentRuntime, reason: signal === 'SIGINT' ? 'service_interrupt' : 'service_shutdown' });
+let shutdownReason = 'service_shutdown';
+let httpClosePromise = null;
+// These existing producer close methods stop polling and drain their retained
+// work. Invoke them in the stop phase, not after other stores start closing.
+function closeOnlyProducer(resource) {
+  let closing = null;
+  return { stop() { closing ||= Promise.resolve().then(() => resource.close()); closing.catch(() => {}); }, close() { this.stop(); return closing; } };
+}
+const skillSyncProducer = closeOnlyProducer(skillGitSync);
+const modDistributionProducer = closeOnlyProducer(modDistribution);
+const closeRuntimeResources = createCoordinatedShutdown({
+  drainMs: SHUTDOWN_DRAIN_MS,
+  stopAdmission: () => {
+    shuttingDown = true;
+    httpClosePromise = new Promise(resolve => server.close(() => resolve()));
     server.closeIdleConnections?.();
-    await Promise.race([closePromise, new Promise((resolve) => setTimeout(() => { forced = true; server.closeAllConnections?.(); resolve(); }, SHUTDOWN_DRAIN_MS))]);
-    await skillGitSync.close();
-    await modDistribution.close();
-    await cleanupMods(loadedMods);
-    await postgresApplication?.close();
-    await serverLogger.event('shutdown_complete', { signal, forced, drainMs: SHUTDOWN_DRAIN_MS });
-  } catch (error) {
-    await serverLogger.event('shutdown_error', { signal, error: String(error?.message || error) });
-    console.error(`Burrow shutdown recovery failed: ${String(error?.message || error)}`); exitCode = exitCode || 1;
-  } finally { await serverLogger.flush().catch(() => {}); process.exit(exitCode); }
+  },
+  producers: () => [skillSyncProducer, modDistributionProducer, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
+  beforeDrain: async () => {
+    try {
+      await recordActiveRunInterruptions({ stores: postgresApplication.stores, activeRuns: activeChatRuns, resolveAgentRuntime, reason: shutdownReason });
+    } finally {
+      // Failed recovery persistence must not leave a producer uncancelled.
+      for (const record of [...activeChatRuns.values(), ...groupChannelRuns.values()]) record.controller?.abort(new Error('service_shutdown'));
+    }
+  },
+  drainAdmission: () => httpClosePromise,
+  closers: () => [() => cleanupMods(loadedMods), () => postgresApplication.close()],
+  onTimeout: () => server.closeAllConnections?.(),
+});
+let shutdownPromise = null;
+function shutdownRuntime(signal, { exitCode = signal === 'SIGINT' ? 130 : signal === 'unhandledRejection' ? 1 : 0 } = {}) {
+  if (shutdownPromise) return shutdownPromise;
+  shutdownReason = signal === 'SIGINT' ? 'service_interrupt' : 'service_shutdown';
+  const drain = closeRuntimeResources(); // Stop admission synchronously, before logging.
+  shutdownPromise = (async () => {
+    try {
+      await serverLogger.event('shutdown_started', { signal, activeRuns: activeChatRuns.size });
+      const { forced, errors } = await drain;
+      if (errors.length) {
+        exitCode ||= 1;
+        await serverLogger.event('shutdown_error', { signal, errors: errors.map(error => String(error?.message || error)) });
+      }
+      await serverLogger.event('shutdown_complete', { signal, forced, drainMs: SHUTDOWN_DRAIN_MS });
+    } catch (error) {
+      console.error(`Burrow shutdown recovery failed: ${String(error?.message || error)}`); exitCode ||= 1;
+      await drain;
+    } finally { await serverLogger.flush().catch(() => {}); process.exit(exitCode); }
+  })();
+  return shutdownPromise;
 }
 process.once('uncaughtException', (error) => { void serverLogger.event('uncaught_exception', { error: String(error?.stack || error) }).finally(() => shutdownRuntime('uncaughtException', { exitCode: 1 })); });
 process.once('unhandledRejection', (error) => { void serverLogger.event('unhandled_rejection', { error: String(error?.stack || error) }).finally(() => shutdownRuntime('unhandledRejection', { exitCode: 1 })); });
@@ -3461,34 +3296,43 @@ server.on('connection', (socket) => { socket.once('error', (error) => { void ser
 const bundledSkillRuntime = await runtimeConfig();
 await ensureDefaultGlobalWorkspace({ installDir: projectRoot, workspaceRoot: bundledSkillRuntime.runtimeState.workspaceRoot, skillStore: postgresApplication.stores.skills });
 
-server.listen(port, host, async () => {
+server.listen(port, host, () => {
+  void startupLifecycle.track(async () => {
   await serverLogger.event('listener_started', { host, port, pid: process.pid, version: releaseVersion });
   await postgresApplication.stores.dreamCycles.reconcileInterrupted();
+  if (shuttingDown) return;
   if (backgroundSchedulersEnabled()) {
     void skillGitSync.start().catch(error => serverLogger.event('skill_sync_startup_failed',{error:'skill_sync_failed'}));
     const store = postgresApplication.stores.scheduledJobs;
     try { await store.markMissedRuns(); await store.markMissedSchedules({ activeOwnerModIds: loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id) }); } finally { /* Shared application store remains open. */ }
+    if (shuttingDown) return;
     await scheduler().start();
+    if (shuttingDown) return;
     await dreamScheduler().start();
+    if (shuttingDown) return;
     await rollingContinuityScheduler().start();
     // Attachment cleanup shares the existing retention scheduler.
+    if (shuttingDown) return;
     await retentionPolicyScheduler().start();
+    if (shuttingDown) return;
     await installerStagingScheduler().start();
+    if (shuttingDown) return;
     startCodexClientVersionRefresh();
   }
   console.log(`Burrow UI listening on http://${host}:${port}`);
   // Recovery uses the same durable per-session queue and runtime turn path as
   // ordinary chat. It starts only after the listener is live, and a queue claim
   // prevents duplicate recovery when startup is retried.
-  void runPendingRecoveryContinuations({
+  if (shuttingDown) return;
+  recoveryContinuationScheduler = createRecoveryContinuationScheduler({ resolveOptions: async () => ({
     stores:postgresApplication.stores,
     agentRuntimes: await Promise.all((await agentsStore().list({ includeDisabled: false })).map((agent) => resolveAgentRuntime(agent.id))),
     createRunId: createChatTurnRunId,
-    runContinuation: async ({ runtime, sessionId, runId, manifest, continuation }) => {
+    runContinuation: async ({ runtime, sessionId, runId, manifest, continuation, signal }) => {
       const recoveryInstruction = continuation?.decision === 'resume'
         ? 'Continue the interrupted work using the runtime recovery record and bounded same-session transcript.'
         : 'Recover the interrupted work using the runtime recovery record. Reconcile durable state before acting; do not repeat completed work blindly.';
-      const lifecycle = registerActiveAgentRun(activeChatRuns, { agentId: runtime.agentId, sessionId, runId, message: `Recover interrupted run: ${manifest.objective || 'reconcile durable state'}`, source: 'recovery' });
+      const lifecycle = registerActiveAgentRun(activeChatRuns, { agentId: runtime.agentId, sessionId, runId, message: `Recover interrupted run: ${manifest.objective || 'reconcile durable state'}`, source: 'recovery', parentSignal: signal });
       try {
         return await runChatTurnFromBody({
           stores:postgresApplication.stores,
@@ -3500,5 +3344,7 @@ server.listen(port, host, async () => {
         });
       } finally { lifecycle.finish(); }
     },
-  }).catch((error) => console.error(`Burrow recovery startup failed: ${String(error?.message || error)}`));
+  }) });
+  void recoveryContinuationScheduler.start().catch(() => {});
+  }).catch(error => { console.error(`Burrow startup failed: ${String(error?.message || error)}`); void shutdownRuntime('startup_failure', { exitCode: 1 }); });
 });

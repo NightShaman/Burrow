@@ -3,7 +3,7 @@ import { resolveGroupMentionTargets } from './group-channel-routing.mjs';
 import { createChatTurnRunId } from './chat-turn-controller.mjs';
 import { persistChatAttachments } from './attachment-store.mjs';
 import { attachmentSummary } from './runtime-turn-input.mjs';
-export function createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgentRuntime, conversationStore, stores, retentionDays, projectRoot, groupChannelRuns, groupChannelRunKey, runChatTurnFromBody }) {
+export function createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgentRuntime, conversationStore, stores, retentionDays, projectRoot, groupChannelRuns, groupChannelRunKey, runChatTurnFromBody, lifecycle = null }) {
   return async function startGroupChannelMessage(channelId, body = {}) {
     const rootDir = await runtimeDataRoot();
     const channel = await readGroupChannel({ rootDir, id: channelId });
@@ -27,10 +27,12 @@ export function createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgent
     // a client-supplied owner or filesystem reference; every recipient gets bytes.
     const owner = await resolveAgentRuntime(targets[0]);
     const persisted = await persistChatAttachments({ agentWorkspaceRoot: owner.agentWorkspaceRoot, attachments, retentionDays: await retentionDays() });
+    lifecycle?.signal.throwIfAborted();
     const operatorTurn = await appendGroupChannelTurn({ rootDir, conversationStore, channelId, role: 'user', content: message, metadata: { sender: 'operator', ...(persisted.length ? { attachments: attachmentSummary(persisted), attachmentAgentId: owner.agentId } : {}), recipientAgentIds: targets, delivery: requested.length || mentionTargets.length ? 'targeted' : 'broadcast', mentions: mentions.mentions } });
     const room = await readGroupChannelTurns({ rootDir, conversationStore, channelId, limit: 500 });
     const launches = await Promise.all(targets.map(async (agentId) => {
       const agentRuntime = await resolveAgentRuntime(agentId);
+      lifecycle?.signal.throwIfAborted();
       const sessionId = `group-${channelId}`;
       const runId = createChatTurnRunId({ sessionId, prefix: `group-${agentId}` });
       const controller = new AbortController();
@@ -39,7 +41,9 @@ export function createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgent
       // Each participant gets its own runtime/session and therefore its own
       // identity, tools, memory scope, and continuity head. The shared channel
       // is only a visible operator transcript.
-      void runChatTurnFromBody({
+      const operation = () => {
+        if (lifecycle?.stopped) controller.abort(lifecycle.signal.reason);
+        return runChatTurnFromBody({
         attachmentInput: attachments,
         body: { message: message || 'Please analyze the attached files.', attachments, sessionId, runId, abortSignal: controller.signal }, rootDir: projectRoot, agentRuntime, stores, resolveAgentRuntime,
         groupChannelContext: { channelId, channelName: channel.name, turns: room?.turns || [] },
@@ -48,6 +52,9 @@ export function createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgent
       }).catch(async (error) => {
         if (!controller.signal.aborted) await appendGroupChannelTurn({ rootDir, conversationStore, channelId, role: 'agent', content: `Request failed: ${String(error?.message || error)}`, runId, metadata: { fromAgentId: agentId, fromAgentName: agentRuntime.agent?.name || agentId, recipient: 'group', participantSessionId: sessionId, failed: true } });
       }).finally(() => groupChannelRuns.delete(groupChannelRunKey(channelId, agentId, runId)));
+      };
+      if (lifecycle) void lifecycle.track(operation, 'group_channel').catch(() => {});
+      else void operation().catch(error => console.error('group_channel_failure', error));
       return { agentId, runId, sessionId };
     }));
     return { ok: true, channelId, operatorTurn, runs: launches };

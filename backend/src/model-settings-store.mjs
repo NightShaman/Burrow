@@ -9,7 +9,6 @@ function now() { return new Date().toISOString(); }
 function normalize(value) { return String(value ?? '').trim(); }
 function asBoolean(value) { return value === true || value === 1; }
 function parseJson(value, fallback) { try { return JSON.parse(value); } catch { return fallback; } }
-function stringifyJson(value) { return JSON.stringify(value ?? {}); }
 function numberOrNull(value) { const n = Number(value); return Number.isFinite(n) && n > 0 ? n : null; }
 function positiveInteger(value) { const n = Number(value); return Number.isInteger(n) && n > 0 ? n : null; }
 
@@ -345,20 +344,6 @@ export function mergeOpenAiOAuthTokens(prior, patch) {
   return next;
 }
 
-function authToken(auth = {}) {
-  if (auth.type === 'oauth') return auth.accessToken || '';
-  if (auth.type === 'token' || auth.type === 'bearer_token') return auth.token || '';
-  if (auth.type === 'api_key') return auth.apiKey || '';
-  return '';
-}
-
-function isOauthFresh(auth = {}, nowMs = Date.now()) {
-  return auth.type === 'oauth' && Number(auth.expiresAt) > nowMs + OAUTH_REFRESH_SKEW_MS && Boolean(auth.accessToken);
-}
-
-function anthropicLikeProvider(value = '') {
-  return /anthropic|claude/i.test(String(value || ''));
-}
 function openAiLikeProvider(value = '') {
   return /openai/i.test(String(value || ''));
 }

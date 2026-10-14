@@ -4,7 +4,6 @@ export const DEFAULT_WORKING_CONTINUITY_ITEM_LIMIT = 1_800;
 export const DEFAULT_WORKING_CONTINUITY_RECORD_LIMIT = 12;
 
 function text(value) { return String(value ?? '').trim(); }
-function bounded(value, limit) { const source = text(value); return source.length <= limit ? source : `${source.slice(0, Math.max(0, limit - 24)).trim()}\n[continuity excerpt clipped]`; }
 function chars(record) { return text(record.title).length + text(record.content).length + (record.sourceRefs || []).join(', ').length + 80; }
 
 // Continuity scope is selected by explicit operator/runtime session state. It

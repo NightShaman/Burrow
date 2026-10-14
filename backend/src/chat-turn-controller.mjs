@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createChatTurnRunId } from './chat-turn-run-id.mjs';
+export { createChatTurnRunId } from './chat-turn-run-id.mjs';
 import { loadRuntimeConfig, runAskChat } from './app-runtime.mjs';
 import { buildChatSupportStatus } from './workbench-status.mjs';
 
@@ -6,14 +7,6 @@ import { buildChatSupportStatus } from './workbench-status.mjs';
 // HTTP/UI/CLI adapters should normalize transport details, then hand the turn here.
 export async function runChatTurn(args = {}) {
   return runAskChat(args);
-}
-
-function compactRunIdPart(value = '') {
-  return String(value || 'default').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'default';
-}
-
-export function createChatTurnRunId({ sessionId = 'default', prefix = 'ask' } = {}) {
-  return `${compactRunIdPart(prefix)}-${compactRunIdPart(sessionId)}-${Date.now()}-${randomUUID().slice(0, 8)}`;
 }
 
 const TEXT_ATTACHMENT_CONTENT_CHARS = 200_000;

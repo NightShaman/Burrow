@@ -99,7 +99,7 @@ export async function curatorRuntimeStatus({ stores, root = curatorRoot() } = {}
   const exists = await fs.stat(modelPath).then((stat) => stat.isFile()).catch(() => false);
   return { configured: true, selection, root, available: exists, implementation: CURATOR_LOCAL_BACKEND, modelPath, reason: exists ? null : 'curator_local_model_missing' };
 }
-async function completeLocal({ selection, root, prompt, jsonSchema = CURATOR_JSON_SCHEMA }) {
+async function completeLocal({ selection, root, prompt, jsonSchema = CURATOR_JSON_SCHEMA, signal = null }) {
   const modelPath = localModelPath(root, selection.modelPath);
   await fs.access(modelPath);
   const { getLlama, LlamaChatSession } = await loadLocalCuratorModule(root);
@@ -110,19 +110,20 @@ async function completeLocal({ selection, root, prompt, jsonSchema = CURATOR_JSO
     grammar = await llama.createGrammarForJsonSchema(jsonSchema || CURATOR_JSON_SCHEMA);
     context = await model.createContext({ contextSize: selection.contextSize, sequences: 1 });
     const session = new LlamaChatSession({ contextSequence: context.getSequence() });
-    const content = await session.prompt(prompt, { temperature: temperature(selection.temperature), maxTokens: 900, grammar, trimWhitespaceSuffix: true });
+    const content = await session.prompt(prompt, { temperature: temperature(selection.temperature), maxTokens: 900, grammar, trimWhitespaceSuffix: true, signal });
     return { choice: { text: String(content || '') }, provider: CURATOR_LOCAL_BACKEND, model: selection.modelPath };
   } finally { await grammar?.dispose?.(); await context?.dispose?.(); await model?.dispose?.(); await llama?.dispose?.(); }
 }
-export async function completeCurator({ selection, stores = null, root = curatorRoot(), prompt, jsonSchema = null, traceLogger = null } = {}) {
+export async function completeCurator({ selection, stores = null, root = curatorRoot(), prompt, jsonSchema = null, traceLogger = null, signal = null } = {}) {
+  signal?.throwIfAborted();
   if (!selection) throw new Error('curator_selection_required');
   if (selection.kind === 'external') {
     if (!stores?.models) throw new Error('curator_model_store_required');
     const config = await resolveModelConfig({ modelConnectionId: selection.connectionId, model: selection.model, stores });
     if (!config) throw new Error('curator_external_model_unavailable');
-    const result = await createModelAdapter({ config: { ...config, reasoningEffort: 'off', temperature: temperature(selection.temperature) } }).complete({ messages: [{ role: 'user', content: prompt }], traceLogger });
+    const result = await createModelAdapter({ config: { ...config, reasoningEffort: 'off', temperature: temperature(selection.temperature) } }).complete({ messages: [{ role: 'user', content: prompt }], traceLogger, abortSignal: signal });
     if (!result?.ok) throw new Error(result?.error || 'curator_external_completion_failed');
     return { ...result, implementation: 'model-connection' };
   }
-  return { ...(await completeLocal({ selection, root, prompt, jsonSchema })), implementation: CURATOR_LOCAL_BACKEND };
+  return { ...(await completeLocal({ selection, root, prompt, jsonSchema, signal })), implementation: CURATOR_LOCAL_BACKEND };
 }

@@ -1,3 +1,4 @@
+import { createBackgroundLifecycle } from './background-lifecycle.mjs';
 import { DREAM_EXTRACTION_CONTRACT_VERSION, dreamSourceIdentity, prepareDreamExtraction, extractIncrementalDreamCandidates } from './dream-incremental-extraction.mjs';
 import { redactProtectedText } from './redaction.mjs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -19,11 +20,6 @@ export const DREAM_INTERRUPTED_ERROR = 'Dream interrupted by runtime restart bef
 
 function text(value) { return String(value ?? '').trim(); }
 function now() { return new Date().toISOString(); }
-function json(value) { return JSON.stringify(value || {}); }
-function parseJson(value) { try { return JSON.parse(value || '{}'); } catch { return {}; } }
-function phaseState(value) { return `dream-cycle:${value}`; }
-function receiptState(agentId, runId) { return `dream-cycle-receipt:${agentId}:${runId}`; }
-function occurrenceState(agentId, scheduledFor) { return `dream-cycle-occurrence:${agentId}:${scheduledFor}`; }
 const dreamRuntimeInstanceId = randomUUID();
 const activeDreamRunIds = new Set();
 function entryId(agentId, phase, title, content) { return `dream-${phase}-${createHash('sha256').update(JSON.stringify([agentId, phase, title, content])).digest('hex')}`; }
@@ -133,31 +129,6 @@ function parseModelJson(value) {
     }
   }
   throw new Error('dream_extraction_invalid_json');
-}
-
-function readableList(items, limit = 4) {
-  const names = items.slice(0, limit).map((item) => clamp(item.title, 72)).filter(Boolean);
-  if (!names.length) return 'none';
-  const remaining = items.length - names.length;
-  return `${names.join('; ')}${remaining > 0 ? `; +${remaining} more` : ''}`;
-}
-
-function kindSummary(items) {
-  const counts = new Map();
-  for (const item of items) counts.set(item.kind || 'item', (counts.get(item.kind || 'item') || 0) + 1);
-  return [...counts.entries()].map(([kind, count]) => `${count} ${kind}${count === 1 ? '' : 's'}`).join(', ') || '0 items';
-}
-
-function summaryNarrative({ agentId, phase, items }) {
-  const count = items.length;
-  if (phase === 'light') {
-    return `Light pass checked ${count} active ${agentId} continuity card${count === 1 ? '' : 's'} (${kindSummary(items)}). Notable: ${readableList(items)}.`;
-  }
-  if (phase === 'rem') {
-    return `REM pass kept ${count} evidence-bearing or durable-looking card${count === 1 ? '' : 's'} in view (${kindSummary(items)}). Notable: ${readableList(items)}.`;
-  }
-  if (!count) return `Deep pass found no decision or handoff cards ready for DreamMemory consolidation.`;
-  return `Deep pass reviewed ${count} consolidation candidate${count === 1 ? '' : 's'} for DreamMemory. Candidates: ${readableList(items)}.`;
 }
 
 function safeResidueItems(items = []) {
@@ -718,7 +689,7 @@ export async function adjudicatePreferencesAsync({ agentId, profileStore, metada
   } catch (error) { return { disposition: 'failed', signalCount: signals.length, reason: String(error?.message || error) }; }
 }
 
-export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now(), runId: requestedRunId = null, scheduledFor = null, trigger = null, modelAdapter = null, modelConfig = null, traceLogger = null, stores } = {}) {
+export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now(), runId: requestedRunId = null, scheduledFor = null, trigger = null, modelAdapter = null, modelConfig = null, traceLogger = null, signal = null, stores } = {}) {
   const id = text(agentId); if (!id) throw new Error('dream_cycle_agent_required');
   if (!stores) throw new Error('dream_cycle_stores_required');
   const { dreamSettings, profiles: profileStore, dreamDiary: diaryStore, dreamCycles: cycleStore, workingMemory: memoryStore, metadata: metadataStore } = stores || {};
@@ -735,8 +706,10 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     lifecycle = { version: 1, ok: null, status: 'running', runId, agentId: id, trigger: trigger || (scheduledFor ? 'scheduled' : 'manual'), scheduledFor: scheduledFor || null, generatedAt, startedAt, runtimeInstanceId: cycleStore.runtimeInstanceId || null, error: null };
     activeDreamRunIds.add(runId);
     await cycleStore.write(lifecycle, startedAt);
+    signal?.throwIfAborted();
     if (!settings.enabled) throw new Error('dream_cycle_disabled');
     const progress = async (patch) => {
+      signal?.throwIfAborted();
       const at = now();
       lifecycle.requests ||= [];
       if (patch.request) {
@@ -771,6 +744,15 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
       resolvedDreamModel = await resolveModelConfig(resolverArgs);
     }
     if (!dreamAdapter && resolvedDreamModel?.model) dreamAdapter = createModelAdapter({ config: { ...resolvedDreamModel, temperature: settings.temperature ?? resolvedDreamModel.temperature ?? 0.2, reasoningEffort: 'off' } });
+    if (dreamAdapter && signal) {
+      const adapter = dreamAdapter;
+      dreamAdapter = { complete: async options => {
+        signal.throwIfAborted();
+        const result = await adapter.complete({ ...options, abortSignal: signal });
+        signal.throwIfAborted();
+        return result;
+      } };
+    }
     const phaseResults = []; const pendingDiaries = []; const windowCandidates = []; const preferenceByKey = new Map();
     const extractionState = stores.dreamExtractions ? await prepareDreamExtraction({ store: stores.dreamExtractions, agentId: id, messages: phaseWindows[PHASES.reduce((longest, value) => PHASE_WINDOWS_DAYS[value] > PHASE_WINDOWS_DAYS[longest] ? value : longest)] }) : null;
     // Extraction coverage is not proof that downstream work completed. Commit
@@ -845,10 +827,12 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
 }
 
 export function createDreamCycleScheduler({ intervalMs = 30_000, clock = now, resolveAgentRoot = null, stores = null, modelAdapter = null } = {}) {
+  const lifecycle = createBackgroundLifecycle({ name: 'dream_cycle_scheduler', clock });
   let timer = null;
   let ticking = false;
-  async function tick() {
-    if (ticking) return [];
+  function tick() { return lifecycle.stopped ? Promise.resolve([]) : lifecycle.track(runTick); }
+  async function runTick() {
+    if (ticking || lifecycle.stopped) return [];
     ticking = true;
     try {
       const at = clock();
@@ -856,21 +840,37 @@ export function createDreamCycleScheduler({ intervalMs = 30_000, clock = now, re
       const results = [];
       const due = (await Promise.all((await stores.agents.list({ includeDisabled: false })).map(async (agent) => {
           try {
+          if (lifecycle.stopped) return null;
           const settings = await stores.dreamSettings.get(agent.id);
+          if (lifecycle.stopped) return null;
           const state = await stores.dreamCycles.ensureState({ agentId: agent.id, settings, at });
           return settings.enabled && state.nextRunAt && state.nextRunAt <= at ? { agent } : null;
-          } catch (error) { results.push({ ok: false, agentId: agent.id, error: String(error?.message || error), generatedAt: at }); return null; }
+          } catch (error) { lifecycle.reportFailure(error, 'due'); results.push({ ok: false, agentId: agent.id, error: String(error?.message || error), generatedAt: at }); return null; }
         }))).filter(Boolean);
       for (const item of due) {
+        if (lifecycle.stopped) break;
+        let rootDir;
+        try { rootDir = await resolveAgentRoot?.(item.agent.id); }
+        catch (error) { lifecycle.reportFailure(error, 'resolve_root'); results.push({ ok: false, agentId: item.agent.id, error: String(error?.message || error), generatedAt: at }); continue; }
+        if (lifecycle.stopped) break;
         const claim = await stores.dreamCycles.claimDue({ agentId: item.agent.id, at });
         if (!claim) continue;
-        try { results.push(await runDreamCycle({ agentId: item.agent.id, rootDir: await resolveAgentRoot?.(item.agent.id), generatedAt: claim.scheduledFor, scheduledFor: claim.scheduledFor, runId: claim.runId, trigger: 'scheduled', stores, modelAdapter })); }
-        catch (error) { results.push({ ok: false, agentId: item.agent.id, error: String(error?.message || error), generatedAt: at }); }
+        if (lifecycle.stopped) {
+          await stores.dreamCycles.write({ version: 1, ok: false, status: 'failed', agentId: item.agent.id, runId: claim.runId, trigger: 'scheduled', scheduledFor: claim.scheduledFor, generatedAt: claim.scheduledFor, completedAt: clock(), error: 'service_shutdown' });
+          continue;
+        }
+        try {
+          const receipt = await runDreamCycle({ agentId: item.agent.id, rootDir, generatedAt: claim.scheduledFor, scheduledFor: claim.scheduledFor, runId: claim.runId, trigger: 'scheduled', stores, modelAdapter, signal: lifecycle.signal });
+          if (receipt.ok === false) lifecycle.reportFailure(new Error(receipt.error || 'dream_cycle_failed'), 'run');
+          results.push(receipt);
+        }
+        catch (error) { lifecycle.reportFailure(error, 'run'); results.push({ ok: false, agentId: item.agent.id, error: String(error?.message || error), generatedAt: at }); }
       }
       return results;
     } finally { ticking = false; }
   }
-  function start() { if (!timer) { timer = setInterval(() => { void tick(); }, intervalMs); timer.unref?.(); } return tick(); }
-  function stop() { if (timer) clearInterval(timer); timer = null; }
-  return { start, stop, tick };
+  function start() { if (lifecycle.stopped) return Promise.resolve([]); if (!timer) { timer = setInterval(() => { void tick().catch(() => {}); }, intervalMs); timer.unref?.(); } return tick(); }
+  function stop() { lifecycle.stop(); if (timer) clearInterval(timer); timer = null; }
+  function close() { stop(); return lifecycle.close(); }
+  return { start, stop, close, tick, health: lifecycle.health };
 }

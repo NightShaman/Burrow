@@ -1,5 +1,5 @@
+import { createBackgroundLifecycle } from './background-lifecycle.mjs';
 import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
-import { createChatTurnRunId, runChatTurnFromBody } from './chat-turn-controller.mjs';
 
 const applicationSchedulers = new WeakMap();
 export function scheduledJobSchedulerForStores(stores) { return stores ? applicationSchedulers.get(stores) || null : null; }
@@ -13,8 +13,9 @@ function boundedResult(result = {}) {
   };
 }
 
-export function createScheduledJobScheduler({ storeFactory, closeStore: closeStoreOverride, resolveAgentRuntime, rootDir, stores = null, executeTurn = runChatTurnFromBody, intervalMs = 30_000, retryDelayMs = intervalMs, activeOwnerModIds = () => [], clock = () => new Date().toISOString() } = {}) {
-  if (typeof storeFactory !== 'function' || typeof resolveAgentRuntime !== 'function') throw new Error('scheduled_job_scheduler_dependencies_required');
+export function createScheduledJobScheduler({ storeFactory, closeStore: closeStoreOverride, resolveAgentRuntime, rootDir, stores = null, executeTurn, createRunId, intervalMs = 30_000, retryDelayMs = intervalMs, activeOwnerModIds = () => [], clock = () => new Date().toISOString() } = {}) {
+  if (typeof storeFactory !== 'function' || typeof resolveAgentRuntime !== 'function' || typeof executeTurn !== 'function' || typeof createRunId !== 'function') throw new Error('scheduled_job_scheduler_dependencies_required');
+  const lifecycle = createBackgroundLifecycle({ name: 'scheduled_job_scheduler', clock });
   const active = new Map();
   const availableOwners = () => { const owners = activeOwnerModIds(); return Array.isArray(owners) ? owners : []; };
   const ownerAvailable = (job) => !job.ownerModId || availableOwners().includes(job.ownerModId);
@@ -31,7 +32,7 @@ export function createScheduledJobScheduler({ storeFactory, closeStore: closeSto
     console.error('scheduled_job_scheduler_failure', JSON.stringify(lastFailure));
   }
   function launch(job, run) {
-    void dispatch(job, run).catch(error => reportFailure(error, 'failure_persistence', run));
+    void lifecycle.track(() => dispatch(job, run), 'dispatch').catch(error => reportFailure(error, 'failure_persistence', run));
   }
   function timerTick() {
     if (Date.now() < retryAt) return;
@@ -43,15 +44,21 @@ export function createScheduledJobScheduler({ storeFactory, closeStore: closeSto
 
   async function dispatch(job, run) {
     const controller = new AbortController();
-    const runId = createChatTurnRunId({ sessionId: job.sessionId, prefix: 'scheduled' });
+    const runId = createRunId({ sessionId: job.sessionId, prefix: 'scheduled' });
     const record = { jobId: job.id, runId: run.id, chatRunId: runId, controller, startedAt: clock() };
     active.set(run.id, record);
     try {
+      if (lifecycle.stopped) controller.abort(lifecycle.signal.reason);
+      controller.signal.throwIfAborted();
       if (!ownerAvailable(job)) throw new Error('scheduled_job_owner_inactive');
       const validationStore = await openStore();
       try { await validationStore.validateModel(job); } finally { await closeStore(validationStore); }
+      if (lifecycle.stopped) controller.abort(lifecycle.signal.reason);
+      controller.signal.throwIfAborted();
       if (!ownerAvailable(job)) throw new Error('scheduled_job_owner_inactive');
       const agentRuntime = await resolveAgentRuntime(job.agentId);
+      if (lifecycle.stopped) controller.abort(lifecycle.signal.reason);
+      controller.signal.throwIfAborted();
       if (!ownerAvailable(job)) throw new Error('scheduled_job_owner_inactive');
       const result = await executeTurn({
         body: { message: job.prompt, sessionId: job.sessionId, runId, abortSignal: controller.signal, ...(job.modelConnectionId ? { modelConnectionId: job.modelConnectionId, model: job.model } : {}) },
@@ -71,25 +78,31 @@ export function createScheduledJobScheduler({ storeFactory, closeStore: closeSto
     } finally { active.delete(run.id); }
   }
 
-  async function tick() {
-    if (ticking) return [];
+  function tick() { return lifecycle.stopped ? Promise.resolve([]) : lifecycle.track(runTick); }
+  async function runTick() {
+    if (ticking || lifecycle.stopped) return [];
     ticking = true;
     try {
       const store = await openStore();
       let claims;
-      try { claims = await store.claimDueJobs({ at: clock(), activeOwnerModIds: availableOwners() }); } finally { await closeStore(store); }
+      try { if (lifecycle.stopped) return []; claims = await store.claimDueJobs({ at: clock(), activeOwnerModIds: availableOwners() }); } finally { await closeStore(store); }
       for (const claim of claims) if (claim.run.status === 'running') launch(claim.job, claim.run);
       return claims;
     } finally { ticking = false; }
   }
 
-  async function trigger(jobId, { ownerModId = undefined } = {}) {
+  function trigger(jobId, options = {}) {
+    if (lifecycle.stopped) return Promise.resolve({ ok: false, error: 'scheduled_job_scheduler_stopped' });
+    return lifecycle.track(() => runTrigger(jobId, options), 'trigger');
+  }
+  async function runTrigger(jobId, { ownerModId = undefined } = {}) {
     const store = await openStore();
     let job; let run;
     try {
       job = ownerModId === undefined ? await store.getJob(jobId) : await store.getOwnedJob(ownerModId, jobId);
       if (!job) return { ok: false, error: 'scheduled_job_not_found' };
       if (!ownerAvailable(job)) return { ok: false, error: 'scheduled_job_owner_inactive' };
+      if (lifecycle.stopped) return { ok: false, error: 'scheduled_job_scheduler_stopped' };
       run = await store.createManualRun(job.id, { at: clock() });
       if (!run) return { ok: false, error: 'scheduled_job_not_found' };
       if (run.overlap) return { ok: false, error: 'scheduled_job_already_running', job, run };
@@ -104,9 +117,14 @@ export function createScheduledJobScheduler({ storeFactory, closeStore: closeSto
     record.controller.abort(reason || 'cancelled by operator');
     return true;
   }
-  function start() { if (!timer) { timer = setInterval(timerTick, intervalMs); timer.unref?.(); } return tick(); }
-  function stop() { if (timer) clearInterval(timer); timer = null; }
-  const scheduler = { start, stop, tick, trigger, cancel, health: () => ({ failureCount, lastFailure: lastFailure && { ...lastFailure }, retryAt }), activeRuns: () => [...active.values()].map(({ controller, ...record }) => ({ ...record, cancelled: controller.signal.aborted })) };
+  function start() { if (lifecycle.stopped) return Promise.resolve([]); if (!timer) { timer = setInterval(timerTick, intervalMs); timer.unref?.(); } return tick(); }
+  function stop() {
+    lifecycle.stop();
+    if (timer) clearInterval(timer); timer = null;
+    for (const record of active.values()) record.controller.abort(lifecycle.signal.reason);
+  }
+  function close() { stop(); return lifecycle.close(); }
+  const scheduler = { start, stop, close, tick, trigger, cancel, health: () => ({ stopped: lifecycle.stopped, pending: lifecycle.health().pending, failureCount, lastFailure: lastFailure && { ...lastFailure }, retryAt }), activeRuns: () => [...active.values()].map(({ controller, ...record }) => ({ ...record, cancelled: controller.signal.aborted })) };
   if (stores) applicationSchedulers.set(stores, scheduler);
   return scheduler;
 }

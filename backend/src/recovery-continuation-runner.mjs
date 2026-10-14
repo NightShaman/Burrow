@@ -1,24 +1,28 @@
+import { createBackgroundLifecycle } from './background-lifecycle.mjs';
 import { postgresContinuity } from './postgres-continuity.mjs';
 
 // Startup recovery is deliberately bounded and idempotent. A queue claim is
 // durable before model work begins; duplicate startups see it as running and
 // leave it alone. The next normal turn still receives the manifest if a
 // recovery run itself fails.
-export async function runPendingRecoveryContinuations({ stores = null, agentRuntimes = [], runContinuation, createRunId, limit = 20, logger = console } = {}) {
+export async function runPendingRecoveryContinuations({ stores = null, agentRuntimes = [], runContinuation, createRunId, limit = 20, logger = console, signal = null, authorityFactory = postgresContinuity } = {}) {
   if (!stores?.conversations) throw new Error('runtime_stores_required');
   if (typeof runContinuation !== 'function') throw new Error('recovery_continuation_runner_required');
   if (typeof createRunId !== 'function') throw new Error('recovery_continuation_run_id_required');
   const outcomes = [];
   for (const runtime of agentRuntimes) {
+    if (signal?.aborted) break;
     if (!runtime?.agentWorkspaceRoot || !runtime?.agentId) continue;
-    const authority = postgresContinuity({ store: stores.conversations, agentId: runtime.agentId });
+    const authority = authorityFactory({ store: stores.conversations, agentId: runtime.agentId });
     const pending = await authority.pending({ rootDir: runtime.agentWorkspaceRoot, limit });
     for (const item of pending) {
+      if (signal?.aborted) break;
       const runId = createRunId({ sessionId: item.sessionId, prefix: 'recover' });
       const claim = await authority.claimRecovery({ rootDir: runtime.agentWorkspaceRoot, sessionId: item.sessionId, recoveryRunId: runId });
       if (!claim.ok) continue;
       try {
-        const result = await runContinuation({ runtime, sessionId: item.sessionId, runId, manifest: claim.manifest, continuation: claim.continuation });
+        signal?.throwIfAborted();
+        const result = await runContinuation({ runtime, sessionId: item.sessionId, runId, manifest: claim.manifest, continuation: claim.continuation, signal });
         const completed = await authority.completeRecovery({
           rootDir: runtime.agentWorkspaceRoot, sessionId: item.sessionId, recoveryRunId: runId,
           ok: Boolean(result?.ok), result: result?.decision || (result?.ok ? 'completed' : 'failed'),
@@ -32,4 +36,21 @@ export async function runPendingRecoveryContinuations({ stores = null, agentRunt
     }
   }
   return outcomes;
+}
+
+// Startup recovery is a one-shot producer, but participates in the same drain
+// as recurring schedulers. Runtime discovery belongs to this owner too.
+export function createRecoveryContinuationScheduler({ resolveOptions, ...options } = {}) {
+  const lifecycle = createBackgroundLifecycle({ name: 'recovery_continuation_scheduler' });
+  let started = null;
+  function start() {
+    if (lifecycle.stopped) return Promise.resolve([]);
+    started ||= lifecycle.track(async () => {
+      const resolved = resolveOptions ? await resolveOptions() : options;
+      if (lifecycle.stopped) return [];
+      return runPendingRecoveryContinuations({ ...resolved, signal: lifecycle.signal });
+    });
+    return started;
+  }
+  return { start, stop: lifecycle.stop, close: lifecycle.close, health: lifecycle.health };
 }
