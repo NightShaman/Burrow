@@ -652,3 +652,20 @@ it('recovers externally dispatched work on assigned agent and after navigation a
  expect(result.current.runtimeRun?.answerText).toBe('Partial answer\nwith whitespace ');
  unmount();
 });
+
+it('hydrates the conversation cache only once, not on each draft/tool-activity render', async () => {
+  const { conversationCacheStorageKey } = await import('./chatConversationCache');
+  const get = vi.spyOn(Storage.prototype, 'getItem');
+  const { result, rerender, unmount } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+  await waitFor(() => expect(result.current.isLoadingConversation).toBe(false));
+  const reads = () => get.mock.calls.filter(([key]) => key === conversationCacheStorageKey).length;
+  const afterLoad = reads();
+  act(() => { result.current.setDraft('typing one'); });
+  act(() => { result.current.setDraft('typing two'); });
+  act(() => { result.current.storeToolActivity({ runId: 'r', items: [], status: 'running' }); });
+  rerender();
+  expect(reads()).toBe(afterLoad);
+  expect(result.current.draft).toBe('typing two');
+  unmount(); get.mockRestore();
+});

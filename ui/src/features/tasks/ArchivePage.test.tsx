@@ -253,3 +253,56 @@ describe('BCA03 shelf-owned retry and status', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 });
+
+it('owns reader lifetime by filter scope, even if an aborted detail rejects late', async () => {
+  const pending = deferred<ArchiveDetail>();
+  const item = { id: 's', sessionId: 's', agentId: 'a', title: 'Selected conversation', archived: true } as ArchiveSession;
+  vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([item]));
+  vi.spyOn(archiveRepository, 'listCalendarAvailability').mockImplementation(async (kind, month) => ({ ok: true, kind, month, dates: [] }));
+  const load = vi.spyOn(archiveRepository, 'loadSession').mockReturnValue(pending.promise);
+  render(<Archive repository={archiveRepository} agents={[]} />);
+  fireEvent.click(await screen.findByRole('button', { name: /Selected conversation.*turns/i }));
+  const signal = load.mock.calls[0][1];
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'different scope' } });
+  expect(signal?.aborted).toBe(true);
+  await act(async () => pending.resolve({ turns: [{ role: 'user', content: 'Late detail intruder' }] }));
+  expect(screen.queryByText('Late detail intruder')).toBeNull();
+  expect(screen.queryByRole('heading', { level: 2, name: 'Selected conversation' })).toBeNull();
+});
+
+it('does not prefetch inactive shelves and drops selection on leaving and returning', async () => {
+  const dreams = vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([]));
+  const cards = vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([]));
+  const item = { id: 's', sessionId: 's', agentId: 'a', title: 'Selected conversation', archived: true } as ArchiveSession;
+  vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([item]));
+  vi.spyOn(archiveRepository, 'listCalendarAvailability').mockImplementation(async (kind, month) => ({ ok: true, kind, month, dates: [] }));
+  vi.spyOn(archiveRepository, 'loadSession').mockResolvedValue({ turns: [{ role: 'user', content: 'Reader body' }] });
+  render(<Archive repository={archiveRepository} agents={[]} />);
+  fireEvent.click(await screen.findByRole('button', { name: /Selected conversation.*turns/i }));
+  await screen.findByText('Reader body');
+  expect(dreams).not.toHaveBeenCalled(); expect(cards).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: /Dreams/ }));
+  await screen.findByText('No dreams match this shelf.');
+  expect(cards).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: /^Chat/ }));
+  await screen.findByRole('button', { name: /Selected conversation.*turns/i });
+  expect(screen.queryByText('Reader body')).toBeNull();
+});
+
+it.each(['dreams', 'tiddle'] as const)('aborts %s pagination on filter-owner replacement and ignores late rows', async kind => {
+  const dream = { id: 'd', agentId: 'a', agentName: 'A', phase: 'REM', date: '2026-10-15', excerpt: 'Dream fixture' } as any;
+  const tiddle = card('c', 'Card fixture');
+  const pending = deferred<any>();
+  vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([]));
+  const dreams = vi.spyOn(archiveRepository, 'listDreams').mockImplementation((_signal, cursor) => cursor ? pending.promise : Promise.resolve({ items: [dream], nextCursor: 'next', hasMore: true }));
+  const cards = vi.spyOn(archiveRepository, 'listContinuityCards').mockImplementation((_agent, _signal, cursor) => cursor ? pending.promise : Promise.resolve({ items: [tiddle], nextCursor: 'next', hasMore: true }));
+  vi.spyOn(archiveRepository, 'listCalendarAvailability').mockImplementation(async (kind, month) => ({ ok: true, kind, month, dates: [] }));
+  render(<Archive repository={archiveRepository} agents={[]} />);
+  fireEvent.click(screen.getByRole('button', { name: kind === 'dreams' ? /Dreams/ : /Tiddle/ }));
+  fireEvent.click(await screen.findByRole('button', { name: kind === 'dreams' ? 'Load more dreams' : 'Load more cards' }));
+  const signal = kind === 'dreams' ? dreams.mock.calls.at(-1)![0] : cards.mock.calls.at(-1)![1];
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'new owner' } });
+  expect(signal?.aborted).toBe(true);
+  await act(async () => pending.resolve(collectionPage(kind === 'dreams' ? [{ ...dream, id: 'intruder', agentName: 'Intruder' }] : [card('intruder', 'Intruder card')])));
+  expect(screen.queryByRole('button', { name: /Intruder/ })).toBeNull();
+});

@@ -69,7 +69,14 @@ export function writeConversationCache(cache: ConversationCache, touchedKey?: st
   const stored = readEntries(storage);
   const now = Date.now();
   const next = { ...stored };
-  Object.entries(cache).forEach(([key, turns]) => {
+  // Every production caller names the changed conversation. Revalidating and
+  // cloning all visited transcripts on each poll/append makes persistence work
+  // grow with the in-memory navigation history, even though disk is bounded.
+  // Untouched disk entries already hold their sanitized snapshot; memory stays
+  // intact (including active/pending turns and optimistic attachment previews).
+  const changed = touchedKey === undefined ? Object.entries(cache)
+    : Object.hasOwn(cache, touchedKey) ? [[touchedKey, cache[touchedKey]] as const] : [];
+  changed.forEach(([key, turns]) => {
     // Optimistic image previews may be multi-megabyte data URLs. Keep them in
     // memory for the send-to-artifact handoff, not in browser storage.
     const boundedTurns = turns.slice(-clientBudgets.conversationCacheTurnsPerEntry).filter((turn) => isCacheEntry({ savedAt: now, turns: [turn] }));

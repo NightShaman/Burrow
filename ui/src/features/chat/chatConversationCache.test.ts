@@ -99,3 +99,18 @@ it('bounds aggregate serialized content and metadata, retaining newest entries',
   expect(readConversationCache(storage)).toHaveProperty('newer');
   expect(readConversationCache(storage)).not.toHaveProperty('older');
 });
+
+it('persists only the touched snapshot without traversing or mutating other active/pending memory', () => {
+  const stable = [{ role: 'assistant', content: 'disk snapshot' }];
+  writeConversationCache({ stable });
+  const memory = { active: [{ role: 'user', content: 'pending', runId: 'r', metadata: { attachments: [{ name: 'image', type: 'image/png', preview: 'data:image/png;base64,YQ==' }] } }], stable };
+  const unrelated = vi.fn(() => { throw new Error('unrelated transcript traversed'); });
+  Object.defineProperty(memory, 'stable', { enumerable: true, get: unrelated });
+  const active = memory.active;
+  writeConversationCache(memory, 'active');
+  expect(unrelated).not.toHaveBeenCalled();
+  expect(memory.active).toBe(active);
+  expect(active[0].metadata.attachments[0].preview).toContain('data:');
+  expect(readConversationCache().stable).toEqual(stable);
+  expect(readConversationCache().active[0]).toMatchObject({ content: 'pending', runId: 'r' });
+});

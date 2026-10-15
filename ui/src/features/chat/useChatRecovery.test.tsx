@@ -1,0 +1,48 @@
+import { act, cleanup, renderHook } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { api } from '../../app/api';
+import { useChatRecovery } from './useChatRecovery';
+vi.mock('../../app/api', async original => ({ ...await original<typeof import('../../app/api')>(), api: vi.fn() }));
+beforeEach(() => { vi.useFakeTimers(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.resetAllMocks(); });
+const options = () => ({ agentId: 'a', sessionId: 'one', enabled: true, isChildSession: false, onRefresh: vi.fn(async () => {}), onError: vi.fn() });
+it('waits for each poll/refresh, retries failures, and cancels timers and requests on unmount', async () => {
+  let resolve!: (value: unknown) => void;
+  vi.mocked(api).mockReturnValueOnce(new Promise(r => { resolve = r; }));
+  const opts = options(); const view = renderHook(() => useChatRecovery(opts));
+  const signal = vi.mocked(api).mock.calls[0][1]?.signal;
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(api).toHaveBeenCalledTimes(1);
+  await act(async () => resolve({ ok: true, runs: [] }));
+  vi.mocked(api).mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ ok: true, runs: [] });
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(opts.onError).not.toHaveBeenCalled();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(api).toHaveBeenCalledTimes(3);
+  view.unmount(); expect(signal?.aborted).toBe(true);
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(api).toHaveBeenCalledTimes(3);
+});
+it('ignores a late previous-selection response and lets only the current scope refresh', async () => {
+  let resolve!: (value: unknown) => void;
+  vi.mocked(api).mockReturnValueOnce(new Promise(r => { resolve = r; })).mockResolvedValue({ ok: true, runs: [] });
+  const opts = options(); const view = renderHook(({ sessionId }) => useChatRecovery({ ...opts, sessionId }), { initialProps: { sessionId: 'one' } });
+  const signal = vi.mocked(api).mock.calls[0][1]?.signal;
+  view.rerender({ sessionId: 'two' });
+  await act(async () => resolve({ ok: true, runs: [{ runId: 'old', agentId: 'a', sessionId: 'one', progress: [] }] }));
+  expect(signal?.aborted).toBe(true); expect(view.result.current.runtimeRun).toBeNull();
+  expect(opts.onRefresh).not.toHaveBeenCalled();
+});
+it('invalidates an already-started reconciliation callback on scope change', async () => {
+  let finish!: () => void;
+  const opts = options();
+  opts.onRefresh.mockImplementation(() => new Promise<void>(r => { finish = r; }));
+  vi.mocked(api).mockResolvedValue({ ok: true, runs: [] });
+  const view = renderHook(({ sessionId }) => useChatRecovery({ ...opts, sessionId, isChildSession: true }), { initialProps: { sessionId: 'one' } });
+  await act(async () => {});
+  const context = (opts.onRefresh.mock.calls as unknown as [{ current: () => boolean }][])[0][0];
+  expect(context.current()).toBe(true);
+  view.rerender({ sessionId: 'two' });
+  expect(context.current()).toBe(false);
+  await act(async () => finish());
+});

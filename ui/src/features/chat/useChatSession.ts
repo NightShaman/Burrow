@@ -1,109 +1,15 @@
-import { minionOutcome } from '../../app/minionOutcome';
-import { projectLiveStage, type LiveStageProjection, type ChatLiveStage } from './chatLiveStage';
+import { useChatRecovery } from './useChatRecovery';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isWithinAttachmentBudget } from '../../app/clientBudgets';
-import { api, textFromChatValue, type ActiveA2AActivity, type ActiveChatRun, type ActiveChatRunsResponse, type ActiveSubagent, type ChatAttachment, type ProgressEntry, type SessionSummary, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
+import { textFromChatValue, type ChatAttachment, type SessionSummary, type SessionTurn, type ToolActivity } from '../../app/api';
 import { conversationCacheGeneration, conversationCacheInvalidated, conversationCacheKey, readConversationCache, writeConversationCache, type ConversationCache } from './chatConversationCache';
 import { readDraftCache, writeDraftCache, type DraftCache } from './chatDraftCache';
 import { reconcileSessionTurns } from './chatTurnReconciliation';
-import { finalizeThoughtProgress, thoughtProgressFromEvents } from './chatThoughtProgress';
+import { finalizeThoughtProgress } from './chatThoughtProgress';
 import { createChatSessionRepository, readSessionListCache } from './chatSessionRepository';
 
 export { conversationCacheKey } from './chatConversationCache';
 
-
-type RuntimeRunForSelection = {
-  targetId: string;
-  runId: string;
-  agentId: string;
-  sessionId: string;
-  latestUserMessage: string;
-  answerText?: string;
-  progress: ProgressEntry[];
-  stage?: ChatLiveStage;
-  toolActivity?: ToolActivity;
-  subagent?: ActiveSubagent;
-};
-
-function runtimeRunProgress(run: ActiveChatRun): ProgressEntry[] {
-  return thoughtProgressFromEvents(run.progress ?? [], run.runId);
-}
-
-function runtimeToolActivity(run: ActiveChatRun): ToolActivity | undefined {
-  const itemsById = new Map<string, ToolActivityItem>();
-  for (const [index, event] of (run.progress ?? []).entries()) {
-    if (event.type !== 'tool.started' && event.type !== 'tool.completed') continue;
-    const data = event.data ?? {};
-    const tool = typeof data.tool === 'string' ? data.tool.trim() : '';
-    if (!tool) continue;
-    const mcpToolName = typeof data.mcpToolName === 'string' ? data.mcpToolName.trim() : '';
-    const label = tool === 'mcp_call' && mcpToolName
-      ? 'MCP tool'
-      : typeof data.label === 'string' && data.label.trim() ? data.label.trim() : tool.replace(/[-_]/g, ' ');
-    const id = typeof data.activityId === 'string' && data.activityId ? data.activityId : `${run.runId}:tool:${index}`;
-    const status = event.type === 'tool.started' ? 'pending' as const : data.ok === false || data.status === 'failed' ? 'error' as const : 'ok' as const;
-    itemsById.set(id, { ...itemsById.get(id), id, label, status });
-  }
-  const items = [...itemsById.values()];
-  if (!items.length) return undefined;
-  const hasError = items.some((item) => item.status === 'error');
-  const hasPending = items.some((item) => item.status === 'pending');
-  return { runId: run.runId, items, status: hasError ? 'warn' : hasPending ? 'running' : 'ok' };
-}
-
-function runtimeRunForSelection(run: ActiveChatRun | undefined, targetId: string): RuntimeRunForSelection | null {
-  if (!run) return null;
-  return { targetId, runId: run.runId, agentId: run.agentId, sessionId: run.sessionId, answerText: typeof run.answerText === 'string' ? run.answerText : '', latestUserMessage: typeof run.latestUserMessage === 'string' ? run.latestUserMessage : '', stage: (run.progress ?? []).reduce<LiveStageProjection>((state, event) => ((event.runId !== undefined && event.runId !== run.runId) || (event.sessionId !== undefined && event.sessionId !== run.sessionId)) ? state : projectLiveStage(state, event), {}).stage, progress: runtimeRunProgress(run), toolActivity: runtimeToolActivity(run) };
-}
-
-function formatElapsed(from?: string | null, to = Date.now()) {
-  if (!from) return '';
-  const at = new Date(from).getTime();
-  if (!Number.isFinite(at)) return '';
-  const seconds = Math.max(0, Math.floor((to - at) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ${minutes % 60}m`;
-}
-
-function subagentToolActivity(child: ActiveSubagent, now = Date.now()): ToolActivity {
-  const activity = child.activity ?? {};
-  const status = String(activity.status || child.status || '').toLowerCase();
-  const final = child.final === true || ['completed', 'succeeded', 'failed', 'cancelled', 'incomplete', 'timed_out'].includes(status);
-  const outcome = minionOutcome(child.status, child.result);
-  const hasError = Boolean(activity.error) || outcome.label === 'Error' || (status === 'failed' && outcome.label !== 'Incomplete');
-  const hasWarning = hasError || outcome.label === 'Incomplete';
-  const rawLabel = activity.tool || activity.label || activity.model || activity.phase || child.phase || child.status || 'Subagent activity';
-  const age = formatElapsed(activity.lastActualActivityAt || child.lastActualActivityAt, now);
-  const elapsed = formatElapsed(activity.startedAt, now);
-  const detail = [
-    activity.kind ? `${activity.kind}` : null,
-    activity.model ? `model ${activity.model}` : null,
-    elapsed ? `elapsed ${elapsed}` : null,
-    age ? `last actual event ${age} ago` : null,
-    activity.error || null,
-    outcome.reason,
-  ].filter(Boolean).join(' · ');
-  return {
-    runId: child.runId || child.id,
-    status: hasWarning ? 'warn' : final ? 'ok' : 'running',
-    title: final ? 'Minion activity' : 'Minion running',
-    summary: detail || undefined,
-    items: [{ id: `${child.id}:${activity.sequence ?? 'activity'}`, label: activity.error ? 'Error' : outcome.label ?? String(rawLabel), status: hasWarning ? 'error' : final ? 'ok' : 'pending', ...(detail ? { detail } : {}) }],
-  };
-}
-
-function runtimeRunForSubagent(child: ActiveSubagent | undefined, targetId: string): RuntimeRunForSelection | null {
-  if (!child || child.final) return null;
-  const runId = child.runId || child.id;
-  const agentId = child.agentId || '';
-  const traceChildSessionId = child.trace && 'childSessionId' in child.trace && typeof child.trace.childSessionId === 'string' ? child.trace.childSessionId : '';
-  const sessionId = child.sessionId || traceChildSessionId || '';
-  if (!runId || !agentId || !sessionId) return null;
-  return { targetId, runId, agentId, sessionId, latestUserMessage: child.purpose || child.label || '', progress: [], toolActivity: subagentToolActivity(child), subagent: child };
-}
 
 /** Owns durable chat-session state, draft retention, and runtime reconciliation. */
 export function useChatSession(selectedAgentId: string) {
@@ -124,14 +30,15 @@ export function useChatSession(selectedAgentId: string) {
 
   const [chatError, setChatError] = useState('');
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
-  const [a2aActivities, setA2aActivities] = useState<ActiveA2AActivity[]>([]);
-  const [runtimeRun, setRuntimeRun] = useState<RuntimeRunForSelection | null>(null);
-  const [runtimeChildActivities, setRuntimeChildActivities] = useState<ToolActivity[]>([]);
   const childSessionsRef = useRef(new Set<string>());
-  const recoveredProgressByRunRef = useRef<Record<string, ProgressEntry[]>>({});
   const [, setToolActivityVersion] = useState(0);
   const pendingTurnsRef = useRef(new Map<string, SessionTurn[]>());
-  const conversationCacheRef = useRef<ConversationCache>(readConversationCache());
+  const conversationCacheRef = useRef<ConversationCache>({});
+  const cacheInitialized = useRef(false);
+  if (!cacheInitialized.current) {
+    conversationCacheRef.current = readConversationCache();
+    cacheInitialized.current = true;
+  }
   useEffect(() => {
     const invalidate = () => { conversationCacheRef.current = {}; pendingTurnsRef.current.clear(); setTurns([]); };
     window.addEventListener(conversationCacheInvalidated, invalidate);
@@ -170,13 +77,37 @@ export function useChatSession(selectedAgentId: string) {
   useEffect(() => { writeDraftCache(draftCache); }, [draftCache]);
   useEffect(() => { selectedChatRef.current = { agentId: selectedAgentId, sessionId }; }, [selectedAgentId, sessionId]);
 
+  const { a2aActivities, runtimeRun, runtimeChildActivities, clearActivity, cancelRuntimeRun } = useChatRecovery({
+    agentId: selectedAgentId, sessionId, enabled: !isNewSession,
+    isChildSession: childSessionsRef.current.has(conversationCacheKey(selectedAgentId, sessionId)),
+    onError: setChatError,
+    onRefresh: async ({ current, generation, recoveredProgress }) => {
+      const cacheKey = conversationCacheKey(selectedAgentId, sessionId);
+      const cachedTurns = conversationCacheRef.current[cacheKey];
+      const session = await sessionRepository.loadSession(selectedAgentId, sessionId);
+      if (!current() || conversationCacheGeneration !== generation || conversationCacheRef.current[cacheKey] !== cachedTurns) return;
+      const nextTurns = reconcileSessionTurns(session, cachedTurns ?? [], pendingTurnsRef.current.get(cacheKey) ?? []).map((turn) => {
+        if (turn.role !== 'assistant' || !turn.runId || turn.metadata?.progress) return turn;
+        const recovered = recoveredProgress[turn.runId];
+        if (!recovered?.length) return turn;
+        const content = textFromChatValue(turn.content);
+        const terminalStatus: NonNullable<import('../../app/api').RunProgress['status']> = content.startsWith('[model_error:') ? 'failed' : 'complete';
+        const progress = finalizeThoughtProgress(recovered, terminalStatus, content);
+        delete recoveredProgress[turn.runId];
+        return progress ? { ...turn, metadata: { ...turn.metadata, progress } } : turn;
+      });
+      conversationCacheRef.current[cacheKey] = nextTurns;
+      writeConversationCache(conversationCacheRef.current, cacheKey);
+      if (current() && selectedChatRef.current.agentId === selectedAgentId && selectedChatRef.current.sessionId === sessionId) setTurns(nextTurns);
+    },
+  });
+
   // This must run before paint. A regular effect runs after React commits the
   // new rail selection, leaving one frame where Chat sees no turns and no
   // loading flag and therefore renders the new-session logo.
   useLayoutEffect(() => {
     committedAgentIdRef.current = selectedAgentId;
-    setRuntimeRun(null);
-    setRuntimeChildActivities([]);
+    clearActivity();
     if (!selectedAgentId) {
       setIsNewSession(false);
       setSessionId('');
@@ -241,7 +172,7 @@ export function useChatSession(selectedAgentId: string) {
       setIsLoadingConversation(false);
     });
     return () => { cancelled = true; };
-  }, [selectedAgentId, sessionRepository]);
+  }, [selectedAgentId, sessionRepository, clearActivity]);
 
   useEffect(() => {
     // A blank composer belongs to the agent that requested it, not whichever
@@ -291,7 +222,7 @@ export function useChatSession(selectedAgentId: string) {
     if (!agentId) return;
     const nextSessions = await sessionRepository.listSessions(agentId);
     if (selectedChatRef.current.agentId === agentId) setSessions(nextSessions);
-  }, [selectedAgentId, sessionRepository]);
+  }, [selectedAgentId, sessionRepository, clearActivity]);
   const refreshConversation = useCallback(async (agentId = selectedAgentId, targetSessionId = sessionId) => {
     if (!agentId || !targetSessionId) return;
     const cacheKey = conversationCacheKey(agentId, targetSessionId);
@@ -313,85 +244,9 @@ export function useChatSession(selectedAgentId: string) {
     const current = selectedChatRef.current;
     if (current.agentId === agentId && current.sessionId === targetSessionId) setTurns(nextTurns);
   }, [selectedAgentId, sessionId, sessionRepository]);
-  useEffect(() => {
-    if (!selectedAgentId || !sessionId || isNewSession) {
-      setA2aActivities([]);
-      setRuntimeRun(null);
-      setRuntimeChildActivities([]);
-
-      return;
-    }
-    let cancelled = false;
-    let timer: number | undefined;
-    let hadRuns = false;
-    const isChildSession = childSessionsRef.current.has(conversationCacheKey(selectedAgentId, sessionId));
-    const controller = new AbortController();
-    const poll = async () => {
-      const generationAtRequestStart = conversationCacheGeneration;
-      try {
-        const resourceId = selectedAgentId;
-        const response = await api<ActiveChatRunsResponse>(`/api/chat/runs/active?agentId=${encodeURIComponent(resourceId)}&sessionId=${encodeURIComponent(sessionId)}`, { signal: controller.signal });
-        if (cancelled || selectedChatRef.current.agentId !== selectedAgentId || selectedChatRef.current.sessionId !== sessionId) return;
-        const selectedRuntimeRun = response.runs?.find((run) => run.agentId === resourceId && run.sessionId === sessionId);
-        const matchingLiveSubagents = (response.subagents ?? []).filter((child) => {
-          const traceChildSessionId = child.trace && 'childSessionId' in child.trace && typeof child.trace.childSessionId === 'string' ? child.trace.childSessionId : '';
-          const childAgentId = child.agentId || '';
-          const parentRunId = child.parentRunId || (child.trace && 'runId' in child.trace && typeof child.trace.runId === 'string' ? child.trace.runId : '');
-          return !child.final
-            && (child.parentSessionId === sessionId || (isChildSession && (child.sessionId === sessionId || traceChildSessionId === sessionId)))
-            && (!childAgentId || childAgentId === resourceId)
-            && (!parentRunId || !selectedRuntimeRun || parentRunId === selectedRuntimeRun.runId);
-        });
-        const childActivities = matchingLiveSubagents.map((child) => subagentToolActivity(child));
-        const projectedRuntimeRun = runtimeRunForSelection(selectedRuntimeRun, 'local') ?? runtimeRunForSubagent(isChildSession ? matchingLiveSubagents[0] : undefined, 'local');
-        if (selectedRuntimeRun) recoveredProgressByRunRef.current[selectedRuntimeRun.runId] = projectedRuntimeRun?.progress ?? [];
-        setRuntimeRun(projectedRuntimeRun);
-        setRuntimeChildActivities(childActivities);
-        const activities = (response.runs ?? []).flatMap((run) => {
-          if (run.a2aActivities?.length) return run.a2aActivities;
-          if (run.source !== 'a2a' || !run.a2a) return [];
-          const status: ActiveA2AActivity['status'] = run.status === 'cancelled' ? 'cancelled' : run.phase === 'streaming' ? 'streaming' : 'running';
-          return [{ id: `a2a:${run.runId}`, status, parentAgentId: run.a2a.parentAgentId, recipient: { agentId: run.agentId, sessionId: run.sessionId, runId: run.runId }, messageMode: run.a2a.messageMode, progress: run.progress ?? [] }];
-        });
-        const hasLiveSubagents = Boolean(matchingLiveSubagents.length);
-        const shouldRefresh = isChildSession || Boolean(response.runs?.length) || hasLiveSubagents || hadRuns;
-        hadRuns = Boolean(response.runs?.length) || hasLiveSubagents;
-        setA2aActivities(activities.slice(-12));
-        // Worker children persist their transcript outside the active chat-run
-        // registry. Keep the selected child fresh even when that registry is empty,
-        // including terminal writes that arrive after the worker stops.
-        if (shouldRefresh) {
-          const cacheKey = conversationCacheKey(selectedAgentId, sessionId);
-          const cachedTurns = conversationCacheRef.current[cacheKey];
-          const session = await sessionRepository.loadSession(selectedAgentId, sessionId);
-          if (cancelled || conversationCacheGeneration !== generationAtRequestStart || conversationCacheRef.current[cacheKey] !== cachedTurns) return;
-          const nextTurns = reconcileSessionTurns(session, cachedTurns ?? [], pendingTurnsRef.current.get(cacheKey) ?? []).map((turn) => {
-            if (turn.role !== 'assistant' || !turn.runId || turn.metadata?.progress) return turn;
-            const recovered = recoveredProgressByRunRef.current[turn.runId];
-            if (!recovered?.length) return turn;
-            const content = textFromChatValue(turn.content);
-            const terminalStatus: NonNullable<import('../../app/api').RunProgress['status']> = content.startsWith('[model_error:') ? 'failed' : 'complete';
-            const progress = finalizeThoughtProgress(recovered, terminalStatus, content);
-            delete recoveredProgressByRunRef.current[turn.runId];
-            return progress ? { ...turn, metadata: { ...turn.metadata, progress } } : turn;
-          });
-          conversationCacheRef.current[cacheKey] = nextTurns;
-          writeConversationCache(conversationCacheRef.current, cacheKey);
-          if (!cancelled && selectedChatRef.current.agentId === selectedAgentId && selectedChatRef.current.sessionId === sessionId) setTurns(nextTurns);
-        }
-      } catch {
-        // Live activity is supplemental; durable session loading remains authoritative.
-      } finally {
-        if (!cancelled) timer = window.setTimeout(poll, 1000);
-      }
-    };
-    void poll();
-    return () => { cancelled = true; controller.abort(); if (timer !== undefined) window.clearTimeout(timer); };
-  }, [isNewSession, selectedAgentId, sessionId, sessionRepository]);
 
   const selectSession = useCallback((targetSessionId: string, targetAgentId = selectedAgentId) => {
-    setRuntimeRun(null);
-    setRuntimeChildActivities([]);
+    clearActivity();
     if (!targetAgentId || !targetSessionId || (targetAgentId === selectedAgentId && targetSessionId === sessionId)) return;
     // Remember explicit choices before React state changes so concurrent list
     // refreshes cannot restore the previous session.
@@ -400,10 +255,9 @@ export function useChatSession(selectedAgentId: string) {
     setTurns(conversationCacheRef.current[conversationCacheKey(targetAgentId, targetSessionId)] ?? []);
     setIsNewSession(false);
     setChatError('');
-  }, [selectedAgentId, sessionId]);
+  }, [selectedAgentId, sessionId, clearActivity]);
   const prepareAgentSelection = useCallback((agentId: string) => {
-    setRuntimeRun(null);
-    setRuntimeChildActivities([]);
+    clearActivity();
     // Rail selections always reopen the parent's canonical session rather than
     // inheriting a displayed child session.
     const targetSessionId = parentSessionIdByAgentRef.current[agentId] ?? '';
@@ -414,17 +268,16 @@ export function useChatSession(selectedAgentId: string) {
     if (cachedTurns) setTurns(cachedTurns);
     setIsNewSession(false);
     setChatError('');
-  }, []);
+  }, [clearActivity]);
   const selectChildSession = useCallback((agentId: string, childSessionId: string) => {
-    setRuntimeRun(null);
-    setRuntimeChildActivities([]);
+    clearActivity();
     childSessionsRef.current.add(conversationCacheKey(agentId, childSessionId));
     sessionIdByAgentRef.current[agentId] = childSessionId;
     setSessionId(childSessionId);
     setTurns(conversationCacheRef.current[conversationCacheKey(agentId, childSessionId)] ?? []);
     setIsNewSession(false);
     setChatError('');
-  }, []);
+  }, [clearActivity]);
   const parentSessionIdForAgent = useCallback((agentId: string) => parentSessionIdByAgentRef.current[agentId] || 'default', []);
   const resetSession = useCallback(async () => {
     if (!selectedAgentId) return false;
@@ -471,19 +324,6 @@ export function useChatSession(selectedAgentId: string) {
   }, [attachmentScope, isAttachmentScopeCurrent]);
   const clearAttachment = useCallback(() => setAttachmentState(null), []);
   const removeAttachment = useCallback((index: number) => setAttachmentState((current) => current?.scope === attachmentScope ? { ...current, files: current.files.filter((_, attachmentIndex) => attachmentIndex !== index) } : current), [attachmentScope]);
-  const cancelController = useRef<AbortController | null>(null);
-  useEffect(() => () => { cancelController.current?.abort(); }, [selectedAgentId, sessionId]);
-  const cancelRuntimeRun = useCallback(async (run: RuntimeRunForSelection) => {
-    cancelController.current?.abort();
-    const controller = new AbortController(); cancelController.current = controller;
-    try {
-      // Recovered runs carry raw backend IDs, not UI-qualified resource IDs.
-      await api( `/api/chat/${encodeURIComponent(run.runId)}/cancel`, { signal: controller.signal, method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: run.agentId, reason: 'Stopped by operator' }) });
-    } catch (error) {
-      if (controller.signal.aborted) return;
-      setChatError(error instanceof Error ? `Could not stop run: ${error.message}` : 'Could not stop run.');
-    }
-  }, []);
   const reportError = useCallback((message: string) => setChatError(message), []);
   const clearError = useCallback(() => setChatError(''), []);
 

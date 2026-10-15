@@ -1,26 +1,21 @@
 import { loadModArchives, modsChangedEvent, type ModArchive } from '../../app/modPanels';
 import { ModArchiveHost } from '../mods/ModArchiveHost';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Agent } from '../../app/types';
 import { ArchiveRunsProof } from './ArchiveRunsProof';
-import { archiveCacheInvalidated, archiveQueryCacheKey, readArchiveSessionCache, writeArchiveSessionCache } from './archiveCache';
+import { archiveQueryCacheKey } from './archiveCache';
 import { createArchiveRepository, type ArchiveRepository, type ArchiveCalendarKind } from './archiveRepository';
-import { archiveSessionDate, buildCalendarDays, dateFromMonthKey, dreamDate, filterArchiveSessions, filterDreamEntries, groupDreamEntries, monthKey } from './archiveDerivations';
-import { archiveSessionTitle, ChatArchiveReader, DreamArchiveReader, formatArchiveDate, TiddleArchiveReader } from './ArchiveReaders';
-import type { ArchiveDetail, ArchiveKind, ArchiveSession, ContinuityCard, ContinuityCardGroup, DreamEntry, DreamGroup } from './archiveTypes';
-
-
+import { buildCalendarDays, dateFromMonthKey, monthKey } from './archiveDerivations';
+import type { ArchiveKind } from './archiveTypes';
+import { ChatArchiveShelf } from './ChatArchiveShelf';
+import { DreamArchiveShelf } from './DreamArchiveShelf';
+import { TiddleArchiveShelf } from './TiddleArchiveShelf';
 const archiveKinds: { id: ArchiveKind; label: string; detail: string }[] = [
   { id: 'chat', label: 'Chat', detail: 'Searchable conversations and session history.' },
   { id: 'dreams', label: 'Dreams', detail: 'Small remembered things from your agents.' },
   { id: 'tiddle', label: 'Tiddle', detail: 'Warm continuity cards and their history.' },
   { id: 'proof', label: 'Proof', detail: 'Operator-readable run outcomes and evidence.' },
 ];
-
-function formatDreamGroupDay(value: string) {
-  const [year, month, day] = value.split('-');
-  return month && day && year ? `${month}-${day}-${year}` : value;
-}
 
 export function Archive({ agents, operatorName = 'Operator', repository }: { agents: Agent[]; operatorName?: string; repository?: ArchiveRepository }) {
   const archiveRepository = useMemo(() => {
@@ -40,265 +35,16 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
   }, []);
   const [kind, setKind] = useState<ArchiveKind>('chat');
   const [selectedAgent, setSelectedAgent] = useState('');
-  const selectedAgentRef = useRef(selectedAgent);
-  selectedAgentRef.current = selectedAgent;
   const [selectedDate, setSelectedDate] = useState('');
   const [search, setSearch] = useState('');
   const queryKey = archiveQueryCacheKey({ target: cacheOwner, agent: selectedAgent, query: search, date: selectedDate, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, kind });
-  const scopeRef = useRef(queryKey);
-  scopeRef.current = queryKey;
-  const moreRequests = useRef(new Set<AbortController>());
-  useEffect(() => {
-    setSessionsCursor(null); setSessionsHasMore(false); setSessionsMoreLoading(false);
-    setDreamsCursor(null); setDreamsHasMore(false); setDreamsMoreLoading(false);
-    setTiddleCursor(null); setTiddleHasMore(false); setTiddleMoreLoading(false);
-    setTiddleHistoryCursor(null); setTiddleHistoryHasMore(false); setTiddleHistoryLoading(false);
-    return () => {
-      moreRequests.current.forEach((request) => request.abort()); moreRequests.current.clear();
-      tiddleHistoryRequest.current?.abort(); earlierAbort.current?.abort();
-    };
-  }, [queryKey]);
-  const [sessions, setSessions] = useState<ArchiveSession[]>([]);
-  const [sessionsCursor, setSessionsCursor] = useState<string | null>(null);
-  const [sessionsHasMore, setSessionsHasMore] = useState(false);
-  const [sessionsMoreLoading, setSessionsMoreLoading] = useState(false);
-  const [dreamsCursor, setDreamsCursor] = useState<string | null>(null);
-  const [dreamsHasMore, setDreamsHasMore] = useState(false);
-  const [dreamsMoreLoading, setDreamsMoreLoading] = useState(false);
-  const [tiddleCursor, setTiddleCursor] = useState<string | null>(null);
-  const [tiddleHasMore, setTiddleHasMore] = useState(false);
-  const [tiddleMoreLoading, setTiddleMoreLoading] = useState(false);
-  const [tiddleHistoryCursor, setTiddleHistoryCursor] = useState<string | null>(null);
-  const [tiddleHistoryHasMore, setTiddleHistoryHasMore] = useState(false);
-  const [tiddleHistoryLoading, setTiddleHistoryLoading] = useState(false);
-  const [tiddleHistoryError, setTiddleHistoryError] = useState('');
-  const tiddleHistoryRequest = useRef<AbortController | null>(null);
-  const [selectedSession, setSelectedSession] = useState<ArchiveSession | null>(null);
-  const [selectedDreamGroup, setSelectedDreamGroup] = useState<DreamGroup | null>(null);
-  const [dreams, setDreams] = useState<DreamEntry[]>([]);
-  const [tiddleGroups, setTiddleGroups] = useState<ContinuityCardGroup[]>([]);
+  const [chatCount, setChatCount] = useState<number | null>(null);
+  const [dreamCount, setDreamCount] = useState<number | null>(null);
   const [tiddleCount, setTiddleCount] = useState<number | null>(null);
-  const [selectedTiddleCard, setSelectedTiddleCard] = useState<ContinuityCard | null>(null);
-  const [selectedTiddle, setSelectedTiddle] = useState<ContinuityCardGroup | null>(null);
-  const [detail, setDetail] = useState<ArchiveDetail | null>(null);
-  const [chatLoading, setChatLoading] = useState(false);
-  const [dreamsLoading, setDreamsLoading] = useState(false);
-  const [tiddleLoading, setTiddleLoading] = useState(false);
-  const [dreamsRetry, setDreamsRetry] = useState(0);
-  const [tiddleRetry, setTiddleRetry] = useState(0);
-  const [chatStale, setChatStale] = useState(false);
-  const [chatRetry, setChatRetry] = useState(0);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [earlierLoading, setEarlierLoading] = useState(false);
-  const [earlierError, setEarlierError] = useState('');
-  const [historyUnavailable, setHistoryUnavailable] = useState(false);
-  const earlierAbort = useRef<AbortController | null>(null);
-  const loadingEarlier = useRef(false);
-  const selectionRef = useRef('');
-  const [dreamDetailLoading, setDreamDetailLoading] = useState(false);
-  const [chatError, setChatError] = useState('');
-  const [dreamsError, setDreamsError] = useState('');
-  const [tiddleError, setTiddleError] = useState('');
-  const [detailError, setDetailError] = useState('');
-  const [dreamDetailError, setDreamDetailError] = useState('');
-
-  useEffect(() => {
-    const abort = new AbortController();
-    archiveRepository.listContinuityCards(selectedAgent, abort.signal)
-      .then((page) => { if (!abort.signal.aborted) setTiddleCount(page.items.length); })
-      .catch(() => { if (!abort.signal.aborted) setTiddleCount(null); });
-    return () => abort.abort();
-  }, [selectedAgent, archiveRepository]);
-
-  useEffect(() => {
-    if (kind !== 'tiddle') return;
-    const abort = new AbortController();
-    setTiddleLoading(true); setTiddleError('');
-    archiveRepository.listContinuityCards(selectedAgent, abort.signal).then((response) => {
-      const cards = response.items.filter((card) => !search.trim() || `${card.title} ${card.summary}`.toLowerCase().includes(search.trim().toLowerCase()));
-      if (!abort.signal.aborted) { setTiddleGroups(cards.map((card) => ({ card, history: [], nextCursor: null, hasMore: false }))); setTiddleCursor(response.nextCursor); setTiddleHasMore(response.hasMore); }
-    }).catch((cause) => { if (!abort.signal.aborted) setTiddleError(cause instanceof Error ? cause.message : 'Could not load Tiddle cards.'); }).finally(() => { if (!abort.signal.aborted) setTiddleLoading(false); });
-    return () => abort.abort();
-  }, [kind, search, selectedAgent, queryKey, tiddleRetry, archiveRepository]);
-
-  useEffect(() => {
-    const abort = new AbortController();
-    if (kind !== 'dreams') return () => abort.abort();
-    const load = async () => {
-      setDreamsLoading(true); setDreamsError('');
-      try {
-        const page = await archiveRepository.listDreams(abort.signal, null, selectedDate || undefined, selectedAgent || undefined);
-        if (!abort.signal.aborted) { setDreams(page.items); setDreamsCursor(page.nextCursor); setDreamsHasMore(page.hasMore); }
-      } catch (cause) { if (!abort.signal.aborted) setDreamsError(cause instanceof Error ? cause.message : 'Could not load dream archive.'); }
-      finally { if (!abort.signal.aborted) setDreamsLoading(false); }
-    };
-    void load();
-    return () => abort.abort();
-  }, [kind, selectedDate, selectedAgent, search, queryKey, dreamsRetry, archiveRepository]);
-
-  useEffect(() => {
-    const invalidate = () => { setSessions([]); setSelectedSession(null); setDetail(null); setChatRetry((value) => value + 1); };
-    window.addEventListener(archiveCacheInvalidated, invalidate);
-    return () => window.removeEventListener(archiveCacheInvalidated, invalidate);
-  }, []);
-  useEffect(() => {
-    if (kind !== 'chat') return;
-    const abort = new AbortController();
-    const query = search.trim();
-    const cached = readArchiveSessionCache(queryKey);
-    setSessions(cached?.sessions ?? []);
-    setChatStale(Boolean(cached)); setChatLoading(true); setChatError('');
-    const timer = window.setTimeout(() => {
-      if (!cached) setChatLoading(true);
-      setChatError('');
-      archiveRepository.listSessions(query, abort.signal, null, selectedDate || undefined, selectedAgent || undefined)
-        .then((page) => {
-          if (abort.signal.aborted) return;
-          setChatStale(false); setSessions(page.items); setSessionsCursor(page.nextCursor); setSessionsHasMore(page.hasMore);
-          writeArchiveSessionCache(queryKey, page.items);
-        })
-        .catch((nextError: Error) => { if (!abort.signal.aborted) setChatError(nextError.message || 'Could not load archive sessions.'); })
-        .finally(() => { if (!abort.signal.aborted) setChatLoading(false); });
-    }, cached ? 0 : 180);
-    return () => { abort.abort(); window.clearTimeout(timer); };
-  }, [kind, search, selectedDate, selectedAgent, queryKey, chatRetry, archiveRepository]);
-
-  useEffect(() => {
-    const abort = new AbortController();
-    earlierAbort.current?.abort();
-    loadingEarlier.current = false;
-    const identity = kind === 'chat' && selectedSession ? `${selectedSession.agentId}:${selectedSession.sessionId}` : '';
-    selectionRef.current = identity;
-    setDetail(null);
-    setEarlierError('');
-    setHistoryUnavailable(false);
-    setEarlierLoading(false);
-    if (!identity || !selectedSession) { setDetailLoading(false); return () => abort.abort(); }
-    setDetailError('');
-    setDetailLoading(true);
-    archiveRepository.loadSession(selectedSession, abort.signal)
-      .then((page) => { if (!abort.signal.aborted && selectionRef.current === identity) { setDetail(page); setHistoryUnavailable(page.historyStatus === 'unavailable'); } })
-      .catch((cause: Error) => { if (!abort.signal.aborted && selectionRef.current === identity) setDetailError(cause.message || 'Could not load this conversation.'); })
-      .finally(() => { if (!abort.signal.aborted && selectionRef.current === identity) setDetailLoading(false); });
-    return () => { abort.abort(); if (selectionRef.current === identity) selectionRef.current = ''; earlierAbort.current?.abort(); };
-  }, [kind, selectedSession]);
-
-  const loadMoreSessions = async () => {
-    if (!sessionsHasMore || !sessionsCursor || sessionsMoreLoading) return;
-    const scope = queryKey; const abort = new AbortController(); moreRequests.current.add(abort);
-    const current = () => !abort.signal.aborted && scopeRef.current === scope;
-    const query = search.trim(); setSessionsMoreLoading(true); setChatError('');
-    try { const date = selectedDate; const page = await archiveRepository.listSessions(query, abort.signal, sessionsCursor, date || undefined, selectedAgent || undefined); if (!current()) return; setSessions((current) => [...current, ...page.items]); setSessionsCursor(page.nextCursor); setSessionsHasMore(page.hasMore); }
-    catch (cause) { if (current()) setChatError(cause instanceof Error ? cause.message : 'Could not load more conversations.'); }
-    finally { moreRequests.current.delete(abort); if (current()) setSessionsMoreLoading(false); }
-  };
-  const loadMoreDreams = async () => {
-    if (!dreamsHasMore || !dreamsCursor || dreamsMoreLoading) return;
-    const scope = queryKey; const abort = new AbortController(); moreRequests.current.add(abort);
-    const current = () => !abort.signal.aborted && scopeRef.current === scope;
-    setDreamsMoreLoading(true);
-    try { const date = selectedDate; const page = await archiveRepository.listDreams(abort.signal, dreamsCursor, date || undefined, selectedAgent || undefined); if (!current()) return; setDreams((current) => [...current, ...page.items]); setDreamsCursor(page.nextCursor); setDreamsHasMore(page.hasMore); }
-    catch (cause) { if (current()) setDreamsError(cause instanceof Error ? cause.message : 'Could not load more dreams.'); }
-    finally { moreRequests.current.delete(abort); if (current()) setDreamsMoreLoading(false); }
-  };
-  const loadMoreTiddleHistory = async () => {
-    if (!selectedTiddleCard || !tiddleHistoryHasMore || !tiddleHistoryCursor || tiddleHistoryLoading) return;
-    const card = selectedTiddleCard; const cursor = tiddleHistoryCursor;
-    tiddleHistoryRequest.current?.abort();
-    const abort = new AbortController(); tiddleHistoryRequest.current = abort;
-    setTiddleHistoryLoading(true); setTiddleHistoryError('');
-    try {
-      const page = await archiveRepository.loadContinuityCard(card, abort.signal, cursor);
-      if (abort.signal.aborted) return;
-      setSelectedTiddle((current) => current?.card.id === card.id && current.card.agentId === card.agentId && current.nextCursor === cursor ? { ...current, history: [...page.history, ...current.history], nextCursor: page.nextCursor, hasMore: page.hasMore } : current);
-      setTiddleHistoryCursor(page.nextCursor ?? null); setTiddleHistoryHasMore(Boolean(page.hasMore));
-    } catch (cause) { if (!abort.signal.aborted) setTiddleHistoryError(cause instanceof Error ? cause.message : 'Could not load more card history.'); }
-    finally { if (!abort.signal.aborted) setTiddleHistoryLoading(false); }
-  };
-  const loadMoreTiddle = async () => {
-    if (!tiddleHasMore || !tiddleCursor || tiddleMoreLoading) return;
-    const scope = queryKey; const abort = new AbortController(); moreRequests.current.add(abort);
-    const current = () => !abort.signal.aborted && scopeRef.current === scope;
-    setTiddleMoreLoading(true);
-    try { const page = await archiveRepository.listContinuityCards(selectedAgent, abort.signal, tiddleCursor); if (!current()) return; const cards = page.items.filter((card) => !search.trim() || `${card.title} ${card.summary}`.toLowerCase().includes(search.trim().toLowerCase())); setTiddleGroups((current) => [...current, ...cards.map((card) => ({ card, history: [], nextCursor: null, hasMore: false }))]); setTiddleCursor(page.nextCursor); setTiddleHasMore(page.hasMore); }
-    catch (cause) { if (current()) setTiddleError(cause instanceof Error ? cause.message : 'Could not load more cards.'); }
-    finally { moreRequests.current.delete(abort); if (current()) setTiddleMoreLoading(false); }
-  };
-
-  const loadEarlier = () => {
-    if (!selectedSession || !detail?.hasMore || !detail.nextCursor || loadingEarlier.current || historyUnavailable) return;
-    const identity = selectionRef.current;
-    const cursor = detail.nextCursor;
-    const abort = new AbortController();
-    earlierAbort.current = abort;
-    loadingEarlier.current = true;
-    setEarlierLoading(true);
-    setEarlierError('');
-    archiveRepository.loadSession(selectedSession, abort.signal, cursor)
-      .then((page) => {
-        if (abort.signal.aborted || selectionRef.current !== identity) return;
-        setDetail((current) => {
-          if (!current || current.nextCursor !== cursor) return current;
-          const existing = current.session?.turns || current.turns || current.chatTurns || [];
-          const incoming = page.session?.turns || page.turns || page.chatTurns || [];
-          const key = (turn: typeof incoming[number]) => JSON.stringify(turn);
-          const seen = new Map<string, number>();
-          existing.forEach((turn) => seen.set(key(turn), (seen.get(key(turn)) || 0) + 1));
-          const older = incoming.filter((turn) => {
-            const fingerprint = key(turn);
-            const count = seen.get(fingerprint) || 0;
-            if (!count) return true;
-            seen.set(fingerprint, count - 1);
-            return false;
-          });
-          return { ...current, turns: [...older, ...existing], chatTurns: undefined, session: undefined, hasMore: page.hasMore, nextCursor: page.nextCursor, historyStatus: page.historyStatus };
-        });
-        setHistoryUnavailable(page.historyStatus === 'unavailable');
-      })
-      .catch((cause: Error) => {
-        if (abort.signal.aborted || selectionRef.current !== identity) return;
-        const status = (cause as Error & { status?: number }).status;
-        setEarlierError(status === 409 ? 'History changed or is unavailable. Restart from latest to request a fresh page.' : status === 400 ? 'This page cursor is invalid. Restart from latest to request a fresh page.' : cause.message || 'Earlier messages could not be loaded.');
-      })
-      .finally(() => { if (!abort.signal.aborted && selectionRef.current === identity) { loadingEarlier.current = false; setEarlierLoading(false); } });
-  };
-
-  useEffect(() => {
-    if (!selectedDreamGroup || kind !== 'dreams') return;
-    const abort = new AbortController();
-    const groupKey = selectedDreamGroup.key;
-    setDreamDetailLoading(true); setDreamDetailError('');
-    Promise.all(selectedDreamGroup.entries.map((entry) => archiveRepository.loadDream(entry, abort.signal)))
-      .then((entries) => {
-        if (!abort.signal.aborted) setSelectedDreamGroup((group) => group?.key === groupKey ? { ...group, entries } : group);
-      })
-      .catch((nextError: Error) => { if (!abort.signal.aborted) setDreamDetailError(nextError.message || 'Could not load the full dream.'); })
-      .finally(() => { if (!abort.signal.aborted) setDreamDetailLoading(false); });
-    return () => abort.abort();
-  }, [kind, selectedDreamGroup?.key]);
-
-  useEffect(() => {
-    if (!selectedTiddleCard || kind !== 'tiddle') return;
-    const abort = new AbortController();
-    tiddleHistoryRequest.current?.abort();
-    setTiddleHistoryCursor(null); setTiddleHistoryHasMore(false); setTiddleHistoryError('');
-    setSelectedTiddle(null);
-    setDetailLoading(true);
-    setDetailError('');
-    archiveRepository.loadContinuityCard(selectedTiddleCard, abort.signal)
-      .then((nextDetail) => { if (!abort.signal.aborted) { setSelectedTiddle(nextDetail); setTiddleHistoryCursor(nextDetail.nextCursor ?? null); setTiddleHistoryHasMore(Boolean(nextDetail.hasMore)); } })
-      .catch((cause) => { if (!abort.signal.aborted) setDetailError(cause instanceof Error ? cause.message : 'Could not load continuity card.'); })
-      .finally(() => { if (!abort.signal.aborted) setDetailLoading(false); });
-    return () => { abort.abort(); tiddleHistoryRequest.current?.abort(); };
-  }, [kind, selectedTiddleCard, queryKey]);
-
-  const visibleSessions = useMemo(() => filterArchiveSessions(sessions, '', selectedDate), [selectedDate, sessions]);
-  const visibleDreams = useMemo(() => filterDreamEntries(dreams, '', search, selectedDate), [dreams, search, selectedDate]);
-  const dreamGroups = useMemo<DreamGroup[]>(() => groupDreamEntries(visibleDreams), [visibleDreams]);
   const [calendarMonth, setCalendarMonth] = useState(() => monthKey(new Date()));
   const [calendarDates, setCalendarDates] = useState<string[]>([]);
   const [calendarAvailabilityState, setCalendarAvailabilityState] = useState<'loading' | 'ready' | 'error'>('loading');
-  const calendarKind: ArchiveCalendarKind | null = kind === 'chat' ? 'sessions' : kind === 'dreams' ? 'dreams' : null;
+  const calendarKind: ArchiveCalendarKind | null = activeMod ? null : kind === 'chat' ? 'sessions' : kind === 'dreams' ? 'dreams' : null;
   useEffect(() => {
     if (!calendarKind) { setCalendarDates([]); setCalendarAvailabilityState('ready'); return; }
     const abort = new AbortController();
@@ -313,24 +59,11 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
       })
       .catch(() => { if (!abort.signal.aborted) { setCalendarDates([]); setCalendarAvailabilityState('error'); } });
     return () => abort.abort();
-  }, [calendarKind, calendarMonth, selectedAgent]);
+  }, [calendarKind, calendarMonth, selectedAgent, archiveRepository]);
   const dateBuckets = useMemo(() => calendarDates.map((key) => ({ key, count: 1, year: '', month: '', day: '', label: '' })), [calendarDates]);
   const calendarDays = useMemo(() => buildCalendarDays(calendarMonth, dateBuckets), [calendarMonth, dateBuckets]);
   const availableDates = useMemo(() => new Set(calendarDates), [calendarDates]);
   const calendarLabel = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(dateFromMonthKey(calendarMonth));
-  const handleKindChange = (nextKind: ArchiveKind) => {
-    setKind(nextKind);
-    selectionRef.current = "";
-    earlierAbort.current?.abort();
-    setSelectedSession(null);
-    setSelectedDreamGroup(null);
-    setSelectedTiddleCard(null);
-    setSelectedTiddle(null);
-    setDetail(null);
-    setDetailError('');
-    setDetailLoading(false);
-  };
-
   return (
     <div className="page-view archive-page">
       <header className="archive-heading">
@@ -339,7 +72,7 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
       </header>
       <div className="archive-layout">
         <aside className="archive-sidebar" aria-label="Archive navigation">
-          <section><span className="archive-sidebar-label">Browse</span>{archiveKinds.map((item) => <button key={item.id} type="button" className={!activeMod && kind === item.id ? 'active' : ''} onClick={() => { setModId(''); handleKindChange(item.id); }}><span>{item.label}</span><span className="archive-count">{item.id === 'dreams' ? dreams.length : item.id === 'tiddle' ? tiddleCount ?? '—' : item.id === 'proof' ? 'Runs' : sessions.length}</span></button>)}</section>
+          <section><span className="archive-sidebar-label">Browse</span>{archiveKinds.map((item) => <button key={item.id} type="button" className={!activeMod && kind === item.id ? 'active' : ''} onClick={() => { setModId(''); setKind(item.id); }}><span>{item.label}</span><span className="archive-count">{item.id === 'dreams' ? dreamCount ?? '—' : item.id === 'tiddle' ? tiddleCount ?? '—' : item.id === 'proof' ? 'Runs' : chatCount ?? '—'}</span></button>)}</section>
           <section><span className="archive-sidebar-label">MODS</span>{modArchives.map((mod) => <button key={mod.modId} type="button" className={activeMod?.modId === mod.modId ? 'active' : ''} onClick={() => setModId(mod.modId)}>{mod.name}</button>)}</section>
           <section className="archive-calendar" aria-label="Archive calendar">
             <div className="archive-calendar-heading"><span className="archive-sidebar-label">When <small>Local time</small></span><button type="button" className="archive-all-dates" onClick={() => setSelectedDate('')}>All dates</button></div>
@@ -351,58 +84,12 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
         </aside>
         <main className="archive-content">
           {activeMod ? <ModArchiveHost panel={activeMod} date={selectedDate} /> : kind === 'chat' ? (
-            <div className="archive-split-view">
-              <section className="archive-results-pane" aria-label="Archived conversations">
-                <div className="archive-pane-heading"><span className="eyebrow">Chat</span><strong>{visibleSessions.length} conversations</strong></div>
-                {chatLoading ? <p role="status">Loading conversations…</p> : null}
-                {chatStale ? <p role="status">Showing stale cached conversations while revalidating.</p> : null}
-                {chatError ? <div role="alert"><p>{chatError}</p><button type="button" onClick={() => setChatRetry((value) => value + 1)}>Retry conversations</button></div> : null}
-                {!chatLoading && !chatError && !visibleSessions.length ? <p>No conversations match this shelf.</p> : null}
-                <div className="archive-session-list">{visibleSessions.map((session) => <button type="button" key={`${session.agentId || 'agent'}:${session.sessionId}`} className={`archive-session-card${selectedSession && session.sessionId === selectedSession.sessionId && session.agentId === selectedSession.agentId ? ' selected' : ''}`} onClick={() => { selectionRef.current = ""; earlierAbort.current?.abort(); setSelectedSession(session); }}><div className="archive-session-main"><div className="archive-session-meta"><span>{session.agentName || session.agentId || 'Unknown agent'}</span><span>{formatArchiveDate(archiveSessionDate(session))}</span></div><h3>{archiveSessionTitle(session)}</h3><p>{session.summary || 'No summary is available yet.'}</p></div><div className="archive-session-side"><strong>{session.chatTurnCount ?? session.turnCount ?? 0}</strong><span>turns</span>{session.archived ? <em>Archived</em> : <em>Active</em>}</div></button>)}{sessionsHasMore ? <button type="button" className="archive-load-more" disabled={sessionsMoreLoading} onClick={() => void loadMoreSessions()}>{sessionsMoreLoading ? 'Loading more conversations…' : 'Load more conversations'}</button> : null}</div>
-              </section>
-              <section className="archive-reader-pane">
-                <ChatArchiveReader session={selectedSession} detail={detail} loading={detailLoading} error={detailError} earlierLoading={earlierLoading} earlierError={earlierError} historyUnavailable={historyUnavailable} onLoadEarlier={loadEarlier} onRestart={() => setSelectedSession((current) => current ? { ...current } : null)} agentNames={agentNames} operatorName={operatorName} attachmentAgentId={selectedSession?.agentId ?? undefined} />
-              </section>
-            </div>
+            <ChatArchiveShelf key={queryKey} archiveRepository={archiveRepository} selectedAgent={selectedAgent} selectedDate={selectedDate} search={search} queryKey={queryKey} onCount={setChatCount} agentNames={agentNames} operatorName={operatorName} />
           ) : kind === 'dreams' ? (
-            <div className="archive-split-view">
-              <section className="archive-results-pane" aria-label="Dream diary groups">
-                <div className="archive-pane-heading"><span className="eyebrow">Dreams</span><strong>{dreamGroups.length} dream groups</strong></div>
-                {dreamsLoading ? <p role="status">Loading dreams…</p> : null}
-                {dreamsError ? <div role="alert"><p>{dreamsError}</p><button type="button" onClick={() => setDreamsRetry((value) => value + 1)}>Retry dreams</button></div> : null}
-                <div className="archive-session-list">
-                  {dreamsLoading ? <section className="archive-empty-state"><div className="archive-empty-mark" aria-hidden="true">⌁</div><div><h3>Gathering the dreams.</h3><p>Opening the remembered things from your agents.</p></div></section> : null}
-                  {dreamsError ? <section className="archive-empty-state archive-error"><div className="archive-empty-mark" aria-hidden="true">!</div><div><h3>Could not load the dream archive.</h3><p>{dreamsError}</p></div></section> : null}
-                  {!dreamsLoading && !dreamsError && !dreamGroups.length ? <section className="archive-empty-state"><div className="archive-empty-mark" aria-hidden="true">⌁</div><div><h3>No dreams match this shelf.</h3><p>Try adjusting the search, date, or agent filter.</p></div></section> : null}
-                  {!dreamsLoading && !dreamsError ? dreamGroups.map((group) => <button type="button" key={group.key} className={`archive-session-card${selectedDreamGroup?.key === group.key ? ' selected' : ''}`} onClick={() => setSelectedDreamGroup(group)}><div className="archive-session-main"><div className="archive-session-meta"><span>{group.agentName}</span><span>{formatArchiveDate(dreamDate(group.entries[0]))}</span></div><h3>{group.agentName} Dreams {formatDreamGroupDay(group.day)}</h3><p>{group.entries.length} remembered states: {group.entries.map((entry) => entry.phase).join(', ')}</p></div><div className="archive-session-side"><strong>{group.entries.length}</strong><span>states</span></div></button>) : null}
-                  {dreamsError ? null : dreamsHasMore ? <button type="button" className="archive-load-more" disabled={dreamsMoreLoading} onClick={() => void loadMoreDreams()}>{dreamsMoreLoading ? 'Loading more dreams…' : 'Load more dreams'}</button> : null}
-                </div>
-              </section>
-              <section className="archive-reader-pane">
-                <DreamArchiveReader group={selectedDreamGroup} loading={dreamDetailLoading} error={dreamDetailError} />
-              </section>
-            </div>
+            <DreamArchiveShelf key={queryKey} archiveRepository={archiveRepository} selectedAgent={selectedAgent} selectedDate={selectedDate} search={search} queryKey={queryKey} onCount={setDreamCount} />
           ) : kind === 'tiddle' ? (
-            <div className="archive-split-view">
-              <section className="archive-results-pane" aria-label="Tiddle warm cards">
-                <div className="archive-pane-heading"><span className="eyebrow">Tiddle</span><strong>{tiddleGroups.length} warm cards</strong></div>
-                {tiddleLoading ? <p role="status">Loading warm cards…</p> : null}
-                {tiddleError ? <div role="alert"><p>{tiddleError}</p><button type="button" onClick={() => setTiddleRetry((value) => value + 1)}>Retry warm cards</button></div> : null}
-                <div className="archive-session-list">
-                  {tiddleLoading ? <section className="archive-empty-state"><div className="archive-empty-mark" aria-hidden="true">⌁</div><div><h3>Gathering warm cards.</h3><p>Opening Tiddle continuity.</p></div></section> : null}
-                  {tiddleError ? <section className="archive-empty-state archive-error"><div className="archive-empty-mark" aria-hidden="true">!</div><div><h3>Could not load Tiddle.</h3><p>{tiddleError}</p></div></section> : null}
-                  {!tiddleLoading && !tiddleError && !tiddleGroups.length ? <section className="archive-empty-state"><div className="archive-empty-mark" aria-hidden="true">⌁</div><div><h3>No warm cards match this shelf.</h3><p>Try another search or agent.</p></div></section> : null}
-                  {!tiddleLoading && !tiddleError ? tiddleGroups.map(({ card }) => <button type="button" key={card.id} className={`archive-session-card tiddle-archive-card${selectedTiddleCard?.id === card.id && selectedTiddleCard.agentId === card.agentId ? ' selected' : ''}`} onClick={() => setSelectedTiddleCard(card)}><div className="archive-session-main"><div className="archive-session-meta"><span>{card.agentId}</span><span>{formatArchiveDate(card.lastSeen)}</span></div><h3>{card.title}</h3><p>{card.summary}</p></div><div className="archive-session-side"><strong>{card.recurrence}</strong><span>repeats</span><em>Warm</em></div></button>) : null}
-                  {tiddleError ? null : tiddleHasMore ? <button type="button" className="archive-load-more" disabled={tiddleMoreLoading} onClick={() => void loadMoreTiddle()}>{tiddleMoreLoading ? 'Loading more cards…' : 'Load more cards'}</button> : null}
-                </div>
-              </section>
-              <section className="archive-reader-pane">
-                <TiddleArchiveReader group={selectedTiddle} loading={detailLoading} error={detailError} historyLoading={tiddleHistoryLoading} historyError={tiddleHistoryError} historyHasMore={tiddleHistoryHasMore} onLoadMoreHistory={() => void loadMoreTiddleHistory()} />
-              </section>
-            </div>
-          ) : kind === 'proof' ? (
-            <ArchiveRunsProof repository={archiveRepository} selectedAgent={selectedAgent} search={search} />
-          ) : null}
+            <TiddleArchiveShelf key={queryKey} archiveRepository={archiveRepository} selectedAgent={selectedAgent} search={search} queryKey={queryKey} onCount={setTiddleCount} />
+          ) : <ArchiveRunsProof repository={archiveRepository} selectedAgent={selectedAgent} search={search} />}
         </main>
       </div>
     </div>
