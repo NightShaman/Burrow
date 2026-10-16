@@ -72,8 +72,8 @@ export function postgresModStoreFactory({ pool, key, ownsPool = false, clock } =
   return (modId) => new PostgresModSettingsStore({ modId, pool, key, ownsPool, clock });
 }
 
-export async function disabledPostgresMods(pool) {
-  const { rows } = await pool.query('SELECT mod_id FROM mod_lifecycle WHERE enabled=FALSE');
+export async function enabledPostgresMods(pool) {
+  const { rows } = await pool.query('SELECT mod_id FROM mod_lifecycle WHERE enabled=TRUE');
   return rows.map(row => row.mod_id);
 }
 

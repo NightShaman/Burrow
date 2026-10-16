@@ -2859,7 +2859,7 @@ const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJ
 const authRoute = createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
 const chatRoute = createChatRoutes({ handleChat, readJsonBody, sendJson, selectedAgentRuntime, cancelChatRun, steerChatRun, listChatSteering });
 const modsRuntimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
-const modLoadOptions = { stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, disabledModIds: postgresApplication.disabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), resolveAgentWorkspaceRoot: async (id) => {
+const modLoadOptions = { stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), resolveAgentWorkspaceRoot: async (id) => {
   const agent = await agentsStore().get(id);
   if (!agent) throw new Error('agent_not_found');
   return agentRuntimeContext({ runtimeState: (await runtimeConfig()).runtimeState, agent }).agentWorkspaceRoot;

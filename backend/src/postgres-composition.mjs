@@ -8,7 +8,7 @@ import { PostgresMcpProviderStateStore } from './postgres-mcp-provider-state-sto
 import { PostgresDreamExtractionStore } from './postgres-dream-extraction-store.mjs';
 import { PostgresAlbdruckStore } from './postgres-albdruck-store.mjs';
 import { createPostgresModDistributionRepository } from './postgres-mod-distribution-repository.mjs';
-import { postgresModStoreFactory, disabledPostgresMods, publishPostgresModCatalog } from './postgres-mod-store.mjs';
+import { postgresModStoreFactory, enabledPostgresMods, publishPostgresModCatalog } from './postgres-mod-store.mjs';
 import { createPostgresPool, closePostgresPool } from './postgres-foundation.mjs';
 import { PostgresAgentRegistryStore } from './postgres-agent-registry.mjs';
 import { PostgresAgentProfileStore } from './postgres-agent-profile-store.mjs';
@@ -96,7 +96,7 @@ export async function createPostgresApplication({
     return Object.freeze({
     modDistributionRepositoryFactory: () => createPostgresModDistributionRepository({ pool: sharedPool }),
     modStoreFactory: postgresModStoreFactory({ pool: sharedPool, key: encryptionKey }),
-    disabledModIds: () => disabledPostgresMods(sharedPool),
+    enabledModIds: () => enabledPostgresMods(sharedPool),
     modCatalogWriter: mod => publishPostgresModCatalog(sharedPool, mod),
     pool: sharedPool,
     ownsPool: ownedPool,

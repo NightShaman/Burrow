@@ -185,16 +185,16 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
   }
 }
 
-export async function loadMods({ runtimeRoot, logger = console, executionProviders = null, replaceExecutionProviders = false, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null, stores = null, onlyModIds = null, modStoreFactory = null, disabledModIds = null, modCatalogWriter = null } = {}) {
+export async function loadMods({ runtimeRoot, logger = console, executionProviders = null, replaceExecutionProviders = false, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null, stores = null, onlyModIds = null, modStoreFactory = null, enabledModIds = null, modCatalogWriter = null } = {}) {
   const discoveredAll = await discoverMods({ runtimeRoot });
   const selectedIds = onlyModIds ? new Set(onlyModIds) : null;
   const discovered = selectedIds ? discoveredAll.filter((mod) => selectedIds.has(mod.id)) : discoveredAll;
-  if (typeof disabledModIds !== 'function' || typeof modStoreFactory !== 'function' || typeof modCatalogWriter !== 'function') throw new Error('postgres_mod_dependencies_required');
-  const disabled = new Set(await disabledModIds());
+  if (typeof enabledModIds !== 'function' || typeof modStoreFactory !== 'function' || typeof modCatalogWriter !== 'function') throw new Error('postgres_mod_dependencies_required');
+  const enabled = new Set(await enabledModIds());
   const loaded = [];
   for (const mod of discovered) {
     if (mod.status === 'failed') { loaded.push(mod); continue; }
-    if (disabled.has(mod.id)) { loaded.push({ ...mod, status: 'disabled' }); continue; }
+    if (!enabled.has(mod.id)) { loaded.push({ ...mod, status: 'disabled' }); continue; }
     let host = null;
     let store = null;
     try {

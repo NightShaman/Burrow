@@ -443,7 +443,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
         const record = installed.get(mod.id); const source = sourceByMod.get(mod.id) || (record?.source_id ? sources.find((item) => item.id === record.source_id) : null);
         const version = record?.version || normalizeVersion(mod.manifest?.version || '') || undefined;
         const latestVersion = source?.latest_version || undefined;
-        const enabled = ![false, 0].includes(lifecycle.get(mod.id)?.enabled);
+        const enabled = [true, 1].includes(lifecycle.get(mod.id)?.enabled);
         return { id: mod.id, name: mod.name, version, status: mod.status === 'failed' ? 'failed' : 'installed', enabled, system: mod.manifest?.system === true, source: source?.url, latestVersion, updateAvailable: Boolean(version && latestVersion && VERSION.test(version) && VERSION.test(latestVersion) && compareVersions(latestVersion, version) > 0), canInstall: source?.status === 'ready', ...(source?.error ? { reason: source.error } : {}) };
       });
       for (const source of sources) if (source.mod_id && !mods.some((mod) => mod.id === source.mod_id)) mods.push({ id: source.mod_id, name: source.mod_name || source.mod_id, status: 'available', source: source.url, latestVersion: source.latest_version || undefined, canInstall: source.status === 'ready', ...(source.error ? { reason: source.error } : {}) });

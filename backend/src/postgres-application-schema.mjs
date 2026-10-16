@@ -133,4 +133,6 @@ UPDATE scheduled_jobs SET timezone=NULL,effective_timezone=NULL;
 UPDATE dream_settings SET timezone=NULL;
 ALTER TABLE skill_git_sources ADD COLUMN effective_timezone TEXT;
 ` },
+  // Existing explicit choices remain intact; only future lifecycle rows default off.
+  { version: 54, name: 'mods-disabled-by-default', sql: 'ALTER TABLE mod_lifecycle ALTER COLUMN enabled SET DEFAULT FALSE;' },
 ]);
