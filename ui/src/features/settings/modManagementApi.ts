@@ -43,8 +43,8 @@ export function normalizeModManagement(value: unknown): NormalizedModManagement 
 
 export async function loadModManagement(): Promise<NormalizedModManagement> {
   const state = normalizeModManagement(await api<ModManagementState>('/api/mod-management'));
-  const catalog = await apiLocal<{ mods?: Array<{ id?: unknown; version?: unknown }> }>('/api/mods').catch(() => ({ mods: [] }));
-  const runningVersions = new Map((catalog.mods ?? []).flatMap((mod) => typeof mod.id === 'string' && typeof mod.version === 'string' ? [[mod.id, mod.version] as const] : []));
+  const catalog = await apiLocal<{ mods?: Array<{ id?: unknown; version?: unknown; status?: unknown }> }>('/api/mods').catch(() => ({ mods: [] }));
+  const runningVersions = new Map((catalog.mods ?? []).flatMap((mod) => mod.status !== 'disabled' && mod.status !== 'failed' && typeof mod.id === 'string' && typeof mod.version === 'string' ? [[mod.id, mod.version] as const] : []));
   return { ...state, mods: state.mods.map((mod) => ({ ...mod, ...(runningVersions.has(mod.id) ? { runningVersion: runningVersions.get(mod.id) } : {}) })) };
 }
 

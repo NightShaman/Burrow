@@ -21,8 +21,14 @@ function isCacheEntry(value: unknown): value is ConversationCacheEntry {
     if (typeof record.content === 'string' && new TextEncoder().encode(record.content).byteLength > clientBudgets.conversationCacheTextBytesPerTurn) return false;
     if (!('metadata' in record)) return true;
     if (!record.metadata || typeof record.metadata !== 'object' || Array.isArray(record.metadata)) return false;
-    const attachments = (record.metadata as Record<string, unknown>).attachments;
-    return attachments === undefined || Array.isArray(attachments) && attachments.length <= clientBudgets.attachmentCount && attachments.every((item) => item && typeof item === 'object' && typeof item.name === 'string' && typeof item.type === 'string' && (item.artifactPath === undefined || typeof item.artifactPath === 'string') && (item.preview === undefined || typeof item.preview === 'string'));
+    const metadata = record.metadata as Record<string, unknown>;
+    const attachments = metadata.attachments;
+    if (attachments !== undefined && !(Array.isArray(attachments) && attachments.length <= clientBudgets.attachmentCount && attachments.every((item) => item && typeof item === 'object' && typeof item.name === 'string' && typeof item.type === 'string' && (item.artifactPath === undefined || typeof item.artifactPath === 'string') && (item.preview === undefined || typeof item.preview === 'string')))) return false;
+    const toolActivity = metadata.toolActivity;
+    if (toolActivity === undefined) return true;
+    if (!toolActivity || typeof toolActivity !== 'object' || Array.isArray(toolActivity)) return false;
+    const items = (toolActivity as Record<string, unknown>).items;
+    return items === undefined || Array.isArray(items) && items.every((item) => item && typeof item === 'object' && !Array.isArray(item) && typeof item.id === 'string' && typeof item.label === 'string' && (item.detail === undefined || typeof item.detail === 'string') && (item.status === undefined || item.status === 'pending' || item.status === 'ok' || item.status === 'error'));
   });
 }
 

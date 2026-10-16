@@ -106,6 +106,79 @@ describe('ModsSettings version and lifecycle truth', () => {
 });
 
 
+describe('explicit mod activation', () => {
+  const actionMock = vi.mocked(management.modManagementAction);
+  const catalog = (mod: management.ModRecord): management.NormalizedModManagement => ({ restartRequired: false, sources: [], mods: [mod] });
+
+  it.each([
+    { id: 'node-goblin', name: 'Node Goblin', system: true },
+    { id: 'ordinary', name: 'Ordinary mod', system: false },
+  ])('installs $name disabled and enables only on a separate operator action', async (identity) => {
+    const available = { ...identity, status: 'available', latestVersion: '1.0.0', canInstall: true };
+    const installed = { ...available, status: 'installed', version: '1.0.0', enabled: false };
+    loadMock.mockResolvedValueOnce(catalog(available))
+      .mockResolvedValueOnce(catalog(installed))
+      .mockResolvedValueOnce(catalog({ ...installed, enabled: true, runningVersion: '1.0.0' }))
+      .mockResolvedValueOnce(catalog(installed));
+    actionMock.mockResolvedValue({ ok: true });
+    const overflow = document.createElement('section'); document.body.appendChild(overflow);
+    const { container, unmount } = render(<ModsSettings overflowTarget={overflow} />);
+    await screen.findByRole('button', { name: 'Install' });
+    expect(screen.queryByRole('button', { name: 'Enable' })).toBeNull();
+    expect(screen.getByText(/All mods, including Node Goblin and system mods, start disabled/).textContent).toContain('Settings → Mods → Installed mods');
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }));
+    const enable = await screen.findByRole('button', { name: 'Enable' });
+    await waitFor(() => expect((enable as HTMLButtonElement).disabled).toBe(false));
+    expect(actionMock.mock.calls).toEqual([['/api/mod-management/' + identity.id + '/install', { method: 'POST', body: '{}' }]]);
+    expect(overflow.textContent).toContain('Installed · Disabled');
+    expect(container.textContent).toContain('Choose Enable to activate it');
+    expect((screen.getByLabelText('Running version') as HTMLInputElement).value).toBe('Not running');
+    expect(overflow.querySelector('.model-actions')).toBeNull();
+    fireEvent.click(enable);
+    const disable = await screen.findByRole('button', { name: 'Disable' });
+    await waitFor(() => expect((disable as HTMLButtonElement).disabled).toBe(false));
+    expect(actionMock).toHaveBeenNthCalledWith(2, '/api/mod-management/' + identity.id + '/enable', { method: 'POST' });
+    expect(overflow.textContent).toContain('Installed · Enabled');
+    expect((screen.getByLabelText('Running version') as HTMLInputElement).value).toBe('1.0.0');
+    expect(screen.queryByText(/Choose Enable to activate it/)).toBeNull();
+    fireEvent.click(disable);
+    await screen.findByRole('button', { name: 'Enable' });
+    expect(actionMock).toHaveBeenNthCalledWith(3, '/api/mod-management/' + identity.id + '/disable', { method: 'POST' });
+    expect(overflow.textContent).toContain('Installed · Disabled');
+    unmount(); overflow.remove();
+  });
+
+  it.each([true, false])('preserves backend enabled=%s after reinstall without a follow-up activation call', async (enabled) => {
+    const mod = { id: 'node-goblin', name: 'Node Goblin', system: true, status: 'installed', enabled, version: '1.0.0' };
+    loadMock.mockResolvedValue(catalog(mod));
+    actionMock.mockResolvedValue({ ok: true });
+    render(<ModsSettings />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reinstall' }));
+    await waitFor(() => expect(loadMock).toHaveBeenCalledTimes(2));
+    await screen.findByRole('button', { name: enabled ? 'Disable' : 'Enable' });
+    expect(actionMock.mock.calls).toEqual([['/api/mod-management/node-goblin/install', { method: 'POST', body: '{}' }]]);
+    expect(screen.getByRole('button', { name: 'Manage Node Goblin' }).textContent).toContain(enabled ? 'Installed · Enabled' : 'Installed · Disabled');
+  });
+
+  it('keeps disabled state while enable is pending and when backend enable fails', async () => {
+    loadMock.mockResolvedValue(catalog({ id: 'node-goblin', name: 'Node Goblin', system: true, status: 'installed', enabled: false }));
+    let reject!: (error: Error) => void;
+    actionMock.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+    render(<ModsSettings />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Enable' }));
+    expect(screen.getByRole('button', { name: 'Manage Node Goblin' }).textContent).toContain('Installed · Disabled');
+    expect(screen.getAllByRole('button', { name: 'Working…' }).every(button => (button as HTMLButtonElement).disabled)).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Disable' })).toBeNull();
+    reject(new Error('Activation failed'));
+    await screen.findByRole('alert');
+    expect(screen.getByRole('alert').textContent).toContain('Activation failed');
+    expect(screen.getByRole('button', { name: 'Enable' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Manage Node Goblin' }).textContent).toContain('Installed · Disabled');
+    expect(actionMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+
 describe('Git mod sources', () => {
   it('edits automatic checks in friendly units and saves exact milliseconds', async () => {
     loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [], sourceRefresh: { enabled: true, intervalMs: 21_600_000, staleMs: 900_000, refreshing: false, failures: 0 } });

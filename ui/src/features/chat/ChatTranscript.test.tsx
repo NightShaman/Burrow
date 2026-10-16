@@ -15,6 +15,13 @@ it('labels a child conversation as a Minion stream without changing its internal
   show([message('Visible conversation')]);
   expect(screen.getByText('Minion stream')).toBeTruthy();
 });
+
+it('renders saved tool activity with a missing label instead of crashing the transcript', () => {
+  const malformedActivity = { runId: 'run-bad-label', items: [{ id: 'tool-1', status: 'ok' }] } as never;
+  show([{ type: 'message', role: 'assistant', content: 'Still visible', metadata: { toolActivity: malformedActivity } }], parent);
+  expect(screen.getByText('Still visible')).toBeTruthy();
+  expect(screen.getByText('Tool activity')).toBeTruthy();
+});
 it('hides modern and legacy generated context without altering stored turns or hiding operator followups', () => {
   const turns = [message('runtime prompt', { kind: 'subagent-runtime-context' }), message('legacy prompt', { kind: 'subagent-task' }), message('debug prompt', { visibility: 'debug', promptEligible: false }), { ...message('debug event'), type: 'debug' }, message('Actual followup')];
   const before = JSON.stringify(turns);

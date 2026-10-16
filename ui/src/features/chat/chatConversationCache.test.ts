@@ -89,6 +89,14 @@ it('rejects malformed attachment metadata on read and write without throwing', (
   }
 });
 
+it('rejects cached tool activity with a missing label so it cannot crash after reload', () => {
+  const turns = [{ role: 'assistant', content: 'Done', metadata: { toolActivity: { runId: 'run-1', items: [{ id: 'tool-1', status: 'ok' }] } } }];
+  localStorage.setItem(conversationCacheStorageKey, JSON.stringify({ 'a:s': { savedAt: 1, turns } }));
+  expect(readConversationCache()).toEqual({});
+  expect(() => writeConversationCache({ 'a:s': turns as never }, 'a:s')).not.toThrow();
+  expect(readConversationCache()['a:s']).toEqual([]);
+});
+
 it('bounds aggregate serialized content and metadata, retaining newest entries', () => {
   const turns = Array.from({ length: 30 }, () => ({ role: 'assistant', content: 'x'.repeat(240 * 1024) }));
   const values = new Map<string, string>();

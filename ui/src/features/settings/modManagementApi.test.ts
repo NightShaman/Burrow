@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { isModBusyError, modLifecyclePath, normalizeModManagement } from './modManagementApi';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { isModBusyError, loadModManagement, modLifecyclePath, normalizeModManagement } from './modManagementApi';
 
 const emptyRefresh = { enabled: false, refreshing: false, failures: 0 };
 
@@ -31,5 +31,29 @@ describe('normalizeModManagement', () => {
     expect(isModBusyError(Object.assign(new Error('mod_busy'), { status: 409 }))).toBe(true);
     expect(isModBusyError(Object.assign(new Error('mod_install_in_progress'), { status: 409 }))).toBe(true);
     expect(isModBusyError(Object.assign(new Error('mod_busy'), { status: 500 }))).toBe(false);
+  });
+});
+
+
+describe('mod running versions', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('does not mistake installed disabled or failed catalog versions for running code', async () => {
+    const mods = [
+      { id: 'node-goblin', name: 'Node Goblin', status: 'installed', enabled: false, version: '2.0.0' },
+      { id: 'failed', name: 'Failed', status: 'installed', enabled: true, version: '2.0.0' },
+      { id: 'active', name: 'Active', status: 'installed', enabled: true, version: '2.0.0' },
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (path: string) => new Response(JSON.stringify(
+      path === '/api/mod-management' ? { mods } : { mods: [
+        { id: 'node-goblin', status: 'disabled', version: '2.0.0' },
+        { id: 'failed', status: 'failed', version: '2.0.0' },
+        { id: 'active', status: 'loaded', version: '1.0.0' },
+      ] },
+    ), { headers: { 'content-type': 'application/json' } })));
+    const state = await loadModManagement();
+    expect(state.mods[0]).not.toHaveProperty('runningVersion');
+    expect(state.mods[1]).not.toHaveProperty('runningVersion');
+    expect(state.mods[2]).toMatchObject({ enabled: true, version: '2.0.0', runningVersion: '1.0.0' });
   });
 });
