@@ -11,7 +11,9 @@ const EXPORT_FORMAT = 'burrow-export/v1';
 const PASSWORD_MIN_LENGTH = 12;
 
 export const EXPORT_CATEGORIES = Object.freeze([
-  { id: 'agents', label: 'Agents and profiles', containsSecrets: false, description: 'Agent registry, complete PostgreSQL profile documents, per-agent Dream settings, and operator identity/avatar.' },
+  { id: 'agents', label: 'Agents and profiles', containsSecrets: false, description: 'Agent registry, complete PostgreSQL profile documents, per-agent Dream settings, chat/default-minion/archive-summary model selections, and operator identity/avatar.' },
+  { id: 'skills', label: 'Operator text skills', containsSecrets: false, description: 'Operator-owned PostgreSQL text skills and assignments. Bundled, Git-managed and filesystem packages are explicit external dependencies, not installed by import.' },
+  { id: 'scheduled-jobs', label: 'Scheduled jobs', containsSecrets: false, description: 'Core scheduled job definitions, prompts, model overrides and enabled state; no runs or mod-owned jobs. Requires referenced agents/models and operator timezone.' },
   { id: 'settings', label: 'Settings', containsSecrets: false, description: 'Portable non-secret runtime settings and preferences.' },
   { id: 'model-connections', label: 'Model connections', containsSecrets: true, description: 'Connection metadata and encrypted provider credentials.' },
   { id: 'mcp-connections', label: 'MCP connections', containsSecrets: true, description: 'MCP connection metadata, API keys, and per-agent tool grants.' },

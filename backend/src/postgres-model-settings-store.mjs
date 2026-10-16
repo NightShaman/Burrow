@@ -154,6 +154,11 @@ export class PostgresModelSettingsStore {
     const row = result.rows[0];
     return row ? { agentId: row.agent_id, connectionId: row.connection_id, model: row.model_id, reasoningEffort: row.reasoning_effort, temperature: Number(row.temperature), updatedAt: row.updated_at } : null;
   }
+  async clearModelSelection(agentId, { minion = false } = {}) {
+    const agent = String(agentId ?? '').trim();
+    if (!agent) throw new Error('agent_id_invalid');
+    await this.pool.query(`DELETE FROM ${minion ? 'agent_minion_model_selections' : 'agent_model_selections'} WHERE agent_id=$1`, [agent]);
+  }
   async saveModelSelection({ agentId, connectionId, model, reasoningEffort = 'off', temperature = undefined, minion = false } = {}) {
     const agent = String(agentId ?? '').trim();
     if (!agent) throw new Error('agent_id_invalid');

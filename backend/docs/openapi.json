@@ -9429,6 +9429,8 @@
               "type": "string",
               "enum": [
                 "agents",
+                "skills",
+                "scheduled-jobs",
                 "settings",
                 "model-connections",
                 "mcp-connections",

@@ -1392,7 +1392,7 @@ async function applyApiCors(req, res, url) {
 }
 
 
-const IMPORT_SUPPORTED_CATEGORIES = new Set(['agents', 'settings', 'task-board', 'model-connections', 'mcp-connections', 'ui-auth']);
+const IMPORT_SUPPORTED_CATEGORIES = new Set(['agents', 'settings', 'task-board', 'model-connections', 'mcp-connections', 'ui-auth', 'scheduled-jobs', 'skills']);
 async function importPreview(decoded, conflictPolicy) {
   const supported = decoded.categories.filter((id) => IMPORT_SUPPORTED_CATEGORIES.has(id));
   const unsupported = decoded.categories.filter((id) => !IMPORT_SUPPORTED_CATEGORIES.has(id));
@@ -1417,7 +1417,20 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
   if (Object.hasOwn(categories, 'agents') && (!categories.agents || typeof categories.agents !== 'object' || Array.isArray(categories.agents) || categories.agents.schema !== 'burrow.agents-and-profiles/v2' || !Array.isArray(categories.agents.records) || !categories.agents.profiles || typeof categories.agents.profiles !== 'object' || Array.isArray(categories.agents.profiles))) {
     return { ok: false, status: 400, error: 'import_agents_format_invalid', details: { expected: 'burrow.agents-and-profiles/v2' } };
   }
+  if (Object.hasOwn(categories, 'scheduled-jobs') && (categories['scheduled-jobs']?.schema !== 'burrow.scheduled-jobs/v1' || !Array.isArray(categories['scheduled-jobs'].jobs) || categories['scheduled-jobs'].jobs.some(job => !job || !/^[A-Za-z0-9._-]{1,96}$/.test(job.id || '') || job.ownerModId))) return { ok: false, status: 400, error: 'import_scheduled_jobs_format_invalid' };
+  if (Object.hasOwn(categories, 'skills') && (categories.skills?.schema !== 'burrow.skills/v1' || !Array.isArray(categories.skills.records) || !Array.isArray(categories.skills.assignments) || categories.skills.records.some(skill => !skill || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(skill.id || '') || skill.storage && skill.storage !== 'postgres' || skill.contentOwner && skill.contentOwner !== 'operator'))) return { ok: false, status: 400, error: 'import_skills_format_invalid' };
+  if (categories.skills?.assignments.some(assignment => !assignment || typeof assignment.agentId !== 'string' || !Array.isArray(assignment.assignedSkillIds) || assignment.assignedSkillIds.some(id => !categories.skills.records.some(skill => skill.id === id)))) return { ok: false, status: 400, error: 'import_skill_assignments_invalid' };
+  for (const records of [categories['scheduled-jobs']?.jobs, categories.skills?.records]) {
+    if (records && new Set(records.map(record => record.id)).size !== records.length) return { ok: false, status: 400, error: 'import_duplicate_id' };
+  }
   const conflicts = [];
+  for (const skill of (categories.skills?.records || [])) if (await postgresApplication.stores.skills.get(skill.id)) conflicts.push({ category: 'skills', id: skill.id });
+  for (const job of (categories['scheduled-jobs']?.jobs || [])) {
+    const existing = await postgresApplication.stores.scheduledJobs.getJob(job.id);
+    // Generic config imports must never overwrite mod-owned definitions.
+    if (existing?.ownerModId) return { ok: false, status: 409, error: 'import_scheduled_job_mod_owned', details: { id: job.id } };
+    if (existing) conflicts.push({ category: 'scheduled-jobs', id: job.id });
+  }
   if (categories['task-board']?.projects && Array.isArray(categories['task-board'].projects)) for (const project of categories['task-board'].projects) if (await withTaskBoard((store) => store.getProject(project.id))) conflicts.push({ category: 'task-board.projects', id: project.id });
   if (Array.isArray(categories['model-connections'])) {
     const store = modelsStore();
@@ -1456,6 +1469,18 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
 
   };
   if (categories.settings && typeof categories.settings === 'object') {
+    if (categories.settings.timezone !== undefined) {
+      await write('settings:timezone', () => saveOperatorTimezone(postgresApplication.stores.metadata, { timezone: categories.settings.timezone }));
+      imported.push('settings:timezone');
+    }
+    if (categories.settings.retentionPolicy !== undefined) {
+      await write('settings:retention-policy', () => postgresApplication.stores.retentionSettings.savePolicy(categories.settings.retentionPolicy));
+      imported.push('settings:retention-policy');
+    }
+    if (categories.settings.workingMemoryRetention !== undefined) {
+      await write('settings:working-memory-retention', () => postgresApplication.stores.workingMemoryRetention.save(categories.settings.workingMemoryRetention));
+      imported.push('settings:working-memory-retention');
+    }
     if (categories.settings.browserOrigin !== undefined) {
       const result = await write('settings:browser-origin', () => saveBrowserOriginSettings(categories.settings.browserOrigin, { metadata: metadataStore() }));
       if (!result.ok) return failure(result);
@@ -1516,13 +1541,48 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
           }
         } finally { await dreamStore.close(); }
       }
+      for (const [field, minion] of [['modelSelection', false], ['minionModelSelection', true]]) {
+        if (!Object.hasOwn(agent, field)) continue; // Older v2 bundles remain valid.
+        const selection = agent[field];
+        if (selection) await write(`agents:${agent.id}:${field}`, () => modelsStore().saveModelSelection({ ...selection, agentId: agent.id, minion }));
+        else await write(`agents:${agent.id}:${field}`, () => modelsStore().clearModelSelection(agent.id, { minion }));
+      }
+      if (Object.hasOwn(agent, 'archiveSummaryModelSelection')) await write(`agents:${agent.id}:archive-summary-model`, () => saveArchiveSummaryModelSelection(agent.id, agent.archiveSummaryModelSelection || {}));
       imported.push(`agents:${agent.id}`);
     }
-    if (categories.agents.operator && typeof categories.agents.operator === 'object') {
+    if (categories.agents.operator?.name && typeof categories.agents.operator === 'object') {
       const operator = categories.agents.operator;
       await write('agents:operator', () => modelsStore().saveIdentity({ kind: 'operator', id: 'default', name: operator.name ?? '', avatar: operator.avatar ?? '' }));
       imported.push('agents:operator');
     }
+  }
+  for (const job of (categories['scheduled-jobs']?.jobs || [])) {
+    if (conflictPolicy === 'skip' && conflicts.some(c => c.category === 'scheduled-jobs' && c.id === job.id)) continue;
+    const store = postgresApplication.stores.scheduledJobs;
+    const existing = await store.getJob(job.id);
+    await write(`scheduled-jobs:${job.id}`, async () => {
+      if (!await agentsStore().get(job.agentId)) throw new Error('scheduled_job_agent_not_found');
+      return existing ? store.updateJob(job.id, job) : store.createJob(job);
+    });
+    imported.push(`scheduled-jobs:${job.id}`);
+  }
+  if (categories.settings?.brainEmbeddings !== undefined) {
+    await write('settings:brain-embeddings', () => postgresApplication.stores.brainEmbeddings.configure(categories.settings.brainEmbeddings));
+    imported.push('settings:brain-embeddings');
+  }
+  for (const skill of (categories.skills?.records || [])) {
+    if (conflictPolicy === 'skip' && conflicts.some(c => c.category === 'skills' && c.id === skill.id)) continue;
+    const store = postgresApplication.stores.skills;
+    await write(`skills:${skill.id}`, async () => await store.get(skill.id) ? store.update(skill.id, skill) : store.create(skill));
+    imported.push(`skills:${skill.id}`);
+  }
+  for (const assignment of (categories.skills?.assignments || [])) {
+    if (conflictPolicy === 'skip' && (conflicts.some(c => c.category === 'agents' && c.id === assignment.agentId) || conflicts.some(c => c.category === 'skills' && assignment.assignedSkillIds.includes(c.id)))) continue;
+    const skillStore = postgresApplication.stores.skills;
+    const incomingIds = new Set(categories.skills.records.map(skill => skill.id));
+    const retainedIds = (await skillStore.assignments(assignment.agentId)).assignedSkillIds.filter(id => !incomingIds.has(id));
+    await write(`skills:assignments:${assignment.agentId}`, () => skillStore.replaceAssignments(assignment.agentId, [...retainedIds, ...assignment.assignedSkillIds]));
+    imported.push(`skills:assignments:${assignment.agentId}`);
   }
   if (categories['task-board']) for (const project of (categories['task-board'].projects || [])) { if (conflictPolicy === 'skip' && conflicts.some((c) => c.category === 'task-board.projects' && c.id === project.id)) continue; const existing = await withTaskBoard((store) => store.getProject(project.id)); if (!existing) await write(`task-board.projects:${project.id}`, () => withTaskBoard((store) => store.createProject(project))); else if (conflictPolicy === 'replace') await write(`task-board.projects:${project.id}`, () => withTaskBoard((store) => store.updateProject(project.id, project))); else continue; imported.push(`task-board.projects:${project.id}`); }
   if (categories['task-board']) for (const task of (categories['task-board'].tasks || [])) { const exists = await withTaskBoard((store) => store.getTask(task.id)); if (exists && conflictPolicy !== 'replace') continue; if (!exists) await write(`task-board.tasks:${task.id}`, () => withTaskBoard((store) => store.createTask(task))); else await write(`task-board.tasks:${task.id}`, () => withTaskBoard((store) => store.updateTask(task.id, task))); imported.push(`task-board.tasks:${task.id}`); }
@@ -1531,6 +1591,7 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
     for (const connection of connections) { if (connection.apiKey === '[redacted]' || (conflictPolicy === 'skip' && conflicts.some(c => c.category === 'mcp-connections' && c.id === connection.id))) continue; const { environmentVariables, ...portableConnection } = connection; await write(`mcp-connections:${connection.id}`, () => mcpStore().save(portableConnection)); imported.push(`mcp-connections:${connection.id}`); }
     for (const grant of (Array.isArray(categories['mcp-connections'].grants) ? categories['mcp-connections'].grants : [])) {
       if (!await agentsStore().get(grant?.agentId) || !Array.isArray(grant?.tools) || !grant.tools.length) continue;
+      if (conflictPolicy === 'skip' && (conflicts.some(c => c.category === 'agents' && c.id === grant.agentId) || grant.tools.some(tool => conflicts.some(c => c.category === 'mcp-connections' && c.id === tool.connectionId)))) continue;
       // v2 stores connection IDs inside each per-agent tool grant. The old
       // importer incorrectly looked for grant.connectionId on the wrapper,
       // which is undefined and caused every valid MCP export to fail with
@@ -1579,6 +1640,7 @@ async function exportSnapshot(categories = []) {
     const dreamStore = dreamSettingsStore();
     let profiles;
     let dreamSettings;
+    const modelSelections = Object.fromEntries(await Promise.all(agentRecords.map(async agent => [agent.id, { modelSelection: await modelsStore().modelSelection(agent.id), minionModelSelection: await modelsStore().modelSelection(agent.id, { minion: true }), archiveSummaryModelSelection: await archiveSummarySelection(agent.id) }])));
     try {
       profiles = Object.fromEntries(await Promise.all(agentRecords.map(async (agent) => [agent.id, await profileStore.list(agent.id)])));
       dreamSettings = Object.fromEntries(await Promise.all(agentRecords.map(async (agent) => [agent.id, await dreamStore.get(agent.id)])));
@@ -1588,7 +1650,7 @@ async function exportSnapshot(categories = []) {
       operator: identities.operator,
       records: (await agentsStore().list({ includeDisabled: true })).map((agent) => {
         const identity = identitiesById.get(agent.id);
-        return { ...agent, ...(identity ? { identityName: identity.name, avatar: identity.avatar || '' } : {}), dreamSettings: dreamSettings[agent.id] };
+        return { ...agent, ...modelSelections[agent.id], ...(identity ? { identityName: identity.name, avatar: identity.avatar || '' } : {}), dreamSettings: dreamSettings[agent.id] };
       }),
       profiles,
     };
@@ -1596,11 +1658,28 @@ async function exportSnapshot(categories = []) {
   if (categories.includes('settings')) {
     data.settings = {
       schema: 'burrow.portable-settings/v1',
+      timezone: await operatorTimezone(postgresApplication.stores.metadata),
+      retentionPolicy: await postgresApplication.stores.retentionSettings.readPolicy(),
+      workingMemoryRetention: await postgresApplication.stores.workingMemoryRetention.read(),
+      brainEmbeddings: await postgresApplication.stores.brainEmbeddings.settings().then(s => ({ enabled: s.enabled, connectionId: s.connection_id, model: s.model })),
       browserOrigin: (await browserOriginSettings({ metadata: metadataStore() })).settings,
       executionBoundaries: await readExecutionBoundaries({ metadataStore: postgresApplication.stores.metadata, }),
       curatorSelection: await readCuratorSelection({ stores: postgresApplication.stores, root: curatorRoot() }),
       ownership: [{ id: 'core-persistence', authority: 'postgres', storage: 'PostgreSQL' }],
     };
+  }
+  if (categories.includes('skills')) {
+    const skills = await postgresApplication.stores.skills.list();
+    const sourceIds = new Set((await postgresApplication.stores.skillSources.list()).map(s => s.skillId));
+    const portable = skills.filter(s => s.storage === 'postgres' && s.contentOwner === 'operator' && !sourceIds.has(s.id));
+    const portableIds = new Set(portable.map(s => s.id));
+    data.skills = { schema: 'burrow.skills/v1', records: portable.map(({ id, name, description, content, lifecycle, global }) => ({ id, name, description, content, lifecycle, global })),
+      assignments: await Promise.all((await agentsStore().list({ includeDisabled: true })).map(async agent => ({ agentId: agent.id, assignedSkillIds: (await postgresApplication.stores.skills.assignments(agent.id)).assignedSkillIds.filter(id => portableIds.has(id)) }))),
+      externalDependencies: skills.filter(s => !portableIds.has(s.id)).map(({ id, storage, contentOwner, installedPath, lifecycle, global }) => ({ id, storage, contentOwner, installedPath, lifecycle, global, requiresReinstallation: true })),
+      externalAssignments: await Promise.all((await agentsStore().list({ includeDisabled: true })).map(async agent => ({ agentId: agent.id, assignedSkillIds: (await postgresApplication.stores.skills.assignments(agent.id)).assignedSkillIds.filter(id => !portableIds.has(id)) }))) };
+  }
+  if (categories.includes('scheduled-jobs')) {
+    data['scheduled-jobs'] = { schema: 'burrow.scheduled-jobs/v1', jobs: (await postgresApplication.stores.scheduledJobs.listJobs({ ownerModId: null })).map(({ id, agentId, name, prompt, cron, sessionId, modelConnectionId, model, enabled }) => ({ id, agentId, name, prompt, cron, sessionId, modelConnectionId, model, enabled })) };
   }
   if (categories.includes('model-connections')) {
     const store = modelsStore();
@@ -1611,8 +1690,8 @@ async function exportSnapshot(categories = []) {
     const agents = await agentsStore().list({ includeDisabled: true });
     data['mcp-connections'] = {
       schema: 'burrow.mcp-connections-and-grants/v2',
-      connections: await Promise.all((await store.list()).map(async (connection) => ({ ...connection, apiKey: await store.apiKey(connection.id), environmentVariables: (connection.environmentVariables || []).map(({ name }) => ({ name, configured: true })) }))),
-      grants: (await Promise.all(agents.map(async (agent) => ({ agentId: agent.id, tools: (await store.agentTools(agent.id)).map((grant) => ({ connectionId: grant.connectionId, toolName: grant.toolName, enabled: grant.enabled })) })))).filter((entry) => entry.tools.length > 0),
+      connections: await Promise.all((await store.list()).filter(connection => connection.transport !== 'mod' && !connection.id.startsWith('mod.')).map(async (connection) => ({ ...connection, apiKey: await store.apiKey(connection.id), environmentVariables: (connection.environmentVariables || []).map(({ name }) => ({ name, configured: true })) }))),
+      grants: (await Promise.all(agents.map(async (agent) => ({ agentId: agent.id, tools: (await store.agentTools(agent.id)).filter(grant => !grant.connectionId.startsWith('mod.')).map((grant) => ({ connectionId: grant.connectionId, toolName: grant.toolName, enabled: grant.enabled })) })))).filter((entry) => entry.tools.length > 0),
     };
   }
   if (categories.includes('ui-auth')) {
