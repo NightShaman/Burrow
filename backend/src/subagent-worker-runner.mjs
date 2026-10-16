@@ -5,7 +5,8 @@ import path from 'node:path';
 import { createModelAdapter } from './model-adapter.mjs';
 import { actionFromNativeToolCall, nativeToolSchemas } from './action-proposal.mjs';
 import { reviewProposalActions } from './action-safety.mjs';
-import { executeReviewedProposalActions } from './proposal-executor.mjs';
+import { executeReviewedProposalActions } from './proposal-execution.mjs';
+import { resolveNativeFilesystemExecutionTarget } from './native-filesystem-execution-router.mjs';
 import { createExecutionContext } from './execution-context.mjs';
 import { executionPolicyAllowsMutation, normalizeExecutionPolicyInput } from './execution-policy.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
@@ -165,6 +166,8 @@ async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSes
     dataRoot, sessionId: childSessionId, traceLogger, executionPolicy, modelConfig,
     allowMutations: executionPolicyAllowsMutation(executionPolicy),
     observedToolResults, executionContext, abortSignal: signal,
+    // Nested remote children retain this worker's live execution dependencies.
+    childRunner: resolveNativeFilesystemExecutionTarget(executionContext).kind === 'remote' ? runSpawnSubagentChild : null,
   });
   const resultsByCallId = new Map((execution.nativeToolResults || execution.toolResults).map((result, index) => {
     const compact = execution.toolResults[index] || {};

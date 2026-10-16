@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { createTraceLogger } from './trace-logger.mjs';
-import { loadRuntimeConfig } from './app-runtime.mjs';
+import { loadRuntimeConfig } from './runtime-config-loader.mjs';
 import { runBurrow } from './runner.mjs';
 import { reviewProposalActions } from './action-safety.mjs';
 import { runExec } from './harness/exec.mjs';

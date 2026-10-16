@@ -1,0 +1,600 @@
+import { searchAgentRunEvidence } from './run-evidence.mjs';
+import { executeBrainTool } from './brain-tool-executor.mjs';
+import { redactText } from './redaction.mjs';
+import { runExec } from './harness/exec.mjs';
+import { createProcessExecutionRouter, resolveProcessExecutionTarget } from './process-execution-router.mjs';
+import { createNativeFilesystemExecutionRouter, resolveNativeFilesystemExecutionTarget } from './native-filesystem-execution-router.mjs';
+import { readFileEnvelope } from './harness/read-file.mjs';
+import { writeFileEnvelope } from './harness/write-file.mjs';
+import { applyPatchEnvelope } from './harness/apply-patch.mjs';
+import { editFileEnvelope, gitDiffEnvelope, gitStatusEnvelope, globEnvelope, listFilesEnvelope, searchFilesEnvelope, statPathEnvelope } from './harness/developer-tools.mjs';
+import { executeSpawnSubagentTool } from './subagent-spawn-execution.mjs';
+import { sendAgentMessage } from './agent-chat-tool.mjs';
+import { updateOwnToolsProfile } from './agent-profile-tool.mjs';
+import { createAgentScheduledJob, executeAgentScheduledJobTool } from './agent-scheduled-job-tool.mjs';
+import { executeContinuityHandoffWriteTool, executeRollingContinuitySearchTool, executeSessionHandoffReadTool, executeWorkingMemoryRecordTool, executeWorkingMemorySearchTool } from './memory-tool-executor.mjs';
+import { searchAgentSessionEvidence } from './session-search.mjs';
+import { executeTaskBoardCreateTool, executeTaskBoardDeleteTool, executeTaskBoardListTool, executeTaskBoardReassignTool, executeTaskBoardUpdateTool } from './task-board-tool-executor.mjs';
+import { compactToolReceipts } from './runtime-result-shapes.mjs';
+import { readAttachmentArtifact } from './attachment-store.mjs';
+import { reviewProposalActions } from './action-safety.mjs';
+import { invokeMcpTool, publicMcpError, publicMcpFailureDetail } from './mcporter-adapter.mjs';
+import { grantedMcpTool, mcpCapabilitiesReceipt, mcpProvidersReceipt } from './mcp-menu.mjs';
+import { activeModToolConnection } from './mod-agent-tools.mjs';
+import { executeForgeTool, forgeFailure } from './forge-agent-tools.mjs';
+import { credentialProducer, protectMcpOutput, protectToolOutput, resolveManagedProtectedBindings } from './protected-values.mjs';
+import { executeSkillTool } from './skill-tool-executor.mjs';
+import path from 'node:path';
+
+function workspacePath(filePath, workspaceRoot, rootDir) {
+  if (!filePath) return filePath;
+  if (path.isAbsolute(filePath)) return filePath;
+  return path.resolve(workspaceRoot || rootDir || process.cwd(), filePath);
+}
+
+function withExecutionProvenance(result, target, executionContext, toolCallId) {
+  if (!result || typeof result !== 'object') return result;
+  const parentRunId = executionContext?.parentRunId || null;
+  return {
+    ...result,
+    execution: target?.kind === 'remote'
+      ? { kind: 'remote', providerId: target.providerId, targetId: target.targetId, parentRunId, toolCallId: toolCallId || null, operationId: result.operationId || null }
+      : { kind: 'local', parentRunId, toolCallId: toolCallId || null },
+  };
+}
+
+export async function executeReviewedProposalActions({ conversationStore = null, actions = [], reviews = [], workspaceRoot = null, rootDir = null, dataRoot = null, sessionId = null, conversationId = null, agentId = null, agentRuntime = null, resolveAgentRuntime = null, runAgentReply = null, workingMemoryStore = null, executionPolicy = null, modelConfig = null, traceLogger = null, artifactPrefix = null, observedToolResults = [], executionContext = null, abortSignal = null, invokeMcp = invokeMcpTool, childRunner = null } = {}) {
+  abortSignal = abortSignal || executionContext?.abortSignal || null;
+  agentId = agentId || executionContext?.agentId || null;
+  const resolvedConversationId = conversationId || executionContext?.conversationId || null;
+  // Agent home is the normal-chat default. Explicit internal/delegated
+  // structural targets remain valid one-turn execution contexts; a model may
+  // otherwise choose an absolute cwd for one shell_exec call.
+  const executionRoot = executionContext?.target?.kind === 'filesystem'
+    ? executionContext.target.root
+    : executionContext?.workspaceRoot || workspaceRoot || rootDir || process.cwd();
+  const toolResults = [];
+  const skipped = [];
+  const routeFilesystem = createNativeFilesystemExecutionRouter({
+    localExecute: async ({ tool, arguments: args }) => {
+      if (tool === 'files_read') return readFileEnvelope(args);
+      if (tool === 'files_list') return listFilesEnvelope(args);
+      if (tool === 'files_find') return globEnvelope(args);
+      if (tool === 'files_inspect') return statPathEnvelope(args);
+      if (tool === 'files_search') return searchFilesEnvelope(args);
+      if (tool === 'files_write') return writeFileEnvelope(args);
+      if (tool === 'files_edit') return editFileEnvelope(args);
+      if (tool === 'files_patch') return applyPatchEnvelope(args);
+      throw new Error('native_filesystem_tool_unsupported');
+    },
+    remoteController: executionContext?.processExecutionController || null,
+  });
+  const executeFilesystem = async (action, args) => {
+    const target = resolveNativeFilesystemExecutionTarget(executionContext || {});
+    const result = await routeFilesystem({ target, operation: { tool: action.tool, arguments: args } }, {
+      parentRunId: executionContext?.parentRunId || traceLogger?.runId,
+      toolCallId: action.toolCallId,
+      abortSignal,
+    });
+    return withExecutionProvenance(result, target, executionContext, action.toolCallId);
+  };
+
+  // Validate the whole batch before dispatch: conflicting immutable IDs must
+  // not partially execute, and identical repeats are one provider operation.
+  const callsById = new Map();
+  actions = actions.filter((action) => {
+    if (!action.toolCallId) return true;
+    const { index, ...operation } = action;
+    const signature = JSON.stringify(Object.fromEntries(Object.entries(operation).sort(([a], [b]) => a.localeCompare(b))));
+    if (!callsById.has(action.toolCallId)) { callsById.set(action.toolCallId, signature); return true; }
+    if (callsById.get(action.toolCallId) !== signature) throw new Error('model_tool_call_conflict');
+    return false;
+  });
+
+  for (const action of actions) {
+    const resultStart = toolResults.length;
+    try {
+    if (abortSignal?.aborted) {
+      skipped.push({ index: action.index, tool: action.tool, toolCallId: action.toolCallId || null, status: 'cancelled' });
+      continue;
+    }
+    const suppliedReview = reviews.find((item) => item.index === action.index) || null;
+    if (suppliedReview?.status !== 'allowed') {
+      const status = suppliedReview?.status || 'unreviewed';
+      skipped.push({ index: action.index, tool: action.tool, status, ...((suppliedReview?.blockers || []).length ? { blockers: suppliedReview.blockers } : {}) });
+      continue;
+    }
+    // Recheck at the concrete executor boundary. Supplied allowed reviews are
+    // useful receipts, but they are not trusted authority; a stale/forged
+    // allowed review must not bypass operator hard blocks or parser errors.
+    const executionReview = reviewProposalActions({ actions: [action], workspaceRoot: executionRoot, executionContext }).reviews[0] || suppliedReview;
+    if (executionReview?.status !== 'allowed') {
+      skipped.push({ index: action.index, tool: action.tool, status: executionReview?.status || 'blocked', ...((executionReview?.blockers || []).length ? { blockers: executionReview.blockers } : {}) });
+      continue;
+    }
+    if (action.tool === 'shell_exec') {
+      const target = resolveProcessExecutionTarget(executionContext || {});
+      const traceDetails = {
+        command: redactText(action.command).slice(0, 2000),
+        cwd: redactText(action.cwd ? path.resolve(action.cwd) : executionRoot).slice(0, 1000),
+        providerId: target.kind === 'remote' ? target.providerId : null,
+      };
+      const started = await traceLogger?.toolStart?.({
+        ...traceDetails,
+        tool: 'shell_exec',
+        toolCallId: action.toolCallId || null,
+        targetId: target.kind === 'remote' ? target.targetId : null,
+        executionTarget: target.kind,
+      });
+      // The authoritative backend resolves protected references. Remote values
+      // are passed only to the authenticated process controller, never embedded
+      // in command text or ordinary process environment fields.
+      const protectedInput = await resolveManagedProtectedBindings(action.protectedBindings, executionContext?.protectedValues, {
+        caller: { agentId, sessionId, conversationId: resolvedConversationId },
+        authorize: async (entry) => {
+          const mod = activeModToolConnection(entry.providerId);
+          if (!mod || mod !== entry.mod || !mod.tools.some((tool) => tool.name === entry.toolName)) return false;
+          const mcp = executionContext?.stores?.mcp;
+          if (!mcp) return false;
+          const connection = await mcp.get(entry.providerId);
+          const grants = await mcp.agentTools(agentId, {availableOnly:true});
+          return Boolean(connection?.enabled && (mod.tools.find((tool) => tool.name === entry.toolName)?.availability === 'mod-authorized' || grants.some((grant) => grant.connectionId === entry.providerId && grant.toolName === entry.toolName && grant.enabled)));
+        },
+      });
+      if (protectedInput.errors.length) {
+        const result = { tool: 'shell_exec', ok: false, command: action.command, cwd: action.cwd ? path.resolve(action.cwd) : executionRoot, error: protectedInput.errors.join(','), protectedBindings: protectedInput.bindings };
+        toolResults.push(result);
+        await (traceLogger?.toolEnd || traceLogger?.tool)?.({
+          ...traceDetails,
+          tool: 'shell_exec',
+          ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}),
+          toolCallId: action.toolCallId || null,
+          targetId: target.kind === 'remote' ? target.targetId : null,
+          executionTarget: target.kind,
+          ok: false,
+          error: result.error,
+        });
+        continue;
+      }
+      const process = {
+        command: action.command,
+        cwd: action.cwd ? path.resolve(action.cwd) : executionRoot,
+        env: protectedInput.env,
+        traceLogger: traceLogger ? {
+          ...traceLogger,
+          toolStart: traceLogger.toolStart ? (payload) => traceLogger.toolStart({ ...payload, toolCallId: action.toolCallId || null }) : undefined,
+          toolEnd: traceLogger.toolEnd ? (payload) => traceLogger.toolEnd({ ...payload, toolCallId: action.toolCallId || null }) : undefined,
+        } : traceLogger,
+        artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-shell_exec`,
+        reason: action.reason,
+        abortSignal,
+        protectedValues: Object.values(protectedInput.env),
+      };
+      const routeProcess = executionContext?.processExecutionRouter || createProcessExecutionRouter({
+        localExecute: runExec,
+        remoteController: executionContext?.processExecutionController || null,
+      });
+      let result;
+      try {
+        result = await routeProcess({ target, process, protectedBindings: action.protectedBindings,
+          ...(target.kind === 'remote' && protectedInput.bindings.length ? { protectedValues: protectedInput.env, protectedBindingMetadata: protectedInput.bindings } : {}) }, {
+          parentRunId: executionContext?.parentRunId || traceLogger?.runId,
+          toolCallId: action.toolCallId,
+          abortSignal,
+        });
+      } catch (error) {
+        const code = typeof error?.code === 'string' ? error.code : 'process_dispatch_failed';
+        result = { tool: 'shell_exec', ok: false, command: action.command, cwd: process.cwd, error: code, failureClass: 'tool_dispatch_failed' };
+      }
+      if (protectedInput.bindings.length) result.protectedBindings = protectedInput.bindings;
+      result = withExecutionProvenance(result, target, executionContext, action.toolCallId);
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({
+        ...traceDetails,
+        exitCode: result.exitCode ?? null,
+        operationId: result.execution?.operationId || result.operationId || null,
+        tool: 'shell_exec',
+        ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}),
+        toolCallId: action.toolCallId || null,
+        targetId: target.kind === 'remote' ? target.targetId : null,
+        executionTarget: target.kind,
+        ok: result.ok,
+        error: result.error || null,
+      });
+      continue;
+    }
+
+    if (action.tool === 'files_read') { toolResults.push(await executeFilesystem(action, { filePath: workspacePath(action.filePath, executionRoot, rootDir), workspaceRoot: executionRoot, rootDir, traceLogger, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-read`, reason: action.reason, offsetBytes: action.offsetBytes ?? 0, ...(action.maxBytes ? { maxBytes: action.maxBytes } : {}) })); continue; }
+    if (action.tool === 'files_list') { toolResults.push(await executeFilesystem(action, { dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxEntries: action.maxEntries, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-list`, reason: action.reason })); continue; }
+    if (action.tool === 'files_find') { toolResults.push(await executeFilesystem(action, { pattern: action.pattern, dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxEntries: action.maxEntries, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-files_find`, reason: action.reason })); continue; }
+    if (action.tool === 'files_inspect') { toolResults.push(await executeFilesystem(action, { path: workspacePath(action.path, executionRoot, rootDir), workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-stat`, reason: action.reason })); continue; }
+    if (action.tool === 'files_search') { toolResults.push(await executeFilesystem(action, { query: action.query, dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxMatches: action.maxMatches, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-search`, reason: action.reason })); continue; }
+    if (action.tool === 'git_status' || action.tool === 'git_diff') {
+      const target = resolveProcessExecutionTarget(executionContext || {});
+      const routeProcess = executionContext?.processExecutionRouter || createProcessExecutionRouter({
+        localExecute: runExec,
+        remoteController: executionContext?.processExecutionController || null,
+      });
+      const execute = (process) => routeProcess({ target, process }, {
+        parentRunId: executionContext?.parentRunId || traceLogger?.runId,
+        toolCallId: action.toolCallId,
+        abortSignal,
+      });
+      const envelope = action.tool === 'git_status' ? gitStatusEnvelope : gitDiffEnvelope;
+      toolResults.push(await envelope({ dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-${action.tool}`, reason: action.reason, execute }));
+      continue;
+    }
+    if (action.tool === 'files_edit') { toolResults.push(await executeFilesystem(action, { filePath: workspacePath(action.filePath, executionRoot, rootDir), oldText: action.oldText, newText: action.newText, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-edit`, reason: action.reason })); continue; }
+
+    if (action.tool === 'scheduled_jobs_create') {
+      const started = await traceLogger?.toolStart?.({ tool: action.tool, toolCallId: action.toolCallId || null });
+      const result = await createAgentScheduledJob({ action, agentId, sessionId, store: executionContext?.stores?.scheduledJobs });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, jobId: result.job?.id || null, error: result.error || null });
+      continue;
+    }
+    if (['scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now'].includes(action.tool)) {
+      const started = await traceLogger?.toolStart?.({ tool: action.tool, toolCallId: action.toolCallId || null, jobId: action.jobId || null });
+      const result = await executeAgentScheduledJobTool({ action, agentId, sessionId, store: executionContext?.stores?.scheduledJobs, rootDir, stores: executionContext?.stores, resolveAgentRuntime: resolveAgentRuntime || executionContext?.resolveAgentRuntime });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, jobId: result.job?.id || action.jobId || null, error: result.error || null });
+      continue;
+    }
+
+    if (action.tool === 'attachment_view') {
+      const attachmentId = action.attachmentId;
+      const agentWorkspaceRoot = executionContext?.agentWorkspaceRoot || workspaceRoot || rootDir;
+      const started = await traceLogger?.toolStart?.({ tool: 'attachment_view', attachmentId, toolCallId: action.toolCallId || null });
+      let result;
+      try {
+        const attachment = await readAttachmentArtifact({ agentWorkspaceRoot, artifactPath: attachmentId, attachment: { name: path.basename(attachmentId) } });
+        result = attachment
+          ? { tool: 'attachment_view', ok: true, attachmentId, attachment }
+          : { tool: 'attachment_view', ok: false, attachmentId, error: 'attachment_not_found' };
+      } catch (error) {
+        result = { tool: 'attachment_view', ok: false, attachmentId, error: String(error?.message || error) };
+      }
+      toolResults.push(withExecutionProvenance(result, { kind: 'local' }, executionContext, action.toolCallId));
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({
+        tool: 'attachment_view',
+        ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}),
+        toolCallId: action.toolCallId || null,
+        attachmentId,
+        ok: result.ok,
+        type: result.attachment?.type || null,
+        error: result.error || null,
+      });
+      continue;
+    }
+
+    if (action.tool === 'list_skills' || action.tool === 'load_skill') {
+      const { result, finishTrace } = await executeSkillTool({
+        action,
+        skillsWorkspace: executionContext?.agentWorkspaceRoot ? path.dirname(executionContext.agentWorkspaceRoot) : executionRoot,
+        agentId: agentId || executionContext?.agentId,
+        agentRuntime: agentRuntime || executionContext?.agentRuntime || null,
+        overrides: executionContext?.skillOverrides || {},
+        skillStore: executionContext?.stores?.skills || null,
+        traceLogger,
+      });
+      toolResults.push(result);
+      await finishTrace();
+      continue;
+    }
+
+    if (action.tool && action.tool.startsWith('forge_')) {
+      let result;
+      try {
+        const args = action.tool === 'forge_create_job'
+          ? { mode: action.forgeMode, connectionId: action.forgeConnectionId || action.connectionId, modelId: action.forgeModelId || action.modelId, prompt: action.forgePrompt || action.prompt, idempotencyKey: action.forgeIdempotencyKey || action.idempotencyKey }
+          : action.tool === 'forge_inspect_job' ? { jobId: action.jobId }
+          : action.tool === 'forge_attach_artifact' ? { jobId: action.jobId, artifactId: action.artifactId } : {};
+        result = await executeForgeTool(action.tool, args, { agentId, sessionId: sessionId || executionContext?.sessionId, conversationId: resolvedConversationId });
+      } catch (error) { result = forgeFailure(error); }
+      toolResults.push({ tool: action.tool, ...result });
+      continue;
+    }
+
+    if (action.tool === 'mcp_providers') {
+      const result = mcpProvidersReceipt({ connections: executionContext?.mcpConnections, grants: executionContext?.mcpTools, agentId });
+      toolResults.push(result);
+      continue;
+    }
+
+    if (action.tool === 'mcp_capabilities') {
+      const result = mcpCapabilitiesReceipt({ connections: executionContext?.mcpConnections, grants: executionContext?.mcpTools, provider: action.mcpProvider, query: action.query, cursor: action.cursor, limit: action.limit });
+      toolResults.push(result);
+      continue;
+    }
+
+    if (action.tool === 'mcp_call') {
+      const selected = grantedMcpTool({ connections: executionContext?.mcpConnections, grants: executionContext?.mcpTools, provider: action.mcpProvider, toolName: action.mcpToolName });
+      const started = await traceLogger?.toolStart?.({ tool: 'mcp_call', toolCallId: action.toolCallId || null, provider: action.mcpProvider, mcpToolName: action.mcpToolName, connectionId: selected.connection?.id || null });
+      let result;
+      try {
+        if (selected.error) throw new Error(selected.error);
+        if (selected.connection.transport === 'mod') {
+          // Reviews and discovery are snapshots. A revoked grant must fail even
+          // when a queued action executes later in the same turn.
+          const mcp = executionContext?.stores?.mcp;
+          if (!mcp) throw new Error('mcp_store_required');
+          const liveMod = activeModToolConnection(selected.connection.id);
+          const connection = await mcp.get(selected.connection.id);
+          if (!liveMod || liveMod !== selected.connection.mod || !liveMod.tools.some((tool) => tool.name === action.mcpToolName) || !connection?.enabled) throw new Error('mcp_provider_not_available');
+          const grants = await mcp.agentTools(agentId, {availableOnly:true});
+          if (liveMod.tools.find((tool) => tool.name === action.mcpToolName)?.availability !== 'mod-authorized' && !grants.some((grant) => grant.connectionId === selected.connection.id && grant.toolName === action.mcpToolName && grant.enabled)) throw new Error('mcp_tool_not_granted');
+        }
+        const output = selected.connection.transport === 'mod'
+          ? await selected.connection.invoke(action.mcpToolName, action.mcpArguments, { context: { agentId, sessionId, conversationId, runId: executionContext?.parentRunId || null }, abortSignal })
+          : await invokeMcp(selected.connection, { apiKey: selected.connection.apiKey, environmentVariables: selected.connection.environmentVariables, toolName: action.mcpToolName, arguments: action.mcpArguments });
+        const protectedOutput = selected.connection.transport === 'mod'
+          ? protectToolOutput(output, { registry: executionContext?.protectedValues,
+            managedIssuer: (declaration) => {
+              if (!agentId || !executionContext?.protectedValues || typeof selected.connection.resolveProtectedReference !== 'function') return null;
+              return { managed: true, reference: declaration.reference, version: declaration.version,
+                providerId: selected.connection.id,
+                toolName: action.mcpToolName, mod: selected.connection.mod,
+                caller: { agentId, sessionId, conversationId: resolvedConversationId },
+                resolve: (reference, caller) => selected.connection.resolveProtectedReference(action.mcpToolName, reference, caller) };
+            } })
+          : protectMcpOutput(output, { provider: selected.connection.name, toolName: action.mcpToolName, mcpArguments: action.mcpArguments, registry: executionContext?.protectedValues });
+        const withheld = protectedOutput.protection.status === 'withheld';
+        result = {
+          tool: 'mcp_call', ok: !withheld, provider: selected.connection.name, mcpToolName: action.mcpToolName, connectionId: selected.connection.id,
+          output: protectedOutput.safeOutput,
+          protection: protectedOutput.protection,
+          ...(withheld ? { error: 'mcp_sensitive_response_withheld' } : {}),
+          ...(protectedOutput.protectedValues.length ? { protectedValues: protectedOutput.protectedValues } : {}),
+        };
+      } catch (error) {
+        const sensitiveProducer = credentialProducer({ provider: selected.connection?.name || action.mcpProvider, toolName: action.mcpToolName, mcpArguments: action.mcpArguments });
+        result = {
+          tool: 'mcp_call', ok: false, provider: action.mcpProvider, mcpToolName: action.mcpToolName, connectionId: selected.connection?.id || null,
+          error: selected.connection?.transport === 'mod' ? (error?.message === 'mcp_tool_not_granted' ? 'mcp_tool_not_granted' : 'mcp_tool_failed') : publicMcpError(error, 'mcp_tool_failed'),
+          // Credential providers may place retrieved values in an isError text
+          // payload. That payload has not crossed the protection adapter, so do
+          // not project free-form diagnostics from it into model-visible state.
+          ...(selected.connection?.transport === 'mod' || sensitiveProducer ? {} : publicMcpFailureDetail(error, [selected.connection?.apiKey, ...Object.values(selected.connection?.environmentVariables || {})])),
+        };
+      }
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'mcp_call', toolCallId: action.toolCallId || null, ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, provider: result.provider, mcpToolName: result.mcpToolName, connectionId: result.connectionId, error: result.error || null });
+      continue;
+    }
+
+    if (action.tool === 'run_evidence_search') {
+      const started = await traceLogger?.toolStart?.({ tool: action.tool, query: action.query });
+      const result = await searchAgentRunEvidence({ conversationStore: conversationStore || executionContext?.conversationStore || executionContext?.stores?.conversations, agentId: agentId || executionContext?.agentId, sessionId: sessionId || executionContext?.sessionId, query: action.query, limit: action.limit });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, toolCallId: action.toolCallId || null, ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, resultCount: result.count, error: result.error || null });
+      continue;
+    }
+
+    if (action.tool === 'session_search') {
+      const started = await traceLogger?.toolStart?.({ tool: 'session_search', query: action.query, scope: action.sessionScope });
+      const result = await searchAgentSessionEvidence({
+        conversationStore: conversationStore || executionContext?.conversationStore || executionContext?.stores?.conversations,
+        continuityStore: executionContext?.stores?.continuity,
+        rootDir: executionContext?.agentWorkspaceRoot || rootDir,
+        additionalRootDirs: [dataRoot || executionContext?.dataRoot].filter(Boolean),
+        dataRoot: executionContext?.agentDataRoot || dataRoot,
+        agentId: agentId || executionContext?.agentId,
+        sessionId: sessionId || executionContext?.sessionId || 'default',
+        query: action.query,
+        scope: action.sessionScope,
+        limit: action.limit,
+        since: action.since, until: action.until, sourceId: action.sourceId,
+        sourceSessionId: action.sourceSessionId, neighborCount: action.neighborCount,
+      });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({
+        tool: 'session_search',
+        ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}),
+        ok: result.ok,
+        query: result.query,
+        scope: result.scope,
+        resultCount: result.count,
+      });
+      continue;
+    }
+
+    if (action.tool?.startsWith('brain_')) {
+      const started = await traceLogger?.toolStart?.({ tool: action.tool });
+      const result = await executeBrainTool({tool:action.tool, arguments:{...action,id:action.brainId}, agentId,store:executionContext?.stores?.brains});
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, toolCallId: action.toolCallId || null, ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, error: result.error || null });
+      continue;
+    }
+    if (action.tool === 'memory_working_search') {
+      const started = await traceLogger?.toolStart?.({ tool: 'memory_working_search', query: action.query, project: action.project || null });
+      const result = await executeWorkingMemorySearchTool({ arguments: { query: action.query, project: action.project, limit: action.limit }, agentId, continuityScope: executionContext?.continuityScope, store: workingMemoryStore || executionContext?.stores?.workingMemory });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'memory_working_search', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, query: result.query, project: result.project, resultCount: result.resultCount ?? 0, error: result.error || null });
+      continue;
+    }
+
+    if (action.tool === 'memory_rolling_search') {
+      const started = await traceLogger?.toolStart?.({ tool: 'memory_rolling_search', query: action.query, project: action.project || null });
+      const result = await executeRollingContinuitySearchTool({ arguments: { query: action.query, project: action.project, limit: action.limit }, agentId, continuityScope: executionContext?.continuityScope, store: workingMemoryStore || executionContext?.stores?.workingMemory });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'memory_rolling_search', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, query: result.query, project: result.project, resultCount: result.resultCount ?? 0, error: result.error || null });
+      continue;
+    }
+
+    if (action.tool === 'memory_working_write') {
+      const started = await traceLogger?.toolStart?.({ tool: 'memory_working_write', project: action.project, kind: action.memoryKind });
+      const result = await executeWorkingMemoryRecordTool({ arguments: { project: action.project, kind: action.memoryKind, state: action.state, title: action.title, content: action.content, sourceRefs: action.sourceRefs }, agentId, sessionId, conversationId: resolvedConversationId, continuityScope: executionContext?.continuityScope, store: workingMemoryStore || executionContext?.stores?.workingMemory });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'memory_working_write', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, record: result.record || null, error: result.error || null });
+      continue;
+    }
+
+    if (action.tool === 'session_read_handoff') {
+      const started = await traceLogger?.toolStart?.({ tool: 'session_read_handoff' });
+      const result = await executeSessionHandoffReadTool({ agentId, sessionId: sessionId || executionContext?.sessionId || 'default', store: executionContext?.stores?.continuity });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'session_read_handoff', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, found: Boolean(result.handoff), error: result.error || null });
+      continue;
+    }
+
+    if (action.tool === 'session_write_handoff') {
+      const started = await traceLogger?.toolStart?.({ tool: 'session_write_handoff' });
+      const result = await executeContinuityHandoffWriteTool({ arguments: { title: action.title, content: action.content, sourceRefs: action.sourceRefs }, agentId, sessionId, runId: traceLogger?.runId || null, store: executionContext?.stores?.continuity });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'session_write_handoff', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, handoff: result.handoff || null, error: result.error || null });
+      continue;
+    }
+
+    if (action.tool === 'tasks_list') {
+      const started = await traceLogger?.toolStart?.({ tool: 'tasks_list', projectId: action.project || null });
+      const result = await executeTaskBoardListTool({ arguments: { projectId: action.project, status: action.status, priority: action.priority, assignedAgentId: action.assignedAgentId }, store: executionContext?.stores?.tasks });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'tasks_list', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, resultCount: result.resultCount, error: result.error || null });
+      continue;
+    }
+    if (action.tool === 'tasks_create') {
+      const started = await traceLogger?.toolStart?.({ tool: 'tasks_create', projectId: action.project || null });
+      const result = await executeTaskBoardCreateTool({ arguments: { projectId: action.project, title: action.title, ...(action.description === null ? {} : { description: action.description }), ...(action.status === null ? {} : { status: action.status }), ...(action.priority === null ? {} : { priority: action.priority }), ...(action.metadata === null ? {} : { metadata: action.metadata }), ...(action.assignedAgentId === null ? {} : { assignedAgentId: action.assignedAgentId }) }, agentId, store: executionContext?.stores?.tasks });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'tasks_create', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, task: result.task || null, error: result.error || null });
+      continue;
+    }
+    if (action.tool === 'tasks_update') {
+      const started = await traceLogger?.toolStart?.({ tool: 'tasks_update', taskId: action.taskId });
+      const result = await executeTaskBoardUpdateTool({ arguments: { taskId: action.taskId, ...(action.title === null ? {} : { title: action.title }), ...(action.description === null ? {} : { description: action.description }), ...(action.status === null ? {} : { status: action.status }), ...(action.priority === null ? {} : { priority: action.priority }), ...(action.metadata === null ? {} : { metadata: action.metadata }), ...(action.assignedAgentId === null ? {} : { assignedAgentId: action.assignedAgentId }) }, agentId, store: executionContext?.stores?.tasks });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'tasks_update', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, task: result.task || null, error: result.error || null });
+      continue;
+    }
+
+    if (action.tool === 'tasks_assign') {
+      const started = await traceLogger?.toolStart?.({ tool: 'tasks_assign', taskId: action.taskId, assignedAgentId: action.assignedAgentId });
+      const result = await executeTaskBoardReassignTool({ arguments: { taskId: action.taskId, assignedAgentId: action.assignedAgentId }, agentId, store: executionContext?.stores?.tasks });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'tasks_assign', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, task: result.task || null, error: result.error || null });
+      continue;
+    }
+    if (action.tool === 'tasks_delete') {
+      const started = await traceLogger?.toolStart?.({ tool: 'tasks_delete', taskId: action.taskId });
+      const result = await executeTaskBoardDeleteTool({ arguments: { taskId: action.taskId }, store: executionContext?.stores?.tasks });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'tasks_delete', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, task: result.task || null, error: result.error || null });
+      continue;
+    }
+    if (action.tool === 'agent_update_tools_profile') {
+      const started = await traceLogger?.toolStart?.({ tool: 'agent_update_tools_profile', agentId });
+      const result = await updateOwnToolsProfile({ agentId, markdown: action.profileToolsContent, store: executionContext?.stores?.profiles });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'agent_update_tools_profile', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, agentId: agentId || null, document: result.document || null, error: result.error || null });
+      continue;
+    }
+
+    if (action.tool === 'files_write') {
+      toolResults.push(await executeFilesystem(action, {
+        filePath: workspacePath(action.filePath, executionRoot, rootDir),
+        content: action.content,
+        workspaceRoot: executionRoot,
+        traceLogger,
+        artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-write`,
+      }));
+      continue;
+    }
+
+    if (action.tool === 'files_patch') {
+      toolResults.push(await executeFilesystem(action, {
+        patch: action.patch,
+        workspaceRoot: executionRoot,
+        baseRoot: executionRoot,
+        rootDir,
+        traceLogger,
+        artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-patch`,
+        observedToolResults: [...observedToolResults, ...toolResults],
+      }));
+      continue;
+    }
+
+    if (action.tool === 'agent_send_message') {
+      const started = await traceLogger?.toolStart?.({ tool: 'agent_send_message', recipientAgentId: action.recipientAgentId, targetSessionId: action.targetSessionId || 'default', messageMode: action.messageMode || 'request_reply' });
+      let result;
+      try {
+        result = await sendAgentMessage({ conversationStore: conversationStore || executionContext?.conversationStore || executionContext?.stores?.conversations, senderRuntime: agentRuntime || executionContext?.agentRuntime, resolveRecipientRuntime: resolveAgentRuntime || executionContext?.resolveAgentRuntime, runRecipientReply: runAgentReply || executionContext?.runAgentReply, recipientAgentId: action.recipientAgentId, targetSessionId: action.targetSessionId || 'default', content: action.content, messageMode: action.messageMode || 'request_reply', runId: traceLogger?.runId || null, sourceSessionId: sessionId, abortSignal });
+      } catch (error) {
+        result = { tool: 'agent_send_message', ok: false, recipientAgentId: action.recipientAgentId || null, targetSessionId: action.targetSessionId || 'default', error: error?.message || String(error), autoExecuted: false };
+      }
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({
+        tool: 'agent_send_message',
+        ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}),
+        ok: result.ok,
+        senderAgentId: result.senderAgentId || agentRuntime?.agentId || executionContext?.agentRuntime?.agentId || null,
+        recipientAgentId: result.recipientAgentId || action.recipientAgentId || null,
+        sourceSessionId: result.sourceSessionId || sessionId || null,
+        targetSessionId: result.targetSessionId || action.targetSessionId || 'default',
+        sourceEntryId: result.sourceEntryId || null,
+        recipientEntryId: result.recipientEntryId || null,
+        mirroredReplyEntryId: result.reply?.entryId || null,
+        recipientReplyEntryId: result.reply?.recipientReplyEntryId || null,
+        messageMode: result.messageMode || action.messageMode || 'request_reply',
+        autoExecuted: false,
+        error: result.error || result.reply?.error || null,
+      });
+      continue;
+    }
+
+    if (action.tool === 'spawn_subagent') {
+      const started = await traceLogger?.toolStart?.({ tool: 'spawn_subagent', label: action.label || null, task: action.task || action.purpose || action.reason || null, model: action.model || null, modelProfile: action.modelProfile || null, target: action.target || null });
+      let result;
+      try {
+        result = await executeSpawnSubagentTool({
+          childRunner,
+          arguments: {
+            task: action.task || action.purpose || action.reason,
+            label: action.label,
+            model: action.model,
+            modelProfile: action.modelProfile,
+            timeoutMs: action.timeoutMs,
+            target: action.target,
+            activityId: started?.payload?.activityId || null,
+          },
+          executionContext,
+          abortSignal,
+          rootDir,
+          dataRoot,
+          sessionId,
+          conversationId: resolvedConversationId,
+          runId: traceLogger?.runId || null,
+          traceLogger,
+          modelConfig,
+          executionPolicy,
+        });
+      } catch (error) {
+        const code = String(error?.code || error?.message || 'subagent_dispatch_failed').split(':')[0];
+        result = { tool: 'spawn_subagent', ok: false, spawned: false, status: 'failed', task: action.task || action.purpose || action.reason || null, target: action.target || null, blockers: [`subagent_dispatch_failed:${code}`], warnings: [], evidence: [], summary: `Minion dispatch failed (${code}).`, record: null };
+        await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'spawn_subagent', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: false, status: 'failed', blockers: result.blockers });
+      }
+      toolResults.push(result);
+      // The subagent executor emits the matching result with this activity ID;
+      // it owns the child-process lifecycle and must close the live row.
+      continue;
+    }
+
+    skipped.push({ index: action.index, tool: action.tool, status: 'unsupported_executor_tool' });
+    } finally {
+      for (let i = resultStart; i < toolResults.length; i += 1) {
+        toolResults[i] = { ...toolResults[i], toolCallId: action.toolCallId || null };
+      }
+    }
+  }
+
+  // Raw results remain local to this executor while an action is running.
+  // The returned execution state is deliberately receipt-only.
+  return {
+    executed: toolResults.length,
+    skipped,
+    // Native provider continuations need the original result only long enough
+    // to serialize its call-ID-paired tool message. Durable/runtime receipts
+    // stay compact and never become a second prompt-evidence clipboard.
+    nativeToolResults: toolResults,
+    toolResults: compactToolReceipts(toolResults),
+  };
+}
