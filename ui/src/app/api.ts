@@ -14,7 +14,7 @@ export type RuntimeHealth = {
   /** Calendar release identifier reported by the connected Burrow runtime. */
   version?: string;
   buildIdentity?: string;
-  releaseProvenance?: { assembly: string; backend: string; ui: string; nodeGoblin: string };
+  releaseProvenance?: { assembly: string; backend: string; ui: string };
   traces?: {
     count?: number;
     allocatedBytes?: number;
