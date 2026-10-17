@@ -85,9 +85,35 @@ export async function runExec({
   const stderrState = { originalBytes: 0, capturedBytes: 0 };
   const prefix = safeName(artifactPrefix || `shell_exec-${commandHash(displayCommand)}`);
   const redact = (value) => redactProtectedText(value, protectedValues);
-  const redactAndTruncate = (value, options) => {
-    const envelope = redactAndTruncateText(value, options);
-    envelope.text = redact(envelope.text);
+  const redactCaptured = (value, captureTruncated = false) => {
+    let text = String(value ?? '');
+    // Byte-bounded capture can stop inside a protected value. Exact-value
+    // redaction cannot recognize that suffix afterward, so remove any trailing
+    // prefix of a protected value before the normal redaction/truncation pass.
+    if (captureTruncated) {
+      const secrets = [...new Set(protectedValues.map((item) => String(item ?? '')).filter(Boolean))];
+      // A byte cut inside a multibyte code point decodes to a replacement
+      // character. Ignore only that truncated tail while matching prefixes.
+      const comparable = text.replace(/\uFFFD+$/u, '');
+      let partialLength = 0;
+      for (const secret of secrets) {
+        const limit = Math.min(secret.length - 1, comparable.length);
+        for (let length = limit; length > partialLength; length -= 1) {
+          if (comparable.endsWith(secret.slice(0, length))) {
+            partialLength = length;
+            break;
+          }
+        }
+      }
+      if (partialLength > 0) text = `${comparable.slice(0, -partialLength)}[redacted]`;
+    }
+    const envelope = redactAndTruncateText(text, { maxChars: maxOutputChars, protectedValues });
+    if (captureTruncated && text.includes('[redacted]') && !envelope.text.includes('[redacted]')) {
+      const marker = '[redacted]';
+      const keep = Math.max(0, maxOutputChars - marker.length);
+      envelope.text = `${text.slice(0, keep)}${marker}`;
+      envelope.truncated = true;
+    }
     return envelope;
   };
   const started = await logger.toolStart?.({ tool: 'shell_exec', command: redact(displayCommand), cwd: cwd || process.cwd(), reason: typeof reason === 'string' ? reason.slice(0, 500) : null });
@@ -146,8 +172,8 @@ export async function runExec({
   const durationMs = nowMs() - startedAt;
   const rawStdout = asText(stdoutChunks);
   const rawStderr = asText(stderrChunks);
-  const stdoutEnvelope = redactAndTruncate(rawStdout, { maxChars: maxOutputChars });
-  const stderrEnvelope = redactAndTruncate(rawStderr, { maxChars: maxOutputChars });
+  const stdoutEnvelope = redactCaptured(rawStdout, stdoutState.originalBytes > stdoutState.capturedBytes);
+  const stderrEnvelope = redactCaptured(rawStderr, stderrState.originalBytes > stderrState.capturedBytes);
   if (stdoutState.originalBytes > stdoutState.capturedBytes) {
     stdoutEnvelope.text = `${stdoutEnvelope.text}\n[shell_exec stdout capture truncated: ${stdoutState.originalBytes - stdoutState.capturedBytes} bytes omitted]`;
     stdoutEnvelope.truncated = true;
