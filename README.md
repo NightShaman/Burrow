@@ -6,7 +6,7 @@
 > Agents can use every tool and integration you grant them, including access to files, credentials, remote systems, and external services. Burrow assumes the operator understands and accepts that blast radius. Use least-privilege credentials, isolated test targets, and only the integrations you deliberately intend to expose.
 
 <p align="center">
-  <img src="burrow-logo.png" alt="Burrow" width="480">
+  <img src="docs/assets/hero.png" alt="Burrow chat-first local agent runtime" width="720">
 </p>
 
 > A chat-first local runtime for people who want capable agents without turning their workbench into a dashboard cult.
@@ -20,7 +20,7 @@ Burrow keeps conversation first. Tools, traces, receipts, tasks, and debug data 
 Burrow installs into one self-contained user home, `~/.burrow` by default:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/NightShaman/Burrow/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/GoblinKing-Burrow/Burrow/main/install.sh | sh
 ```
 
 The complete automatic setup path is Ubuntu with systemd, run as a non-root user with sudo access. Have `curl`, `tar`, and gzip support available; the installer provisions Node.js 24 with npm when needed, plus missing PostgreSQL 17 and pgvector packages for the default managed database. It creates and starts a persistent user service and verifies HTTP readiness and the installed version before reporting success. Burrow itself runs as your user; it does not require `/opt` or Docker.
@@ -30,7 +30,7 @@ Node provisioning also supports RHEL-family Linux 9+, but automatic PostgreSQL/p
 To install elsewhere, download the script first and pass `--dir`:
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/NightShaman/Burrow/main/install.sh
+curl -fsSLO https://raw.githubusercontent.com/GoblinKing-Burrow/Burrow/main/install.sh
 sh install.sh --dir "$HOME/my-burrow"
 ```
 
@@ -144,7 +144,7 @@ To build from source for development instead, clone this repository and use its 
 
 Mods are optional projects maintained separately from Burrow. Their repositories contain their installation, configuration, and update instructions.
 
-- **[Node Goblin](https://github.com/NightShaman/Node-Goblin)** — run approved Burrow tools on remote machines.
+- **[Node Goblin](https://github.com/GoblinKing-Burrow/Node-Goblin)** — run approved Burrow tools on remote machines.
 
 ## Uninstall
 
