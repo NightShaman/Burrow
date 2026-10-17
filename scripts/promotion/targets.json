@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "developmentOwner": "NightShaman",
+  "publicOwner": "GoblinKing-Burrow",
+  "targets": {
+    "burrow": {
+      "repository": "Burrow",
+      "releaseAssets": ["container-image", "source-snapshot"],
+      "dependsOn": ["burrowBackend", "burrowUi", "nodeGoblin"]
+    },
+    "nodeGoblin": {
+      "repository": "Node-Goblin",
+      "releaseAssets": ["node-goblin-tarball", "sha256"],
+      "dependsOn": ["nodeGoblin"]
+    },
+    "goblinSecretStore": {
+      "repository": "Goblin-Secret-Store",
+      "releaseAssets": ["source-snapshot"],
+      "dependsOn": ["goblinSecretStore"]
+    },
+    "burrowSkills": {
+      "repository": "Burrow-Skills",
+      "releaseAssets": ["source-snapshot"],
+      "dependsOn": ["burrowSkills"]
+    }
+  }
+}
