@@ -23,6 +23,7 @@ import { publishModTools } from '../src/mod-agent-tools.mjs';
 import { diagnosticMods, modJobs, pendingModOperations } from '../src/mod-diagnostics.mjs';
 import { forgeDiagnosticJobs, forgeDiagnosticJob, postgresDiagnostic } from '../src/forge-diagnostic-summary.mjs';
 import { brainDiagnosticSummary, brainDiagnosticMemories, brainDiagnosticEmbeddingJobs } from '../src/brain-diagnostic-summary.mjs';
+import { runtimeDiagnosticSessionSummaries } from '../src/runtime-diagnostic-sessions.mjs';
 import { releaseVersion } from '../src/release-version.mjs';
 import { createServer } from 'node:http';
 import { promises as fs } from 'node:fs';
@@ -2900,7 +2901,8 @@ const runtimeDiagnostics = Object.freeze({
     if (operation === 'agent-status') { const runtime = await agentRuntime(input.agentId); return { ok: true, ...(await agentStatusForSession(sessionId(), runtime)) }; }
     if (operation === 'sessions') {
       const runtime = await agentRuntime(input.agentId);
-      return { ok: true, sessions: await listSessions({ rootDir: runtime.agentWorkspaceRoot, agentId: runtime.agentId, includeArchived: input.archived === true, limit: input.limit }) };
+      const sessions = await listSessions({ rootDir: runtime.agentWorkspaceRoot, agentId: runtime.agentId, includeArchived: input.archived === true, limit: input.limit });
+      return { ok: true, sessions: runtimeDiagnosticSessionSummaries(sessions) };
     }
     if (operation === 'session') { const runtime = await agentRuntime(input.agentId); const value = await sessionDetail(String(input.sessionId || ''), { rootDir: await runtimeSessionRoot(String(input.sessionId || ''), runtime.agentId), agentId: runtime.agentId }); return value ? { ok: true, session: value } : { ok: false, error: 'not_found' }; }
     if (operation === 'active-runs') return { ok: true, ...(await currentActiveChatRunSummaries({ agentId: targetAgentId(input.agentId), sessionId: input.sessionId || null })) };
