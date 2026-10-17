@@ -202,6 +202,16 @@ jobs:
             org.opencontainers.image.source=https://github.com/GoblinKing-Burrow/Burrow
             org.opencontainers.image.url=https://github.com/GoblinKing-Burrow/Burrow
             org.opencontainers.image.version=${{ needs.stage.outputs.release_date }}
+      - name: Verify image repository association
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_PROMOTION_DESTINATION_TOKEN }}
+        run: |
+          set -eu
+          linked_repository=$(gh api /user/packages/container/burrow --jq '.repository.full_name // ""')
+          [ "$linked_repository" = "$PUBLIC_OWNER/Burrow" ] || {
+            echo "GHCR package is not linked to $PUBLIC_OWNER/Burrow" >&2
+            exit 1
+          }
       - name: Verify anonymous image availability
         run: |
           set -eu
