@@ -1,4 +1,5 @@
 import { pathToFileURL } from 'node:url';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 let cleanup = null;
 let sequence = 0;
@@ -11,6 +12,7 @@ const activeTools = new Map();
 let diagnosticHandlers = null;
 const pendingStore = new Map();
 const pendingCapabilities = new Map();
+const invocationScope = new AsyncLocalStorage();
 function capabilityRequest(method, input, { signal } = {}) {
   if (stopping || !process.connected) return Promise.reject(new Error("mod_capability_unavailable"));
   if (signal?.aborted) return Promise.reject(new Error("mod_capability_cancelled"));
@@ -23,7 +25,7 @@ function capabilityRequest(method, input, { signal } = {}) {
     };
     signal?.addEventListener("abort", cancel, { once: true });
     pendingCapabilities.set(requestId, { resolve, reject, signal, cancel });
-    send({ type: "capability-request", requestId, method, input }, (error) => {
+    send({ type: "capability-request", requestId, method, input, parentInvocationId: invocationScope.getStore()?.invocationId || null }, (error) => {
       if (error && pendingCapabilities.delete(requestId)) { signal?.removeEventListener("abort", cancel); reject(new Error("mod_capability_unavailable")); }
     });
     if (signal?.aborted) cancel();
@@ -160,6 +162,7 @@ async function activate(message) {
     api: registration.api,
     tools: registration.toolsApi,
     diagnostics: registration.diagnostics,
+    runtimeDiagnostics: Object.freeze({ read: (input, options) => capabilityRequest("readRuntimeDiagnostics", input, options) }),
     settings: settingsApi(),
     secrets: secretsApi(),
     conversations: Object.freeze({ list: (input) => capabilityRequest("listConversations", input), read: (input, options) => capabilityRequest("readConversation", input, options) }),
@@ -201,8 +204,10 @@ async function invoke(message) {
   if (!message.routeId?.startsWith('tool:')) return handler(message.request);
   const controller = new AbortController();
   activeTools.set(message.requestId, controller);
-  try { return await handler(message.request.arguments, Object.freeze({ ...message.request.caller, signal: controller.signal })); }
-  finally { activeTools.delete(message.requestId); }
+  try {
+    return await invocationScope.run(Object.freeze({ invocationId: message.requestId }), () =>
+      handler(message.request.arguments, Object.freeze({ ...message.request.caller, signal: controller.signal })));
+  } finally { activeTools.delete(message.requestId); }
 }
 
 async function shutdown() {

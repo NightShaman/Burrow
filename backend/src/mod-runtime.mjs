@@ -185,7 +185,7 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
   }
 }
 
-export async function loadMods({ runtimeRoot, logger = console, executionProviders = null, replaceExecutionProviders = false, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null, stores = null, onlyModIds = null, modStoreFactory = null, enabledModIds = null, modCatalogWriter = null } = {}) {
+export async function loadMods({ runtimeRoot, logger = console, executionProviders = null, replaceExecutionProviders = false, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null, stores = null, runtimeDiagnostics = null, onlyModIds = null, modStoreFactory = null, enabledModIds = null, modCatalogWriter = null } = {}) {
   const discoveredAll = await discoverMods({ runtimeRoot });
   const selectedIds = onlyModIds ? new Set(onlyModIds) : null;
   const discovered = selectedIds ? discoveredAll.filter((mod) => selectedIds.has(mod.id)) : discoveredAll;
@@ -213,7 +213,7 @@ export async function loadMods({ runtimeRoot, logger = console, executionProvide
         let unregisterController = null;
         store = await modStoreFactory(mod.id);
         host = startModHost({
-          mod, store, logger, systemCapability, capabilities: resolveAgentRuntime ? createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl: capabilityFetch, ownerModId: mod.id, scheduledJobScheduler, stores }) : null, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs,
+          mod, store, logger, systemCapability, capabilities: resolveAgentRuntime ? createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl: capabilityFetch, ownerModId: mod.id, scheduledJobScheduler, stores, modStore: store, runtimeDiagnostics }) : null, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs,
           onSystemControllerReady(controllerProxy) {
             if (!systemCapability || !executionProviders) return;
             unregisterController = executionProviders.register(mod.id, controllerProxy, { replace: replaceExecutionProviders });

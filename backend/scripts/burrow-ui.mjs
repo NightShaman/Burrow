@@ -2861,7 +2861,70 @@ const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJ
 const authRoute = createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
 const chatRoute = createChatRoutes({ handleChat, readJsonBody, sendJson, selectedAgentRuntime, cancelChatRun, steerChatRun, listChatSteering });
 const modsRuntimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
-const modLoadOptions = { stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), resolveAgentWorkspaceRoot: async (id) => {
+const runtimeDiagnostics = Object.freeze({
+  async read(input = {}, { caller, global = false } = {}) {
+    const operation = String(input.operation || '');
+    const callerAgentId = String(caller?.agentId || '').trim();
+    if (!callerAgentId) throw Object.assign(new Error('diagnostic_caller_required'), { statusCode: 403 });
+    const targetAgentId = (requested = null) => {
+      const target = String(requested || callerAgentId).trim();
+      if (!target || (!global && target !== callerAgentId)) throw Object.assign(new Error('diagnostic_scope_forbidden'), { statusCode: 403 });
+      return target;
+    };
+    const agentRuntime = async (requested = null) => resolveAgentRuntime(targetAgentId(requested));
+    const requireGlobal = () => { if (!global) throw Object.assign(new Error('diagnostic_global_scope_required'), { statusCode: 403 }); };
+    const sessionId = () => String(input.sessionId || caller.sessionId || 'default');
+    if (operation === 'health') return { ok: true, runtime: 'burrow', version: releaseVersion, buildIdentity: healthBuildIdentity, ...(healthReleaseProvenance ? { releaseProvenance: healthReleaseProvenance } : {}) };
+    if (operation === 'runtime-status') {
+      const status = await runtimeStatus(targetAgentId(input.agentId));
+      if (!status.ok) return status;
+      return { ok: true, runtime: status.runtime, version: status.version, ui: status.ui, memory: status.memory, model: status.model, policy: status.policy, retention: status.retention, traces: status.traces };
+    }
+    if (operation === 'metrics') return runtimeMetrics();
+    if (operation === 'inventory') {
+      const modInventory = await modDistribution.list();
+      const installed = modInventory.mods.filter((mod) => mod.status === 'installed');
+      return { ok: true, inventory: { mcp: { configured: (await mcpStore().list()).length }, mods: { installed: installed.length, enabled: installed.filter((mod) => mod.enabled === true).length } } };
+    }
+    if (operation === 'postgres-status') return postgresDiagnostic(postgresApplication.pool);
+    if (operation === 'brains-status') return brainDiagnosticSummary(postgresApplication.pool, { agentId: targetAgentId(input.agentId) });
+    if (operation === 'brain-memories') return brainDiagnosticMemories(postgresApplication.pool, { agentId: targetAgentId(input.agentId), limit: input.limit, cursor: input.cursor });
+    if (operation === 'brain-embedding-jobs') return brainDiagnosticEmbeddingJobs(postgresApplication.pool, { agentId: targetAgentId(input.agentId), limit: input.limit, cursor: input.cursor });
+    if (operation === 'forge-jobs') { requireGlobal(); return forgeDiagnosticJobs(postgresApplication.pool, { limit: input.limit, cursor: input.cursor }); }
+    if (operation === 'forge-job') { requireGlobal(); return forgeDiagnosticJob(postgresApplication.pool, input.jobId); }
+    if (operation === 'mods') return { ok: true, mods: diagnosticMods(loadedMods) };
+    if (operation === 'mod-jobs') { requireGlobal(); return { ok: true, ...await modJobs(loadedMods, input.modId, { limit: input.limit, cursor: input.cursor }) }; }
+    if (operation === 'mod-job') { requireGlobal(); return { ok: true, ...await modJobs(loadedMods, input.modId, { jobId: input.jobId }) }; }
+    if (operation === 'mod-pending') { requireGlobal(); return { ok: true, ...pendingModOperations(loadedMods, input.modId) }; }
+    if (operation === 'agents') return { ok: true, agents: await agentsStore().list({ includeDisabled: input.includeDisabled !== false }) };
+    if (operation === 'agent-status') { const runtime = await agentRuntime(input.agentId); return { ok: true, ...(await agentStatusForSession(sessionId(), runtime)) }; }
+    if (operation === 'sessions') {
+      const runtime = await agentRuntime(input.agentId);
+      return { ok: true, sessions: await listSessions({ rootDir: runtime.agentWorkspaceRoot, agentId: runtime.agentId, includeArchived: input.archived === true, limit: input.limit }) };
+    }
+    if (operation === 'session') { const runtime = await agentRuntime(input.agentId); const value = await sessionDetail(String(input.sessionId || ''), { rootDir: await runtimeSessionRoot(String(input.sessionId || ''), runtime.agentId), agentId: runtime.agentId }); return value ? { ok: true, session: value } : { ok: false, error: 'not_found' }; }
+    if (operation === 'active-runs') return { ok: true, ...(await currentActiveChatRunSummaries({ agentId: targetAgentId(input.agentId), sessionId: input.sessionId || null })) };
+    if (operation === 'traces') { const runtime = await agentRuntime(input.agentId); return { ok: true, traces: await listTraces(sessionId(), runtime.agentId) }; }
+    if (operation === 'trace' || operation === 'trace-authority') {
+      const runtime = await agentRuntime(input.agentId); const runId = String(input.runId || '');
+      if (!validTraceRunId(runId)) throw Object.assign(new Error('trace_run_id_invalid'), { statusCode: 400 });
+      const config = await runtimeConfig();
+      const trace = await summarizeTrace({ conversationStore: postgresApplication.stores.conversations, agentId: runtime.agentId, rootDir: await traceRootForRun({ rootDir: runtime.agentWorkspaceRoot, sessionId: sessionId(), runId, runtime: config, agentId: runtime.agentId }), runId, includeToolOutput: operation === 'trace' && input.includeToolOutput === true });
+      return operation === 'trace' ? { ok: true, trace } : { ok: true, runId, authority: authorityExplanationFromTraceSummary(trace) };
+    }
+    if (operation === 'run-proofs') { const runtime = await agentRuntime(input.agentId); return { ok: true, ...(await archiveRuns({ agentRuntime: runtime, sessionId: input.sessionId || null, limit: input.limit || 100 })) }; }
+    if (operation === 'run-proof') { const runtime = await agentRuntime(input.agentId); const run = await archiveRunDetail({ agentRuntime: runtime, runId: String(input.runId || '') }); return run ? { ok: true, run } : { ok: false, error: 'archive_run_not_found' }; }
+    if (operation === 'session-context' || operation === 'context-status') {
+      const runtime = await agentRuntime(input.agentId); const config = await runtimeConfig(runtime.agentId); const sid = sessionId();
+      const limits = activeConversationLimits({ modelConfig: config.modelConfig, contextConfig: config.contextConfig });
+      if (operation === 'session-context') return { ok: true, context: await inspectSessionContext({ conversationStore: postgresApplication.stores.conversations, agentId: runtime.agentId, rootDir: projectRoot, dataRoot: runtime.agentWorkspaceRoot, sessionId: sid, limits, contextWindow: config.modelConfig?.contextWindow, contextTokens: config.modelConfig?.contextTokens }) };
+      const active = [...activeChatRuns.values()].find((run) => run.agentId === runtime.agentId && run.sessionId === sid && !run.controller.signal.aborted) || null;
+      return { ok: true, status: await inspectSessionContextStatus({ conversationStore: postgresApplication.stores.conversations, agentId: runtime.agentId, rootDir: projectRoot, dataRoot: runtime.agentWorkspaceRoot, sessionId: sid, limits, contextConfig: config.contextConfig, contextWindow: config.modelConfig?.contextWindow, contextTokens: config.modelConfig?.contextTokens, liveContext: active?.contextUsage || null }) };
+    }
+    throw Object.assign(new Error('diagnostic_operation_invalid'), { statusCode: 400 });
+  },
+});
+const modLoadOptions = { stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), runtimeDiagnostics, resolveAgentWorkspaceRoot: async (id) => {
   const agent = await agentsStore().get(id);
   if (!agent) throw new Error('agent_not_found');
   return agentRuntimeContext({ runtimeState: (await runtimeConfig()).runtimeState, agent }).agentWorkspaceRoot;
