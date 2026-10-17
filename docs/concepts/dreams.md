@@ -74,7 +74,9 @@ Dream does not automatically populate Brains or keep the retired Albdruck write 
 
 ### Diary
 
-The diary is operator-facing prose, using `SOUL` only for tone. The generation prompt requests a 100–250-word narrative rather than machinery or status language. Stored entries support up to 12,000 characters and 16 source references, with duplicate prevention by agent, date, phase and narrative digest. The diary is never runtime prompt authority. [Diary generation](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/dream-cycle-runner.mjs#L165-L198), [diary storage](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-dream-diary-store.mjs#L4-L69)
+The diary is operator-facing prose, using `SOUL` only for tone. The generation prompt requests a 100–250-word narrative rather than machinery or status language. Stored entries support up to 12,000 characters and 16 source references, with duplicate prevention by agent, date, phase and narrative digest. The diary is never runtime prompt authority.
+
+Light diary output is independent from knowledge publication. If Light extraction still has invalid citations after its bounded repair attempt, Burrow records the extraction error, rejects those candidates from memory and preference processing, and generates the Light diary directly from the original one-day conversation window. The cycle is `partial`, not successful, but the operator-facing Light dream remains available. Deep and REM remain dependent on validated extraction, and no DreamMemory or preload publication occurs while an extraction error exists. [Diary generation](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/dream-cycle-runner.mjs#L165-L198), [diary storage](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-dream-diary-store.mjs#L4-L69)
 
 ## Failures and observability
 
