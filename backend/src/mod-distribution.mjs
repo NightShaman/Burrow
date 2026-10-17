@@ -444,7 +444,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
         const version = record?.version || normalizeVersion(mod.manifest?.version || '') || undefined;
         const latestVersion = source?.latest_version || undefined;
         const enabled = [true, 1].includes(lifecycle.get(mod.id)?.enabled);
-        return { id: mod.id, name: mod.name, version, status: mod.status === 'failed' ? 'failed' : 'installed', enabled, system: mod.manifest?.system === true, source: source?.url, latestVersion, updateAvailable: Boolean(version && latestVersion && VERSION.test(version) && VERSION.test(latestVersion) && compareVersions(latestVersion, version) > 0), canInstall: source?.status === 'ready', ...(source?.error ? { reason: source.error } : {}) };
+        return { id: mod.id, name: mod.name, version, status: mod.status === 'failed' ? 'failed' : 'installed', enabled, system: mod.manifest?.system === true, systemCapabilities: [...(mod.systemCapabilities || [])], source: source?.url, latestVersion, updateAvailable: Boolean(version && latestVersion && VERSION.test(version) && VERSION.test(latestVersion) && compareVersions(latestVersion, version) > 0), canInstall: source?.status === 'ready', ...(source?.error ? { reason: source.error } : {}) };
       });
       for (const source of sources) if (source.mod_id && !mods.some((mod) => mod.id === source.mod_id)) mods.push({ id: source.mod_id, name: source.mod_name || source.mod_id, status: 'available', source: source.url, latestVersion: source.latest_version || undefined, canInstall: source.status === 'ready', ...(source.error ? { reason: source.error } : {}) });
       const refreshConfig = await refreshSettings(db);
@@ -588,7 +588,6 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       const discovered = await discoverMods({ runtimeRoot, logger });
       const mod = discovered.find((entry) => entry.id === id);
       if (!mod) throw Object.assign(new Error('mod_not_found'), { statusCode: 404 });
-      if (mod.manifest?.system === true) throw Object.assign(new Error('system_mod_uninstall_forbidden'), { statusCode: 409 });
       const target = path.join(modsRoot, id); const quarantine = `${target}.uninstall-${crypto.randomUUID()}`; const recovery = `${quarantine}.recovery`;
       const metadata = await db.transaction(tx => tx.uninstallMetadata(id));
       const { installation, lifecycle } = metadata;

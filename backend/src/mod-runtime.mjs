@@ -8,7 +8,25 @@ import { startModHost } from './mod-host.mjs';
 // Reserved for mod-owned persistent data; never a discoverable/installable mod.
 export const MOD_DATA_DIRECTORY = 'mod-data';
 const MOD_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const SYSTEM_CAPABILITY_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
+export const SUPPORTED_SYSTEM_MOD_CAPABILITIES = Object.freeze(['execution-provider-v1']);
+const SUPPORTED_SYSTEM_MOD_CAPABILITY_SET = new Set(SUPPORTED_SYSTEM_MOD_CAPABILITIES);
 const MIME = Object.freeze({ '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' });
+
+function manifestSystemCapabilities(id, manifest = {}) {
+  const system = manifest.system === true;
+  const declared = manifest.systemCapabilities;
+  if (!system) {
+    if (declared !== undefined) throw new Error(`system_mod_declaration_invalid:${id}`);
+    return [];
+  }
+  if (!Array.isArray(declared) || declared.length === 0) throw new Error(`system_mod_capability_required:${id}`);
+  const capabilities = declared.map((value) => String(value || '').trim());
+  if (capabilities.some((value) => !SYSTEM_CAPABILITY_ID.test(value))) throw new Error(`system_mod_capability_invalid:${id}`);
+  if (new Set(capabilities).size !== capabilities.length) throw new Error(`system_mod_capability_duplicate:${id}`);
+  if (capabilities.some((value) => !SUPPORTED_SYSTEM_MOD_CAPABILITY_SET.has(value))) throw new Error(`system_mod_capability_unsupported:${id}`);
+  return capabilities;
+}
 
 function safeRelative(value, errorCode) {
   const input = String(value || '').trim().replaceAll('\\', '/');
@@ -126,10 +144,12 @@ export async function discoverMods({ runtimeRoot = process.env.BURROW_RUNTIME_RO
         previous.status = 'failed'; previous.error = 'mod_id_duplicate';
         throw new Error(`mod_id_duplicate:${id}`);
       }
+      const systemCapabilities = manifestSystemCapabilities(id, manifest);
       const server = manifest.server ? safeRelative(manifest.server, `mod_server_invalid:${id}`) : null;
+      if (systemCapabilities.length && !server) throw new Error(`system_mod_server_required:${id}`);
       const ui = manifestUi(id, root, manifest.ui);
       const contributions = manifestContributions(id, manifest.contributions, ui);
-      const mod = { id, name, root, manifest, server: server ? inside(root, server) : null, ui, contributions };
+      const mod = { id, name, root, manifest, systemCapabilities, server: server ? inside(root, server) : null, ui, contributions };
       seen.set(id, mod); mods.push(mod);
     } catch (error) {
       mods.push(failedMod({ id: manifestId, root, error }));
@@ -201,15 +221,8 @@ export async function loadMods({ runtimeRoot, logger = console, executionProvide
       let routes = [];
       let commitProviderReplacement = null;
       if (mod.server) {
-        const requestedSystem = mod.manifest?.system === true;
-        const declaredCapabilities = Array.isArray(mod.manifest?.systemCapabilities)
-          ? [...new Set(mod.manifest.systemCapabilities.map((value) => String(value || '').trim()).filter(Boolean))]
-          : [];
-        if (declaredCapabilities.length > 0 && !requestedSystem) throw new Error(`system_mod_declaration_invalid:${mod.id}`);
-        if (declaredCapabilities.some((capability) => capability !== 'execution-provider-v1')) throw new Error(`system_mod_capability_unsupported:${mod.id}`);
-        if (declaredCapabilities.length > 1) throw new Error(`system_mod_capability_ambiguous:${mod.id}`);
-        const systemCapability = requestedSystem ? declaredCapabilities[0] || null : null;
-        if (requestedSystem && !systemCapability) throw new Error(`system_mod_capability_required:${mod.id}`);
+        const declaredCapabilities = mod.systemCapabilities || [];
+        const systemCapability = declaredCapabilities.includes('execution-provider-v1') ? 'execution-provider-v1' : null;
         let unregisterController = null;
         store = await modStoreFactory(mod.id);
         host = startModHost({
@@ -286,6 +299,7 @@ export function modCatalog(mods = []) {
       status: mod.status || 'discovered',
       ...(mod.status === 'failed' ? { error: mod.error || 'mod_failed' } : {}),
       ...(mod.status !== 'failed' && mod.manifest?.version ? { version: String(mod.manifest.version) } : {}),
+      ...(mod.status !== 'failed' && mod.manifest?.system === true ? { system: true, systemCapabilities: [...(mod.systemCapabilities || [])] } : {}),
       ...(active && Object.keys(mod.contributions || {}).length ? { contributions: { ...mod.contributions } } : {}),
       ...(active && Object.keys(mod.ui || {}).length ? { ui: { ...(mod.ui.control ? { controlUrl: mod.ui.control.url } : {}), ...(mod.ui.settings ? { settingsUrl: mod.ui.settings.url } : {}), ...(mod.ui.archive ? { archiveUrl: mod.ui.archive.url } : {}) } } : {}),
     };
