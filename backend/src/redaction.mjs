@@ -11,11 +11,39 @@ function isSensitiveField(key) {
 }
 
 export function redactProtectedText(value, protectedValues = []) {
-  let text = redactText(value);
-  const values = [...new Set((protectedValues || []).map((item) => String(item ?? '')).filter(Boolean))]
-    .sort((left, right) => right.length - left.length);
-  for (const secret of values) text = text.split(secret).join('[redacted]');
-  return text;
+  const text = redactText(value);
+  const values = [...new Set((protectedValues || []).map((item) => String(item ?? '')).filter(Boolean))];
+  if (!values.length || !text) return text;
+
+  // Replacing matches one value at a time destroys later matches when protected
+  // occurrences overlap (including a value overlapping with itself). Find every
+  // occurrence against the unchanged source, merge their covered ranges, and
+  // only then rewrite the text.
+  const ranges = [];
+  for (const secret of values) {
+    let from = 0;
+    while (from <= text.length - secret.length) {
+      const start = text.indexOf(secret, from);
+      if (start < 0) break;
+      ranges.push([start, start + secret.length]);
+      from = start + 1;
+    }
+  }
+  if (!ranges.length) return text;
+  ranges.sort((left, right) => left[0] - right[0] || right[1] - left[1]);
+  const merged = [];
+  for (const range of ranges) {
+    const previous = merged.at(-1);
+    if (previous && range[0] <= previous[1]) previous[1] = Math.max(previous[1], range[1]);
+    else merged.push([...range]);
+  }
+  let redacted = '';
+  let cursor = 0;
+  for (const [start, end] of merged) {
+    redacted += `${text.slice(cursor, start)}[redacted]`;
+    cursor = end;
+  }
+  return redacted + text.slice(cursor);
 }
 
 /**
