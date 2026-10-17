@@ -43,6 +43,13 @@ test('assembly selects only the runtime OpenAPI file from canonical backend docs
  assert.match(workflow, /install -d backend\/docs\s+cp \.\.\/backend-source\/docs\/openapi\.json backend\/docs\/openapi\.json/);
  assert.doesNotMatch(workflow, /cp\s+-a\s+\.\.\/backend-source\/docs\b|cp\s+-R\s+\.\.\/backend-source\/docs\b/);
 });
+test('assembly preserves repository-owned presentation and governance files', () => {
+ const workflow = readFileSync(new URL('../../.github/workflows/assemble.yml', import.meta.url), 'utf8');
+ assert.doesNotMatch(workflow, /rm -rf[^\n]*(?:README\.md|docs\/|LICENSE|burrow-logo\.png)/);
+ assert.doesNotMatch(workflow, /cp \.\.\/backend-source\/deploy\/README\.md README\.md/);
+ assert.doesNotMatch(workflow, /cp \.\.\/ui-source\/public\/burrow-logo\.png burrow-logo\.png/);
+ assert.match(workflow, /rm -rf backend ui Dockerfile docker-entrypoint\.sh compose\.yml \.dockerignore install\.sh install-node-goblin\.sh SOURCE_VERSIONS/);
+});
 test('smoke parses a current OpenAPI operation and requires local Scalar HTML assets', () => {
  verifyOpenApi({ openapi: '3.1.0', paths: { '/api/sessions': { get: { operationId: 'listSessions' } } } });
  assert.throws(() => verifyOpenApi({ openapi: '3.1.0', paths: {} }));

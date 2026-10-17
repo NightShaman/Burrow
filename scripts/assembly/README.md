@@ -1,5 +1,11 @@
 # Assembly trust gate
 
+Assembly owns only the generated runtime and release payload: `backend/`, `ui/`,
+root container files, root installers, and `SOURCE_VERSIONS`. The Burrow repository
+owns `README.md`, `docs/` and its artwork, license/governance files, and workflow
+configuration. Those curated files are neither deleted nor copied from component
+repositories during assembly.
+
 Both repository dispatch and manual dispatch resolve Backend/UI refs through the
 GitHub commits API before comparing forward-only pins, checking CI or checking out
 sources. A delayed non-forward dispatch continues to fail closed.

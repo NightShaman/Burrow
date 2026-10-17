@@ -47,13 +47,14 @@ The repositories are combined by copying files, not Git submodules. Backend `doc
 | `ui/dist` | UI build during assembly |
 | Root installer | Backend `deploy/installer/install.sh` |
 | Root Docker/Compose/entrypoint files | Backend `deploy/docker` |
-| Root README | Backend `deploy/README.md` |
+| Root README and `docs/assets/` presentation | Public Burrow repository |
 | `SOURCE_VERSIONS` and stamped versions | Assembly workflow |
-| Root MkDocs site/tooling | Documentation maintained in public Burrow |
+| Root MkDocs site/tooling | Public Burrow repository |
+| Root license, governance files, and workflow configuration | Public Burrow repository |
 
-An app-source correction belongs in its source repository and should be regenerated. Direct edits to generated copies can disappear on assembly. This docs project does not alter runtime source to repair discovered behavior.
+An app-source correction belongs in its source repository and should be regenerated. Direct edits to generated runtime copies can disappear on assembly. Repository presentation, documentation, governance, and workflow files are curated in Burrow and survive assembly unchanged.
 
-Root README is regenerated. Documentation integration instructions must account for that owner rather than assuming a local README edit is permanent. The assembly's replacement list leaves the root MkDocs documentation tree and a separate docs workflow intact.
+Assembly replaces only the explicit runtime and release payload: `backend/`, `ui/`, root container files, root installers, and `SOURCE_VERSIONS`. It does not source the root README or artwork from Backend or UI.
 
 ## Source links and accessibility
 
