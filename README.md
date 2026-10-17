@@ -1,108 +1,64 @@
 # Burrow
 
-> [!WARNING]
-> **Burrow is not safe by default and does not provide comprehensive guardrails around agent actions.**
->
-> Agents can use every tool and integration you grant them, including access to files, credentials, remote systems, and external services. Burrow assumes the operator understands and accepts that blast radius. Use least-privilege credentials, isolated test targets, and only the integrations you deliberately intend to expose.
+> A chat-first local runtime for people who want capable agents without turning their workbench into a dashboard cult.
+
+Burrow is a self-hosted AI agent application with a web chat interface, model-provider connections, tools, and persistent conversations.
+
+Burrow keeps conversation first. Tools, traces, receipts, tasks, and debug data stay behind the curtain unless they are useful to inspect.
 
 <p align="center">
   <img src="docs/assets/hero.png" alt="Burrow chat-first local agent runtime" width="720">
 </p>
 
-> A chat-first local runtime for people who want capable agents without turning their workbench into a dashboard cult.
+[Get started](#get-started) · [Documentation](docs/index.md) · [Troubleshooting](docs/operations/troubleshooting.md)
 
-Burrow keeps conversation first. Tools, traces, receipts, tasks, and debug data stay behind the curtain unless they are useful to inspect.
+> [!WARNING]
+> **Burrow is not safe by default and does not provide comprehensive guardrails around agent actions.**
+>
+> Agents can use every tool and integration you grant them, including access to files, credentials, remote systems, and external services. Burrow assumes the operator understands and accepts that blast radius. Use least-privilege credentials, isolated test targets, and only the integrations you deliberately intend to expose.
 
-## Install
+## Get started
 
-> **Before installing:** Burrow's safety boundary is the access you grant it, not an internal command sandbox. Do not run it with credentials or host permissions whose full blast radius you are unwilling to accept.
+Choose a native installation or Docker. Both use the same web interface and [first-run setup](#first-conversation).
 
-Burrow installs into one self-contained user home, `~/.burrow` by default:
+### Native installation
+
+The complete automatic setup path is **Ubuntu with systemd**, running as a **non-root user with sudo access**.
+
+Before installing:
+
+- Have `curl`, `tar`, and gzip support available.
+- The installer provisions Node.js 24 with npm when needed, plus missing PostgreSQL 17 and pgvector packages for the default managed database.
+- Automatic Node provisioning also supports RHEL-family Linux 9+, but automatic PostgreSQL/pgvector provisioning is Ubuntu-only. Other hosts need the database prerequisites installed separately or an external PostgreSQL 17 server configured in `burrow.env`.
+- Persistent service setup requires systemd user services and permission to enable lingering, which keeps the service running after logout and reboot. Use `--no-service` if you will run Burrow in the foreground or with your own supervisor.
+
+Burrow's safety boundary is the access you grant it, not an internal command sandbox. Review the warning above before installing.
+
+Install into `~/.burrow`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/GoblinKing-Burrow/Burrow/main/install.sh | sh
 ```
 
-The complete automatic setup path is Ubuntu with systemd, run as a non-root user with sudo access. Have `curl`, `tar`, and gzip support available; the installer provisions Node.js 24 with npm when needed, plus missing PostgreSQL 17 and pgvector packages for the default managed database. It creates and starts a persistent user service and verifies HTTP readiness and the installed version before reporting success. Burrow itself runs as your user; it does not require `/opt` or Docker.
+A fresh default install creates and starts a persistent user service, then verifies HTTP readiness and the installed version. Burrow runs as your user; it does not require `/opt` or Docker.
 
-Node provisioning also supports RHEL-family Linux 9+, but automatic PostgreSQL/pgvector provisioning is Ubuntu-only. On other hosts, supply the database prerequisites yourself or configure an external PostgreSQL 17 server in `burrow.env`. Use `--no-service` for a foreground runtime or your own supervisor.
-
-To install elsewhere, download the script first and pass `--dir`:
+To review the script first or choose another install location:
 
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/GoblinKing-Burrow/Burrow/main/install.sh
+sh install.sh --help
 sh install.sh --dir "$HOME/my-burrow"
 ```
 
-The installer downloads the assembled `main` revision, installs dependencies, builds the bundled UI, and creates:
+The commands below assume the default `~/.burrow` location. Substitute your chosen path if you installed elsewhere.
 
-```text
-~/.burrow/
-├── app/          # replaceable installed application
-├── bin/burrow    # launcher and management command
-├── burrow.env    # durable runtime environment
-├── config/       # settings database and configuration
-├── workspace/    # workspace and project material
-├── cache/
-├── reports/
-└── integrations/
-```
+For a manual installation, pass `--no-service` to the downloaded installer, then run `~/.burrow/bin/burrow serve` and keep the terminal open. Do not run a foreground process alongside the service on the same port.
 
-### Installer options
+Open **http://127.0.0.1:42817** in a browser on the Burrow host, then continue to [First conversation](#first-conversation). For access from another machine, review [authentication](docs/security/authentication.md) and [network exposure](docs/operations/deployment.md#network-exposure) before changing the listener.
 
-```text
---dir PATH                    install root; defaults to ~/.burrow
---host HOST                   listener host; defaults to 127.0.0.1
---port PORT                   listener port; defaults to 42817
---no-service                  skip automatic service setup; foreground/custom supervisor
---install-node                compatibility alias; Node provisioning is already automatic
---no-install-dependencies     skip npm install/build and auto service; development only
---source-dir PATH             install from an assembled local Burrow checkout
---help                        show all options
-```
+See the [installation guide](docs/getting-started/installation.md) for all installer options, the installed directory layout, and database requirements.
 
-## Run and update
-
-A fresh default install is already running. Check its status:
-
-```sh
-~/.burrow/bin/burrow service status
-```
-
-For an installation made with `--no-service`, start it in the foreground with `~/.burrow/bin/burrow serve`. Do not run a foreground process alongside the service on the same port.
-
-The default listener is `127.0.0.1:42817`. Configure it explicitly during unattended installation, for example `sh install.sh --host 0.0.0.0 --port 42817`. Re-running the installer without listener flags preserves the existing values; supplying either flag updates that value and restarts a managed service after activation.
-
-Update in place:
-
-```sh
-~/.burrow/bin/burrow update
-```
-
-An update downloads the current assembled Burrow revision and atomically replaces only `~/.burrow/app`. It preserves `burrow.env`, `config/`, `workspace/`, `cache/`, `reports/`, and `integrations/`. Existing managed services are updated/restarted without re-enabling a disabled service; existing manual installations remain manual.
-
-### Run as a user service
-
-Fresh default installs set up the persistent service automatically. To opt into it later after a manual installation, run:
-
-```sh
-~/.burrow/bin/burrow service install
-```
-
-Management commands are:
-
-```sh
-~/.burrow/bin/burrow service status
-~/.burrow/bin/burrow service restart
-~/.burrow/bin/burrow service logs
-~/.burrow/bin/burrow service stop
-~/.burrow/bin/burrow service start
-~/.burrow/bin/burrow service uninstall
-```
-
-The service uses `~/.burrow/burrow.env`, restarts after failures, and persists across logout and reboot. Installation requires `loginctl` to enable and verify systemd user lingering, with a sudo fallback if enabling it as your user is denied. If lingering or systemd user services are unavailable, service installation fails rather than creating a session-only service; install with `--no-service` and run `burrow serve` under your own supervisor instead.
-
-## Docker
+### Docker
 
 The published image stores durable runtime state in `/data` and runs as UID/GID `4226:4226` by default.
 
@@ -134,38 +90,75 @@ Then start it:
 docker compose up -d
 ```
 
-Open `http://<docker-host>:42817`. These port mappings are reachable through the Docker host; restrict them with the host firewall, network policy, or a trusted reverse proxy. TCP `7443` is used by approved Node Goblin execution nodes.
+Open `http://<docker-host>:42817`, then follow [First conversation](#first-conversation). These port mappings are reachable through the Docker host; restrict them with the host firewall, network policy, or a trusted reverse proxy. TCP `7443` is used by approved Node Goblin execution nodes.
 
 The persistent volume must be writable by the configured numeric identity. Migrate existing Burrow-owned data deliberately rather than recursively changing unrelated container or service data.
 
 To build from source for development instead, clone this repository and use its root `Dockerfile`.
 
-## Mods
+## First conversation
+
+1. Complete the first-run dialog: start fresh or import a trusted export, name yourself and your first agent, and give the agent its identity.
+2. Connect a model provider and select a model. You can skip model selection during setup, but model-backed chat needs a configured model.
+3. Open **Chat**, select your agent, and choose its **Provider** and **Model**.
+4. Send a short, low-risk question and confirm that a complete answer arrives.
+
+The [initial setup guide](docs/getting-started/initial-setup.md) walks through provider connections, saving and selecting models, and operating preferences. The [interface guide](docs/concepts/interface.md) explains Chat, Tasks, Archive, Brains, Forge, and Settings.
+
+## Manage and update
+
+For a native installation, check status and recent logs:
+
+```sh
+~/.burrow/bin/burrow service status
+~/.burrow/bin/burrow service logs -n 100
+```
+
+Update in place:
+
+```sh
+~/.burrow/bin/burrow update
+```
+
+Updates replace the installed application while preserving your configuration, workspace, and other persistent data. Existing managed services are updated/restarted without re-enabling a disabled service; existing manual installations remain manual. Back up before upgrading and read the [upgrade guide](docs/operations/upgrades.md) for verification and recovery limits.
+
+For other operations:
+
+- [Service commands](docs/reference/cli.md#installed-launcher-commands): start, stop, restart, install, or remove the user service
+- [Installation guide](docs/getting-started/installation.md#native-installation): opt into a service after a manual installation
+- [Listener settings](docs/operations/procedures.md#change-listener-settings): configure the host and port
+- [Container updates and backups](docs/operations/containers.md#upgrade-and-backup): manage Docker installations
+
+## Optional mods
 
 Mods are optional projects maintained separately from Burrow. Their repositories contain their installation, configuration, and update instructions.
 
 - **[Node Goblin](https://github.com/GoblinKing-Burrow/Node-Goblin)** — run approved Burrow tools on remote machines.
 
+## Help and documentation
+
+- [Full manual](docs/index.md)
+- [Troubleshooting](docs/operations/troubleshooting.md)
+- [Backup and recovery](docs/operations/backup-recovery.md)
+- [Known limitations](docs/project/known-limitations.md)
+- [Developer setup](docs/development/setup.md)
+
 ## Uninstall
 
-Remove the application while preserving durable state:
+For a native installation, remove the application while preserving persistent data:
 
 ```sh
 ~/.burrow/bin/burrow uninstall
 ```
 
-Remove the entire Burrow home, including configuration, workspace, sessions, and other durable state:
+**To delete the entire Burrow home, including configuration, workspace, sessions, and other persistent data**, back up anything you need first, then use:
 
 ```sh
 ~/.burrow/bin/burrow uninstall --purge
 ```
 
-For non-interactive use, include `--yes` explicitly:
+Non-interactive uninstall also requires `--yes`. See [removal details](docs/operations/procedures.md#remove-the-application). Container volume deletion is a separate destructive operation.
 
-```sh
-~/.burrow/bin/burrow uninstall --purge --yes
-```
-
-## Project status
+## Project and feedback
 
 Burrow is a public personal project built around the maintainer's own needs and direction. Issues and thoughtful feedback are welcome and will be read, but opening an issue does not create an obligation to implement it. Changes that do not fit the project's vision may be declined or left unaddressed.
