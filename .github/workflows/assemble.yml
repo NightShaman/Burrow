@@ -194,6 +194,13 @@ jobs:
           # for public asset availability.
           version="${{ steps.build.outputs.version }}"
           printf '%s\n' "$version" > node-goblin-source/gateway/VERSION
+          node -e '
+            const fs = require("node:fs");
+            const file = "node-goblin-source/gateway/package.json";
+            const metadata = JSON.parse(fs.readFileSync(file, "utf8"));
+            metadata.version = process.argv[1];
+            fs.writeFileSync(file, `${JSON.stringify(metadata, null, 2)}\n`);
+          ' "$version"
           SOURCE_DATE_EPOCH=$(git -C node-goblin-source show -s --format=%ct HEAD) \
             node-goblin-source/gateway/deploy/build-release.sh node-goblin-source/gateway/dist
           printf 'present=true\n' >> "$GITHUB_OUTPUT"

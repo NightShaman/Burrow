@@ -24,6 +24,8 @@ test('assembly gates exact components, smokes loaded image before publication, n
  assert.ok(workflow.indexOf('Smoke disposable packaged runtime') < workflow.indexOf('Commit generated assembly'));
  assert.ok(workflow.indexOf('Smoke disposable packaged runtime') < workflow.indexOf('docker push'));
  assert.match(workflow,/docker tag burrow-assembly:tested/);
+ assert.match(workflow,/metadata\.version = process\.argv\[1\]/);
+ assert.ok(workflow.indexOf('metadata.version = process.argv[1]') < workflow.indexOf('build-release.sh node-goblin-source/gateway/dist'));
 });
 
 test('smoke uses isolated resources and cleanup in finally', () => {
