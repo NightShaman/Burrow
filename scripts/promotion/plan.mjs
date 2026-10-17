@@ -25,20 +25,20 @@ export function createPromotionPlan({ config, sources, previous = null, now = ne
   const releaseDate = utcReleaseDate(now);
   const frozenSources = normalizedSources(sources);
   const priorSources = previous?.sources ? normalizedSources(previous.sources) : {};
+  const changed = JSON.stringify(frozenSources) !== JSON.stringify(priorSources);
   const publishedToday = previous?.releaseDate === releaseDate;
+  const action = !changed ? 'skip-unchanged' : publishedToday ? 'defer-next-utc-day' : 'stage';
   const targets = Object.entries(config.targets).map(([id, target]) => {
     const selected = Object.fromEntries((target.dependsOn || []).map((name) => {
       if (!frozenSources[name]) throw new Error(`promotion_source_missing:${id}:${name}`);
       return [name, frozenSources[name]];
     }));
-    const before = Object.fromEntries((target.dependsOn || []).flatMap((name) => priorSources[name] ? [[name, priorSources[name]]] : []));
-    const changed = JSON.stringify(selected) !== JSON.stringify(before);
     return {
       id,
       repository: `${config.publicOwner}/${target.repository}`,
       version: releaseDate,
       changed,
-      action: !changed ? 'skip-unchanged' : publishedToday ? 'defer-next-utc-day' : 'stage',
+      action,
       sources: selected,
       releaseAssets: target.releaseAssets || []
     };
@@ -50,7 +50,7 @@ export function createPromotionPlan({ config, sources, previous = null, now = ne
     publicOwner: config.publicOwner,
     sources: frozenSources,
     targets,
-    publishable: targets.some(({ action }) => action === 'stage')
+    publishable: action === 'stage'
   };
 }
 

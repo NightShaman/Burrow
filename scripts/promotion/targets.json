@@ -5,23 +5,44 @@
   "targets": {
     "burrow": {
       "repository": "Burrow",
-      "releaseAssets": ["container-image", "source-snapshot"],
-      "dependsOn": ["burrowBackend", "burrowUi", "nodeGoblin"]
+      "releaseAssets": [
+        "container-image",
+        "source-snapshot"
+      ],
+      "dependsOn": [
+        "burrow",
+        "burrowBackend",
+        "burrowUi",
+        "nodeGoblin"
+      ]
     },
     "nodeGoblin": {
       "repository": "Node-Goblin",
-      "releaseAssets": ["node-goblin-tarball", "sha256"],
-      "dependsOn": ["nodeGoblin"]
+      "releaseAssets": [
+        "node-goblin-tarball",
+        "sha256"
+      ],
+      "dependsOn": [
+        "nodeGoblin"
+      ]
     },
     "goblinSecretStore": {
       "repository": "Goblin-Secret-Store",
-      "releaseAssets": ["source-snapshot"],
-      "dependsOn": ["goblinSecretStore"]
+      "releaseAssets": [
+        "source-snapshot"
+      ],
+      "dependsOn": [
+        "goblinSecretStore"
+      ]
     },
     "burrowSkills": {
       "repository": "Burrow-Skills",
-      "releaseAssets": ["source-snapshot"],
-      "dependsOn": ["burrowSkills"]
+      "releaseAssets": [
+        "source-snapshot"
+      ],
+      "dependsOn": [
+        "burrowSkills"
+      ]
     }
   }
 }

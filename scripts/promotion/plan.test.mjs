@@ -5,9 +5,9 @@ import { createPromotionPlan, utcReleaseDate } from './plan.mjs';
 
 const config = JSON.parse(await readFile(new URL('./targets.json', import.meta.url), 'utf8'));
 const sha = character => character.repeat(40);
-const sources = { burrowBackend:sha('a'), burrowUi:sha('b'), nodeGoblin:sha('c'), goblinSecretStore:sha('d'), burrowSkills:sha('e') };
+const sources = { burrow:sha('f'), burrowBackend:sha('a'), burrowUi:sha('b'), nodeGoblin:sha('c'), goblinSecretStore:sha('d'), burrowSkills:sha('e') };
 
-test('assigns one plain UTC calendar version to every changed target', () => {
+test('assigns one atomic UTC calendar release to every target', () => {
   const plan = createPromotionPlan({ config, sources, now:new Date('2026-10-18T01:02:03Z') });
   assert.equal(plan.releaseDate, '2026.10.18');
   assert.equal(plan.publishable, true);
@@ -15,19 +15,25 @@ test('assigns one plain UTC calendar version to every changed target', () => {
   assert(plan.targets.every(target => target.action === 'stage'));
 });
 
-test('skips unchanged targets independently', () => {
-  const previous = { releaseDate:'2026.10.17', sources:{...sources, goblinSecretStore:sha('f')} };
+test('skips the coordinated release when every source is unchanged', () => {
+  const previous = { releaseDate:'2026.10.17', sources };
   const plan = createPromotionPlan({ config, sources, previous, now:new Date('2026-10-18T12:00:00Z') });
-  assert.equal(plan.targets.find(target => target.id === 'goblinSecretStore').action, 'stage');
-  assert(plan.targets.filter(target => target.id !== 'goblinSecretStore').every(target => target.action === 'skip-unchanged'));
+  assert.equal(plan.publishable, false);
+  assert(plan.targets.every(target => target.action === 'skip-unchanged'));
 });
 
-test('defers a second changed promotion on the same UTC date', () => {
-  const previous = { releaseDate:'2026.10.18', sources:{...sources, nodeGoblin:sha('f')} };
+test('one changed source stages every repository under the same manifest', () => {
+  const previous = { releaseDate:'2026.10.17', sources:{...sources, goblinSecretStore:sha('0')} };
+  const plan = createPromotionPlan({ config, sources, previous, now:new Date('2026-10-18T12:00:00Z') });
+  assert.equal(plan.publishable, true);
+  assert(plan.targets.every(target => target.action === 'stage'));
+});
+
+test('defers any changed coordinated release after publication on the same UTC date', () => {
+  const previous = { releaseDate:'2026.10.18', sources:{...sources, nodeGoblin:sha('0')} };
   const plan = createPromotionPlan({ config, sources, previous, now:new Date('2026-10-18T23:59:59Z') });
-  assert.equal(plan.targets.find(target => target.id === 'nodeGoblin').action, 'defer-next-utc-day');
-  assert.equal(plan.targets.find(target => target.id === 'burrow').action, 'defer-next-utc-day');
   assert.equal(plan.publishable, false);
+  assert(plan.targets.every(target => target.action === 'defer-next-utc-day'));
 });
 
 test('rejects mutable-looking or malformed source identities', () => {
