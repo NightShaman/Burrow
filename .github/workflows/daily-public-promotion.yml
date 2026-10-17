@@ -198,6 +198,11 @@ jobs:
           tags: |
             ghcr.io/goblinking-burrow/burrow:latest
             ghcr.io/goblinking-burrow/burrow:${{ needs.stage.outputs.release_date }}
+      - name: Verify anonymous image availability
+        run: |
+          set -eu
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          docker pull "ghcr.io/goblinking-burrow/burrow:${{ needs.stage.outputs.release_date }}"
       - name: Publish Burrow snapshot and release manifest last
         env:
           PUBLIC_GITHUB_TOKEN: ${{ secrets.PUBLIC_PROMOTION_DESTINATION_TOKEN }}
