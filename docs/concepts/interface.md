@@ -4,6 +4,9 @@ The BURROW interface brings conversations, agent configuration, project tasks, r
 
 The runtime owns durable state. The browser presents API responses and live activity, and keeps some local preferences and conversation caches. A visible answer, an accepted job, and a verified result are different states; inspect the relevant run or evidence before treating work as complete.
 
+!!! note "Development screenshots"
+    The screenshots below show synthetic development fixtures captured on October 16, 2026. They illustrate interface layout, not verified task execution, provider generation, or saved configuration. Empty outer canvas has been cropped; application content is unchanged. Select an image to inspect it at full resolution. The source-backed behavior described in this guide remains pinned to the documented release.
+
 ## Find the right page
 
 | Page | Use it for |
@@ -59,6 +62,11 @@ The registry distinguishes loading, empty, and unavailable states. A failed refr
 
 Model selection is saved through `PUT /api/agents/{agentId}/model-selection`. Available models and effort choices come from configured connections; `off` is also offered for effort. See [Models and providers](models.md) for connection setup and resolution behavior. [Sources: toolbar](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/chat/ChatPage.tsx), [selection write](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/App.tsx)
 
+<figure markdown="span">
+[![Chat with synthetic agent list, session and model controls, conversation, composer, and workspace rail.](../assets/screenshots/03-chat.webp){ loading=lazy }](../assets/screenshots/03-chat.webp)
+<figcaption>Chat: check the agent and session before sending. This conversation is synthetic fixture data.</figcaption>
+</figure>
+
 ### Session controls and project context
 
 **New session** creates a named conversation. Names are 1–80 characters, begin with a letter or number, and otherwise use letters, numbers, underscores, or hyphens. The regular session picker excludes child, group, artifact, and task-owned sessions. **Reset Session** resets the selected session while retaining that session ID and clearing the displayed conversation; it is different from creating another named session. [Sources: named sessions](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/chat/useChatComposers.ts), [reset behavior](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/chat/useChatSession.ts)
@@ -72,6 +80,11 @@ Chat submits `POST /api/chat` and requests newline-delimited JSON events. Progre
 **Stop response** (square icon) aborts the browser's stream read and requests cancellation through `POST /api/chat/{runId}/cancel`. The interface also reconciles activity with `GET /api/chat/runs/active` and reloads session records. It does not resume a disconnected stream from an event offset. If work seems stuck, inspect current runtime activity and [Troubleshooting](../operations/troubleshooting.md) before resubmitting a potentially consequential instruction. [Source: active-run reconciliation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/chat/useChatSession.ts), [cancellation request](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/chat/useChatRun.ts)
 
 Expand an agent to inspect its Minion streams. Selecting a Minion changes the displayed child conversation while preserving its parent agent's identity for workspace ownership. See [Agents and Minions](agents-minions.md). MCP activity cards show provider and tool identity without exposing MCP argument and output payloads in the transcript. Use the relevant evidence views when investigating execution. [Source: transcript activity](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/chat/ChatTranscript.tsx), [MCP activity filtering](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/chat/useChatRun.ts)
+
+<figure markdown="span">
+[![Synthetic Chat conversation with an expanded runtime activity card beneath an assistant message.](../assets/screenshots/04-chat-runtime-actions.webp){ loading=lazy }](../assets/screenshots/04-chat-runtime-actions.webp)
+<figcaption>Expanded runtime activity in a synthetic conversation. Visible fixture entries do not verify that an operation ran.</figcaption>
+</figure>
 
 ### Interpreting progress and sending a correction
 
@@ -121,11 +134,81 @@ Settings separates category navigation, subsection navigation, the main editor, 
 
 Under **Mods**, source checks discover available versions; they do not automatically install updates. Newly installed mods begin disabled, while updates preserve enabled state. Honor any restart-required or busy response shown by the runtime. A mod UI is dynamically imported into the application page, so installing a mod is a trust decision rather than an isolated visual customization. [Sources: mod lifecycle](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/settings/ModsSettings.tsx), [mod settings host](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/settings/ModSettingsHost.tsx)
 
+=== "General"
+
+    <figure markdown="span">
+    [![Settings General with Operator profile selected and its display-name editor visible.](../assets/screenshots/10-settings-general.webp){ loading=lazy }](../assets/screenshots/10-settings-general.webp)
+    <figcaption>General: operator-profile editor and the available preferences sections.</figcaption>
+    </figure>
+
+=== "Agent"
+
+    <figure markdown="span">
+    [![Settings Agents showing a synthetic agent, default provider and model, and Minion model controls.](../assets/screenshots/11-settings-agent.webp){ loading=lazy }](../assets/screenshots/11-settings-agent.webp)
+    <figcaption>Agents: check the selected agent before changing its details or Minion model.</figcaption>
+    </figure>
+
+=== "Profile documents"
+
+    <figure markdown="span">
+    [![Settings Agents Profile documents with SOUL.md selected and synthetic personality text in the editor.](../assets/screenshots/12-settings-profile-documents.webp){ loading=lazy }](../assets/screenshots/12-settings-profile-documents.webp)
+    <figcaption>Profile documents: choose a document, review its text, then save only the intended changes.</figcaption>
+    </figure>
+
+=== "MCP tools"
+
+    <figure markdown="span">
+    [![Settings Agents MCP tools with synthetic server connections and tool-grant checkboxes.](../assets/screenshots/13-settings-mcp-tools.webp){ loading=lazy }](../assets/screenshots/13-settings-mcp-tools.webp)
+    <figcaption>MCP tools: review grants for the selected agent and connection.</figcaption>
+    </figure>
+
+=== "Cron jobs"
+
+    <figure markdown="span">
+    [![Settings Agents Cron jobs with a schedule editor and a synthetic saved daily-review job.](../assets/screenshots/14-settings-cron.webp){ loading=lazy }](../assets/screenshots/14-settings-cron.webp)
+    <figcaption>Cron jobs: the editor and saved-job controls. No job was triggered during capture.</figcaption>
+    </figure>
+
+=== "Skills"
+
+    <figure markdown="span">
+    [![Settings Skills showing an installed skill editor with source, update, and assignment controls.](../assets/screenshots/15-settings-skills.webp){ loading=lazy }](../assets/screenshots/15-settings-skills.webp)
+    <figcaption>Skills: inspect source, update settings, and assignments before saving.</figcaption>
+    </figure>
+
+=== "Model providers"
+
+    <figure markdown="span">
+    [![Settings Connections Model providers showing a synthetic connection and discovered model capabilities.](../assets/screenshots/16-settings-model-provider.webp){ loading=lazy }](../assets/screenshots/16-settings-model-provider.webp)
+    <figcaption>Model providers: synthetic provider and model entries demonstrate the connection editor; they are not a tested provider configuration.</figcaption>
+    </figure>
+
+=== "Mods"
+
+    <figure markdown="span">
+    [![Settings Mods showing an empty installed-mod list and no selected mod.](../assets/screenshots/17-settings-mods.webp){ loading=lazy }](../assets/screenshots/17-settings-mods.webp)
+    <figcaption>Mods: empty installed-mod state. Source checks and installation are separate actions.</figcaption>
+    </figure>
+
 ## Tasks and retained evidence
 
 ### Tasks
 
 Create a project before creating a task. Projects hold description, notes, and named paths; those path references do not grant filesystem access. The visible board columns are **Backlog**, **To Do**, **In Progress**, **Review**, and **Done**. New UI tasks default to To Do with Normal priority. Edit a task to change its status or assignment; the current board does not implement drag-and-drop status transitions. [Source: board columns](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/tasks/TasksPage.tsx)
+
+=== "Board"
+
+    <figure markdown="span">
+    [![Tasks board filled with synthetic cards across Backlog, To Do, In Progress, Review, and Done.](../assets/screenshots/01-tasks-board.webp){ loading=lazy }](../assets/screenshots/01-tasks-board.webp)
+    <figcaption>Tasks: the five board columns, project selector, and task controls with synthetic records.</figcaption>
+    </figure>
+
+=== "Task details"
+
+    <figure markdown="span">
+    [![Edit task dialog over the dimmed Tasks board, showing title, description, status, priority, assignee, project, and Execute control.](../assets/screenshots/02-task-details.webp){ loading=lazy }](../assets/screenshots/02-task-details.webp)
+    <figcaption>Task details: review the project and assignee, save changes, then execute deliberately. This capture does not show a completed execution.</figcaption>
+    </figure>
 
 To run a task:
 
@@ -141,6 +224,11 @@ Dispatch awaits the stored task and project; the previous unawaited-lookup limit
 Use **Chat** for retained sessions, **Dreams** for recorded Dream entries, **Tiddle** for continuity cards and history, and **Proof** for run evidence. The calendar uses the browser's timezone. Chat and Dream lists support server-side date filtering; Tiddle and Proof do not use that same date filter.
 
 Chat opens recent messages first and can load earlier pages. **Copy loaded chat** copies only the messages already loaded. A history-unavailable response is different from reaching the beginning of retained history. In Proof, expand the evidence to distinguish execution from verification: an answer without a terminal receipt is shown as **unverified**, and a linked child's execution state is separate from its verification result. The control labeled **Full redacted tool evidence** loads retained traces when expanded. That label is not a blanket guarantee that every free-text value is secret-free; review evidence before sharing it. [Sources: Chat reader](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/tasks/ArchiveReaders.tsx), [Archive requests](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/tasks/archiveRepository.ts), [Proof presentation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/tasks/ArchiveRunsProof.tsx), [evidence details](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/tasks/ArchiveRunsProof.tsx)
+
+<figure markdown="span">
+[![Archive Chat with synthetic retained sessions, a selected conversation, calendar, and Copy loaded chat control.](../assets/screenshots/05-archive-conversation.webp){ loading=lazy }](../assets/screenshots/05-archive-conversation.webp)
+<figcaption>Archive → Chat: a selected synthetic retained conversation. Copy loaded chat includes only the loaded messages.</figcaption>
+</figure>
 
 ### Brains
 
@@ -159,6 +247,11 @@ Migrated records show **Migrated from legacy Albdruck** and expandable **Legacy 
 
 Sources: [Brains controls and revision checks](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/albdruck/AlbdruckPage.tsx), [embedding controls and disclosure](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/settings/BrainEmbeddingSettings.tsx).
 
+<figure markdown="span">
+[![Brains with an Agent owner selector, saved-memory list, and an editor for a synthetic memory and source references.](../assets/screenshots/06-brains-memory.webp){ loading=lazy }](../assets/screenshots/06-brains-memory.webp)
+<figcaption>Brains: the selected agent owns the memory. Review the content and source references before saving.</figcaption>
+</figure>
+
 ### Recall original conversations
 
 1. Open **Archive → Chat**, choose the agent, and narrow the search or calendar date.
@@ -173,6 +266,27 @@ Brains search searches saved memories, not conversation transcripts. The old Alb
 Forge provides **Image**, **Video**, **Speech**, **Music**, and **Recents** views. Available generation models come from `GET /api/forge/catalog`; a visible mode may have no supported or configured model. In particular, the interface explicitly represents unavailable video and source-attachment capabilities.
 
 Choose an available model, enter the prompt or speech script, and start generation. Music has separate musical-direction and optional lyrics inputs; lyrics are guidance rather than a guarantee of verbatim output. `POST /api/forge/jobs` accepts the job, and the UI polls queued or running jobs. Inspect the resulting artifact or failure details. **Attach to conversation** uses the current agent and session, so verify that destination first. [Sources: catalog and saved selections](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/forge/ForgePage.tsx), [job, attachment, and mode controls](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/forge/ForgePage.tsx)
+
+=== "Failed job"
+
+    <figure markdown="span">
+    [![Forge Image view showing Generation failed, a failed synthetic job, and no image models available.](../assets/screenshots/07-forge-failed-state.webp){ loading=lazy }](../assets/screenshots/07-forge-failed-state.webp)
+    <figcaption>Failed Forge fixture: Generation failed is an error state, not a generated artifact. The capture also shows no image models available.</figcaption>
+    </figure>
+
+=== "Artifact placeholder"
+
+    <figure markdown="span">
+    [![Forge Image view showing a synthetic image placeholder and Download and Attach to conversation controls.](../assets/screenshots/08-forge-image.webp){ loading=lazy }](../assets/screenshots/08-forge-image.webp)
+    <figcaption>Synthetic artifact placeholder: demonstrates the result controls only. It is not evidence of a successful provider-backed generation.</figcaption>
+    </figure>
+
+=== "Recents"
+
+    <figure markdown="span">
+    [![Forge Recents with synthetic failed and succeeded job entries and a selected placeholder artifact.](../assets/screenshots/09-forge-recents.webp){ loading=lazy }](../assets/screenshots/09-forge-recents.webp)
+    <figcaption>Recents: synthetic job history and a selected placeholder. Inspect actual job status and artifact content before relying on a result.</figcaption>
+    </figure>
 
 ## Browser data and privacy
 
