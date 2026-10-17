@@ -1,7 +1,7 @@
 #!/bin/sh
 # Burrow user-local installer. It replaces app while preserving runtime state.
 set -eu
-REPOSITORY="NightShaman/Burrow"
+REPOSITORY="GoblinKing-Burrow/Burrow"
 INSTALL_DIR="${HOME}/.burrow"
 SOURCE_DIR=""
 INSTALL_DEPS=1

@@ -125,6 +125,9 @@ async function runAskChatUnserialized({
   onModelThoughtDelta = null,
   // Current serialized provider-request budget; transient transport observer.
   onModelContextUsage = null,
+  // Signals that this run's durable steering identity exists. Active-run
+  // projections must not advertise steering before this boundary completes.
+  onSteeringReady = null,
   // Trusted server-side lifecycle hook for nested A2A recipient runs. This lets
   // transports publish real recipient work without coupling core to a UI registry.
   registerNestedAgentRun = null,
@@ -174,6 +177,7 @@ async function runAskChatUnserialized({
   const steeringIdentity = { agentId: runtimeState.agentId, sessionId: resolvedSessionId, runId: resolvedRunId };
   if (stores.steering) {
     await stores.steering.open(steeringIdentity);
+    onSteeringReady?.(steeringIdentity);
     normalizedArgs.live_steering = { boundary: options => stores.steering.boundary(steeringIdentity, options) };
   }
   try {
@@ -256,6 +260,7 @@ async function runAskChatUnserialized({
         onModelTextDelta: lifecycle?.onModelTextDelta || null,
         onModelThoughtDelta: lifecycle?.onModelThoughtDelta || null,
         onModelContextUsage: lifecycle?.onModelContextUsage || null,
+        onSteeringReady: lifecycle?.onSteeringReady || null,
         args: { abort_signal: lifecycle?.signal || parentSignal || normalizedArgs.abort_signal || null },
       });
       return { ok: reply.ok === true, decision: reply.decision || null, answerText: reply.answerText || null, runId: reply.runId || null, recipientReplyEntryId: reply.assistantTurn?.id || null, error: reply.error || null };

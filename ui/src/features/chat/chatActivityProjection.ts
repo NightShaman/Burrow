@@ -8,6 +8,7 @@ export type RuntimeRunForSelection = {
   runId: string;
   agentId: string;
   sessionId: string;
+  steeringReady: boolean;
   latestUserMessage: string;
   answerText?: string;
   progress: ProgressEntry[];
@@ -46,7 +47,7 @@ function runtimeRunForSelection(run: ActiveChatRun | undefined, targetId: string
   if (!run) return null;
   const owner = run;
   run = { ...run, progress: (run.progress ?? []).filter((event) => (event.runId === undefined || event.runId === owner.runId) && (event.sessionId === undefined || event.sessionId === owner.sessionId)) };
-  return { targetId, runId: run.runId, agentId: run.agentId, sessionId: run.sessionId, answerText: typeof run.answerText === 'string' ? run.answerText : '', latestUserMessage: typeof run.latestUserMessage === 'string' ? run.latestUserMessage : '', stage: (run.progress ?? []).reduce<LiveStageProjection>((state, event) => ((event.runId !== undefined && event.runId !== run.runId) || (event.sessionId !== undefined && event.sessionId !== run.sessionId)) ? state : projectLiveStage(state, event), {}).stage, progress: runtimeRunProgress(run), toolActivity: runtimeToolActivity(run) };
+  return { targetId, runId: run.runId, agentId: run.agentId, sessionId: run.sessionId, steeringReady: run.steeringReady === true, answerText: typeof run.answerText === 'string' ? run.answerText : '', latestUserMessage: typeof run.latestUserMessage === 'string' ? run.latestUserMessage : '', stage: (run.progress ?? []).reduce<LiveStageProjection>((state, event) => ((event.runId !== undefined && event.runId !== run.runId) || (event.sessionId !== undefined && event.sessionId !== run.sessionId)) ? state : projectLiveStage(state, event), {}).stage, progress: runtimeRunProgress(run), toolActivity: runtimeToolActivity(run) };
 }
 
 function formatElapsed(from: string | null | undefined, to: number) {
@@ -95,7 +96,7 @@ function runtimeRunForSubagent(child: ActiveSubagent | undefined, targetId: stri
   const traceChildSessionId = child.trace && 'childSessionId' in child.trace && typeof child.trace.childSessionId === 'string' ? child.trace.childSessionId : '';
   const sessionId = child.sessionId || traceChildSessionId || '';
   if (!runId || !agentId || !sessionId) return null;
-  return { targetId, runId, agentId, sessionId, latestUserMessage: child.purpose || child.label || '', progress: [], toolActivity: subagentToolActivity(child, now), subagent: child };
+  return { targetId, runId, agentId, sessionId, steeringReady: false, latestUserMessage: child.purpose || child.label || '', progress: [], toolActivity: subagentToolActivity(child, now), subagent: child };
 }
 
 /** Pure active-run projection. Selection and clock are inputs, never global state. */

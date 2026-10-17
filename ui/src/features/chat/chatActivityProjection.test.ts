@@ -3,7 +3,7 @@ import type { ActiveChatRunsResponse } from '../../app/api';
 import { projectChatActivity } from './chatActivityProjection';
 const selection = { agentId: 'a', sessionId: 'parent', isChildSession: false, hadRuns: false, now: Date.parse('2026-10-15T00:02:00Z') };
 it('is deterministic without mutating the response and keeps parent/child identity separate', () => {
-  const response = { ok: true, runs: [{ status: 'running', runId: 'r', agentId: 'a', sessionId: 'parent', answerText: ' partial ', progress: [] }], subagents: [
+  const response = { ok: true, runs: [{ status: 'running', runId: 'r', agentId: 'a', sessionId: 'parent', steeringReady: true, answerText: ' partial ', progress: [] }], subagents: [
     { id: 'c', agentId: 'a', runId: 'cr', parentRunId: 'r', parentSessionId: 'parent', sessionId: 'child', final: false, activity: { startedAt: '2026-10-15T00:00:00Z', tool: 'shell_exec' } },
     { id: 'foreign', agentId: 'b', parentSessionId: 'parent', final: false },
   ] } as ActiveChatRunsResponse;
@@ -11,7 +11,7 @@ it('is deterministic without mutating the response and keeps parent/child identi
   const first = projectChatActivity(response, selection);
   expect(projectChatActivity(response, selection)).toEqual(first);
   expect(JSON.stringify(response)).toBe(before);
-  expect(first.runtimeRun).toMatchObject({ runId: 'r', agentId: 'a', sessionId: 'parent', answerText: ' partial ' });
+  expect(first.runtimeRun).toMatchObject({ runId: 'r', agentId: 'a', sessionId: 'parent', steeringReady: true, answerText: ' partial ' });
   expect(first.childActivities).toHaveLength(1);
   expect(first.childActivities[0].summary).toContain('elapsed 2m');
   expect(projectChatActivity({ ...response, runs: [] }, selection).runtimeRun).toBeNull();

@@ -137,6 +137,16 @@ describe('Chat composer draft ownership', () => {
 });
 
 describe('FE-014 submission acceptance', () => {
+  it('keeps the draft editable but blocks steering until the backend publishes readiness', () => {
+    renderChat({ draft: 'Wait for durable steering', isSending: true, steeringReady: false, activeRunId: 'run' });
+    const input = screen.getByRole('textbox', { name: 'Message' });
+    expect((input as HTMLTextAreaElement).disabled).toBe(false);
+    expect(screen.getByRole('button', { name: 'Send message' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Stop response' })).toBeTruthy();
+    fireEvent.change(input, { target: { value: 'Still editable' } });
+    expect(input).toHaveProperty('value', 'Still editable');
+  });
+
   it.each([true, false])('retains blocked draft (running=%s)', (running) => {
     const onCancel = vi.fn();
     const { onSend } = renderChat({ draft: running ? 'Next message' : '   ', isSending: running, onCancel });

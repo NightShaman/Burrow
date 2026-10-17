@@ -15,6 +15,7 @@ export function activeChatRunSummary(record = {}) {
     progress: Array.isArray(record.progress) ? record.progress.slice(-50) : [],
     contextUsage: record.contextUsage || null,
     detached: record.detached === true,
+    steeringReady: record.steeringReady === true,
     source: record.source || null,
     a2a: record.a2a || null,
     a2aActivities: Array.isArray(record.a2aActivities) ? record.a2aActivities.slice(-12) : [],
@@ -35,7 +36,7 @@ export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'd
   const record = {
     agentId: String(agentId), runId: String(runId), sessionId: String(sessionId || 'default'), controller,
     startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: String(message || '').slice(0, 16_000),
-    progress: [], contextUsage: null, cancelled: false, reason: null, detached: true, source, a2a, a2aActivities: [],
+    progress: [], contextUsage: null, cancelled: false, reason: null, detached: true, steeringReady: false, source, a2a, a2aActivities: [],
   };
   const key = activeChatRunKey(record.agentId, record.runId);
   activeChatRuns.set(key, record);
@@ -74,6 +75,7 @@ export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'd
     onModelTextDelta() { record.phase = 'streaming'; updateActivity({ status: 'streaming' }); },
     onModelThoughtDelta() { record.phase = 'streaming'; },
     onModelContextUsage(usage) { if (usage && typeof usage === 'object') record.contextUsage = usage; },
+    onSteeringReady() { record.steeringReady = true; },
     finish() { inheritedSignal?.removeEventListener('abort', abortFromParent); updateActivity({ status: record.controller.signal.aborted ? 'cancelled' : 'replied', completedAt: new Date().toISOString() }); if (activeChatRuns.get(key) === record) activeChatRuns.delete(key); },
   };
 }

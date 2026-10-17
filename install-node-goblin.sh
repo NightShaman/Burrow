@@ -2,7 +2,7 @@
 # Public bootstrap for the calendar-versioned Node Goblin release.
 set -eu
 
-REPOSITORY=${NODE_GOBLIN_REPOSITORY:-NightShaman/Burrow}
+REPOSITORY=${NODE_GOBLIN_REPOSITORY:-GoblinKing-Burrow/Node-Goblin}
 VERSION=${NODE_GOBLIN_VERSION:-latest}
 CONTROLLER=
 NODE_ID=
@@ -10,7 +10,7 @@ TMP=
 
 usage() {
   cat >&2 <<'EOF'
-usage: install-node-goblin.sh [--version YYYY.MM.DD[.N]] [--controller HOST:PORT] [--node-id ID]
+usage: install-node-goblin.sh [--version YYYY.MM.DD] [--controller HOST:PORT] [--node-id ID]
 
 Installs the latest calendar-versioned Node Goblin release by default. Controller
 address and node ID are non-secret and may be supplied now or configured later
@@ -29,8 +29,8 @@ done
 
 case "$VERSION" in
   latest) ;;
-  [0-9][0-9][0-9][0-9].[0-1][0-9].[0-3][0-9]|[0-9][0-9][0-9][0-9].[0-1][0-9].[0-3][0-9].[0-9]*) ;;
-  *) echo "version must be YYYY.MM.DD[.N] or latest" >&2; exit 2 ;;
+  [0-9][0-9][0-9][0-9].[0-1][0-9].[0-3][0-9]) ;;
+  *) echo "version must be YYYY.MM.DD or latest" >&2; exit 2 ;;
 esac
 # Reject incomplete configuration before downloading or installing anything.
 if [ -n "$CONTROLLER" ] || [ -n "$NODE_ID" ]; then
@@ -46,7 +46,7 @@ if [ "$VERSION" = latest ]; then
   VERSION=$(curl -fsSL -H 'Accept: application/vnd.github+json' "$release_url" \
     | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\([^"]*\)".*/\1/p' | head -n 1)
   [ -n "$VERSION" ] || { echo "could not resolve the latest Node Goblin release" >&2; exit 1; }
-  case "$VERSION" in [0-9][0-9][0-9][0-9].[0-1][0-9].[0-3][0-9]|[0-9][0-9][0-9][0-9].[0-1][0-9].[0-3][0-9].[0-9]*) ;; *) echo "latest release has an invalid calendar version" >&2; exit 1;; esac
+  case "$VERSION" in [0-9][0-9][0-9][0-9].[0-1][0-9].[0-3][0-9]) ;; *) echo "latest release has an invalid calendar version" >&2; exit 1;; esac
 fi
 
 NAME="node-goblin-$VERSION"

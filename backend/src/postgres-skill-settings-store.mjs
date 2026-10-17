@@ -38,7 +38,7 @@ export class PostgresSkillSettingsStore {
    }
    // Operator-owned IDs are not converted into upstream-managed instructions.
    if (!source && (!old || old.content_owner==='bundled')) {
-    await new PostgresSkillSources({pool:postgresTransactionContext(c),clock:this.clock}).save(id,{repository:'https://github.com/NightShaman/Burrow-Skills.git',ref:'main',path:'burrow-runtime/SKILL.md',enabled:true,cron:'0 */6 * * *'});
+    await new PostgresSkillSources({pool:postgresTransactionContext(c),clock:this.clock}).save(id,{repository:'https://github.com/GoblinKing-Burrow/Burrow-Skills.git',ref:'main',path:'burrow-runtime/SKILL.md',enabled:true,cron:'0 */6 * * *'});
    }
    // An already configured source (including disabled) is intentionally untouched.
    await c.query('INSERT INTO official_skill_default_adoptions(skill_id) VALUES($1)',[id]);

@@ -227,6 +227,7 @@ export type ActiveSubagent = {
 };
 export type ActiveChatRun = {
   answerText?: string;
+  steeringReady?: boolean;
   runId: string;
   agentId: string;
   sessionId: string;

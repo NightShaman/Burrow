@@ -34,6 +34,7 @@ type ChatComposerProps = {
   onAttach: (files: File[]) => void;
   onRemoveAttachment: (index: number) => void;
   disabled?: boolean;
+  sendDisabled?: boolean;
   steeringActive?: boolean;
   onSend: () => void;
   onCancel?: () => void;
@@ -55,6 +56,7 @@ export function ChatComposer({
   onAttach,
   onRemoveAttachment,
   disabled = false,
+  sendDisabled = false,
   steeringActive = false,
   onSend,
   onCancel,
@@ -68,7 +70,7 @@ export function ChatComposer({
   operatorName = 'You',
   agentNames = new Map(),
 }: ChatComposerProps) {
-  const canSend = Boolean(draft.trim() || attached.length) && !disabled;
+  const canSend = Boolean(draft.trim() || attached.length) && !disabled && !sendDisabled;
   const [projectContext, setProjectContext] = useState<ProjectOption | null>(null);
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectError, setProjectError] = useState('');

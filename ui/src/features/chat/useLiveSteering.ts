@@ -3,6 +3,11 @@ import { useEffect, useRef, useState } from 'react';
 import { api, type ChatAttachment } from '../../app/api';
 const emptyInputs: SteeringInput[] = [];
 export type SteeringInput = { id: string; status: 'pending' | 'delivered' | 'follow_up'; message: string; createdAt: string; deliveredAt?: string | null };
+export function isChatRunNotFoundError(error: unknown) {
+  return error instanceof Error
+    && error.message === 'chat_run_not_found'
+    && (error as Error & { status?: number }).status === 404;
+}
 export function useLiveSteering(agentId: string, sessionId: string, activeRunId: string) {
   const scope = `${agentId}:${sessionId}`;
   const currentScope = useRef(scope); currentScope.current = scope;

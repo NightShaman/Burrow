@@ -290,7 +290,7 @@ async function executeBoardTask(taskId) {
   if (!dispatch.ok) return dispatch;
   const { task, project, agentRuntime, sessionId, runId, updated } = dispatch;
   const controller = new AbortController();
-  const record = { agentId: agentRuntime.agentId, runId, sessionId, controller, startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: taskExecutionMessage(task, project).slice(0, 16_000), progress: [], contextUsage: null, cancelled: false, reason: null, detached: true, taskId: task.id };
+  const record = { agentId: agentRuntime.agentId, runId, sessionId, controller, startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: taskExecutionMessage(task, project).slice(0, 16_000), progress: [], contextUsage: null, cancelled: false, reason: null, detached: true, steeringReady: false, taskId: task.id };
   const headKey = sessionContinuityHeadKey(agentRuntime.agentId, sessionId);
   sessionContinuityHeads.set(headKey, record);
   activeChatRuns.set(activeChatRunKey(agentRuntime.agentId, runId), record);
@@ -304,6 +304,7 @@ async function executeBoardTask(taskId) {
     registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerActiveAgentRun(activeChatRuns, { agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
     onModelTextDelta: createChatStreamDelta({ record, type: 'assistant.delta', runId, sessionId, write: () => {} }),
     onModelThoughtDelta: createChatStreamDelta({ record, type: 'assistant.thought', runId, sessionId, write: () => {} }),
+    onSteeringReady: () => { record.steeringReady = true; },
     onTraceRecord: (traceRecord) => {
       const progress = publicChatProgress(traceRecord);
       if (!progress) return;
@@ -2681,7 +2682,7 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
   const runId = body.runId ? String(body.runId) : createChatTurnRunId({ sessionId, prefix: 'ui' });
   if (activeChatRuns.has(activeChatRunKey(agentRuntime.agentId, runId))) throw Object.assign(new Error('chat_run_id_already_used'), { statusCode: 409 });
   const controller = new AbortController();
-  const record = { agentId: agentRuntime.agentId, runId, sessionId, controller, startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: String(body.message || '').trim().slice(0, 16_000), progress: [], contextUsage: null, cancelled: false, reason: null, detached: false };
+  const record = { agentId: agentRuntime.agentId, runId, sessionId, controller, startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: String(body.message || '').trim().slice(0, 16_000), progress: [], contextUsage: null, cancelled: false, reason: null, detached: false, steeringReady: false };
   const headKey = sessionContinuityHeadKey(agentRuntime.agentId, sessionId);
   sessionContinuityHeads.set(headKey, record);
   activeChatRuns.set(activeChatRunKey(agentRuntime.agentId, runId), record);
@@ -2712,6 +2713,7 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
       },
       onModelTextDelta: streaming ? createChatStreamDelta({ record, type: 'assistant.delta', runId, sessionId, write: (event) => writeNdjson(res, event) }) : null,
       onModelThoughtDelta: streaming ? createChatStreamDelta({ record, type: 'assistant.thought', runId, sessionId, write: (event) => writeNdjson(res, event) }) : null,
+      onSteeringReady: () => { record.steeringReady = true; },
       onModelContextUsage: async (usage) => {
         if (!usage || typeof usage !== 'object') return;
         // Keep every raw measurement in telemetry, while the active card uses
@@ -3214,6 +3216,7 @@ server.listen(port, host, () => {
           rootDir: projectRoot, agentRuntime: runtime, resolveAgentRuntime,
           onTraceRecord: lifecycle.onTraceRecord, onModelTextDelta: lifecycle.onModelTextDelta,
           onModelThoughtDelta: lifecycle.onModelThoughtDelta, onModelContextUsage: lifecycle.onModelContextUsage,
+          onSteeringReady: lifecycle.onSteeringReady,
           registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerActiveAgentRun(activeChatRuns, { agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
         });
       } finally { lifecycle.finish(); }

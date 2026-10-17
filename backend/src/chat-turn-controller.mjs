@@ -98,11 +98,11 @@ export function chatTurnInputFromBody({ body = {}, rootDir, dataRoot, agentDataR
   };
 }
 
-export async function runChatTurnFromBody({ attachmentInput = null, body = {}, rootDir, dataRoot, agentDataRoot, agentRuntime = null, resolveAgentRuntime = null, stores = null, groupChannelContext = null, turnSource = null, latencyTiming = null, onTraceRecord = null, onModelTextDelta = null, onModelThoughtDelta = null, onModelContextUsage = null, registerNestedAgentRun = null } = {}) {
+export async function runChatTurnFromBody({ attachmentInput = null, body = {}, rootDir, dataRoot, agentDataRoot, agentRuntime = null, resolveAgentRuntime = null, stores = null, groupChannelContext = null, turnSource = null, latencyTiming = null, onTraceRecord = null, onModelTextDelta = null, onModelThoughtDelta = null, onModelContextUsage = null, onSteeringReady = null, registerNestedAgentRun = null } = {}) {
   // Internal group producer supplies validated byte-bearing attachments, not client references.
   const input = chatTurnInputFromBody({ body: attachmentInput ? { ...body, attachments: [] } : body, rootDir, dataRoot, agentDataRoot, agentRuntime });
   if (attachmentInput) input.args.attachments = attachmentInput;
-  return runChatTurn({ ...input, agentRuntime, resolveAgentRuntime, stores, groupChannelContext, turnSource, latencyTiming, onTraceRecord, onModelTextDelta, onModelThoughtDelta, onModelContextUsage, registerNestedAgentRun });
+  return runChatTurn({ ...input, agentRuntime, resolveAgentRuntime, stores, groupChannelContext, turnSource, latencyTiming, onTraceRecord, onModelTextDelta, onModelThoughtDelta, onModelContextUsage, onSteeringReady, registerNestedAgentRun });
 }
 
 

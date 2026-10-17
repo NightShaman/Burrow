@@ -1,9 +1,15 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../../app/api';
-import { useLiveSteering } from './useLiveSteering';
+import { isChatRunNotFoundError, useLiveSteering } from './useLiveSteering';
 vi.mock('../../app/api', () => ({api: vi.fn()}));
 const input = {id: 'durable-1', status: 'pending', message: 'change direction', createdAt: '2026-10-10'};
+it('recognizes only the exact unknown-run 404 used for normal-send reconciliation', () => {
+ const missing = Object.assign(new Error('chat_run_not_found'), {status: 404});
+ expect(isChatRunNotFoundError(missing)).toBe(true);
+ expect(isChatRunNotFoundError(Object.assign(new Error('chat_run_not_found'), {status: 503}))).toBe(false);
+ expect(isChatRunNotFoundError(Object.assign(new Error('other_not_found'), {status: 404}))).toBe(false);
+});
 beforeEach(() => {vi.clearAllMocks(); vi.mocked(api).mockResolvedValue({steering: []});});
 it('submits to the existing run and merges durable acceptance without starting chat', async () => {
  const {result, unmount} = renderHook(() => useLiveSteering('agent', 'session', 'run'));
