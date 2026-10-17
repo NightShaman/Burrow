@@ -67,6 +67,12 @@ function stampBurrow(root, version, sources) {
   const lines = fs.readFileSync(path.join(root, 'SOURCE_VERSIONS'), 'utf8').trim().split(/\r?\n/);
   lines[0] = `Burrow-Build-Version ${version}`;
   fs.writeFileSync(path.join(root, 'SOURCE_VERSIONS'), `${lines.join('\n')}\n`);
+  writeJson(path.join(root, 'backend/RELEASE_PROVENANCE.json'), {
+    assembly: version,
+    backend: sources.burrowBackend,
+    ui: sources.burrowUi,
+    nodeGoblin: sources.nodeGoblin
+  });
   writeJson(path.join(root, 'PUBLIC_RELEASE.json'), { schemaVersion: 1, releaseDate: version, sources });
 }
 

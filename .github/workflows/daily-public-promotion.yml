@@ -21,6 +21,7 @@ jobs:
     outputs:
       publishable: ${{ steps.plan.outputs.publishable }}
       release_date: ${{ steps.plan.outputs.release_date }}
+      ui_sha: ${{ steps.plan.outputs.ui_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -64,6 +65,7 @@ jobs:
           cat plan.json
           printf 'publishable=%s\n' "$(node -p "require('./plan.json').publishable")" >> "$GITHUB_OUTPUT"
           printf 'release_date=%s\n' "$(node -p "require('./plan.json').releaseDate")" >> "$GITHUB_OUTPUT"
+          printf 'ui_sha=%s\n' "$(node -p "require('./sources.json').burrowUi")" >> "$GITHUB_OUTPUT"
       - name: Expose frozen SHAs for checkouts
         if: steps.plan.outputs.publishable == 'true'
         id: frozen
@@ -116,7 +118,7 @@ jobs:
           (cd staged/Goblin-Secret-Store && npm run build && node --test $(find server ui -name '*.test.mjs' ! -name 'core-integration.test.mjs' -print))
           (cd staged/Node-Goblin/gateway && npm test)
           sh -n staged/Burrow/install.sh staged/Burrow/install-node-goblin.sh
-          docker build -t burrow-public-candidate staged/Burrow
+          docker build --build-arg BURROW_UI_SHA="$(node -p "require('./sources.json').burrowUi")" -t burrow-public-candidate staged/Burrow
           node staged/Burrow/scripts/assembly/packaged-smoke.mjs burrow-public-candidate staged/Burrow
           for target in burrow nodeGoblin goblinSecretStore burrowSkills; do
             test ! -d "staged/$target/.git"
@@ -191,6 +193,8 @@ jobs:
         with:
           context: staged/Burrow
           push: true
+          build-args: |
+            BURROW_UI_SHA=${{ needs.stage.outputs.ui_sha }}
           tags: |
             ghcr.io/goblinking-burrow/burrow:latest
             ghcr.io/goblinking-burrow/burrow:${{ needs.stage.outputs.release_date }}
