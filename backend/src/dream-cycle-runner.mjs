@@ -772,8 +772,16 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
       const selected = extraction.memories;
       await progress({ step: 'diary', request: null });
       let diaryNarrative = null; let diaryError = null;
-      try { if (extractionError) throw new Error(extractionError); if (!needsProcessing && settings.quietDayDreams === false) throw new Error('dream_quiet_day_disabled'); diaryNarrative = await generateOperatorDiary({ phase, settings, soul, items: extraction.memories, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress }); } catch (error) { if (error?.message !== 'dream_quiet_day_disabled') diaryError = clamp(error?.message || error, 500); }
-      if (diaryNarrative) pendingDiaries.push({ entryDate: generatedAt.slice(0, 10), phase, narrative: diaryNarrative, sourceRefs: selected.flatMap((item) => item.sourceRefs || []).slice(0, 16) });
+      // Light is the operator-facing daily reflection, not a publication of
+      // extracted knowledge. If grounded extraction fails, keep that failure
+      // visible and excluded from downstream memory, but still reflect from the
+      // original Light-window conversation. Deep and REM retain their stricter
+      // dependency on validated extraction.
+      const diaryItems = extractionError && phase === 'light'
+        ? messages.map((message) => ({ content: message.content }))
+        : extraction.memories;
+      try { if (extractionError && phase !== 'light') throw new Error(extractionError); if (!needsProcessing && settings.quietDayDreams === false) throw new Error('dream_quiet_day_disabled'); diaryNarrative = await generateOperatorDiary({ phase, settings, soul, items: diaryItems, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress }); } catch (error) { if (error?.message !== 'dream_quiet_day_disabled') diaryError = clamp(error?.message || error, 500); }
+      if (diaryNarrative) pendingDiaries.push({ entryDate: generatedAt.slice(0, 10), phase, narrative: diaryNarrative, sourceRefs: (extractionError && phase === 'light' ? messages.map((message) => message.sourceRef) : selected.flatMap((item) => item.sourceRefs || [])).slice(0, 16) });
       phaseResults.push({ phase, reusedCoverage: extraction.reusedCoverage ?? 0, newCoverage: extraction.newCoverage ?? 0, extractionMessages: extraction.extractionMessages ?? messages.length, extractionChunks: extraction.chunks, windowDays: PHASE_WINDOWS_DAYS[phase], inspected: messages.length, recorded: selected.length, selected: selected.length, summary: `${phase.toUpperCase()} pass inspected ${messages.length} persisted chat message${messages.length === 1 ? '' : 's'} in its ${PHASE_WINDOWS_DAYS[phase]}-day window and selected ${selected.length} candidate${selected.length === 1 ? '' : 's'}.`, chunks: extraction.chunks, modelResponses: extractionDiagnostics, ...(extractionError ? { extractionError } : {}), ...(diaryError ? { diaryError } : {}), windowStart: phaseWindowStart({ phase, generatedAt }), windowEnd: generatedAt, earliestAt: messages[0]?.at || null, latestAt: messages.at(-1)?.at || null });
       lifecycle.phases = [...phaseResults];
       await progress({ step: 'phase_completed', request: null });
