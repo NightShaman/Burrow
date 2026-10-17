@@ -165,7 +165,7 @@ jobs:
         env:
           VERSION: ${{ needs.stage.outputs.release_date }}
         run: |
-          SOURCE_DATE_EPOCH=0 staged/Node-Goblin/gateway/deploy/build-release.sh staged/Node-Goblin/gateway/dist
+          SOURCE_DATE_EPOCH=0 sh staged/Node-Goblin/gateway/deploy/build-release.sh staged/Node-Goblin/gateway/dist
       - name: Publish releases
         env:
           GH_TOKEN: ${{ secrets.PUBLIC_PROMOTION_DESTINATION_TOKEN }}
