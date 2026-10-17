@@ -198,6 +198,10 @@ jobs:
           tags: |
             ghcr.io/goblinking-burrow/burrow:latest
             ghcr.io/goblinking-burrow/burrow:${{ needs.stage.outputs.release_date }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/GoblinKing-Burrow/Burrow
+            org.opencontainers.image.url=https://github.com/GoblinKing-Burrow/Burrow
+            org.opencontainers.image.version=${{ needs.stage.outputs.release_date }}
       - name: Verify anonymous image availability
         run: |
           set -eu
