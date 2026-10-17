@@ -25,7 +25,7 @@ A rejected bearer token does **not** fall back to a valid Basic/OIDC cookie, tru
 
 ### Public health metadata
 
-`GET /health` and `GET /api/health` intentionally precede authentication. Both return a minimal build-identity projection: `ok: true`, `runtime: "burrow"`, `version`, `buildIdentity`, and optional `releaseProvenance` (`assembly`, `backend`, `ui`, `nodeGoblin`). A configured smoke token is echoed only when the request supplies the matching `x-burrow-smoke-token` header. The build identity is a content hash, not an installation path.
+`GET /health` and `GET /api/health` intentionally precede authentication. Both return a minimal build-identity projection: `ok: true`, `runtime: "burrow"`, `version`, `buildIdentity`, and optional `releaseProvenance` (`assembly`, `backend`, `ui`). Optional mods such as Node Goblin have independent release identities and are not part of Burrow's assembly provenance. A configured smoke token is echoed only when the request supplies the matching `x-burrow-smoke-token` header. The build identity is a content hash, not an installation path.
 
 These routes do not return filesystem roots, model settings, policy, or trace configuration and do not run a full runtime/database/model readiness check. `/api/status` remains behind authentication and returns the detailed runtime projection. Host checks and applicable browser-origin checks still precede public health. [Source: request order and health](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs#L3224-L3240) · [Source: build identity](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/build-identity.mjs)
 

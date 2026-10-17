@@ -39,7 +39,6 @@ jobs:
           EVENT_REF: ${{ github.event.client_payload.source_ref }}
           INPUT_BACKEND_SHA: ${{ inputs.backend_sha }}
           INPUT_UI_SHA: ${{ inputs.ui_sha }}
-          EVENT_NODE_GOBLIN_VERSION: ${{ github.event.client_payload.node_goblin_version }}
           GH_TOKEN: ${{ secrets.BURROW_SOURCE_TOKEN }}
         run: |
           set -eu
@@ -56,7 +55,6 @@ jobs:
           # Resolve even explicitly supplied refs before comparing, gating or checkout.
           backend_ref=$(gh api "repos/NightShaman/Burrow-Backend/commits/$backend_ref" --jq .sha)
           ui_ref=$(gh api "repos/NightShaman/Burrow-UI/commits/$ui_ref" --jq .sha)
-          node_goblin_ref=$(gh api repos/NightShaman/Node-Goblin/commits/main --jq .sha)
           # A queued older dispatch must never roll a recorded component backward.
           for item in "backend NightShaman/Burrow-Backend $backend_ref" "ui NightShaman/Burrow-UI $ui_ref"; do
             set -- $item; recorded=$(awk -v key="Burrow-${1^}" '$1==key {print $2}' assembled/SOURCE_VERSIONS 2>/dev/null || true)
@@ -65,7 +63,7 @@ jobs:
               [ "$status" = ahead ] || { echo "Refusing non-forward $1 pin: $recorded -> $3 ($status)" >&2; exit 1; }
             fi
           done
-          printf 'backend=%s\nui=%s\nnode_goblin=%s\nnode_goblin_version=%s\n' "$backend_ref" "$ui_ref" "$node_goblin_ref" "$EVENT_NODE_GOBLIN_VERSION" >> "$GITHUB_OUTPUT"
+          printf 'backend=%s\nui=%s\n' "$backend_ref" "$ui_ref" >> "$GITHUB_OUTPUT"
       - name: Require trusted component CI for exact resolved SHAs
         env:
           GH_TOKEN: ${{ secrets.BURROW_SOURCE_TOKEN }}
@@ -86,12 +84,6 @@ jobs:
           ref: ${{ steps.revisions.outputs.ui }}
           token: ${{ secrets.BURROW_SOURCE_TOKEN }}
           path: ui-source
-      - uses: actions/checkout@v4
-        with:
-          repository: NightShaman/Node-Goblin
-          ref: ${{ steps.revisions.outputs.node_goblin }}
-          token: ${{ secrets.BURROW_SOURCE_TOKEN }}
-          path: node-goblin-source
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -146,14 +138,13 @@ jobs:
           for path in src public dist scripts; do cp -a "../ui-source/$path" "ui/$path"; done
           cp -a ../ui-source/package.json ../ui-source/package-lock.json ../ui-source/index.html ../ui-source/tsconfig.json ../ui-source/vite.config.ts ../ui-source/vitest.config.ts ui/
           cp ../backend-source/deploy/installer/install.sh install.sh
-          cp ../backend-source/deploy/installer/install-node-goblin.sh install-node-goblin.sh
-          chmod 0755 install.sh install-node-goblin.sh
+          chmod 0755 install.sh
           cp ../backend-source/deploy/docker/Dockerfile Dockerfile
           cp ../backend-source/deploy/docker/docker-entrypoint.sh docker-entrypoint.sh
           cp ../backend-source/deploy/docker/compose.yml compose.yml
           cp ../backend-source/deploy/docker/.dockerignore .dockerignore
-          printf '{"assembly":"%s","backend":"%s","ui":"%s","nodeGoblin":"%s"}\n' "${{ steps.build.outputs.version }}" "${{ steps.revisions.outputs.backend }}" "${{ steps.revisions.outputs.ui }}" "${{ steps.revisions.outputs.node_goblin }}" > backend/RELEASE_PROVENANCE.json
-          printf 'Burrow-Build-Version %s\nBurrow-Backend %s\nBurrow-UI %s\nNode-Goblin %s\n' "${{ steps.build.outputs.version }}" "${{ steps.revisions.outputs.backend }}" "${{ steps.revisions.outputs.ui }}" "${{ steps.revisions.outputs.node_goblin }}" > SOURCE_VERSIONS
+          printf '{"assembly":"%s","backend":"%s","ui":"%s"}\n' "${{ steps.build.outputs.version }}" "${{ steps.revisions.outputs.backend }}" "${{ steps.revisions.outputs.ui }}" > backend/RELEASE_PROVENANCE.json
+          printf 'Burrow-Build-Version %s\nBurrow-Backend %s\nBurrow-UI %s\n' "${{ steps.build.outputs.version }}" "${{ steps.revisions.outputs.backend }}" "${{ steps.revisions.outputs.ui }}" > SOURCE_VERSIONS
           grep -R "${{ steps.revisions.outputs.ui }}" ui/dist/assets >/dev/null
       - name: Build local release image
         uses: docker/build-push-action@v6
@@ -182,32 +173,6 @@ jobs:
             git push origin HEAD:main
           fi
           printf 'commit=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Build public Node Goblin release assets
-        id: node_goblin_assets
-        run: |
-          set -eu
-          # The public Burrow repository owns the release tag namespace. Build
-          # daemon assets here, but attach them only when the single canonical
-          # Burrow release is created after the image has published.
-          # Every canonical Burrow release carries a matching Node Goblin
-          # installer. This also makes manual assemblies and Backend/UI-driven
-          # releases installable; source-update payloads are not the authority
-          # for public asset availability.
-          version="${{ steps.build.outputs.version }}"
-          printf '%s\n' "$version" > node-goblin-source/gateway/VERSION
-          node -e '
-            const fs = require("node:fs");
-            const file = "node-goblin-source/gateway/package.json";
-            const metadata = JSON.parse(fs.readFileSync(file, "utf8"));
-            metadata.version = process.argv[1];
-            fs.writeFileSync(file, `${JSON.stringify(metadata, null, 2)}\n`);
-          ' "$version"
-          SOURCE_DATE_EPOCH=$(git -C node-goblin-source show -s --format=%ct HEAD) \
-            node-goblin-source/gateway/deploy/build-release.sh node-goblin-source/gateway/dist
-          printf 'present=true\n' >> "$GITHUB_OUTPUT"
-          printf 'tarball=%s\nchecksum=%s\n' \
-            "$GITHUB_WORKSPACE/node-goblin-source/gateway/dist/node-goblin-$version.tar.gz" \
-            "$GITHUB_WORKSPACE/node-goblin-source/gateway/dist/node-goblin-$version.tar.gz.sha256" >> "$GITHUB_OUTPUT"
       - name: Authenticate to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -231,12 +196,7 @@ jobs:
           tag="v$VERSION"
           git -C assembled tag "$tag" "$COMMIT"
           git -C assembled push origin "$tag"
-          assets=''
-          if [ "${{ steps.node_goblin_assets.outputs.present }}" = true ]; then
-            assets="${{ steps.node_goblin_assets.outputs.tarball }} ${{ steps.node_goblin_assets.outputs.checksum }}"
-          fi
           gh release create "$tag" \
             --repo "$GITHUB_REPOSITORY" \
             --title "Burrow $VERSION" \
-            --notes "Calendar-versioned Burrow release $VERSION assembled at $COMMIT. Image: ghcr.io/nightshaman/burrow:$VERSION" \
-            $assets
+            --notes "Calendar-versioned Burrow release $VERSION assembled at $COMMIT. Image: ghcr.io/nightshaman/burrow:$VERSION"

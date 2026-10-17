@@ -117,7 +117,7 @@ jobs:
           node orchestrator/scripts/promotion/validate-public-readiness.mjs staged
           (cd staged/Goblin-Secret-Store && npm run build && node --test $(find server ui -name '*.test.mjs' ! -name 'core-integration.test.mjs' -print))
           (cd staged/Node-Goblin/gateway && npm test)
-          sh -n staged/Burrow/install.sh staged/Burrow/install-node-goblin.sh
+          sh -n staged/Burrow/install.sh staged/Node-Goblin/install.sh
           docker build --build-arg BURROW_UI_SHA="$(node -p "require('./sources.json').burrowUi")" -t burrow-public-candidate staged/Burrow
           node staged/Burrow/scripts/assembly/packaged-smoke.mjs burrow-public-candidate staged/Burrow
           for target in burrow nodeGoblin goblinSecretStore burrowSkills; do

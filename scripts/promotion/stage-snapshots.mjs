@@ -5,11 +5,11 @@ import { pathToFileURL } from 'node:url';
 
 const TARGETS = {
   burrow: {
-    paths: ['.dockerignore', '.gitignore', 'Dockerfile', 'LICENSE', 'README.md', 'SOURCE_VERSIONS', 'backend', 'burrow-logo.png', 'compose.yml', 'docker-entrypoint.sh', 'docs', 'install-node-goblin.sh', 'install.sh', 'mkdocs.yml', 'requirements-docs-test.txt', 'requirements-docs.txt', 'scripts/assembly', 'scripts/docs', 'scripts/install', 'ui'],
+    paths: ['.dockerignore', '.gitignore', 'Dockerfile', 'LICENSE', 'README.md', 'SOURCE_VERSIONS', 'backend', 'burrow-logo.png', 'compose.yml', 'docker-entrypoint.sh', 'docs', 'install.sh', 'mkdocs.yml', 'requirements-docs-test.txt', 'requirements-docs.txt', 'scripts/assembly', 'scripts/docs', 'scripts/install', 'ui'],
     excludes: []
   },
   nodeGoblin: {
-    paths: ['.gitignore', 'NG-Logo.png', 'README.md', 'burrow.mod.json', 'docs', 'gateway', 'mkdocs.yml', 'requirements-docs-test.txt', 'requirements-docs.txt', 'scripts/docs', 'server', 'ui'],
+    paths: ['.gitignore', 'NG-Logo.png', 'README.md', 'burrow.mod.json', 'docs', 'gateway', 'install.sh', 'mkdocs.yml', 'requirements-docs-test.txt', 'requirements-docs.txt', 'scripts/docs', 'server', 'ui'],
     excludes: ['docs/audit-repair-pass-5.md', 'docs/repairs/lifecycle-pass-4.md']
   },
   goblinSecretStore: {
@@ -70,8 +70,7 @@ function stampBurrow(root, version, sources) {
   writeJson(path.join(root, 'backend/RELEASE_PROVENANCE.json'), {
     assembly: version,
     backend: sources.burrowBackend,
-    ui: sources.burrowUi,
-    nodeGoblin: sources.nodeGoblin
+    ui: sources.burrowUi
   });
   writeJson(path.join(root, 'PUBLIC_RELEASE.json'), { schemaVersion: 1, releaseDate: version, sources });
 }

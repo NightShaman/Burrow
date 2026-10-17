@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { verifyHealth, assetPaths, verifyOpenApi, docsAssetPaths, smokeCredentials, verifyNativePayload } from './packaged-smoke.mjs';
 import { scryptSync } from 'node:crypto';
 test('health requires actual version, exact provenance and disposable token', () => {
- const expected = { assembly:'v1', backend:'a', ui:'b', nodeGoblin:'c' };
+ const expected = { assembly:'v1', backend:'a', ui:'b' };
  const health = {ok:true,runtime:'burrow',version:'v1',releaseProvenance:expected,smokeToken:'token'};
  verifyHealth(health,expected,'token');
  for (const patch of [{version:'foreign'}, {runtime:'fixture'}, {smokeToken:'foreign'}, {releaseProvenance:{...expected,backend:'foreign'}}, {ok:false}]) assert.throws(()=>verifyHealth({...health,...patch},expected,'token'));
@@ -24,8 +24,7 @@ test('assembly gates exact components, smokes loaded image before publication, n
  assert.ok(workflow.indexOf('Smoke disposable packaged runtime') < workflow.indexOf('Commit generated assembly'));
  assert.ok(workflow.indexOf('Smoke disposable packaged runtime') < workflow.indexOf('docker push'));
  assert.match(workflow,/docker tag burrow-assembly:tested/);
- assert.match(workflow,/metadata\.version = process\.argv\[1\]/);
- assert.ok(workflow.indexOf('metadata.version = process.argv[1]') < workflow.indexOf('build-release.sh node-goblin-source/gateway/dist'));
+ assert.doesNotMatch(workflow,/Node-Goblin|node-goblin-source|node_goblin_assets|build-release\.sh/);
 });
 
 test('smoke uses isolated resources and cleanup in finally', () => {

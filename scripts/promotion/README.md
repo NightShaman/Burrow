@@ -17,8 +17,8 @@ promotion workflow publishes reviewed, allowlisted snapshots to the public
   `YYYY.MM.DD` identity. Never allocate `.N` revisions.
 - A target already published that UTC day is immutable; later changes wait for
   the next UTC day.
-- Node Goblin owns its tarball and checksum.
-- Burrow owns its assembled source snapshot and GHCR image.
+- Node Goblin owns its version, source snapshot, bootstrap installer, tarball, and checksum. Node Goblin changes do not create a Burrow release.
+- Burrow owns only its assembled source snapshot and GHCR image; Burrow releases do not contain Node Goblin assets or adopt Node Goblin's version.
 - GSS and Skills own their public source snapshots.
 - Public snapshots use explicit allowlists. Development workflows, audit notes,
   secrets, caches, runtime data, and Git history are not mirrored.

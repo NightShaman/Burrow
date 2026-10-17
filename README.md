@@ -131,9 +131,9 @@ For other operations:
 
 ## Optional mods
 
-Mods are optional projects maintained separately from Burrow. Their repositories contain their installation, configuration, and update instructions.
+Mods are optional projects maintained and released separately from Burrow. Burrow does not rebuild, rename, or republish a mod under a Burrow release. Each mod repository owns its version, release assets, installation, configuration, and update instructions.
 
-- **[Node Goblin](https://github.com/GoblinKing-Burrow/Node-Goblin)** — run approved Burrow tools on remote machines.
+- **[Node Goblin](https://github.com/GoblinKing-Burrow/Node-Goblin)** — run approved Burrow tools on remote machines. Node Goblin releases and the Mini Node Goblin installer come from the Node Goblin repository.
 
 ## Help and documentation
 
