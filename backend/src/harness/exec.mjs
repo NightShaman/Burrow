@@ -78,18 +78,28 @@ export async function runExec({
   const startedAt = nowMs();
   const stdoutChunks = [];
   const stderrChunks = [];
-  // Bound bytes before decoding/redaction. Truncating only after Buffer.concat()
-  // still lets a noisy command allocate an unbounded string in the parent.
-  const captureLimitBytes = Math.max(1, Math.floor(Number(maxOutputChars) || 100_000) * 2);
+  // Bound bytes before decoding/redaction. Keep one protected-value length of
+  // lookahead so a value beginning at the ordinary capture boundary is still
+  // available to exact-value redaction before any tail or character truncation.
+  // Memory remains bounded by the requested output budget plus the supplied
+  // protected values, which are already resident in this process.
+  const outputCaptureLimitBytes = Math.max(1, Math.floor(Number(maxOutputChars) || 100_000) * 2);
+  const protectedLookaheadBytes = protectedValues.reduce(
+    (largest, item) => Math.max(largest, Buffer.byteLength(String(item ?? ''), 'utf8')),
+    0,
+  );
+  const captureLimitBytes = outputCaptureLimitBytes + protectedLookaheadBytes;
   const stdoutState = { originalBytes: 0, capturedBytes: 0 };
   const stderrState = { originalBytes: 0, capturedBytes: 0 };
   const prefix = safeName(artifactPrefix || `shell_exec-${commandHash(displayCommand)}`);
   const redact = (value) => redactProtectedText(value, protectedValues);
   const redactCaptured = (value, captureTruncated = false) => {
-    let text = String(value ?? '');
-    // Byte-bounded capture can stop inside a protected value. Exact-value
-    // redaction cannot recognize that suffix afterward, so remove any trailing
-    // prefix of a protected value before the normal redaction/truncation pass.
+    // Redact complete values first. Partial-tail handling must never remove a
+    // self-overlapping suffix from a complete value before exact redaction.
+    let text = redactProtectedText(String(value ?? ''), protectedValues);
+    // Byte-bounded capture can still stop inside a protected value after the
+    // bounded lookahead. Remove only a trailing proper prefix that remains
+    // after all complete values have already been replaced.
     if (captureTruncated) {
       const secrets = [...new Set(protectedValues.map((item) => String(item ?? '')).filter(Boolean))];
       // A byte cut inside a multibyte code point decodes to a replacement
@@ -108,9 +118,11 @@ export async function runExec({
       if (partialLength > 0) text = `${comparable.slice(0, -partialLength)}[redacted]`;
     }
     const envelope = redactAndTruncateText(text, { maxChars: maxOutputChars, protectedValues });
-    if (captureTruncated && text.includes('[redacted]') && !envelope.text.includes('[redacted]')) {
+    if (text.includes('[redacted]') && !envelope.text.includes('[redacted]')) {
       const marker = '[redacted]';
       const keep = Math.max(0, maxOutputChars - marker.length);
+      // `text` is already fully redacted. Preserve the complete marker rather
+      // than publishing a misleading partial marker such as "[re".
       envelope.text = `${text.slice(0, keep)}${marker}`;
       envelope.truncated = true;
     }
