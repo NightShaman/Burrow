@@ -18,6 +18,31 @@ CREATE TABLE IF NOT EXISTS mod_installations (
 );
 `;
 
+// Kept separate from the immutable v7 SQL above: existing installations verify
+// its migration checksum. The application ledger appends this additive schema;
+// standalone management startup also ensures it idempotently in the same Core
+// application database. No provider-owned store is involved.
+export const POSTGRES_MOD_MANAGEMENT_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS mod_management_operations (
+  sequence BIGSERIAL UNIQUE NOT NULL,
+  id UUID PRIMARY KEY,
+  owner_mod_id VARCHAR(128) NOT NULL,
+  agent_id VARCHAR(256) NOT NULL, session_id VARCHAR(256),
+  conversation_id VARCHAR(256), run_id VARCHAR(256),
+  action TEXT NOT NULL CHECK (action IN ('install','update','enable','disable','uninstall','refresh')),
+  mod_id VARCHAR(128), version VARCHAR(128),
+  status TEXT NOT NULL CHECK (status IN ('queued','running','succeeded','failed','interrupted')),
+  created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
+  started_at TIMESTAMPTZ, finished_at TIMESTAMPTZ,
+  result JSONB CHECK (result IS NULL OR octet_length(result::text) <= 8192),
+  error_code VARCHAR(80),
+  CHECK ((action = 'refresh' AND mod_id IS NULL AND version IS NULL) OR (action <> 'refresh' AND mod_id IS NOT NULL)),
+  CHECK (version IS NULL OR action IN ('install','update'))
+);
+CREATE INDEX IF NOT EXISTS mod_management_operations_queue ON mod_management_operations(sequence) WHERE status='queued';
+CREATE INDEX IF NOT EXISTS mod_management_operations_owner ON mod_management_operations(owner_mod_id,id);
+`;
+
 const changes = (result) => ({ changes: result.rowCount ?? 0 });
 const rows = (result) => result.rows;
 const first = (result) => result.rows[0];
@@ -30,6 +55,32 @@ export function createPostgresModDistributionRepository({ pool } = {}) {
     const query = (sql, params = []) => queryer.query(sql, params);
     return {
       async close() {},
+      async ensureManagementSchema() { await query(POSTGRES_MOD_MANAGEMENT_SCHEMA_SQL); },
+      async createManagementOperation(row) {
+        return changes(await query(`INSERT INTO mod_management_operations
+          (id,owner_mod_id,agent_id,session_id,conversation_id,run_id,action,mod_id,version,status,created_at,updated_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'queued',$10,$10)`,
+        [row.id,row.owner_mod_id,row.agent_id,row.session_id,row.conversation_id,row.run_id,row.action,row.mod_id,row.version,row.created_at]));
+      },
+      async managementOperation(id, ownerModId) {
+        return first(await query('SELECT * FROM mod_management_operations WHERE id=$1 AND owner_mod_id=$2', [id,ownerModId]));
+      },
+      async interruptManagementOperations(timestamp) {
+        return changes(await query(`UPDATE mod_management_operations SET status='interrupted',updated_at=$1,finished_at=$1,
+          result='{"outcome":"unknown"}'::jsonb,error_code='mod_management_interrupted' WHERE status='running'`, [timestamp]));
+      },
+      async claimManagementOperation(timestamp) {
+        return first(await query(`UPDATE mod_management_operations SET status='running',started_at=$1,updated_at=$1
+          WHERE id=(SELECT id FROM mod_management_operations WHERE status='queued' ORDER BY sequence LIMIT 1 FOR UPDATE SKIP LOCKED)
+          AND status='queued' RETURNING *`, [timestamp]));
+      },
+      async finishManagementOperation(id, { status, result, errorCode, timestamp }) {
+        if (!['succeeded','failed'].includes(status)) throw new Error('mod_management_status_invalid');
+        const changed = changes(await query(`UPDATE mod_management_operations SET status=$2,result=$3::jsonb,error_code=$4,updated_at=$5,finished_at=$5
+          WHERE id=$1 AND status='running'`, [id,status,JSON.stringify(result),errorCode,timestamp]));
+        if (changed.changes !== 1) throw new Error('mod_management_operation_conflict');
+        return changed;
+      },
       async sourceRows() { return rows(await query('SELECT id,url,provider,mod_id,mod_name,latest_version,archive_url,status,error,last_checked_at FROM mod_sources ORDER BY created_at')); },
       async installationRows() { return rows(await query('SELECT mod_id,source_id,version,archive_sha256,installed_at,updated_at FROM mod_installations')); },
       async lifecycleRows() { return rows(await query('SELECT mod_id,enabled,created_at,updated_at FROM mod_lifecycle')); },

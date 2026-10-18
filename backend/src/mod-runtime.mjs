@@ -9,7 +9,7 @@ import { startModHost } from './mod-host.mjs';
 export const MOD_DATA_DIRECTORY = 'mod-data';
 const MOD_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SYSTEM_CAPABILITY_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
-export const SUPPORTED_SYSTEM_MOD_CAPABILITIES = Object.freeze(['execution-provider-v1']);
+export const SUPPORTED_SYSTEM_MOD_CAPABILITIES = Object.freeze(['execution-provider-v1', 'mod-management-v1']);
 const SUPPORTED_SYSTEM_MOD_CAPABILITY_SET = new Set(SUPPORTED_SYSTEM_MOD_CAPABILITIES);
 const MIME = Object.freeze({ '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' });
 
@@ -205,7 +205,7 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
   }
 }
 
-export async function loadMods({ runtimeRoot, logger = console, executionProviders = null, replaceExecutionProviders = false, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null, stores = null, runtimeDiagnostics = null, onlyModIds = null, modStoreFactory = null, enabledModIds = null, modCatalogWriter = null } = {}) {
+export async function loadMods({ runtimeRoot, logger = console, executionProviders = null, replaceExecutionProviders = false, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null, stores = null, runtimeDiagnostics = null, modManagement = null, onlyModIds = null, modStoreFactory = null, enabledModIds = null, modCatalogWriter = null } = {}) {
   const discoveredAll = await discoverMods({ runtimeRoot });
   const selectedIds = onlyModIds ? new Set(onlyModIds) : null;
   const discovered = selectedIds ? discoveredAll.filter((mod) => selectedIds.has(mod.id)) : discoveredAll;
@@ -226,7 +226,7 @@ export async function loadMods({ runtimeRoot, logger = console, executionProvide
         let unregisterController = null;
         store = await modStoreFactory(mod.id);
         host = startModHost({
-          mod, store, logger, systemCapability, capabilities: resolveAgentRuntime ? createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl: capabilityFetch, ownerModId: mod.id, scheduledJobScheduler, stores, modStore: store, runtimeDiagnostics }) : null, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs,
+          mod, store, logger, systemCapability, capabilities: resolveAgentRuntime ? createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl: capabilityFetch, ownerModId: mod.id, scheduledJobScheduler, stores, modStore: store, runtimeDiagnostics, modManagement: declaredCapabilities.includes('mod-management-v1') ? modManagement : null }) : null, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs,
           onSystemControllerReady(controllerProxy) {
             if (!systemCapability || !executionProviders) return;
             unregisterController = executionProviders.register(mod.id, controllerProxy, { replace: replaceExecutionProviders });

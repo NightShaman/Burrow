@@ -123,7 +123,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       child.send({ type: "capability-result", requestId, error: "mod_busy" }, () => {}); return;
     }
     const controller = new AbortController();
-    if (activeCapabilities.size >= 4 || !capabilities || !["readRuntimeDiagnostics", "listAgents", "getOperatorIdentity", "getOperatorTimezone", "listConversations", "readConversation", "listModels", "generateText", "listScheduledJobs", "readScheduledJob", "createScheduledJob", "updateScheduledJob", "deleteScheduledJob", "listScheduledJobRuns", "triggerScheduledJob"].includes(message.method)) {
+    if (activeCapabilities.size >= 4 || !capabilities || !["managementInventory", "managementSubmit", "managementOperation", "readRuntimeDiagnostics", "listAgents", "getOperatorIdentity", "getOperatorTimezone", "listConversations", "readConversation", "listModels", "generateText", "listScheduledJobs", "readScheduledJob", "createScheduledJob", "updateScheduledJob", "deleteScheduledJob", "listScheduledJobRuns", "triggerScheduledJob"].includes(message.method)) {
       child.send({ type: "capability-result", requestId, error: "mod_capability_unavailable" }, () => {}); return;
     }
     // Capability methods validate their own inputs; transport does not impose a
@@ -146,12 +146,18 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       const result = await Promise.race([cancelled, Promise.resolve().then(() => {
         if (controller.signal.aborted) throw controller.signal.reason;
         let caller = null;
-        if (message.method === 'readRuntimeDiagnostics') {
-          const parent = pending.get(String(message.parentInvocationId || ''));
-          if (!parent?.trustedCaller || !parent.routeId?.startsWith('tool:')) throw hostError('mod_diagnostic_caller_required');
+        const management = message.method.startsWith('management');
+        let parent = null;
+        if (message.method === 'readRuntimeDiagnostics' || management) {
+          if (management && !(mod.systemCapabilities || []).includes('mod-management-v1')) throw hostError('mod_capability_unavailable');
+          parent = pending.get(String(message.parentInvocationId || ''));
+          if (!parent?.trustedCaller || !parent.routeId?.startsWith('tool:')) throw hostError(management ? 'mod_management_caller_required' : 'mod_diagnostic_caller_required');
           caller = parent.trustedCaller;
         }
-        return capabilities[message.method](message.input, { signal: controller.signal, caller });
+        const assertCallerActive = () => {
+          if (controller.signal.aborted || !parent || pending.get(String(message.parentInvocationId || '')) !== parent) throw hostError('mod_management_caller_required');
+        };
+        return capabilities[message.method](message.input, { signal: controller.signal, caller, assertCallerActive, waitForCaller: parent?.completed });
       })]);
       if (result === undefined) throw hostError("mod_capability_output_invalid");
       if (!controller.signal.aborted && !closing && child.connected) child.send({ type: "capability-result", requestId, result }, () => {});
@@ -381,7 +387,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
 
   // Deliberately send only identity and entrypoint. Database ownership and path
   // remain in core and are never part of the child activation context.
-  child.send({ type: 'activate', modId: mod.id, serverPath: mod.server, ...(systemCapability ? { systemCapability, controllerInstanceId } : {}) }, (error) => {
+  child.send({ type: 'activate', modId: mod.id, serverPath: mod.server, management: (mod.systemCapabilities || []).includes('mod-management-v1'), ...(systemCapability ? { systemCapability, controllerInstanceId } : {}) }, (error) => {
     if (!error || activationSettled) return;
     activationSettled = true;
     clearTimeout(activationTimer);
@@ -484,13 +490,17 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     if (stopped || closing || !child.connected) throw hostError('mod_host_unavailable', mod.id);
     const requestId = `${process.pid}-${Date.now()}-${++sequence}`;
     return new Promise((resolve, reject) => {
+      let finish;
+      const completed = new Promise(done => { finish = done; });
+      const succeed = value => { finish(); resolve(value); };
+      const fail = error => { finish(); reject(error); };
       const cancel = () => {
         if (!pending.has(requestId)) return;
         pending.delete(requestId);
         clearTimeout(timer);
         abortSignal?.removeEventListener('abort', cancel);
         child.send({ type: 'invoke-cancel', requestId }, () => {});
-        reject(hostError('mod_tool_cancelled'));
+        fail(hostError('mod_tool_cancelled'));
       };
       abortSignal?.addEventListener('abort', cancel, { once: true });
       const timer = setTimeout(() => {
@@ -499,11 +509,11 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
         abortSignal?.removeEventListener('abort', cancel);
         const error = hostError('mod_route_timeout', mod.id);
         markUnavailable('mod_route_timeout');
-        reject(error);
+        fail(error);
         rejectPending(hostError('mod_host_unavailable', mod.id));
         child.kill('SIGKILL');
       }, finiteTimeout(routeTimeoutMs, DEFAULT_MOD_ROUTE_TIMEOUT_MS));
-      pending.set(requestId, { resolve, reject, timer, routeId, abortSignal, cancel, trustedCaller: routeId?.startsWith('tool:') ? Object.freeze({ ...(request?.caller || {}) }) : null });
+      pending.set(requestId, { resolve: succeed, reject: fail, completed, timer, routeId, abortSignal, cancel, trustedCaller: routeId?.startsWith('tool:') ? Object.freeze({ ...(request?.caller || {}) }) : null });
       if (abortSignal?.aborted) { cancel(); return; }
       child.send({ type: 'invoke', requestId, routeId, request }, (error) => {
         if (!error || !pending.has(requestId)) return;
@@ -511,7 +521,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
         clearTimeout(timer);
         abortSignal?.removeEventListener('abort', cancel);
         const failure = hostError('mod_host_send_failed');
-        reject(failure);
+        fail(failure);
         rejectPending(hostError('mod_host_unavailable', mod.id));
         markUnavailable('mod_host_send_failed');
         if (!stopped) child.kill('SIGKILL');

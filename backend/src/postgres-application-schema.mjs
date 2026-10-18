@@ -23,7 +23,7 @@ import { POSTGRES_FORGE_NATIVE_SCHEMA_SQL } from './postgres-forge-native-schema
 import { POSTGRES_ROLLING_CONTINUITY_SCHEMA_SQL } from './postgres-rolling-continuity-store.mjs';
 import { POSTGRES_DREAM_EXTRACTION_SCHEMA_SQL } from './postgres-dream-extraction-store.mjs';
 import { POSTGRES_ALBDRUCK_SCHEMA_SQL } from './postgres-albdruck-store.mjs';
-import { POSTGRES_MOD_DISTRIBUTION_SCHEMA_SQL } from './postgres-mod-distribution-repository.mjs';
+import { POSTGRES_MOD_DISTRIBUTION_SCHEMA_SQL, POSTGRES_MOD_MANAGEMENT_SCHEMA_SQL } from './postgres-mod-distribution-repository.mjs';
 import { POSTGRES_MOD_SCHEMA_SQL } from './postgres-mod-store.mjs';
 import { POSTGRES_AGENT_REGISTRY_SCHEMA_SQL } from './postgres-agent-registry.mjs';
 import { POSTGRES_AGENT_PROFILE_SCHEMA_SQL } from './postgres-agent-profile-store.mjs';
@@ -135,4 +135,5 @@ ALTER TABLE skill_git_sources ADD COLUMN effective_timezone TEXT;
 ` },
   // Existing explicit choices remain intact; only future lifecycle rows default off.
   { version: 54, name: 'mods-disabled-by-default', sql: 'ALTER TABLE mod_lifecycle ALTER COLUMN enabled SET DEFAULT FALSE;' },
+  { version: 55, name: 'durable-mod-management-operations', sql: POSTGRES_MOD_MANAGEMENT_SCHEMA_SQL },
 ]);
