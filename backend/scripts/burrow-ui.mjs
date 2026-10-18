@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { migrateLegacyExecutionProviderApproval } from '../src/execution-provider-approval.mjs';
 import { createModAuthority, createModAuthorityRoute } from '../src/mod-authority.mjs';
 import { createProviderUsageService } from '../src/provider-usage-service.mjs';
 import { createBackgroundLifecycle, createCoordinatedShutdown } from '../src/background-lifecycle.mjs';
@@ -103,7 +104,7 @@ import { createObservabilityRoutes } from './ui/observability-routes.mjs';
 import { createScheduledChannelRoutes } from './ui/scheduled-channel-routes.mjs';
 import { createAuthRoutes } from './ui/auth-routes.mjs';
 import { createChatRoutes } from './ui/chat-routes.mjs';
-import { cleanupMods, createModRoute, loadMods } from '../src/mod-runtime.mjs';
+import { cleanupMods, createModRoute, discoverMods, loadMods } from '../src/mod-runtime.mjs';
 import { createModManagement } from '../src/mod-management.mjs';
 import { createModDistribution, createModManagementRoute } from '../src/mod-distribution.mjs';
 import { MAX_OVERVIEW_CHILD_CONTEXTS, normalizeOverviewBody, overviewSessionIds } from '../src/agent-overview.mjs';
@@ -2940,14 +2941,15 @@ const modLoadOptions = { modAuthority, modManagement: modManagementCapability, s
   if (!agent) throw new Error('agent_not_found');
   return agentRuntimeContext({ runtimeState: (await runtimeConfig()).runtimeState, agent }).agentWorkspaceRoot;
 } };
-const mods = await loadMods(modLoadOptions);
-loadedMods = mods;
+let modsStarting = true;
 const modRoute = createModRoute({ getMods: () => loadedMods, readJsonBody, sendJson });
-async function transitionMod({ modId, enabled, installed, action }) {
+async function transitionMod({ modId, enabled, installed, action, reactivate = false }) {
+  // Startup journals reconcile files and metadata before any hosts are started.
+  if (modsStarting) return;
   const old = loadedMods.find((entry) => entry.id === modId) || null;
   // Repeated enable is a no-op only for a genuinely active loaded host.
   // Failed/disconnected hosts must still pass through activation on retry.
-  if (action === 'enable' && installed && enabled && old?.status === 'loaded' && old.host && !old.host.child?.killed && old.host.child?.connected) return;
+  if (!reactivate && ['enable', 'enable-recovery'].includes(action) && installed && enabled && old?.status === 'loaded' && old.host && !old.host.child?.killed && old.host.child?.connected) return;
   if (old?.host?.activeOperationCount?.() > 0) throw Object.assign(new Error('mod_busy'), { statusCode: 409 });
   if (action === 'update-preflight') return;
   // A failed uninstall can restore files and lifecycle records after the old
@@ -2965,6 +2967,12 @@ async function transitionMod({ modId, enabled, installed, action }) {
       ? loadedMods.map((entry) => entry.id === modId ? { ...entry, host: null, routes: [], store: null, lifecycleCleanup: null, status: 'disabled' } : entry)
       : loadedMods.filter((entry) => entry.id !== modId);
     return;
+  }
+  if (reactivate && old) {
+    // Newly approved interfaces require a fresh host. Stop the old listener
+    // before activation; overlapping Node Goblin listeners cannot share a port.
+    await cleanupMods([old]);
+    Object.assign(old, { host: null, routes: [], store: null, lifecycleCleanup: null, status: 'disabled' });
   }
   const [next] = await loadMods({ ...modLoadOptions, onlyModIds: [modId], replaceExecutionProviders: action === 'update' });
   if (!next || next.status !== 'loaded') {
@@ -2997,6 +3005,13 @@ const modDistribution = createModDistribution({
 // callback above is self-contained and does not call back into the distribution,
 // so this readiness barrier cannot form a lifecycle/distribution cycle.
 await modDistribution.ready;
+await migrateLegacyExecutionProviderApproval({
+  repositoryFactory: postgresApplication.modDistributionRepositoryFactory,
+  mods: await discoverMods({ runtimeRoot: modsRuntimeRoot }),
+  agents: await agentsStore().list({ includeDisabled: true }),
+});
+loadedMods = await loadMods(modLoadOptions);
+modsStarting = false;
 coreModManagement = createModManagement({ modAuthority, distribution: modDistribution, repositoryFactory: postgresApplication.modDistributionRepositoryFactory });
 await coreModManagement.ready;
 const modAuthorityRoute = createModAuthorityRoute({ authority: modAuthority, getMods: () => loadedMods, readJsonBody, sendJson });
@@ -3308,3 +3323,4 @@ server.listen(port, host, () => {
   void recoveryContinuationScheduler.start().catch(() => {});
   }).catch(error => { console.error(`Burrow startup failed: ${String(error?.message || error)}`); void shutdownRuntime('startup_failure', { exitCode: 1 }); });
 });
+

@@ -62,6 +62,41 @@ export function createPostgresModDistributionRepository({ pool } = {}) {
         VALUES($1,$2::jsonb,$3::jsonb,$4::jsonb) ON CONFLICT(mod_id) DO UPDATE SET grants=EXCLUDED.grants,
         admin_agent_ids=EXCLUDED.admin_agent_ids,diagnostic_agent_ids=EXCLUDED.diagnostic_agent_ids,updated_at=now()`,
         [id,JSON.stringify(value.grants),JSON.stringify(value.adminAgentIds),JSON.stringify(value.diagnosticAgentIds)]); },
+      async executionProviderInstallation(id) {
+        return first(await query(`SELECT i.version,i.archive_sha256,s.url AS source_url
+          FROM mod_installations i JOIN mod_sources s ON s.id=i.source_id WHERE i.mod_id=$1`, [id]));
+      },
+      async beginExecutionProviderApprovalMigration() {
+        const result = await query(`INSERT INTO settings_meta(key,value_json,updated_at)
+          VALUES ('execution-provider-approval-migration-v1','true'::jsonb,now())
+          ON CONFLICT(key) DO NOTHING RETURNING key`);
+        return result.rows.length === 1;
+      },
+      async grantExecutionProvider(id, { restoreRevoked = false } = {}) {
+        if (queryer === pool) return withPostgresTransaction(pool, client => make(client).grantExecutionProvider(id, { restoreRevoked }));
+        const previous = first(await query('SELECT grants,admin_agent_ids,diagnostic_agent_ids FROM core_mod_authority WHERE mod_id=$1 FOR UPDATE', [id]));
+        if (previous && (!restoreRevoked || previous.grants.includes('execution-provider-v1'))) return null;
+        if (previous) {
+          const changed = first(await query(`UPDATE core_mod_authority SET grants=$2::jsonb,updated_at=now()
+            WHERE mod_id=$1 RETURNING xmin::text AS revision`, [id,JSON.stringify([...previous.grants,'execution-provider-v1'])]));
+          return { id, previous, revision: changed.revision };
+        }
+        const row = first(await query(`INSERT INTO core_mod_authority(mod_id,grants,admin_agent_ids,diagnostic_agent_ids)
+          VALUES($1,$2::jsonb,$3::jsonb,$4::jsonb)
+          ON CONFLICT(mod_id) DO NOTHING RETURNING xmin::text AS revision`,
+          [id,JSON.stringify([...(previous?.grants || []),'execution-provider-v1']),JSON.stringify(previous?.admin_agent_ids || []),JSON.stringify(previous?.diagnostic_agent_ids || [])]));
+        return row ? { id, previous: null, revision: row.revision } : null;
+      },
+      async restoreExecutionProviderApproval(receipt) {
+        if (!receipt) return;
+        if (!receipt.previous) {
+          await query('DELETE FROM core_mod_authority WHERE mod_id=$1 AND xmin::text=$2', [receipt.id,receipt.revision]);
+        } else {
+          const previous = receipt.previous;
+          await query(`UPDATE core_mod_authority SET grants=$3::jsonb,admin_agent_ids=$4::jsonb,diagnostic_agent_ids=$5::jsonb,updated_at=now()
+            WHERE mod_id=$1 AND xmin::text=$2`, [receipt.id,receipt.revision,JSON.stringify(previous.grants),JSON.stringify(previous.admin_agent_ids),JSON.stringify(previous.diagnostic_agent_ids)]);
+        }
+      },
       async recordModDenial(id, capability, agentId) { await query('INSERT INTO core_mod_denials(owner_mod_id,capability,agent_id) VALUES($1,$2,$3)', [id,capability,agentId]); },
       async ensureManagementSchema() { await query(POSTGRES_MOD_MANAGEMENT_SCHEMA_SQL); },
       async createManagementOperation(row) {
@@ -130,3 +165,4 @@ export function createPostgresModDistributionRepository({ pool } = {}) {
 }
 
 export default createPostgresModDistributionRepository;
+

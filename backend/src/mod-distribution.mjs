@@ -1,3 +1,4 @@
+import { approveOperatorExecutionProvider, executionProviderEligibility, isOperatorModAction } from './execution-provider-approval.mjs';
 import crypto, { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -488,7 +489,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
   }
   async function removeSource(id) {
     await ready; const db = await repositoryFactory(); try { const removed = (await db.removeSource(String(id))).changes > 0; return { ok: removed, removed }; } finally { await db.close(); } }
-  async function install(modId, requestedVersion = null) {
+  async function install(modId, requestedVersion = null, { operatorInitiated = false } = {}) {
     await ready;
     const id = String(modId || '').trim(); if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id))) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
@@ -523,6 +524,11 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       const journal = { version: 1, operation: 'install', operationId, modId: prepared.id, target, backup, hadTarget, digest, enabled, wasInstalled };
       await durableJson(journalPath, journal);
       let metadataCommitted = false;
+      const candidate = { ...prepared, systemCapabilities: prepared.manifest.systemCapabilities };
+      const candidateInstallation = { source_url: source.url, version: prepared.manifest.version === version ? version : null, archive_sha256: digest };
+      const executionApprovalEligible = operatorInitiated && prepared.id === 'node-goblin'
+        && (await executionProviderEligibility(db, candidate, candidateInstallation)).eligible;
+      let installationApproval = null;
       try {
         if (hadTarget) await renamePath(target, backup);
         await syncTree(prepared.root);
@@ -530,7 +536,10 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
         const directory = await fs.open(modsRoot, 'r');
         try { await directory.sync(); } finally { await directory.close(); }
         if (wasInstalled && enabled) await onLifecycleChange?.({ modId: prepared.id, enabled: true, installed: true, action: 'update' });
-        await db.transaction((tx) => tx.saveInstallation(source, prepared, version, digest, now(), operationId));
+        await db.transaction(async tx => {
+          await tx.saveInstallation(source, prepared, version, digest, now(), operationId);
+          if (executionApprovalEligible) installationApproval = await approveOperatorExecutionProvider(tx, candidate, { candidateInstallation });
+        });
         metadataCommitted = true;
         await cleanupPath(backup, { recursive: true, force: true });
         await removeDurably(journalPath);
@@ -550,14 +559,14 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
         throw error;
       }
       restart?.();
-      return { ok: true, modId: prepared.id, version, archiveSha256: digest, restartRequired: Boolean(restart) };
+      return { ok: true, modId: prepared.id, version, archiveSha256: digest, restartRequired: Boolean(restart || (installationApproval && wasInstalled && enabled)) };
     } finally {
       try { await db?.close(); } finally {
         try { if (scratch) await fs.rm(scratch, { recursive: true, force: true }); } finally { locks.delete(id); }
       }
     }
   }
-  async function setEnabled(modId, enabled) {
+  async function setEnabled(modId, enabled, { operatorInitiated = false } = {}) {
     await ready;
     const id = String(modId || '').trim(); if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id))) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
@@ -568,10 +577,25 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       if (!discovered.some((entry) => entry.id === id)) throw Object.assign(new Error('mod_not_found'), { statusCode: 404 });
       const timestamp = now();
       const previous = await db.previousLifecycle(id);
-      await db.setLifecycle(id, enabled, timestamp);
-      try { await onLifecycleChange?.({ modId: id, enabled: Boolean(enabled), installed: true, action: enabled ? 'enable' : 'disable' }); }
+      let approval = null;
+      let reactivate = false;
+      if (enabled && operatorInitiated && id === 'node-goblin') {
+        await db.transaction(async tx => {
+          reactivate = (await executionProviderEligibility(tx, discovered.find(entry => entry.id === id))).eligible;
+          approval = await approveOperatorExecutionProvider(tx, discovered.find(entry => entry.id === id), { restoreRevoked: true });
+          await tx.setLifecycle(id, enabled, timestamp);
+        });
+      } else await db.setLifecycle(id, enabled, timestamp);
+      try { await onLifecycleChange?.({ modId: id, enabled: Boolean(enabled), installed: true, action: enabled ? 'enable' : 'disable', ...(reactivate ? { reactivate: true } : {}) }); }
       catch (error) {
-        await db.restoreLifecycle(id, previous, timestamp);
+        if (reactivate) {
+          await db.transaction(async tx => {
+            await tx.restoreLifecycle(id, previous, timestamp);
+            if (approval) await tx.restoreExecutionProviderApproval(approval);
+          });
+          try { await onLifecycleChange?.({ modId: id, enabled: [true, 1].includes(previous?.enabled), installed: true, action: 'enable-recovery' }); }
+          catch (recoveryError) { error.runtimeRecoveryError = recoveryError; }
+        } else await db.restoreLifecycle(id, previous, timestamp);
         throw error;
       }
       restart?.();
@@ -652,7 +676,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
   }
   const pollingReady = ready.then(() => schedulePoll());
   void pollingReady.catch((error) => logger.error?.(`Burrow mod source polling failed: ${String(error?.message || error)}`));
-  return { ready, list, sourceRefreshConfig, saveSourceRefreshConfig, addSource, refresh, removeSource, install, enable: (id) => setEnabled(id, true), disable: (id) => setEnabled(id, false), uninstall, async close() { closed = true; clearPoll(); try { await ready; await pollingReady; await refreshPromise; } catch {} } };
+  return { ready, list, sourceRefreshConfig, saveSourceRefreshConfig, addSource, refresh, removeSource, install, enable: (id, options) => setEnabled(id, true, options), disable: (id) => setEnabled(id, false), uninstall, async close() { closed = true; clearPoll(); try { await ready; await pollingReady; await refreshPromise; } catch {} } };
 }
 
 export function createModManagementRoute({ distribution, readJsonBody, sendJson } = {}) {
@@ -670,12 +694,15 @@ export function createModManagementRoute({ distribution, readJsonBody, sendJson 
       let result;
       if (match[2] === 'install') {
         const body = await readJsonBody(req);
-        result = await distribution.install(id, body.version || body.targetVersion);
+        result = await distribution.install(id, body.version || body.targetVersion, { operatorInitiated: isOperatorModAction(req) });
       } else {
-        result = await distribution[match[2]](id);
+        result = match[2] === 'enable'
+          ? await distribution.enable(id, { operatorInitiated: isOperatorModAction(req) })
+          : await distribution[match[2]](id);
       }
       sendJson(res, 200, result); return true;
     }
     return false;
   };
 }
+
