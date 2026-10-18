@@ -79,10 +79,19 @@ function stampBurrow(root, version, sources) {
   writeJson(path.join(root, 'PUBLIC_RELEASE.json'), { schemaVersion: 1, releaseDate: version, sources });
 }
 
+export function setNodeGoblinReleaseAuthority(root, repository) {
+  const file = path.join(root, 'install.sh');
+  const source = fs.readFileSync(file, 'utf8');
+  const authority = /^REPOSITORY=\$\{NODE_GOBLIN_REPOSITORY:-[^}]+\}$/m;
+  if (!authority.test(source)) throw new Error('node_goblin_installer_authority_missing');
+  fs.writeFileSync(file, source.replace(authority, `REPOSITORY=\${NODE_GOBLIN_REPOSITORY:-${repository}}`));
+}
+
 function stampNodeGoblin(root, version, sources) {
   stampJson(path.join(root, 'burrow.mod.json'), version);
   stampJson(path.join(root, 'gateway/package.json'), version);
   fs.writeFileSync(path.join(root, 'gateway/VERSION'), `${version}\n`);
+  setNodeGoblinReleaseAuthority(root, 'GoblinKing-Burrow/Node-Goblin');
   writeJson(path.join(root, 'PUBLIC_RELEASE.json'), { schemaVersion: 1, releaseDate: version, sources });
 }
 
