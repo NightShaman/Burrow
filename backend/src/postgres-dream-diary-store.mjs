@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS dream_diary_entries (
 );
 CREATE INDEX IF NOT EXISTS dream_diary_entries_agent_idx ON dream_diary_entries (agent_id, entry_date DESC, created_at DESC);
 `;
+export const POSTGRES_DREAM_CALENDAR_INDEX_SQL = `
+CREATE INDEX IF NOT EXISTS dream_diary_calendar_idx ON dream_diary_entries(agent_id,created_at DESC);
+`;
 export const DREAM_DIARY_SCHEMA_SQL = POSTGRES_DREAM_DIARY_SCHEMA_SQL;
 
 const MAX_NARRATIVE_CHARS = 12_000;
@@ -50,6 +53,17 @@ export class PostgresDreamDiaryStore {
     });
     const result = await this.pool.query('SELECT * FROM dream_diary_entries WHERE agent_id=$1 AND entry_date=$2 AND phase=$3 AND narrative_digest=$4 AND narrative=$5', [agentId, entryDate, entryPhase, narrativeDigest, body]);
     return publicRow(result.rows[0]);
+  }
+  async listCalendarDates(agent, { month, timezone = 'UTC' } = {}) {
+    const agentId = text(agent); if (!agentId) throw new Error('dream_diary_agent_required');
+    const value = text(month); if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) throw new Error('archive_month_invalid');
+    const start = new Date(`${value}-01T00:00:00Z`); const safeStart = new Date(start); safeStart.setUTCDate(safeStart.getUTCDate() - 1);
+    const safeEnd = new Date(start); safeEnd.setUTCMonth(safeEnd.getUTCMonth() + 1, 2);
+    const result = await this.pool.query(`SELECT DISTINCT to_char(created_at AT TIME ZONE $4,'YYYY-MM-DD') AS day
+      FROM dream_diary_entries WHERE agent_id=$1 AND created_at>=$2 AND created_at<$3
+      AND to_char(created_at AT TIME ZONE $4,'YYYY-MM')=$5 ORDER BY day`,
+    [agentId, safeStart.toISOString(), safeEnd.toISOString(), timezone, value]);
+    return result.rows.map(row => row.day);
   }
   async list(agent, { date: filterDate = null, phase: filterPhase = null, limit = 30 } = {}) {
     const agentId = text(agent); if (!agentId) throw new Error('dream_diary_agent_required');

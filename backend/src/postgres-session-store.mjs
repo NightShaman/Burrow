@@ -83,6 +83,13 @@ ALTER TABLE conversation_archives ALTER COLUMN entries SET DEFAULT '[]'::json;
 
 export const POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL = `CREATE INDEX IF NOT EXISTS conversation_entries_agent_recent_idx ON conversation_entries(agent_id, created_at DESC, sequence DESC);`;
 
+export const POSTGRES_ARCHIVE_LISTING_INDEX_SQL = `
+CREATE INDEX IF NOT EXISTS conversation_sessions_archive_listing_idx
+ ON conversation_sessions(agent_id,updated_at DESC,session_id DESC);
+CREATE INDEX IF NOT EXISTS conversation_archives_reset_listing_idx
+ ON conversation_archives(agent_id,created_at DESC,archive_id DESC) WHERE kind='reset';
+`;
+
 export const POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL = `
 -- Lexical top-level member scanner: no JSON string is decoded into PostgreSQL text.
 CREATE OR REPLACE FUNCTION burrow_json_member(payload json, member text) RETURNS json
@@ -521,7 +528,7 @@ UPDATE conversation_entries SET has_payload_id=NULL;
 UPDATE conversation_archive_entries SET has_payload_id=NULL;
 `;
 
-export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL + POSTGRES_RESET_INSTANT_SQL + POSTGRES_HISTORY_KEYSET_SQL + POSTGRES_LOGICAL_MEMBER_SQL + POSTGRES_ARCHIVE_RELATIONAL_ID_SQL + POSTGRES_CATALOG_SCALAR_ID_SQL + POSTGRES_LOGICAL_LOOKUP_INDEX_SQL + POSTGRES_AGENT_DELIVERY_SCHEMA_SQL + POSTGRES_OPERATOR_INSTANT_SQL;
+export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL + POSTGRES_RESET_INSTANT_SQL + POSTGRES_HISTORY_KEYSET_SQL + POSTGRES_LOGICAL_MEMBER_SQL + POSTGRES_ARCHIVE_RELATIONAL_ID_SQL + POSTGRES_CATALOG_SCALAR_ID_SQL + POSTGRES_LOGICAL_LOOKUP_INDEX_SQL + POSTGRES_AGENT_DELIVERY_SCHEMA_SQL + POSTGRES_OPERATOR_INSTANT_SQL + POSTGRES_ARCHIVE_LISTING_INDEX_SQL;
 
 const text = (value) => String(value ?? '');
 const required = (value, name) => { const result = text(value).trim(); if (!result) throw new Error(`${name} is required`); return result; };
@@ -1287,6 +1294,68 @@ export class PostgresSessionStore {
     });
   }
 
+  async listArchiveSessions({ agentId: rawAgentId, includeArchived = true, query = '', date = null, month = null, timezone = 'UTC', limit = 100, boundary = null } = {}) {
+    const agentId = required(rawAgentId, 'agentId');
+    const size = limitValue(limit);
+    const search = text(query).trim().toLowerCase();
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) throw new Error('archive_date_invalid');
+    if (month && !/^\d{4}-\d{2}$/.test(String(month))) throw new Error('archive_month_invalid');
+    if (boundary && (typeof boundary.t !== 'string' || typeof boundary.i !== 'string')) throw new Error('archive_cursor_invalid');
+    const windowKey = date || (month ? `${month}-01` : null);
+    const windowStart = windowKey ? new Date(`${windowKey}T00:00:00Z`) : null;
+    const windowEnd = windowStart ? new Date(windowStart) : null;
+    if (windowStart) windowStart.setUTCDate(windowStart.getUTCDate() - 1);
+    if (windowEnd) date ? windowEnd.setUTCDate(windowEnd.getUTCDate() + 2) : windowEnd.setUTCMonth(windowEnd.getUTCMonth() + 1, 2);
+    const { rows } = await this.pool.query(`WITH archive_rows AS (
+      SELECT s.agent_id,s.session_id AS id,s.session_id,NULL::text AS source_session_id,
+        false AS archive_snapshot,s.metadata,s.created_at,s.updated_at
+      FROM conversation_sessions s
+      WHERE s.agent_id=$1 AND ($2::boolean OR COALESCE((s.metadata->>'archived')::boolean,false)=false)
+        AND ($10::timestamptz IS NULL OR s.updated_at>=$10::timestamptz)
+        AND ($11::timestamptz IS NULL OR s.updated_at<$11::timestamptz)
+      UNION ALL
+      SELECT a.agent_id,a.archive_id AS id,a.session_id,a.session_id AS source_session_id,
+        true AS archive_snapshot,a.metadata,a.created_at,a.created_at AS updated_at
+      FROM conversation_archives a WHERE a.agent_id=$1 AND a.kind='reset'
+        AND ($10::timestamptz IS NULL OR a.created_at>=$10::timestamptz)
+        AND ($11::timestamptz IS NULL OR a.created_at<$11::timestamptz)
+    ), bounded AS (
+      SELECT *,agent_id || ':' || id AS identity FROM archive_rows
+      WHERE ($3::text='' OR lower(concat_ws(' ',id,session_id,source_session_id,metadata::text)) LIKE '%' || $3 || '%')
+      AND ($4::text IS NULL OR to_char(updated_at AT TIME ZONE $6,'YYYY-MM-DD')=$4)
+      AND ($5::text IS NULL OR to_char(updated_at AT TIME ZONE $6,'YYYY-MM')=$5)
+      AND ($7::timestamptz IS NULL OR (updated_at,agent_id || ':' || id)<($7::timestamptz,$8::text))
+      ORDER BY updated_at DESC,agent_id || ':' || id DESC LIMIT $9
+    ) SELECT bounded.*,
+      CASE WHEN archive_snapshot THEN (SELECT count(*) FROM conversation_archive_entries e
+        WHERE e.agent_id=bounded.agent_id AND e.session_id=bounded.session_id AND e.source_id=bounded.id)
+      WHEN metadata->>'turnCount' ~ '^[0-9]+$' THEN (metadata->>'turnCount')::bigint ELSE 0 END AS turn_count
+      FROM bounded ORDER BY updated_at DESC,identity DESC`,
+    [agentId, Boolean(includeArchived), search, date, month, timezone, boundary?.t || null, boundary?.i || null, size + 1, windowStart?.toISOString() || null, windowEnd?.toISOString() || null]);
+    const hasMore = rows.length > size;
+    return { rows: (hasMore ? rows.slice(0, size) : rows).map(row => ({
+      id: row.id, sessionId: row.id, sourceSessionId: row.source_session_id,
+      archiveSnapshot: row.archive_snapshot ? 'reset' : null, metadata: row.metadata,
+      turnCount: Number(row.turn_count), createdAt: row.created_at, updatedAt: row.updated_at,
+      identity: row.identity,
+    })), hasMore };
+  }
+
+  async listArchiveCalendarDates({ agentId: rawAgentId, month, timezone = 'UTC' } = {}) {
+    const agentId = required(rawAgentId, 'agentId');
+    const monthStart = new Date(`${month}-01T00:00:00Z`);
+    const safeStart = new Date(monthStart); safeStart.setUTCDate(safeStart.getUTCDate() - 1);
+    const safeEnd = new Date(monthStart); safeEnd.setUTCMonth(safeEnd.getUTCMonth() + 1, 2);
+    const { rows } = await this.pool.query(`SELECT DISTINCT day FROM (
+      SELECT to_char(updated_at AT TIME ZONE $3,'YYYY-MM-DD') AS day
+      FROM conversation_sessions WHERE agent_id=$1 AND updated_at>=$4 AND updated_at<$5
+      UNION ALL
+      SELECT to_char(created_at AT TIME ZONE $3,'YYYY-MM-DD') AS day
+      FROM conversation_archives WHERE agent_id=$1 AND kind='reset' AND created_at>=$4 AND created_at<$5
+    ) archive_days WHERE day LIKE $2 || '-%' ORDER BY day`, [agentId, month, timezone, safeStart.toISOString(), safeEnd.toISOString()]);
+    return rows.map(row => row.day);
+  }
+
   async listArchives({ agentId: rawAgentId, sessionId: rawSessionId, limit = 100 } = {}) {
     const agentId = required(rawAgentId, 'agentId'); const params = [agentId]; let where = 'agent_id=$1';
     if (rawSessionId != null) { params.push(required(rawSessionId, 'sessionId')); where += ` AND session_id=$${params.length}`; }
@@ -1294,6 +1363,18 @@ export class PostgresSessionStore {
     if (!unbounded) params.push(limitValue(limit));
     const result = await this.pool.query(`SELECT archive_id,session_id,generation,kind,COALESCE((SELECT json_agg(e.entry ORDER BY e.ordinal) FROM conversation_archive_entries e WHERE e.agent_id=conversation_archives.agent_id AND e.session_id=conversation_archives.session_id AND e.source_id=conversation_archives.archive_id),'[]'::json) AS entries,metadata,created_at FROM conversation_archives WHERE ${where} ORDER BY generation DESC, created_at DESC, archive_id DESC${unbounded ? '' : ` LIMIT $${params.length}`}`, params);
     return result.rows.map((row) => ({ archiveId: row.archive_id, sessionId: row.session_id, generation: Number(row.generation), kind: row.kind, entries: row.entries, metadata: row.metadata, createdAt: row.created_at }));
+  }
+
+  async readArchiveById({ agentId: rawAgentId, archiveId, kind = null } = {}) {
+    const agentId = required(rawAgentId, 'agentId'); const id = required(archiveId, 'archiveId');
+    const result = await this.pool.query(`SELECT archive_id,session_id,generation,kind,
+      COALESCE((SELECT json_agg(e.entry ORDER BY e.ordinal) FROM conversation_archive_entries e
+        WHERE e.agent_id=conversation_archives.agent_id AND e.session_id=conversation_archives.session_id
+        AND e.source_id=conversation_archives.archive_id),'[]'::json) AS entries,metadata,created_at
+      FROM conversation_archives WHERE agent_id=$1 AND archive_id=$2 AND ($3::text IS NULL OR kind=$3)
+      ORDER BY created_at DESC,session_id DESC LIMIT 1`, [agentId, id, kind]);
+    const row = result.rows[0];
+    return row ? { archiveId: row.archive_id, sessionId: row.session_id, generation: Number(row.generation), kind: row.kind, entries: row.entries, metadata: row.metadata, createdAt: row.created_at } : null;
   }
 
   async readArchive({ agentId: rawAgentId, sessionId: rawSessionId, archiveId } = {}) {

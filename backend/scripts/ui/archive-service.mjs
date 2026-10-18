@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { archiveRunListPage } from './archive-run-list.mjs';
 import { readArchiveRun } from '../../src/archive-proof.mjs';
-import { archivePage, archiveUtcDay, archiveUtcMonth, archiveCalendarDates, matchesArchiveDay } from '../../src/archive-pagination.mjs';
+import { archivePage, archiveUtcDay, archiveUtcMonth, archiveCalendarDates, matchesArchiveDay, archiveCursorBoundary, archiveCursor } from '../../src/archive-pagination.mjs';
 import { validateTimezone } from '../../src/timezone.mjs';
 import { listTiddleCards, tiddleHistory } from '../../src/tiddle-continuity.mjs';
 
@@ -139,7 +139,24 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
     timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
     const parsedMonth = archiveUtcMonth(month);
     if (!['sessions', 'dreams'].includes(kind)) throw new Error('archive_kind_invalid');
-    const rows = kind === 'dreams' ? await archiveDreamRows({ agentId }) : await archiveSessionRows({ agentId });
+    if (kind === 'sessions' && typeof stores().conversations.listArchiveCalendarDates === 'function') {
+      const agents = (await agentsStore().list({ includeDisabled: false })).filter((agent) => !agentId || agent.id === agentId);
+      const dates = [...new Set((await Promise.all(agents.map((agent) => stores().conversations.listArchiveCalendarDates({ agentId: agent.id, month: parsedMonth, timezone })))).flat())].sort();
+      return { ok: true, kind, month: parsedMonth, dates };
+    }
+    if (kind === 'dreams') {
+      const agents = (await agentsStore().list({ includeDisabled: true })).filter((agent) => !agentId || agent.id === agentId);
+      const store = dreamDiaryStore();
+      try {
+        if (typeof store.listCalendarDates === 'function') {
+          const dates = [...new Set((await Promise.all(agents.map((agent) => store.listCalendarDates(agent.id, { month: parsedMonth, timezone })))).flat())].sort();
+          return { ok: true, kind, month: parsedMonth, dates };
+        }
+        const rows = (await Promise.all(agents.map(async (agent) => (await store.list(agent.id, { limit: null })).map((entry) => ({ createdAt: entry.createdAt }))))).flat();
+        return { ok: true, kind, month: parsedMonth, dates: archiveCalendarDates(rows, parsedMonth, (row) => row.createdAt, timezone) };
+      } finally { await store.close(); }
+    }
+    const rows = await archiveSessionRows({ agentId });
     const dates = archiveCalendarDates(rows, parsedMonth, (row) => kind === 'dreams' ? row.createdAt : row.archivedAt || row.updatedAt || row.createdAt, timezone);
     return { ok: true, kind, month: parsedMonth, dates };
   }
@@ -147,6 +164,26 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
   async function archiveSessions({ timezone = 'UTC', includeArchived = true, query = '', agentId = null, date = null, limit = 200, includeDisabled = false, cursor = null } = {}) {
     timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
     if (date) archiveUtcDay(date);
+    const store = stores().conversations;
+    if (typeof store.listArchiveSessions === 'function') {
+      const size = Math.max(1, Math.min(1000, Number(limit) || 200));
+      const scope = JSON.stringify(['sessions', includeArchived, query, includeDisabled, agentId, date, timezone]);
+      const boundary = archiveCursorBoundary(cursor, { scope });
+      const agents = (await agentsStore().list({ includeDisabled: Boolean(includeDisabled) })).filter((agent) => !agentId || agent.id === agentId);
+      const pages = await Promise.all(agents.map(async (agent) => ({ agent, page: await store.listArchiveSessions({ agentId: agent.id, includeArchived, query, date, timezone, limit: size, boundary }) })));
+      const rows = pages.flatMap(({ agent, page }) => page.rows.map((record) => archiveSessionListItem({
+        id: record.id, archiveSnapshot: record.archiveSnapshot, sourceSessionId: record.sourceSessionId,
+        turnCount: record.turnCount, updatedAt: record.updatedAt,
+        archiveSummary: record.metadata?.archiveSummary || record.metadata?.summary,
+        summaryStatus: record.metadata?.archiveSummaryStatus || record.metadata?.summaryStatus,
+        metadata: { ...record.metadata, createdAt: record.createdAt, updatedAt: record.updatedAt },
+      }, { agentId: agent.id }, agent)));
+      rows.sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')) || `${right.agentId}:${right.id}`.localeCompare(`${left.agentId}:${left.id}`));
+      const sessions = rows.slice(0, size);
+      const hasMore = rows.length > size || pages.some(({ page }) => page.hasMore);
+      const last = sessions.at(-1);
+      return { sessions, nextCursor: hasMore && last ? archiveCursor({ scope, timestamp: String(last.updatedAt || ''), identity: `${last.agentId}:${last.id}` }) : null, hasMore };
+    }
     const rows = await archiveSessionRows({ includeArchived, agentId, includeDisabled });
     const page = archivePage(rows.filter((item) => (matchesArchiveDay(item.archivedAt || item.updatedAt || item.createdAt, date, timezone)) && (!query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase()))), { limit, cursor, max: 1000, scope: JSON.stringify(['sessions', includeArchived, query, includeDisabled, agentId, date, timezone]), timestamp: (row) => row.updatedAt, identity: (row) => `${row.agentId}:${row.id}` });
     return { sessions: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
@@ -172,7 +209,9 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
     const agentRuntime = await resolveAgentRuntime(agentId);
     const agent = await agentsStore().resolve(agentRuntime.agentId) || { id: agentRuntime.agentId, name: agentRuntime.agentId };
     const store = stores().conversations;
-    const archive = (await store.listArchives({ agentId: agentRuntime.agentId, limit: null })).find((item) => item.kind === 'reset' && item.archiveId === sessionId);
+    const archive = typeof store.readArchiveById === 'function'
+      ? await store.readArchiveById({ agentId: agentRuntime.agentId, archiveId: sessionId, kind: 'reset' })
+      : (await store.listArchives({ agentId: agentRuntime.agentId, limit: null })).find((item) => item.kind === 'reset' && item.archiveId === sessionId);
     const resetSnapshot = archive ? { id: archive.archiveId, sourceSessionId: archive.sessionId, turnCount: archive.entries.length, createdAt: archive.createdAt, updatedAt: archive.createdAt, archiveSummary: archive.metadata?.summary, summaryStatus: archive.metadata?.summaryStatus, archiveTitle: archive.metadata?.archiveTitle } : null;
     const source = archive ? archive.entries : (await store.exportTranscript({ agentId: agentRuntime.agentId, sessionId }))?.entries;
     if (!source) return null;

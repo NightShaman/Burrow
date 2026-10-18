@@ -3,24 +3,32 @@ import { localDay } from './timezone.mjs';
 // position in a descending timestamp + identity ordering.
 import { createHash } from 'node:crypto';
 
+const archiveScopeSignature = (scope) => createHash('sha256').update(scope).digest('hex').slice(0, 16);
+
+export function archiveCursorBoundary(cursor, { scope = '' } = {}) {
+  if (!cursor) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+    if (parsed.v !== 1 || parsed.s !== archiveScopeSignature(scope) || typeof parsed.t !== 'string' || typeof parsed.i !== 'string') throw Error();
+    return { t: parsed.t, i: parsed.i };
+  } catch { throw new Error('archive_cursor_invalid'); }
+}
+
+export function archiveCursor({ scope = '', timestamp, identity } = {}) {
+  if (typeof timestamp !== 'string' || typeof identity !== 'string') throw new Error('archive_cursor_invalid');
+  return Buffer.from(JSON.stringify({ v: 1, s: archiveScopeSignature(scope), t: timestamp, i: identity })).toString('base64url');
+}
+
 export function archivePage(rows, { limit = 100, cursor = null, scope = '', timestamp, identity, max = 500 } = {}) {
   const size = Math.max(1, Math.min(max, Number(limit) || 100));
-  const signature = createHash('sha256').update(scope).digest('hex').slice(0, 16);
-  let boundary = null;
-  if (cursor) {
-    try {
-      const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
-      if (parsed.v !== 1 || parsed.s !== signature || typeof parsed.t !== 'string' || typeof parsed.i !== 'string') throw Error();
-      boundary = parsed;
-    } catch { throw new Error('archive_cursor_invalid'); }
-  }
+  const boundary = archiveCursorBoundary(cursor, { scope });
   const ordered = rows.map((row) => ({ row, t: String(timestamp(row) || ''), i: String(identity(row) || '') }))
     .sort((a, b) => (a.t < b.t ? 1 : a.t > b.t ? -1 : a.i < b.i ? 1 : a.i > b.i ? -1 : 0));
   const remaining = boundary ? ordered.filter(({ t, i }) => t < boundary.t || (t === boundary.t && i < boundary.i)) : ordered;
   const page = remaining.slice(0, size);
   const hasMore = remaining.length > size;
   const last = page.at(-1);
-  return { items: page.map(({ row }) => row), hasMore, nextCursor: hasMore ? Buffer.from(JSON.stringify({ v: 1, s: signature, t: last.t, i: last.i })).toString('base64url') : null };
+  return { items: page.map(({ row }) => row), hasMore, nextCursor: hasMore ? archiveCursor({ scope, timestamp: last.t, identity: last.i }) : null };
 }
 
 export function archiveUtcDay(value) {

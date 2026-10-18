@@ -14,10 +14,19 @@ export async function saveOperatorTimezone(metadata, body) {
   await metadata.set('operator_timezone', { timezone });
   return { ok: true, timezone };
 }
+const localDayFormatters = new Map();
+function localDayFormatter(timezone) {
+  let formatter = localDayFormatters.get(timezone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' });
+    localDayFormatters.set(timezone, formatter);
+  }
+  return formatter;
+}
 export function localDay(timestamp, timezone = 'UTC') {
   const date = new Date(timestamp);
   if (!timestamp || !Number.isFinite(date.getTime())) return '';
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date).map(p => [p.type, p.value]));
+  const parts = Object.fromEntries(localDayFormatter(timezone).formatToParts(date).map(p => [p.type, p.value]));
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 export function localTimestamp(timestamp, timezone = 'UTC') {

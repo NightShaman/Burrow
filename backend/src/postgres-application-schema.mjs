@@ -32,7 +32,7 @@ import { POSTGRES_MCP_SETTINGS_SCHEMA_SQL } from './postgres-mcp-settings-store.
 import { POSTGRES_TASK_BOARD_SCHEMA_SQL } from './postgres-task-board-store.mjs';
 import { POSTGRES_SCHEDULED_JOB_SCHEMA_SQL } from './postgres-scheduled-job-store.mjs';
 import { POSTGRES_DREAM_SETTINGS_SCHEMA_SQL } from './postgres-dream-settings-store.mjs';
-import { POSTGRES_DREAM_DIARY_SCHEMA_SQL } from './postgres-dream-diary-store.mjs';
+import { POSTGRES_DREAM_DIARY_SCHEMA_SQL, POSTGRES_DREAM_CALENDAR_INDEX_SQL } from './postgres-dream-diary-store.mjs';
 import { POSTGRES_DREAM_CYCLE_RECEIPT_SCHEMA_SQL } from './postgres-dream-cycle-receipt-store.mjs';
 import { POSTGRES_CONTINUITY_HANDOFF_SCHEMA_SQL } from './postgres-continuity-handoff-store.mjs';
 import { POSTGRES_FORGE_SCHEMA_SQL } from './postgres-forge-store.mjs';
@@ -42,7 +42,7 @@ import { POSTGRES_SKILL_SETTINGS_SCHEMA_SQL, POSTGRES_OFFICIAL_SKILL_DEFAULT_SQL
 import { POSTGRES_SETUP_STATE_SCHEMA_SQL } from './postgres-setup-state-store.mjs';
 import { POSTGRES_RETENTION_SETTINGS_SCHEMA_SQL } from './postgres-retention-settings-store.mjs';
 import { POSTGRES_WORKING_MEMORY_RETENTION_SCHEMA_SQL } from './postgres-working-memory-retention-settings-store.mjs';
-import { POSTGRES_SESSION_SCHEMA_SQL, POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL, POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL, POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL, POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL, POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL, POSTGRES_SESSION_SEARCH_SCHEMA_SQL, POSTGRES_SESSION_NATIVE_SCHEMA_SQL, POSTGRES_SESSION_METADATA_SCHEMA_SQL, POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL } from './postgres-session-store.mjs';
+import { POSTGRES_SESSION_SCHEMA_SQL, POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL, POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL, POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL, POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL, POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL, POSTGRES_SESSION_SEARCH_SCHEMA_SQL, POSTGRES_SESSION_NATIVE_SCHEMA_SQL, POSTGRES_SESSION_METADATA_SCHEMA_SQL, POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL, POSTGRES_ARCHIVE_LISTING_INDEX_SQL } from './postgres-session-store.mjs';
 import { POSTGRES_UI_AUTH_SECRET_SCHEMA_SQL } from './postgres-ui-auth-secret-store.mjs';
 import { POSTGRES_AGENT_DELIVERY_SCHEMA_SQL } from './postgres-agent-delivery-store.mjs';
 
@@ -136,4 +136,5 @@ ALTER TABLE skill_git_sources ADD COLUMN effective_timezone TEXT;
   // Existing explicit choices remain intact; only future lifecycle rows default off.
   { version: 54, name: 'mods-disabled-by-default', sql: 'ALTER TABLE mod_lifecycle ALTER COLUMN enabled SET DEFAULT FALSE;' },
   { version: 55, name: 'durable-mod-management-operations', sql: POSTGRES_MOD_MANAGEMENT_SCHEMA_SQL },
+  { version: 56, name: 'bounded-archive-listing-indexes', sql: POSTGRES_ARCHIVE_LISTING_INDEX_SQL + POSTGRES_DREAM_CALENDAR_INDEX_SQL },
 ]);
