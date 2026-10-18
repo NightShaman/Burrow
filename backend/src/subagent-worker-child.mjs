@@ -14,7 +14,7 @@ async function main() {
   const childArgs = payload.args || payload;
   const pool = createPostgresPool();
   const conversationStore = new PostgresSessionStore({ pool });
-  const telemetry = childArgs.traceContext && (process.env.OTEL_EXPORTER_OTLP_ENDPOINT || process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) ? createOtelRuntime() : null;
+  const telemetry = childArgs.traceContext ? createOtelRuntime() : null;
   if (telemetry) await telemetry.start();
   const telemetryRun = telemetry?.startRun({ runId: childArgs.id, sessionId: childArgs.childSessionId, agentId: childArgs.owner?.agentId, source: 'subagent', parentTraceContext: childArgs.traceContext });
   const heartbeat = setInterval(() => {

@@ -1,6 +1,6 @@
 import { context, createTraceState, trace } from '@opentelemetry/api';
 
-const TRACEPARENT = /^00-[0-9a-f]{32}-[0-9a-f]{16}-0[01]$/;
+const TRACEPARENT = /^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/;
 const MAX_TRACESTATE_CHARS = 512;
 
 export function normalizeTraceContextCarrier(value = null) {

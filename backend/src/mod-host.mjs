@@ -33,6 +33,16 @@ function capabilityErrorEnvelope(error, fallback = 'mod_capability_failed') {
 
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 const NATIVE_FILESYSTEM_TOOLS = new Set(['files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_write', 'files_edit']);
+const TRACEPARENT = /^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/;
+function traceContextCarrier(value) {
+  if (value == null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw hostError('remote_trace_context_invalid');
+  const traceparent = String(value.traceparent || '').trim().toLowerCase();
+  const tracestate = value.tracestate == null ? '' : String(value.tracestate).trim();
+  if (!TRACEPARENT.test(traceparent) || traceparent.slice(3, 35) === '0'.repeat(32) || traceparent.slice(36, 52) === '0'.repeat(16)
+    || (tracestate && (tracestate.length > 512 || /[\r\n]/.test(tracestate)))) throw hostError('remote_trace_context_invalid');
+  return { traceparent, ...(tracestate ? { tracestate } : {}) };
+}
 function validateJsonBody(value) {
   if (value === undefined) throw hostError('mod_route_response_invalid');
   let encoded;
@@ -408,8 +418,10 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
         const toolCallId = String(request.toolCallId || '');
         if (!operationId || !targetId || !parentRunId || !toolCallId || !request.process || typeof request.process !== 'object' || Array.isArray(request.process)) return Promise.reject(hostError('remote_process_request_invalid'));
         let operation;
+        const traceContext = traceContextCarrier(request.traceContext);
         try {
           operation = JSON.parse(JSON.stringify({ operationId, targetId, parentRunId, toolCallId, process: request.process,
+            ...(traceContext ? { traceContext } : {}),
             ...(request.protectedBindingMetadata ? { protectedBindingMetadata: request.protectedBindingMetadata } : {}),
             ...(request.protectedValues ? { protectedValues: request.protectedValues } : {}) }));
         } catch { return Promise.reject(hostError('remote_process_request_invalid')); }
@@ -458,9 +470,10 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
         const tool = String(request.operation?.tool || '');
         if (!operationId || !targetId || !parentRunId || !toolCallId || !NATIVE_FILESYSTEM_TOOLS.has(tool)) return Promise.reject(hostError('remote_filesystem_request_invalid'));
         let operation;
+        const traceContext = traceContextCarrier(request.traceContext);
         try {
           const args = jsonObject(request.operation?.arguments || {}, 'remote_filesystem_request_invalid');
-          operation = { operationId, targetId, parentRunId, toolCallId, tool, arguments: args };
+          operation = { operationId, targetId, parentRunId, toolCallId, tool, arguments: args, ...(traceContext ? { traceContext } : {}) };
         } catch { return Promise.reject(hostError('remote_filesystem_request_invalid')); }
         const requestId = randomUUID();
         return new Promise((resolve, reject) => {

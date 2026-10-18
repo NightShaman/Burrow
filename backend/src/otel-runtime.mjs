@@ -41,22 +41,35 @@ function usageValues(usage = {}) {
 }
 
 function timeout(promise, timeoutMs, code) {
+  let timer;
   return Promise.race([
     promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(code)), timeoutMs).unref()),
-  ]);
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(code)), timeoutMs); timer.unref(); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+function signalEndpoint(env, signal) {
+  const exact = String(env[`OTEL_EXPORTER_OTLP_${signal.toUpperCase()}_ENDPOINT`] || '').trim();
+  if (exact) return exact;
+  const base = String(env.OTEL_EXPORTER_OTLP_ENDPOINT || '').trim().replace(/\/$/, '');
+  return base ? `${base}/v1/${signal}` : null;
+}
+
+function positiveInteger(value, fallback, { minimum = 1, maximum = Number.MAX_SAFE_INTEGER } = {}) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= minimum ? Math.min(maximum, Math.floor(number)) : fallback;
 }
 
 function traceExporterOptions(env) {
-  const url = env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT;
+  const url = signalEndpoint(env, 'traces');
   const headers = env.OTEL_EXPORTER_OTLP_TRACES_HEADERS || env.OTEL_EXPORTER_OTLP_HEADERS;
-  return { ...(url ? { url } : {}), ...(headers ? { headers: Object.fromEntries(String(headers).split(',').map((entry) => entry.split('=', 2).map((value) => decodeURIComponent(value.trim()))).filter(([key, value]) => key && value)) } : {}), timeoutMillis: Math.max(1, Number(env.OTEL_EXPORTER_OTLP_TRACES_TIMEOUT || env.OTEL_EXPORTER_OTLP_TIMEOUT || DEFAULT_EXPORT_TIMEOUT_MS)) };
+  return { ...(url ? { url } : {}), ...(headers ? { headers: Object.fromEntries(String(headers).split(',').map((entry) => entry.split('=', 2).map((value) => decodeURIComponent(value.trim()))).filter(([key, value]) => key && value)) } : {}), timeoutMillis: positiveInteger(env.OTEL_EXPORTER_OTLP_TRACES_TIMEOUT || env.OTEL_EXPORTER_OTLP_TIMEOUT, DEFAULT_EXPORT_TIMEOUT_MS) };
 }
 
 function metricExporterOptions(env) {
-  const url = env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT;
+  const url = signalEndpoint(env, 'metrics');
   const headers = env.OTEL_EXPORTER_OTLP_METRICS_HEADERS || env.OTEL_EXPORTER_OTLP_HEADERS;
-  return { ...(url ? { url } : {}), ...(headers ? { headers: Object.fromEntries(String(headers).split(',').map((entry) => entry.split('=', 2).map((value) => decodeURIComponent(value.trim()))).filter(([key, value]) => key && value)) } : {}), timeoutMillis: Math.max(1, Number(env.OTEL_EXPORTER_OTLP_METRICS_TIMEOUT || env.OTEL_EXPORTER_OTLP_TIMEOUT || DEFAULT_EXPORT_TIMEOUT_MS)) };
+  return { ...(url ? { url } : {}), ...(headers ? { headers: Object.fromEntries(String(headers).split(',').map((entry) => entry.split('=', 2).map((value) => decodeURIComponent(value.trim()))).filter(([key, value]) => key && value)) } : {}), timeoutMillis: positiveInteger(env.OTEL_EXPORTER_OTLP_METRICS_TIMEOUT || env.OTEL_EXPORTER_OTLP_TIMEOUT, DEFAULT_EXPORT_TIMEOUT_MS) };
 }
 
 export function createOtelRuntime({ env = process.env, serviceVersion = null, traceExporter = null, metricExporter = null, resource = null, clock = () => Date.now() } = {}) {
@@ -109,16 +122,16 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
       const resolvedTraceExporter = monitoredExporter(traceExporter || new OTLPTraceExporter(traceExporterOptions(env)));
       const resolvedMetricExporter = monitoredExporter(metricExporter || new OTLPMetricExporter(metricExporterOptions(env)));
       const spanProcessor = new BatchSpanProcessor(resolvedTraceExporter, {
-        maxQueueSize: Math.max(1, Number(env.OTEL_BSP_MAX_QUEUE_SIZE || DEFAULT_QUEUE_SIZE)),
-        maxExportBatchSize: Math.max(1, Number(env.OTEL_BSP_MAX_EXPORT_BATCH_SIZE || DEFAULT_BATCH_SIZE)),
-        scheduledDelayMillis: Math.max(1, Number(env.OTEL_BSP_SCHEDULE_DELAY || 1_000)),
-        exportTimeoutMillis: Math.max(1, Number(env.OTEL_BSP_EXPORT_TIMEOUT || DEFAULT_EXPORT_TIMEOUT_MS)),
+        maxQueueSize: positiveInteger(env.OTEL_BSP_MAX_QUEUE_SIZE, DEFAULT_QUEUE_SIZE),
+        maxExportBatchSize: positiveInteger(env.OTEL_BSP_MAX_EXPORT_BATCH_SIZE, DEFAULT_BATCH_SIZE),
+        scheduledDelayMillis: positiveInteger(env.OTEL_BSP_SCHEDULE_DELAY, 1_000),
+        exportTimeoutMillis: positiveInteger(env.OTEL_BSP_EXPORT_TIMEOUT, DEFAULT_EXPORT_TIMEOUT_MS),
       });
-      const metricExportInterval = Math.max(1_000, Number(env.OTEL_METRIC_EXPORT_INTERVAL || DEFAULT_METRIC_INTERVAL_MS));
+      const metricExportInterval = positiveInteger(env.OTEL_METRIC_EXPORT_INTERVAL, DEFAULT_METRIC_INTERVAL_MS, { minimum: 1_000 });
       const metricReader = new PeriodicExportingMetricReader({
         exporter: resolvedMetricExporter,
         exportIntervalMillis: metricExportInterval,
-        exportTimeoutMillis: Math.min(metricExportInterval, Math.max(1, Number(env.OTEL_METRIC_EXPORT_TIMEOUT || DEFAULT_EXPORT_TIMEOUT_MS))),
+        exportTimeoutMillis: Math.min(metricExportInterval, positiveInteger(env.OTEL_METRIC_EXPORT_TIMEOUT, DEFAULT_EXPORT_TIMEOUT_MS)),
       });
       const resolvedResource = resource || resourceFromAttributes({ 'service.name': SERVICE_NAME, ...(serviceVersion ? { 'service.version': String(serviceVersion) } : {}) });
       tracerProvider = new NodeTracerProvider({ resource: resolvedResource, spanProcessors: [spanProcessor] });
@@ -282,7 +295,7 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
       await timeout(Promise.all([
         tracerProvider?.shutdown?.(),
         meterProvider?.shutdown?.(),
-      ].filter(Boolean)), Math.max(1, timeoutMs), 'otel_shutdown_timeout');
+      ].filter(Boolean)), positiveInteger(timeoutMs, DEFAULT_SHUTDOWN_TIMEOUT_MS), 'otel_shutdown_timeout');
     } catch { failures.shutdown += 1; }
     return status();
   }
@@ -290,4 +303,4 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
   return Object.freeze({ start, startRun, observe, endRun, traceContextForRun, traceContextForTool, status, shutdown });
 }
 
-export const __otelRuntime__ = Object.freeze({ usageValues, safeOutcome, traceExporterOptions, metricExporterOptions });
+export const __otelRuntime__ = Object.freeze({ usageValues, safeOutcome, signalEndpoint, positiveInteger, traceExporterOptions, metricExporterOptions });

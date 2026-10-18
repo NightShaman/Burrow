@@ -42,6 +42,16 @@ function capabilityRequest(method, input, { signal } = {}) {
 const activeSystemProcesses = new Map();
 const activeSystemFilesystems = new Map();
 const NATIVE_FILESYSTEM_TOOLS = new Set(['files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_write', 'files_edit']);
+const TRACEPARENT = /^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/;
+function traceContextCarrier(value) {
+  if (value == null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('remote_trace_context_invalid');
+  const traceparent = String(value.traceparent || '').trim().toLowerCase();
+  const tracestate = value.tracestate == null ? '' : String(value.tracestate).trim();
+  if (!TRACEPARENT.test(traceparent) || traceparent.slice(3, 35) === '0'.repeat(32) || traceparent.slice(36, 52) === '0'.repeat(16)
+    || (tracestate && (tracestate.length > 512 || /[\r\n]/.test(tracestate)))) throw new Error('remote_trace_context_invalid');
+  return { traceparent, ...(tracestate ? { tracestate } : {}) };
+}
 let controllerInstanceId = null;
 const SYSTEM_PROTOCOL = 'execution-provider-v1';
 
@@ -259,9 +269,11 @@ process.on('message', async (message) => {
   if (message?.type === 'system-controller-filesystem-execute') {
     const operation = message.operation;
     let argumentsValue = null;
+    let traceContext = null;
     try {
       argumentsValue = operation?.arguments && typeof operation.arguments === 'object' && !Array.isArray(operation.arguments)
         ? JSON.parse(JSON.stringify(operation.arguments)) : null;
+      traceContext = traceContextCarrier(operation?.traceContext);
     } catch {}
     if (!validSystemMessage({ ...message, operationId: operation?.operationId, targetId: operation?.targetId }, 'system-controller-filesystem-execute')
       || typeof operation.parentRunId !== 'string' || !operation.parentRunId || typeof operation.toolCallId !== 'string' || !operation.toolCallId
@@ -270,7 +282,7 @@ process.on('message', async (message) => {
     activeSystemFilesystems.set(message.requestId, { abort, operationId: operation.operationId, targetId: operation.targetId });
     try {
       const result = await systemController.executeNativeFilesystem({ operationId: operation.operationId, targetId: operation.targetId,
-        parentRunId: operation.parentRunId, toolCallId: operation.toolCallId, operation: { tool: operation.tool, arguments: argumentsValue } }, { abortSignal: abort.signal });
+        parentRunId: operation.parentRunId, toolCallId: operation.toolCallId, ...(traceContext ? { traceContext } : {}), operation: { tool: operation.tool, arguments: argumentsValue } }, { abortSignal: abort.signal });
       if (!activeSystemFilesystems.has(message.requestId)) return;
       send({ type: 'system-controller-filesystem-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId, requestId: message.requestId,
         operationId: operation.operationId, targetId: operation.targetId, ok: true, result }, () => {});
@@ -288,13 +300,17 @@ process.on('message', async (message) => {
   }
   if (message?.type === 'system-controller-process-execute') {
     const operation = message.operation;
+    let traceContext;
+    try { traceContext = traceContextCarrier(operation?.traceContext); } catch { return; }
     if (!validSystemMessage({ ...message, operationId: operation?.operationId, targetId: operation?.targetId }, 'system-controller-process-execute')
       || typeof operation.parentRunId !== 'string' || !operation.parentRunId || typeof operation.toolCallId !== 'string' || !operation.toolCallId
       || !operation.process || typeof operation.process !== 'object' || Array.isArray(operation.process) || !systemController?.executeProcess) return;
     const abort = new AbortController();
     activeSystemProcesses.set(message.requestId, { abort, operationId: operation.operationId, targetId: operation.targetId });
     try {
-      const result = await systemController.executeProcess(operation, { abortSignal: abort.signal });
+      const processOperation = { ...operation };
+      delete processOperation.traceContext;
+      const result = await systemController.executeProcess({ ...processOperation, ...(traceContext ? { traceContext } : {}) }, { abortSignal: abort.signal });
       if (!activeSystemProcesses.has(message.requestId)) return;
       send({ type: 'system-controller-process-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId, requestId: message.requestId,
         operationId: operation.operationId, targetId: operation.targetId, ok: true, result }, () => {});
