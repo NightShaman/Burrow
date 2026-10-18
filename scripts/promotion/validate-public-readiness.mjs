@@ -26,6 +26,7 @@ export async function validatePublicReadiness(root) {
     const project = path.join(root, directory);
     const hero = path.join(project, 'docs/assets/hero.png');
     const readme = path.join(project, 'README.md');
+    const license = path.join(project, 'LICENSE');
     try {
       const [width, height] = await pngSize(hero);
       if (width !== 1536 || height !== 1024) failures.push(`${label}: hero must be 1536x1024, got ${width}x${height}`);
@@ -38,6 +39,10 @@ export async function validatePublicReadiness(root) {
       if (!/width=["']720["']/.test(text)) failures.push(`${label}: README hero width must be 720`);
       if (!/alt=["'][^"']+["']/.test(text)) failures.push(`${label}: README hero needs alt text`);
     } catch (error) { failures.push(`${label}: README unavailable (${error.code || error.message})`); }
+    try {
+      const stat = await fs.stat(license);
+      if (!stat.isFile() || stat.size === 0) failures.push(`${label}: LICENSE must be a non-empty file`);
+    } catch (error) { failures.push(`${label}: LICENSE unavailable (${error.code || error.message})`); }
   }
   return failures;
 }

@@ -9,15 +9,15 @@ const TARGETS = {
     excludes: []
   },
   nodeGoblin: {
-    paths: ['.gitignore', 'NG-Logo.png', 'README.md', 'burrow.mod.json', 'docs', 'gateway', 'install.sh', 'mkdocs.yml', 'requirements-docs-test.txt', 'requirements-docs.txt', 'scripts/docs', 'server', 'ui'],
+    paths: ['.gitignore', 'LICENSE', 'NG-Logo.png', 'README.md', 'burrow.mod.json', 'docs', 'gateway', 'install.sh', 'mkdocs.yml', 'requirements-docs-test.txt', 'requirements-docs.txt', 'scripts/docs', 'server', 'ui'],
     excludes: ['docs/audit-repair-pass-5.md', 'docs/repairs/lifecycle-pass-4.md']
   },
   goblinSecretStore: {
-    paths: ['API-CONTRACT.md', 'README.md', 'burrow.mod.json', 'docs', 'package.json', 'server', 'ui'],
+    paths: ['API-CONTRACT.md', 'LICENSE', 'README.md', 'burrow.mod.json', 'docs', 'package.json', 'server', 'ui'],
     excludes: []
   },
   burrowSkills: {
-    paths: ['README.md', 'burrow-runtime', 'docs'],
+    paths: ['LICENSE', 'README.md', 'burrow-runtime', 'docs'],
     excludes: []
   },
   burrowBackdoor: {
