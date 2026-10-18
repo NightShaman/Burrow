@@ -34,22 +34,22 @@ export async function executeTaskBoardListTool({ arguments: args = {}, store } =
 
 // Assignment is board metadata, not dispatch. The store validates that an
 // explicit assignee is a known agent via its foreign-key constraint.
-export async function executeTaskBoardCreateTool({ arguments: args = {}, agentId = null, store } = {}) {
+export async function executeTaskBoardCreateTool({ arguments: args = {}, agentId = null, sessionId = null, runId = null, store } = {}) {
   if (!text(agentId)) return { tool: 'tasks_create', ok: false, error: 'task_board_agent_unavailable' };
   try {
     if (!store) throw new Error('task_board_store_required');
     const task = await store.createTask({
       projectId: await resolveProjectId(store, args.projectId), title: args.title, description: args.description,
       status: args.status, priority: args.priority, metadata: args.metadata,
-      assignedAgentId: args.assignedAgentId === undefined ? agentId : (text(args.assignedAgentId) || null), actorAgentId: agentId,
-    });
+      assignedAgentId: args.assignedAgentId === undefined ? agentId : (text(args.assignedAgentId) || null),
+    }, { actor: { type: 'agent', id: agentId }, sessionId, runId });
     return { tool: 'tasks_create', ok: true, task: compactTask(task), error: null };
   } catch (error) { return { tool: 'tasks_create', ok: false, error: error?.message || 'task_board_create_failed' }; }
 }
 
 // Task assignment is board metadata, not an edit boundary. A reviewed update
 // may modify any existing task, including moving it to another existing agent.
-export async function executeTaskBoardUpdateTool({ arguments: args = {}, agentId = null, store } = {}) {
+export async function executeTaskBoardUpdateTool({ arguments: args = {}, agentId = null, sessionId = null, runId = null, store } = {}) {
   try {
     if (!store) throw new Error('task_board_store_required');
     {
@@ -59,31 +59,30 @@ export async function executeTaskBoardUpdateTool({ arguments: args = {}, agentId
         title: args.title, description: args.description, status: args.status,
         priority: args.priority, metadata: args.metadata,
         ...(args.assignedAgentId === undefined ? {} : { assignedAgentId: text(args.assignedAgentId) || null }),
-        actorAgentId: agentId,
-      });
+      }, { actor: { type: 'agent', id: agentId }, sessionId, runId });
       return { tool: 'tasks_update', ok: true, task: compactTask(task), error: null };
     }
   } catch (error) { return { tool: 'tasks_update', ok: false, error: error?.message || 'task_board_update_failed' }; }
 }
 
 
-export async function executeTaskBoardReassignTool({ arguments: args = {}, agentId = null, store } = {}) {
+export async function executeTaskBoardReassignTool({ arguments: args = {}, agentId = null, sessionId = null, runId = null, store } = {}) {
   if (!text(args.taskId) || !text(args.assignedAgentId)) return { tool: 'tasks_assign', ok: false, error: 'task_board_reassign_input_required' };
   try {
     if (!store) throw new Error('task_board_store_required');
     {
-      const task = await store.updateTask(args.taskId, { assignedAgentId: text(args.assignedAgentId), actorAgentId: agentId });
+      const task = await store.updateTask(args.taskId, { assignedAgentId: text(args.assignedAgentId) }, { actor: { type: 'agent', id: agentId }, sessionId, runId });
       return task ? { tool: 'tasks_assign', ok: true, task: compactTask(task), error: null } : { tool: 'tasks_assign', ok: false, error: 'task_not_found' };
     }
   } catch (error) { return { tool: 'tasks_assign', ok: false, error: error?.message || 'task_board_reassign_failed' }; }
 }
 
-export async function executeTaskBoardDeleteTool({ arguments: args = {}, store } = {}) {
+export async function executeTaskBoardDeleteTool({ arguments: args = {}, agentId = null, sessionId = null, runId = null, store } = {}) {
   if (!text(args.taskId)) return { tool: 'tasks_delete', ok: false, error: 'taskId_required' };
   try {
     if (!store) throw new Error('task_board_store_required');
     {
-      const task = await store.deleteTask(args.taskId);
+      const task = await store.deleteTask(args.taskId, { actor: agentId ? { type: 'agent', id: agentId } : { type: 'unknown' }, sessionId, runId });
       return task ? { tool: 'tasks_delete', ok: true, task: compactTask(task), error: null } : { tool: 'tasks_delete', ok: false, error: 'task_not_found' };
     }
   } catch (error) { return { tool: 'tasks_delete', ok: false, error: error?.message || 'task_board_delete_failed' }; }

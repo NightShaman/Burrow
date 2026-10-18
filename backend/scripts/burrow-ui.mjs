@@ -286,7 +286,7 @@ async function executeBoardTask(taskId) {
     const sessionId = 'default';
     const runId = createChatTurnRunId({ sessionId, prefix: 'task' });
     lifecycle?.signal.throwIfAborted();
-    const updated = await store.startExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId });
+    const updated = await store.startExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId }, { actor: { type: 'operator', id: 'default' } });
     return { ok: true, task, project, agentRuntime, sessionId, runId, updated };
   });
   if (!dispatch.ok) return dispatch;
@@ -325,9 +325,9 @@ async function executeBoardTask(taskId) {
       verification: result.verification ? { required: Boolean(result.verification.required), ok: result.verification.ok ?? null, reason: result.verification.reason || null } : null,
       completionEvidence: result.completionEvidence || null,
     };
-    await withTaskBoard((store) => store.recordExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId: result.runId || runId, decision: result.decision || null, ok: Boolean(result.ok), executedAt: new Date().toISOString(), traceDir: result.traceDir || null, error: result.ok ? null : (result.error || null), result: taskResult }));
+    await withTaskBoard((store) => store.recordExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId: result.runId || runId, decision: result.decision || null, ok: Boolean(result.ok), executedAt: new Date().toISOString(), traceDir: result.traceDir || null, error: result.ok ? null : (result.error || null), result: taskResult }, { actor: { type: 'agent', id: agentRuntime.agentId } }));
   }).catch(async (error) => {
-    await withTaskBoard((store) => store.recordExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId, ok: false, error: String(error?.message || error), result: { answerText: null, blockers: [String(error?.message || error)], verification: null, completionEvidence: null } }));
+    await withTaskBoard((store) => store.recordExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId, ok: false, error: String(error?.message || error), result: { answerText: null, blockers: [String(error?.message || error)], verification: null, completionEvidence: null } }, { actor: { type: 'agent', id: agentRuntime.agentId } }));
   }).finally(() => {
     if (activeChatRuns.get(activeChatRunKey(agentRuntime.agentId, runId)) === record) activeChatRuns.delete(activeChatRunKey(agentRuntime.agentId, runId));
   });

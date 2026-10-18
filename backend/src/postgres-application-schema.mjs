@@ -31,6 +31,7 @@ import { POSTGRES_AGENT_PROFILE_SCHEMA_SQL } from './postgres-agent-profile-stor
 import { POSTGRES_MODEL_SETTINGS_SCHEMA_SQL, POSTGRES_MINION_MODEL_SETTINGS_SCHEMA_SQL } from './postgres-model-settings-store.mjs';
 import { POSTGRES_MCP_SETTINGS_SCHEMA_SQL } from './postgres-mcp-settings-store.mjs';
 import { POSTGRES_TASK_BOARD_SCHEMA_SQL } from './postgres-task-board-store.mjs';
+import { POSTGRES_TASK_AUDIT_SCHEMA_SQL } from './postgres-task-audit-schema.mjs';
 import { POSTGRES_SCHEDULED_JOB_SCHEMA_SQL } from './postgres-scheduled-job-store.mjs';
 import { POSTGRES_DREAM_SETTINGS_SCHEMA_SQL } from './postgres-dream-settings-store.mjs';
 import { POSTGRES_DREAM_DIARY_SCHEMA_SQL, POSTGRES_DREAM_CALENDAR_INDEX_SQL } from './postgres-dream-diary-store.mjs';
@@ -140,4 +141,5 @@ ALTER TABLE skill_git_sources ADD COLUMN effective_timezone TEXT;
   { version: 56, name: 'bounded-archive-listing-indexes', sql: POSTGRES_ARCHIVE_LISTING_INDEX_SQL + POSTGRES_DREAM_CALENDAR_INDEX_SQL },
   { version: 57, name: 'indexed-proof-run-directory', sql: POSTGRES_ARCHIVE_RUN_INDEX_SQL },
   { version: 58, name: 'operator-owned-mod-authority', sql: POSTGRES_MOD_AUTHORITY_SCHEMA_SQL },
+  { version: 59, name: 'task-audit-history-and-documents', sql: POSTGRES_TASK_AUDIT_SCHEMA_SQL },
 ]);

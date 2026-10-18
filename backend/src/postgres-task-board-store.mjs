@@ -1,6 +1,7 @@
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { randomUUID } from "node:crypto";
 import { TASK_STATUSES, TASK_PRIORITIES } from "./task-board-store.mjs";
+import { TaskBoardAuditStore } from './task-board-audit-store.mjs';
 export { TASK_STATUSES, TASK_PRIORITIES };
 import {
   closePostgresPool,
@@ -203,6 +204,7 @@ export class PostgresTaskBoardStore {
     this.pool = normalizePostgresPool(pool);
     this.ownsPool = ownsPool;
     this.clock = clock;
+    this.audit = new TaskBoardAuditStore({ pool: this.pool, clock });
   }
   async close() {
     if (this.ownsPool) await closePostgresPool(this.pool);
@@ -343,7 +345,7 @@ export class PostgresTaskBoardStore {
     ]);
     return taskRow(r.rows[0]);
   }
-  async createTask(input = {}) {
+  async createTask(input = {}, audit = {}) {
     const t = taskInput(input),
       stamp = this.clock(),
       taskId = input.id ? id(input.id, "task_id") : randomUUID();
@@ -352,7 +354,7 @@ export class PostgresTaskBoardStore {
       if (!p) throw new Error("task_project_not_found");
       const metadata = createdMetadata(
         t.metadata || {},
-        input.actorAgentId ?? t.assignedAgentId ?? null,
+        audit.actor?.type === 'agent' ? audit.actor.id : null,
         stamp,
       );
       await c.query(
@@ -370,10 +372,11 @@ export class PostgresTaskBoardStore {
           stamp,
         ],
       );
+      await this.audit.append(c, taskId, 'created', { ...audit, at: stamp, details: { projectId: t.projectId, title: t.title, status: t.status || 'backlog', priority: t.priority || 'normal', assignedAgentId: t.assignedAgentId || null } });
       return this.getTask(taskId, c);
     });
   }
-  async updateTask(taskId, input = {}) {
+  async updateTask(taskId, input = {}, audit = {}) {
     return withPostgresTransaction(this.pool, async (c) => {
       const r = await c.query(
         "SELECT * FROM task_board_tasks WHERE id=$1 FOR UPDATE",
@@ -406,30 +409,31 @@ export class PostgresTaskBoardStore {
       );
       if (t.metadata !== undefined) fields.push("metadata");
       const next = editedMetadata(current.metadata || {}, metadata, {
-        actorAgentId: input.actorAgentId ?? null,
+        actorAgentId: audit.actor?.type === 'agent' ? audit.actor.id : null,
         at: stamp,
         fields,
       });
+      const values = {
+        projectId: t.projectId ?? current.projectId,
+        title: t.title ?? current.title,
+        description: t.description ?? current.description,
+        status,
+        priority: t.priority ?? current.priority,
+        assignedAgentId: t.assignedAgentId === undefined ? current.assignedAgentId : t.assignedAgentId,
+        metadata: next,
+      };
       await c.query(
         "UPDATE task_board_tasks SET project_id=$1,title=$2,description=$3,status=$4,priority=$5,assigned_agent_id=$6,metadata_json=$7::jsonb,updated_at=$8 WHERE id=$9",
-        [
-          t.projectId ?? current.projectId,
-          t.title ?? current.title,
-          t.description ?? current.description,
-          status,
-          t.priority ?? current.priority,
-          t.assignedAgentId === undefined
-            ? current.assignedAgentId
-            : t.assignedAgentId,
-          json(next),
-          stamp,
-          current.id,
-        ],
+        [values.projectId, values.title, values.description, values.status, values.priority, values.assignedAgentId, json(values.metadata), stamp, current.id],
       );
+      if (fields.length) {
+        const changes = Object.fromEntries(fields.map((field) => [field, { before: field === 'metadata' ? current.metadata : current[field], after: values[field] }]));
+        await this.audit.append(c, current.id, 'updated', { ...audit, at: stamp, changes });
+      }
       return this.getTask(current.id, c);
     });
   }
-  async deleteTask(taskId) {
+  async deleteTask(taskId, _audit = {}) {
     return withPostgresTransaction(this.pool, async (c) => {
       const r = await c.query(
         "SELECT * FROM task_board_tasks WHERE id=$1 FOR UPDATE",
@@ -441,7 +445,7 @@ export class PostgresTaskBoardStore {
       return current;
     });
   }
-  async startExecution(taskId, execution = {}) {
+  async startExecution(taskId, execution = {}, audit = {}) {
     return withPostgresTransaction(this.pool, async (c) => {
       const current = await this.lockTask(c, taskId);
       if (!current) return null;
@@ -464,10 +468,11 @@ export class PostgresTaskBoardStore {
         "UPDATE task_board_tasks SET execution_json=$1::jsonb,updated_at=$2 WHERE id=$3",
         [json(receipt), stamp, current.id],
       );
+      await this.audit.append(c, current.id, 'execution_started', { ...audit, at: stamp, sessionId: receipt.sessionId, runId: receipt.runId, details: { agentId: receipt.agentId } });
       return this.getTask(current.id, c);
     });
   }
-  async recordExecution(taskId, execution = {}) {
+  async recordExecution(taskId, execution = {}, audit = {}) {
     return withPostgresTransaction(this.pool, async (c) => {
       const current = await this.lockTask(c, taskId);
       if (!current) return null;
@@ -496,9 +501,15 @@ export class PostgresTaskBoardStore {
         "UPDATE task_board_tasks SET execution_json=$1::jsonb,updated_at=$2 WHERE id=$3",
         [json(receipt), stamp, current.id],
       );
+      await this.audit.append(c, current.id, receipt.ok ? 'execution_completed' : 'execution_failed', { ...audit, at: stamp, sessionId: receipt.sessionId, runId: receipt.runId, details: { agentId: receipt.agentId, status: receipt.status, ok: receipt.ok, error: receipt.error, decision: receipt.decision } });
       return this.getTask(current.id, c);
     });
   }
+  async taskHistory(taskId, options = {}) { return this.audit.history(taskId, options); }
+  async listAttachments(taskId) { return this.audit.listAttachments(taskId); }
+  async getAttachment(taskId, attachmentId, options = {}) { return this.audit.attachment(taskId, attachmentId, options); }
+  async addAttachment(taskId, input = {}, audit = {}) { return this.audit.addAttachment(taskId, input, audit); }
+  async deleteAttachment(taskId, attachmentId, audit = {}) { return this.audit.removeAttachment(taskId, attachmentId, audit); }
   async lockTask(c, taskId) {
     const r = await c.query(
       "SELECT * FROM task_board_tasks WHERE id=$1 FOR UPDATE",

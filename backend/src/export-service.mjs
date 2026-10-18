@@ -18,7 +18,7 @@ export const EXPORT_CATEGORIES = Object.freeze([
   { id: 'model-connections', label: 'Model connections', containsSecrets: true, description: 'Connection metadata and encrypted provider credentials.' },
   { id: 'mcp-connections', label: 'MCP connections', containsSecrets: true, description: 'MCP connection metadata, API keys, and per-agent tool grants.' },
   { id: 'ui-auth', label: 'UI authentication', containsSecrets: true, description: 'UI auth configuration and OIDC credentials. Basic passwords are nonportable and require deliberate reconfiguration.' },
-  { id: 'task-board', label: 'Task board and work items', containsSecrets: false, description: 'Projects, tasks, and work-item state.' },
+  { id: 'task-board', label: 'Task board and work items', containsSecrets: false, description: 'Projects and current task state. Append-only audit history and attachment bytes remain local operational records and are not portable yet.' },
 ]);
 
 const categoryMap = new Map(EXPORT_CATEGORIES.map((category) => [category.id, category]));

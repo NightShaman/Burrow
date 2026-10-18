@@ -454,14 +454,14 @@ export async function executeReviewedProposalActions({ conversationStore = null,
     }
     if (action.tool === 'tasks_create') {
       const started = await traceLogger?.toolStart?.({ tool: 'tasks_create', projectId: action.project || null });
-      const result = await executeTaskBoardCreateTool({ arguments: { projectId: action.project, title: action.title, ...(action.description === null ? {} : { description: action.description }), ...(action.status === null ? {} : { status: action.status }), ...(action.priority === null ? {} : { priority: action.priority }), ...(action.metadata === null ? {} : { metadata: action.metadata }), ...(action.assignedAgentId === null ? {} : { assignedAgentId: action.assignedAgentId }) }, agentId, store: executionContext?.stores?.tasks });
+      const result = await executeTaskBoardCreateTool({ arguments: { projectId: action.project, title: action.title, ...(action.description === null ? {} : { description: action.description }), ...(action.status === null ? {} : { status: action.status }), ...(action.priority === null ? {} : { priority: action.priority }), ...(action.metadata === null ? {} : { metadata: action.metadata }), ...(action.assignedAgentId === null ? {} : { assignedAgentId: action.assignedAgentId }) }, agentId, sessionId, runId: traceLogger?.runId || null, store: executionContext?.stores?.tasks });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'tasks_create', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, task: result.task || null, error: result.error || null });
       continue;
     }
     if (action.tool === 'tasks_update') {
       const started = await traceLogger?.toolStart?.({ tool: 'tasks_update', taskId: action.taskId });
-      const result = await executeTaskBoardUpdateTool({ arguments: { taskId: action.taskId, ...(action.title === null ? {} : { title: action.title }), ...(action.description === null ? {} : { description: action.description }), ...(action.status === null ? {} : { status: action.status }), ...(action.priority === null ? {} : { priority: action.priority }), ...(action.metadata === null ? {} : { metadata: action.metadata }), ...(action.assignedAgentId === null ? {} : { assignedAgentId: action.assignedAgentId }) }, agentId, store: executionContext?.stores?.tasks });
+      const result = await executeTaskBoardUpdateTool({ arguments: { taskId: action.taskId, ...(action.title === null ? {} : { title: action.title }), ...(action.description === null ? {} : { description: action.description }), ...(action.status === null ? {} : { status: action.status }), ...(action.priority === null ? {} : { priority: action.priority }), ...(action.metadata === null ? {} : { metadata: action.metadata }), ...(action.assignedAgentId === null ? {} : { assignedAgentId: action.assignedAgentId }) }, agentId, sessionId, runId: traceLogger?.runId || null, store: executionContext?.stores?.tasks });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'tasks_update', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, task: result.task || null, error: result.error || null });
       continue;
@@ -469,14 +469,14 @@ export async function executeReviewedProposalActions({ conversationStore = null,
 
     if (action.tool === 'tasks_assign') {
       const started = await traceLogger?.toolStart?.({ tool: 'tasks_assign', taskId: action.taskId, assignedAgentId: action.assignedAgentId });
-      const result = await executeTaskBoardReassignTool({ arguments: { taskId: action.taskId, assignedAgentId: action.assignedAgentId }, agentId, store: executionContext?.stores?.tasks });
+      const result = await executeTaskBoardReassignTool({ arguments: { taskId: action.taskId, assignedAgentId: action.assignedAgentId }, agentId, sessionId, runId: traceLogger?.runId || null, store: executionContext?.stores?.tasks });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'tasks_assign', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, task: result.task || null, error: result.error || null });
       continue;
     }
     if (action.tool === 'tasks_delete') {
       const started = await traceLogger?.toolStart?.({ tool: 'tasks_delete', taskId: action.taskId });
-      const result = await executeTaskBoardDeleteTool({ arguments: { taskId: action.taskId }, store: executionContext?.stores?.tasks });
+      const result = await executeTaskBoardDeleteTool({ arguments: { taskId: action.taskId }, agentId, sessionId, runId: traceLogger?.runId || null, store: executionContext?.stores?.tasks });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'tasks_delete', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, task: result.task || null, error: result.error || null });
       continue;
