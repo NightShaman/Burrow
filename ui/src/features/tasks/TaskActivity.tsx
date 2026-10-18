@@ -6,13 +6,14 @@ type Actor = { type: string; id: string | null; name: string | null };
 type Attachment = { id: string; name: string; size: number; createdAt: string; createdBy: Actor };
 type TaskEvent = { id: string; action: string; actor: Actor; at: string; changes: Record<string, unknown>; details: Record<string, unknown>; sessionId: string | null; runId: string | null };
 type History = { events: TaskEvent[]; hasMore: boolean; nextCursor: string | null };
-const who = (actor: Actor) => actor.name || actor.id || (actor.type === 'unknown' ? 'Unknown actor' : actor.type);
+const who = (actor: Actor) => actor.name || (actor.type === 'unknown' ? 'Unknown actor' : `Unnamed ${actor.type}`);
 const date = (value: string) => new Date(value).toLocaleString();
 const valueText = (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value) ?? '—';
 
 /** Keyed by task ID at the editor boundary so responses cannot leak into another task. */
 export function TaskActivity({ taskId, revision }: { taskId: string; revision: string }) {
   const confirm = useConfirm();
+  const fileInput = useRef<HTMLInputElement>(null);
   const base = `/api/task-board/tasks/${encodeURIComponent(taskId)}`;
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [history, setHistory] = useState<History>({ events: [], hasMore: false, nextCursor: null });
@@ -55,9 +56,8 @@ export function TaskActivity({ taskId, revision }: { taskId: string; revision: s
   }
   return <div className="task-activity" aria-label="Task documents and history">
     {error && <p role="alert">{error} <button type="button" disabled={busy || loading} onClick={() => void refresh()}>Retry</button></p>}
-    <section aria-labelledby="task-documents-heading"><h3 id="task-documents-heading">Documents</h3>
-      <label className="task-file-picker">Attach a document<input type="file" disabled={busy || loading} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void upload(file); }} /></label>
-      <p className="hint">Files are stored with this task. Server upload limit defaults to 25 MiB; your administrator may change it.</p>
+    <section aria-labelledby="task-documents-heading"><header className="task-activity-heading"><h3 id="task-documents-heading">Documents</h3><button type="button" disabled={busy || loading} onClick={() => fileInput.current?.click()}>Attach document</button></header>
+      <input ref={fileInput} hidden aria-label="Attach document" type="file" disabled={busy || loading} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void upload(file); }} />
       {loading ? <p role="status">Loading documents and history…</p> : !attachments.length && !error && <p>No documents attached.</p>}
       <ul className="task-document-list">{attachments.map(file => <li key={file.id}><div><strong>{file.name}</strong><small>{new Intl.NumberFormat().format(file.size)} bytes · {who(file.createdBy)} · {date(file.createdAt)}</small></div><div><button type="button" disabled={busy} onClick={() => void perform(async () => {
         const response = await fetchApi(`${base}/attachments/${encodeURIComponent(file.id)}`);
@@ -70,14 +70,27 @@ export function TaskActivity({ taskId, revision }: { taskId: string; revision: s
       })}>Remove<span className="sr-only"> {file.name}</span></button></div></li>)}</ul>
     </section>
     <section aria-labelledby="task-history-heading"><header className="task-activity-heading"><h3 id="task-history-heading">History</h3><button type="button" disabled={busy || loading} onClick={() => void refresh()}>Refresh history</button></header>
-      <p className="hint">Oldest to newest within loaded history. Earlier activity may predate audit tracking.</p>
+
       {history.hasMore && history.nextCursor && <button type="button" disabled={busy || loading} onClick={() => void older()}>Load older activity</button>}
       {!loading && !error && !history.events.length && <p>No recorded activity.</p>}
-      <ol className="task-history-list">{[...history.events].reverse().map(event => <li key={event.id}><strong>{event.action.replaceAll('_', ' ')}</strong><small>{who(event.actor)} ({event.actor.type}) · <time dateTime={event.at}>{date(event.at)}</time></small>
-        {Object.keys(event.changes ?? {}).length > 0 && <details><summary>Changes</summary><dl>{Object.entries(event.changes).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value && typeof value === 'object' && 'before' in value && 'after' in value ? `${valueText(value.before)} → ${valueText(value.after)}` : valueText(value)}</dd></div>)}</dl></details>}
-        {Object.keys(event.details ?? {}).length > 0 && <details><summary>Details</summary><pre>{JSON.stringify(event.details, null, 2)}</pre></details>}
-        {(event.sessionId || event.runId) && <small>Session: {event.sessionId || '—'} · Run: {event.runId || '—'}</small>}
-      </li>)}</ol>
+      <ol className="task-history-list">{[...history.events].reverse().map(event => {
+        const changes = Object.entries(event.changes ?? {});
+        const summary = changes.map(([key, value]) => {
+          const label = key.replace(/([A-Z])/g, ' $1').toLowerCase();
+          if (['status', 'priority'].includes(key) && value && typeof value === 'object' && 'before' in value && 'after' in value) return `${label}: ${valueText(value.before)} → ${valueText(value.after)}`;
+          return `${label} changed`;
+        }).join('; ');
+        const result = event.details?.error || event.details?.status || event.details?.name;
+        const extra = changes.some(([key]) => !['status', 'priority'].includes(key)) || Object.keys(event.details ?? {}).length > 0 || event.sessionId || event.runId;
+        return <li key={event.id}>
+          <div className="task-history-row"><time dateTime={event.at}>{date(event.at)}</time><span>{who(event.actor)}</span><strong>{event.action.replaceAll('_', ' ')}</strong>{Boolean(summary || result) && <span className="task-history-result">{summary || valueText(result)}</span>}</div>
+          {extra && <details><summary>Details<span className="sr-only"> for {event.action.replaceAll('_', ' ')} at {date(event.at)}</span></summary>
+            {changes.length > 0 && <dl>{changes.map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value && typeof value === 'object' && 'before' in value && 'after' in value ? `${valueText(value.before)} → ${valueText(value.after)}` : valueText(value)}</dd></div>)}</dl>}
+            {Object.keys(event.details ?? {}).length > 0 && <pre>{JSON.stringify(event.details, null, 2)}</pre>}
+            {(event.sessionId || event.runId) && <small>Session: {event.sessionId || '—'} · Run: {event.runId || '—'}</small>}
+          </details>}
+        </li>;
+      })}</ol>
     </section>{busy && <p role="status">Working…</p>}
   </div>;
 }
