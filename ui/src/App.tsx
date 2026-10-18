@@ -1,3 +1,4 @@
+import { useBrowserTabTitle } from './app/browserTab';
 import { readAttachment } from './app/readAttachment';
 import { isWithinAttachmentBudget } from './features/chat/attachmentValidation';
 import { useModelSelectionWriter } from './app/useModelSelectionWriter';
@@ -36,6 +37,7 @@ import { GroupChannelsPage } from './features/groups/GroupChannelsPage';
 import { Forge } from './features/forge/ForgePage';
 
 function AppContent() {
+  useBrowserTabTitle();
   const [runtimeVersion, setRuntimeVersion] = useState<string | null>(null);
   useEffect(() => { let live = true; void api<RuntimeHealth>('/api/health').then((health) => { if (live) setRuntimeVersion(health.version ?? null); }).catch(() => {}); return () => { live = false; }; }, []);
   const previewFirstRun = new URLSearchParams(window.location.search).get('previewFirstRun') === '1';

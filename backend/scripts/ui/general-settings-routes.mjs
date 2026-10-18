@@ -1,5 +1,5 @@
 import { normalizeRetentionPolicy } from '../../src/retention-settings.mjs';
-export function createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings, tiddleCards, tiddleHistory, uiAuthSettings, saveUiAuthSettings, browserOriginSettings, saveBrowserOriginSettings, otelSettings, saveOtelSettings, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup } = {}) {
+export function createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings, tiddleCards, tiddleHistory, uiAuthSettings, saveUiAuthSettings, browserOriginSettings, saveBrowserOriginSettings, browserTabSettings, saveBrowserTabSettings, otelSettings, saveOtelSettings, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup } = {}) {
   const resultResponse = (res, result, success = 200) => {
     sendJson(res, result.ok === false ? (result.status || 500) : success, result);
     return true;
@@ -28,6 +28,10 @@ export function createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdenti
     if (url.pathname === '/api/settings/browser-origin') {
       if (req.method === 'GET') { sendJson(res, 200, await browserOriginSettings()); return true; }
       if (req.method === 'PUT') return resultResponse(res, await saveBrowserOriginSettings(await readJsonBody(req)));
+    }
+    if (url.pathname === '/api/settings/browser-tab') {
+      if (req.method === 'GET') { sendJson(res, 200, await browserTabSettings()); return true; }
+      if (req.method === 'PUT') return resultResponse(res, await saveBrowserTabSettings(await readJsonBody(req)));
     }
     if (url.pathname === '/api/settings/opentelemetry') {
       if (req.method === 'GET') { sendJson(res, 200, await otelSettings()); return true; }

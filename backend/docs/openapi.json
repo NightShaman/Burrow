@@ -7134,6 +7134,70 @@
           }
         }
       }
+    },
+    "/api/settings/browser-tab": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Read the environment-wide browser tab suffix",
+        "operationId": "getBrowserTabSettings",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Saved browser tab suffix.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserTabSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Save the environment-wide browser tab suffix",
+        "operationId": "updateBrowserTabSettings",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserTabSettingsInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved trimmed browser tab suffix.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserTabSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -12664,6 +12728,33 @@
             }
           }
         ]
+      },
+      "BrowserTabSettings": {
+        "type": "object",
+        "required": [
+          "suffix"
+        ],
+        "properties": {
+          "suffix": {
+            "type": "string",
+            "maxLength": 80,
+            "description": "Trimmed suffix appended to the default Burrow document title; empty restores the default title."
+          }
+        },
+        "additionalProperties": false
+      },
+      "BrowserTabSettingsInput": {
+        "type": "object",
+        "required": [
+          "suffix"
+        ],
+        "properties": {
+          "suffix": {
+            "type": "string",
+            "description": "Suffix to trim before enforcing the 80-character stored-value limit; whitespace-only input clears the suffix."
+          }
+        },
+        "additionalProperties": false
       }
     }
   },
