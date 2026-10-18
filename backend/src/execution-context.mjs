@@ -76,6 +76,8 @@ export function createExecutionContext({
   processExecutionController = null,
   processExecutionRouter = null,
   parentRunId = null,
+  traceContext = null,
+  telemetry = null,
   abortSignal = null,
 } = {}) {
   const resolvedAgentWorkspaceRoot = optionalAbsolute(agentWorkspaceRoot, 'agent_workspace_root');
@@ -112,8 +114,9 @@ export function createExecutionContext({
     processExecutionController: processExecutionController && typeof processExecutionController.executeProcess === 'function' ? processExecutionController : null,
     processExecutionRouter: typeof processExecutionRouter === 'function' ? processExecutionRouter : null,
     parentRunId: parentRunId == null ? null : String(parentRunId),
+    traceContext: traceContext && typeof traceContext === 'object' ? { ...traceContext } : null,
   };
-  Object.defineProperties(context, { conversationStore: { value: conversationStore, enumerable: false }, stores: { value: stores, enumerable: false }, abortSignal: { value: abortSignal, enumerable: false } });
+  Object.defineProperties(context, { conversationStore: { value: conversationStore, enumerable: false }, stores: { value: stores, enumerable: false }, telemetry: { value: telemetry, enumerable: false }, abortSignal: { value: abortSignal, enumerable: false } });
   return freeze(context);
 }
 

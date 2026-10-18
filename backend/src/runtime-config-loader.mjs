@@ -1,5 +1,6 @@
 import { loadBurrowConfig, resolveModelConfig, configDefaults, resolveRuntimeStateConfig, resolveUiConfig, resolveChatToolLoopConfig, resolveSkillsConfig, resolveContextConfig } from './config.mjs';
 import { readExecutionBoundaries } from './execution-boundaries.mjs';
+import { otelSettings } from './otel-settings.mjs';
 
 export async function loadRuntimeConfig({ rootDir, args = {}, stores = null, runtimeStores = null, tolerateModelResolutionError = false } = {}) {
   // Store injection is an async runtime boundary. Keep args-compatible callers,
@@ -11,6 +12,7 @@ export async function loadRuntimeConfig({ rootDir, args = {}, stores = null, run
   const runtimeState = resolveRuntimeStateConfig({ rootDir, args, loadedConfig: loaded.config });
   const skillsConfig = { ...resolveSkillsConfig(loaded.config), root: runtimeState.skillsRoot };
   const executionBoundaries = await readExecutionBoundaries({ metadataStore: injectedStores.metadata });
+  const opentelemetry = await otelSettings({ metadata: injectedStores.metadata });
   let modelConfig = null;
   let modelResolutionError = null;
   try {
@@ -25,6 +27,7 @@ export async function loadRuntimeConfig({ rootDir, args = {}, stores = null, run
     modelConfig,
     modelResolutionError,
     executionBoundaries,
+    opentelemetry,
     runtimeState,
     ui: await resolveUiConfig(resolverArgs, loaded.config),
     chatToolLoopConfig: resolveChatToolLoopConfig(loaded.config),

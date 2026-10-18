@@ -2,10 +2,10 @@ import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
 import { compactAskChatResult } from './runtime-result-assembly.mjs';
 import { persistSessionWorkingContext } from './working-context.mjs';
 
-export function createTerminalCommitter({ stores = null, agentId, continuityAuthority = null, rootDir, sessionRoot, sessionId, runId, generation, command, json, initialWorkingContext, objective = null, traceRef = null, logger = null, testHooks } = {}) {
+export function createTerminalCommitter({ stores = null, agentId, continuityAuthority = null, rootDir, sessionRoot, sessionId, runId, generation, command, json, initialWorkingContext, objective = null, traceRef = null, logger = null, onTerminal = null, testHooks } = {}) {
   if (!stores?.conversations) throw new Error('runtime_stores_required');
   if (!continuityAuthority?.commit || !continuityAuthority?.interrupt) throw new Error('runtime_continuity_authority_required');
-  return async function commitTerminalResult({ workingContext = initialWorkingContext, finalize, branch = 'terminal' } = {}) {
+  return async function commitTerminalResult({ workingContext = initialWorkingContext, finalize, afterCommitBeforeTraceTerminal = null, branch = 'terminal' } = {}) {
     await testHooks?.beforeTerminalCommit?.({ branch, sessionId, runId, generation });
     const completion = await continuityAuthority.commit({
       rootDir: sessionRoot,
@@ -37,7 +37,9 @@ export function createTerminalCommitter({ stores = null, agentId, continuityAuth
       return json ? superseded : compactAskChatResult(superseded);
     }
     const result = completion.value;
+    await afterCommitBeforeTraceTerminal?.(result);
     await logger?.terminal?.();
+    try { onTerminal?.(result); } catch {}
     void testHooks?.afterTerminalResponse?.({ branch, sessionId, runId, postTerminalCuration: null });
     return json ? { ...result, continuity: { ...completion.head, current: true } } : compactAskChatResult(result);
   };

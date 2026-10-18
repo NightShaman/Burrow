@@ -3,7 +3,7 @@ import { resolveGroupMentionTargets } from './group-channel-routing.mjs';
 import { createChatTurnRunId } from './chat-turn-controller.mjs';
 import { persistChatAttachments } from './attachment-store.mjs';
 import { attachmentSummary } from './runtime-turn-input.mjs';
-export function createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgentRuntime, conversationStore, stores, retentionDays, projectRoot, groupChannelRuns, groupChannelRunKey, runChatTurnFromBody, lifecycle = null }) {
+export function createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgentRuntime, conversationStore, stores, retentionDays, projectRoot, groupChannelRuns, groupChannelRunKey, runChatTurnFromBody, telemetry = null, lifecycle = null }) {
   return async function startGroupChannelMessage(channelId, body = {}) {
     const rootDir = await runtimeDataRoot();
     const channel = await readGroupChannel({ rootDir, id: channelId });
@@ -46,6 +46,7 @@ export function createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgent
         return runChatTurnFromBody({
         attachmentInput: attachments,
         body: { message: message || 'Please analyze the attached files.', attachments, sessionId, runId, abortSignal: controller.signal }, rootDir: projectRoot, agentRuntime, stores, resolveAgentRuntime,
+        telemetry, runSource: 'group-channel',
         groupChannelContext: { channelId, channelName: channel.name, turns: room?.turns || [] },
       }).then(async (result) => {
         if (!controller.signal.aborted && (result?.answerText || result?.assistantTurn?.metadata?.outputArtifacts?.length)) await appendGroupChannelTurn({ rootDir, conversationStore, channelId, role: 'agent', content: result.answerText || '', runId, metadata: { attachmentAgentId: agentId, outputArtifacts: result?.assistantTurn?.metadata?.outputArtifacts || [], fromAgentId: agentId, fromAgentName: agentRuntime.agent?.name || agentId, recipient: 'group', participantSessionId: sessionId } });

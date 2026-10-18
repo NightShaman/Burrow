@@ -7075,6 +7075,65 @@
           }
         }
       }
+    },
+    "/api/settings/opentelemetry": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Read saved, effective, and runtime OpenTelemetry state",
+        "operationId": "getOpenTelemetrySettings",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/SettingsResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Enable or disable OpenTelemetry export",
+        "operationId": "updateOpenTelemetrySettings",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "enabled"
+                ],
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/SettingsResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
     }
   },
   "components": {

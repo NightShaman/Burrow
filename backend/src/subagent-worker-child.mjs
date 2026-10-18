@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { runSpawnSubagentChild } from './subagent-worker-runner.mjs';
 import { createPostgresPool } from './postgres-foundation.mjs';
 import { PostgresSessionStore } from './postgres-session-store.mjs';
+import { createOtelRuntime } from './otel-runtime.mjs';
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
@@ -13,20 +14,25 @@ async function main() {
   const childArgs = payload.args || payload;
   const pool = createPostgresPool();
   const conversationStore = new PostgresSessionStore({ pool });
+  const telemetry = childArgs.traceContext && (process.env.OTEL_EXPORTER_OTLP_ENDPOINT || process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) ? createOtelRuntime() : null;
+  if (telemetry) await telemetry.start();
+  const telemetryRun = telemetry?.startRun({ runId: childArgs.id, sessionId: childArgs.childSessionId, agentId: childArgs.owner?.agentId, source: 'subagent', parentTraceContext: childArgs.traceContext });
   const heartbeat = setInterval(() => {
     process.stdout.write(`${JSON.stringify({ __burrowSubagentProgress: true, phase: 'heartbeat', at: new Date().toISOString() })}\n`);
   }, HEARTBEAT_INTERVAL_MS);
   try {
     const result = await runSpawnSubagentChild({
       ...childArgs,
-      parentExecutionContext: { conversationStore, agentId: childArgs.owner?.agentId, executionBoundaries: childArgs.executionBoundaries || null },
+      parentExecutionContext: { conversationStore, agentId: childArgs.owner?.agentId, executionBoundaries: childArgs.executionBoundaries || null, parentRunId: childArgs.id, traceContext: telemetryRun?.traceContext || childArgs.traceContext || null, telemetry },
       progress: async (event = {}) => {
         process.stdout.write(`${JSON.stringify({ __burrowSubagentProgress: true, ...event, at: new Date().toISOString() })}\n`);
       },
     });
+    telemetry?.endRun(childArgs.id, result);
     process.stdout.write(`${JSON.stringify({ __burrowSubagentResult: true, ok: Boolean(result.ok), result })}\n`);
   } finally {
     clearInterval(heartbeat);
+    await telemetry?.shutdown?.();
     await pool.end();
   }
 }

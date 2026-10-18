@@ -29,6 +29,9 @@ function childEnv(baseEnv = process.env) {
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'BURROW_RUNTIME_ROOT', 'BURROW_WORKSPACE_ROOT', 'BURROW_AGENT_WORKSPACE_ROOT', 'BURROW_AGENT_DATA_ROOT', 'BURROW_CACHE_ROOT', 'BURROW_TRACE_ISOLATION', 'BURROW_SETTINGS_KEY', 'BURROW_POSTGRES_URL', 'BURROW_POSTGRES_HOST', 'BURROW_POSTGRES_PORT', 'BURROW_POSTGRES_DATABASE', 'BURROW_POSTGRES_USER', 'BURROW_POSTGRES_PASSWORD', 'DATABASE_URL']) {
     if (baseEnv[key]) env[key] = baseEnv[key];
   }
+  for (const [key, value] of Object.entries(baseEnv)) {
+    if (/^OTEL_(?:EXPORTER_OTLP|BSP|METRIC_EXPORT|RESOURCE_ATTRIBUTES|SERVICE_NAME|SDK_DISABLED)/.test(key) && value) env[key] = value;
+  }
   return env;
 }
 

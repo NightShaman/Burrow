@@ -16,6 +16,7 @@ import { prepareNativeToolContinuation } from './native-continuation-preparation
 import { changedPathsFromToolResults, summarizeToolResults } from './runtime-result-shapes.mjs';
 import { boundedRedactedValue } from './redaction.mjs';
 import { chatToolActivity } from './runtime-plain-chat-finalizer.mjs';
+import { randomUUID } from 'node:crypto';
 
 function compactString(value) {
   return String(value || '').trim();
@@ -160,6 +161,8 @@ async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSes
     processExecutionController: (parentExecutionContext?.processExecutionTarget?.kind === 'remote' || parentExecutionContext?.executionEnvironment?.kind === 'remote') ? parentExecutionContext?.processExecutionController || null : null,
     processExecutionRouter: (parentExecutionContext?.processExecutionTarget?.kind === 'remote' || parentExecutionContext?.executionEnvironment?.kind === 'remote') ? parentExecutionContext?.processExecutionRouter || null : null,
     parentRunId: parentExecutionContext?.parentRunId || traceLogger?.runId || null,
+    traceContext: parentExecutionContext?.traceContext || null,
+    telemetry: parentExecutionContext?.telemetry || null,
   });
   const execution = await executeReviewedProposalActions({
     actions: proposal.actions, reviews: reviews.reviews, workspaceRoot: target.root, rootDir: target.root,
@@ -533,14 +536,23 @@ export async function runSpawnSubagentChild({
   await authority.append({ sessionId: childSessionId, type: 'event', content: prompt, visibility: 'debug', entersPrompt: false, runId: id, traceDir, metadata: { kind: 'subagent-runtime-context', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null } });
 
   const childTraceDir = traceDir || path.join(dataRoot, 'subagents', id, 'trace');
+  const emitTelemetry = (type, payload) => parentExecutionContext?.telemetry?.observe?.({ runId: id, sessionId: childSessionId, type, payload, ts: nowIso() });
   const modelTrace = {
+    runId: id,
     traceDir: childTraceDir,
     model: async (payload) => {
       const file = path.join(childTraceDir, 'model-events.jsonl');
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.appendFile(file, `${JSON.stringify(payload)}\n`, 'utf8');
+      emitTelemetry('model', payload);
     },
-    tool: async () => {},
+    tool: async (payload) => { emitTelemetry('tool', payload); },
+    toolStart: async (payload = {}) => {
+      const record = { ...payload, activityId: payload.activityId || `tool-${randomUUID()}`, phase: 'start' };
+      emitTelemetry('tool', record);
+      return { payload: record };
+    },
+    toolEnd: async (payload = {}) => { emitTelemetry('tool', { ...payload, phase: 'result' }); },
     artifact: async (name, content) => {
       const file = path.join(childTraceDir, 'artifacts', String(name || 'artifact').replace(/[^a-zA-Z0-9._-]+/g, '-'));
       await fs.mkdir(path.dirname(file), { recursive: true });

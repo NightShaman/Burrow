@@ -30,7 +30,7 @@ export async function loadRuntimeMcpCapabilities({ agentId, stores } = {}) {
   return { mcpTools, mcpConnections };
 }
 
-export function createRuntimeExecutionContext({ stores = null, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId = null, abortSignal = null, skillOverrides = {} } = {}) {
+export function createRuntimeExecutionContext({ stores = null, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId = null, traceContext = null, telemetry = null, abortSignal = null, skillOverrides = {} } = {}) {
   const includeAgentChat = Boolean(agentRuntime && typeof resolveAgentRuntime === 'function');
   const includeTaskBoard = Boolean(runtimeState.agentId);
   const context = createExecutionContext({
@@ -61,6 +61,8 @@ export function createRuntimeExecutionContext({ stores = null, runtimeState, res
     executionEnvironment: agentRuntime?.executionEnvironment || { kind: 'local', workspaceRoot: resolvedWorkingRoot },
     processExecutionController: agentRuntime?.processExecutionController || null,
     parentRunId,
+    traceContext,
+    telemetry,
     abortSignal,
   });
   // Preserve non-enumerable live dependencies; object spread silently drops them.

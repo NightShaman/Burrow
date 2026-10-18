@@ -16,6 +16,8 @@ import { buildIdentity } from './build-identity.mjs';
 import { releaseProvenance } from './release-provenance.mjs';
 import { httpAuthorityConfig, hostAuthorityPolicy } from '../src/http-authority.mjs';
 import { browserOriginConfig, browserOriginSettings, saveBrowserOriginSettings, browserRequestPolicy } from '../src/browser-origin-policy.mjs';
+import { otelSettings, saveOtelSettings } from '../src/otel-settings.mjs';
+import { createOtelRuntime } from '../src/otel-runtime.mjs';
 import { artifactResponseHeaders } from '../src/artifact-response-policy.mjs';
 import { postgresTransactionContext, withPostgresTransaction } from '../src/postgres-foundation.mjs';
 import { readJsonBody } from '../src/request-resource-budgets.mjs';
@@ -184,6 +186,8 @@ const { anthropicOauthUsage, openaiOauthUsage } = createProviderUsageService({ m
 configureMcpProviderStateStore(postgresApplication.stores.mcpProviderStates);
 await hydrateMcpProviderStates({ runtimeRoot: process.env.BURROW_MCPORTER_ROOT || path.join(runtimeRoot, 'integrations', 'mcporter') }).catch((error) => serverLogger.event('mcp_provider_state_hydration_failed', { error: String(error?.message || error) }));
 const runtimeMetrics = createRuntimeMetricsCollector({ runtimeRoot });
+const otelRuntime = createOtelRuntime({ serviceVersion: releaseVersion });
+if ((await otelSettings({ metadata: postgresApplication.stores.metadata })).effective.enabled) await otelRuntime.start();
 
 function profilesStore() { return postgresApplication.stores.profiles; }
 function dreamDiaryStore() { return postgresApplication.stores.dreamDiary; }
@@ -202,7 +206,7 @@ function scheduler() {
       storeFactory: () => borrowedStore,
       executeTurn: runChatTurnFromBody, createRunId: createChatTurnRunId,
       closeStore: async () => {},
-      resolveAgentRuntime, rootDir: projectRoot, stores: postgresApplication.stores,
+      resolveAgentRuntime, rootDir: projectRoot, stores: postgresApplication.stores, telemetry: otelRuntime,
       activeOwnerModIds: () => loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id),
     });
   }
@@ -303,6 +307,8 @@ async function executeBoardTask(taskId) {
     agentRuntime,
     stores: postgresApplication.stores,
     resolveAgentRuntime,
+    telemetry: otelRuntime,
+    runSource: 'task-board',
     registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerActiveAgentRun(activeChatRuns, { agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
     onModelTextDelta: createChatStreamDelta({ record, type: 'assistant.delta', runId, sessionId, write: () => {} }),
     onModelThoughtDelta: createChatStreamDelta({ record, type: 'assistant.thought', runId, sessionId, write: () => {} }),
@@ -2704,6 +2710,8 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
       stores: postgresApplication.stores,
       resolveAgentRuntime,
       latencyTiming,
+      telemetry: otelRuntime,
+      runSource: 'operator-chat',
       registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerActiveAgentRun(activeChatRuns, { agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
       onTraceRecord: (traceRecord) => {
         const progress = publicChatProgress(traceRecord);
@@ -2768,7 +2776,7 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
   }
 }
 
-const startGroupChannelMessage = createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgentRuntime, conversationStore: postgresApplication.stores.conversations, stores: postgresApplication.stores, retentionDays: async () => (await postgresApplication.stores.albdruck.readRetention()).attachmentDays, projectRoot, groupChannelRuns, groupChannelRunKey, runChatTurnFromBody, lifecycle: requestLifecycle });
+const startGroupChannelMessage = createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgentRuntime, conversationStore: postgresApplication.stores.conversations, stores: postgresApplication.stores, retentionDays: async () => (await postgresApplication.stores.albdruck.readRetention()).attachmentDays, projectRoot, groupChannelRuns, groupChannelRunKey, runChatTurnFromBody, telemetry: otelRuntime, lifecycle: requestLifecycle });
 
 async function cancelGroupChannelRun(channelId, runId, body = {}) {
   const record = [...groupChannelRuns.values()].find((item) => item.channelId === channelId && item.runId === runId);
@@ -2857,7 +2865,7 @@ const { archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, arc
 });
 const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
 const brainRoute = createBrainRoutes({ store: postgresApplication.stores.brains, embeddings: postgresApplication.stores.brainEmbeddings, readJsonBody, sendJson });
-const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, browserOriginSettings: () => browserOriginSettings({ metadata: metadataStore() }), saveBrowserOriginSettings: body => saveBrowserOriginSettings(body, { metadata: metadataStore() }), executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
+const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, browserOriginSettings: () => browserOriginSettings({ metadata: metadataStore() }), saveBrowserOriginSettings: body => saveBrowserOriginSettings(body, { metadata: metadataStore() }), otelSettings: () => otelSettings({ metadata: metadataStore(), runtimeStatus: otelRuntime.status }), saveOtelSettings: async body => { let result = await saveOtelSettings(body, { metadata: metadataStore(), runtimeStatus: otelRuntime.status }); if (result.ok && result.effective.enabled) { await otelRuntime.start(); result = await otelSettings({ metadata: metadataStore(), runtimeStatus: otelRuntime.status }); } return result; }, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
 const observabilityRoute = createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, codexLbAccounts, anthropicOauthUsage, openaiOauthUsage, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore: postgresApplication.stores.conversations, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
 const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJson, validateBoundaryBody, withScheduledJobs, scheduler, listGroupChannels, createGroupChannel, readGroupChannelTurns, groupChannelRuns, startGroupChannelMessage, cancelGroupChannelRun, runtimeDataRoot, conversationStore: postgresApplication.stores.conversations });
 const authRoute = createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
@@ -3225,7 +3233,7 @@ const closeRuntimeResources = createCoordinatedShutdown({
     }
   },
   drainAdmission: () => httpClosePromise,
-  closers: () => [() => cleanupMods(loadedMods), () => postgresApplication.close()],
+  closers: () => [() => cleanupMods(loadedMods), () => otelRuntime.shutdown(), () => postgresApplication.close()],
   onTimeout: () => server.closeAllConnections?.(),
 });
 let shutdownPromise = null;
@@ -3312,6 +3320,7 @@ server.listen(port, host, () => {
           stores:postgresApplication.stores,
           body: { message: recoveryInstruction, sessionId, runId, abortSignal: lifecycle.signal },
           rootDir: projectRoot, agentRuntime: runtime, resolveAgentRuntime,
+          telemetry: otelRuntime, runSource: 'recovery',
           onTraceRecord: lifecycle.onTraceRecord, onModelTextDelta: lifecycle.onModelTextDelta,
           onModelThoughtDelta: lifecycle.onModelThoughtDelta, onModelContextUsage: lifecycle.onModelContextUsage,
           onSteeringReady: lifecycle.onSteeringReady,

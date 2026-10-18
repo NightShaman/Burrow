@@ -50,6 +50,7 @@ export function createNativeFilesystemExecutionRouter({ localExecute, remoteCont
       targetId: required(target.targetId, 'target_id'),
       parentRunId,
       toolCallId,
+      ...(context.traceContext ? { traceContext: { ...context.traceContext } } : {}),
       operation: { tool, arguments: Object.fromEntries(Object.entries(operation.arguments || {}).filter(([key, value]) => !['traceLogger', 'rootDir', 'artifactPrefix', 'runId'].includes(key) && (value == null || ['string', 'number', 'boolean'].includes(typeof value)))) },
       }, { abortSignal: context.abortSignal || null });
       return result && typeof result === 'object' ? { ...result, operationId: result.operationId || operationId } : result;

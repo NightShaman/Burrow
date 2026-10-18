@@ -13,7 +13,7 @@ function boundedResult(result = {}) {
   };
 }
 
-export function createScheduledJobScheduler({ storeFactory, closeStore: closeStoreOverride, resolveAgentRuntime, rootDir, stores = null, executeTurn, createRunId, intervalMs = 30_000, retryDelayMs = intervalMs, activeOwnerModIds = () => [], clock = () => new Date().toISOString() } = {}) {
+export function createScheduledJobScheduler({ storeFactory, closeStore: closeStoreOverride, resolveAgentRuntime, rootDir, stores = null, executeTurn, createRunId, telemetry = null, intervalMs = 30_000, retryDelayMs = intervalMs, activeOwnerModIds = () => [], clock = () => new Date().toISOString() } = {}) {
   if (typeof storeFactory !== 'function' || typeof resolveAgentRuntime !== 'function' || typeof executeTurn !== 'function' || typeof createRunId !== 'function') throw new Error('scheduled_job_scheduler_dependencies_required');
   const lifecycle = createBackgroundLifecycle({ name: 'scheduled_job_scheduler', clock });
   const active = new Map();
@@ -67,6 +67,8 @@ export function createScheduledJobScheduler({ storeFactory, closeStore: closeSto
         agentRuntime,
         resolveAgentRuntime,
         turnSource: 'scheduled',
+        telemetry,
+        runSource: 'scheduled',
       });
       const outcome = classifyRuntimeOutcome(result, { cancelled: controller.signal.aborted });
       const store = await openStore();

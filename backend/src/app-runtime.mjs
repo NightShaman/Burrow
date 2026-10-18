@@ -118,6 +118,10 @@ async function runAskChatUnserialized({
   // Internal transport observer. It receives persisted trace records and is
   // intentionally not accepted through serialized request arguments.
   onTraceRecord = null,
+  // Optional process-owned OTel projection; never accepted from serialized args.
+  telemetry = null,
+  parentTraceContext = null,
+  runSource = null,
   latencyTiming = null,
   // Visible provider text only; never carried in serialized turn arguments.
   onModelTextDelta = null,
@@ -232,9 +236,15 @@ async function runAskChatUnserialized({
     agentId: runtimeState.agentId,
     sessionId: resolvedSessionId,
   });
-  const logger = createTraceLogger({ rootDir: traceRoot, runId: resolvedRunId, sessionId: resolvedSessionId, conversationId, onRecord: onTraceRecord });
+  const telemetryRun = runtimeConfig.opentelemetry?.effective?.enabled
+    ? telemetry?.startRun?.({ runId: resolvedRunId, sessionId: resolvedSessionId, agentId: runtimeState.agentId, source: runSource || turnSource || command, parentTraceContext })
+    : null;
+  const observeTrace = telemetryRun
+    ? (record) => { telemetry.observe?.(record); return onTraceRecord?.(record); }
+    : onTraceRecord;
+  const logger = createTraceLogger({ rootDir: traceRoot, runId: resolvedRunId, sessionId: resolvedSessionId, conversationId, onRecord: observeTrace });
   if (latencyTiming) await logger.event('chat-admission-timing', { ...latencyTiming, clockDomain: 'server-process' });
-  const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, logger, testHooks });
+  const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, logger, onTerminal: telemetryRun ? (result) => telemetry.endRun?.(resolvedRunId, result) : null, testHooks });
   const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, inboundEntryId, parentSignal = null }) => {
     const nestedRunId = `${resolvedRunId}-reply-${recipientRuntime.agentId}`;
     const lifecycle = typeof registerNestedAgentRun === 'function'
@@ -257,6 +267,9 @@ async function runAskChatUnserialized({
         registerNestedAgentRun,
         stores,
         onTraceRecord: lifecycle?.onTraceRecord || null,
+        telemetry,
+        parentTraceContext: telemetryRun ? telemetry.traceContextForRun?.(resolvedRunId) : null,
+        runSource: 'a2a',
         onModelTextDelta: lifecycle?.onModelTextDelta || null,
         onModelThoughtDelta: lifecycle?.onModelThoughtDelta || null,
         onModelContextUsage: lifecycle?.onModelContextUsage || null,
@@ -269,7 +282,7 @@ async function runAskChatUnserialized({
     }
   };
   const { mcpTools, mcpConnections } = await loadRuntimeMcpCapabilities({ agentId: runtimeState.agentId, stores });
-  const executionContext = createRuntimeExecutionContext({ stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, abortSignal: normalizedArgs.abort_signal || null, skillOverrides: scopedSkillsConfig });
+  const executionContext = createRuntimeExecutionContext({ stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, traceContext: telemetryRun ? telemetry.traceContextForRun?.(resolvedRunId) : null, telemetry: telemetryRun ? telemetry : null, abortSignal: normalizedArgs.abort_signal || null, skillOverrides: scopedSkillsConfig });
   const effectiveSkillCatalog = await loadEffectiveSkillCatalog({
     workspaceRoot: runtimeState.workspaceRoot,
     agentId: runtimeState.agentId,
@@ -454,17 +467,21 @@ async function runAskChatUnserialized({
     return modelExecution.result;
   }
   const { modelTurn, finalWorkingContext } = modelExecution;
-  const result = await persistPlainChatResult({ stores, agentId: runtimeState.agentId, sessionRoot, dataRoot, logger, command, message, sessionId: resolvedSessionId, priorSession, route, selectedSkills: route.skills.selected.map((skill) => skill.id), prompt, contextEngine: turnContext, contextCompression, intent, session, workspaceRoot: resolvedWorkingRoot, artifactWorkspaceRoot: runtimeState.agentWorkspaceRoot, subjectScope: verifiedSubjectScope, backgroundWork: trackedBackgroundWork, modelTurn, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, subagents, structuredSubagents, extraEyesReview, fileDeicticResolution: deicticFiles, finalWorkingContext, commitTerminalResult });
-  if (result?.ok && result.decision === 'answered' && result.answerText) {
-    // Tiddle residue is advisory and must never turn a completed chat response
-    // into a failure. The periodic pass owns semantic reconciliation later.
-    try {
-      const residue = await appendTiddleResidueAsync({ metadataStore: stores.metadata, agentId: runtimeState.agentId, scope: continuityScope, sessionId: resolvedSessionId, conversationId: conversationId || resolvedSessionId, runId: logger.runId, message, answerText: result.answerText, toolResults: result?.proposalExecution?.tools || [] });
-      await logger.event('tiddle-residue-recorded', { rollingContinuity: true, residue: residue ? { ref: residue.ref, scope: residue.scope } : null });
-    } catch (error) {
-      await logger.event('tiddle-residue-recorded', { rollingContinuity: true, error: String(error?.message || error) });
-    }
-  }
+  const result = await persistPlainChatResult({
+    stores, agentId: runtimeState.agentId, sessionRoot, dataRoot, logger, command, message, sessionId: resolvedSessionId, priorSession, route, selectedSkills: route.skills.selected.map((skill) => skill.id), prompt, contextEngine: turnContext, contextCompression, intent, session, workspaceRoot: resolvedWorkingRoot, artifactWorkspaceRoot: runtimeState.agentWorkspaceRoot, subjectScope: verifiedSubjectScope, backgroundWork: trackedBackgroundWork, modelTurn, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, subagents, structuredSubagents, extraEyesReview, fileDeicticResolution: deicticFiles, finalWorkingContext, commitTerminalResult,
+    afterCommitBeforeTraceTerminal: async (committedResult) => {
+      if (!committedResult?.ok || committedResult.decision !== 'answered' || !committedResult.answerText) return;
+      // Tiddle residue is advisory and must never turn a completed chat response
+      // into a failure. Record it before terminal.json so the marker remains the
+      // final trace write and completed traces stay retention-eligible.
+      try {
+        const residue = await appendTiddleResidueAsync({ metadataStore: stores.metadata, agentId: runtimeState.agentId, scope: continuityScope, sessionId: resolvedSessionId, conversationId: conversationId || resolvedSessionId, runId: logger.runId, message, answerText: committedResult.answerText, toolResults: committedResult?.proposalExecution?.tools || [] });
+        await logger.event('tiddle-residue-recorded', { rollingContinuity: true, residue: residue ? { ref: residue.ref, scope: residue.scope } : null });
+      } catch (error) {
+        await logger.event('tiddle-residue-recorded', { rollingContinuity: true, error: String(error?.message || error) });
+      }
+    },
+  });
   return result;
   } finally {
     if (stores.steering) await stores.steering.boundary(steeringIdentity, { finish: true });

@@ -74,6 +74,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
     const result = await routeFilesystem({ target, operation: { tool: action.tool, arguments: args } }, {
       parentRunId: executionContext?.parentRunId || traceLogger?.runId,
       toolCallId: action.toolCallId,
+      traceContext: executionContext?.telemetry?.traceContextForTool?.(executionContext?.parentRunId || traceLogger?.runId, action.toolCallId) || executionContext?.traceContext || null,
       abortSignal,
     });
     return withExecutionProvenance(result, target, executionContext, action.toolCallId);
@@ -180,6 +181,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
           ...(target.kind === 'remote' && protectedInput.bindings.length ? { protectedValues: protectedInput.env, protectedBindingMetadata: protectedInput.bindings } : {}) }, {
           parentRunId: executionContext?.parentRunId || traceLogger?.runId,
           toolCallId: action.toolCallId,
+          traceContext: executionContext?.telemetry?.traceContextForTool?.(executionContext?.parentRunId || traceLogger?.runId, action.toolCallId) || executionContext?.traceContext || null,
           abortSignal,
         });
       } catch (error) {
@@ -218,6 +220,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       const execute = (process) => routeProcess({ target, process }, {
         parentRunId: executionContext?.parentRunId || traceLogger?.runId,
         toolCallId: action.toolCallId,
+        traceContext: executionContext?.telemetry?.traceContextForTool?.(executionContext?.parentRunId || traceLogger?.runId, action.toolCallId) || executionContext?.traceContext || null,
         abortSignal,
       });
       const envelope = action.tool === 'git_status' ? gitStatusEnvelope : gitDiffEnvelope;

@@ -60,6 +60,7 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
       targetId,
       parentRunId,
       toolCallId,
+      ...(context.traceContext ? { traceContext: { ...context.traceContext } } : {}),
       process: {
         ...(command ? { command } : { executable, args: process.args ? [...process.args] : [] }),
         ...(process.cwd ? { cwd: String(process.cwd) } : {}),
