@@ -8,6 +8,7 @@ promotion workflow publishes reviewed, allowlisted snapshots to the public
 - `Node-Goblin`
 - `Goblin-Secret-Store`
 - `Burrow-Skills`
+- `Burrow-Backdoor`
 
 ## Release contract
 
@@ -19,7 +20,9 @@ promotion workflow publishes reviewed, allowlisted snapshots to the public
   the next UTC day.
 - Node Goblin owns its version, source snapshot, bootstrap installer, tarball, and checksum. Node Goblin changes do not create a Burrow release.
 - Burrow owns only its assembled source snapshot and GHCR image; Burrow releases do not contain Node Goblin assets or adopt Node Goblin's version.
-- GSS and Skills own their public source snapshots.
+- GSS, Skills, and Backdoor own their public source snapshots.
+- Complete Backend, UI, Node Goblin, GSS/Core integration, Backdoor/Core integration, installer, assembly, and packaged-image validation runs here against the frozen source set before publication. NightShaman push workflows remain fast development gates.
+- Public GitHub releases use coordinated notes generated from the NightShaman commit ranges since the previous public manifest, with generated assembly/release commits omitted.
 - Public snapshots use explicit allowlists. Development workflows, audit notes,
   secrets, caches, runtime data, and Git history are not mirrored.
 - Publication credentials are available only in the environment-gated publish
@@ -32,8 +35,12 @@ The active workflow is `.github/workflows/daily-public-promotion.yml`. It runs a
 these Actions secrets are required in the private NightShaman Burrow repository:
 
 - `PUBLIC_PROMOTION_SOURCE_TOKEN`: read access to required NightShaman sources.
-- `PUBLIC_PROMOTION_DESTINATION_TOKEN`: write access to the four public
+- `PUBLIC_PROMOTION_DESTINATION_TOKEN`: write access to the five public
   repositories, releases, and `ghcr.io/goblinking-burrow/burrow`.
+
+The destination repositories must already exist. In particular,
+`GoblinKing-Burrow/Burrow-Backdoor` must be created before the first promotion;
+the publisher intentionally does not create repositories implicitly.
 
 ## Local verification
 

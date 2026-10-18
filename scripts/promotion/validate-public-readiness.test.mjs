@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { validatePublicReadiness } from './validate-public-readiness.mjs';
 
-const names=['Burrow','Node-Goblin','Goblin-Secret-Store','Burrow-Skills'];
+const names=['Burrow','Node-Goblin','Goblin-Secret-Store','Burrow-Skills','Burrow-Backdoor'];
 const png=(width,height)=>{ const b=Buffer.alloc(24); Buffer.from('89504e470d0a1a0a','hex').copy(b); b.writeUInt32BE(width,16); b.writeUInt32BE(height,20); return b; };
 test('enforces the shared public hero contract',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'burrow-public-'));

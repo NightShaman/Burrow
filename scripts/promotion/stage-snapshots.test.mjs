@@ -3,7 +3,7 @@ import test from 'node:test';
 import { validateInputs } from './stage-snapshots.mjs';
 
 const sha = 'a'.repeat(40);
-const sources = { burrow: sha, burrowBackend: sha, burrowUi: sha, nodeGoblin: sha, goblinSecretStore: sha, burrowSkills: sha };
+const sources = { burrow: sha, burrowBackend: sha, burrowUi: sha, nodeGoblin: sha, goblinSecretStore: sha, burrowSkills: sha, burrowBackdoor: sha };
 
 test('accepts the complete frozen source set', () => {
   assert.doesNotThrow(() => validateInputs({ releaseDate: '2026.10.17', sources }));

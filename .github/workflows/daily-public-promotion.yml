@@ -1,4 +1,4 @@
-name: Promote public releases
+name: Validate and promote public releases
 
 on:
   schedule:
@@ -26,6 +26,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: orchestrator
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -40,19 +41,21 @@ jobs:
           node_goblin=$(gh api repos/NightShaman/Node-Goblin/commits/main --jq .sha)
           gss=$(gh api repos/NightShaman/Goblin-Secret-Store/commits/main --jq .sha)
           skills=$(gh api repos/NightShaman/Burrow-Skills/commits/main --jq .sha)
+          backdoor=$(gh api repos/NightShaman/Burrow-Backdoor/commits/main --jq .sha)
           for item in \
             "burrow $burrow NightShaman/Burrow" \
             "burrowBackend $backend NightShaman/Burrow-Backend" \
             "burrowUi $ui NightShaman/Burrow-UI" \
             "nodeGoblin $node_goblin NightShaman/Node-Goblin" \
             "goblinSecretStore $gss NightShaman/Goblin-Secret-Store" \
-            "burrowSkills $skills NightShaman/Burrow-Skills"; do
+            "burrowSkills $skills NightShaman/Burrow-Skills" \
+            "burrowBackdoor $backdoor NightShaman/Burrow-Backdoor"; do
             set -- $item
             resolved=$(gh api "repos/$3/commits/$2" --jq .sha)
             [ "$resolved" = "$2" ] || { echo "source resolution changed for $1" >&2; exit 1; }
           done
-          printf '{"burrow":"%s","burrowBackend":"%s","burrowUi":"%s","nodeGoblin":"%s","goblinSecretStore":"%s","burrowSkills":"%s"}\n' \
-            "$burrow" "$backend" "$ui" "$node_goblin" "$gss" "$skills" > sources.json
+          printf '{"burrow":"%s","burrowBackend":"%s","burrowUi":"%s","nodeGoblin":"%s","goblinSecretStore":"%s","burrowSkills":"%s","burrowBackdoor":"%s"}\n' \
+            "$burrow" "$backend" "$ui" "$node_goblin" "$gss" "$skills" "$backdoor" > sources.json
       - name: Read last public manifest
         run: |
           curl --fail --silent --show-error \
@@ -70,7 +73,7 @@ jobs:
         if: steps.plan.outputs.publishable == 'true'
         id: frozen
         run: |
-          for key in burrow nodeGoblin goblinSecretStore burrowSkills; do
+          for key in burrow burrowBackend burrowUi nodeGoblin goblinSecretStore burrowSkills burrowBackdoor; do
             printf '%s=%s\n' "$key" "$(node -p "require('./sources.json').$key")" >> "$GITHUB_OUTPUT"
           done
       - uses: actions/checkout@v4
@@ -79,48 +82,133 @@ jobs:
           repository: NightShaman/Burrow
           ref: ${{ steps.frozen.outputs.burrow }}
           token: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
-          path: source-burrow
+          path: sources/Burrow
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        if: steps.plan.outputs.publishable == 'true'
+        with:
+          repository: NightShaman/Burrow-Backend
+          ref: ${{ steps.frozen.outputs.burrowBackend }}
+          token: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
+          path: sources/Burrow-Backend
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        if: steps.plan.outputs.publishable == 'true'
+        with:
+          repository: NightShaman/Burrow-UI
+          ref: ${{ steps.frozen.outputs.burrowUi }}
+          token: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
+          path: sources/Burrow-UI
+          fetch-depth: 0
       - uses: actions/checkout@v4
         if: steps.plan.outputs.publishable == 'true'
         with:
           repository: NightShaman/Node-Goblin
           ref: ${{ steps.frozen.outputs.nodeGoblin }}
           token: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
-          path: source-node-goblin
+          path: sources/Node-Goblin
+          fetch-depth: 0
       - uses: actions/checkout@v4
         if: steps.plan.outputs.publishable == 'true'
         with:
           repository: NightShaman/Goblin-Secret-Store
           ref: ${{ steps.frozen.outputs.goblinSecretStore }}
           token: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
-          path: source-gss
+          path: sources/Goblin-Secret-Store
+          fetch-depth: 0
       - uses: actions/checkout@v4
         if: steps.plan.outputs.publishable == 'true'
         with:
           repository: NightShaman/Burrow-Skills
           ref: ${{ steps.frozen.outputs.burrowSkills }}
           token: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
-          path: source-skills
-      - name: Stage allowlisted public trees
+          path: sources/Burrow-Skills
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        if: steps.plan.outputs.publishable == 'true'
+        with:
+          repository: NightShaman/Burrow-Backdoor
+          ref: ${{ steps.frozen.outputs.burrowBackdoor }}
+          token: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
+          path: sources/Burrow-Backdoor
+          fetch-depth: 0
+      - name: Install PostgreSQL 17 and pgvector for complete release validation
+        if: steps.plan.outputs.publishable == 'true'
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y wget ca-certificates gnupg
+          sudo install -d /usr/share/postgresql-common/pgdg
+          wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /etc/apt/trusted.gpg.d/postgresql.asc >/dev/null
+          . /etc/os-release
+          echo "deb https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-17 postgresql-client-17 postgresql-17-pgvector
+      - name: Run complete frozen-source test suites
+        if: steps.plan.outputs.publishable == 'true'
+        env:
+          BURROW_TEST_TIMEOUT_MS: '1800000'
+          BURROW_TEST_DISPOSABLE_POSTGRES: '1'
+        run: |
+          set -eu
+          (cd sources/Burrow-Backend && npm ci --no-audit --no-fund && npm test)
+          (cd sources/Burrow-UI && npm ci --no-audit --no-fund && npm test && npm run build)
+          (cd sources/Node-Goblin/gateway && npm test)
+          (cd sources/Goblin-Secret-Store && npm run build && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" BURROW_POSTGRES_BIN_DIR=/usr/lib/postgresql/17/bin npm test)
+          (cd sources/Burrow-Backdoor && npm ci --ignore-scripts --no-audit --no-fund && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm run check)
+          find sources/Burrow-Skills -name SKILL.md -type f -size +0c | grep -q .
+      - uses: actions/setup-python@v6
+        if: steps.plan.outputs.publishable == 'true'
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            sources/Burrow/requirements-docs.txt
+            sources/Burrow/requirements-docs-test.txt
+            sources/Node-Goblin/requirements-docs.txt
+            sources/Node-Goblin/requirements-docs-test.txt
+      - name: Run complete frozen documentation validation
+        if: steps.plan.outputs.publishable == 'true'
+        run: |
+          python -m pip install \
+            -r sources/Burrow/requirements-docs.txt \
+            -r sources/Burrow/requirements-docs-test.txt \
+            -r sources/Node-Goblin/requirements-docs.txt \
+            -r sources/Node-Goblin/requirements-docs-test.txt
+          python -m playwright install --with-deps chromium
+          (cd sources/Burrow && python -m mkdocs build --strict && python scripts/docs/check_site.py site && python scripts/docs/check_mermaid.py site --artifacts docs-browser-artifacts)
+          (cd sources/Node-Goblin && python -m mkdocs build --strict && python scripts/docs/check_site.py site && python scripts/docs/check_mermaid.py site --artifacts docs-browser-artifacts)
+      - name: Stage allowlisted public trees and release notes
         if: steps.plan.outputs.publishable == 'true'
         env:
           RELEASE_DATE: ${{ steps.plan.outputs.release_date }}
         run: |
           cat > roots.json <<JSON
-          {"burrow":"$GITHUB_WORKSPACE/source-burrow","nodeGoblin":"$GITHUB_WORKSPACE/source-node-goblin","goblinSecretStore":"$GITHUB_WORKSPACE/source-gss","burrowSkills":"$GITHUB_WORKSPACE/source-skills"}
+          {"burrow":"$GITHUB_WORKSPACE/sources/Burrow","nodeGoblin":"$GITHUB_WORKSPACE/sources/Node-Goblin","goblinSecretStore":"$GITHUB_WORKSPACE/sources/Goblin-Secret-Store","burrowSkills":"$GITHUB_WORKSPACE/sources/Burrow-Skills","burrowBackdoor":"$GITHUB_WORKSPACE/sources/Burrow-Backdoor"}
+          JSON
+          cat > note-roots.json <<JSON
+          {"burrow":"$GITHUB_WORKSPACE/sources/Burrow","burrowBackend":"$GITHUB_WORKSPACE/sources/Burrow-Backend","burrowUi":"$GITHUB_WORKSPACE/sources/Burrow-UI","nodeGoblin":"$GITHUB_WORKSPACE/sources/Node-Goblin","goblinSecretStore":"$GITHUB_WORKSPACE/sources/Goblin-Secret-Store","burrowSkills":"$GITHUB_WORKSPACE/sources/Burrow-Skills","burrowBackdoor":"$GITHUB_WORKSPACE/sources/Burrow-Backdoor"}
           JSON
           node orchestrator/scripts/promotion/stage-snapshots.mjs roots.json staged "$RELEASE_DATE" sources.json
-      - name: Verify staged trees
+          node orchestrator/scripts/promotion/release-notes.mjs "$RELEASE_DATE" sources.json previous.json note-roots.json release-notes.md
+          cat release-notes.md
+      - name: Verify staged release trees
         if: steps.plan.outputs.publishable == 'true'
         run: |
+          set -eu
           node --test orchestrator/scripts/promotion/*.test.mjs
           node orchestrator/scripts/promotion/validate-public-readiness.mjs staged
-          (cd staged/Goblin-Secret-Store && npm run build && node --test $(find server ui -name '*.test.mjs' ! -name 'core-integration.test.mjs' -print))
-          (cd staged/Node-Goblin/gateway && npm test)
+          node --test staged/Burrow/scripts/install/*.test.mjs staged/Burrow/scripts/assembly/*.test.mjs
           sh -n staged/Burrow/install.sh staged/Node-Goblin/install.sh
+          node -e "for (const name of ['Burrow-Backdoor']) { const root='staged/'+name; const version=require('./'+root+'/package.json').version; if (version !== process.env.VERSION || require('./'+root+'/burrow.mod.json').version !== version) throw Error(name+' version mismatch'); }" 
+        env:
+          VERSION: ${{ steps.plan.outputs.release_date }}
+      - name: Build and smoke the public Burrow image
+        if: steps.plan.outputs.publishable == 'true'
+        run: |
           docker build --build-arg BURROW_UI_SHA="$(node -p "require('./sources.json').burrowUi")" -t burrow-public-candidate staged/Burrow
           node staged/Burrow/scripts/assembly/packaged-smoke.mjs burrow-public-candidate staged/Burrow
-          for target in burrow nodeGoblin goblinSecretStore burrowSkills; do
+          for target in Burrow Node-Goblin Goblin-Secret-Store Burrow-Skills Burrow-Backdoor; do
             test ! -d "staged/$target/.git"
             ! find "staged/$target" -type f \( -name '*.env' -o -name '*.pem' -o -name '*.key' \) -print -quit | grep -q .
           done
@@ -132,6 +220,7 @@ jobs:
             staged
             sources.json
             plan.json
+            release-notes.md
           if-no-files-found: error
           retention-days: 7
 
@@ -161,12 +250,13 @@ jobs:
           orchestrator/scripts/promotion/publish-snapshot.sh Node-Goblin staged/Node-Goblin "$VERSION" "Release Node Goblin $VERSION"
           orchestrator/scripts/promotion/publish-snapshot.sh Goblin-Secret-Store staged/Goblin-Secret-Store "$VERSION" "Release Goblin Secret Store $VERSION"
           orchestrator/scripts/promotion/publish-snapshot.sh Burrow-Skills staged/Burrow-Skills "$VERSION" "Release Burrow Skills $VERSION"
+          orchestrator/scripts/promotion/publish-snapshot.sh Burrow-Backdoor staged/Burrow-Backdoor "$VERSION" "Release Burrow Backdoor $VERSION"
       - name: Build Node Goblin release assets
         env:
           VERSION: ${{ needs.stage.outputs.release_date }}
         run: |
           SOURCE_DATE_EPOCH=0 sh staged/Node-Goblin/gateway/deploy/build-release.sh staged/Node-Goblin/gateway/dist
-      - name: Publish releases
+      - name: Publish component releases with coordinated notes
         env:
           GH_TOKEN: ${{ secrets.PUBLIC_PROMOTION_DESTINATION_TOKEN }}
           VERSION: ${{ needs.stage.outputs.release_date }}
@@ -175,13 +265,14 @@ jobs:
           create_release() {
             repo=$1; shift
             if gh release view "v$VERSION" --repo "$PUBLIC_OWNER/$repo" >/dev/null 2>&1; then return; fi
-            gh release create "v$VERSION" --repo "$PUBLIC_OWNER/$repo" --title "$repo $VERSION" --notes "Public calendar release $VERSION." "$@"
+            gh release create "v$VERSION" --repo "$PUBLIC_OWNER/$repo" --title "$repo $VERSION" --notes-file release-notes.md "$@"
           }
           create_release Node-Goblin \
             "staged/Node-Goblin/gateway/dist/node-goblin-$VERSION.tar.gz" \
             "staged/Node-Goblin/gateway/dist/node-goblin-$VERSION.tar.gz.sha256"
           create_release Goblin-Secret-Store
           create_release Burrow-Skills
+          create_release Burrow-Backdoor
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -217,7 +308,7 @@ jobs:
           set -eu
           docker logout ghcr.io >/dev/null 2>&1 || true
           docker pull "ghcr.io/goblinking-burrow/burrow:${{ needs.stage.outputs.release_date }}"
-      - name: Publish Burrow snapshot and release manifest last
+      - name: Publish Burrow snapshot and coordinated release last
         env:
           PUBLIC_GITHUB_TOKEN: ${{ secrets.PUBLIC_PROMOTION_DESTINATION_TOKEN }}
           GH_TOKEN: ${{ secrets.PUBLIC_PROMOTION_DESTINATION_TOKEN }}
@@ -226,5 +317,5 @@ jobs:
           set -eu
           orchestrator/scripts/promotion/publish-snapshot.sh Burrow staged/Burrow "$VERSION" "Release Burrow $VERSION"
           if ! gh release view "v$VERSION" --repo "$PUBLIC_OWNER/Burrow" >/dev/null 2>&1; then
-            gh release create "v$VERSION" --repo "$PUBLIC_OWNER/Burrow" --title "Burrow $VERSION" --notes "Public calendar release $VERSION. Image: ghcr.io/goblinking-burrow/burrow:$VERSION"
+            gh release create "v$VERSION" --repo "$PUBLIC_OWNER/Burrow" --title "Burrow $VERSION" --notes-file release-notes.md
           fi

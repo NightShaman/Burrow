@@ -1,6 +1,6 @@
 # Containers
 
-The assembled repository supplies the canonical `Dockerfile`, `docker-entrypoint.sh`, and `compose.yml`. The published image is `ghcr.io/nightshaman/burrow`.
+The assembled repository supplies the canonical `Dockerfile`, `docker-entrypoint.sh`, and `compose.yml`. The public release image is `ghcr.io/goblinking-burrow/burrow`.
 
 ## Start with an explicit configuration
 
@@ -9,7 +9,7 @@ This core-only example binds to loopback on the Docker host. It intentionally sh
 ```yaml
 services:
   burrow:
-    image: ghcr.io/nightshaman/burrow:2026.10.10.4
+    image: ghcr.io/goblinking-burrow/burrow:2026.10.18
     init: true
     user: "4226:4226"
     environment:

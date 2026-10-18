@@ -13,18 +13,20 @@ test('index must reference actual JS and CSS assets', () => {
  assert.deepEqual(assetPaths('<script src="/assets/index.js"></script><link href="/assets/index.css">'), ['/assets/index.js','/assets/index.css']);
  assert.throws(()=>assetPaths('<html>fixture</html>'));
 });
-test('assembly gates exact components, smokes loaded image before publication, never repeats component suites', () => {
+test('development assembly gates exact components and leaves full image validation and publication to daily promotion', () => {
  const workflow = readFileSync(new URL('../../.github/workflows/assemble.yml',import.meta.url),'utf8');
+ const promotion = readFileSync(new URL('../../.github/workflows/daily-public-promotion.yml',import.meta.url),'utf8');
  assert.match(workflow,/component-gate\.mjs NightShaman\/Burrow-Backend/);
  assert.match(workflow,/component-gate\.mjs NightShaman\/Burrow-UI/);
- assert.doesNotMatch(workflow,/npm test|apt-get|DISPOSABLE_POSTGRES/);
- assert.equal((workflow.match(/docker\/build-push-action/g)||[]).length,1);
- assert.match(workflow,/load: true\s+push: false/);
- assert.match(workflow,/BURROW_UI_SHA=\$\{\{ steps.revisions.outputs.ui \}\}/);
- assert.ok(workflow.indexOf('Smoke disposable packaged runtime') < workflow.indexOf('Commit generated assembly'));
- assert.ok(workflow.indexOf('Smoke disposable packaged runtime') < workflow.indexOf('docker push'));
- assert.match(workflow,/docker tag burrow-assembly:tested/);
- assert.doesNotMatch(workflow,/Node-Goblin|node-goblin-source|node_goblin_assets|build-release\.sh/);
+ assert.doesNotMatch(workflow,/npm test|apt-get|DISPOSABLE_POSTGRES|docker\/build-push-action|docker push|gh release create/);
+ assert.match(workflow,/Verify assembled payload shape/);
+ assert.match(promotion,/Run complete frozen-source test suites/);
+ assert.match(promotion,/npm test/);
+ assert.match(promotion,/Build and smoke the public Burrow image/);
+ assert.match(promotion,/packaged-smoke\.mjs/);
+ assert.match(promotion,/ghcr\.io\/goblinking-burrow\/burrow/);
+ assert.match(promotion,/gh release create/);
+ assert.match(promotion,/Burrow-Backdoor/);
 });
 
 test('smoke uses isolated resources and cleanup in finally', () => {
