@@ -653,6 +653,24 @@ it('recovers externally dispatched work on assigned agent and after navigation a
  unmount();
 });
 
+it('clears superseded assistant/action state while retaining its submitted user turn', async () => {
+  const { result } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+  await waitFor(() => expect(result.current.isLoadingConversation).toBe(false));
+  const user = { role: 'user' as const, content: 'Keep this request', runId: 'superseded-run' };
+  const assistant = { role: 'assistant' as const, content: '[model_error: superseded]', runId: 'superseded-run' };
+  act(() => {
+    result.current.appendTurn(agentId, sessionId, user);
+    result.current.appendTurn(agentId, sessionId, assistant);
+    result.current.storeToolActivity({ runId: 'superseded-run', items: [{ id: 'old-action', label: 'Old action', status: 'pending' }], status: 'running' });
+  });
+
+  act(() => result.current.clearRunState(agentId, sessionId, 'superseded-run'));
+
+  expect(result.current.turns).toEqual([user]);
+  expect(result.current.toolActivityForRun('superseded-run')).toBeUndefined();
+});
+
 it('hydrates the conversation cache only once, not on each draft/tool-activity render', async () => {
   const { conversationCacheStorageKey } = await import('./chatConversationCache');
   const get = vi.spyOn(Storage.prototype, 'getItem');

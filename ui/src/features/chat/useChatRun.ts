@@ -21,6 +21,7 @@ type ChatRunSession = {
   appendTurn: (agentId: string, sessionId: string, turn: SessionTurn) => void;
   storeToolActivity: (activity: { runId: string; items: ToolActivityItem[]; status: 'running' | 'ok' | 'warn' }) => void;
   toolActivityForRun: (runId: string) => { items?: ToolActivityItem[] } | undefined;
+  clearRunState: (agentId: string, sessionId: string, runId: string) => void;
   refreshSessions: (agentId?: string) => Promise<void>;
   refreshConversation: (agentId?: string, sessionId?: string) => Promise<void>;
 };
@@ -138,20 +139,27 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
       if (frame) { cancelAnimationFrame(frame); flushLiveText(); }
       const runStatus: NonNullable<RunProgress['status']> = terminalType === 'run.failed' ? 'failed' : terminalType === 'run.cancelled' ? 'cancelled' : terminalType === 'run.superseded' ? 'superseded' : 'complete';
       const terminalError = runStatus === 'complete' ? '' : answerFromChatResult(finalResult);
-      const failedMessage = terminalError.replace(/^Request failed:\s*/, '').trim() || 'The runtime could not complete the message.';
-      const answer = runStatus === 'complete' ? answerFromChatResult(finalResult) || streamedAnswer : `[model_error: ${failedMessage}]`;
-      const activity = session.toolActivityForRun(runId);
-      const progress = finalizeThoughtProgress(progressEntries, runStatus, answer);
-      // The streamed visible response is a separate, secondary record. Keep it
-      // out of the authoritative final answer, even when a provider's terminal
-      // answer differs from the text it streamed along the way.
-      const retainedStream = runStatus === 'complete' && streamedAnswer.trim()
-        ? trimStreamedAnswer(streamedAnswer, answer) || undefined
-        : streamedAnswer.trim() || undefined;
-      const metadata = activity?.items?.length || progress || retainedStream
-        ? { ...(activity?.items?.length ? { toolActivity: activity } : {}), ...(progress ? { progress } : {}), ...(retainedStream ? { streamedAnswer: retainedStream } : {}) }
-        : undefined;
-      session.appendTurn(target.agentId, target.sessionId, { type: 'message', role: 'assistant', content: answer, ts: new Date().toISOString(), runId, metadata });
+      if (runStatus === 'superseded') {
+        // Supersession transfers transcript ownership to the newer recovered
+        // run. Close this run's optimistic/live records without turning that
+        // control-flow boundary into an assistant error at the bottom.
+        session.clearRunState(target.agentId, target.sessionId, runId);
+      } else {
+        const failedMessage = terminalError.replace(/^Request failed:\s*/, '').trim() || 'The runtime could not complete the message.';
+        const answer = runStatus === 'complete' ? answerFromChatResult(finalResult) || streamedAnswer : `[model_error: ${failedMessage}]`;
+        const activity = session.toolActivityForRun(runId);
+        const progress = finalizeThoughtProgress(progressEntries, runStatus, answer);
+        // The streamed visible response is a separate, secondary record. Keep it
+        // out of the authoritative final answer, even when a provider's terminal
+        // answer differs from the text it streamed along the way.
+        const retainedStream = runStatus === 'complete' && streamedAnswer.trim()
+          ? trimStreamedAnswer(streamedAnswer, answer) || undefined
+          : streamedAnswer.trim() || undefined;
+        const metadata = activity?.items?.length || progress || retainedStream
+          ? { ...(activity?.items?.length ? { toolActivity: activity } : {}), ...(progress ? { progress } : {}), ...(retainedStream ? { streamedAnswer: retainedStream } : {}) }
+          : undefined;
+        session.appendTurn(target.agentId, target.sessionId, { type: 'message', role: 'assistant', content: answer, ts: new Date().toISOString(), runId, metadata });
+      }
       setLiveProgressByRun((current) => { const next = { ...current }; delete next[targetKey]; return next; });
       setLiveAnswerByRun((current) => { const next = { ...current }; delete next[targetKey]; return next; });
       setActiveRuns((current) => { const next = { ...current }; if (next[targetKey]?.runId === runId) delete next[targetKey]; return next; });
@@ -159,7 +167,7 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
         session.refreshSessions(target.agentId),
         session.refreshConversation(target.agentId, target.sessionId),
       ]).catch((error) => session.reportError(error instanceof Error ? `Could not refresh chat: ${error.message}` : 'Could not refresh chat.'));
-      if (runStatus !== 'complete') throw new Error(runStatus === 'cancelled' ? 'Run cancelled.' : runStatus === 'superseded' ? 'Run superseded by a newer message.' : terminalError.replace(/^Request failed:\s*/, '') || 'Run failed.');
+      if (runStatus === 'failed' || runStatus === 'cancelled') throw new Error(runStatus === 'cancelled' ? 'Run cancelled.' : terminalError.replace(/^Request failed:\s*/, '') || 'Run failed.');
     } catch (error) {
       if (!(error instanceof DOMException && error.name === 'AbortError')) session.reportError(error instanceof Error ? `Message failed: ${error.message}` : 'Message failed.');
     } finally {

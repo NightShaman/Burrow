@@ -314,6 +314,25 @@ export function useChatSession(selectedAgentId: string) {
     setToolActivityVersion((version) => version + 1);
   }, []);
   const toolActivityForRun = useCallback((runId: string) => toolActivityByRunRef.current[runId], []);
+  const clearRunState = useCallback((agentId: string, targetSessionId: string, runId: string) => {
+    const cacheKey = conversationCacheKey(agentId, targetSessionId);
+    pendingTurnsRef.current.set(cacheKey, (pendingTurnsRef.current.get(cacheKey) ?? []).filter((turn) => turn.runId !== runId));
+    const cachedTurns = conversationCacheRef.current[cacheKey] ?? [];
+    // Preserve the operator's submitted message until the authoritative refresh
+    // reconciles it. Only terminal assistant artifacts from this superseded run
+    // are invalid; removing the user turn here can make the request blink away.
+    const nextTurns = cachedTurns.filter((turn) => turn.runId !== runId || turn.role === 'user');
+    if (nextTurns.length !== cachedTurns.length) {
+      conversationCacheRef.current[cacheKey] = nextTurns;
+      writeConversationCache(conversationCacheRef.current, cacheKey);
+      if (selectedChatRef.current.agentId === agentId && selectedChatRef.current.sessionId === targetSessionId) setTurns(nextTurns);
+    }
+    if (toolActivityByRunRef.current[runId]) {
+      const { [runId]: _, ...remaining } = toolActivityByRunRef.current;
+      toolActivityByRunRef.current = remaining;
+      setToolActivityVersion((version) => version + 1);
+    }
+  }, []);
   const setAttachment = useCallback((attachments: ChatAttachment[]) => {
     if (!isAttachmentScopeCurrent()) return;
     setAttachmentState((current) => {
@@ -327,5 +346,5 @@ export function useChatSession(selectedAgentId: string) {
   const reportError = useCallback((message: string) => setChatError(message), []);
   const clearError = useCallback(() => setChatError(''), []);
 
-  return { composerResetGeneration, isAttachmentScopeCurrent, attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation: isLoadingConversation || isSwitchingAgent, draft, setDraft, refreshSessions, refreshConversation, selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun, a2aActivities, runtimeRun, runtimeChildActivities, cancelRuntimeRun };
+  return { composerResetGeneration, isAttachmentScopeCurrent, attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation: isLoadingConversation || isSwitchingAgent, draft, setDraft, refreshSessions, refreshConversation, selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun, clearRunState, a2aActivities, runtimeRun, runtimeChildActivities, cancelRuntimeRun };
 }

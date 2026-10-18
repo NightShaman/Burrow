@@ -20,6 +20,7 @@ function createSession() {
     appendTurn: vi.fn(),
     storeToolActivity: vi.fn(),
     toolActivityForRun: vi.fn(),
+    clearRunState: vi.fn(),
     refreshSessions: vi.fn().mockResolvedValue(undefined),
     refreshConversation: vi.fn().mockResolvedValue(undefined),
   };
@@ -34,6 +35,42 @@ describe('useChatRun', () => {
     expect(trimStreamedAnswer('Working notes.\n\nAuthoritative final answer.', 'Authoritative   final answer.')).toBe('Working notes.');
     expect(trimStreamedAnswer('A streamed response that differs.', 'A rewritten final response.')).toBe('A streamed response that differs.');
     expect(trimStreamedAnswer('Short tail ok', 'ok and more')).toBe('Short tail ok');
+  });
+
+  it('closes a superseded run without appending or reporting a synthetic assistant error', async () => {
+    streamChatMock.mockImplementation(async ({ onEvent }) => {
+      onEvent({ type: 'assistant.thought', data: { delta: 'Old run progress.' } });
+      onEvent({ type: 'tool.started', data: { tool: 'shell_exec', activityId: 'old-tool', command: 'echo old' } });
+      return {
+        terminalType: 'run.superseded',
+        finalResult: { ok: false, error: 'superseded_by_newer_session_run' },
+      };
+    });
+    const session = createSession();
+    const activity = { items: [] as Array<{ id: string; label: string; detail?: string; status?: 'pending' | 'ok' | 'error' }> };
+    session.toolActivityForRun.mockImplementation(() => activity);
+    session.storeToolActivity.mockImplementation((next) => { activity.items = next.items; });
+    const setAgentActivity = vi.fn();
+    const { result } = renderHook(() => useChatRun({
+      selectedAgentId: 'nigel',
+      selected: { id: 'nigel', name: 'Nigel', avatar: '', activity: 'idle', context: null, provider: '', model: '', effort: '', temperature: 1, workspace: '', files: [], subagents: [] },
+      savedProviders: [],
+      session,
+      setAgentActivity,
+    }));
+
+    await act(async () => { await result.current.sendMessage(); });
+
+    const runId = (streamChatMock.mock.calls[0][0].requestBody as { runId: string }).runId;
+    expect(session.clearRunState).toHaveBeenCalledWith('nigel', 'session-1', runId);
+    expect(session.appendTurn).toHaveBeenCalledTimes(1);
+    expect(session.appendTurn).toHaveBeenCalledWith('nigel', 'session-1', expect.objectContaining({ role: 'user', runId }));
+    expect(session.reportError).not.toHaveBeenCalled();
+    expect(result.current.activeRunId).toBe('');
+    expect(result.current.liveProgress).toEqual([]);
+    expect(result.current.liveAnswer).toBe('');
+    expect(setAgentActivity).toHaveBeenLastCalledWith('nigel', 'idle');
+    await waitFor(() => expect(session.refreshConversation).toHaveBeenCalledWith('nigel', 'session-1'));
   });
 
   it('reconciles the active conversation after a failed terminal event', async () => {
