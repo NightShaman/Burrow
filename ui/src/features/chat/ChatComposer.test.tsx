@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { isProjectContextDraft, projectContextQuery } from './ChatComposer';
 
 describe('project conversation context syntax', () => {
@@ -18,7 +18,7 @@ describe('project conversation context syntax', () => {
   });
 });
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll } from 'vitest';
 import { useState } from 'react';
 import { ChatComposer } from './ChatComposer';
@@ -46,6 +46,23 @@ function ComposerFixture({ initial = '' }: { initial?: string }) {
 }
 
 describe('composer emoji picker', () => {
+  // The real vendor picker schedules debounced React updates without unmount
+  // cleanup. Own its clock here so none can escape into jsdom teardown; keep
+  // exercising the real picker rather than mocking away the integration.
+  beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }));
+  afterEach(async () => {
+    cleanup();
+    try {
+      await act(async () => { await vi.runAllTimersAsync(); });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  const findPickerElement = async (role: 'textbox' | 'button', name: string) => {
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    return vi.waitFor(() => screen.getByRole(role, { name }), { timeout: 5000 });
+  };
   it('inserts at cursor, replaces a selection and restores focus without sending', async () => {
     render(<ComposerFixture initial="Hello world" />);
     const message = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement;
@@ -54,9 +71,9 @@ describe('composer emoji picker', () => {
     fireEvent.select(message);
     fireEvent.click(screen.getByRole('button', { name: 'Insert emoji' }));
     expect(screen.getByRole('button', { name: 'Insert emoji' }).getAttribute('aria-expanded')).toBe('true');
-    const search = await screen.findByRole('textbox', { name: 'Type to search for an emoji' });
+    const search = await findPickerElement('textbox', 'Type to search for an emoji');
     fireEvent.change(search, { target: { value: 'grinning face' } });
-    fireEvent.click(await screen.findByRole('button', { name: 'grinning face' }));
+    fireEvent.click(await findPickerElement('button', 'grinning face'));
     expect(message.value).toBe('Hello 😀');
     expect(document.activeElement).toBe(message);
     expect(message.selectionStart).toBe('Hello 😀'.length);
@@ -67,26 +84,26 @@ describe('composer emoji picker', () => {
     const message = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement;
     message.focus(); message.setSelectionRange(2, 2); fireEvent.select(message);
     fireEvent.click(screen.getByRole('button', { name: 'Insert emoji' }));
-    const purpleSearch = await screen.findByRole('textbox', { name: 'Type to search for an emoji' });
+    const purpleSearch = await findPickerElement('textbox', 'Type to search for an emoji');
     fireEvent.change(purpleSearch, { target: { value: 'purple heart' } });
-    fireEvent.click(await screen.findByRole('button', { name: 'purple heart' }));
+    fireEvent.click(await findPickerElement('button', 'purple heart'));
     fireEvent.click(screen.getByRole('button', { name: 'Insert emoji' }));
-    const middleSearch = await screen.findByRole('textbox', { name: 'Type to search for an emoji' });
+    const middleSearch = await findPickerElement('textbox', 'Type to search for an emoji');
     fireEvent.change(middleSearch, { target: { value: 'middle finger' } });
-    fireEvent.click(await screen.findByRole('button', { name: 'middle finger' }));
+    fireEvent.click(await findPickerElement('button', 'middle finger'));
     expect(message.value).toBe('Hi💜🖕');
     fireEvent.click(screen.getByRole('button', { name: 'Insert emoji' }));
     fireEvent.keyDown(screen.getByRole('textbox', { name: 'Type to search for an emoji' }), { key: 'Escape' });
     expect(screen.queryByRole('textbox', { name: 'Type to search for an emoji' })).toBeNull();
     expect(document.activeElement).toBe(message);
     expect(message.value).toBe('Hi💜🖕');
-  });
+  }, 15000);
   it('closes when clicking outside without clearing the draft', async () => {
     render(<ComposerFixture initial="Still here" />);
     fireEvent.click(screen.getByRole('button', { name: 'Insert emoji' }));
-    await screen.findByRole('textbox', { name: 'Type to search for an emoji' });
+    await findPickerElement('textbox', 'Type to search for an emoji');
     fireEvent.pointerDown(document.body);
-    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Type to search for an emoji' })).toBeNull());
+    await vi.waitFor(() => expect(screen.queryByRole('textbox', { name: 'Type to search for an emoji' })).toBeNull());
     expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('Still here');
   });
 });
