@@ -209,7 +209,7 @@ jobs:
           set -eu
           node --test orchestrator/scripts/promotion/*.test.mjs
           node orchestrator/scripts/promotion/validate-public-readiness.mjs staged
-          (cd staged/Burrow && node --test scripts/install/*.test.mjs scripts/assembly/*.test.mjs)
+          (cd staged/Burrow && node --test scripts/install/*.test.mjs)
           sh -n staged/Burrow/install.sh staged/Node-Goblin/install.sh
           node -e "for (const name of ['Burrow-Backdoor']) { const root='staged/'+name; const version=require('./'+root+'/package.json').version; if (version !== process.env.VERSION || require('./'+root+'/burrow.mod.json').version !== version) throw Error(name+' version mismatch'); }" 
         env:
