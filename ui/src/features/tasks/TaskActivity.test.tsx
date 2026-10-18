@@ -38,12 +38,13 @@ it('retains activity and exposes upload rejection', async () => {
  fireEvent.change(screen.getByLabelText('Attach document'), { target: { files: [new File(['x'], 'x.txt')] } });
  expect(await screen.findByRole('alert')).toBeTruthy(); expect(screen.getByText('middle')).toBeTruthy();
 });
-it('keeps execution identifiers behind a disclosure and uses an intentional upload button', async () => {
+it('omits technical disclosures and uses an intentional upload button', async () => {
  fixture(); await screen.findByText('middle');
  expect(screen.getByRole('button', { name: 'Attach document' })).toBeTruthy();
  expect(screen.getByLabelText('Attach document').hasAttribute('hidden')).toBe(true);
- for (const details of document.querySelectorAll('details')) expect(details.open).toBe(false);
- expect(screen.getAllByText('Session: s · Run: r').every(el => !!el.closest('details'))).toBe(true);
+ expect(document.querySelector('details')).toBeNull();
+ expect(screen.queryByText('Session: s · Run: r')).toBeNull();
+ expect(screen.getByRole('button', { name: 'Attach document' }).classList.contains('task-attach-button')).toBe(true);
 });
 it('shows unknown attribution honestly without exposing an actor ID', async () => {
  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => response(String(input).includes('/attachments') ? { attachments: [] } : { events: [{ ...event('created'), actor: { type: 'unknown', id: null, name: null }, runId: null, sessionId: null }], hasMore: false, nextCursor: null })));

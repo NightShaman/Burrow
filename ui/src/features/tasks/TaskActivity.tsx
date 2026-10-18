@@ -56,7 +56,7 @@ export function TaskActivity({ taskId, revision }: { taskId: string; revision: s
   }
   return <div className="task-activity" aria-label="Task documents and history">
     {error && <p role="alert">{error} <button type="button" disabled={busy || loading} onClick={() => void refresh()}>Retry</button></p>}
-    <section aria-labelledby="task-documents-heading"><header className="task-activity-heading"><h3 id="task-documents-heading">Documents</h3><button type="button" disabled={busy || loading} onClick={() => fileInput.current?.click()}>Attach document</button></header>
+    <section aria-labelledby="task-documents-heading"><header className="task-activity-heading"><h3 id="task-documents-heading">Documents</h3><button className="task-attach-button" type="button" disabled={busy || loading} onClick={() => fileInput.current?.click()}><span aria-hidden="true">＋</span>Attach document</button></header>
       <input ref={fileInput} hidden aria-label="Attach document" type="file" disabled={busy || loading} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void upload(file); }} />
       {loading ? <p role="status">Loading documents and history…</p> : !attachments.length && !error && <p>No documents attached.</p>}
       <ul className="task-document-list">{attachments.map(file => <li key={file.id}><div><strong>{file.name}</strong><small>{new Intl.NumberFormat().format(file.size)} bytes · {who(file.createdBy)} · {date(file.createdAt)}</small></div><div><button type="button" disabled={busy} onClick={() => void perform(async () => {
@@ -74,21 +74,16 @@ export function TaskActivity({ taskId, revision }: { taskId: string; revision: s
       {history.hasMore && history.nextCursor && <button type="button" disabled={busy || loading} onClick={() => void older()}>Load older activity</button>}
       {!loading && !error && !history.events.length && <p>No recorded activity.</p>}
       <ol className="task-history-list">{[...history.events].reverse().map(event => {
-        const changes = Object.entries(event.changes ?? {});
+        const changes = Object.entries(event.changes ?? {}).filter(([key]) => !['metadata', 'fields', 'updatedAt', 'createdAt'].includes(key));
         const summary = changes.map(([key, value]) => {
           const label = key.replace(/([A-Z])/g, ' $1').toLowerCase();
-          if (['status', 'priority'].includes(key) && value && typeof value === 'object' && 'before' in value && 'after' in value) return `${label}: ${valueText(value.before)} → ${valueText(value.after)}`;
+          if (['status', 'priority', 'title'].includes(key) && value && typeof value === 'object' && 'before' in value && 'after' in value) return `${label}: ${valueText(value.before)} → ${valueText(value.after)}`;
           return `${label} changed`;
         }).join('; ');
         const result = event.details?.error || event.details?.status || event.details?.name;
-        const extra = changes.some(([key]) => !['status', 'priority'].includes(key)) || Object.keys(event.details ?? {}).length > 0 || event.sessionId || event.runId;
         return <li key={event.id}>
           <div className="task-history-row"><time dateTime={event.at}>{date(event.at)}</time><span>{who(event.actor)}</span><strong>{event.action.replaceAll('_', ' ')}</strong>{Boolean(summary || result) && <span className="task-history-result">{summary || valueText(result)}</span>}</div>
-          {extra && <details><summary>Details<span className="sr-only"> for {event.action.replaceAll('_', ' ')} at {date(event.at)}</span></summary>
-            {changes.length > 0 && <dl>{changes.map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value && typeof value === 'object' && 'before' in value && 'after' in value ? `${valueText(value.before)} → ${valueText(value.after)}` : valueText(value)}</dd></div>)}</dl>}
-            {Object.keys(event.details ?? {}).length > 0 && <pre>{JSON.stringify(event.details, null, 2)}</pre>}
-            {(event.sessionId || event.runId) && <small>Session: {event.sessionId || '—'} · Run: {event.runId || '—'}</small>}
-          </details>}
+
         </li>;
       })}</ol>
     </section>{busy && <p role="status">Working…</p>}
