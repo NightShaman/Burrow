@@ -8,7 +8,6 @@ type TelemetryState = {
   runtime?: { enabled: boolean; sdkStarted: boolean };
 };
 const endpoint = '/api/settings/opentelemetry';
-const enabledText = (enabled: boolean) => enabled ? 'Enabled' : 'Disabled';
 
 export function OpenTelemetrySettings() {
   const [saved, setSaved] = useState<TelemetryState | null>(null);
@@ -34,20 +33,16 @@ export function OpenTelemetrySettings() {
     finally { setBusy(false); }
   }
   return <SettingSection title="OpenTelemetry">
-    <p className="settings-description">Control Core telemetry collection. Export destinations are configured on the server.</p>
-    <label className="field"><span>Enable OpenTelemetry</span><input type="checkbox" checked={enabled} disabled={!saved || busy} onChange={event => { setEnabled(event.target.checked); setNotice(''); }} /></label>
+    <div className="telemetry-control">
+      <div className="telemetry-copy"><label id="telemetry-label" htmlFor="telemetry-enabled">Collect telemetry</label><p id="telemetry-help">Collect Core traces and metrics for diagnostics.</p></div>
+      <input id="telemetry-enabled" className="telemetry-switch" type="checkbox" role="switch" aria-labelledby="telemetry-label" aria-describedby="telemetry-help" checked={enabled} disabled={!saved || busy} onChange={event => { setEnabled(event.target.checked); setNotice(''); }} />
+    </div>
     {saved && <>
-      <dl className="settings-help">
-        <dt>Saved setting</dt><dd>{enabledText(saved.settings.enabled)}</dd>
-        <dt>Effective setting</dt><dd>{enabledText(saved.effective.enabled)}</dd>
-        <dt>Source</dt><dd>{({ environment: 'Environment override', database: 'Saved setting', default: 'Default' } as Record<string, string>)[saved.effective.source] ?? saved.effective.source}</dd>
-        <dt>Runtime</dt><dd>{saved.runtime ? `${enabledText(saved.runtime.enabled)} · SDK ${saved.runtime.sdkStarted ? 'started' : 'not started'}` : 'Unavailable'}</dd>
-        <dt>Restart required</dt><dd>{saved.effective.restartRequired ? 'Yes' : 'No'}</dd>
-      </dl>
-      {saved.effective.restartRequired && <p role="status">Restart Core to finish applying this setting. Saving does not restart Core.</p>}
+      <p className="settings-help" role="status">{saved.runtime ? `Telemetry is ${saved.runtime.enabled ? 'on' : 'off'}.` : 'Telemetry runtime status is unavailable.'}{enabled !== saved.settings.enabled ? ' Unsaved changes.' : ''}</p>
+      {saved.effective.source === 'environment' && <p className="telemetry-guidance">Server override: telemetry is {saved.effective.enabled ? 'enabled' : 'disabled'} by <code>BURROW_OTEL_ENABLED</code>. Saving changes your preference, but the override takes priority. Change or remove that variable and restart Core to use the saved setting.</p>}
+      {saved.effective.restartRequired && <p className="telemetry-guidance" role="status">Restart Core to finish applying this setting. Saving does not restart Core.</p>}
     </>}
-    <p className="settings-help"><code>BURROW_OTEL_ENABLED</code> overrides the saved setting when set to true or false. Change or remove that server environment variable and restart Core to change the override. Follow the reported restart requirement after saving.</p>
-    <button type="button" className="primary" disabled={!saved || busy || enabled === saved.settings.enabled} onClick={() => void save()}>{busy ? 'Saving…' : 'Save telemetry setting'}</button>
+    <div className="telemetry-actions"><button type="button" className="primary" disabled={!saved || busy || enabled === saved.settings.enabled} onClick={() => void save()}>{busy ? 'Saving…' : 'Save changes'}</button></div>
     {!saved && !error && <p role="status">Loading OpenTelemetry settings…</p>}
     {error && <p role="alert">{error}</p>}
     {!saved && error && <button type="button" className="secondary" onClick={() => setRetry(value => value + 1)}>Retry OpenTelemetry settings</button>}

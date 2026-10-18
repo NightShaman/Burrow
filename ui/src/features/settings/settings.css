@@ -771,3 +771,13 @@ button:disabled{cursor:not-allowed;opacity:.45}
 @container skills-form (max-width:460px){
   .field-pair.skill-field-pair{grid-template-columns:minmax(0,1fr)}
 }
+
+/* Telemetry is one preference, not a runtime diagnostics table. */
+.telemetry-control{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:2px 0 8px}
+.telemetry-copy{min-width:0}.telemetry-copy label{font-weight:700;color:var(--text-strong);cursor:pointer}.telemetry-copy p{margin:5px 0 0;color:var(--muted);font-size:12px;line-height:1.5}
+.telemetry-switch{appearance:none;flex:0 0 38px;width:38px;height:22px;min-height:22px;margin:0;border:1px solid var(--line);border-radius:99px;background:var(--surface-sunken);cursor:pointer;position:relative}
+.telemetry-switch::before{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--muted)}
+.telemetry-switch:checked{background:var(--accent);border-color:var(--accent)}.telemetry-switch:checked::before{left:19px;background:var(--text-strong)}
+.telemetry-switch:focus-visible{outline:2px solid var(--accent);outline-offset:4px}.telemetry-switch:disabled{opacity:.5;cursor:wait}
+.telemetry-guidance{padding:10px 12px;border-left:2px solid var(--accent);background:var(--surface-raised);color:var(--muted);font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.telemetry-actions{display:flex;margin-top:14px}
