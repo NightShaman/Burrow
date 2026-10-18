@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: '30 5 * * *'
   workflow_dispatch:
+    inputs:
+      validate_only:
+        description: Run complete frozen-source validation without publishing
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -20,6 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       publishable: ${{ steps.plan.outputs.publishable }}
+      validation_required: ${{ steps.plan.outputs.validation_required }}
       release_date: ${{ steps.plan.outputs.release_date }}
       ui_sha: ${{ steps.plan.outputs.ui_sha }}
     steps:
@@ -66,18 +73,22 @@ jobs:
         run: |
           node orchestrator/scripts/promotion/plan.mjs orchestrator/scripts/promotion/targets.json sources.json previous.json > plan.json
           cat plan.json
-          printf 'publishable=%s\n' "$(node -p "require('./plan.json').publishable")" >> "$GITHUB_OUTPUT"
+          publishable=$(node -p "require('./plan.json').publishable")
+          validation_required="$publishable"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.validate_only }}" = "true" ]; then validation_required=true; fi
+          printf 'publishable=%s\n' "$publishable" >> "$GITHUB_OUTPUT"
+          printf 'validation_required=%s\n' "$validation_required" >> "$GITHUB_OUTPUT"
           printf 'release_date=%s\n' "$(node -p "require('./plan.json').releaseDate")" >> "$GITHUB_OUTPUT"
           printf 'ui_sha=%s\n' "$(node -p "require('./sources.json').burrowUi")" >> "$GITHUB_OUTPUT"
       - name: Expose frozen SHAs for checkouts
-        if: steps.plan.outputs.publishable == 'true'
+        if: steps.plan.outputs.validation_required == 'true'
         id: frozen
         run: |
           for key in burrow burrowBackend burrowUi nodeGoblin goblinSecretStore burrowSkills burrowBackdoor; do
             printf '%s=%s\n' "$key" "$(node -p "require('./sources.json').$key")" >> "$GITHUB_OUTPUT"
           done
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.publishable == 'true'
+        if: steps.plan.outputs.validation_required == 'true'
         with:
           repository: NightShaman/Burrow
           ref: ${{ steps.frozen.outputs.burrow }}
@@ -85,7 +96,7 @@ jobs:
           path: sources/Burrow
           fetch-depth: 0
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.publishable == 'true'
+        if: steps.plan.outputs.validation_required == 'true'
         with:
           repository: NightShaman/Burrow-Backend
           ref: ${{ steps.frozen.outputs.burrowBackend }}
@@ -93,7 +104,7 @@ jobs:
           path: sources/Burrow-Backend
           fetch-depth: 0
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.publishable == 'true'
+        if: steps.plan.outputs.validation_required == 'true'
         with:
           repository: NightShaman/Burrow-UI
           ref: ${{ steps.frozen.outputs.burrowUi }}
@@ -101,7 +112,7 @@ jobs:
           path: sources/Burrow-UI
           fetch-depth: 0
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.publishable == 'true'
+        if: steps.plan.outputs.validation_required == 'true'
         with:
           repository: NightShaman/Node-Goblin
           ref: ${{ steps.frozen.outputs.nodeGoblin }}
@@ -109,7 +120,7 @@ jobs:
           path: sources/Node-Goblin
           fetch-depth: 0
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.publishable == 'true'
+        if: steps.plan.outputs.validation_required == 'true'
         with:
           repository: NightShaman/Goblin-Secret-Store
           ref: ${{ steps.frozen.outputs.goblinSecretStore }}
@@ -117,7 +128,7 @@ jobs:
           path: sources/Goblin-Secret-Store
           fetch-depth: 0
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.publishable == 'true'
+        if: steps.plan.outputs.validation_required == 'true'
         with:
           repository: NightShaman/Burrow-Skills
           ref: ${{ steps.frozen.outputs.burrowSkills }}
@@ -125,7 +136,7 @@ jobs:
           path: sources/Burrow-Skills
           fetch-depth: 0
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.publishable == 'true'
+        if: steps.plan.outputs.validation_required == 'true'
         with:
           repository: NightShaman/Burrow-Backdoor
           ref: ${{ steps.frozen.outputs.burrowBackdoor }}
@@ -133,7 +144,7 @@ jobs:
           path: sources/Burrow-Backdoor
           fetch-depth: 0
       - name: Install PostgreSQL 17 and pgvector for complete release validation
-        if: steps.plan.outputs.publishable == 'true'
+        if: steps.plan.outputs.validation_required == 'true'
         run: |
           set -eu
           sudo apt-get update
@@ -145,7 +156,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-17 postgresql-client-17 postgresql-17-pgvector
       - name: Run complete frozen-source test suites
-        if: steps.plan.outputs.publishable == 'true'
+        if: steps.plan.outputs.validation_required == 'true'
         env:
           BURROW_TEST_TIMEOUT_MS: '1800000'
           BURROW_TEST_DISPOSABLE_POSTGRES: '1'
@@ -158,7 +169,7 @@ jobs:
           (cd sources/Burrow-Backdoor && npm ci --ignore-scripts --no-audit --no-fund && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm run check)
           find sources/Burrow-Skills -name SKILL.md -type f -size +0c | grep -q .
       - uses: actions/setup-python@v6
-        if: steps.plan.outputs.publishable == 'true'
+        if: steps.plan.outputs.validation_required == 'true'
         with:
           python-version: '3.12'
           cache: pip
@@ -168,7 +179,7 @@ jobs:
             sources/Node-Goblin/requirements-docs.txt
             sources/Node-Goblin/requirements-docs-test.txt
       - name: Run complete frozen documentation validation
-        if: steps.plan.outputs.publishable == 'true'
+        if: steps.plan.outputs.validation_required == 'true'
         run: |
           python -m pip install \
             -r sources/Burrow/requirements-docs.txt \
@@ -179,7 +190,7 @@ jobs:
           (cd sources/Burrow && python -m mkdocs build --strict && python scripts/docs/check_site.py site && python scripts/docs/check_mermaid.py site --artifacts docs-browser-artifacts)
           (cd sources/Node-Goblin && python -m mkdocs build --strict && python scripts/docs/check_site.py site && python scripts/docs/check_mermaid.py site --artifacts docs-browser-artifacts)
       - name: Stage allowlisted public trees and release notes
-        if: steps.plan.outputs.publishable == 'true'
+        if: steps.plan.outputs.validation_required == 'true'
         env:
           RELEASE_DATE: ${{ steps.plan.outputs.release_date }}
         run: |
@@ -193,7 +204,7 @@ jobs:
           node orchestrator/scripts/promotion/release-notes.mjs "$RELEASE_DATE" sources.json previous.json note-roots.json release-notes.md
           cat release-notes.md
       - name: Verify staged release trees
-        if: steps.plan.outputs.publishable == 'true'
+        if: steps.plan.outputs.validation_required == 'true'
         run: |
           set -eu
           node --test orchestrator/scripts/promotion/*.test.mjs
@@ -204,7 +215,7 @@ jobs:
         env:
           VERSION: ${{ steps.plan.outputs.release_date }}
       - name: Build and smoke the public Burrow image
-        if: steps.plan.outputs.publishable == 'true'
+        if: steps.plan.outputs.validation_required == 'true'
         run: |
           docker build --build-arg BURROW_UI_SHA="$(node -p "require('./sources.json').burrowUi")" -t burrow-public-candidate staged/Burrow
           node staged/Burrow/scripts/assembly/packaged-smoke.mjs burrow-public-candidate staged/Burrow
@@ -213,7 +224,7 @@ jobs:
             ! find "staged/$target" -type f \( -name '*.env' -o -name '*.pem' -o -name '*.key' \) -print -quit | grep -q .
           done
       - uses: actions/upload-artifact@v4
-        if: steps.plan.outputs.publishable == 'true'
+        if: steps.plan.outputs.validation_required == 'true'
         with:
           name: public-promotion-${{ steps.plan.outputs.release_date }}
           path: |

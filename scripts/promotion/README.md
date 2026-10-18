@@ -31,7 +31,9 @@ promotion workflow publishes reviewed, allowlisted snapshots to the public
   idempotently from the same frozen release manifest.
 
 The active workflow is `.github/workflows/daily-public-promotion.yml`. It runs at
-05:30 UTC and supports manual dispatch. The `public-promotion` environment and
+05:30 UTC and supports manual dispatch. A manual `validate_only` run executes the
+complete frozen-source gate without publishing, including when today's immutable
+release already exists. The `public-promotion` environment and
 these Actions secrets are required in the private NightShaman Burrow repository:
 
 - `PUBLIC_PROMOTION_SOURCE_TOKEN`: read access to required NightShaman sources.
