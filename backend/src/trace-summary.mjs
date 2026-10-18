@@ -492,7 +492,7 @@ export async function summarizeTrace({ rootDir, conversationStore, agentId, runI
     routerStages: router.map((record) => record.payload?.stage || record.type || 'unknown'),
     toolFailures: toolFailures.map((record) => ({
       tool: record.payload?.tool,
-      error: record.payload?.error,
+      error: record.payload?.error ? redactText(String(record.payload.error)) : record.payload?.error,
       command: record.payload?.command ? redactText(record.payload.command) : undefined,
       filePath: record.payload?.filePath,
     })),

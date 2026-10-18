@@ -2913,7 +2913,7 @@ const runtimeDiagnostics = Object.freeze({
       const trace = await summarizeTrace({ conversationStore: postgresApplication.stores.conversations, agentId: runtime.agentId, rootDir: await traceRootForRun({ rootDir: runtime.agentWorkspaceRoot, sessionId: sessionId(), runId, runtime: config, agentId: runtime.agentId }), runId, includeToolOutput: operation === 'trace' && input.includeToolOutput === true });
       return operation === 'trace' ? { ok: true, trace } : { ok: true, runId, authority: authorityExplanationFromTraceSummary(trace) };
     }
-    if (operation === 'run-proofs') { const runtime = await agentRuntime(input.agentId); return { ok: true, ...(await archiveRuns({ agentRuntime: runtime, sessionId: input.sessionId || null, limit: input.limit || 100 })) }; }
+    if (operation === 'run-proofs') { const runtime = await agentRuntime(input.agentId); return { ok: true, ...(await archiveRuns({ agentRuntime: runtime, sessionId: input.sessionId || null, limit: input.limit || 100, cursor: input.cursor })) }; }
     if (operation === 'run-proof') { const runtime = await agentRuntime(input.agentId); const run = await archiveRunDetail({ agentRuntime: runtime, runId: String(input.runId || '') }); return run ? { ok: true, run } : { ok: false, error: 'archive_run_not_found' }; }
     if (operation === 'session-context' || operation === 'context-status') {
       const runtime = await agentRuntime(input.agentId); const config = await runtimeConfig(runtime.agentId); const sid = sessionId();

@@ -1,5 +1,12 @@
 import { pathToFileURL } from 'node:url';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
+
+// Validate, never coerce, default, or silently strip model-supplied arguments.
+const toolSchemaValidator = new Ajv({ strict: false, coerceTypes: false, useDefaults: false, removeAdditional: false });
+addFormats(toolSchemaValidator);
+const toolValidators = new Map();
 
 let cleanup = null;
 let sequence = 0;
@@ -124,6 +131,10 @@ function registrar(modId) {
       if (JSON.stringify(schema) !== JSON.stringify(inputSchema)) throw new Error('mod_tool_registration_invalid');
       if (resolveProtectedReference !== undefined && typeof resolveProtectedReference !== 'function') throw new Error('mod_tool_registration_invalid');
       if (!['grant-required', 'mod-authorized'].includes(availability)) throw new Error('mod_tool_registration_invalid');
+      let validate;
+      try { validate = toolSchemaValidator.compile(schema); }
+      catch { throw new Error('mod_tool_registration_invalid'); }
+      toolValidators.set(name, validate);
       toolHandlers.set(name, handler);
       if (resolveProtectedReference) protectedResolvers.set(name, resolveProtectedReference);
       tools.push({ name, description, inputSchema: schema, availability });
@@ -210,6 +221,10 @@ async function invoke(message) {
   if (!handler) throw new Error('mod_route_handler_not_found');
   if (message.routeId?.startsWith('protected:')) return handler(message.request.reference, Object.freeze(message.request.caller));
   if (!message.routeId?.startsWith('tool:')) return handler(message.request);
+  const validate = toolValidators.get(message.routeId.slice(5));
+  if (!validate || !validate(message.request.arguments)) {
+    throw Object.assign(new Error('mod_tool_input_invalid'), { statusCode: 400 });
+  }
   const controller = new AbortController();
   activeTools.set(message.requestId, controller);
   try {

@@ -1,6 +1,6 @@
 {
   "name": "burrow",
-  "version": "2026.10.18.3",
+  "version": "2026.10.18.4",
   "private": true,
   "type": "module",
   "bin": {
@@ -40,6 +40,8 @@
     "check:postgres-only": "node scripts/check-postgres-only.mjs"
   },
   "dependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "jose": "^6.2.8",
     "pg": "^8.16.3"
   },
