@@ -16,7 +16,7 @@ export const EXPORT_CATEGORIES = Object.freeze([
   { id: 'scheduled-jobs', label: 'Scheduled jobs', containsSecrets: false, description: 'Core scheduled job definitions, prompts, model overrides and enabled state; no runs or mod-owned jobs. Requires referenced agents/models and operator timezone.' },
   { id: 'settings', label: 'Settings', containsSecrets: false, description: 'Portable non-secret runtime settings and preferences.' },
   { id: 'model-connections', label: 'Model connections', containsSecrets: true, description: 'Connection metadata and encrypted provider credentials.' },
-  { id: 'mcp-connections', label: 'MCP connections', containsSecrets: true, description: 'MCP connection metadata, API keys, and per-agent tool grants.' },
+  { id: 'mcp-connections', label: 'MCP connections', containsSecrets: true, description: 'MCP connection metadata and API keys. Agent tool grants are deployment-local and must be granted deliberately after import.' },
   { id: 'ui-auth', label: 'UI authentication', containsSecrets: true, description: 'UI auth configuration and OIDC credentials. Basic passwords are nonportable and require deliberate reconfiguration.' },
   { id: 'task-board', label: 'Task board and work items', containsSecrets: false, description: 'Projects and current task state. Append-only audit history and attachment bytes remain local operational records and are not portable yet.' },
 ]);
@@ -76,7 +76,11 @@ export async function buildExport({ request, data = {}, sourceFiles = {} } = {})
   const selected = normalizeExportRequest(request);
   const categories = {};
   for (const id of selected.categories) {
-    const value = data[id] ?? sourceFiles[id] ?? null;
+    let value = data[id] ?? sourceFiles[id] ?? null;
+    if (id === 'mcp-connections' && value && typeof value === 'object' && !Array.isArray(value)) {
+      const { grants: _deploymentLocalGrants, ...portable } = value;
+      value = { ...portable, schema: 'burrow.mcp-connections/v3' };
+    }
     categories[id] = selected.includesSecrets ? value : redacted(value);
     if (id === 'ui-auth' && value?.auth?.basic) {
       categories[id] = { ...value, auth: { ...value.auth, basic: { ...value.auth.basic, password: undefined, passwordHash: undefined } }, basicCredentialsPortable: false };

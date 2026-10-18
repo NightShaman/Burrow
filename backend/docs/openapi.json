@@ -2246,7 +2246,8 @@
             }
           }
         },
-        "summary": "List export categories"
+        "summary": "List export categories",
+        "description": "Lists portable export categories. MCP connection exports include connection configuration and credentials, but never deployment-local per-agent tool grants."
       }
     },
     "/api/export": {
@@ -2284,7 +2285,8 @@
             }
           }
         },
-        "summary": "Create a selected export bundle"
+        "summary": "Create a selected export bundle",
+        "description": "Creates a portable bundle. MCP connections never include per-agent tool grants; access must be granted deliberately on the destination deployment."
       }
     },
     "/api/export/import/preview": {
@@ -2321,7 +2323,8 @@
           }
         },
         "operationId": "previewExportImport",
-        "summary": "Preview an export import"
+        "summary": "Preview an export import",
+        "description": "Previews portable configuration import. For MCP connections, mcpAuthorization reports that grants are not transferred and counts any legacy embedded grants that will be ignored."
       }
     },
     "/api/export/import": {
@@ -2358,7 +2361,8 @@
           }
         },
         "operationId": "importExport",
-        "summary": "Apply an export import"
+        "summary": "Apply an export import",
+        "description": "Imports portable configuration after confirmation. MCP connections are restored without agent tool grants; legacy embedded grants are ignored and reported in mcpAuthorization."
       }
     },
     "/api/auth/session": {

@@ -1418,10 +1418,30 @@ async function importPreview(decoded, conflictPolicy) {
     const summary = record => ({ mode: record.mode, enabled: record.mode !== 'none', basicPasswordConfigured: Boolean(record.basic.passwordHash), oidcClientSecretConfigured: Boolean(record.oidc.clientSecretConfigured || record.oidc.clientSecret) });
     uiAuth = { before: summary(existing), after: summary(plan.next), basicCredentialsPortable: false, requiresBasicReconfiguration: basicReconfigurationRequired, warning: basicReconfigurationRequired ? 'Basic credentials are not portable. Existing authentication will be preserved; configure Basic credentials deliberately after import.' : null };
   }
-  return { ok: true, format: decoded.payload.manifest.format, encrypted: decoded.encrypted, categories: decoded.categories, supported, unsupported, conflictPolicy, requiresConfirmation: true, redacted: Boolean(decoded.payload.manifest.redacted), uiAuth };
+  const mcpCategory = decoded.payload.categories['mcp-connections'];
+  const legacyMcpGrants = mcpCategory && typeof mcpCategory === 'object' && !Array.isArray(mcpCategory) && Array.isArray(mcpCategory.grants) ? mcpCategory.grants : [];
+  const mcpConnections = Array.isArray(mcpCategory) ? mcpCategory : (Array.isArray(mcpCategory?.connections) ? mcpCategory.connections : []);
+  const mcpAuthorization = supported.includes('mcp-connections') ? {
+    transferred: false,
+    ignoredGrantRecords: legacyMcpGrants.length,
+    ignoredToolGrants: legacyMcpGrants.reduce((count, grant) => count + (Array.isArray(grant?.tools) ? grant.tools.length : 0), 0),
+    regrantRequired: mcpConnections.length > 0,
+    message: 'MCP tool grants are deployment-local and are not imported. Regrant access deliberately on this deployment.',
+  } : null;
+  return { ok: true, format: decoded.payload.manifest.format, encrypted: decoded.encrypted, categories: decoded.categories, supported, unsupported, conflictPolicy, requiresConfirmation: true, redacted: Boolean(decoded.payload.manifest.redacted), uiAuth, mcpAuthorization };
 }
 async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
   const categories = Object.fromEntries(decoded.categories.map(id => [id, decoded.payload.categories[id]]));
+  const importedMcpCategory = categories['mcp-connections'];
+  const legacyMcpGrants = importedMcpCategory && typeof importedMcpCategory === 'object' && !Array.isArray(importedMcpCategory) && Array.isArray(importedMcpCategory.grants) ? importedMcpCategory.grants : [];
+  const importedMcpConnections = Array.isArray(importedMcpCategory) ? importedMcpCategory : (Array.isArray(importedMcpCategory?.connections) ? importedMcpCategory.connections : []);
+  const mcpAuthorization = Object.hasOwn(categories, 'mcp-connections') ? {
+    transferred: false,
+    ignoredGrantRecords: legacyMcpGrants.length,
+    ignoredToolGrants: legacyMcpGrants.reduce((count, grant) => count + (Array.isArray(grant?.tools) ? grant.tools.length : 0), 0),
+    regrantRequired: importedMcpConnections.length > 0,
+    message: 'MCP tool grants are deployment-local and are not imported. Regrant access deliberately on this deployment.',
+  } : null;
   const unsupported = decoded.categories.filter((id) => !IMPORT_SUPPORTED_CATEGORIES.has(id));
   if (unsupported.length) return { ok: false, status: 400, error: 'import_category_unsupported', details: { categories: unsupported } };
   if (Object.hasOwn(categories, 'agents') && (!categories.agents || typeof categories.agents !== 'object' || Array.isArray(categories.agents) || categories.agents.schema !== 'burrow.agents-and-profiles/v2' || !Array.isArray(categories.agents.records) || !categories.agents.profiles || typeof categories.agents.profiles !== 'object' || Array.isArray(categories.agents.profiles))) {
@@ -1453,15 +1473,15 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
     }
   }
   for (const agent of (categories.agents?.records || [])) if (await agentsStore().get(agent.id)) conflicts.push({ category: 'agents', id: agent.id });
-  const mcpConnections = Array.isArray(categories['mcp-connections']) ? categories['mcp-connections'] : (categories['mcp-connections']?.connections || []);
+  const mcpConnections = importedMcpConnections;
   for (const connection of mcpConnections) if (await mcpStore().get(connection.id)) conflicts.push({ category: 'mcp-connections', id: connection.id });
   for (const task of (categories['task-board']?.tasks || [])) if (await withTaskBoard(store => store.getTask(task.id))) conflicts.push({ category: 'task-board.tasks', id: task.id });
-  if (conflicts.length && conflictPolicy === 'error') return { ok: false, status: 409, error: 'import_conflicts', details: { conflicts } };
+  if (conflicts.length && conflictPolicy === 'error') return { ok: false, status: 409, error: 'import_conflicts', details: { conflicts }, mcpAuthorization };
   const imported = [];
   const deleted = [];
   const completed = [];
   let currentItem = null;
-  const failure = (result) => ({ ...result, ok: false, status: result.status || result.statusCode || 400, imported: [...imported], deleted: [...deleted], completed: [...completed], partial: completed.length > 0 || deleted.length > 0, failed: { item: currentItem, error: String(result.error || 'import_failed') }, skipped: conflicts.filter(c => conflictPolicy === 'skip'), unsupported: [] });
+  const failure = (result) => ({ ...result, ok: false, status: result.status || result.statusCode || 400, imported: [...imported], deleted: [...deleted], completed: [...completed], partial: completed.length > 0 || deleted.length > 0, failed: { item: currentItem, error: String(result.error || 'import_failed') }, skipped: conflicts.filter(c => conflictPolicy === 'skip'), unsupported: [], mcpAuthorization });
   const write = async (item, operation) => {
     currentItem = item;
     const result = await operation();
@@ -1599,19 +1619,6 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
   if (categories['mcp-connections'] && typeof categories['mcp-connections'] === 'object' && !Array.isArray(categories['mcp-connections'])) {
     const connections = Array.isArray(categories['mcp-connections'].connections) ? categories['mcp-connections'].connections : [];
     for (const connection of connections) { if (connection.apiKey === '[redacted]' || (conflictPolicy === 'skip' && conflicts.some(c => c.category === 'mcp-connections' && c.id === connection.id))) continue; const { environmentVariables, ...portableConnection } = connection; await write(`mcp-connections:${connection.id}`, () => mcpStore().save(portableConnection)); imported.push(`mcp-connections:${connection.id}`); }
-    for (const grant of (Array.isArray(categories['mcp-connections'].grants) ? categories['mcp-connections'].grants : [])) {
-      if (!await agentsStore().get(grant?.agentId) || !Array.isArray(grant?.tools) || !grant.tools.length) continue;
-      if (conflictPolicy === 'skip' && (conflicts.some(c => c.category === 'agents' && c.id === grant.agentId) || grant.tools.some(tool => conflicts.some(c => c.category === 'mcp-connections' && c.id === tool.connectionId)))) continue;
-      // v2 stores connection IDs inside each per-agent tool grant. The old
-      // importer incorrectly looked for grant.connectionId on the wrapper,
-      // which is undefined and caused every valid MCP export to fail with
-      // mcp_connection_id_invalid before setAgentTools could validate it.
-      const connectionIds = [...new Set(grant.tools.map((tool) => String(tool?.connectionId || '').trim()).filter(Boolean))];
-      if (connectionIds.length && (await Promise.all(connectionIds.map((connectionId) => mcpStore().get(connectionId)))).every(Boolean)) {
-        await write(`mcp-grants:${grant.agentId}`, () => mcpStore().setAgentTools(grant.agentId, grant.tools));
-        imported.push(`mcp-grants:${grant.agentId}`);
-      }
-    }
   } else if (Array.isArray(categories['mcp-connections'])) for (const connection of categories['mcp-connections']) { if (connection.apiKey === '[redacted]' || (conflictPolicy === 'skip' && conflicts.some(c => c.category === 'mcp-connections' && c.id === connection.id))) continue; const { environmentVariables, ...portableConnection } = connection; await write(`mcp-connections:${connection.id}`, () => mcpStore().save(portableConnection)); imported.push(`mcp-connections:${connection.id}`); }
   if (categories['ui-auth'] && typeof categories['ui-auth'] === 'object') {
     const importedAuth = categories['ui-auth'].auth;
@@ -1627,7 +1634,7 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
       imported.push('ui-auth:settings');
     }
   }
-  return { ok: true, imported, deleted, completed, partial: false, skipped: conflicts.filter((c) => conflictPolicy === 'skip'), unsupported: [] };
+  return { ok: true, imported, deleted, completed, partial: false, skipped: conflicts.filter((c) => conflictPolicy === 'skip'), unsupported: [], mcpAuthorization };
   } catch (error) {
     return failure({ ...(error?.importResult || {}), error: String(error?.importResult?.error || error?.message || error), status: error?.importResult?.status || error?.statusCode || 400 });
   }
@@ -1697,11 +1704,9 @@ async function exportSnapshot(categories = []) {
   }
   if (categories.includes('mcp-connections')) {
     const store = mcpStore();
-    const agents = await agentsStore().list({ includeDisabled: true });
     data['mcp-connections'] = {
-      schema: 'burrow.mcp-connections-and-grants/v2',
+      schema: 'burrow.mcp-connections/v3',
       connections: await Promise.all((await store.list()).filter(connection => connection.transport !== 'mod' && !connection.id.startsWith('mod.')).map(async (connection) => ({ ...connection, apiKey: await store.apiKey(connection.id), environmentVariables: (connection.environmentVariables || []).map(({ name }) => ({ name, configured: true })) }))),
-      grants: (await Promise.all(agents.map(async (agent) => ({ agentId: agent.id, tools: (await store.agentTools(agent.id)).filter(grant => !grant.connectionId.startsWith('mod.')).map((grant) => ({ connectionId: grant.connectionId, toolName: grant.toolName, enabled: grant.enabled })) })))).filter((entry) => entry.tools.length > 0),
     };
   }
   if (categories.includes('ui-auth')) {
