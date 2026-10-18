@@ -535,9 +535,38 @@ export async function listArchiveRuns({ rootDir, conversationStore, dataRoot = n
   }));
 }
 
+export async function listArchiveRunSummariesPage({ rootDir, conversationStore, dataRoot = null, agentId, agentName = null, sessionId = null, limit = 100, boundary = null } = {}) {
+  if (!rootDir || !agentId) throw new Error('archive_run_scope_required');
+  if (typeof conversationStore?.listArchiveRunDirectory !== 'function' || typeof conversationStore?.readArchiveRunSource !== 'function') return null;
+  const directory = await conversationStore.listArchiveRunDirectory({ agentId, sessionId, limit, boundary });
+  const subagentRecords = dataRoot ? await listSubagentRecords({ dataRoot, includeFinal: true, limit: 500 }) : [];
+  const runs = directory.rows.map(row => {
+    const children = subagentRecords.filter(record => record.owner?.parentRunId === row.runId).slice(0, 24);
+    const evidence = row.evidence;
+    return {
+      id: row.runId, runId: row.runId, agentId, agentName, sessionId: row.sessionId,
+      status: evidence ? (failureEvidence(evidence).length || unresolvedEvidence(evidence).length ? 'warning' : 'completed') : 'incomplete',
+      startedAt: row.startedAt || evidence?.createdAt || null,
+      completedAt: row.completedAt || evidence?.createdAt || null,
+      lastActivityAt: row.lastActivityAt || row.completedAt || row.startedAt || null,
+      _sortTimestamp: row.sortTimestamp,
+      objective: evidence?.objective || null, decision: evidence?.decision || null, route: evidence?.route || null,
+      counts: { observations: nonFailure(evidence?.observations).length, changes: nonFailure(evidence?.changes).length,
+        verifications: nonFailure(evidence?.validations).length + children.filter(record => childVerification(record)).length,
+        failures: failureEvidence(evidence).length, unresolved: unresolvedEvidence(evidence).length, toolActivities: 0, subagents: children.length },
+    };
+  });
+  return { runs, hasMore: directory.hasMore };
+}
+
 export async function readArchiveRun({ rootDir, conversationStore, dataRoot = null, traceRoot = null, resolveTraceRoot = null, agentId, agentName = null, runId } = {}) {
   if (!rootDir || !agentId || !runId) throw new Error('archive_run_target_required');
   const subagentRecords = dataRoot ? await listSubagentRecords({ dataRoot, includeFinal: true, limit: 500 }) : [];
+  if (typeof conversationStore?.readArchiveRunSource === 'function') {
+    const source = await conversationStore.readArchiveRunSource({ agentId, runId });
+    if (!source) return null;
+    return proofDetail({ conversationStore, agentId, agentName, sessionId: source.sessionId, runId, entries: source.entries, evidence: source.evidence, subagentRecords, traceRoot: traceRootFor({ traceRoot, resolveTraceRoot, sessionId: source.sessionId }) });
+  }
   for (const session of await recordsFor(conversationStore, agentId)) {
     const [entries, evidence] = await Promise.all([
       evidenceTranscript({ conversationStore, agentId, sessionId: session.id, includeResetHistory: true }),
