@@ -4,7 +4,7 @@ const MOD_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const VERSION = /^v?(\d{4}\.\d{2}\.\d{2}(?:\.\d+)?|\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)$/;
 const ACTIONS = new Set(['install', 'update', 'enable', 'disable', 'uninstall', 'refresh']);
 const STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'interrupted']);
-const ERRORS = new Set(['mod_not_found', 'mod_id_invalid', 'mod_source_not_resolved', 'mod_version_unavailable', 'mod_install_in_progress', 'mod_archive_resources_exceeded', 'mod_archive_resources_unavailable', 'mod_source_authentication_failed', 'mod_source_timeout', 'mod_source_git_failed', 'mod_management_failed', 'mod_management_interrupted']);
+const ERRORS = new Set(['mod_not_found', 'mod_id_invalid', 'mod_source_not_resolved', 'mod_version_unavailable', 'mod_install_in_progress', 'mod_archive_resources_exceeded', 'mod_archive_resources_unavailable', 'mod_source_authentication_failed', 'mod_source_timeout', 'mod_source_git_failed', 'mod_management_failed', 'mod_management_interrupted', 'mod_authority_forbidden']);
 const invalid = () => Object.assign(new Error('mod_management_input_invalid'), { statusCode: 400 });
 const unavailable = () => Object.assign(new Error('mod_management_unavailable'), { statusCode: 503 });
 function object(value, keys) {
@@ -50,7 +50,7 @@ function safeOperation(row) {
  * Call close() before closing distribution or the repository pool. Only queued
  * work is replayable; an interrupted running operation has an unknown outcome.
  */
-export function createModManagement({ distribution, repositoryFactory } = {}) {
+export function createModManagement({ distribution, repositoryFactory, modAuthority = null } = {}) {
   if (!distribution || typeof repositoryFactory !== 'function' || !['list', 'install', 'enable', 'disable', 'uninstall', 'refresh'].every(key => typeof distribution[key] === 'function')) throw new Error('mod_management_configuration_required');
   let closed = false;
   let scheduled = null;
@@ -97,6 +97,8 @@ export function createModManagement({ distribution, repositoryFactory } = {}) {
       if (barrier) { await barrier; callerBarriers.delete(row.id); }
       let result; let errorCode = null; let status = 'succeeded';
       try {
+        // Check after the receipt barrier, immediately before starting mutation.
+        if (modAuthority) await modAuthority.assertAllowed(row.owner_mod_id, 'mod-management-v1', row.agent_id);
         const value = row.action === 'refresh' ? await distribution.refresh()
           : ['install', 'update'].includes(row.action) ? await distribution.install(row.mod_id, row.version)
             : await distribution[row.action](row.mod_id);
@@ -105,9 +107,10 @@ export function createModManagement({ distribution, repositoryFactory } = {}) {
       } catch (error) {
         status = 'failed';
         errorCode = ERRORS.has(error?.message) ? error.message : 'mod_management_failed';
-        // Distribution may have committed before cleanup failed. Never assert
-        // that a thrown exception proves the mutation was rolled back.
-        result = { outcome: 'unknown' };
+        // Revocation is checked before distribution starts, so this specific
+        // failure proves no mutation was attempted. Other exceptions may occur
+        // after commit and must retain an unknown outcome.
+        result = { outcome: errorCode === 'mod_authority_forbidden' ? 'failed' : 'unknown' };
       }
       await repository(db => db.finishManagementOperation(row.id, { status, result, errorCode, timestamp: new Date().toISOString() }));
     }
@@ -160,6 +163,7 @@ export function createModManagement({ distribution, repositoryFactory } = {}) {
       const actor = { agent_id: identity(caller.agentId, true), session_id: identity(caller.sessionId), conversation_id: identity(caller.conversationId), run_id: identity(caller.runId) };
       const requested = { action: input.action, mod_id: input.modId ?? null, version: input.version ?? null };
       await ready;
+      if (modAuthority) await modAuthority.assertAllowed(owner, 'mod-management-v1', actor.agent_id);
       if (workerError) throw unavailable();
       const timestamp = new Date().toISOString();
       const row = { id: randomUUID(), owner_mod_id: owner, ...actor, ...requested, status: 'queued', created_at: timestamp, updated_at: timestamp, started_at: null, finished_at: null, result: null, error_code: null };

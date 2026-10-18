@@ -1,3 +1,4 @@
+import { POSTGRES_MOD_AUTHORITY_SCHEMA_SQL } from './mod-authority.mjs';
 import { POSTGRES_SKILL_SOURCES_SQL } from './postgres-skill-sources.mjs';
 import { POSTGRES_LIVE_RUN_STEERING_SQL } from './postgres-live-run-steering.mjs';
 import { POSTGRES_OPERATOR_INSTANT_SQL } from './postgres-operator-instant.mjs';
@@ -138,4 +139,5 @@ ALTER TABLE skill_git_sources ADD COLUMN effective_timezone TEXT;
   { version: 55, name: 'durable-mod-management-operations', sql: POSTGRES_MOD_MANAGEMENT_SCHEMA_SQL },
   { version: 56, name: 'bounded-archive-listing-indexes', sql: POSTGRES_ARCHIVE_LISTING_INDEX_SQL + POSTGRES_DREAM_CALENDAR_INDEX_SQL },
   { version: 57, name: 'indexed-proof-run-directory', sql: POSTGRES_ARCHIVE_RUN_INDEX_SQL },
+  { version: 58, name: 'operator-owned-mod-authority', sql: POSTGRES_MOD_AUTHORITY_SCHEMA_SQL },
 ]);

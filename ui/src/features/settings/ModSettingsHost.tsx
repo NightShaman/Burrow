@@ -21,6 +21,7 @@ type ModSettingsContext = {
   primary: SettingsSurface;
   overflow: SettingsSurface | null;
   api: <T = unknown>(path: string, init?: RequestInit) => Promise<T>;
+  accessApi: <T = unknown>(init?: RequestInit) => Promise<T>;
   refreshAgents: () => Promise<void>;
   saveAgentExecutionEnvironment: (agentId: string, executionEnvironment: Agent['executionEnvironment']) => Promise<void>;
 };
@@ -140,6 +141,15 @@ function modApi(modId: string) {
   };
 }
 
+function modAccessApi(modId: string) {
+  const path = `/api/operator/mods/${encodeURIComponent(modId)}/access`;
+  return <T = unknown>(init?: RequestInit): Promise<T> => apiLocal<T>(path, init);
+}
+
+function settingsFactoryContext(modId: string, agents: readonly Agent[]) {
+  return { api: modApi(modId), accessApi: modAccessApi(modId), agents };
+}
+
 export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, navigationTarget, overflowTarget }: { modId: string; settingsUrl: string; agents: Agent[]; onAgentsChanged: () => Promise<void>; navigationTarget: HTMLElement | null; overflowTarget: HTMLElement | null }) {
   const primaryRef = useRef<HTMLDivElement>(null);
   const [module, setModule] = useState<ModSettingsModule | null>(null);
@@ -159,7 +169,7 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
       if (!active) return;
       const staticContribution = validateSettingsContribution(loaded.settingsContribution);
       const contribution = loaded.createSettingsContribution
-        ? validateSettingsContribution(await loaded.createSettingsContribution({ api: modApi(modId), agents: agentsRef.current }))
+        ? validateSettingsContribution(await loaded.createSettingsContribution(settingsFactoryContext(modId, agentsRef.current)))
         : staticContribution;
       if (!active) return;
       const next = contribution?.sections ?? validSections(loaded.settingsSections);
@@ -191,6 +201,7 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
       primary: primarySurface,
       overflow: overflowSurface,
       api: modApi(modId),
+      accessApi: modAccessApi(modId),
       refreshAgents: () => onAgentsChangedRef.current(),
       saveAgentExecutionEnvironment: async (agentId, executionEnvironment) => {
         await apiLocal(`/api/agents/${encodeURIComponent(agentId)}`, {
@@ -217,7 +228,7 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
         if (module?.createSettingsContribution) {
           try {
             const { agents: currentAgents } = await apiLocal<{ agents: Agent[] }>('/api/agents');
-            const refreshed = validateSettingsContribution(await module.createSettingsContribution({ api: modApi(modId), agents: currentAgents }));
+            const refreshed = validateSettingsContribution(await module.createSettingsContribution(settingsFactoryContext(modId, currentAgents)));
             void onAgentsChangedRef.current();
             if (!refreshed) throw new Error("Invalid settings response.");
             setContribution(refreshed); setError('');

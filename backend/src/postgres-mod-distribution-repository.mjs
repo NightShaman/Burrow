@@ -1,3 +1,4 @@
+import { POSTGRES_MOD_AUTHORITY_SCHEMA_SQL } from './mod-authority.mjs';
 import { normalizePostgresPool, postgresTransactionContext, withPostgresTransaction } from './postgres-foundation.mjs';
 
 export const POSTGRES_MOD_DISTRIBUTION_SCHEMA_SQL = `
@@ -55,6 +56,13 @@ export function createPostgresModDistributionRepository({ pool } = {}) {
     const query = (sql, params = []) => queryer.query(sql, params);
     return {
       async close() {},
+      async ensureAuthoritySchema() { await query(POSTGRES_MOD_AUTHORITY_SCHEMA_SQL); },
+      async readModAuthority(id) { return first(await query('SELECT grants,admin_agent_ids,diagnostic_agent_ids FROM core_mod_authority WHERE mod_id=$1', [id])); },
+      async replaceModAuthority(id, value) { await query(`INSERT INTO core_mod_authority(mod_id,grants,admin_agent_ids,diagnostic_agent_ids)
+        VALUES($1,$2::jsonb,$3::jsonb,$4::jsonb) ON CONFLICT(mod_id) DO UPDATE SET grants=EXCLUDED.grants,
+        admin_agent_ids=EXCLUDED.admin_agent_ids,diagnostic_agent_ids=EXCLUDED.diagnostic_agent_ids,updated_at=now()`,
+        [id,JSON.stringify(value.grants),JSON.stringify(value.adminAgentIds),JSON.stringify(value.diagnosticAgentIds)]); },
+      async recordModDenial(id, capability, agentId) { await query('INSERT INTO core_mod_denials(owner_mod_id,capability,agent_id) VALUES($1,$2,$3)', [id,capability,agentId]); },
       async ensureManagementSchema() { await query(POSTGRES_MOD_MANAGEMENT_SCHEMA_SQL); },
       async createManagementOperation(row) {
         return changes(await query(`INSERT INTO mod_management_operations

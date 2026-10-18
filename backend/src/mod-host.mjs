@@ -97,7 +97,7 @@ const STORE_METHODS = Object.freeze({
   secrets: Object.freeze({ get: 'getSecret', set: 'setSecret', clear: 'clearSecret', has: 'hasSecret' }),
 });
 
-export function startModHost({ mod, store, logger = console, systemCapability = null, capabilities = null, capabilityTimeoutMs = null, modelCapabilityTimeoutMs = null, activationTimeoutMs = 10_000, routeTimeoutMs = DEFAULT_MOD_ROUTE_TIMEOUT_MS, cleanupTimeoutMs = 5_000, systemProcessWatchdogGraceMs = SYSTEM_PROCESS_WATCHDOG_GRACE_MS, onUnavailable = null, onSystemControllerReady = null, onSystemControllerUnavailable = null } = {}) {
+export function startModHost({ mod, store, logger = console, systemCapability = null, modAuthority = null, capabilities = null, capabilityTimeoutMs = null, modelCapabilityTimeoutMs = null, activationTimeoutMs = 10_000, routeTimeoutMs = DEFAULT_MOD_ROUTE_TIMEOUT_MS, cleanupTimeoutMs = 5_000, systemProcessWatchdogGraceMs = SYSTEM_PROCESS_WATCHDOG_GRACE_MS, onUnavailable = null, onSystemControllerReady = null, onSystemControllerUnavailable = null } = {}) {
   if (!store) throw hostError('mod_store_required', mod?.id);
   const child = fork(CHILD_PATH, [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], serialization: 'advanced' });
   const pending = new Map();
@@ -397,7 +397,9 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
 
   function createSystemControllerProxy() {
     return Object.freeze({
-      executeProcess(request = {}, { abortSignal = null } = {}) {
+      async executeProcess(request = {}, { abortSignal = null } = {}) {
+        if (!modAuthority) throw hostError('mod_authority_forbidden');
+        await modAuthority.assertAllowed(mod.id, 'execution-provider-v1');
         if (admissionsPaused) return Promise.reject(Object.assign(hostError('mod_busy'), { statusCode: 409 }));
         if (!systemControllerReady || closing || stopped || !child.connected) return Promise.reject(hostError('remote_process_controller_unavailable'));
         const operationId = String(request.operationId || '');
@@ -444,7 +446,9 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
           });
         });
       },
-      executeNativeFilesystem(request = {}, { abortSignal = null } = {}) {
+      async executeNativeFilesystem(request = {}, { abortSignal = null } = {}) {
+        if (!modAuthority) throw hostError('mod_authority_forbidden');
+        await modAuthority.assertAllowed(mod.id, 'execution-provider-v1');
         if (admissionsPaused) return Promise.reject(Object.assign(hostError('mod_busy'), { statusCode: 409 }));
         if (!systemControllerReady || closing || stopped || !child.connected) return Promise.reject(hostError('remote_native_filesystem_controller_unavailable'));
         const operationId = String(request.operationId || '');

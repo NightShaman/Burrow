@@ -68,7 +68,7 @@ function summarizedRun(run) {
 }
 
 // Only this core-side service has access to PostgreSQL secrets and provider credentials.
-export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null, stores = null, modStore = null, runtimeDiagnostics = null, modManagement = null } = {}) {
+export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null, stores = null, modStore = null, runtimeDiagnostics = null, modManagement = null, modAuthority = null } = {}) {
   if (typeof resolveAgentRuntime !== 'function') throw new Error('mod_agent_resolver_required');
   const injected = stores || {};
   for (const key of ['agents','models','scheduledJobs','conversations']) if (!injected[key]) throw new Error(`mod_${key}_store_required`);
@@ -77,18 +77,21 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
   const conversationStore = injected.conversations;
   const schedulerOwner = () => { if (typeof ownerModId !== 'string' || !ownerModId) throw new Error('mod_scheduler_owner_unavailable'); return ownerModId; };
   async function readRuntimeDiagnostics(input, { caller, signal } = {}) {
-    if (!runtimeDiagnostics?.read || !modStore?.get || !caller?.agentId) throw new Error('mod_diagnostic_caller_required');
+    if (!runtimeDiagnostics?.read || !modAuthority || !caller?.agentId) throw new Error('mod_diagnostic_caller_required');
     const value = plain(input);
-    const globalAgentIds = await modStore.get('globalAgentIds', []);
-    const global = Array.isArray(globalAgentIds) && globalAgentIds.includes(caller.agentId);
-    return runtimeDiagnostics.read(value, { caller: Object.freeze({ agentId: caller.agentId, sessionId: caller.sessionId || 'default', conversationId: caller.conversationId || null, runId: caller.runId || null }), global, signal });
+    const global = await modAuthority.allowed(ownerModId, 'diagnostics-global', caller.agentId);
+    try {
+      return await runtimeDiagnostics.read(value, { caller: Object.freeze({ agentId: caller.agentId, sessionId: caller.sessionId || 'default', conversationId: caller.conversationId || null, runId: caller.runId || null }), global, signal });
+    } catch (error) {
+      if (!global && ['diagnostic_scope_forbidden', 'diagnostic_global_scope_required'].includes(error?.message)) await modAuthority.deny(ownerModId, 'diagnostics-global', caller.agentId);
+      throw error;
+    }
   }
   async function manage(method, input, { caller, assertCallerActive, waitForCaller } = {}) {
-    if (!modManagement || !modStore?.get || !caller?.agentId || typeof assertCallerActive !== 'function') throw new Error('mod_management_caller_required');
+    if (!modManagement || !modAuthority || !caller?.agentId || typeof assertCallerActive !== 'function') throw new Error('mod_management_caller_required');
     assertCallerActive();
-    const admins = await modStore.get('adminAgentIds', []);
+    await modAuthority.assertAllowed(ownerModId, 'mod-management-v1', caller.agentId);
     assertCallerActive();
-    if (!Array.isArray(admins) || !admins.includes(caller.agentId)) throw new Error('mod_management_forbidden');
     return modManagement[method](input, { ownerModId, caller: Object.freeze({ agentId: caller.agentId, sessionId: caller.sessionId || null, conversationId: caller.conversationId || null, runId: caller.runId || null }), waitForCaller, assertCallerActive });
   }
   const ownedJob = (store, jobId) => store.getOwnedJob(schedulerOwner(), bounded(jobId, 96));

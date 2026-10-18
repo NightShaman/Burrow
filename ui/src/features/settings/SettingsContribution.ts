@@ -55,6 +55,7 @@ export type SettingsContribution = {
 
 export type SettingsContributionContext = {
   api: <T = unknown>(path: string, init?: RequestInit) => Promise<T>;
+  accessApi: <T = unknown>(init?: RequestInit) => Promise<T>;
   agents: readonly unknown[];
 };
 

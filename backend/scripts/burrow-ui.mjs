@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createModAuthority, createModAuthorityRoute } from '../src/mod-authority.mjs';
 import { createProviderUsageService } from '../src/provider-usage-service.mjs';
 import { createBackgroundLifecycle, createCoordinatedShutdown } from '../src/background-lifecycle.mjs';
 import { SkillGitSync } from '../src/skill-git-sync.mjs';
@@ -2861,6 +2862,8 @@ const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJ
 const authRoute = createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
 const chatRoute = createChatRoutes({ handleChat, readJsonBody, sendJson, selectedAgentRuntime, cancelChatRun, steerChatRun, listChatSteering });
 const modsRuntimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
+const modAuthority = createModAuthority({ repositoryFactory: postgresApplication.modDistributionRepositoryFactory });
+await modAuthority.ready;
 const runtimeDiagnostics = Object.freeze({
   async read(input = {}, { caller, global = false } = {}) {
     const operation = String(input.operation || '');
@@ -2932,7 +2935,7 @@ const modManagementCapability = Object.freeze(Object.fromEntries(['inventory', '
   if (!coreModManagement) throw new Error('mod_management_unavailable');
   return coreModManagement[method](...args);
 }])));
-const modLoadOptions = { modManagement: modManagementCapability, stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), runtimeDiagnostics, resolveAgentWorkspaceRoot: async (id) => {
+const modLoadOptions = { modAuthority, modManagement: modManagementCapability, stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), runtimeDiagnostics, resolveAgentWorkspaceRoot: async (id) => {
   const agent = await agentsStore().get(id);
   if (!agent) throw new Error('agent_not_found');
   return agentRuntimeContext({ runtimeState: (await runtimeConfig()).runtimeState, agent }).agentWorkspaceRoot;
@@ -2994,8 +2997,9 @@ const modDistribution = createModDistribution({
 // callback above is self-contained and does not call back into the distribution,
 // so this readiness barrier cannot form a lifecycle/distribution cycle.
 await modDistribution.ready;
-coreModManagement = createModManagement({ distribution: modDistribution, repositoryFactory: postgresApplication.modDistributionRepositoryFactory });
+coreModManagement = createModManagement({ modAuthority, distribution: modDistribution, repositoryFactory: postgresApplication.modDistributionRepositoryFactory });
 await coreModManagement.ready;
+const modAuthorityRoute = createModAuthorityRoute({ authority: modAuthority, getMods: () => loadedMods, readJsonBody, sendJson });
 const modManagementRoute = createModManagementRoute({ distribution: modDistribution, readJsonBody, sendJson });
 
 const server = createServer((req, res) => {
@@ -3101,6 +3105,7 @@ async function handleRequest(req, res) {
         return sendJson(res, token ? 200 : 404, token ? { ok: true, token } : { ok: false, error: 'api_token_not_found' });
       } finally { await store.close?.(); }
     }
+    if (await modAuthorityRoute({ req, res, url })) return;
     if (await modManagementRoute({ req, res, url })) return;
     if (await modRoute({ req, res, url })) return;
     if (await exportRoute({ req, res, url })) return;
