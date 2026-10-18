@@ -1,6 +1,6 @@
 # Releases
 
-NightShaman repositories are the development authority. Development pushes use fast contract/build gates and may update the assembled NightShaman Burrow tree, but they do not publish production releases.
+NightShaman repositories are the development authority. Development pushes use fast contract/build gates, update the assembled NightShaman Burrow tree, and publish immediately testable development artifacts. They do not replace the completely validated public releases.
 
 The scheduled `Validate and promote public releases` workflow is the release boundary. It freezes exact NightShaman revisions, runs complete validation against that frozen set, stages allowlisted public trees, and then publishes coordinated releases to `GoblinKing-Burrow`.
 
@@ -10,7 +10,9 @@ The scheduled `Validate and promote public releases` workflow is the release bou
 flowchart TD
     Source[Backend or UI source update] --> Quick[Fast source gate]
     Quick --> Assemble[Assemble NightShaman Burrow]
-    Assemble --> Commit[Commit development assembly]
+    Assemble --> Smoke[Build and smoke development image]
+    Smoke --> Commit[Commit development assembly]
+    Commit --> Dev[Publish NightShaman dev image]
     Daily[Daily public promotion] --> Freeze[Freeze exact NightShaman SHAs]
     Freeze --> Full[Run complete test suites]
     Full --> Stage[Stage allowlisted public snapshots]
@@ -18,7 +20,13 @@ flowchart TD
     Notes --> Publish[Publish GoblinKing-Burrow snapshots, releases, and image]
 ```
 
-The development assembly serializes publishers, verifies exact Backend and UI source checks, builds the UI, copies the allowlisted runtime payload, and writes `SOURCE_VERSIONS`. It deliberately does not build/push the public image or create a release.
+The development assembly serializes publishers, verifies exact Backend and UI source checks, builds the UI, copies the allowlisted runtime payload, writes `SOURCE_VERSIONS`, builds the container, and runs the packaged-runtime smoke test. It then publishes the exact tested image as:
+
+- `ghcr.io/nightshaman/burrow:latest`
+- `ghcr.io/nightshaman/burrow:dev`
+- `ghcr.io/nightshaman/burrow:sha-<assembly-commit>`
+
+The movable `latest` and `dev` tags select the current NightShaman development build; the assembled-commit tag pins the exact tested artifact. NightShaman development publication does not create a production release or weaken the separate public validation gate.
 
 ## Public version and image identifiers
 

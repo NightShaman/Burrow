@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 # Assembly publishes generated files back to main. Serialize publishers so two
 # source-update dispatches cannot both build from stale main and race the push.
@@ -140,6 +141,17 @@ jobs:
           test -f assembled/backend/RELEASE_PROVENANCE.json
           test -f assembled/ui/dist/index.html
           grep -R "${{ steps.revisions.outputs.ui }}" assembled/ui/dist/assets >/dev/null
+      - name: Build development image
+        uses: docker/build-push-action@v6
+        with:
+          context: assembled
+          load: true
+          push: false
+          build-args: |
+            BURROW_UI_SHA=${{ steps.revisions.outputs.ui }}
+          tags: burrow-development:tested
+      - name: Smoke development image
+        run: node assembled/scripts/assembly/packaged-smoke.mjs burrow-development:tested assembled
       - name: Commit generated assembly
         id: publish
         run: |
@@ -156,3 +168,16 @@ jobs:
             git push origin HEAD:main
           fi
           printf 'commit=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Authenticate to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish tested development image
+        run: |
+          set -eu
+          for tag in latest dev "sha-${{ steps.publish.outputs.commit }}"; do
+            docker tag burrow-development:tested "ghcr.io/nightshaman/burrow:$tag"
+            docker push "ghcr.io/nightshaman/burrow:$tag"
+          done
