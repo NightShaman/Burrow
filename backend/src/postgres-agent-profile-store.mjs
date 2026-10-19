@@ -10,6 +10,7 @@ import {
 
 export { AGENT_PROFILE_KINDS, profileFilesFromDocuments };
 
+export const GLOBAL_PROFILE_KINDS = Object.freeze(['RULES', 'ORIENTATION']);
 export const POSTGRES_AGENT_PROFILE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS agent_profile_documents (
   agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -23,6 +24,7 @@ CREATE TABLE IF NOT EXISTS agent_profile_documents (
 export const AGENT_PROFILE_SCHEMA_SQL = POSTGRES_AGENT_PROFILE_SCHEMA_SQL;
 const order = "CASE kind WHEN 'SOUL' THEN 0 WHEN 'RULES' THEN 1 WHEN 'ORIENTATION' THEN 2 WHEN 'PREFERENCES' THEN 3 WHEN 'TOOLS' THEN 4 WHEN 'DREAM_MEMORY' THEN 5 END";
 const now = () => new Date().toISOString();
+const globalProfile = row => ({ useGlobalRules: Boolean(row?.use_global_rules), useGlobalOrientation: Boolean(row?.use_global_orientation) });
 function document(row) { return row && { kind: row.kind, markdown: row.markdown, format: 'markdown', createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at, updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at }; }
 
 export class PostgresAgentProfileStore {
@@ -31,6 +33,41 @@ export class PostgresAgentProfileStore {
     this.pool = normalizePostgresPool(pool); this.ownsPool = ownsPool; this.clock = clock;
   }
   async close() { if (this.ownsPool) await closePostgresPool(this.pool); }
+  async globalProfile(agent) {
+    const id = agentId(agent);
+    const result = await this.pool.query('SELECT use_global_rules,use_global_orientation FROM agents WHERE id=$1', [id]);
+    if (!result.rows[0]) throw new Error('agent_not_found');
+    return globalProfile(result.rows[0]);
+  }
+  async listGlobal() {
+    const result = await this.pool.query("SELECT kind,markdown,created_at,updated_at FROM global_profile_documents ORDER BY CASE kind WHEN 'RULES' THEN 0 ELSE 1 END");
+    return result.rows.map(document);
+  }
+  async replaceGlobal(documents = []) {
+    const normalized = (Array.isArray(documents) ? documents : []).map(item => ({ kind: String(item?.kind || '').toUpperCase(), markdown: markdown(item?.markdown) }));
+    if (normalized.length !== 2 || new Set(normalized.map(item => item.kind)).size !== 2 || normalized.some(item => !GLOBAL_PROFILE_KINDS.includes(item.kind))) throw new Error('global_profile_documents_complete_set_required');
+    return withPostgresTransaction(this.pool, async client => {
+      const stamp = this.clock();
+      for (const item of normalized) await client.query('INSERT INTO global_profile_documents(kind,markdown,created_at,updated_at) VALUES($1,$2,$3,$3) ON CONFLICT(kind) DO UPDATE SET markdown=EXCLUDED.markdown,updated_at=EXCLUDED.updated_at', [item.kind,item.markdown,stamp]);
+      const result = await client.query("SELECT kind,markdown,created_at,updated_at FROM global_profile_documents ORDER BY CASE kind WHEN 'RULES' THEN 0 ELSE 1 END");
+      return result.rows.map(document);
+    });
+  }
+  async replaceWithGlobalProfile(agent, documents, value) {
+    if (typeof value?.useGlobalRules !== 'boolean' || typeof value?.useGlobalOrientation !== 'boolean') throw new Error('agent_global_profile_booleans_required');
+    const id = agentId(agent);
+    const normalized = (Array.isArray(documents) ? documents : []).map((item) => ({ kind: kind(item?.kind), markdown: markdown(item?.markdown) }));
+    if (normalized.length !== AGENT_PROFILE_KINDS.length || new Set(normalized.map((item) => item.kind)).size !== AGENT_PROFILE_KINDS.length) throw new Error('agent_profile_documents_complete_set_required');
+    return withPostgresTransaction(this.pool, async (client) => {
+      const found = await client.query('SELECT id FROM agents WHERE id=$1 FOR UPDATE', [id]);
+      if (!found.rows[0]) throw new Error('agent_not_found');
+      const stamp = this.clock();
+      for (const item of normalized) await client.query(`INSERT INTO agent_profile_documents (agent_id,kind,markdown,created_at,updated_at) VALUES ($1,$2,$3,$4,$4) ON CONFLICT (agent_id,kind) DO UPDATE SET markdown=EXCLUDED.markdown,updated_at=EXCLUDED.updated_at`, [id, item.kind, item.markdown, stamp]);
+      await client.query('UPDATE agents SET use_global_rules=$2,use_global_orientation=$3 WHERE id=$1', [id, value.useGlobalRules, value.useGlobalOrientation]);
+      const rows = await client.query(`SELECT kind,markdown,created_at,updated_at FROM agent_profile_documents WHERE agent_id=$1 ORDER BY ${order}`, [id]);
+      return { documents: rows.rows.map(document), globalProfile: value };
+    });
+  }
   async list(agent) {
     const id = agentId(agent);
     return withPostgresTransaction(this.pool, async (client) => {

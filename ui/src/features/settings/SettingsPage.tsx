@@ -1,5 +1,6 @@
 import { OpenTelemetrySettings } from './OpenTelemetrySettings';
 import { BrowserTabSettings } from './BrowserTabSettings';
+import { GlobalProfileDocuments } from './GlobalProfileDocuments';
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import type { Agent, PanelId, SavedProvider, SettingsTab } from '../../app/types';
@@ -39,7 +40,7 @@ const isBoolean = (value: unknown): value is boolean => typeof value === 'boolea
 export function Settings({ navigationTarget, tab, setTab, agents, selected, savedProviders, onModelConnectionsChanged, onAgentsChanged, onOperatorProfileChanged, onFirstRunComplete, leftTopPanel, setLeftTopPanel, leftBottomPanel, setLeftBottomPanel, rightTopPanel, setRightTopPanel, rightBottomPanel, setRightBottomPanel, leftSinglePanel, setLeftSinglePanel, rightSinglePanel, setRightSinglePanel, leftRailLayout, setLeftRailLayout, rightRailLayout, setRightRailLayout, theme, setTheme, agentRailPreferences, setAgentRailPreferences, previewFirstRun = false }: { navigationTarget?: HTMLElement | null; tab: SettingsTab; setTab: (t: SettingsTab) => void; agents: Agent[]; selected: Agent; savedProviders: SavedProvider[]; onModelConnectionsChanged: () => Promise<void>; onAgentsChanged: () => Promise<void>; onOperatorProfileChanged: (profile: { name: string; avatar: string }) => void; onFirstRunComplete: () => void; leftTopPanel: PanelId; setLeftTopPanel: (id: PanelId) => void; leftBottomPanel: PanelId; setLeftBottomPanel: (id: PanelId) => void; rightTopPanel: PanelId; setRightTopPanel: (id: PanelId) => void; rightBottomPanel: PanelId; setRightBottomPanel: (id: PanelId) => void; leftSinglePanel: PanelId; setLeftSinglePanel: (id: PanelId) => void; rightSinglePanel: PanelId; setRightSinglePanel: (id: PanelId) => void; leftRailLayout: typeof railLayouts[number]; setLeftRailLayout: (layout: typeof railLayouts[number]) => void; rightRailLayout: typeof railLayouts[number]; setRightRailLayout: (layout: typeof railLayouts[number]) => void; theme: Theme; setTheme: (theme: Theme) => void; agentRailPreferences: AgentRailPreferences; setAgentRailPreferences: (next: AgentRailPreferences | ((current: AgentRailPreferences) => AgentRailPreferences)) => void; previewFirstRun?: boolean }) {
   const [settingsAgentId, setSettingsAgentId] = useState(selected.id);
   const [agentSection, setAgentSection] = useState<'details' | 'profile-documents' | 'mcp-tools' | 'cron-jobs' | 'dreams' | 'skills'>('details');
-  const [generalSection, setGeneralSection] = useState<'opentelemetry' | 'browser-tab' | 'operator-timezone' | 'operator-profile' | 'execution-boundaries' | 'trace-retention' | 'brain-memory' | 'export' | 'rail-panels' | 'tiddle-signal' | 'appearance'>('operator-profile');
+  const [generalSection, setGeneralSection] = useState<'opentelemetry' | 'browser-tab' | 'operator-timezone' | 'operator-profile' | 'execution-boundaries' | 'trace-retention' | 'brain-memory' | 'global-documents' | 'export' | 'rail-panels' | 'tiddle-signal' | 'appearance'>('operator-profile');
   const [connectionSection, setConnectionSection] = useState<'authentication' | 'browser-origin' | 'model-providers' | 'mcp-servers' | 'api-tokens'>('authentication');
   const [skillsSection, setSkillsSection] = useState<'installed' | 'repo' | 'text'>('installed');
   const [modsSection, setModsSection] = useState<'installed' | 'sources' | 'automatic-checks'>('installed');
@@ -110,6 +111,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
             ['execution-boundaries', 'Execution boundaries'],
             ['trace-retention', 'Trace retention'],
             ['brain-memory', 'Brain memory'],
+            ['global-documents', 'Global documents'],
             ['export', 'Export'],
             ['rail-panels', 'Rail panels'],
             ['tiddle-signal', 'Tiddle Signal'],
@@ -152,6 +154,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
         {tab === 'general' && generalSection === 'execution-boundaries' && <ExecutionBoundaries overflowTarget={overflowColumn} />}
         {tab === 'general' && generalSection === 'trace-retention' && <RetentionSettings />}
         {tab === 'general' && generalSection === 'brain-memory' && <BrainEmbeddingSettings savedProviders={savedProviders} />}
+        {tab === 'general' && generalSection === 'global-documents' && <GlobalProfileDocuments overflowTarget={overflowColumn} />}
         {tab === 'general' && generalSection === 'export' && <ExportSettings />}
         {tab === 'general' && generalSection === 'rail-panels' && <SettingSection title="Rail Panels"><div className="field-pair compact-fields"><RailPanelSettings side="Left" layout={leftRailLayout} setLayout={setLeftRailLayout} singlePanel={leftSinglePanel} setSinglePanel={setLeftSinglePanel} topPanel={leftTopPanel} setTopPanel={setLeftTopPanel} bottomPanel={leftBottomPanel} setBottomPanel={setLeftBottomPanel} /><RailPanelSettings side="Right" layout={rightRailLayout} setLayout={setRightRailLayout} singlePanel={rightSinglePanel} setSinglePanel={setRightSinglePanel} topPanel={rightTopPanel} setTopPanel={setRightTopPanel} bottomPanel={rightBottomPanel} setBottomPanel={setRightBottomPanel} /></div></SettingSection>}
         {tab === 'general' && generalSection === 'tiddle-signal' && <CuratorSettings savedProviders={savedProviders} />}

@@ -26,7 +26,9 @@ export class AgentProfileStore {
   constructor() { throw new Error('postgres_required'); }
 }
 
-export function profileFilesFromDocuments(documents = [], { agentId: owningAgentId = null } = {}) {
+export function profileFilesFromDocuments(documents = [], { agentId: owningAgentId = null, globalDocuments = [], globalProfile = {} } = {}) {
+  const globals = new Map(globalDocuments.map(item => [item.kind, item.markdown]));
+  documents = documents.map(item => ({ ...item, markdown: ((item.kind === 'RULES' && globalProfile.useGlobalRules) || (item.kind === 'ORIENTATION' && globalProfile.useGlobalOrientation)) ? [globals.get(item.kind), item.markdown].filter(Boolean).join('\n\n') : item.markdown }));
   const byKind = new Map((Array.isArray(documents) ? documents : []).map((item) => [item.kind, item]));
   const files = AGENT_PROFILE_KINDS.map((documentKind) => byKind.get(documentKind)).filter(Boolean).map((item) => {
     const displayName = item.kind === 'DREAM_MEMORY' ? 'DreamMemory' : item.kind === 'PREFERENCES' ? 'PREFERENCES' : item.kind;

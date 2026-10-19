@@ -7218,6 +7218,65 @@
           }
         }
       }
+    },
+    "/api/settings/global-profile-documents": {
+      "get": {
+        "operationId": "getGlobalProfileDocuments",
+        "responses": {
+          "200": {
+            "description": "Global profile documents"
+          }
+        },
+        "summary": "Get global profile documents"
+      },
+      "put": {
+        "operationId": "replaceGlobalProfileDocuments",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "documents"
+                ],
+                "properties": {
+                  "documents": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "markdown"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "RULES",
+                            "ORIENTATION"
+                          ]
+                        },
+                        "markdown": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Global profile documents replaced"
+          }
+        },
+        "summary": "Replace global profile documents"
+      }
     }
   },
   "components": {

@@ -144,4 +144,10 @@ ALTER TABLE skill_git_sources ADD COLUMN effective_timezone TEXT;
   { version: 58, name: 'operator-owned-mod-authority', sql: POSTGRES_MOD_AUTHORITY_SCHEMA_SQL },
   { version: 59, name: 'task-audit-history-and-documents', sql: POSTGRES_TASK_AUDIT_SCHEMA_SQL },
   { version: 60, name: 'opentelemetry-operator-settings', sql: POSTGRES_OTEL_SETTINGS_SCHEMA_SQL },
+  { version: 61, name: 'global-profile-documents', sql: `
+ALTER TABLE agents ADD COLUMN use_global_rules BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE agents ADD COLUMN use_global_orientation BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE TABLE global_profile_documents (kind TEXT PRIMARY KEY CHECK(kind IN ('RULES','ORIENTATION')), markdown TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+INSERT INTO global_profile_documents(kind,markdown,created_at,updated_at) VALUES ('RULES','',CURRENT_TIMESTAMP::text,CURRENT_TIMESTAMP::text),('ORIENTATION','',CURRENT_TIMESTAMP::text,CURRENT_TIMESTAMP::text);
+` },
 ]);
