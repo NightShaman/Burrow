@@ -7090,14 +7090,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Saved, effective, and live OpenTelemetry state without protected credential values.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OpenTelemetrySettingsResponse"
-                }
-              }
-            }
+            "$ref": "#/components/responses/SettingsResponse"
           },
           "400": {
             "$ref": "#/components/responses/ErrorResponse"
@@ -7151,14 +7144,7 @@
         },
         "responses": {
           "200": {
-            "description": "Saved, effective, and live OpenTelemetry state without protected credential values.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OpenTelemetrySettingsResponse"
-                }
-              }
-            }
+            "$ref": "#/components/responses/SettingsResponse"
           },
           "400": {
             "$ref": "#/components/responses/ErrorResponse"
@@ -7228,68 +7214,6 @@
             "$ref": "#/components/responses/ErrorResponse"
           },
           "404": {
-            "$ref": "#/components/responses/ErrorResponse"
-          }
-        }
-      }
-    },
-    "/api/settings/opentelemetry/test": {
-      "post": {
-        "tags": [
-          "Settings"
-        ],
-        "summary": "Test an OTLP/HTTP collector connection without saving changes",
-        "operationId": "testOpenTelemetryConnection",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "endpoint"
-                ],
-                "properties": {
-                  "endpoint": {
-                    "type": "string",
-                    "maxLength": 2048,
-                    "description": "Candidate OTLP/HTTP base endpoint."
-                  },
-                  "headers": {
-                    "type": "string",
-                    "maxLength": 8192,
-                    "writeOnly": true,
-                    "description": "Optional candidate replacement headers. Omit to test saved protected headers only when the candidate endpoint exactly matches the saved endpoint."
-                  },
-                  "clearHeaders": {
-                    "type": "boolean",
-                    "description": "Test without saved headers. Mutually exclusive with headers."
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Collector accepted a bounded empty OTLP traces request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OpenTelemetryConnectionTestResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ErrorResponse"
-          },
-          "502": {
-            "$ref": "#/components/responses/ErrorResponse"
-          },
-          "504": {
             "$ref": "#/components/responses/ErrorResponse"
           }
         }
@@ -12851,126 +12775,6 @@
           }
         },
         "additionalProperties": false
-      },
-      "OpenTelemetryConnectionTestResponse": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "ok",
-          "collectorStatus",
-          "durationMs"
-        ],
-        "properties": {
-          "ok": {
-            "const": true
-          },
-          "collectorStatus": {
-            "type": "integer"
-          },
-          "durationMs": {
-            "type": "integer",
-            "minimum": 0
-          }
-        }
-      },
-      "OpenTelemetrySavedSettings": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "enabled",
-          "endpoint",
-          "headersConfigured"
-        ],
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          },
-          "endpoint": {
-            "type": "string"
-          },
-          "headersConfigured": {
-            "type": "boolean"
-          },
-          "streamName": {
-            "type": "string",
-            "description": "Saved non-secret OpenObserve stream name extracted from the protected transport configuration when present."
-          }
-        }
-      },
-      "OpenTelemetryEffectiveSettings": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "enabled",
-          "endpoint",
-          "headersConfigured",
-          "source",
-          "endpointSource",
-          "headersSource",
-          "restartRequired"
-        ],
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          },
-          "endpoint": {
-            "type": "string"
-          },
-          "headersConfigured": {
-            "type": "boolean"
-          },
-          "source": {
-            "type": "string",
-            "enum": [
-              "environment",
-              "database",
-              "default"
-            ]
-          },
-          "endpointSource": {
-            "type": "string",
-            "enum": [
-              "environment",
-              "database",
-              "default"
-            ]
-          },
-          "headersSource": {
-            "type": "string",
-            "enum": [
-              "environment",
-              "database",
-              "default"
-            ]
-          },
-          "restartRequired": {
-            "const": false
-          }
-        }
-      },
-      "OpenTelemetrySettingsResponse": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "ok",
-          "settings",
-          "effective"
-        ],
-        "properties": {
-          "ok": {
-            "const": true
-          },
-          "settings": {
-            "$ref": "#/components/schemas/OpenTelemetrySavedSettings"
-          },
-          "effective": {
-            "$ref": "#/components/schemas/OpenTelemetryEffectiveSettings"
-          },
-          "runtime": {
-            "type": "object",
-            "additionalProperties": true
-          }
-        }
       }
     }
   },

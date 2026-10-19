@@ -1,5 +1,5 @@
 import { normalizeRetentionPolicy } from '../../src/retention-settings.mjs';
-export function createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings, tiddleCards, tiddleHistory, uiAuthSettings, saveUiAuthSettings, browserOriginSettings, saveBrowserOriginSettings, browserTabSettings, saveBrowserTabSettings, otelSettings, saveOtelSettings, testOtelConnection, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup } = {}) {
+export function createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings, tiddleCards, tiddleHistory, uiAuthSettings, saveUiAuthSettings, browserOriginSettings, saveBrowserOriginSettings, browserTabSettings, saveBrowserTabSettings, otelSettings, saveOtelSettings, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup } = {}) {
   const resultResponse = (res, result, success = 200) => {
     sendJson(res, result.ok === false ? (result.status || 500) : success, result);
     return true;
@@ -36,14 +36,6 @@ export function createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdenti
     if (url.pathname === '/api/settings/opentelemetry') {
       if (req.method === 'GET') { sendJson(res, 200, await otelSettings()); return true; }
       if (req.method === 'PUT') return resultResponse(res, await saveOtelSettings(await readJsonBody(req)));
-    }
-    if (req.method === 'POST' && url.pathname === '/api/settings/opentelemetry/test') {
-      const controller = new AbortController();
-      const abort = () => controller.abort();
-      req.once?.('aborted', abort);
-      res.once?.('close', abort);
-      try { return resultResponse(res, await testOtelConnection(await readJsonBody(req, { maxBytes: 12 * 1024 }), { signal: controller.signal })); }
-      finally { req.off?.('aborted', abort); res.off?.('close', abort); }
     }
     if (url.pathname === '/api/settings/ui-auth') {
       if (req.method === 'GET') { sendJson(res, 200, await uiAuthSettings()); return true; }
