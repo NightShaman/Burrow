@@ -1,6 +1,6 @@
 <div class="burrow-hero" markdown>
 
-![Burrow](assets/burrow-logo.png){ .burrow-hero-logo }
+![Burrow](assets/hero.png){ .burrow-hero-logo }
 
 # Your agents. Your workbench.
 

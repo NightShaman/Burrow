@@ -23,7 +23,7 @@ The eight **User guide** pages were written for this public snapshot: installati
 
 The **Earlier technical reference** is preserved for historical context and existing links. Every retained page is marked as not fully revalidated for 2026.10.19. Older NightShaman links on those pages document their cited revisions, not necessarily today's public behavior. Do not use old image tags, install commands, or security assumptions as current instructions.
 
-Existing screenshots remain with the earlier reference. They were captured from synthetic development fixtures on October 16, not from a tested public-release installation; they have not been relabeled as current screenshots. The new homepage uses the repository's existing Burrow logo.
+Existing screenshots remain with the earlier reference. They were captured from synthetic development fixtures on October 16, not from a tested public-release installation; they have not been relabeled as current screenshots. The homepage uses the repository's canonical `docs/assets/hero.png`, shared with its README; the header logo and favicon remain separate.
 
 ## Verification limits
 
