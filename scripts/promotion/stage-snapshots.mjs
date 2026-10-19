@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const TARGETS = {
+export const TARGETS = {
   burrow: {
     paths: ['.github/workflows/docs.yml', '.dockerignore', '.gitignore', 'Dockerfile', 'LICENSE', 'README.md', 'SOURCE_VERSIONS', 'backend', 'burrow-logo.png', 'compose.yml', 'docker-entrypoint.sh', 'docs', 'install.sh', 'mkdocs.yml', 'requirements-docs-test.txt', 'requirements-docs.txt', 'scripts/assembly', 'scripts/docs', 'scripts/install', 'ui'],
     excludes: []
@@ -17,7 +17,7 @@ const TARGETS = {
     excludes: []
   },
   burrowSkills: {
-    paths: ['LICENSE', 'README.md', 'burrow-runtime', 'docs'],
+    paths: ['LICENSE', 'README.md', 'burrow-backdoor', 'burrow-runtime', 'docs', 'goblin-secret-store', 'node-goblin-operations'],
     excludes: []
   },
   burrowBackdoor: {
