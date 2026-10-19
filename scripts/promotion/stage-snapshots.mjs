@@ -9,7 +9,7 @@ export const TARGETS = {
     excludes: []
   },
   nodeGoblin: {
-    paths: ['.gitignore', 'LICENSE', 'NG-Logo.png', 'README.md', 'burrow.mod.json', 'docs', 'gateway', 'install.sh', 'mkdocs.yml', 'requirements-docs-test.txt', 'requirements-docs.txt', 'scripts/docs', 'server', 'ui'],
+    paths: ['.github/workflows/docs.yml', '.gitignore', 'LICENSE', 'NG-Logo.png', 'README.md', 'burrow.mod.json', 'docs', 'gateway', 'install.sh', 'mkdocs.yml', 'requirements-docs-test.txt', 'requirements-docs.txt', 'scripts/docs', 'server', 'ui'],
     excludes: ['docs/audit-repair-pass-5.md', 'docs/repairs/lifecycle-pass-4.md']
   },
   goblinSecretStore: {

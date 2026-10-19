@@ -45,3 +45,14 @@ test('public snapshot fails closed when Node Goblin installer authority is missi
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test('Node Goblin snapshot preserves documentation deployment without release workflows', () => {
+  const paths = TARGETS.nodeGoblin.paths;
+  assert.ok(paths.includes('.github/workflows/docs.yml'));
+  assert.ok(!paths.includes('.github'));
+  assert.ok(!paths.includes('.github/workflows'));
+  assert.ok(!paths.includes('.github/workflows/release-node-goblin.yml'));
+  assert.ok(TARGETS.nodeGoblin.excludes.includes('docs/audit-repair-pass-5.md'));
+  assert.ok(TARGETS.nodeGoblin.excludes.includes('docs/repairs/lifecycle-pass-4.md'));
+});
