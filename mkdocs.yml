@@ -73,7 +73,7 @@ validation:
     unrecognized_links: warn
 
 extra_css:
-  - assets/stylesheets/extra.css
+  - assets/stylesheets/extra.css?v=20261019-warning
 
 nav:
   - Home: index.md
