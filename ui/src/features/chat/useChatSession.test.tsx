@@ -132,6 +132,20 @@ describe('useChatSession', () => {
     });
   });
 
+  it('shows transient turns only until the conversation is revisited', async () => {
+    const { result } = renderHook(() => useChatSession(agentId));
+    await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+
+    act(() => result.current.appendTransientTurn(agentId, sessionId, { role: 'assistant', content: 'Temporary context report' }));
+    expect(result.current.turns).toContainEqual({ role: 'assistant', content: 'Temporary context report' });
+    expect(localStorage.getItem('hc.chatConversations') ?? '').not.toContain('Temporary context report');
+
+    act(() => result.current.selectSession('other'));
+    act(() => result.current.selectSession(sessionId));
+
+    expect(result.current.turns).not.toContainEqual({ role: 'assistant', content: 'Temporary context report' });
+  });
+
   it('does not let an in-flight refresh erase a direct message appended after it started', async () => {
     const staleRefresh = deferred<{ session: { id: string; turns: { role: string; content: string }[] } }>();
     const { result } = renderHook(() => useChatSession(agentId));

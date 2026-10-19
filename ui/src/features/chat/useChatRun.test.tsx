@@ -18,6 +18,7 @@ function createSession() {
     reportError: vi.fn(),
     leaveNewSessionForMessage: vi.fn(),
     appendTurn: vi.fn(),
+    appendTransientTurn: vi.fn(),
     storeToolActivity: vi.fn(),
     toolActivityForRun: vi.fn(),
     clearRunState: vi.fn(),
@@ -95,6 +96,43 @@ describe('useChatRun', () => {
     }));
     await waitFor(() => expect(session.refreshConversation).toHaveBeenCalledWith('nigel', 'session-1'));
     expect(session.refreshSessions).toHaveBeenCalledWith('nigel');
+  });
+
+  it('keeps /context visible for the current visit without caching or immediately reconciling it away', async () => {
+    streamChatMock.mockResolvedValue({
+      terminalType: 'run.completed',
+      finalResult: { ok: true, answerText: 'Context: 42% used.' },
+    });
+    const session = createSession();
+    session.draft = '/context';
+    const { result } = renderHook(() => useChatRun({
+      selectedAgentId: 'nigel',
+      selected: { id: 'nigel', name: 'Nigel', avatar: '', activity: 'idle', context: null, provider: '', model: '', effort: '', temperature: 1, workspace: '', files: [], subagents: [] },
+      savedProviders: [], session, setAgentActivity: vi.fn(),
+    }));
+
+    await act(async () => { await result.current.sendMessage(); });
+
+    expect(session.appendTransientTurn).toHaveBeenNthCalledWith(1, 'nigel', 'session-1', expect.objectContaining({ role: 'user', content: '/context' }));
+    expect(session.appendTransientTurn).toHaveBeenNthCalledWith(2, 'nigel', 'session-1', expect.objectContaining({ role: 'assistant', content: 'Context: 42% used.' }));
+    expect(session.appendTurn).not.toHaveBeenCalled();
+    expect(session.refreshConversation).not.toHaveBeenCalled();
+    expect(session.refreshSessions).toHaveBeenCalledWith('nigel');
+  });
+
+  it('preserves normal message persistence and reconciliation', async () => {
+    streamChatMock.mockResolvedValue({ terminalType: 'run.completed', finalResult: { ok: true, answerText: 'Normal reply.' } });
+    const session = createSession();
+    session.draft = 'Hello';
+    const { result } = renderHook(() => useChatRun({
+      selectedAgentId: 'nigel', selected: undefined, savedProviders: [], session, setAgentActivity: vi.fn(),
+    }));
+
+    await act(async () => { await result.current.sendMessage(); });
+
+    expect(session.appendTurn).toHaveBeenCalledTimes(2);
+    expect(session.appendTransientTurn).not.toHaveBeenCalled();
+    await waitFor(() => expect(session.refreshConversation).toHaveBeenCalledWith('nigel', 'session-1'));
   });
 
   it('coalesces word-sized thought deltas by model call without changing the terminal answer', async () => {

@@ -19,6 +19,7 @@ type ChatRunSession = {
   reportError: (message: string) => void;
   leaveNewSessionForMessage: () => void;
   appendTurn: (agentId: string, sessionId: string, turn: SessionTurn) => void;
+  appendTransientTurn: (agentId: string, sessionId: string, turn: SessionTurn) => void;
   storeToolActivity: (activity: { runId: string; items: ToolActivityItem[]; status: 'running' | 'ok' | 'warn' }) => void;
   toolActivityForRun: (runId: string) => { items?: ToolActivityItem[] } | undefined;
   clearRunState: (agentId: string, sessionId: string, runId: string) => void;
@@ -72,6 +73,7 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
   const sendMessage = async (draftOverride?: string, onAccepted?: () => void) => {
     const message = (draftOverride ?? session.draft).trim() || (session.attached.length ? 'Please analyze the attached files.' : '');
     if (!message || !selectedAgentId || !session.sessionId || activeRunForSelection || streamAbortRef.current[runKey(selectedAgentId, session.sessionId)]) return;
+    const transientContextCommand = /^\/context(?:\s+full)?$/i.test(message);
     const target = { agentId: selectedAgentId, resourceAgentId: selected?.resourceId ?? selectedAgentId, sessionId: session.sessionId };
     const sentAt = performance.now();
     const runId = createRunId(target.sessionId);
@@ -86,7 +88,8 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
     setLiveProgressByRun((current) => ({ ...current, [targetKey]: [] }));
     setLiveAnswerByRun((current) => ({ ...current, [targetKey]: '' }));
     setAgentActivity(target.agentId, 'thinking'); session.clearError(); session.setDraft(''); onAccepted?.(); session.clearAttachment(); session.leaveNewSessionForMessage();
-    session.appendTurn(target.agentId, target.sessionId, { type: 'message', role: 'user', content: message, ts: new Date().toISOString(), runId, ...(attachments.length ? { metadata: { attachments: attachments.map(({ name, type, size }, index) => ({ index, name, type, size, encoding: 'data-url', ...(type.startsWith('image/') ? { preview: attachments[index].content } : {}) })) } } : {}) });
+    const appendVisibleTurn = transientContextCommand ? session.appendTransientTurn : session.appendTurn;
+    appendVisibleTurn(target.agentId, target.sessionId, { type: 'message', role: 'user', content: message, ts: new Date().toISOString(), runId, ...(attachments.length ? { metadata: { attachments: attachments.map(({ name, type, size }, index) => ({ index, name, type, size, encoding: 'data-url', ...(type.startsWith('image/') ? { preview: attachments[index].content } : {}) })) } } : {}) });
     performance.mark(`chat:${runId}:send`, { startTime: sentAt });
     let firstUseful = false;
     let streamedAnswer = ''; let progressEntries: ProgressEntry[] = []; let toolSequence = 0; let frame = 0;
@@ -158,14 +161,14 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
         const metadata = activity?.items?.length || progress || retainedStream
           ? { ...(activity?.items?.length ? { toolActivity: activity } : {}), ...(progress ? { progress } : {}), ...(retainedStream ? { streamedAnswer: retainedStream } : {}) }
           : undefined;
-        session.appendTurn(target.agentId, target.sessionId, { type: 'message', role: 'assistant', content: answer, ts: new Date().toISOString(), runId, metadata });
+        appendVisibleTurn(target.agentId, target.sessionId, { type: 'message', role: 'assistant', content: answer, ts: new Date().toISOString(), runId, metadata });
       }
       setLiveProgressByRun((current) => { const next = { ...current }; delete next[targetKey]; return next; });
       setLiveAnswerByRun((current) => { const next = { ...current }; delete next[targetKey]; return next; });
       setActiveRuns((current) => { const next = { ...current }; if (next[targetKey]?.runId === runId) delete next[targetKey]; return next; });
       void Promise.all([
         session.refreshSessions(target.agentId),
-        session.refreshConversation(target.agentId, target.sessionId),
+        ...(transientContextCommand ? [] : [session.refreshConversation(target.agentId, target.sessionId)]),
       ]).catch((error) => session.reportError(error instanceof Error ? `Could not refresh chat: ${error.message}` : 'Could not refresh chat.'));
       if (runStatus === 'failed' || runStatus === 'cancelled') throw new Error(runStatus === 'cancelled' ? 'Run cancelled.' : terminalError.replace(/^Request failed:\s*/, '') || 'Run failed.');
     } catch (error) {

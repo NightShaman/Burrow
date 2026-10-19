@@ -37,7 +37,7 @@ describe('attachment navigation and send lifecycle', () => {
 
       streamMock.mockResolvedValue({ terminalType: 'run.completed', finalResult: { ok: true, answerText: 'sent' } });
       const session = {
-        attached: [currentAttachment], clearAttachment: vi.fn(), sessionId: 's-b', draft: '', setDraft: vi.fn(), clearError: vi.fn(), reportError: vi.fn(), leaveNewSessionForMessage: vi.fn(), appendTurn: vi.fn(), storeToolActivity: vi.fn(), toolActivityForRun: vi.fn(), clearRunState: vi.fn(), refreshSessions: vi.fn().mockResolvedValue(undefined), refreshConversation: vi.fn().mockResolvedValue(undefined),
+        attached: [currentAttachment], clearAttachment: vi.fn(), sessionId: 's-b', draft: '', setDraft: vi.fn(), clearError: vi.fn(), reportError: vi.fn(), leaveNewSessionForMessage: vi.fn(), appendTurn: vi.fn(), appendTransientTurn: vi.fn(), storeToolActivity: vi.fn(), toolActivityForRun: vi.fn(), clearRunState: vi.fn(), refreshSessions: vi.fn().mockResolvedValue(undefined), refreshConversation: vi.fn().mockResolvedValue(undefined),
       };
       const { result } = renderHook(() => useChatRun({ selectedAgentId: 'b', selected: undefined, savedProviders: [], session, setAgentActivity: vi.fn() }));
       await act(async () => { await result.current.sendMessage(); });
@@ -48,7 +48,7 @@ describe('attachment navigation and send lifecycle', () => {
   it('keeps same-agent attachment scope across session navigation and sends captured session', async () => {
     const attachment = await readAttachment(new File(['same'], 'same.txt', { type: 'text/plain' }), 'same.txt');
     streamMock.mockResolvedValue({ terminalType: 'run.completed', finalResult: { ok: true, answerText: 'sent' } });
-    const session = { attached: [attachment], clearAttachment: vi.fn(), sessionId: 's-2', draft: '', setDraft: vi.fn(), clearError: vi.fn(), reportError: vi.fn(), leaveNewSessionForMessage: vi.fn(), appendTurn: vi.fn(), storeToolActivity: vi.fn(), toolActivityForRun: vi.fn(), clearRunState: vi.fn(), refreshSessions: vi.fn().mockResolvedValue(undefined), refreshConversation: vi.fn().mockResolvedValue(undefined) };
+    const session = { attached: [attachment], clearAttachment: vi.fn(), sessionId: 's-2', draft: '', setDraft: vi.fn(), clearError: vi.fn(), reportError: vi.fn(), leaveNewSessionForMessage: vi.fn(), appendTurn: vi.fn(), appendTransientTurn: vi.fn(), storeToolActivity: vi.fn(), toolActivityForRun: vi.fn(), clearRunState: vi.fn(), refreshSessions: vi.fn().mockResolvedValue(undefined), refreshConversation: vi.fn().mockResolvedValue(undefined) };
     const { result } = renderHook(() => useChatRun({ selectedAgentId: 'same', selected: undefined, savedProviders: [], session, setAgentActivity: vi.fn() }));
     await act(async () => { await result.current.sendMessage(); });
     expect(streamMock).toHaveBeenCalledWith(expect.objectContaining({ requestBody: expect.objectContaining({ agentId: 'same', sessionId: 's-2', attachments: [attachment] }) }));

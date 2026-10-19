@@ -308,6 +308,9 @@ export function useChatSession(selectedAgentId: string) {
     writeConversationCache(conversationCacheRef.current, cacheKey);
     if (selectedChatRef.current.agentId === agentId && selectedChatRef.current.sessionId === targetSessionId) setTurns(nextTurns);
   }, []);
+  const appendTransientTurn = useCallback((agentId: string, targetSessionId: string, turn: SessionTurn) => {
+    if (selectedChatRef.current.agentId === agentId && selectedChatRef.current.sessionId === targetSessionId) setTurns((current) => [...current, turn]);
+  }, []);
   const storeToolActivity = useCallback((activity: ToolActivity) => {
     if (!activity.runId) return;
     toolActivityByRunRef.current = { ...toolActivityByRunRef.current, [activity.runId]: activity };
@@ -346,5 +349,5 @@ export function useChatSession(selectedAgentId: string) {
   const reportError = useCallback((message: string) => setChatError(message), []);
   const clearError = useCallback(() => setChatError(''), []);
 
-  return { composerResetGeneration, isAttachmentScopeCurrent, attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation: isLoadingConversation || isSwitchingAgent, draft, setDraft, refreshSessions, refreshConversation, selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, storeToolActivity, toolActivityForRun, clearRunState, a2aActivities, runtimeRun, runtimeChildActivities, cancelRuntimeRun };
+  return { composerResetGeneration, isAttachmentScopeCurrent, attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation: isLoadingConversation || isSwitchingAgent, draft, setDraft, refreshSessions, refreshConversation, selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, appendTransientTurn, storeToolActivity, toolActivityForRun, clearRunState, a2aActivities, runtimeRun, runtimeChildActivities, cancelRuntimeRun };
 }

@@ -209,7 +209,7 @@ it.each(['agent', 'session'])('FE014 composed run/page retains unavailable %s dr
     const session = {
       attached: [], clearAttachment: vi.fn(), sessionId: missing === 'session' ? '' : 'default',
       draft: 'Keep this draft', setDraft, clearError: vi.fn(), reportError: vi.fn(),
-      leaveNewSessionForMessage: vi.fn(), appendTurn: vi.fn(), storeToolActivity: vi.fn(),
+      leaveNewSessionForMessage: vi.fn(), appendTurn: vi.fn(), appendTransientTurn: vi.fn(), storeToolActivity: vi.fn(),
       toolActivityForRun: vi.fn(), clearRunState: vi.fn(), refreshSessions: vi.fn().mockResolvedValue(undefined),
       refreshConversation: vi.fn().mockResolvedValue(undefined),
     };
