@@ -38,18 +38,33 @@ export function AgentProfileDocuments({ agentId, overflowTarget }: { agentId: st
     });
     return () => controller.abort();
   }, [agentId, retry]);
-  const save = async () => {
-    if (state !== 'idle') return;
+  const persist = async (nextDocuments: ProfileDocument[], nextGlobalProfile: GlobalProfile) => {
     const version = requestVersion.current;
     setState('saving'); setError('');
-    try { await request(`/api/agents/${encodeURIComponent(resourceId)}/profile-documents`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ documents, globalProfile }) }); }
-    catch (cause) { if (requestVersion.current === version) setError(cause instanceof Error ? `Could not save profile documents: ${cause.message}` : 'Could not save profile documents.'); }
-    finally { if (requestVersion.current === version) setState('idle'); }
+    try {
+      await request(`/api/agents/${encodeURIComponent(resourceId)}/profile-documents`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ documents: nextDocuments, globalProfile: nextGlobalProfile }) });
+      return true;
+    } catch (cause) {
+      if (requestVersion.current !== version) return true;
+      setError(cause instanceof Error ? `Could not save profile documents: ${cause.message}` : 'Could not save profile documents.');
+      return false;
+    } finally { if (requestVersion.current === version) setState('idle'); }
+  };
+  const save = async () => {
+    if (state !== 'idle') return;
+    await persist(documents, globalProfile);
+  };
+  const updateGlobalProfile = async (key: keyof GlobalProfile, checked: boolean) => {
+    if (state !== 'idle') return;
+    const previous = globalProfile;
+    const next = { ...previous, [key]: checked };
+    setGlobalProfile(next);
+    if (!await persist(documents, next)) setGlobalProfile(previous);
   };
   const update = (kind: ProfileDocument['kind'], markdown: string) => setDocuments(current => current.map(item => item.kind === kind ? { ...item, markdown } : item));
   const globalControls = <fieldset className="profile-global-controls" disabled={state !== 'idle'}><legend>Global documents</legend>
-    <label><input type="checkbox" checked={globalProfile.useGlobalRules} onChange={event => setGlobalProfile(current => ({ ...current, useGlobalRules: event.target.checked }))} /><span><strong>Include Global Rules</strong><small>{globalProfile.useGlobalRules ? 'Global Rules first, then this agent’s RULES.md.' : 'Use only this agent’s RULES.md.'}</small></span></label>
-    <label><input type="checkbox" checked={globalProfile.useGlobalOrientation} onChange={event => setGlobalProfile(current => ({ ...current, useGlobalOrientation: event.target.checked }))} /><span><strong>Include Global Orientation</strong><small>{globalProfile.useGlobalOrientation ? 'Global Orientation first, then this agent’s ORIENTATION.md.' : 'Use only this agent’s ORIENTATION.md.'}</small></span></label>
+    <label><input type="checkbox" checked={globalProfile.useGlobalRules} onChange={event => void updateGlobalProfile('useGlobalRules', event.target.checked)} /><span><strong>Include Global Rules</strong><small>{globalProfile.useGlobalRules ? 'Global Rules first, then this agent’s RULES.md.' : 'Use only this agent’s RULES.md.'}</small></span></label>
+    <label><input type="checkbox" checked={globalProfile.useGlobalOrientation} onChange={event => void updateGlobalProfile('useGlobalOrientation', event.target.checked)} /><span><strong>Include Global Orientation</strong><small>{globalProfile.useGlobalOrientation ? 'Global Orientation first, then this agent’s ORIENTATION.md.' : 'Use only this agent’s ORIENTATION.md.'}</small></span></label>
   </fieldset>;
 
   if (overflowTarget) {

@@ -133,6 +133,7 @@ export function ChatComposer({
     }
     if (event.key === 'Escape') { event.preventDefault(); setDismissedMenu(true); return true; }
     if (event.key === 'Enter' && !event.shiftKey) {
+      if (projectQuery === null && draft === '/context') return false;
       event.preventDefault();
       if (projectQuery !== null) void chooseProject(activeOption === 0 ? null : visibleProjects[activeOption - 1]);
       else chooseCommand(commandMatches[activeOption].name);

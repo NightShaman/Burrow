@@ -138,15 +138,37 @@ describe('FE015 composition lifecycle and submission eligibility', () => {
     expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
-it('navigates command options with active descendant and Escape without submitting', () => {
- render(<ComposerFixture initial="/" />);
- const input = screen.getByRole('textbox', {name:'Message'});
- const options = screen.getAllByRole('option');
- expect(input.getAttribute('aria-activedescendant')).toBe(options[0].id);
- fireEvent.keyDown(input, {key:'End'});
- expect(input.getAttribute('aria-activedescendant')).toBe(options[options.length - 1].id);
- fireEvent.keyDown(input, {key:'Home'}); fireEvent.keyDown(input, {key:'Enter'});
- expect((input as HTMLTextAreaElement).value).not.toBe('/');
- fireEvent.change(input, {target:{value:'/'}}); fireEvent.keyDown(input, {key:'Escape'});
- expect(screen.queryByRole('listbox')).toBeNull();
+describe('chat command autocomplete', () => {
+  it('submits bare /context instead of intercepting Enter as an autocomplete selection', () => {
+    const onSend = vi.fn();
+    render(<ChatComposer draft="/context" setDraft={() => {}} attached={[]} onAttach={() => {}} onRemoveAttachment={() => {}} onSend={onSend} placeholder="Message" />);
+    const input = screen.getByRole('textbox', { name: 'Message' });
+
+    expect(screen.getByRole('listbox', { name: 'Chat commands' })).toBeTruthy();
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onSend).toHaveBeenCalledOnce();
+  });
+
+  it('preserves autocomplete selection for a partial /context command', () => {
+    const onSend = vi.fn();
+    render(<ChatComposer draft="/cont" setDraft={() => {}} attached={[]} onAttach={() => {}} onRemoveAttachment={() => {}} onSend={onSend} placeholder="Message" />);
+
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message' }), { key: 'Enter' });
+
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('navigates options with active descendant and Escape without submitting', () => {
+    render(<ComposerFixture initial="/" />);
+    const input = screen.getByRole('textbox', { name: 'Message' });
+    const options = screen.getAllByRole('option');
+    expect(input.getAttribute('aria-activedescendant')).toBe(options[0].id);
+    fireEvent.keyDown(input, { key: 'End' });
+    expect(input.getAttribute('aria-activedescendant')).toBe(options[options.length - 1].id);
+    fireEvent.keyDown(input, { key: 'Home' }); fireEvent.keyDown(input, { key: 'Enter' });
+    expect((input as HTMLTextAreaElement).value).not.toBe('/');
+    fireEvent.change(input, { target: { value: '/' } }); fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
 });
