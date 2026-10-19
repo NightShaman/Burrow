@@ -235,7 +235,7 @@ function MessageAttachment({ attachment, agentId }: { attachment: SessionAttachm
     return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [agentId, isImage, path]);
   const imageSource = isImage && !failed ? source ?? attachment.preview ?? null : null;
-  return <div className="message-attachment-card">{imageSource
+  return <div className={`message-attachment-card${imageSource ? ' image' : ''}`}>{imageSource
     ? <figure className="message-attachment-image"><ImagePreview src={imageSource} alt={attachment.name} loading="lazy" onError={() => setFailed(true)} /><figcaption>{attachment.name}</figcaption></figure>
     : <span className="message-attachment" title={attachment.type}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m4 18 5.5-5.5 3.5 3.5 2.5-2.5 4.5 4.5" /></svg><span>{attachment.name}</span></span>}
     {url && <button type="button" onClick={download} disabled={downloadState === 'downloading'} aria-label={`Download ${attachment.name}`}>{downloadState === 'downloading' ? 'Downloading…' : downloadState === 'failed' ? 'Retry download' : 'Download'}</button>}

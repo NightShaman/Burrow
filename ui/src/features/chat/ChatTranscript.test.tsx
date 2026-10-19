@@ -216,6 +216,9 @@ it('renders empty Forge attachment turns after completion and refresh, with auth
     const { rerender } = render(<ChatTranscript {...props} turns={[]} isSending />);
     rerender(<ChatTranscript {...props} turns={[attached, { type: 'message', role: 'assistant', content: 'Done' }]} isSending={false} />);
     await waitFor(() => expect(screen.getByRole('img', { name: 'Forge image.png' }).getAttribute('src')).toBe('blob:forge'));
+    const attachmentCard = screen.getByRole('img', { name: 'Forge image.png' }).closest('.message-attachment-card');
+    expect(attachmentCard?.classList.contains('image')).toBe(true);
+    expect(attachmentCard?.closest('.message.operator')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Download Forge image.png' }));
     await waitFor(() => expect(click).toHaveBeenCalledOnce());
     expect(fetchMock.mock.calls[0][0]).toBe('/api/attachments/hatchet/artifacts/attachments/forge%20image.png');
