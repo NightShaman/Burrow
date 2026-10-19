@@ -21,7 +21,7 @@ export const TARGETS = {
     excludes: []
   },
   burrowBackdoor: {
-    paths: ['README.md', 'LICENSE', 'burrow.mod.json', 'docs', 'package.json', 'package-lock.json', 'src', 'test', 'ui'],
+    paths: ['.github/workflows/docs.yml', 'README.md', 'LICENSE', 'burrow.mod.json', 'docs', 'mkdocs.yml', 'package.json', 'package-lock.json', 'requirements-docs.txt', 'scripts/docs', 'src', 'test', 'ui'],
     excludes: []
   }
 };
