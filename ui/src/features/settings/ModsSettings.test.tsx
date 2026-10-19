@@ -20,7 +20,7 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 describe('ModsSettings layout contract', () => {
   it('keeps selected mod configuration in column 3 and the catalog in column 4', async () => {
     loadMock.mockResolvedValue({ restartRequired: false, sources: [], mods: [
-      { id: 'alpha', name: 'Alpha', status: 'installed', enabled: true, version: '1.0.0', system: true },
+      { id: 'alpha', name: 'Alpha', status: 'installed', enabled: true, version: '1.0.0', runningVersion: '1.0.0', managedSkillVersion: '3.2.1', system: true },
       { id: 'beta', name: 'Beta', status: 'available', latestVersion: '2.0.0' },
     ] });
     const overflow = document.createElement('section');
@@ -30,6 +30,8 @@ describe('ModsSettings layout contract', () => {
     expect(container.querySelector('.mod-configuration')).toBeTruthy();
     expect(container.querySelector('.mod-configuration.setting-section')).toBeTruthy();
     expect(overflow.textContent).toContain('Alpha');
+    expect(screen.getByRole('button', { name: 'Manage Alpha' }).textContent).toContain('Installed · Enabled · Installed 1.0.0 · Running 1.0.0 · Managed skill 3.2.1');
+    expect(screen.getByRole('button', { name: 'Manage Beta' }).textContent).not.toContain('Managed skill');
     expect(overflow.textContent).not.toContain('Core');
     expect(overflow.querySelector('.mod-system-dot')).toBeNull();
     expect(overflow.querySelector('.mod-system-badge')?.textContent).toBe('System');

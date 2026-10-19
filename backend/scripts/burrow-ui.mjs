@@ -108,7 +108,7 @@ import { createScheduledChannelRoutes } from './ui/scheduled-channel-routes.mjs'
 import { createAuthRoutes } from './ui/auth-routes.mjs';
 import { createChatRoutes } from './ui/chat-routes.mjs';
 import { cleanupMods, createModRoute, discoverMods, loadMods } from '../src/mod-runtime.mjs';
-import { activeManagedSkillDeclarations, createManagedSkillSynchronizer, reconcileManagedSkills } from '../src/managed-skills.mjs';
+import { activeManagedSkillDeclarations, createManagedSkillSynchronizer, inspectManagedSkills, reconcileManagedSkills } from '../src/managed-skills.mjs';
 import { createModManagement } from '../src/mod-management.mjs';
 import { createModDistribution, createModManagementRoute } from '../src/mod-distribution.mjs';
 import { MAX_OVERVIEW_CHILD_CONTEXTS, normalizeOverviewBody, overviewSessionIds } from '../src/agent-overview.mjs';
@@ -3061,7 +3061,26 @@ modsStarting = false;
 coreModManagement = createModManagement({ modAuthority, distribution: modDistribution, repositoryFactory: postgresApplication.modDistributionRepositoryFactory });
 await coreModManagement.ready;
 const modAuthorityRoute = createModAuthorityRoute({ authority: modAuthority, getMods: () => loadedMods, readJsonBody, sendJson });
-const modManagementRoute = createModManagementRoute({ distribution: modDistribution, readJsonBody, sendJson });
+const modManagementDistribution = {
+  ...modDistribution,
+  async list() {
+    const result = await modDistribution.list();
+    const workspaceRoot = (await runtimeConfig()).runtimeState.workspaceRoot;
+    const managedRoot = path.join(workspaceRoot, 'global', 'managed-skills');
+    const loadedById = new Map(loadedMods.map(mod => [mod.id, mod]));
+    return {
+      ...result,
+      mods: await Promise.all(result.mods.map(async mod => {
+        const declarations = loadedById.get(mod.id)?.managedSkills || [];
+        if (!declarations.length) return mod;
+        const installed = await inspectManagedSkills({ root: managedRoot, declarations });
+        const managedSkillVersion = installed.length === 1 ? installed[0].version : null;
+        return managedSkillVersion ? { ...mod, managedSkillVersion } : mod;
+      })),
+    };
+  },
+};
+const modManagementRoute = createModManagementRoute({ distribution: modManagementDistribution, readJsonBody, sendJson });
 
 const server = createServer((req, res) => {
   void requestLifecycle.track(() => handleRequest(req, res)).catch(error => {

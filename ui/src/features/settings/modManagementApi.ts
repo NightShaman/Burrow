@@ -5,6 +5,7 @@ export type ModRecord = {
   name: string;
   version?: string;
   runningVersion?: string;
+  managedSkillVersion?: string;
   status?: string;
   system?: boolean;
   enabled?: boolean;

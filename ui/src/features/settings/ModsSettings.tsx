@@ -198,7 +198,7 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   const modInventoryContents = state.mods.length === 0
     ? <p className="settings-empty">No mods found. Add a source in Mod sources.</p>
     : <div className="memory-connection-list">{state.mods.map((mod) => <article className="memory-connection" key={mod.id}>
-      <button type="button" className="memory-connection-select" aria-label={`Manage ${mod.name}`} aria-pressed={mod.id === selectedModId} disabled={busy !== null} onClick={() => setSelectedModId(mod.id)}><strong>{mod.name}{mod.system && <span className="mod-system-badge">System</span>}</strong><small>{mod.status === 'installed' ? (mod.enabled ? 'Installed · Enabled' : 'Installed · Disabled') : 'Available'}{mod.version ? ` · Installed ${mod.version}` : ''}{mod.runningVersion ? ` · Running ${mod.runningVersion}` : ''}</small></button>
+      <button type="button" className="memory-connection-select" aria-label={`Manage ${mod.name}`} aria-pressed={mod.id === selectedModId} disabled={busy !== null} onClick={() => setSelectedModId(mod.id)}><strong>{mod.name}{mod.system && <span className="mod-system-badge">System</span>}</strong><small>{mod.status === 'installed' ? (mod.enabled ? 'Installed · Enabled' : 'Installed · Disabled') : 'Available'}{mod.version ? ` · Installed ${mod.version}` : ''}{mod.runningVersion ? ` · Running ${mod.runningVersion}` : ''}{mod.managedSkillVersion ? ` · Managed skill ${mod.managedSkillVersion}` : ''}</small></button>
     </article>)}</div>;
   const modInventory = overflowTarget
     ? <div className="settings-overflow-content memory-saved" aria-label="Mod catalog">{modInventoryContents}</div>

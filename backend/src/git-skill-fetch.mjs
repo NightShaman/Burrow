@@ -111,7 +111,7 @@ function metadata(text, fallback) {
     const item = /^([A-Za-z][\w-]*):\s*(.*?)\s*$/.exec(line);
     if (item) fields[item[1]] = item[2].replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, (_, double, single) => double ?? single);
   }
-  return { name: fields.name || fallback, description: fields.description || '' };
+  return { name: fields.name || fallback, description: fields.description || '', version: fields.version || null };
 }
 
 /**
