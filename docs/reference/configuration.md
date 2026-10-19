@@ -4,9 +4,6 @@
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 BURROW stores operator-managed configuration in PostgreSQL. The service environment supplies deployment paths, database connectivity, encryption keys and optional overrides. The retained `loadBurrowConfig()` function is inert: it does not read or write `burrow.json`.
-
-[Configuration authority](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/config.mjs#L51-L60) · [Runtime composition](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/runtime-config-loader.mjs#L4-L34)
-
 ## Choose the right configuration surface
 
 | Setting | Authoritative surface | Operator entry point |
@@ -25,9 +22,6 @@ BURROW stores operator-managed configuration in PostgreSQL. The service environm
 | Theme, rail layout, drafts, cached conversations | Browser-local storage/state | UI appearance and navigation |
 
 These are separate ownership domains. Copying a workspace directory does not copy all application settings; exporting selected categories is not a complete backup. See [storage](../architecture/persistence.md), [backup and recovery](../operations/backup-recovery.md), and [browser state](../concepts/interface.md).
-
-[Settings routes](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/settings-routes.mjs#L1-L70) · [General settings routes](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/general-settings-routes.mjs#L1-L46)
-
 ## Resolution and overrides
 
 Runtime composition requires injected PostgreSQL-backed stores; there is no silent fallback to a local settings file. A caller can explicitly tolerate model-resolution errors for inspection, but normal execution still needs a usable model selection.
@@ -35,9 +29,6 @@ Runtime composition requires injected PostgreSQL-backed stores; there is no sile
 For UI authentication, precedence is explicit runtime arguments → service environment → persisted settings → defaults. A saved authentication form can therefore differ from the effective mode. `GET /api/settings/ui-auth` returns both the saved `auth` object and `effective` mode, enabled state and source. Responses report whether secrets are configured rather than returning them. Saving an omitted Basic password preserves its existing hash; a nonblank supplied OIDC client secret replaces the encrypted stored secret.
 
 Listener host/port are selected at process start. Changing the service environment requires a restart. The direct HTTP entry point defaults to `0.0.0.0:42817`; the native installer explicitly writes `127.0.0.1`, while Docker uses `0.0.0.0`. The generic configuration resolver's loopback default does not override the server entry point. Set the listener deliberately before enabling remote access.
-
-[Auth resolution](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/config.mjs#L160-L197) · [Saved/effective auth](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L699-L778) · [Listener](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L114-L120)
-
 ## Paths and agent ownership
 
 The native installer normally uses `$HOME/.burrow`. The generic runtime fallback is `/mnt/local/burrow`; it is not the native installation recommendation. Explicit path arguments precede environment values. Agent workspaces normally resolve under the shared workspace root, with agent data and workspace pointing to the same selected tree.
@@ -52,7 +43,7 @@ The native installer normally uses `$HOME/.burrow`. The generic runtime fallback
 
 An explicit workspace-root argument suppresses the ambient agent-workspace override. A workspace or data root is ownership/context information, not a filesystem sandbox. Configure [execution boundaries](../security/permissions.md) separately and use operating-system isolation where required.
 
-[Path resolution](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/config.mjs#L200-L228) · [Installation](../getting-started/installation.md)
+ · [Installation](../getting-started/installation.md)
 
 ## Models and generation defaults
 
@@ -67,20 +58,15 @@ Select an enabled connection and an enabled model within it. Agent defaults can 
 | Image input | Per-model accepted input takes precedence over connection-level compatibility metadata |
 
 Capacity fallbacks are BURROW defaults, not a guarantee of a provider's current limits. Catalog output capacity is metadata and is distinct from the requested generation limit. See [models](../concepts/models.md) before changing provider details.
-
-[Model resolution](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/config.mjs#L15-L41) · [Selection and capabilities](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/config.mjs#L62-L145)
-
 ## Context compression
 
 Compression policy is runtime configuration, not a client-owned chat-body setting. Defaults are a 0.75 threshold, 48 fresh-tail messages, 24,000 fresh-tail tokens, 20,000 leaf-chunk tokens, a 6,000-token summary target, at most four sweep iterations and a 120,000 ms deadline. A summary-model override is optional. See the exact [environment variables](environment.md#context-and-memory) and [conversation history](../concepts/conversation-history.md).
-
-[Compression defaults](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/context-compression.mjs#L57-L79)
 
 ## Timezone and independent retention policies
 
 The operator timezone is an IANA name used by agent context and inherited schedules. Jobs with a null timezone inherit the current operator zone; reconciliation recomputes their next run when that zone changes. Jobs with an explicit timezone retain it. Saving the operator zone does not force browser-local display into that zone. Dreams likewise support explicit or inherited timezone. Trace cleanup, original-conversation retention, working-memory expiration and rolling-continuity history are separate mechanisms. Do not use old session-age environment defaults as a substitute for the current operator policy.
 
-[Inherited schedule reconciliation](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-scheduled-job-store.mjs#L169-L178) · [Timezone API](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/settings-routes.mjs#L7-L10) · [Trace retention API](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/general-settings-routes.mjs#L36-L46) · [Dreams](../concepts/dreams.md) · [Memory retention](../concepts/memory.md)
+ ·  ·  · [Dreams](../concepts/dreams.md) · [Memory retention](../concepts/memory.md)
 
 ## Portable agent context
 
@@ -88,4 +74,3 @@ The `burrow.agent-context/v1` format carries descriptive context: personality, o
 
 Unknown fields are discarded. This format does not define executable tools, grant permissions, select a model or establish memory-routing authority. Its text limits differ from the six profile-document limits. An advertised UI target is context, not an automatic browser launch.
 
-[Portable context contract](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/agent-context-config.mjs#L1-L98)

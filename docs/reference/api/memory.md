@@ -20,9 +20,6 @@ Every request requires an `agentId` query parameter. The query owner overrides a
 Titles and content must be nonempty strings. `limit` must be a positive safe integer; the store does not impose a fixed page-size ceiling. Use the server-returned cursor with the same agent and query. Listing is ID-keyset paged, not a snapshot of concurrent writes. An omitted `sourceRefs` on update becomes an empty array, so supply references you intend to retain.
 
 Responses are record/list objects, not a universal `ok` envelope. Validation errors return 400 with `error: brain_*`; revision/ownership conflicts return 409. Reload before retrying `brain_revision_conflict_or_operator_authority`. An `expectedRevision` must be a positive integer. Operator creates/edits/deletes mark records operator-owned; runtime Brain tools cannot mutate operator-owned records. DELETE is a tombstone operation, not conversation purge or physical erasure.
-
-[Mounted Brain routes](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/ui/brain-routes.mjs) · [Store contract](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-brain-store.mjs)
-
 Example creation (use your normal authenticated client):
 
 ```http
@@ -49,25 +46,16 @@ Embeddings are optional and disabled by default. They enrich the explicit runtim
 These routes use the normal UI authentication/browser-origin boundary. Handled embedding errors return 400 with `brain_embedding_request_failed`. Enabling indexing sends saved-memory title/content to the selected embedding provider; search sends the query. Use a connection appropriate for that data. Indexing is asynchronous: a successful settings/reindex response is not a completed-index receipt. Check `pending`, `failed` and `indexed` afterward. Jobs persist and retry with backoff; edits/deletions invalidate stale vectors.
 
 Hybrid search ranks lexical and exact cosine matches over the active agent's records. On embedding-provider failure it returns lexical results with `retrieval: {mode: "lexical", fallback: "embedding_unavailable"}`. Ranked cursors bind the agent, query and corpus digest; changes can invalidate the cursor, requiring a fresh search. This is explicit recall, never an automatic prompt preload.
-
-[Embedding routes](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/ui/brain-routes.mjs) · [Indexing and search](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-brain-embeddings.mjs) · [Provider contract](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/brain-embedding-provider.mjs)
-
 ## Retired Albdruck routes and original evidence
 
 The current router does **not** mount `/api/albdruck/*`, including `/knowledge`, `/recall`, `/history`, `/retention` or `/purge-conversation`. Legacy store/migration code and stale generated API artifacts can still mention those names; they do not make the HTTP routes available.
 
 Use [session search and Archive](sessions.md) for original conversation evidence and `/api/settings/retention` plus its `/preview` and `/run` actions for trace-retention controls. They are not a replacement per-conversation purge API. Brains deletion does not remove an original conversation. Imported memories preserve legacy migration details; see [migration semantics](../../concepts/memory.md#legacy-albdruck-migration).
-
-[Current route wiring](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs) · [Retention routes](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/ui/general-settings-routes.mjs)
-
 ## Tiddle and promotion candidates
 
 `GET /api/settings/tiddle` returns status for an agent. `/api/tiddle/cards` accepts `agentId`, `scope`, `limit`; `/api/tiddle/history` accepts `agentId`, `cardId`, `since`, `limit`. Signal history is not the complete original chat transcript. Current working-memory/rolling TTL defaults are 90 days, and `cardTtlDays` reads the persisted rolling policy.
 
 Brain-promotion candidate list/review routes remain a separate surface. A candidate's presence does not mean a saved Brain memory was created.
-
-[Tiddle routes](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/ui/general-settings-routes.mjs) · [Status policy](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/tiddle-continuity.mjs) · [Candidate route wiring](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs)
-
 ## Dream controls missing from the pinned OpenAPI
 
 All these routes share the normal API authentication boundary. They are implemented even though the downloadable contract omits them.
@@ -82,10 +70,6 @@ All these routes share the normal API authentication boundary. They are implemen
 Dream settings include `enabled`, `cron`, `timezone`, `prompt`, optional `modelConnectionId` and `model`. The persisted default is enabled at `0 4 * * *`, with inherited operator timezone and model selection. Null timezone means inheritance, not a stored snapshot of the effective zone. Explicit model overrides must supply a complete valid pair. A Dream prompt is at most 20,000 characters.
 
 Diary GET supports `date`, `phase`, `limit` (default 30) and `format`/`markdown`. Cycle receipt GET defaults to 20 entries. Consolidation/cycle POST accept `limit` and optional `generatedAt`; these are processing controls, not a separate scheduling API. A cycle result should be inspected for actual phase outcomes.
-
-[Dream route module](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/ui/dream-routes.mjs) · [Controller behavior](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs) · [Defaults/selection](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-dream-settings-store.mjs)
-
-
 ## Additional endpoint inventory
 
 Methods are significant. Braced segments are placeholders; URL-encode identifiers. See the [contract and conventions](../api.md) for artifact limitations. Brains and embedding endpoints are listed above.

@@ -30,7 +30,7 @@ Authentication settings resolve as explicit runtime arguments → environment �
 | `BURROW_UI_AUTH_OIDC_ALLOWED_DOMAINS` | Empty; optional comma-separated allowlist |
 | `BURROW_UI_AUTH_OIDC_INSECURE_COOKIES` | Only literal `true` disables OIDC Secure cookies; local development only |
 
-[Resolver](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/config.mjs#L160-L197) · [Actual listener](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L114-L120) · [Authentication caveats](../security/authentication.md)
+ ·  · [Authentication caveats](../security/authentication.md)
 
 ## Runtime paths and key material
 
@@ -51,9 +51,6 @@ Authentication settings resolve as explicit runtime arguments → environment �
 | `BURROW_BOOTSTRAP_SAMPLE_IDENTITIES` | Sample-identity bootstrap is opt-in; use `1` for explicit fixtures, not as ordinary setup |
 
 The encryption key is needed to decrypt stored credentials after recovery. Keep it with a protected backup, outside public documentation and source control. Container startup persists a generated key and rejects a conflicting supplied key. The key-file variable is an entrypoint feature, not a general backend file-loader setting.
-
-[Paths](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/config.mjs#L200-L228) · [Key loader](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/mcp-settings-store.mjs#L10-L16) · [Container key persistence](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/docker-entrypoint.sh#L1-L33) · [Schedulers](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/background-scheduler-policy.mjs#L1-L3) · [Shutdown](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L3290-L3305)
-
 ## PostgreSQL
 
 The supported startup wrapper requires an explicit lifecycle. Although the low-level resolver defaults to `disabled`, normal startup rejects it with `postgres_startup_requires_explicit_lifecycle`. The native installer and container select `managed` unless configured otherwise.
@@ -85,9 +82,6 @@ The supported startup wrapper requires an explicit lifecycle. Although the low-l
 Managed startup removes connection URLs/passwords and supplies its Unix socket, port 5432, database `postgres` and current OS username. Consequently, the general pool defaults above do not describe the managed database's effective identity. Managed PostgreSQL does not listen on TCP. External mode validates the expected major and installed `vector` extension without owning database process start/stop.
 
 `verify-full` verifies the configured hostname, including IP literals. Do not combine an explicit SSL mode with URL parameters whose names begin with `ssl`; startup rejects mixed TLS sources. An unset mode does not imply certificate verification. See [persistence](../architecture/persistence.md) for lifecycle requirements.
-
-[Pool/TLS configuration](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-foundation.mjs#L15-L61) · [Lifecycle](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-lifecycle-bootstrap.mjs#L13-L32) · [Managed overrides](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-startup.mjs#L7-L32)
-
 ## Context and memory
 
 | Variable | Default |
@@ -103,10 +97,7 @@ Managed startup removes connection URLs/passwords and supplies its Unix socket, 
 | `BURROW_ALBDRUCK_PROMPT_MAX_CHARS` | `4000` |
 | `BURROW_ALBDRUCK_MAX_PAGE_SIZE` | `200` |
 
-Compression controls normalize invalid values to supported defaults. The retained `BURROW_ALBDRUCK_*` configuration names are compatibility values, not switches that restore the retired Albdruck UI/API. Positive safe integers are required. Explicit history lookup also accepts `BURROW_HISTORY_QUERY_BUDGET_MS` (15000) and `BURROW_HISTORY_LOCK_TIMEOUT_MS` (1000). These are work bounds, not retention settings. [Current mapping](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/config.mjs).
-
-[Compression mapping](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/config.mjs#L248-L274) · [Defaults](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/context-compression.mjs#L57-L79)
-
+Compression controls normalize invalid values to supported defaults. The retained `BURROW_ALBDRUCK_*` configuration names are compatibility values, not switches that restore the retired Albdruck UI/API. Positive safe integers are required. Explicit history lookup also accepts `BURROW_HISTORY_QUERY_BUDGET_MS` (15000) and `BURROW_HISTORY_LOCK_TIMEOUT_MS` (1000). These are work bounds, not retention settings.
 ## MCP, provider login and mods
 
 | Variable | Default / purpose |
@@ -120,9 +111,6 @@ Compression controls normalize invalid values to supported defaults. The retaine
 | `BURROW_MOD_ARCHIVE_RESERVE_BYTES` | `268435456` (256 MiB); nonnegative safe-integer free-space reserve during mod extraction |
 
 MCP provider-specific environment variables are saved per connection; they are not arbitrary `BURROW_*` service settings. Mod Git credentials are injected into a subprocess internally and should not be configured as global service variables. See [MCP](../concepts/mcp.md) and [extensions](../development/extensions.md).
-
-[mcporter paths](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/mcporter-adapter.mjs#L12-L25) · [OAuth callback](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/openai-oauth-login.mjs#L58-L68) · [Error budget](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/forge-diagnostics.mjs#L1-L9) · [Archive reserve](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/mod-distribution.mjs#L310-L319)
-
 ## Compatibility, installer and development-only names
 
 These names occur in the repository but are not a second supported application-configuration system.
@@ -147,5 +135,3 @@ These names occur in the repository but are not a second supported application-c
 | `BURROW_TEST_TIMEOUT_MS`, `BURROW_VERIFY_DEPLOYED_ISOLATION`, `BURROW_POSTGRES_LIFECYCLE_REHEARSAL` | Test/rehearsal controls |
 | `BURROW_OOM_REPRO_ITERATIONS`, `BURROW_OOM_REPRO_FILE_BYTES`, `BURROW_OOM_REPRO_CALLS_PER_ITERATION`, `BURROW_OOM_REPRO_GC_INTERVAL`, `BURROW_OOM_REPRO_MAX_HEAP_MIB` | Isolated diagnostic reproducer inputs |
 | `BURROW_SOURCE_TOKEN` | Assembly CI secret for pinned source access; never a runtime API token |
-
-[Compatibility resolver](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/config.mjs#L225-L261) · [CLI environment](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/cli-postgres.mjs#L6-L19) · [Test isolation](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/test-runtime.mjs#L100-L125) · [Container build](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/Dockerfile#L11-L19)

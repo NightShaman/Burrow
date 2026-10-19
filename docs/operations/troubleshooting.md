@@ -50,16 +50,16 @@ Create a private `setup.json` file with this shape, replacing the fictional name
 
 ```json
 {
-  "operationId": "initial-setup-assistant-2026-10-10",
-  "operator": { "name": "Your display name", "avatar": "" },
-  "agent": { "id": "assistant", "name": "Assistant", "enabled": true },
-  "agentIdentity": { "avatar": "" },
+  "operationId": "initial-setup-assistant-2026-10-10"
+  "operator": { "name": "Your display name", "avatar": "" }
+  "agent": { "id": "assistant", "name": "Assistant", "enabled": true }
+  "agentIdentity": { "avatar": "" }
   "documents": [
-    { "kind": "SOUL", "markdown": "Describe the agent's role here." },
-    { "kind": "RULES", "markdown": "" },
-    { "kind": "ORIENTATION", "markdown": "" },
-    { "kind": "PREFERENCES", "markdown": "" },
-    { "kind": "TOOLS", "markdown": "" },
+    { "kind": "SOUL", "markdown": "Describe the agent's role here." }
+    { "kind": "RULES", "markdown": "" }
+    { "kind": "ORIENTATION", "markdown": "" }
+    { "kind": "PREFERENCES", "markdown": "" }
+    { "kind": "TOOLS", "markdown": "" }
     { "kind": "DREAM_MEMORY", "markdown": "" }
   ]
 }
@@ -81,7 +81,7 @@ If authentication is configured, use an authorized client instead. For Basic aut
 
 Expected result: the operation returns `ok: true` and the intended agent, and setup status reports `configured: true` / `wizardStep: "ready"`. Reload the UI, review the saved profiles and schedules, then follow [model setup](../getting-started/initial-setup.md#configure-a-usable-model). Retain the request privately until an uncertain response is resolved, then remove the temporary copy when no longer needed. Do not put credentials in it.
 
-[Wizard submission](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/settings/AgentToolbar.tsx) · [Transactional operation and replay](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/setup-operation.mjs) · [Six-kind validator](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-agent-profile-store.mjs) · [Setup requirements](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-setup-state-store.mjs).
+ ·  ·  · .
 
 ## Update reports health failure
 
@@ -131,10 +131,10 @@ Confirm the actual socket directory first. The default is `$HOME/.burrow/postgre
   PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=1000' \
   "$PSQL" -X -w -v ON_ERROR_STOP=1 \
     -h "$SOCKET" -p 5432 -U "$(id -un)" -d postgres <<'SQL'
-SELECT pid, state,
-       clock_timestamp() - query_start AS query_age,
-       clock_timestamp() - xact_start AS transaction_age,
-       wait_event_type, wait_event,
+SELECT pid, state
+       clock_timestamp() - query_start AS query_age
+       clock_timestamp() - xact_start AS transaction_age
+       wait_event_type, wait_event
        pg_blocking_pids(pid) AS blocking_pids
 FROM pg_stat_activity
 WHERE datname = current_database()
@@ -157,7 +157,7 @@ Burrow holds a transaction-scoped advisory lock and applies pending migrations i
 
 If diagnosis remains inconclusive, preserve the build, PID, elapsed observations, wait/blocker details and sanitized errors for investigation. Do not kill the backend, restart repeatedly, clear the migration ledger, edit checksums or force an older app onto the database as a progress test. Any interruption or recovery needs a deliberate plan and a restorable backup.
 
-[Startup ordering and private-socket identity](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-startup.mjs) · [Migration transaction and lock](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-migrations.mjs) · [CLI composition](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/cli-postgres.mjs).
+ ·  · .
 
 ## API documentation does not load
 
@@ -191,10 +191,3 @@ Preview cleanup and inspect the selected retention policy before confirming. Cur
 
 Include build version/source pins, deployment shape, sanitized exact error, relevant IDs, attempted steps, and terminal check results. Exclude settings keys, tokens/passwords, raw environment dumps, and unrelated conversation material. Distinguish a static source limitation from a reproduced failure.
 
-## Source evidence
-
-- [Wizard profile kinds](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/settings/AgentToolbar.tsx)
-- [Complete-set validation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-agent-profile-store.mjs)
-- [Update verification](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/install.sh)
-- [API spec file read](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs)
-- [Current wizard repair and durable retry](https://github.com/NightShaman/Burrow-UI/blob/da6e9c7e4eef6866e1127bc16a3b03db63bb1757/src/features/settings/AgentToolbar.tsx#L191-L224)

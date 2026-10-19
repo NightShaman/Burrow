@@ -80,9 +80,3 @@ The source includes `health-check.mjs`, `service-smoke.mjs`, `operational-audit.
 
 For production acceptance, use the correct supervisor scope, authenticated API evidence where needed, and an actual representative request. See [troubleshooting](troubleshooting.md) and [procedures](procedures.md).
 
-## Source evidence
-
-- [Server status, transport, lifecycle](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs)
-- [Observability routes](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/observability-routes.mjs)
-- [Runtime server logger](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/runtime-server-log.mjs)
-- [Service smoke implementation](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/service-smoke.mjs)

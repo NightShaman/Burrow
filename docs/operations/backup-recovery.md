@@ -117,12 +117,3 @@ These exports do not capture complete conversations, original archives, Brain kn
 - Background schedules and operator timezone are correct
 - A low-risk model turn completes without duplicate external actions
 
-## Source evidence
-
-- [Portable backup and restore implementation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/portable-install-backup.mjs)
-- [Database-only/selected-files backup](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/runtime-backup.mjs)
-- [Export catalog and encryption](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/export-service.mjs)
-- [Managed connection selection](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-startup.mjs)
-
-- [Cold-backup checks and restore inventory](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/portable-backup-policy.mjs)
-- [Launcher restore mapping dispatch](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/bin/burrow.mjs#L326-L332)

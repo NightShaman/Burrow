@@ -21,7 +21,7 @@ This distinction matters when operating the system: a successful HTTP request, a
 | **Receipt** | A bounded record of an operation and its result | A receipt is not the full raw output or an independent guarantee of correctness |
 | **Trace** | Diagnostic records and artifacts associated with a run | Traces can contain sensitive operational content |
 
-The runtime contracts explicitly separate chat turns, canonical turn envelopes, execution results, and side channels. [Source: runtime contracts](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/chat-runtime-contracts.mjs#L1-L41)
+The runtime contracts explicitly separate chat turns, canonical turn envelopes, execution results, and side channels. 
 
 ## Configuration, context, and evidence
 
@@ -33,7 +33,7 @@ Keep three questions separate:
 
 For example, a profile can say that a project uses a particular build command. Running that command produces current evidence about whether the build passed. An earlier assistant statement that it passed does not replace a fresh failing result.
 
-The product-owned prompt kernel reinforces this distinction and leaves identity, behavior rules, environment knowledge, and procedures to their appropriate profile or skill sources. [Source: chat kernel](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/plain-chat-kernel.mjs#L1-L14)
+The product-owned prompt kernel reinforces this distinction and leaves identity, behavior rules, environment knowledge, and procedures to their appropriate profile or skill sources. 
 
 ## A normal turn
 
@@ -49,7 +49,7 @@ flowchart LR
     A --> S[Conversation storage]
 ```
 
-Normal chat is model-owned: runtime planning and route labels provide context and observability, while the model selects tools from the supplied schemas. A planner label does not independently spawn a child or turn prose into filesystem authority. [Source: normal-chat routing](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/app-runtime.mjs#L299-L351)
+Normal chat is model-owned: runtime planning and route labels provide context and observability, while the model selects tools from the supplied schemas. A planner label does not independently spawn a child or turn prose into filesystem authority. 
 
 ## Workspace means starting context
 
@@ -58,7 +58,7 @@ An agent's workspace is its default context and working directory. An explicit f
 !!! warning "Workspace roots are not sandboxes"
     Agent homes and minion targets do not themselves enforce filesystem isolation. Native tools may address absolute paths outside the default workspace. Execution availability also depends on configured hard blocks, tool grants, operating-system permissions, and the selected execution environment. Read [Permissions](../security/permissions.md) before granting access to a host.
 
-This is explicit in the execution-context implementation, which describes roots as selected-context facts rather than access-control boundaries. [Source: execution context](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/execution-context.mjs#L25-L47) [Source: agent roots](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/agent-registry.mjs#L68-L94)
+This is explicit in the execution-context implementation, which describes roots as selected-context facts rather than access-control boundaries.  
 
 ## Reading completion correctly
 
@@ -68,7 +68,7 @@ This is explicit in the execution-context implementation, which describes roots 
 - **Superseded** means a newer run owns the session, so the older run must not publish itself as current
 - A tool receipt can be successful even when later verification fails
 
-Normal chat and the retained legacy work-loop have different completion and verification behavior. See [Execution flow](../architecture/execution-flow.md) and [Known limitations](../project/known-limitations.md). [Source: terminal integrity](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/runtime-plain-chat-finalizer.mjs#L138-L155)
+Normal chat and the retained legacy work-loop have different completion and verification behavior. See [Execution flow](../architecture/execution-flow.md) and [Known limitations](../project/known-limitations.md). 
 
 ## Where to go next
 

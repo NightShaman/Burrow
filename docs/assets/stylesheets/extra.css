@@ -14,3 +14,7 @@
 .md-typeset .burrow-hero .md-button { margin: .3rem; border-radius: .45rem; }
 .md-typeset .grid.cards > ul > li { padding: 1.1rem; }
 @media (max-width: 600px) { .burrow-hero { padding-top: 0; } .md-typeset .burrow-hero-logo { max-height: 15rem; } }
+
+/* Keep the homepage access warning prominent and readable. */
+.md-typeset .admonition.danger { font-size: .85rem; border-width: 2px; }
+.md-typeset .admonition.danger > .admonition-title { font-size: 1rem; }

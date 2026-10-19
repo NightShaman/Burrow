@@ -93,10 +93,3 @@ Normal shutdown records active-run interruption evidence and drains connections 
 - A recent backup has been restored in an isolated rehearsal
 - Logs and retention have explicit owners
 
-## Source evidence
-
-- [Native service and activation](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/install.sh#L480-L613)
-- [Supervisor](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/postgres-supervisor.mjs)
-- [External database validation](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-lifecycle.mjs#L105-L133)
-- [Connection and TLS configuration](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-foundation.mjs#L15-L61)
-- [Server startup/shutdown](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L3290-L3371)

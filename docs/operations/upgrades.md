@@ -8,7 +8,7 @@ Upgrade the deployment through its own distribution path: the native launcher fo
 ## Before changing a deployment
 
 1. Record the current version from health and the installed `SOURCE_VERSIONS`
-2. Review the target [release](https://github.com/NightShaman/Burrow/releases) and [known limitations](../project/known-limitations.md)
+2. Review the target  and [known limitations](../project/known-limitations.md)
 3. Make a consistent [backup](backup-recovery.md) and confirm how to restore it
 4. Allow space for new and previous application payloads and dependency staging
 5. Plan a maintenance window for active agent work, provider calls, and schema migration
@@ -63,9 +63,3 @@ Do not repeatedly update while an earlier attempt is still active. Capture the s
 
 Pin the intended image tag, then follow [container upgrade](containers.md#upgrade-and-backup). Keep the same durable volume and matching key. A container replacement uses startup migrations just like native startup; restoring an older image alone may be insufficient.
 
-## Source evidence
-
-- [Download and incoming-installer handoff](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/install.sh)
-- [Staging, activation, restart, cleanup](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/install.sh)
-- [Migration validation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-migrations.mjs)
-- [Release assembly](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/.github/workflows/assemble.yml)

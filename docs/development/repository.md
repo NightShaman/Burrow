@@ -61,13 +61,9 @@ Assembly replaces only the explicit runtime and release payload: `backend/`, `ui
 
 ## Source links and accessibility
 
-The manual prefers public commit-pinned source links so readers can inspect its evidence. Authorized contributors can use [Burrow-Backend](https://github.com/NightShaman/Burrow-Backend) and [Burrow-UI](https://github.com/NightShaman/Burrow-UI) for full development history/tests. Those repositories may be private; lack of access does not prevent reading the public assembled runtime.
+The manual prefers public commit-pinned source links so readers can inspect its evidence. Authorized contributors can use  and  for full development history/tests. Those repositories may be private; lack of access does not prevent reading the public assembled runtime.
 
 Generated bundles and dependency locks are inventory/build evidence, not preferred sources for explaining behavior. Source and tests take priority over stale comments, help text, historical runbooks, or planning documents.
 
 See [source map](../project/source-map.md), [architecture](../architecture/overview.md), and [release process](releases.md).
 
-## Source evidence
-
-- [Version pins](https://github.com/NightShaman/Burrow/blob/2d979fecca8434fe02a6ed2e8225c46eb4690098/SOURCE_VERSIONS)
-- [Materialization and version stamping](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/.github/workflows/assemble.yml)

@@ -74,13 +74,6 @@ The main UI also has **Tasks**, **Archive**, **Brains**, **Forge**, and **Settin
 
 ## Source evidence
 
-- [Setup authority and completion requirements](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-setup-state-store.mjs)
-- [UI setup routing](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/App.tsx)
-- [First-run dialog](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/settings/AgentToolbar.tsx)
-- [Profile replacement contract](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-agent-profile-store.mjs)
-- [Connection editor and controls](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/settings/ModelConnections.tsx)
-- [Model capability controls](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/settings/ModelConnectionViews.tsx)
-- [Chat model selector](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/chat/ChatPage.tsx) and [persisted selection writer](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/app/useModelSelectionWriter.ts)
-- [OAuth dialog](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/settings/ModelConnectionOAuthDialog.tsx) and [editor lifecycle](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/settings/useModelConnectionEditor.ts)
-- [Transactional first-run operation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/setup-operation.mjs)
-- [Six-document wizard and retained-operation repair](https://github.com/NightShaman/Burrow-UI/blob/da6e9c7e4eef6866e1127bc16a3b03db63bb1757/src/features/settings/AgentToolbar.tsx#L191-L224)
+-  and 
+-  and 
+

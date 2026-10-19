@@ -51,12 +51,10 @@ Model credentials belong in protected connection configuration, not secret-beari
 
 PostgreSQL-backed readers need a running reachable database and settings key. They do not start the database; composing application stores can run the schema migration check. `--agent-id` defaults to `hatchet` in these CLI paths, so use the actual owner explicitly when investigating a different agent.
 
-
 ### Managed reader connection
 
-`session-search`, `trace`, `retention` and `doctor` compose PostgreSQL stores through `withCliPostgres`. In managed mode, the helper resolves the configured socket directory, port 5432, database `postgres` and current OS database owner; it clears URL/password overrides in the connection environment. In external mode it uses the configured external connection. The helper does not start PostgreSQL. Use the installed launcher rather than manually overriding connection fields from an older example. [CLI store composition](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/cli-postgres.mjs) · [Lifecycle-derived connection](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-startup.mjs)
-
-For a raw source invocation, load the trusted environment for that isolated runtime first and supply `--root`. Do not point development diagnostics at a live deployment unintentionally. `doctor` can create/check runtime directories and run `node`, `npm` and `git` version probes; it is not a strictly read-only command. Its result includes `ready`, `degraded` or `blocked`, blockers/warnings, effective skills and redacted model settings. Shared help still advertises `--check-memory`, but the current diagnostic implementation does not implement a separate check for that flag. [Doctor implementation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/doctor.mjs)
+`session-search`, `trace`, `retention` and `doctor` compose PostgreSQL stores through `withCliPostgres`. In managed mode, the helper resolves the configured socket directory, port 5432, database `postgres` and current OS database owner; it clears URL/password overrides in the connection environment. In external mode it uses the configured external connection. The helper does not start PostgreSQL. Use the installed launcher rather than manually overriding connection fields from an older example.
+For a raw source invocation, load the trusted environment for that isolated runtime first and supply `--root`. Do not point development diagnostics at a live deployment unintentionally. `doctor` can create/check runtime directories and run `node`, `npm` and `git` version probes; it is not a strictly read-only command. Its result includes `ready`, `degraded` or `blocked`, blockers/warnings, effective skills and redacted model settings. Shared help still advertises `--check-memory`, but the current diagnostic implementation does not implement a separate check for that flag. 
 
 ### CLI retention policy
 
@@ -111,10 +109,3 @@ These are messages handled by the HTTP chat path, separate from shell commands:
 
 `/context full` can reveal private conversation and evidence; review before sharing.
 
-## Source evidence
-
-- [Backend CLI usage and dispatch](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/bin/burrow.mjs)
-- [Installed launcher](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/install.sh)
-- [Model-store requirement](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/config.mjs)
-- [Managed PostgreSQL access](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/managed-postgres-access.mjs)
-- [Slash-command dispatch](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs)

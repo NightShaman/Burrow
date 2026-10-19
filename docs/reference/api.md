@@ -47,9 +47,6 @@ Specific drift:
 - Archive calendar uses the requested timezone, despite its old UTC-only summary
 
 The source drift checker scans literal route comparisons. Passing it does not establish dynamic-route, HTTP-method, request or response parity. See [known limitations](../project/known-limitations.md).
-
-[Dream routes](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ui/dream-routes.mjs#L1-L27) · [Mod catalog](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/mod-runtime.mjs#L295-L307) · [Forge input](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-forge-store.mjs#L270-L334)
-
 ## Runtime explorer
 
 | Method | Path | Purpose |
@@ -61,8 +58,6 @@ The source drift checker scans literal route comparisons. Passing it does not es
 These routes are behind the usual authentication gate. The schema endpoint reads `backend/docs/openapi.json` within the installed Backend source tree.
 
 That file is absent from this public assembled snapshot. The explorer shell can load while its contract request fails. The download on this documentation site does not change that runtime behavior. The same omitted source assets can affect API-contract export categories.
-
-[Explorer routes](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L3225-L3239)
 
 ## Request conventions
 
@@ -76,9 +71,6 @@ That file is absent from this public assembled snapshot. The explorer shell can 
 - There is no general HTTP API version prefix, universal idempotency header or WebSocket protocol in this surface. Forge has a body-level idempotency contract
 
 Invalid JSON returns `400 invalid_json`. Selected route boundaries reject non-object bodies and required fields; the server does not apply a universal OpenAPI request validator. JSON ingestion is bounded before parsing; route families can impose stricter limits. Browser-origin and JSON content-type checks apply to mutations. These checks do not replace authentication or deployment-level request limits. See [trust boundaries](../security/trust-boundaries.md).
-
-[Parsing/validation](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L1835-L1873) · [Route composition and errors](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/burrow-ui.mjs#L3151-L3289)
-
 ## Authentication for clients
 
 Use the configured Basic, trusted-proxy or OIDC session flow for the full API. Scoped Bearer tokens currently support only `diagnostics:read` and an exact GET allowlist; they cannot administer settings or run chat. A rejected Bearer token returns 403 rather than falling back to interactive authentication.

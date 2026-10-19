@@ -30,7 +30,7 @@ flowchart TB
     FIN --> HTTP
 ```
 
-The HTTP entrypoint is `backend/scripts/burrow-ui.mjs`; transport normalization is in `chat-turn-controller.mjs`; `app-runtime.mjs` composes the turn. The model/tool loop belongs to `runtime-orchestrator.mjs`. [Source: controller boundary](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/chat-turn-controller.mjs#L1-L17) [Source: runtime composition](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/app-runtime.mjs#L3-L41)
+The HTTP entrypoint is `backend/scripts/burrow-ui.mjs`; transport normalization is in `chat-turn-controller.mjs`; `app-runtime.mjs` composes the turn. The model/tool loop belongs to `runtime-orchestrator.mjs`.  
 
 ## Ownership boundaries
 
@@ -45,7 +45,7 @@ The HTTP entrypoint is `backend/scripts/burrow-ui.mjs`; transport normalization 
 | PostgreSQL stores | Configuration and current conversation/state authorities | Trace files or release contents |
 | Runtime filesystem | Workspaces, artifacts, trace/cache files, release material | Universal settings or conversation authority |
 
-Normal chat fixes the route as a model-owned chat turn. Planning and route metadata are diagnostic/support information, not an independent execution engine. [Source: route ownership](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/app-runtime.mjs#L309-L362)
+Normal chat fixes the route as a model-owned chat turn. Planning and route metadata are diagnostic/support information, not an independent execution engine. 
 
 ## State root versus execution root
 
@@ -53,17 +53,16 @@ The controller must retain its agent/session state even when tools execute elsew
 
 The built-in UI uses only its serving runtime, with relative API paths. There is no remote API-target selector. Backend execution placement remains separate:
 
-
 | Selection | Changes | Does not establish |
 |---|---|---|
 | Agent execution environment | Local execution, or a remote `providerId`/`targetId` for supported tools | A new agent identity or a migration of controller-owned state |
 | Filesystem target / command `cwd` | The directory used as task context or a command's working directory | Host choice, permission grants, or OS containment |
 
-An execution host, sometimes called a node by an integration, is an execution placement. It is not a registered agent or minion. The core router requires a live registered controller for a remote target; an unavailable controller fails the operation rather than falling back to the controller host. Provider-specific host discovery, enrollment, and transport belong to that integration's contract. [Source: target and process routing](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/process-execution-router.mjs#L15-L47) [Source: local UI transport](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/app/api.ts)
+An execution host, sometimes called a node by an integration, is an execution placement. It is not a registered agent or minion. The core router requires a live registered controller for a remote target; an unavailable controller fails the operation rather than falling back to the controller host. Provider-specific host discovery, enrollment, and transport belong to that integration's contract.  
 
 See [Interface runtime ownership](../concepts/interface.md#runtime-and-resource-ownership) and [Agent execution environments](../concepts/agents-minions.md#execution-environment) before operating across multiple runtimes or hosts.
 
-Agent workspace and target paths establish context and defaults. They do not create a filesystem sandbox. [Source: execution facts](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/execution-context.mjs#L44-L117)
+Agent workspace and target paths establish context and defaults. They do not create a filesystem sandbox. 
 
 See [Persistence](persistence.md), [Trust boundaries](../security/trust-boundaries.md), and [Tools](../concepts/tools.md).
 
@@ -79,7 +78,7 @@ The runtime keeps separate channels for:
 - Receipts and debug information
 - Raw diagnostic artifacts
 
-Raw receipts, tool protocol, and debug entries do not all become future conversation. The finalizer deliberately adds a bounded execution digest when appropriate. [Source: persisted tool and digest entries](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/runtime-plain-chat-finalizer.mjs#L160-L221)
+Raw receipts, tool protocol, and debug entries do not all become future conversation. The finalizer deliberately adds a bounded execution digest when appropriate. 
 
 ## Extension boundaries
 

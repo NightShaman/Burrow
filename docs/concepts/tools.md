@@ -21,35 +21,35 @@ The effective schema depends on runtime context and enabled integrations. The na
 | Discovery | `list_skills`, `load_skill`, `mcp_providers`, `mcp_capabilities`, `mcp_call` | Load instructions or discover/invoke integrations |
 | Generation | `forge_*` | Asynchronous media jobs and artifact attachment |
 
-Schemas, required fields, and feature filters are defined centrally. The supplied schema is authoritative for a particular turn; do not assume every row is available to every agent or minion. [Source: native tool catalog](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/action-proposal.mjs#L219-L445)
+Schemas, required fields, and feature filters are defined centrally. The supplied schema is authoritative for a particular turn; do not assume every row is available to every agent or minion. 
 
 See [MCP](mcp.md), [Agents and minions](agents-minions.md), and [Workers and tasks](workers-tasks.md) for those specific workflows.
 
 ## Files and working directories
 
-Relative file paths resolve under the current execution root, normally the agent home. A structural filesystem target replaces that root for the turn. An absolute `cwd` applies to one `shell_exec` call; it does not persist as a UI/session project selection. [Source: path resolution](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/proposal-executor.mjs#L27-L52)
+Relative file paths resolve under the current execution root, normally the agent home. A structural filesystem target replaces that root for the turn. An absolute `cwd` applies to one `shell_exec` call; it does not persist as a UI/session project selection. 
 
 Example native calls:
 
 ```json
 {
-  "filePath": "/srv/projects/example/src/parser.mjs",
-  "offsetBytes": 0,
+  "filePath": "/srv/projects/example/src/parser.mjs"
+  "offsetBytes": 0
   "maxBytes": 32000
 }
 ```
 
 ```json
 {
-  "command": "npm test",
-  "cwd": "/srv/projects/example",
+  "command": "npm test"
+  "cwd": "/srv/projects/example"
   "reason": "Run the project's test command after the change"
 }
 ```
 
 ### Read evidence and truncation
 
-`files_read` supports byte ranges and reports total size, returned bytes, offset, truncation, and the next offset. Its harness default is 512,000 bytes. Later receipt/prompt projections can be smaller than the raw read, so distinguish the source range read from the content actually delivered to the model. Continue at the reported next range when necessary; a truncated read is not a full-file inspection. [Source: read harness](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/harness/read-file.mjs#L23-L102) [Source: coverage and delivery](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/runtime-result-shapes.mjs#L28-L87)
+`files_read` supports byte ranges and reports total size, returned bytes, offset, truncation, and the next offset. Its harness default is 512,000 bytes. Later receipt/prompt projections can be smaller than the raw read, so distinguish the source range read from the content actually delivered to the model. Continue at the reported next range when necessary; a truncated read is not a full-file inspection.  
 
 Listing, finding, and searching are bounded operations:
 
@@ -59,7 +59,7 @@ Listing, finding, and searching are bounded operations:
 - Search skips oversized files and uses a cumulative scan budget
 - Directory traversal does not descend symlink directories
 
-Inspect truncation and warning fields before interpreting an empty or partial result as exhaustive. [Source: developer tools](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/harness/developer-tools.mjs#L69-L179)
+Inspect truncation and warning fields before interpreting an empty or partial result as exhaustive. 
 
 ### Mutations
 
@@ -68,19 +68,19 @@ Inspect truncation and warning fields before interpreting an empty or partial re
 !!! warning "Multi-file patches are not transactions"
     A structured patch may change earlier files before a later operation fails. Inspect the actual results and repository diff after a failure; do not assume rollback. Workspace validation is advisory, not a sandbox guarantee.
 
-For another project, prefer explicit absolute paths or a shell command with explicit `cwd`, as directed by the tool schema. `files_patch` is not in the remote-native filesystem routing set. [Source: mutation schemas](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/action-proposal.mjs#L369-L395) [Source: patch implementation](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/harness/apply-patch.mjs#L135-L281)
+For another project, prefer explicit absolute paths or a shell command with explicit `cwd`, as directed by the tool schema. `files_patch` is not in the remote-native filesystem routing set.  
 
 ## Process execution
 
 The harness supports either a shell command string or an executable plus string argument array. Those forms are mutually exclusive. Native `shell_exec` exposes the command-string form; built-in Git helpers use argument arrays.
 
-Defaults include a 30-second timeout and bounded stdout/stderr capture. The normal harness environment starts with `PATH` and `HOME`, then explicit overrides; it is not a promise to inherit the complete service environment. On Unix, timeout/cancellation terminates the process group and escalates from TERM to KILL. [Source: process harness](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/harness/exec.mjs#L39-L174)
+Defaults include a 30-second timeout and bounded stdout/stderr capture. The normal harness environment starts with `PATH` and `HOME`, then explicit overrides; it is not a promise to inherit the complete service environment. On Unix, timeout/cancellation terminates the process group and escalates from TERM to KILL. 
 
-Remote process/filesystem operations carry provider ID, target ID, parent run ID, tool call ID, and an operation ID. Those fields establish where a result came from; a familiar path alone does not identify the machine. [Source: execution provenance](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/proposal-executor.mjs#L33-L41)
+Remote process/filesystem operations carry provider ID, target ID, parent run ID, tool call ID, and an operation ID. Those fields establish where a result came from; a familiar path alone does not identify the machine. 
 
 ## Review and permissions
 
-Every allowed action is re-reviewed at the concrete executor boundary. A stale or forged earlier “allowed” review cannot bypass current malformed-argument checks or configured hard blocks. Denied or invalid native calls produce failed tool results so the model can correct its arguments while preserving provider call/result pairing. [Source: executor recheck](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/proposal-executor.mjs#L78-L92) [Source: failed-call pairing](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/runtime-orchestrator.mjs#L112-L160)
+Every allowed action is re-reviewed at the concrete executor boundary. A stale or forged earlier “allowed” review cannot bypass current malformed-argument checks or configured hard blocks. Denied or invalid native calls produce failed tool results so the model can correct its arguments while preserving provider call/result pairing.  
 
 Agent roots do not provide operating-system isolation. Read [Permissions](../security/permissions.md) and [Trust boundaries](../security/trust-boundaries.md) for the actual enforcement model and caveats.
 
@@ -90,14 +90,14 @@ An integration may return a `protected://` reference instead of a sensitive valu
 
 ```json
 {
-  "command": "example-client status",
+  "command": "example-client status"
   "protectedBindings": {
     "EXAMPLE_TOKEN": "protected://reference-from-an-earlier-result"
   }
 }
 ```
 
-This is illustrative: the reference must come from a real earlier result and remain valid for that caller and turn. It is not a persistent credential string. [Source: protected binding resolution](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/proposal-executor.mjs#L107-L162)
+This is illustrative: the reference must come from a real earlier result and remain valid for that caller and turn. It is not a persistent credential string. 
 
 ## Results, verification, and diagnostics
 
@@ -105,4 +105,4 @@ Raw outputs belong to the producing tool and its trace artifacts. Loop state, pe
 
 Normal chat reports completion evidence; legacy mutation workflows apply additional verification gates. A test-looking command name alone is not a universal proof of verification, and mutation recognition differs between current and legacy helpers. See [Execution flow](../architecture/execution-flow.md) and [Known limitations](../project/known-limitations.md).
 
-Treat traces as potentially sensitive. Bounded output and selective redaction are not a guarantee that all artifacts are safe to publish. [Source: receipt ownership rule](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/runtime-result-shapes.mjs#L3-L17)
+Treat traces as potentially sensitive. Bounded output and selective redaction are not a guarantee that all artifacts are safe to publish. 

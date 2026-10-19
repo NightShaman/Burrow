@@ -1,6 +1,6 @@
 # Source and coverage
 
-The user guide documents the public **2026.10.19** release of Burrow. It is grounded in executable code from the public repository, not assumed parity with newer NightShaman development work.
+The user guide documents the public **2026.10.19** release of Burrow. It is grounded in executable code from the public repository.
 
 ## Public baseline
 
@@ -21,7 +21,7 @@ These source pins are recorded in the public [PUBLIC_RELEASE.json](https://githu
 
 The eight **User guide** pages were written for this public snapshot: installation, first agent, everyday interface use, models, tools/mods, skills/memory, projects/tasks, and maintenance. Their source links point to immutable public code. The homepage and documentation build instructions were also refreshed.
 
-The **Earlier technical reference** is preserved for historical context and existing links. Every retained page is marked as not fully revalidated for 2026.10.19. Older NightShaman links on those pages document their cited revisions, not necessarily today's public behavior. Do not use old image tags, install commands, or security assumptions as current instructions.
+The **Earlier technical reference** is preserved for historical context and existing links. Every retained page is marked as not fully revalidated for 2026.10.19. Historical descriptions may differ from today's public behavior. Do not use old image tags, install commands, or security assumptions as current instructions.
 
 Existing screenshots remain with the earlier reference. They were captured from synthetic development fixtures on October 16, not from a tested public-release installation; they have not been relabeled as current screenshots. The homepage uses the repository's canonical `docs/assets/hero.png`, shared with its README; the header logo and favicon remain separate.
 
@@ -29,14 +29,10 @@ Existing screenshots remain with the earlier reference. They were captured from 
 
 Code inspection establishes what the release implements. It does not certify that every feature works with every provider or deployment. This refresh did not execute a live installation, model call, OAuth login, database restore, mod install, remote command, or production deployment. Documentation checks validate the site itself; they do not replace runtime testing.
 
-NightShaman development versions use `YYYY.MM.DD.#`; GoblinKing-Burrow public versions use `YYYY.MM.DD` without the numeric suffix. This formatting difference is expected and does not itself mean a release is stale. Compare the manifest and source revisions.
+Public release versions use `YYYY.MM.DD`, such as `2026.10.19`. Use the public release manifest and your installed version when reporting problems. Features not present in this inspected public snapshot are outside this guide's coverage.
 
-The public release and development builds have different publication boundaries. A feature seen in NightShaman after the frozen source revisions is not automatically included here. Use the public release manifest and installed version when reporting problems.
+## Documentation sources
 
-## Where documentation changes belong
-
-The public tree is promoted from NightShaman/Burrow. The promotion copies `docs/`, `mkdocs.yml`, documentation dependency files, and `scripts/docs/`. Its publisher replaces the public repository contents, so editing only the public copy will not survive a later promotion.
-
-Maintain this hand-written documentation in the upstream Burrow documentation paths, while keeping its product claims pinned to an inspected public release. Do not put documentation edits into generated application directories or change the root README as part of this site refresh. The documentation workflow is preserved separately in public promotion and deploys only from GoblinKing-Burrow/Burrow; development and release workflows are not copied. Hosting and custom-domain configuration remain separate from the documentation build.
+The hand-written site lives in `docs/`, with configuration in `mkdocs.yml`, documentation dependency files, and validation tools in `scripts/docs/`. Keep product claims grounded in an inspected public release and verify source citations when updating the guide.
 
 See [Build this documentation](../development/documentation.md) for preview and validation commands.

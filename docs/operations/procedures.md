@@ -58,7 +58,7 @@ Use an explicit run ID for incident investigation. `--latest` is useful for expl
 3. Wait for active-run state to settle, then inspect the recorded tool activity and final/cancelled outcome.
 4. Before retrying, verify any external changes already made. If **Could not stop run** appears, recheck the active run rather than assuming the request succeeded.
 
-If the intent is to correct work rather than stop it, send a follow-up while the run is active. Confirm whether it is pending, delivered to the run, or retained as an undelivered follow-up. A pending steering message waits for a model boundary. Sources: [cancellation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/chat/useChatRun.ts), [steering status](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/chat/ChatTranscript.tsx).
+If the intent is to correct work rather than stop it, send a follow-up while the run is active. Confirm whether it is pending, delivered to the run, or retained as an undelivered follow-up. A pending steering message waits for a model boundary. Sources: , .
 
 ## Execute and verify a board task
 
@@ -68,7 +68,7 @@ If the intent is to correct work rather than stop it, send a follow-up while the
 4. Follow progress; the UI polls active runs and reloads the task after execution ends. The assigned agent runs the task in its **default** conversation, with project context scoped to this task run.
 5. Inspect the default conversation and **Archive → Proof** for its final answer, blockers, and verification. Update the board status to reflect the reviewed outcome.
 
-The dispatch lookup is awaited in this release; the former unassigned-task warning is obsolete. Execution success does not automatically move a task to Done. A progress panel may remain visible during a transient status-poll failure. Check runtime activity and the task's persisted execution before retrying; a disconnected browser does not prove dispatch failed. Project paths supply context, not filesystem authorization. Sources: [task editor and polling](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/tasks/TasksPage.tsx), [task dispatch](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/burrow-ui.mjs), [receipt persistence](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-task-board-store.mjs).
+The dispatch lookup is awaited in this release; the former unassigned-task warning is obsolete. Execution success does not automatically move a task to Done. A progress panel may remain visible during a transient status-poll failure. Check runtime activity and the task's persisted execution before retrying; a disconnected browser does not prove dispatch failed. Project paths supply context, not filesystem authorization. Sources: , , .
 
 ## Recover a prior decision or saved memory
 
@@ -78,7 +78,7 @@ The dispatch lookup is awaited in this release; the former unassigned-task warni
 4. For an explicit saved memory, open **Brains**, select **Agent owner**, and search. Open the entry to inspect its content, source references, origin, and revision.
 5. To correct it, edit and choose **Save memory**. On a conflict, preserve your intended wording elsewhere, **Reload memory**, compare, and reapply only the desired correction.
 
-Brains records are agent-owned saved context, not verification of current runtime state. Legacy migration details explain origin; they do not certify present truth. Brains does not provide the old global knowledge, Recall, or purge controls. Sources: [Archive reader](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/tasks/ArchiveReaders.tsx), [historical search](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/action-proposal.mjs), [Brains editor](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/albdruck/AlbdruckPage.tsx).
+Brains records are agent-owned saved context, not verification of current runtime state. Legacy migration details explain origin; they do not certify present truth. Brains does not provide the old global knowledge, Recall, or purge controls. Sources: , , .
 
 ### Delete saved memories deliberately
 
@@ -87,7 +87,7 @@ Brains records are agent-owned saved context, not verification of current runtim
 3. Inspect each bulk result: these are separate deletions, so some can succeed while others conflict or fail.
 4. **Reload list** and review current revisions before retrying failed entries.
 
-These controls delete immediately without a separate UI confirmation. Memory deletion does not delete conversation originals, attachments, browser caches, or other retained evidence. The legacy Albdruck conversation-purge route adapter is not mounted in this release; its historical procedure is not a supported erasure workflow. Sources: [delete behavior](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/albdruck/AlbdruckPage.tsx), [retired adapter](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/legacy-albdruck-routes.mjs).
+These controls delete immediately without a separate UI confirmation. Memory deletion does not delete conversation originals, attachments, browser caches, or other retained evidence. The legacy Albdruck conversation-purge route adapter is not mounted in this release; its historical procedure is not a supported erasure workflow. Sources: , .
 
 ## Retention maintenance
 
@@ -100,7 +100,7 @@ Use **Settings → General → Trace retention** for managed trace cleanup:
 5. If the saved, previewed policy is still the intended one, choose **Run now**. Any form edit requires saving and previewing again.
 6. Check the cleanup result, last-run status, next-run status, and any error. A zero count may simply mean no trace qualifies.
 
-Managed cleanup is disabled until enabled with at least one limit. This surface removes trace data, not Brains records or a selected conversation. If a save/preview fails, resolve that error before proceeding. Do not use a different policy surface merely to bypass the guard. [Source: [retention controls](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/src/features/settings/RetentionSettings.tsx)]
+Managed cleanup is disabled until enabled with at least one limit. This surface removes trace data, not Brains records or a selected conversation. If a save/preview fails, resolve that error before proceeding. Do not use a different policy surface merely to bypass the guard. ]
 
 ### CLI retention is a separate policy
 
@@ -136,9 +136,4 @@ Full removal also destroys the installation's durable state. Back up first, then
 
 ## Source evidence
 
-- [Installed management launcher](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/install.sh)
-- [CLI retention and trace dispatch](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/bin/burrow.mjs)
-- [Managed operator access](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/managed-postgres-access.mjs)
-- [Retention implementation](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/retention.mjs)
-
-Additional implementation evidence: [CLI connection and retention policy resolution](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/cli-authority-commands.mjs), [retention environment defaults](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/config.mjs).
+Additional implementation evidence: , .

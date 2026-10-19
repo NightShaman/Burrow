@@ -29,7 +29,7 @@ Run as the account that will own Burrow:
 
 ```sh
 curl -fsSLo install-burrow.sh \
-  https://raw.githubusercontent.com/NightShaman/Burrow/main/install.sh
+  https://raw.githubusercontent.com/GoblinKing-Burrow/Burrow/main/install.sh
 sh install-burrow.sh --help
 ```
 
@@ -113,8 +113,3 @@ Inspect the JSON `ok` and `version` fields. Both `/health` and `/api/health` are
 
 Next: [initial setup](initial-setup.md), [deployment](../operations/deployment.md), [upgrades](../operations/upgrades.md), and [backup and recovery](../operations/backup-recovery.md).
 
-## Source evidence
-
-- [Native installer](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/install.sh)
-- [Database supervisor](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/postgres-supervisor.mjs)
-- [Managed lifecycle](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-lifecycle.mjs)

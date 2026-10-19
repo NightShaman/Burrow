@@ -95,7 +95,7 @@ Do not run the native `burrow update` procedure inside a container as a substitu
 ## Build from the assembled checkout
 
 ```sh
-git clone https://github.com/NightShaman/Burrow.git
+git clone https://github.com/GoblinKing-Burrow/Burrow.git
 cd Burrow
 git checkout 2d979fecca8434fe02a6ed2e8225c46eb4690098
 docker build -t burrow-local:2026.10.10.4 .
@@ -103,10 +103,3 @@ docker build -t burrow-local:2026.10.10.4 .
 
 This is a build command, not a deployment to an existing runtime. The build needs access to npm, Debian/PGDG packages, and base images.
 
-## Source evidence
-
-- [Dockerfile](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/Dockerfile)
-- [Entrypoint](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/docker-entrypoint.sh)
-- [Repository Compose file](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/compose.yml)
-- [Integration manifest](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/runtime-integrations.json)
-- [Integration bootstrap](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/scripts/ensure-runtime-integrations.mjs)

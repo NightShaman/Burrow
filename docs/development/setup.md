@@ -79,10 +79,3 @@ The existing lifecycle rehearsal uses a disposable PostgreSQL17/pgvector Docker 
 
 Source pushes can trigger assembly through the upstream dispatch workflow. A source push and a running user's upgrade are distinct events; do not restart or update a live runtime as an unrequested development step.
 
-## Source evidence
-
-- [Backend scripts](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/package.json)
-- [Test isolation runner](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/test-runtime.mjs)
-- [PostgreSQL lifecycle rehearsal](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/scripts/postgres-lifecycle-rehearsal.mjs)
-- [UI package scripts](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/ui/package.json)
-- [Assembly verification](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/.github/workflows/assemble.yml)

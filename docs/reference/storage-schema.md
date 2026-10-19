@@ -9,8 +9,7 @@ See [Persistence architecture](../architecture/persistence.md) for the data flow
 
 ## Migration ledger
 
-`burrow_schema_migrations` records `version`, `name`, `checksum` and `applied_at`. The runner validates an append-only, contiguous history and uses a transaction advisory lock. Changing an already applied migration is an error. `burrow_migration_receipts` is a separate table for verified source-cutover receipts (`migration_id`, manifest, fingerprint, result and completion time). [Ledger](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-migrations.mjs#L6-L64), [manifest](https://github.com/NightShaman/Burrow/blob/2d979fecca8434fe02a6ed2e8225c46eb4690098/backend/src/postgres-application-schema.mjs#L31-L77)
-
+`burrow_schema_migrations` records `version`, `name`, `checksum` and `applied_at`. The runner validates an append-only, contiguous history and uses a transaction advisory lock. Changing an already applied migration is an error. `burrow_migration_receipts` is a separate table for verified source-cutover receipts (`migration_id`, manifest, fingerprint, result and completion time).
 | Version | Migration name |
 |---:|---|
 | 1 | `application-stores` |
@@ -77,9 +76,6 @@ Early schema constants intentionally remain immutable. Read them together with l
 | `model_auth_previews` | `connection_id`; connection FK cascades | Non-secret authentication preview JSON text |
 | `model_settings_cache` | `cache_key` | Catalog/settings cache JSON text and update time |
 | `agent_model_selections` | `agent_id`; agent FK cascades, connection FK restricts | Selected connection/model, reasoning effort and temperature |
-
-[Agents](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-agent-registry.mjs#L51-L80), [profiles](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-agent-profile-store.mjs#L12-L21), [model schema](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-model-settings-store.mjs#L10-L40)
-
 Temperature is constrained to 0–2, default 0.2. Profile kind is constrained by the database; profile size and complete-replacement semantics are enforced by the store. Secret tables store encrypted bytes, not the external `BURROW_SETTINGS_KEY`. See [Authentication](../security/authentication.md).
 
 ## Conversations and original evidence
@@ -92,20 +88,15 @@ Temperature is constrained to 0–2, default 0.2. Profile kind is constrained by
 | `conversation_archive_entries` | `(agent_id, session_id, source_store, source_id, ordinal)` | Native archived occurrence and original `entry JSON`; owner FK cascades from archive header |
 | `conversation_original_rows` | Read-only `UNION ALL` view | Unified lookup across live entries and archive occurrences |
 
-The session owner FK cascades to entries and archive headers; archive ownership cascades to native archive occurrences. Conversation session `agent_id` is a scope field, not an `agents` foreign key. Do not infer cross-table deletion behavior from similarly named columns. [Initial session/archives schema](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-session-store.mjs#L7-L49), [occurrence schema](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-session-store.mjs#L151-L169), [native conversion](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-session-store.mjs#L270-L299)
-
-Current native rows also contain extracted `entry_key`, `search_projection`, `search_grams`, `has_payload_id` and `has_compression_summary` metadata. Triggers extract metadata only when payloads change, with conservative fallback when fields cannot be safely projected. GIN candidate indexes speed lookup; original JSON and the final JavaScript matcher remain authoritative. [Metadata migration](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-session-store.mjs#L365-L422), [ASCII-run candidates](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-session-store.mjs#L425-L499)
-
-Session metadata retains transcript/reset generation, archive status and read evidence. Migration 23 moves `continuityHead`, `interruptedRun` and `recoveryQueue` into native stores and removes the old metadata copies. Session listing joins the current head for compatibility. [Native transition](https://github.com/NightShaman/Burrow/blob/2d979fecca8434fe02a6ed2e8225c46eb4690098/backend/src/postgres-continuity-state-store.mjs#L24-L33), [session projection](https://github.com/NightShaman/Burrow/blob/2d979fecca8434fe02a6ed2e8225c46eb4690098/backend/src/postgres-session-store.mjs#L772-L776), [read evidence](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/read-evidence-store.mjs#L3-L13)
-
+The session owner FK cascades to entries and archive headers; archive ownership cascades to native archive occurrences. Conversation session `agent_id` is a scope field, not an `agents` foreign key. Do not infer cross-table deletion behavior from similarly named columns.
+Current native rows also contain extracted `entry_key`, `search_projection`, `search_grams`, `has_payload_id` and `has_compression_summary` metadata. Triggers extract metadata only when payloads change, with conservative fallback when fields cannot be safely projected. GIN candidate indexes speed lookup; original JSON and the final JavaScript matcher remain authoritative.
+Session metadata retains transcript/reset generation, archive status and read evidence. Migration 23 moves `continuityHead`, `interruptedRun` and `recoveryQueue` into native stores and removes the old metadata copies. Session listing joins the current head for compatibility.
 | Table | Key / relationship | Stored data |
 |---|---|---|
 | `continuity_state` | `(agent_id, session_id)`; session FK cascades | `head`, `manifest`, `queue` as `json`; extracted owner/head/queue state, auto-resume and queued/update time |
 | `continuity_log` | Identity bigint `sequence`; session FK cascades | Append-only transition snapshots using `json` payloads |
 
-Continuity updates lock the session row, atomically update native state and append a log only when the continuity payload changes. Pending/active indexes drive recovery selection. Original session rename updates both tables; session deletion and Albdruck purge reject active native heads or running recovery queues. [Native state writer](https://github.com/NightShaman/Burrow/blob/2d979fecca8434fe02a6ed2e8225c46eb4690098/backend/src/postgres-continuity-state-store.mjs#L42-L78), [rename/deletion](https://github.com/NightShaman/Burrow/blob/2d979fecca8434fe02a6ed2e8225c46eb4690098/backend/src/postgres-session-store.mjs#L530-L545)
-
-
+Continuity updates lock the session row, atomically update native state and append a log only when the continuity payload changes. Pending/active indexes drive recovery selection. Original session rename updates both tables; session deletion and Albdruck purge reject active native heads or running recovery queues.
 ## Working memory, rolling continuity and handoffs
 
 | Table | Key / relationship | Stored data |
@@ -119,10 +110,8 @@ Continuity updates lock the session row, atomically update native state and appe
 | `tiddle_envelopes` | `key` | Envelope JSONB, update time and indexed `next_run_at` scheduling projection |
 | `tiddle_entries` | Identity bigint `id`; envelope FK cascades | Ordered JSONB history/residue entries with timestamp and reference |
 
-Working-memory kind is constrained to `decision`, `finding`, `blocker`, `handoff`, `task`; state to `active`, `resolved`, `superseded`. Scope columns here are not agent/session foreign keys. Lifecycle and purge behavior therefore belong to the stores as well as the schema. [Working memory schema](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-working-memory-store.mjs#L57-L60), [rolling migration](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-rolling-continuity-store.mjs#L1-L74), [handoffs](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-continuity-handoff-store.mjs#L9-L25), [retention settings](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-working-memory-retention-settings-store.mjs#L4-L14)
-
-Migration 26 moves Tiddle residue/history and pass/scope/receipt/synthesis envelopes out of `settings_meta`. Native append keeps ordering and prunes by age/reference; the old 240-entry residue cap is removed. Generic metadata atomic updates reject these keys, requiring the native writer. [Tiddle migration and writer](https://github.com/NightShaman/Burrow/blob/2d979fecca8434fe02a6ed2e8225c46eb4690098/backend/src/postgres-tiddle-store.mjs#L1-L37), [metadata dispatch](https://github.com/NightShaman/Burrow/blob/2d979fecca8434fe02a6ed2e8225c46eb4690098/backend/src/postgres-settings-metadata-store.mjs#L21-L46)
-
+Working-memory kind is constrained to `decision`, `finding`, `blocker`, `handoff`, `task`; state to `active`, `resolved`, `superseded`. Scope columns here are not agent/session foreign keys. Lifecycle and purge behavior therefore belong to the stores as well as the schema.
+Migration 26 moves Tiddle residue/history and pass/scope/receipt/synthesis envelopes out of `settings_meta`. Native append keeps ordering and prunes by age/reference; the old 240-entry residue cap is removed. Generic metadata atomic updates reject these keys, requiring the native writer.
 Migration 18 moves legacy rolling envelopes into relational scope/identity while preserving complete card JSON and additional envelope metadata. Malformed source envelopes stop the migration rather than being silently discarded. See [Memory and continuity](../concepts/memory.md).
 
 ## Dream
@@ -139,11 +128,7 @@ Migration 18 moves legacy rolling envelopes into relational scope/identity while
 | `dream_ledger_entries` | `(key, position)`; envelope FK cascades | Ordered ledger payload JSONB |
 | `dream_preload_entries` | `(key, position)`; envelope FK cascades | Ordered preload payload JSONB |
 | `dream_scope_review_entries` | `(key, position)`; envelope FK cascades | Ordered scope-review candidate JSONB |
-
-[Settings](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-dream-settings-store.mjs#L6-L18), [diary](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-dream-diary-store.mjs#L4-L18), [cycle tables](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-dream-cycle-receipt-store.mjs#L30-L35), [extraction checkpoints](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-dream-extraction-store.mjs#L3-L17)
-
-Migration 25 splits legacy Dream collections from `working_memory_meta` into envelope metadata and native rows, preserving array order and refusing malformed object/array envelopes. The write helper uses an advisory lock per key, merges metadata and appends or replaces entries transactionally. It removes legacy store-level count/reference truncation; generation callers can still select bounded subsets. [Dream state schema](https://github.com/NightShaman/Burrow/blob/2d979fecca8434fe02a6ed2e8225c46eb4690098/backend/src/postgres-dream-state-schema.mjs#L1-L26), [writer](https://github.com/NightShaman/Burrow/blob/2d979fecca8434fe02a6ed2e8225c46eb4690098/backend/src/postgres-working-memory-store.mjs#L270-L361)
-
+Migration 25 splits legacy Dream collections from `working_memory_meta` into envelope metadata and native rows, preserving array order and refusing malformed object/array envelopes. The write helper uses an advisory lock per key, merges metadata and appends or replaces entries transactionally. It removes legacy store-level count/reference truncation; generation callers can still select bounded subsets.
 Diary phase permits `light`, `deep`, `rem` and `manual`. Incremental batches are successful derived checkpoints, including empty candidate results; they are not another store of original transcripts. The compact DreamMemory result lives in `agent_profile_documents`, not a dedicated DreamMemory table. See [Dream cycles](../concepts/dreams.md).
 
 ## Brains and optional embeddings
@@ -152,12 +137,11 @@ Diary phase permits `light`, `deep`, `rem` and `manual`. Incremental batches are
 
 Optional embedding configuration, vectors and pending jobs live in `brain_embedding_settings`, `brain_embedding_vectors` and `brain_embedding_jobs`. Embeddings start disabled. Revision/generation checks keep stale vectors from becoming current; disabling semantic search does not delete the saved memory itself.
 
-[Memory schema](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-brain-store.mjs) · [Embedding schema](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-brain-embeddings.mjs) · [Current manifest](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/backend/src/postgres-application-schema.mjs).
+ ·  · .
 
 ## Legacy Albdruck knowledge
 
 These tables remain in the database for compatibility and migration. They do not establish a current Albdruck UI or mounted HTTP route. Use [Brains and recall](../concepts/memory.md) for current operator behavior.
-
 
 | Table | Key / relationship | Stored data |
 |---|---|---|
@@ -166,8 +150,7 @@ These tables remain in the database for compatibility and migration. They do not
 | `albdruck_revisions` | Identity bigint `id`; knowledge FK cascades | Operation, document JSONB and timestamp |
 | `albdruck_retention` | `owner_id` | Policy JSONB |
 
-Original references are semantic locators resolved through the conversation store; they are not SQL foreign keys into message payloads. Evidence and knowledge are derived. Store validation checks source existence, scope, fingerprints and user evidence for supersession. [Albdruck schema and contract](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-albdruck-store.mjs#L7-L55), [write validation](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-albdruck-store.mjs#L144-L237)
-
+Original references are semantic locators resolved through the conversation store; they are not SQL foreign keys into message payloads. Evidence and knowledge are derived. Store validation checks source existence, scope, fingerprints and user evidence for supersession.
 ## Task board and scheduling
 
 | Table | Key / relationship | Stored data |
@@ -179,8 +162,7 @@ Original references are semantic locators resolved through the conversation stor
 | `scheduled_jobs` | `id`; agent FK cascades | Owner mod, prompt, cron, nullable inherited timezone, effective timezone, session/model and next/last run |
 | `scheduled_job_runs` | `id`; job FK cascades; unique `(job_id, scheduled_for)` | Run status, dispatch/completion, trace/result/error fields |
 
-Task statuses are `backlog`, `todo`, `in_progress`, `review`, `done`, `cancelled`; priorities are `critical`, `high`, `normal`, `low`. Scheduled-run statuses are `running`, `completed`, `failed`, `cancelled`, `missed`, `skipped`. Model override fields on scheduled jobs are validated by the store rather than declared as model-connection foreign keys. [Task schema](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-task-board-store.mjs#L189-L195), [schedule schema](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-scheduled-job-store.mjs#L149-L154), [timezone migration](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-application-schema.mjs#L54-L57)
-
+Task statuses are `backlog`, `todo`, `in_progress`, `review`, `done`, `cancelled`; priorities are `critical`, `high`, `normal`, `low`. Scheduled-run statuses are `running`, `completed`, `failed`, `cancelled`, `missed`, `skipped`. Model override fields on scheduled jobs are validated by the store rather than declared as model-connection foreign keys.
 ## Forge and filesystem artifacts
 
 | Table | Key | Stored data |
@@ -189,8 +171,7 @@ Task statuses are `backlog`, `todo`, `in_progress`, `review`, `done`, `cancelled
 | `forge_selections` | `mode` | Saved connection/model selection |
 | `forge_idempotency_claims` | `idem`; `first_job_id` FK to jobs | Unique claim for an idempotency identity, preserving existing colliding historical jobs |
 
-Forge claims idempotency under an advisory lock and inserts a unique claim row before provider dispatch. Migration 22 preserves colliding legacy jobs while reserving their shared identity; a trigger derives native `status` from the job record. Artifact bytes live on disk. Store initialization retains compatibility DDL and checks native-schema presence under a transaction advisory lock. [Forge native schema](https://github.com/NightShaman/Burrow/blob/2d979fecca8434fe02a6ed2e8225c46eb4690098/backend/src/postgres-forge-native-schema.mjs#L1-L22), [initialization](https://github.com/NightShaman/Burrow/blob/2d979fecca8434fe02a6ed2e8225c46eb4690098/backend/src/postgres-forge-store.mjs#L134-L146), [job claim](https://github.com/NightShaman/Burrow/blob/2d979fecca8434fe02a6ed2e8225c46eb4690098/backend/src/postgres-forge-store.mjs#L335-L397)
-
+Forge claims idempotency under an advisory lock and inserts a unique claim row before provider dispatch. Migration 22 preserves colliding legacy jobs while reserving their shared identity; a trigger derives native `status` from the job record. Artifact bytes live on disk. Store initialization retains compatibility DDL and checks native-schema presence under a transaction advisory lock.
 The current attachment-to-session error-cleanup path has a source-level defect documented in [Known limitations](../project/known-limitations.md); do not treat a stored generated artifact as proof of successful session delivery.
 
 ## MCP, skills, mods and authentication
@@ -213,11 +194,7 @@ The current attachment-to-session error-cleanup path has a source-level defect d
 | `mod_installations` | `mod_id`; source FK sets null | Installed version, archive SHA-256 and timestamps |
 | `api_tokens` | `id`; unique token hash | SHA-256 hash, prefix, scope, expiry/revocation and last use |
 | `ui_auth_secrets` | `id`; unique name | Encrypted UI-auth material |
-
-[MCP schema](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-mcp-settings-store.mjs#L5-L24), [skills](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-skill-settings-store.mjs#L2-L5), [mod state](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-mod-store.mjs#L5-L19), [mod distribution](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-mod-distribution-repository.mjs#L3-L19), [API tokens](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-api-token-store.mjs#L4-L10), [UI-auth secrets](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-ui-auth-secret-store.mjs#L6-L14)
-
-In the composed server, MCP lifecycle events use PostgreSQL. Hydration imports an existing JSONL file once per path, preserves the entire raw source (including malformed lines/unknown fields) in the import table, and combines normalized historical/live receipts before keeping the latest 200. The original file is not removed. **The raw import receipt is not a redaction guarantee.** Standalone adapters without the configured store retain the file-backed fallback. [MCP state store](https://github.com/NightShaman/Burrow/blob/2d979fecca8434fe02a6ed2e8225c46eb4690098/backend/src/postgres-mcp-provider-state-store.mjs#L1-L62), [adapter boundary](https://github.com/NightShaman/Burrow/blob/2d979fecca8434fe02a6ed2e8225c46eb4690098/backend/src/mcporter-adapter.mjs#L27-L66)
-
+In the composed server, MCP lifecycle events use PostgreSQL. Hydration imports an existing JSONL file once per path, preserves the entire raw source (including malformed lines/unknown fields) in the import table, and combines normalized historical/live receipts before keeping the latest 200. The original file is not removed. **The raw import receipt is not a redaction guarantee.** Standalone adapters without the configured store retain the file-backed fallback.
 Managed mod MCP catalogs use stable `mod://` identities. Removing an installation preserves mod settings/secrets and sibling mod-data files; uninstall is not a full data purge. The API-token scope implemented in this version is `diagnostics:read`. See [MCP](../concepts/mcp.md), [Extensions](../development/extensions.md) and [Authentication](../security/authentication.md) for supported administration.
 
 ## General metadata and policy
@@ -228,9 +205,6 @@ Managed mod MCP catalogs use stable `mod://` identities. Removing an installatio
 | `installation_setup_state` | `owner_id` | Persisted initial-setup state JSONB |
 | `retention_settings` | `owner_id` | Trace retention policy/state JSONB |
 | `working_memory_retention_settings` | `owner_id` | Working/rolling TTL settings JSONB |
-
-[Settings metadata](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-settings-metadata-store.mjs#L3-L47), [setup](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-setup-state-store.mjs#L1-L14), [trace retention](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-retention-settings-store.mjs#L4-L17), [memory retention](https://github.com/NightShaman/Burrow/blob/d6490825401405ce719e007fd96a487c5b0cde56/backend/src/postgres-working-memory-retention-settings-store.mjs#L4-L14)
-
 The schema uses a mixture of timestamp text and `timestamptz`, and JSON text, `json` and `jsonb`. Do not normalize these columns wholesale: original `json` is a deliberate losslessness boundary, and changing historical migration SQL breaks ledger validation.
 
 ## Files outside PostgreSQL

@@ -13,6 +13,9 @@ Public-release guide · **2026.10.19**
 
 </div>
 
+!!! danger "Burrow is not safe by design."
+    Burrow gives agents real tools and real access. Depending on what you enable, they can run commands, change or delete files, use credentials, and affect connected systems. Models make mistakes. **Burrow is not a sandbox; you are responsible for the access you grant and the consequences.**
+
 ## Start small. Add what you need.
 
 You run Burrow on your own host and open its web interface in a browser. Model providers and integrations may still receive the content you send them; self-hosted does not mean every model runs locally.
@@ -45,12 +48,10 @@ You run Burrow on your own host and open its web interface in a browser. Model p
 
 </div>
 
-!!! warning "Understand the access you grant"
-    Burrow does not provide comprehensive guardrails around agent actions. Tools and mods can access files, credentials, remote systems, and external services. Start on loopback, use least-privilege credentials, and enable only integrations you trust. An agent workspace is not a security sandbox.
 
 ## A guide to the public release
 
-These user guides follow [GoblinKing-Burrow/Burrow](https://github.com/GoblinKing-Burrow/Burrow/tree/deec39818955db1711161b5310d5822e65fda39a), not the moving NightShaman development build. Features depend on your installed release, model provider, and enabled mods.
+These user guides follow [GoblinKing-Burrow/Burrow](https://github.com/GoblinKing-Burrow/Burrow/tree/deec39818955db1711161b5310d5822e65fda39a). Features depend on your installed release, model provider, and enabled mods.
 
 Older architectural and API material remains under **Earlier technical reference**, with a warning on every page. It is not a second set of current installation instructions. [Read the source and verification scope](project/source-map.md).
 

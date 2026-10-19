@@ -101,9 +101,9 @@ For an otherwise unmodified native Ubuntu installation, a mapping may look like 
 
 ```json
 {
-  "BURROW_POSTGRES_LIFECYCLE": "managed",
-  "BURROW_POSTGRES_INITDB": "/usr/lib/postgresql/17/bin/initdb",
-  "BURROW_POSTGRES_PG_CTL": "/usr/lib/postgresql/17/bin/pg_ctl",
+  "BURROW_POSTGRES_LIFECYCLE": "managed"
+  "BURROW_POSTGRES_INITDB": "/usr/lib/postgresql/17/bin/initdb"
+  "BURROW_POSTGRES_PG_CTL": "/usr/lib/postgresql/17/bin/pg_ctl"
   "BURROW_POSTGRES_BIN": "/usr/lib/postgresql/17/bin/postgres"
 }
 ```
