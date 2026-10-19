@@ -201,8 +201,11 @@ jobs:
           {"burrow":"$GITHUB_WORKSPACE/sources/Burrow","burrowBackend":"$GITHUB_WORKSPACE/sources/Burrow-Backend","burrowUi":"$GITHUB_WORKSPACE/sources/Burrow-UI","nodeGoblin":"$GITHUB_WORKSPACE/sources/Node-Goblin","goblinSecretStore":"$GITHUB_WORKSPACE/sources/Goblin-Secret-Store","burrowSkills":"$GITHUB_WORKSPACE/sources/Burrow-Skills","burrowBackdoor":"$GITHUB_WORKSPACE/sources/Burrow-Backdoor"}
           JSON
           node orchestrator/scripts/promotion/stage-snapshots.mjs roots.json staged "$RELEASE_DATE" sources.json
-          node orchestrator/scripts/promotion/release-notes.mjs "$RELEASE_DATE" sources.json previous.json note-roots.json release-notes.md
-          cat release-notes.md
+          mkdir -p release-notes
+          for target in burrow nodeGoblin goblinSecretStore burrowSkills burrowBackdoor; do
+            node orchestrator/scripts/promotion/release-notes.mjs "$target" "$RELEASE_DATE" sources.json previous.json note-roots.json "release-notes/$target.md"
+            cat "release-notes/$target.md"
+          done
       - name: Verify staged release trees
         if: steps.plan.outputs.validation_required == 'true'
         run: |
@@ -231,7 +234,7 @@ jobs:
             staged
             sources.json
             plan.json
-            release-notes.md
+            release-notes
           if-no-files-found: error
           retention-days: 7
 
@@ -274,16 +277,16 @@ jobs:
         run: |
           set -eu
           create_release() {
-            repo=$1; shift
+            repo=$1; notes=$2; shift 2
             if gh release view "v$VERSION" --repo "$PUBLIC_OWNER/$repo" >/dev/null 2>&1; then return; fi
-            gh release create "v$VERSION" --repo "$PUBLIC_OWNER/$repo" --title "$repo $VERSION" --notes-file release-notes.md "$@"
+            gh release create "v$VERSION" --repo "$PUBLIC_OWNER/$repo" --title "$repo $VERSION" --notes-file "$notes" "$@"
           }
-          create_release Node-Goblin \
+          create_release Node-Goblin release-notes/nodeGoblin.md \
             "staged/Node-Goblin/gateway/dist/node-goblin-$VERSION.tar.gz" \
             "staged/Node-Goblin/gateway/dist/node-goblin-$VERSION.tar.gz.sha256"
-          create_release Goblin-Secret-Store
-          create_release Burrow-Skills
-          create_release Burrow-Backdoor
+          create_release Goblin-Secret-Store release-notes/goblinSecretStore.md
+          create_release Burrow-Skills release-notes/burrowSkills.md
+          create_release Burrow-Backdoor release-notes/burrowBackdoor.md
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -328,5 +331,5 @@ jobs:
           set -eu
           orchestrator/scripts/promotion/publish-snapshot.sh Burrow staged/Burrow "$VERSION" "Release Burrow $VERSION"
           if ! gh release view "v$VERSION" --repo "$PUBLIC_OWNER/Burrow" >/dev/null 2>&1; then
-            gh release create "v$VERSION" --repo "$PUBLIC_OWNER/Burrow" --title "Burrow $VERSION" --notes-file release-notes.md
+            gh release create "v$VERSION" --repo "$PUBLIC_OWNER/Burrow" --title "Burrow $VERSION" --notes-file release-notes/burrow.md
           fi
