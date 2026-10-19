@@ -108,6 +108,7 @@ import { createScheduledChannelRoutes } from './ui/scheduled-channel-routes.mjs'
 import { createAuthRoutes } from './ui/auth-routes.mjs';
 import { createChatRoutes } from './ui/chat-routes.mjs';
 import { cleanupMods, createModRoute, discoverMods, loadMods } from '../src/mod-runtime.mjs';
+import { activeManagedSkillDeclarations, createManagedSkillSynchronizer, reconcileManagedSkills } from '../src/managed-skills.mjs';
 import { createModManagement } from '../src/mod-management.mjs';
 import { createModDistribution, createModManagementRoute } from '../src/mod-distribution.mjs';
 import { MAX_OVERVIEW_CHILD_CONTEXTS, normalizeOverviewBody, overviewSessionIds } from '../src/agent-overview.mjs';
@@ -2971,6 +2972,15 @@ const modLoadOptions = { modAuthority, modManagement: modManagementCapability, o
   if (!agent) throw new Error('agent_not_found');
   return agentRuntimeContext({ runtimeState: (await runtimeConfig()).runtimeState, agent }).agentWorkspaceRoot;
 } };
+const coreManagedSkills = [{ id: 'burrow-runtime', repository: 'https://github.com/GoblinKing-Burrow/Burrow-Skills.git', path: 'burrow-runtime/SKILL.md' }];
+async function reconcileRuntimeManagedSkills(mods = loadedMods) {
+  const workspaceRoot = (await runtimeConfig()).runtimeState.workspaceRoot;
+  return reconcileManagedSkills({ root: path.join(workspaceRoot, 'global', 'managed-skills'), declarations: activeManagedSkillDeclarations(mods, coreManagedSkills) });
+}
+const managedSkillSynchronizer = createManagedSkillSynchronizer({
+  reconcile: () => reconcileRuntimeManagedSkills(),
+  intervalMs: Math.max(60_000, Number(process.env.BURROW_MANAGED_SKILL_SYNC_INTERVAL_MS || 6 * 60 * 60 * 1000)),
+});
 let modsStarting = true;
 const modRoute = createModRoute({ getMods: () => loadedMods, readJsonBody, sendJson });
 async function transitionMod({ modId, enabled, installed, action, reactivate = false }) {
@@ -2996,6 +3006,7 @@ async function transitionMod({ modId, enabled, installed, action, reactivate = f
     loadedMods = installed
       ? loadedMods.map((entry) => entry.id === modId ? { ...entry, host: null, routes: [], store: null, lifecycleCleanup: null, status: 'disabled' } : entry)
       : loadedMods.filter((entry) => entry.id !== modId);
+    await reconcileRuntimeManagedSkills();
     return;
   }
   if (reactivate && old) {
@@ -3025,6 +3036,7 @@ async function transitionMod({ modId, enabled, installed, action, reactivate = f
     throw error;
   }
   if (old) await cleanupMods([old]);
+  await reconcileRuntimeManagedSkills();
   await modLoadOptions.onExecutionProviderActivated?.(modId);
 }
 const modDistribution = createModDistribution({
@@ -3042,6 +3054,8 @@ await migrateLegacyExecutionProviderApproval({
   agents: await agentsStore().list({ includeDisabled: true }),
 });
 loadedMods = await loadMods(modLoadOptions);
+const initialManagedSkillSync = await managedSkillSynchronizer.tick();
+if (!initialManagedSkillSync.ok) await serverLogger.event('managed_skill_sync_failed', { error: initialManagedSkillSync.error });
 await applyOtelConfigurationToNodeGoblins();
 modsStarting = false;
 coreModManagement = createModManagement({ modAuthority, distribution: modDistribution, repositoryFactory: postgresApplication.modDistributionRepositoryFactory });
@@ -3247,7 +3261,7 @@ const closeRuntimeResources = createCoordinatedShutdown({
     httpClosePromise = new Promise(resolve => server.close(() => resolve()));
     server.closeIdleConnections?.();
   },
-  producers: () => [skillSyncProducer, modDistributionProducer, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
+  producers: () => [skillSyncProducer, managedSkillSynchronizer, modDistributionProducer, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
   beforeDrain: async () => {
     try {
       await recordActiveRunInterruptions({ stores: postgresApplication.stores, activeRuns: activeChatRuns, resolveAgentRuntime, reason: shutdownReason });
@@ -3308,6 +3322,9 @@ server.listen(port, host, () => {
   await postgresApplication.stores.dreamCycles.reconcileInterrupted();
   if (shuttingDown) return;
   if (backgroundSchedulersEnabled()) {
+    void managedSkillSynchronizer.start().then(result => {
+      if (!result.ok) return serverLogger.event('managed_skill_sync_failed', { error: result.error });
+    }).catch(error => serverLogger.event('managed_skill_sync_failed', { error: String(error?.message || error) }));
     void skillGitSync.start().catch(error => serverLogger.event('skill_sync_startup_failed',{error:'skill_sync_failed'}));
     const store = postgresApplication.stores.scheduledJobs;
     try { await store.markMissedRuns(); await store.markMissedSchedules({ activeOwnerModIds: loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id) }); } finally { /* Shared application store remains open. */ }

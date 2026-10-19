@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { startModHost } from './mod-host.mjs';
+import { manifestManagedSkills } from './managed-skills.mjs';
 
 // Reserved for mod-owned persistent data; never a discoverable/installable mod.
 export const MOD_DATA_DIRECTORY = 'mod-data';
@@ -149,7 +150,8 @@ export async function discoverMods({ runtimeRoot = process.env.BURROW_RUNTIME_RO
       if (systemCapabilities.length && !server) throw new Error(`system_mod_server_required:${id}`);
       const ui = manifestUi(id, root, manifest.ui);
       const contributions = manifestContributions(id, manifest.contributions, ui);
-      const mod = { id, name, root, manifest, systemCapabilities, server: server ? inside(root, server) : null, ui, contributions };
+      const managedSkills = manifestManagedSkills(id, manifest.managedSkills);
+      const mod = { id, name, root, manifest, systemCapabilities, managedSkills, server: server ? inside(root, server) : null, ui, contributions };
       seen.set(id, mod); mods.push(mod);
     } catch (error) {
       mods.push(failedMod({ id: manifestId, root, error }));

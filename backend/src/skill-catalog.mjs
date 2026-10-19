@@ -129,9 +129,11 @@ export async function loadEffectiveSkillCatalog({ workspaceRoot, agentId, agentR
   const workspace = path.resolve(workspaceRoot || path.dirname(runtimeAgentWorkspace));
   const resolvedAgentId = runtimeAgentId || normalizeId(agentId);
   const globalRoot = path.join(workspace, 'global', 'skills');
+  const managedRoot = path.join(workspace, 'global', 'managed-skills');
   const agentRoot = runtimeSkillsRoot || path.join(workspace, resolvedAgentId, 'skills');
-  const [globalSkills, agentSkills] = await Promise.all([
+  const [globalSkills, managedSkills, agentSkills] = await Promise.all([
     loadOwnedSkillRoot({ skillsRoot: globalRoot, owner: { scope: 'global', agentId: null }, overrides }),
+    loadOwnedSkillRoot({ skillsRoot: managedRoot, owner: { scope: 'managed', agentId: null, readOnly: true }, overrides }),
     loadOwnedSkillRoot({ skillsRoot: agentRoot, owner: { scope: 'agent', agentId: resolvedAgentId }, overrides }),
   ]);
   let databaseSkills = [];
@@ -147,16 +149,17 @@ export async function loadEffectiveSkillCatalog({ workspaceRoot, agentId, agentR
       }));
     } finally { if (ownsStore) await store.close?.(); }
   }
-  // Collision order is explicit: assigned PostgreSQL text < shared filesystem < agent filesystem.
-  // This preserves asset-capable filesystem defaults and, most importantly, local agent overrides.
+  // Managed IDs are authoritative and read-only. Ordinary agent/global skills keep
+  // their existing precedence for every ID not reserved by an active managed source.
   const effective = new Map(databaseSkills.map((skill) => [skill.id, skill]));
   for (const skill of globalSkills) effective.set(skill.id, skill);
   for (const skill of agentSkills) effective.set(skill.id, skill);
+  for (const skill of managedSkills) effective.set(skill.id, skill);
   const skills = [...effective.values()].sort((a, b) => String(a.id).localeCompare(String(b.id)));
   return {
     workspaceRoot: workspace,
     agentId: resolvedAgentId,
-    roots: { global: globalRoot, agent: agentRoot },
+    roots: { global: globalRoot, managed: managedRoot, agent: agentRoot },
     overrides: {
       disabledSkillIds: asArray(overrides.disabledSkillIds).map(String),
       experimentalSkillIds: asArray(overrides.experimentalSkillIds).map(String),
