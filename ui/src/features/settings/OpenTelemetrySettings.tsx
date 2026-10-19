@@ -27,11 +27,9 @@ type OpenTelemetryUpdate = {
 };
 
 type OpenObserveEndpoint = { serverUrl: string; organization: string };
-type OpenTelemetryTestResponse = { ok: true; collectorStatus: number; durationMs: number };
-type BusyAction = 'save' | 'test' | null;
+type BusyAction = 'save' | null;
 
 const route = '/api/settings/opentelemetry';
-const testRoute = `${route}/test`;
 const openObservePath = /^(.*)\/api\/([^/]+)$/;
 
 function joinLabels(labels: string[]) {
@@ -156,7 +154,7 @@ export function OpenTelemetrySettings() {
   );
   const controlsDisabled = !saved || busy !== null;
 
-  function candidate(forTest: boolean): OpenTelemetryUpdate | null {
+  function candidate(): OpenTelemetryUpdate | null {
     if (!saved) return null;
     let collectorEndpoint = endpoint.trim();
     let replacementHeaders = headers;
@@ -164,22 +162,22 @@ export function OpenTelemetrySettings() {
       const cleanServerUrl = serverUrl.trim();
       const cleanOrganization = organization.trim();
       const cleanStream = stream.trim();
-      if ((enabled || forTest) && !cleanServerUrl) { setError('Enter your OpenObserve server URL before testing or enabling telemetry.'); return null; }
+      if (enabled && !cleanServerUrl) { setError('Enter your OpenObserve server URL before enabling telemetry.'); return null; }
       const serverValidation = endpointError(cleanServerUrl, 'OpenObserve server URL');
       if (serverValidation) { setError(serverValidation); return null; }
       if (!cleanOrganization) { setError('Enter the OpenObserve organization.'); return null; }
       if (/[/?#]/.test(cleanOrganization)) { setError('Organization cannot contain slashes, a query, or a fragment.'); return null; }
       if (!cleanStream) { setError('Enter the OpenObserve stream.'); return null; }
       if ((username && !password) || (!username && password)) { setError('Enter both the OpenObserve username and password to replace the saved credentials.'); return null; }
-      if (!saved.settings.headersConfigured && (!username || !password) && (enabled || forTest)) { setError('Enter your OpenObserve username and password before testing or enabling telemetry.'); return null; }
+      if (!saved.settings.headersConfigured && (!username || !password) && enabled) { setError('Enter your OpenObserve username and password before enabling telemetry.'); return null; }
       if (stream.trim() !== savedStream && saved.settings.headersConfigured && (!username || !password)) { setError('Enter your OpenObserve username and password to change the stream.'); return null; }
       collectorEndpoint = cleanServerUrl ? openObserveEndpoint(cleanServerUrl, cleanOrganization) : '';
       replacementHeaders = username && password ? openObserveHeaders(username, password, cleanStream) : '';
     }
 
     const environmentEndpointAvailable = saved.effective.endpointSource === 'environment' && Boolean(saved.effective.endpoint.trim());
-    if ((enabled || forTest) && !collectorEndpoint && !environmentEndpointAvailable) {
-      setError(`Enter a collector endpoint before ${forTest ? 'testing the connection' : 'enabling telemetry'}.`);
+    if (enabled && !collectorEndpoint && !environmentEndpointAvailable) {
+      setError('Enter a collector endpoint before enabling telemetry.');
       return null;
     }
     const endpointValidation = endpointError(collectorEndpoint);
@@ -203,7 +201,7 @@ export function OpenTelemetrySettings() {
     setError('');
     setNotice('');
 
-    const update = candidate(false);
+    const update = candidate();
     if (!update) return;
 
     setBusy('save');
@@ -214,37 +212,6 @@ export function OpenTelemetrySettings() {
       setNotice(overridden ? 'OpenTelemetry settings saved. Active environment overrides remain in effect.' : 'OpenTelemetry settings saved and applied live.');
     } catch {
       setError('Could not save OpenTelemetry settings. Your changes have not been confirmed. Try again.');
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function testConnection() {
-    if (!saved) return;
-    setError('');
-    setNotice('');
-    const update = candidate(true);
-    if (!update) return;
-    const { endpoint: candidateEndpoint, headers: candidateHeaders, clearHeaders: candidateClearHeaders } = update;
-    setBusy('test');
-    try {
-      const result = await api<OpenTelemetryTestResponse>(testRoute, jsonMutation('POST', {
-        endpoint: candidateEndpoint,
-        ...(candidateClearHeaders ? { clearHeaders: true } : candidateHeaders ? { headers: candidateHeaders } : {}),
-      }));
-      setNotice(`Connection succeeded. Collector returned ${result.collectorStatus} in ${result.durationMs} ms.`);
-    } catch (caught) {
-      const code = caught instanceof Error ? caught.message : '';
-      const messages: Record<string, string> = {
-        opentelemetry_authentication_failed: 'Connection failed: the collector rejected the credentials.',
-        opentelemetry_endpoint_not_found: 'Connection failed: the collector endpoint was not found.',
-        opentelemetry_connection_failed: 'Connection failed: Burrow could not reach the collector.',
-        opentelemetry_connection_timeout: 'Connection failed: the collector did not respond in time.',
-        opentelemetry_destination_blocked: "Burrow blocked this connection because the collector URL points to an unsafe local or private destination. Use the collector's reachable public or proxy URL.",
-        opentelemetry_saved_headers_endpoint_mismatch: 'The destination changed. Enter the credentials again, or remove the saved credentials before testing.',
-        opentelemetry_headers_reserved: 'Authentication headers cannot include reserved HTTP headers such as Host, Content-Type, or Content-Length.',
-      };
-      setError(messages[code] ?? 'Could not test the collector connection. Try again.');
     } finally {
       setBusy(null);
     }
@@ -322,7 +289,6 @@ export function OpenTelemetrySettings() {
     </>}
 
     <div className="telemetry-actions">
-      <button type="button" className="secondary" disabled={controlsDisabled} onClick={() => void testConnection()}>{busy === 'test' ? 'Testing…' : 'Test connection'}</button>
       <button type="button" className="primary" disabled={controlsDisabled || !dirty} onClick={() => void save()}>{busy === 'save' ? 'Saving…' : 'Save changes'}</button>
     </div>
     {!saved && !error && <p className="settings-help" role="status">Loading OpenTelemetry settings…</p>}

@@ -47,7 +47,6 @@ async function mount(response: Fixture = state) {
 }
 
 function save() { fireEvent.click(screen.getByRole('button', { name: 'Save changes' })); }
-function testConnection() { fireEvent.click(screen.getByRole('button', { name: 'Test connection' })); }
 function lastRequestBody() { return JSON.parse(vi.mocked(api).mock.calls.at(-1)![1]!.body as string); }
 
 it('keeps generic collectors in the custom path and preserves protected headers when omitted', async () => {
@@ -117,51 +116,6 @@ it('requires complete OpenObserve credentials and validates the friendly fields 
   save();
   expect((await screen.findByRole('alert')).textContent).toContain('both the OpenObserve username and password');
   expect(api).toHaveBeenCalledTimes(1);
-});
-
-it('tests the current candidate without saving and omits headers to use saved credentials', async () => {
-  await mount();
-  vi.mocked(api).mockResolvedValueOnce({ ok: true, collectorStatus: 200, durationMs: 47 });
-  fireEvent.change(screen.getByLabelText('OTLP endpoint'), { target: { value: 'https://candidate.example.com:4318' } });
-  testConnection();
-  await screen.findByText('Connection succeeded. Collector returned 200 in 47 ms.');
-  expect(api).toHaveBeenCalledTimes(2);
-  expect(vi.mocked(api).mock.calls.at(-1)?.[0]).toBe('/api/settings/opentelemetry/test');
-  expect(lastRequestBody()).toEqual({ endpoint: 'https://candidate.example.com:4318' });
-});
-
-it('tests OpenObserve with generated replacement headers including its stream', async () => {
-  await mount({
-    ...state,
-    settings: { enabled: false, endpoint: '', headersConfigured: false },
-    effective: { ...state.effective, endpoint: '', headersConfigured: false },
-  });
-  fireEvent.click(screen.getByRole('radio', { name: /OpenObserve/ }));
-  fireEvent.change(screen.getByLabelText('OpenObserve server URL'), { target: { value: 'https://observe.example.com/' } });
-  fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'goblin kingdom' } });
-  fireEvent.change(screen.getByLabelText('Stream'), { target: { value: 'burrow traces' } });
-  fireEvent.change(screen.getByLabelText('OpenObserve username or email'), { target: { value: 'rob@example.com' } });
-  fireEvent.change(screen.getByLabelText('OpenObserve password'), { target: { value: 'swordfish' } });
-  vi.mocked(api).mockResolvedValueOnce({ ok: true, collectorStatus: 200, durationMs: 12 });
-  testConnection();
-  await screen.findByText('Connection succeeded. Collector returned 200 in 12 ms.');
-  expect(lastRequestBody()).toEqual({
-    endpoint: 'https://observe.example.com/api/goblin%20kingdom',
-    headers: `Authorization=${encodeURIComponent(`Basic ${btoa('rob@example.com:swordfish')}`)},stream-name=burrow%20traces`,
-  });
-  expect((screen.getByLabelText('OpenObserve password') as HTMLInputElement).value).toBe('swordfish');
-});
-
-it.each([
-  ['opentelemetry_authentication_failed', 'rejected the credentials'],
-  ['opentelemetry_destination_blocked', "Burrow blocked this connection because the collector URL points to an unsafe local or private destination. Use the collector's reachable public or proxy URL."],
-  ['opentelemetry_saved_headers_endpoint_mismatch', 'The destination changed. Enter the credentials again, or remove the saved credentials before testing.'],
-  ['opentelemetry_headers_reserved', 'Authentication headers cannot include reserved HTTP headers'],
-])('maps the %s connection test failure without exposing backend details', async (code, message) => {
-  await mount();
-  vi.mocked(api).mockRejectedValueOnce(Error(code));
-  testConnection();
-  expect((await screen.findByRole('alert')).textContent).toContain(message);
 });
 
 it('validates advanced endpoint and header syntax before PUT', async () => {
