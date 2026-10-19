@@ -7104,7 +7104,7 @@
         "tags": [
           "Settings"
         ],
-        "summary": "Enable or disable OpenTelemetry export",
+        "summary": "Configure OpenTelemetry export",
         "operationId": "updateOpenTelemetrySettings",
         "parameters": [],
         "requestBody": {
@@ -7115,11 +7115,27 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
-                  "enabled"
+                  "enabled",
+                  "endpoint"
                 ],
                 "properties": {
                   "enabled": {
                     "type": "boolean"
+                  },
+                  "endpoint": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "description": "Saved OTLP/HTTP base endpoint. Environment overrides may take precedence."
+                  },
+                  "headers": {
+                    "type": "string",
+                    "maxLength": 8192,
+                    "writeOnly": true,
+                    "description": "Optional replacement OTLP header string. Omit to preserve the existing protected value."
+                  },
+                  "clearHeaders": {
+                    "type": "boolean",
+                    "description": "Remove the saved protected OTLP headers. Mutually exclusive with headers."
                   }
                 }
               }

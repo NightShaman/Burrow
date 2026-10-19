@@ -79,11 +79,11 @@ function safeErrorDetails(value) {
   } catch { return null; }
 }
 
-function validSystemMessage(message, type) {
+function validSystemMessage(message, type, { operation = true } = {}) {
   return message?.type === type && message.protocol === SYSTEM_PROTOCOL && message.controllerInstanceId === controllerInstanceId
     && typeof message.requestId === 'string' && message.requestId.length > 0
-    && typeof message.operationId === 'string' && message.operationId.length > 0
-    && typeof message.targetId === 'string' && message.targetId.length > 0;
+    && (!operation || (typeof message.operationId === 'string' && message.operationId.length > 0
+      && typeof message.targetId === 'string' && message.targetId.length > 0));
 }
 
 function rejectStoreRequests(error) {
@@ -261,6 +261,19 @@ async function shutdown() {
 
 process.on('message', async (message) => {
   if (message?.type === 'invoke-cancel') { activeTools.get(message.requestId)?.abort(); return; }
+  if (message?.type === 'system-controller-configure-telemetry') {
+    if (!validSystemMessage(message, 'system-controller-configure-telemetry', { operation: false }) || !systemController?.configureTelemetry) return;
+    try {
+      const configuration = message.configuration && typeof message.configuration === 'object' && !Array.isArray(message.configuration)
+        ? JSON.parse(JSON.stringify(message.configuration)) : null;
+      if (!configuration) throw new Error('remote_configuration_invalid');
+      const result = await systemController.configureTelemetry(configuration);
+      send({ type: 'system-controller-configuration-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId, requestId: message.requestId, ok: true, result }, () => {});
+    } catch (error) {
+      send({ type: 'system-controller-configuration-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId, requestId: message.requestId, ok: false, error: opaqueCode(error, 'remote_configuration_failed') }, () => {});
+    }
+    return;
+  }
   if (message?.type === 'system-controller-filesystem-cancel') {
     if (!validSystemMessage(message, 'system-controller-filesystem-cancel')) return;
     activeSystemFilesystems.get(message.requestId)?.abort.abort();

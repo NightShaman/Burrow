@@ -122,6 +122,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   let systemControllerReady = false;
   const controllerInstanceId = systemCapability ? randomUUID() : null;
   const pendingSystemProcess = new Map();
+  const pendingSystemConfiguration = new Map();
   const activeCapabilities = new Map();
   const cancelCapabilities = () => { for (const { controller } of activeCapabilities.values()) controller.abort(hostError("mod_capability_shutdown")); activeCapabilities.clear(); capabilities?.dispose?.(); };
   async function serviceCapabilityRequest(message) {
@@ -186,6 +187,8 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       entry.reject(error);
     }
     pendingSystemProcess.clear();
+    for (const entry of pendingSystemConfiguration.values()) { clearTimeout(entry.timer); entry.reject(error); }
+    pendingSystemConfiguration.clear();
   };
   const rejectSystemFilesystems = (code = 'remote_native_filesystem_controller_unavailable') => {
     const error = hostError(code);
@@ -306,6 +309,17 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       }
       return;
     }
+    if (message?.type === 'system-controller-configuration-result') {
+      if (message.protocol !== systemCapability || message.controllerInstanceId !== controllerInstanceId) return;
+      const requestId = typeof message.requestId === 'string' ? message.requestId : '';
+      const entry = pendingSystemConfiguration.get(requestId);
+      if (!entry) return;
+      pendingSystemConfiguration.delete(requestId);
+      clearTimeout(entry.timer);
+      if (message.ok !== true) entry.reject(hostError(typeof message.error === 'string' && /^[a-z0-9_]+$/.test(message.error) ? message.error : 'remote_configuration_failed'));
+      else entry.resolve(validateJsonBody(message.result));
+      return;
+    }
     if (message?.type === 'system-controller-process-result') {
       if (message.protocol !== systemCapability || message.controllerInstanceId !== controllerInstanceId) return;
       const requestId = typeof message.requestId === 'string' ? message.requestId : '';
@@ -407,6 +421,30 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
 
   function createSystemControllerProxy() {
     return Object.freeze({
+      async configureTelemetry(configuration = {}) {
+        if (!modAuthority) throw hostError('mod_authority_forbidden');
+        await modAuthority.assertAllowed(mod.id, 'execution-provider-v1');
+        if (!systemControllerReady || closing || stopped || !child.connected) throw hostError('remote_configuration_controller_unavailable');
+        let value;
+        try { value = jsonObject(configuration, 'remote_configuration_invalid'); }
+        catch { throw hostError('remote_configuration_invalid'); }
+        const requestId = randomUUID();
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            if (!pendingSystemConfiguration.has(requestId)) return;
+            pendingSystemConfiguration.delete(requestId);
+            reject(hostError('remote_configuration_timeout'));
+          }, finiteTimeout(routeTimeoutMs, DEFAULT_MOD_ROUTE_TIMEOUT_MS));
+          timer.unref?.();
+          pendingSystemConfiguration.set(requestId, { resolve, reject, timer });
+          child.send({ type: 'system-controller-configure-telemetry', protocol: systemCapability, controllerInstanceId, requestId, configuration: value }, (error) => {
+            if (!error || !pendingSystemConfiguration.has(requestId)) return;
+            pendingSystemConfiguration.delete(requestId);
+            clearTimeout(timer);
+            reject(hostError('remote_configuration_send_failed'));
+          });
+        });
+      },
       async executeProcess(request = {}, { abortSignal = null } = {}) {
         if (!modAuthority) throw hostError('mod_authority_forbidden');
         await modAuthority.assertAllowed(mod.id, 'execution-provider-v1');

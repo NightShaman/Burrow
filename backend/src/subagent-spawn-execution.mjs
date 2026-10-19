@@ -337,7 +337,7 @@ export async function executeSpawnSubagentTool({
     if (remoteExecution && typeof childRunner !== 'function') throw new Error('subagent_child_runner_required');
     childRun = remoteExecution || childRunner
       ? { ok: true, spawned: true, exitCode: 0, durationMs: null, result: await childRunner({ id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy, parentExecutionContext: executionContext, signal: abortSignal }) }
-      : await runSubagentProcess({ args: { id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy, executionBoundaries: executionContext?.executionBoundaries || null, traceContext: executionContext?.telemetry?.traceContextForTool?.(parentRunId, activityId) || executionContext?.traceContext || null }, signal: abortSignal });
+      : await runSubagentProcess({ args: { id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy, executionBoundaries: executionContext?.executionBoundaries || null, traceContext: executionContext?.telemetry?.traceContextForTool?.(parentRunId, activityId) || executionContext?.traceContext || null, otelConfiguration: executionContext?.telemetry?.remoteConfiguration?.() || null }, signal: abortSignal });
   } catch (error) {
     const code = compactString(error?.code || error?.message || 'subagent_child_dispatch_failed').split(':')[0];
     childRun = {

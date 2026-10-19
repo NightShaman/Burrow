@@ -17,8 +17,8 @@ import { releaseProvenance } from './release-provenance.mjs';
 import { httpAuthorityConfig, hostAuthorityPolicy } from '../src/http-authority.mjs';
 import { browserOriginConfig, browserOriginSettings, saveBrowserOriginSettings, browserRequestPolicy } from '../src/browser-origin-policy.mjs';
 import { browserTabSettings, saveBrowserTabSettings } from '../src/browser-tab-settings.mjs';
-import { otelSettings, saveOtelSettings } from '../src/otel-settings.mjs';
-import { createOtelRuntime } from '../src/otel-runtime.mjs';
+import { otelSettings, readOtelRuntimeConfig, saveOtelSettings } from '../src/otel-settings.mjs';
+import { createReconfigurableOtelRuntime } from '../src/otel-runtime.mjs';
 import { artifactResponseHeaders } from '../src/artifact-response-policy.mjs';
 import { postgresTransactionContext, withPostgresTransaction } from '../src/postgres-foundation.mjs';
 import { readJsonBody } from '../src/request-resource-budgets.mjs';
@@ -187,8 +187,16 @@ const { anthropicOauthUsage, openaiOauthUsage } = createProviderUsageService({ m
 configureMcpProviderStateStore(postgresApplication.stores.mcpProviderStates);
 await hydrateMcpProviderStates({ runtimeRoot: process.env.BURROW_MCPORTER_ROOT || path.join(runtimeRoot, 'integrations', 'mcporter') }).catch((error) => serverLogger.event('mcp_provider_state_hydration_failed', { error: String(error?.message || error) }));
 const runtimeMetrics = createRuntimeMetricsCollector({ runtimeRoot });
-const otelRuntime = createOtelRuntime({ serviceVersion: releaseVersion });
-if ((await otelSettings({ metadata: postgresApplication.stores.metadata })).effective.enabled) await otelRuntime.start();
+const otelRuntime = createReconfigurableOtelRuntime({ serviceVersion: releaseVersion });
+await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: postgresApplication.stores.metadata }));
+async function applyOtelConfigurationToNodeGoblins() {
+  const configuration = otelRuntime.remoteConfiguration();
+  try { return await executionProviders.configure('node-goblin', configuration); }
+  catch (error) {
+    serverLogger.event('node_goblin_otel_configuration_failed', { error: String(error?.code || error?.message || 'configuration_failed') });
+    return { configured: false, reason: 'configuration_failed' };
+  }
+}
 
 function profilesStore() { return postgresApplication.stores.profiles; }
 function dreamDiaryStore() { return postgresApplication.stores.dreamDiary; }
@@ -2871,7 +2879,7 @@ const { archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, arc
 });
 const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
 const brainRoute = createBrainRoutes({ store: postgresApplication.stores.brains, embeddings: postgresApplication.stores.brainEmbeddings, readJsonBody, sendJson });
-const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, browserOriginSettings: () => browserOriginSettings({ metadata: metadataStore() }), saveBrowserOriginSettings: body => saveBrowserOriginSettings(body, { metadata: metadataStore() }), browserTabSettings: () => browserTabSettings({ metadata: metadataStore() }), saveBrowserTabSettings: body => saveBrowserTabSettings(body, { metadata: metadataStore() }), otelSettings: () => otelSettings({ metadata: metadataStore(), runtimeStatus: otelRuntime.status }), saveOtelSettings: async body => { let result = await saveOtelSettings(body, { metadata: metadataStore(), runtimeStatus: otelRuntime.status }); if (result.ok && result.effective.enabled) { await otelRuntime.start(); result = await otelSettings({ metadata: metadataStore(), runtimeStatus: otelRuntime.status }); } return result; }, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
+const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, browserOriginSettings: () => browserOriginSettings({ metadata: metadataStore() }), saveBrowserOriginSettings: body => saveBrowserOriginSettings(body, { metadata: metadataStore() }), browserTabSettings: () => browserTabSettings({ metadata: metadataStore() }), saveBrowserTabSettings: body => saveBrowserTabSettings(body, { metadata: metadataStore() }), otelSettings: () => otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }), saveOtelSettings: async body => { let result = await saveOtelSettings(body, { store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); if (result.ok) { try { await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore() })); await applyOtelConfigurationToNodeGoblins(); } catch (error) { serverLogger.event('otel_configuration_apply_failed', { error: String(error?.message || 'configuration_failed') }); return { ok: false, status: 500, error: 'opentelemetry_configuration_apply_failed' }; } result = await otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); } return result; }, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
 const observabilityRoute = createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, codexLbAccounts, anthropicOauthUsage, openaiOauthUsage, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore: postgresApplication.stores.conversations, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
 const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJson, validateBoundaryBody, withScheduledJobs, scheduler, listGroupChannels, createGroupChannel, readGroupChannelTurns, groupChannelRuns, startGroupChannelMessage, cancelGroupChannelRun, runtimeDataRoot, conversationStore: postgresApplication.stores.conversations });
 const authRoute = createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
@@ -2950,7 +2958,7 @@ const modManagementCapability = Object.freeze(Object.fromEntries(['inventory', '
   if (!coreModManagement) throw new Error('mod_management_unavailable');
   return coreModManagement[method](...args);
 }])));
-const modLoadOptions = { modAuthority, modManagement: modManagementCapability, stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), runtimeDiagnostics, resolveAgentWorkspaceRoot: async (id) => {
+const modLoadOptions = { modAuthority, modManagement: modManagementCapability, onExecutionProviderActivated: async modId => { if (modId === 'node-goblin') await applyOtelConfigurationToNodeGoblins(); }, stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), runtimeDiagnostics, resolveAgentWorkspaceRoot: async (id) => {
   const agent = await agentsStore().get(id);
   if (!agent) throw new Error('agent_not_found');
   return agentRuntimeContext({ runtimeState: (await runtimeConfig()).runtimeState, agent }).agentWorkspaceRoot;
@@ -3009,6 +3017,7 @@ async function transitionMod({ modId, enabled, installed, action, reactivate = f
     throw error;
   }
   if (old) await cleanupMods([old]);
+  await modLoadOptions.onExecutionProviderActivated?.(modId);
 }
 const modDistribution = createModDistribution({
   runtimeRoot: modsRuntimeRoot,
@@ -3025,6 +3034,7 @@ await migrateLegacyExecutionProviderApproval({
   agents: await agentsStore().list({ includeDisabled: true }),
 });
 loadedMods = await loadMods(modLoadOptions);
+await applyOtelConfigurationToNodeGoblins();
 modsStarting = false;
 coreModManagement = createModManagement({ modAuthority, distribution: modDistribution, repositoryFactory: postgresApplication.modDistributionRepositoryFactory });
 await coreModManagement.ready;

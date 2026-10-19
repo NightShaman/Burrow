@@ -28,6 +28,7 @@ import PostgresSetupStateStore, { POSTGRES_SETUP_STATE_SCHEMA_SQL } from './post
 import PostgresSettingsMetadataStore from './postgres-settings-metadata-store.mjs';
 import { PostgresSessionStore } from './postgres-session-store.mjs';
 import PostgresUiAuthSecretStore from './postgres-ui-auth-secret-store.mjs';
+import PostgresOtelSettingsStore from './postgres-otel-settings-store.mjs';
 import PostgresRetentionSettingsStore, { POSTGRES_RETENTION_SETTINGS_SCHEMA_SQL } from './postgres-retention-settings-store.mjs';
 import PostgresWorkingMemoryRetentionSettingsStore, { POSTGRES_WORKING_MEMORY_RETENTION_SCHEMA_SQL } from './postgres-working-memory-retention-settings-store.mjs';
 
@@ -83,6 +84,7 @@ export async function createPostgresApplication({
     retentionSettings: new PostgresRetentionSettingsStore({ ...common, ...(clock ? { clock } : {}) }),
     workingMemoryRetention,
     uiAuthSecrets: new PostgresUiAuthSecretStore({ ...common, key: encryptionKey, ...(clock ? { clock } : {}) }),
+    opentelemetry: new PostgresOtelSettingsStore({ ...common, key: encryptionKey, ...(clock ? { clock } : {}) }),
     metadata: new PostgresSettingsMetadataStore({ ...common, ...(clock ? { clock } : {}) }),
     conversations: new PostgresSessionStore({ ...common, ...(clock ? { clock } : {}) }),
     };

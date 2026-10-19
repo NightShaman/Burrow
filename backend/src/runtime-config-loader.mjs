@@ -12,7 +12,7 @@ export async function loadRuntimeConfig({ rootDir, args = {}, stores = null, run
   const runtimeState = resolveRuntimeStateConfig({ rootDir, args, loadedConfig: loaded.config });
   const skillsConfig = { ...resolveSkillsConfig(loaded.config), root: runtimeState.skillsRoot };
   const executionBoundaries = await readExecutionBoundaries({ metadataStore: injectedStores.metadata });
-  const opentelemetry = await otelSettings({ metadata: injectedStores.metadata });
+  const opentelemetry = await otelSettings({ store: injectedStores.opentelemetry, metadata: injectedStores.metadata });
   let modelConfig = null;
   let modelResolutionError = null;
   try {

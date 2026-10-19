@@ -303,4 +303,77 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
   return Object.freeze({ start, startRun, observe, endRun, traceContextForRun, traceContextForTool, status, shutdown });
 }
 
+export function createReconfigurableOtelRuntime({ serviceVersion = null, clock = () => Date.now(), runtimeFactory = createOtelRuntime, tuningEnv = process.env } = {}) {
+  const runtimeTuning = Object.fromEntries(Object.entries(tuningEnv).filter(([key, value]) => value && /^(?:OTEL_BSP_|OTEL_METRIC_EXPORT_|OTEL_RESOURCE_ATTRIBUTES$|OTEL_SERVICE_NAME$|OTEL_SDK_DISABLED$|OTEL_EXPORTER_OTLP_(?:TIMEOUT|TRACES_TIMEOUT|METRICS_TIMEOUT))/.test(key)));
+  let active = runtimeFactory({ env: runtimeTuning, serviceVersion, clock });
+  let applied = { enabled: false, endpoint: '', headers: null, tracesEndpoint: null, metricsEndpoint: null, tracesHeaders: null, metricsHeaders: null };
+  let generation = 0;
+  let applying = Promise.resolve();
+
+  function configurationKey(config) {
+    return JSON.stringify([config.enabled === true, String(config.endpoint || ''), String(config.headers || ''), String(config.tracesEndpoint || ''), String(config.metricsEndpoint || ''), String(config.tracesHeaders || ''), String(config.metricsHeaders || '')]);
+  }
+
+  async function apply(config = {}) {
+    const normalized = { enabled: config.enabled === true, endpoint: String(config.endpoint || '').trim(), headers: config.headers ? String(config.headers) : null,
+      tracesEndpoint: config.tracesEndpoint || null, metricsEndpoint: config.metricsEndpoint || null, tracesHeaders: config.tracesHeaders || null, metricsHeaders: config.metricsHeaders || null };
+    const operation = async () => {
+      if (configurationKey(normalized) === configurationKey(applied)) return status();
+      const previous = active;
+      const previousApplied = applied;
+      const env = {
+        ...runtimeTuning,
+        ...(normalized.endpoint ? { OTEL_EXPORTER_OTLP_ENDPOINT: normalized.endpoint } : {}),
+        ...(normalized.tracesEndpoint ? { OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: normalized.tracesEndpoint } : {}),
+        ...(normalized.metricsEndpoint ? { OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: normalized.metricsEndpoint } : {}),
+        ...(normalized.headers ? { OTEL_EXPORTER_OTLP_HEADERS: normalized.headers } : {}),
+        ...(normalized.tracesHeaders ? { OTEL_EXPORTER_OTLP_TRACES_HEADERS: normalized.tracesHeaders } : {}),
+        ...(normalized.metricsHeaders ? { OTEL_EXPORTER_OTLP_METRICS_HEADERS: normalized.metricsHeaders } : {}),
+      };
+      const candidate = runtimeFactory({ env, serviceVersion, clock });
+      try {
+        if (normalized.enabled && (normalized.endpoint || normalized.tracesEndpoint || normalized.metricsEndpoint)) {
+          const started = await candidate.start();
+          if (started?.sdkStarted !== true) throw new Error('opentelemetry_runtime_start_failed');
+        }
+      } catch (error) {
+        await candidate.shutdown().catch(() => {});
+        active = previous;
+        applied = previousApplied;
+        throw error;
+      }
+      active = candidate;
+      applied = normalized;
+      generation += 1;
+      await previous.shutdown();
+      return status();
+    };
+    applying = applying.then(operation, operation);
+    return applying;
+  }
+
+  function status() {
+    return { ...active.status(), configured: Boolean(applied.endpoint || applied.tracesEndpoint || applied.metricsEndpoint), generation };
+  }
+
+  function remoteConfiguration() {
+    const endpoint = applied.tracesEndpoint || applied.endpoint;
+    const headers = applied.tracesHeaders || applied.headers;
+    return Object.freeze({ enabled: applied.enabled && Boolean(endpoint), endpoint, ...(headers ? { headers } : {}) });
+  }
+
+  return Object.freeze({
+    apply,
+    remoteConfiguration,
+    start: () => active.start(),
+    startRun: (...args) => active.startRun(...args),
+    observe: (...args) => active.observe(...args),
+    endRun: (...args) => active.endRun(...args),
+    traceContextForRun: (...args) => active.traceContextForRun(...args),
+    traceContextForTool: (...args) => active.traceContextForTool(...args),
+    status,
+    shutdown: (...args) => active.shutdown(...args),
+  });
+}
+
 export const __otelRuntime__ = Object.freeze({ usageValues, safeOutcome, signalEndpoint, positiveInteger, traceExporterOptions, metricExporterOptions });
