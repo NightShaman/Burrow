@@ -19,10 +19,10 @@ Open `http://127.0.0.1:8000/`. Windows PowerShell uses `.venv-docs\Scripts\Activ
 
 ```sh
 python -m mkdocs build --strict
-python scripts/docs/check_site.py site --base-path /Burrow/
+python scripts/docs/check_site.py site --base-path /
 ```
 
-The strict build validates configuration, navigation, Markdown links, and anchors. The HTML checker validates built local links, assets, and fragments. The current GitHub Pages project site uses `/Burrow/`. Keep `site_url` and the checker base path aligned. If the intended custom domain is configured later, switch both to the domain-root path `/`.
+The strict build validates configuration, navigation, Markdown links, and anchors. The HTML checker validates built local links, assets, and fragments. The custom-domain site uses the root path `/`, without `/Burrow/`. Keep `site_url` and the checker base path aligned.
 
 The retained technical reference includes Mermaid diagrams. Check actual browser rendering separately:
 
@@ -46,7 +46,7 @@ Provenance checked at upstream commit `650cfc4`: [assembly preservation](https:/
 
 ## Publishing the documentation
 
-The current canonical URL is `https://goblinking-burrow.github.io/Burrow/`. The intended future custom domain is `blissful-psychosis.com`; its setup is deferred. No custom-domain redirect or CNAME is included. Build output is in `site/`.
+The canonical URL is `https://burrow-docs.blissful-psychosis.com/`, without a `/Burrow/` path. GitHub Pages owns the custom-domain binding; the DNS CNAME points `burrow-docs` to `GoblinKing-Burrow.github.io`. This source configuration does not itself change DNS or Pages settings. Build output is in `site/`.
 
 The Documentation workflow builds and checks documentation in both repositories. Only in **GoblinKing-Burrow/Burrow**, after successful checks on `main`, it uploads the static `site/` directory and deploys to that repository’s configured GitHub Pages site. NightShaman and pull requests run checks only. Public promotion preserves this one documentation workflow; it does not copy development/release workflows. This workflow does not build or publish Burrow application images.
 
