@@ -13,7 +13,7 @@ export const TARGETS = {
     excludes: ['docs/audit-repair-pass-5.md', 'docs/repairs/lifecycle-pass-4.md']
   },
   goblinSecretStore: {
-    paths: ['API-CONTRACT.md', 'LICENSE', 'README.md', 'burrow.mod.json', 'docs', 'package.json', 'server', 'ui'],
+    paths: ['.github/workflows/docs.yml', 'API-CONTRACT.md', 'LICENSE', 'README.md', 'burrow.mod.json', 'docs', 'mkdocs.yml', 'package.json', 'requirements-docs.txt', 'scripts/docs', 'server', 'ui'],
     excludes: []
   },
   burrowSkills: {

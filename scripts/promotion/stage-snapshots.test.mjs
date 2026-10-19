@@ -56,3 +56,13 @@ test('Node Goblin snapshot preserves documentation deployment without release wo
   assert.ok(TARGETS.nodeGoblin.excludes.includes('docs/audit-repair-pass-5.md'));
   assert.ok(TARGETS.nodeGoblin.excludes.includes('docs/repairs/lifecycle-pass-4.md'));
 });
+
+
+test('Goblin Secret Store snapshot preserves documentation without other workflows', () => {
+  const paths = TARGETS.goblinSecretStore.paths;
+  for (const file of ['.github/workflows/docs.yml', 'docs', 'mkdocs.yml', 'requirements-docs.txt', 'scripts/docs']) {
+    assert.ok(paths.includes(file), `missing public documentation path: ${file}`);
+  }
+  assert.deepEqual(paths.filter(file => file.startsWith('.github')), ['.github/workflows/docs.yml']);
+  assert.deepEqual(paths.filter(file => file.startsWith('scripts')), ['scripts/docs']);
+});
