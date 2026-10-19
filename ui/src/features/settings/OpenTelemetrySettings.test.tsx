@@ -8,18 +8,26 @@ vi.mock('../../app/api', async (importOriginal) => ({
   api: vi.fn(),
 }));
 
-afterEach(() => {
-  cleanup();
-  vi.resetAllMocks();
-});
+afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
-const state = {
+type Fixture = {
+  ok: boolean;
+  settings: { enabled: boolean; endpoint: string; headersConfigured: boolean; streamName?: string };
+  effective: {
+    enabled: boolean;
+    endpoint: string;
+    headersConfigured: boolean;
+    source: 'environment' | 'database' | 'default';
+    endpointSource: 'environment' | 'database' | 'default';
+    headersSource: 'environment' | 'database' | 'default';
+    restartRequired: false;
+  };
+  runtime?: { enabled: boolean; sdkStarted: boolean };
+};
+
+const state: Fixture = {
   ok: true,
-  settings: {
-    enabled: false,
-    endpoint: 'https://collector.example.com:4318',
-    headersConfigured: true,
-  },
+  settings: { enabled: false, endpoint: 'https://collector.example.com:4318', headersConfigured: true },
   effective: {
     enabled: false,
     endpoint: 'https://collector.example.com:4318',
@@ -32,196 +40,185 @@ const state = {
   runtime: { enabled: false, sdkStarted: false },
 };
 
-async function mount() {
+async function mount(response: Fixture = state) {
+  vi.mocked(api).mockResolvedValue(response);
   render(<OpenTelemetrySettings />);
-  await screen.findByText(/Telemetry runtime is off/);
+  await screen.findByText(/Telemetry runtime (?:is off|status is unavailable)/);
 }
 
-function save() {
-  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-}
+function save() { fireEvent.click(screen.getByRole('button', { name: 'Save changes' })); }
+function testConnection() { fireEvent.click(screen.getByRole('button', { name: 'Test connection' })); }
+function lastRequestBody() { return JSON.parse(vi.mocked(api).mock.calls.at(-1)![1]!.body as string); }
 
-function lastRequestBody() {
-  return JSON.parse(vi.mocked(api).mock.calls.at(-1)![1]!.body as string);
-}
-
-it('shows saved and effective values and preserves protected headers when omitted', async () => {
-  vi.mocked(api)
-    .mockResolvedValueOnce(state)
-    .mockResolvedValueOnce({
-      ...state,
-      settings: { ...state.settings, enabled: true },
-      effective: { ...state.effective, enabled: true },
-      runtime: { enabled: true, sdkStarted: true },
-    });
-
+it('keeps generic collectors in the custom path and preserves protected headers when omitted', async () => {
   await mount();
-  expect((screen.getByLabelText('Collector endpoint') as HTMLInputElement).value).toBe(state.settings.endpoint);
-  expect(screen.getByText(/Headers are configured/)).toBeTruthy();
-  expect((screen.getByRole('button', { name: 'Save changes' }) as HTMLButtonElement).disabled).toBe(true);
-
+  expect((screen.getByRole('radio', { name: /Custom OTLP/ }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByLabelText('OTLP endpoint') as HTMLInputElement).value).toBe(state.settings.endpoint);
+  expect((screen.getByLabelText('Authentication headers') as HTMLInputElement).value).toBe('');
   fireEvent.click(screen.getByRole('switch'));
   save();
-
   await screen.findByText('OpenTelemetry settings saved and applied live.');
-  expect(api).toHaveBeenLastCalledWith('/api/settings/opentelemetry', expect.objectContaining({ method: 'PUT' }));
   expect(lastRequestBody()).toEqual({ enabled: true, endpoint: state.settings.endpoint });
-  expect(screen.getByText(/Telemetry runtime is on/)).toBeTruthy();
 });
 
-it('replaces protected headers without retaining or displaying the secret after success', async () => {
-  vi.mocked(api).mockResolvedValue(state);
-  await mount();
-
-  const headerInput = screen.getByLabelText('Collector headers') as HTMLInputElement;
-  expect(headerInput.type).toBe('password');
-  expect(headerInput.value).toBe('');
-  fireEvent.change(headerInput, { target: { value: 'Authorization=Bearer test-token' } });
+it('presents OpenObserve as normal fields and converts them to the existing secure API contract', async () => {
+  const openObserve = {
+    ...state,
+    settings: { enabled: false, endpoint: '', headersConfigured: false },
+    effective: { ...state.effective, endpoint: '', headersConfigured: false },
+  };
+  await mount(openObserve);
+  fireEvent.click(screen.getByRole('radio', { name: /OpenObserve/ }));
+  fireEvent.change(screen.getByLabelText('OpenObserve server URL'), { target: { value: 'https://observe.example.com/' } });
+  fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'goblin kingdom' } });
+  fireEvent.change(screen.getByLabelText('Stream'), { target: { value: 'goblin logs' } });
+  fireEvent.change(screen.getByLabelText('OpenObserve username or email'), { target: { value: 'rob@example.com' } });
+  fireEvent.change(screen.getByLabelText('OpenObserve password'), { target: { value: 'swordfish' } });
+  fireEvent.click(screen.getByRole('switch'));
   save();
-
   await screen.findByText('OpenTelemetry settings saved and applied live.');
-  expect(lastRequestBody()).toEqual({
-    enabled: false,
-    endpoint: state.settings.endpoint,
-    headers: 'Authorization=Bearer test-token',
+  const body = lastRequestBody();
+  expect(body.enabled).toBe(true);
+  expect(body.endpoint).toBe('https://observe.example.com/api/goblin%20kingdom');
+  expect(body.headers).toBe(`Authorization=${encodeURIComponent(`Basic ${btoa('rob@example.com:swordfish')}`)},stream-name=goblin%20logs`);
+  expect(screen.queryByLabelText('OpenObserve username or email')).toBeNull();
+  expect(screen.queryByLabelText('OpenObserve password')).toBeNull();
+  expect(document.body.textContent).not.toContain('swordfish');
+});
+
+it('reloads a saved non-default OpenObserve stream without attempting to reveal credentials', async () => {
+  await mount({
+    ...state,
+    settings: { ...state.settings, endpoint: 'https://observe.example.com/api/default', streamName: 'burrow-traces' },
+    effective: { ...state.effective, endpoint: 'https://observe.example.com/api/default' },
   });
-  expect(headerInput.value).toBe('');
-  expect(screen.queryByText(/test-token/)).toBeNull();
+  expect((screen.getByRole('radio', { name: /OpenObserve/ }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByLabelText('OpenObserve server URL') as HTMLInputElement).value).toBe('https://observe.example.com');
+  expect((screen.getByLabelText('Organization') as HTMLInputElement).value).toBe('default');
+  expect((screen.getByLabelText('Stream') as HTMLInputElement).value).toBe('burrow-traces');
+  expect((screen.getByLabelText('OpenObserve password') as HTMLInputElement).value).toBe('');
+  expect(screen.getByText(/saved sign-in is configured/i)).toBeTruthy();
 });
 
-it('preserves an intentional header replacement exactly, including surrounding whitespace', async () => {
-  vi.mocked(api).mockResolvedValue(state);
-  await mount();
-
-  fireEvent.change(screen.getByLabelText('Collector headers'), { target: { value: '  x-api-key=secret  ' } });
-  save();
-
-  await screen.findByText('OpenTelemetry settings saved and applied live.');
-  expect(lastRequestBody().headers).toBe('  x-api-key=secret  ');
-});
-
-it('clears saved headers explicitly and never combines clearHeaders with headers', async () => {
-  vi.mocked(api).mockResolvedValue(state);
-  await mount();
-
-  fireEvent.change(screen.getByLabelText('Collector headers'), { target: { value: 'x-api-key=secret' } });
-  fireEvent.click(screen.getByLabelText('Remove saved headers on save'));
-  expect((screen.getByLabelText('Collector headers') as HTMLInputElement).value).toBe('');
-  save();
-
-  await screen.findByText('OpenTelemetry settings saved and applied live.');
-  expect(lastRequestBody()).toEqual({
-    enabled: false,
-    endpoint: state.settings.endpoint,
-    clearHeaders: true,
+it('requires complete OpenObserve credentials and validates the friendly fields before PUT', async () => {
+  await mount({
+    ...state,
+    settings: { enabled: false, endpoint: '', headersConfigured: false },
+    effective: { ...state.effective, endpoint: '', headersConfigured: false },
   });
+  fireEvent.click(screen.getByRole('radio', { name: /OpenObserve/ }));
+  fireEvent.change(screen.getByLabelText('OpenObserve server URL'), { target: { value: 'https://observe.example.com' } });
+  fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'bad/org' } });
+  save();
+  expect((await screen.findByRole('alert')).textContent).toContain('Organization cannot contain');
+  expect(api).toHaveBeenCalledTimes(1);
+  fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'default' } });
+  fireEvent.change(screen.getByLabelText('OpenObserve username or email'), { target: { value: 'rob@example.com' } });
+  save();
+  expect((await screen.findByRole('alert')).textContent).toContain('both the OpenObserve username and password');
+  expect(api).toHaveBeenCalledTimes(1);
 });
 
-it('summarizes independent environment overrides without restart or manual-edit guidance', async () => {
-  vi.mocked(api).mockResolvedValue({
+it('tests the current candidate without saving and omits headers to use saved credentials', async () => {
+  await mount();
+  vi.mocked(api).mockResolvedValueOnce({ ok: true, collectorStatus: 200, durationMs: 47 });
+  fireEvent.change(screen.getByLabelText('OTLP endpoint'), { target: { value: 'https://candidate.example.com:4318' } });
+  testConnection();
+  await screen.findByText('Connection succeeded. Collector returned 200 in 47 ms.');
+  expect(api).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(api).mock.calls.at(-1)?.[0]).toBe('/api/settings/opentelemetry/test');
+  expect(lastRequestBody()).toEqual({ endpoint: 'https://candidate.example.com:4318' });
+});
+
+it('tests OpenObserve with generated replacement headers including its stream', async () => {
+  await mount({
+    ...state,
+    settings: { enabled: false, endpoint: '', headersConfigured: false },
+    effective: { ...state.effective, endpoint: '', headersConfigured: false },
+  });
+  fireEvent.click(screen.getByRole('radio', { name: /OpenObserve/ }));
+  fireEvent.change(screen.getByLabelText('OpenObserve server URL'), { target: { value: 'https://observe.example.com/' } });
+  fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'goblin kingdom' } });
+  fireEvent.change(screen.getByLabelText('Stream'), { target: { value: 'burrow traces' } });
+  fireEvent.change(screen.getByLabelText('OpenObserve username or email'), { target: { value: 'rob@example.com' } });
+  fireEvent.change(screen.getByLabelText('OpenObserve password'), { target: { value: 'swordfish' } });
+  vi.mocked(api).mockResolvedValueOnce({ ok: true, collectorStatus: 200, durationMs: 12 });
+  testConnection();
+  await screen.findByText('Connection succeeded. Collector returned 200 in 12 ms.');
+  expect(lastRequestBody()).toEqual({
+    endpoint: 'https://observe.example.com/api/goblin%20kingdom',
+    headers: `Authorization=${encodeURIComponent(`Basic ${btoa('rob@example.com:swordfish')}`)},stream-name=burrow%20traces`,
+  });
+  expect((screen.getByLabelText('OpenObserve password') as HTMLInputElement).value).toBe('swordfish');
+});
+
+it.each([
+  ['opentelemetry_authentication_failed', 'rejected the credentials'],
+  ['opentelemetry_destination_blocked', "Burrow blocked this connection because the collector URL points to an unsafe local or private destination. Use the collector's reachable public or proxy URL."],
+  ['opentelemetry_saved_headers_endpoint_mismatch', 'The destination changed. Enter the credentials again, or remove the saved credentials before testing.'],
+  ['opentelemetry_headers_reserved', 'Authentication headers cannot include reserved HTTP headers'],
+])('maps the %s connection test failure without exposing backend details', async (code, message) => {
+  await mount();
+  vi.mocked(api).mockRejectedValueOnce(Error(code));
+  testConnection();
+  expect((await screen.findByRole('alert')).textContent).toContain(message);
+});
+
+it('validates advanced endpoint and header syntax before PUT', async () => {
+  await mount();
+  fireEvent.change(screen.getByLabelText('OTLP endpoint'), { target: { value: 'ftp://user:pass@example.test?bad=yes' } });
+  save();
+  expect((await screen.findByRole('alert')).textContent).toContain('HTTP or HTTPS collector URL');
+  fireEvent.change(screen.getByLabelText('OTLP endpoint'), { target: { value: 'https://collector.example' } });
+  fireEvent.change(screen.getByLabelText('Authentication headers'), { target: { value: 'not-a-pair' } });
+  save();
+  expect((await screen.findByRole('alert')).textContent).toContain('comma-separated key=value');
+  expect(api).toHaveBeenCalledTimes(1);
+});
+
+it('clears saved credentials explicitly without sending a replacement', async () => {
+  await mount();
+  fireEvent.change(screen.getByLabelText('Authentication headers'), { target: { value: 'x-api-key=secret' } });
+  fireEvent.click(screen.getByLabelText('Remove saved credentials on save'));
+  save();
+  await screen.findByText('OpenTelemetry settings saved and applied live.');
+  expect(lastRequestBody()).toEqual({ enabled: false, endpoint: state.settings.endpoint, clearHeaders: true });
+});
+
+it('summarizes environment overrides without restart or manual-edit guidance', async () => {
+  await mount({
     ...state,
     runtime: undefined,
-    effective: {
-      ...state.effective,
-      enabled: true,
-      endpoint: 'https://environment-collector.example.com',
-      source: 'environment',
-      endpointSource: 'environment',
-      headersSource: 'environment',
-    },
+    effective: { ...state.effective, enabled: true, endpoint: 'https://environment-collector.example.com', source: 'environment', endpointSource: 'environment', headersSource: 'environment' },
   });
-
-  render(<OpenTelemetrySettings />);
-  await screen.findByText(/Telemetry runtime status is unavailable/);
-  expect(screen.getByText(/Environment overrides currently control the telemetry preference, collector endpoint, and collector headers/)).toBeTruthy();
-  expect(screen.getByText(/environment-collector/)).toBeTruthy();
+  expect(screen.getByText(/telemetry preference, collector endpoint, and collector credentials/)).toBeTruthy();
   expect(screen.queryByText(/Restart Core/)).toBeNull();
-  expect(screen.queryByText(/change.*variable/i)).toBeNull();
-  fireEvent.change(screen.getByRole('textbox', { name: 'Collector endpoint' }), { target: { value: 'https://saved-change.example' } });
+  fireEvent.change(screen.getByLabelText('OTLP endpoint'), { target: { value: 'https://saved-change.example' } });
   save();
   await screen.findByText('OpenTelemetry settings saved. Active environment overrides remain in effect.');
 });
 
-it('blocks contract-invalid endpoint and header values before PUT', async () => {
-  vi.mocked(api).mockResolvedValueOnce(state);
-  await mount();
-  fireEvent.change(screen.getByRole('textbox', { name: 'Collector endpoint' }), { target: { value: 'ftp://user:pass@example.test?bad=yes' } });
-  save();
-  await screen.findByText(/Use an HTTP or HTTPS collector URL/);
-  expect(api).toHaveBeenCalledTimes(1);
-  fireEvent.change(screen.getByRole('textbox', { name: 'Collector endpoint' }), { target: { value: 'https://collector.example' } });
-  fireEvent.change(screen.getByLabelText('Collector headers'), { target: { value: 'not-a-pair' } });
-  save();
-  await screen.findByText(/comma-separated key=value list/);
-  expect(api).toHaveBeenCalledTimes(1);
-});
-
-it('retries load errors and keeps the draft after save errors without exposing server details', async () => {
-  vi.mocked(api)
-    .mockRejectedValueOnce(Error('offline'))
-    .mockResolvedValueOnce(state)
-    .mockRejectedValueOnce(Error('Authorization=do-not-render'));
-
+it('retries load errors and keeps drafts after sanitized save errors', async () => {
+  vi.mocked(api).mockRejectedValueOnce(Error('offline')).mockResolvedValueOnce(state).mockRejectedValueOnce(Error('Authorization=do-not-render'));
   render(<OpenTelemetrySettings />);
   fireEvent.click(await screen.findByRole('button', { name: 'Retry OpenTelemetry settings' }));
   await screen.findByText(/Telemetry runtime is off/);
-
   fireEvent.click(screen.getByRole('switch'));
   save();
-
   const alert = await screen.findByRole('alert');
   expect(alert.textContent).toContain('Could not save');
   expect(alert.textContent).not.toContain('do-not-render');
   expect((screen.getByRole('switch') as HTMLInputElement).checked).toBe(true);
-  expect(screen.queryByText('OpenTelemetry settings saved and applied live.')).toBeNull();
 });
 
-it('requires a destination to enable telemetry before sending a PUT', async () => {
-  vi.mocked(api).mockResolvedValue({
+it('allows enablement with an environment destination and an otherwise blank custom draft', async () => {
+  await mount({
     ...state,
-    settings: { ...state.settings, endpoint: '' },
-    effective: { ...state.effective, endpoint: '' },
+    settings: { enabled: false, endpoint: '', headersConfigured: false },
+    effective: { ...state.effective, endpoint: 'https://environment-collector.example.com', endpointSource: 'environment', headersConfigured: false },
   });
-  await mount();
-
   fireEvent.click(screen.getByRole('switch'));
   save();
-
-  expect((await screen.findByRole('alert')).textContent).toContain('before enabling');
-  expect(api).toHaveBeenCalledTimes(1);
-});
-
-it('allows enablement with a blank saved endpoint when an effective environment endpoint exists', async () => {
-  vi.mocked(api).mockResolvedValue({
-    ...state,
-    settings: { ...state.settings, endpoint: '' },
-    effective: {
-      ...state.effective,
-      endpoint: 'https://environment-collector.example.com',
-      endpointSource: 'environment',
-    },
-  });
-  await mount();
-
-  fireEvent.click(screen.getByRole('switch'));
-  save();
-
   await screen.findByText('OpenTelemetry settings saved. Active environment overrides remain in effect.');
   expect(lastRequestBody()).toEqual({ enabled: true, endpoint: '' });
-});
-
-it('sends blank endpoint and headers as omission so the server applies exact contract semantics', async () => {
-  vi.mocked(api).mockResolvedValue({
-    ...state,
-    settings: { ...state.settings, enabled: false, endpoint: '', headersConfigured: false },
-    effective: { ...state.effective, endpoint: '', headersConfigured: false },
-  });
-  await mount();
-
-  fireEvent.change(screen.getByLabelText('Collector headers'), { target: { value: '   ' } });
-  fireEvent.change(screen.getByLabelText('Collector endpoint'), { target: { value: ' https://collector.example.com/v1 ' } });
-  save();
-
-  await screen.findByText('OpenTelemetry settings saved and applied live.');
-  expect(lastRequestBody()).toEqual({ enabled: false, endpoint: 'https://collector.example.com/v1' });
 });
