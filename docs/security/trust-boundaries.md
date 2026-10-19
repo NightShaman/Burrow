@@ -1,5 +1,8 @@
 # Trust boundaries
 
+!!! warning "Earlier technical reference"
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 BURROW is an operator-controlled runtime with native filesystem/process tools, model connections, MCP integrations, and installable code. Deploy it inside a trust boundary suitable for the data and credentials available to its service account. HTTP login, encrypted settings, and child processes each provide specific protections; together they do not establish hostile multi-tenant isolation.
 
 This page describes source-verified behavior at commit `c15064dd177788afcdda357a5e545510f754a754` (**2026.10.10.4**). Live network, identity-provider, database, and host isolation must be verified in the actual deployment.

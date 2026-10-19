@@ -1,5 +1,8 @@
 # Repository and source ownership
 
+!!! warning "Earlier technical reference"
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 Burrow's public repository is an assembled distribution. The backend and UI originate in separate source repositories; the assembly records the exact commits it used.
 
 ## Reviewed snapshot

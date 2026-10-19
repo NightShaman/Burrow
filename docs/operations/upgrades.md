@@ -1,5 +1,8 @@
 # Upgrades
 
+!!! warning "Earlier technical reference"
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 Upgrade the deployment through its own distribution path: the native launcher for user installs, image replacement for containers. Preserve durable state and the settings encryption key.
 
 ## Before changing a deployment

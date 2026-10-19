@@ -1,5 +1,8 @@
 # Installation
 
+!!! warning "Earlier technical reference"
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 Burrow runs as a local Node.js application with PostgreSQL and an optional browser interface. Choose a [native installation](#native-installation) or [container deployment](../operations/containers.md).
 
 !!! warning "Grant access deliberately"

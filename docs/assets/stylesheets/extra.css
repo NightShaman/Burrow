@@ -6,3 +6,11 @@
 .md-typeset table:not([class]) { font-size: .72rem; }
 .md-typeset .admonition { border-radius: .3rem; }
 .md-typeset .mermaid { overflow-x: auto; }
+
+/* Documentation refresh for the public release; application UI is unchanged. */
+.burrow-hero { text-align: center; padding: 1rem 0 1.5rem; }
+.md-typeset .burrow-hero-logo { display: block; width: min(24rem, 85%); max-height: 20rem; object-fit: contain; margin: 0 auto 1rem; }
+.md-typeset .burrow-hero h1 { margin: .5rem 0 1rem; }
+.md-typeset .burrow-hero .md-button { margin: .3rem; border-radius: .45rem; }
+.md-typeset .grid.cards > ul > li { padding: 1.1rem; }
+@media (max-width: 600px) { .burrow-hero { padding-top: 0; } .md-typeset .burrow-hero-logo { max-height: 15rem; } }

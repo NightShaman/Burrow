@@ -1,66 +1,57 @@
-# BURROW
+<div class="burrow-hero" markdown>
 
-BURROW is an agent runtime with a web interface, model-provider connections, native and MCP tools, durable conversations, task execution, and PostgreSQL-backed application state.
+![Burrow](assets/burrow-logo.png){ .burrow-hero-logo }
 
-This manual explains the runtime an operator installs and the code a developer extends. It follows the assembled release and its pinned Backend and UI sources; it does not assume that a running installation has already been upgraded.
+# Your agents. Your workbench.
 
-<div class="grid cards" markdown>
+Burrow is a self-hosted, chat-first AI agent application. Connect a model, give an agent a personality, and keep conversations, tools, memories, and project work in one place.
 
--   **Install and configure**
+[Install Burrow](guide/installation.md){ .md-button .md-button--primary }
+[Create your first agent](guide/first-agent.md){ .md-button }
 
-    ---
-
-    Choose a native installation or container, complete setup, and connect an agent to a model.
-
-    [Installation](getting-started/installation.md) · [Initial setup](getting-started/initial-setup.md)
-
--   **Understand execution**
-
-    ---
-
-    Follow a chat turn through context preparation, model execution, tools, Minions, and persistence.
-
-    [Architecture](architecture/overview.md) · [Execution flow](architecture/execution-flow.md)
-
--   **Operate reliably**
-
-    ---
-
-    Upgrade deliberately, protect the database and encryption key, and diagnose failures from evidence.
-
-    [Operations](operations/procedures.md) · [Backup and recovery](operations/backup-recovery.md)
-
--   **Build on the runtime**
-
-    ---
-
-    Find source ownership, developer workflows, API surfaces, and extension boundaries.
-
-    [Developer setup](development/setup.md) · [API reference](reference/api.md)
+Public-release guide · **2026.10.19**
 
 </div>
 
-## What do you want to do?
+## Start small. Add what you need.
 
-- [Connect a model and send your first message](getting-started/initial-setup.md)
-- [Use Chat, follow tool progress, and stop work](concepts/interface.md#chat-and-sessions)
-- [Save or correct a memory in Brains](concepts/memory.md)
-- [Find an earlier conversation](concepts/conversation-history.md)
-- [Start, restart, and inspect Burrow](operations/procedures.md)
-- [Fix a setup or connection problem](operations/troubleshooting.md)
+You run Burrow on your own host and open its web interface in a browser. Model providers and integrations may still receive the content you send them; self-hosted does not mean every model runs locally.
 
-## Before first use
+<div class="grid cards" markdown>
 
-1. Read [core concepts](concepts/core-concepts.md) to distinguish agents, sessions, Minions, workers, and tools.
-2. Review [authentication](security/authentication.md) before exposing the listener beyond a trusted host.
-3. Read [storage and recovery](architecture/persistence.md): PostgreSQL is central, but files and the settings encryption key also matter.
-4. Check the [known limitations](project/known-limitations.md) for incomplete commands and packaging differences in this documented snapshot.
+- **Have your first conversation**
 
-!!! warning "A workspace is not a security sandbox"
-    Agent workspace roots provide execution context. They do not by themselves confine filesystem access or shell commands. Configure and verify the actual [permission and trust boundaries](security/permissions.md).
+    Install Burrow, finish the setup wizard, connect a model, and send a harmless first message.
 
-## Documentation baseline
+    [Start here →](guide/installation.md)
 
-The operator guides are updated for assembled build **2026.10.10.4**, commit [`c15064d`](https://github.com/NightShaman/Burrow/tree/c15064dd177788afcdda357a5e545510f754a754). Exact source pins, inspection scope, and validation limits are recorded in [Source and coverage](project/source-map.md). References distinguish current behavior, compatibility paths, source-visible gaps, and unverified deployment behavior.
+- **Make it your everyday workspace**
 
-For precise values, use the [configuration](reference/configuration.md), [environment](reference/environment.md), and [CLI](reference/cli.md) references rather than older examples from unrelated releases.
+    Switch agents and sessions, follow running work, use files, and find past conversations.
+
+    [Learn the interface →](guide/everyday-use.md)
+
+- **Give agents useful capabilities**
+
+    Understand model connections, MCP tools, Node Goblin, skills, and optional mods before enabling them.
+
+    [Choose tools and mods →](guide/tools-and-mods.md)
+
+- **Keep your work safe**
+
+    Update deliberately, protect your database and encryption key, and know what to check when something fails.
+
+    [Maintenance and help →](guide/maintenance.md)
+
+</div>
+
+!!! warning "Understand the access you grant"
+    Burrow does not provide comprehensive guardrails around agent actions. Tools and mods can access files, credentials, remote systems, and external services. Start on loopback, use least-privilege credentials, and enable only integrations you trust. An agent workspace is not a security sandbox.
+
+## A guide to the public release
+
+These user guides follow [GoblinKing-Burrow/Burrow](https://github.com/GoblinKing-Burrow/Burrow/tree/deec39818955db1711161b5310d5822e65fda39a), not the moving NightShaman development build. Features depend on your installed release, model provider, and enabled mods.
+
+Older architectural and API material remains under **Earlier technical reference**, with a warning on every page. It is not a second set of current installation instructions. [Read the source and verification scope](project/source-map.md).
+
+Burrow is distributed under its [Sustainable Use License](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/LICENSE).

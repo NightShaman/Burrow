@@ -1,5 +1,8 @@
 # Releases
 
+!!! warning "Earlier technical reference"
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 NightShaman repositories are the development authority. Development pushes use fast contract/build gates, update the assembled NightShaman Burrow tree, and publish immediately testable development artifacts. They do not replace the completely validated public releases.
 
 The scheduled `Validate and promote public releases` workflow is the release boundary. It freezes exact NightShaman revisions, runs complete validation against that frozen set, stages allowlisted public trees, and then publishes coordinated releases to `GoblinKing-Burrow`.

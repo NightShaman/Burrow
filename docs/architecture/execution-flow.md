@@ -1,5 +1,8 @@
 # Execution flow
 
+!!! warning "Earlier technical reference"
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 This page follows a selected native tool call through validation, dispatch, provider continuation, and terminal reporting. For setup and tool arguments, see [Tools](../concepts/tools.md).
 
 ## From model output to execution

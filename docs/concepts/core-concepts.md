@@ -1,5 +1,8 @@
 # Core concepts
 
+!!! warning "Earlier technical reference"
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 BURROW is a chat-first runtime. An operator talks to a configured agent; the agent can answer, inspect files, run tools, delegate a bounded task, or use an enabled integration. The normal result is an assistant response. Progress, traces, receipts, and task state explain how that result was produced.
 
 This distinction matters when operating the system: a successful HTTP request, a completed tool, and a verified task are different outcomes.

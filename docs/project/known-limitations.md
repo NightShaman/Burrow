@@ -1,5 +1,8 @@
 # Known limitations
 
+!!! warning "Earlier technical reference"
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 These observations were rechecked against release **2026.10.10.4**, the [documented source baseline](source-map.md). They describe published source and packaging, not an independently tested running installation. Recheck them when upgrading.
 
 ## Configuration and command compatibility

@@ -1,11 +1,11 @@
 site_name: BURROW
-site_description: Operator and developer documentation for the BURROW agent runtime
-site_url: https://nightshaman.github.io/Burrow/
-repo_url: https://github.com/NightShaman/Burrow
-repo_name: NightShaman/Burrow
-edit_uri: edit/main/docs/
+site_description: Install Burrow, create your first agent, and use the public release day to day
+site_url: https://blissful-psychosis.com/
+repo_url: https://github.com/GoblinKing-Burrow/Burrow
+repo_name: GoblinKing-Burrow/Burrow
+edit_uri: ""
 strict: true
-copyright: BURROW · NightShaman · MIT
+copyright: Burrow · Blissful-Psychosis · Sustainable Use License
 
 theme:
   name: material
@@ -37,7 +37,6 @@ theme:
     - search.suggest
     - search.highlight
     - content.code.copy
-    - content.action.edit
 
 plugins:
   - search
@@ -78,58 +77,69 @@ extra_css:
 
 nav:
   - Home: index.md
-  - Start:
-      - Core concepts: concepts/core-concepts.md
-      - Installation: getting-started/installation.md
-      - Initial setup: getting-started/initial-setup.md
-      - Interface guide: concepts/interface.md
-  - Architecture:
-      - Overview: architecture/overview.md
-      - Runtime: architecture/runtime.md
-      - Execution flow: architecture/execution-flow.md
-      - Persistence: architecture/persistence.md
-      - Agents and Minions: concepts/agents-minions.md
-      - Workers and tasks: concepts/workers-tasks.md
-      - Tools: concepts/tools.md
-      - MCP: concepts/mcp.md
-      - Models and providers: concepts/models.md
-      - Memory: concepts/memory.md
-      - Dreams: concepts/dreams.md
-      - Conversation history: concepts/conversation-history.md
-  - Operate:
-      - Deployment: operations/deployment.md
-      - Containers: operations/containers.md
-      - Upgrades: operations/upgrades.md
-      - Backup and recovery: operations/backup-recovery.md
-      - Logging and observability: operations/observability.md
-      - Procedures: operations/procedures.md
-      - Troubleshooting: operations/troubleshooting.md
-  - Security:
-      - Authentication: security/authentication.md
-      - Permissions: security/permissions.md
-      - Trust boundaries: security/trust-boundaries.md
-  - Reference:
-      - Configuration: reference/configuration.md
-      - Environment variables: reference/environment.md
-      - CLI: reference/cli.md
-      - API:
-          - Overview: reference/api.md
-          - Chat and cancellation: reference/api/chat.md
-          - Agents and profiles: reference/api/agents.md
-          - Settings and connections: reference/api/settings.md
-          - Sessions and archives: reference/api/sessions.md
-          - Memory and Dreams: reference/api/memory.md
-          - Work and scheduling: reference/api/work.md
-          - Artifacts and Forge: reference/api/artifacts.md
-          - Diagnostics: reference/api/diagnostics.md
-          - Mod host contracts: reference/api/mods.md
-      - Storage schema: reference/storage-schema.md
-  - Develop:
-      - Developer setup: development/setup.md
-      - Repository structure: development/repository.md
-      - Extensions: development/extensions.md
-      - Releases and versioning: development/releases.md
-      - Documentation development: development/documentation.md
-  - Project:
+  - User guide:
+      - Install Burrow: guide/installation.md
+      - Your first agent: guide/first-agent.md
+      - Everyday use: guide/everyday-use.md
+      - Models and connections: guide/models.md
+      - Tools, Node Goblin, and mods: guide/tools-and-mods.md
+      - Skills and memory: guide/skills-and-memory.md
+      - Projects and tasks: guide/tasks.md
+      - Updates, backups, and help: guide/maintenance.md
+  - About this release:
       - Source and coverage: project/source-map.md
-      - Known limitations: project/known-limitations.md
+      - Build this documentation: development/documentation.md
+  - Earlier technical reference:
+      - Start:
+          - Core concepts: concepts/core-concepts.md
+          - Installation: getting-started/installation.md
+          - Initial setup: getting-started/initial-setup.md
+          - Interface guide: concepts/interface.md
+      - Architecture:
+          - Overview: architecture/overview.md
+          - Runtime: architecture/runtime.md
+          - Execution flow: architecture/execution-flow.md
+          - Persistence: architecture/persistence.md
+          - Agents and Minions: concepts/agents-minions.md
+          - Workers and tasks: concepts/workers-tasks.md
+          - Tools: concepts/tools.md
+          - MCP: concepts/mcp.md
+          - Models and providers: concepts/models.md
+          - Memory: concepts/memory.md
+          - Dreams: concepts/dreams.md
+          - Conversation history: concepts/conversation-history.md
+      - Operate:
+          - Deployment: operations/deployment.md
+          - Containers: operations/containers.md
+          - Upgrades: operations/upgrades.md
+          - Backup and recovery: operations/backup-recovery.md
+          - Logging and observability: operations/observability.md
+          - Procedures: operations/procedures.md
+          - Troubleshooting: operations/troubleshooting.md
+      - Security:
+          - Authentication: security/authentication.md
+          - Permissions: security/permissions.md
+          - Trust boundaries: security/trust-boundaries.md
+      - Reference:
+          - Configuration: reference/configuration.md
+          - Environment variables: reference/environment.md
+          - CLI: reference/cli.md
+          - API:
+              - Overview: reference/api.md
+              - Chat and cancellation: reference/api/chat.md
+              - Agents and profiles: reference/api/agents.md
+              - Settings and connections: reference/api/settings.md
+              - Sessions and archives: reference/api/sessions.md
+              - Memory and Dreams: reference/api/memory.md
+              - Work and scheduling: reference/api/work.md
+              - Artifacts and Forge: reference/api/artifacts.md
+              - Diagnostics: reference/api/diagnostics.md
+              - Mod host contracts: reference/api/mods.md
+          - Storage schema: reference/storage-schema.md
+      - Develop:
+          - Developer setup: development/setup.md
+          - Repository structure: development/repository.md
+          - Extensions: development/extensions.md
+          - Releases and versioning: development/releases.md
+      - Project:
+          - Known limitations: project/known-limitations.md

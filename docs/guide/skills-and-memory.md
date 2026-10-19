@@ -1,0 +1,86 @@
+# Skills and memory
+
+This guide follows the public **2026.10.19** release. Use **skills** for reusable instructions, **profile documents** for agent-specific guidance, and **Brains** for explicit saved memories.
+
+## Create a text skill
+
+1. Open **Settings → Skills → New text skill**.
+2. Fill in **ID**, **Name**, **Description**, and **Content**. Alternatively, click **Choose text file** to load a `.md`, `.markdown`, or `.txt` file into the form for review.
+3. Choose a **Lifecycle**: available, experimental, deprecated, or disabled.
+4. Check **Assign globally** if every agent should have access, or leave it unchecked for individual assignment.
+5. Click **Create skill**. Loading a file into the editor does not save it until this step.
+
+To assign a saved skill, open **Installed skills**, select it, and use its **Assignments** section. You can also open **Settings → Agents → [agent] → Skills** and check individual assignments. Assignments refer to the same shared skill; they do not create separate copies. A global skill cannot be individually unchecked in the agent view.
+
+Use **Installed skills** to search by name, ID, or description, filter by lifecycle/assignment, edit operator-managed instructions, or delete a skill. Deletion removes the shared copy and its assignments.
+
+[Source: text creation and assignments](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/SkillsSettings.tsx#L70-L153)
+
+## Import a repository skill
+
+1. Open **Settings → Skills → Import from repository**.
+2. Enter the repository and **Skill path**. Select a directory for a package with companion files, or `SKILL.md` for instructions only.
+3. Under **Ref & automatic updates**, choose a ref if needed. `HEAD` uses the repository default; tags and commit IDs stay pinned. Automatic sync is off unless enabled.
+4. Click **Preview skill**. Read the actual instructions, included files, and previewed revision.
+5. Review **Install ID & availability**, then click **Install skill**.
+6. Assign it to the intended agents if you did not assign it globally.
+
+The interface installs files; it does not execute package files during import. If the repository changes after preview, preview again before installing. If an install response times out, reload the library to check whether it completed before retrying.
+
+[Source: repository preview and import](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/SkillRepositoryImport.tsx#L20-L76)
+
+### Update an imported skill
+
+Select it under **Installed skills**. Its **Source** section controls the repository, ref, path, and automatic sync schedule. **Save source** saves that configuration; **Sync now** fetches the upstream content. **Refresh status** checks an ongoing or uncertain result. Schedules use the operator timezone.
+
+Upstream-managed instructions are read-only in the editor; lifecycle and assignments remain editable. Disabling automatic sync retains the installed content. A text-only source can be removed while retaining its text and assignments. A package with companion files cannot be detached here without copying; disable automatic sync instead. Private HTTPS credentials are not configured in this skill form.
+
+[Source: source controls and limitations](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/SkillSourceSettings.tsx#L45-L75)
+
+### What assigning a skill does
+
+Assignment makes the skill available for discovery. It does not inject the full instructions into every prompt or guarantee that a particular turn uses them. The agent can list skills and explicitly load the relevant one. The planner does not automatically select full skill bodies. A disabled skill is unavailable; experimental and deprecated are lifecycle labels, not equivalent to disabled.
+
+[Source: explicit loading](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/prompt-skill-selection.mjs#L5-L32) · [Source: lifecycle availability](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/skill-catalog.mjs#L21-L26) · [Source: skill discovery and load](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/skill-tool-executor.mjs#L5-L17)
+
+## Edit an agent's profile documents
+
+Open **Settings → Agents**, choose the agent, then **Profile documents**. Select **SOUL.md**, **RULES.md**, **ORIENTATION.md**, **PREFERENCES.md**, **TOOLS.md**, or **DreamMemory.md**. Edit the Markdown and click **Save profile documents**.
+
+These are agent guidance documents. Writing a permission into a document does not create an operating-system sandbox or an MCP grant; configure actual access separately in [Tools and mods](tools-and-mods.md).
+
+[Source: profile document editor](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/AgentProfileDocuments.tsx#L6-L52)
+
+## Create and correct saved memories
+
+1. Open **Brains** and select the **Agent owner**.
+2. Click **New memory**.
+3. Add a **Title**, **Content**, and optional **Source references**, one per line.
+4. Click **Create memory**.
+
+Search within the selected agent's memories, then select one to read or edit it. Click **Save memory** to save an edit. If another change caused a revision conflict, use **Reload memory** and review the latest version before saving again.
+
+Memories you create or edit through the operator interface are operator-owned; agents cannot modify operator-owned records. Memories are separated by agent owner. They have no automatic expiration or full-memory preload: the agent uses explicit memory tools to retrieve them. A saved fact and its references may become stale; neither proves current runtime state.
+
+[Source: Brains UI](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/brains/BrainsPage.tsx#L72-L119) · [Source: ownership and revisions](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/postgres-brain-store.mjs#L43-L56) · [Source: operator mutations](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/scripts/ui/brain-routes.mjs#L23-L26) · [Source: retrieval contract](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/action-proposal.mjs#L230-L231)
+
+!!! warning "Check the selection before deleting"
+    **Delete memory** and **Delete selected memories** act directly in this release; there is no confirmation dialog in the Brains page. **Select page** selects only the visible page. Bulk deletion runs independently for each record, so some deletions may succeed while others fail. Read the per-record result before retrying. This page has no restore button.
+
+[Source: deletion behavior](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/brains/BrainsPage.tsx#L83-L118)
+
+### Optional embeddings
+
+Open **Settings → General → Brain memory** to configure embeddings globally. This release supports Google and Ollama embedding adapters; a working chat connection to another provider does not establish embedding support. Choose a supported provider and embedding model, test it, then enable and save the settings. A manually entered model ID requires a successful test before saving an enabled configuration. **Reindex all memories asynchronously** rebuilds the index in the background; the page reports indexed, pending, and failed counts. Partial coverage remains searchable lexically, and saved-memory editing remains separate from indexing.
+
+Enabling a remote embedding provider involves sending memory text to that provider for indexing. Choose the provider with the sensitivity of your saved content in mind.
+
+[Source: embedding controls](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/BrainEmbeddingSettings.tsx#L48-L80) · [Source: supported providers and text requests](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/brain-embedding-provider.mjs#L15-L59)
+
+## Scheduled dreaming
+
+Open **Settings → Agents → [agent] → Dreams**. Enable scheduled dreaming, set the cron schedule, choose a model override or inherit the chat model, edit the prompt, and click **Save dream settings**. The schedule follows the operator timezone. **Dream on quiet days** controls whether a day with no new material still generates a diary from retained continuity; when off, such days skip model work.
+
+Check **Recent activity** for completed, partial, failed, or interrupted cycles and any phase errors. Browse retained dream entries in **Archive → Dreams**. Dream continuity and explicit Brains records are separate features.
+
+[Source: dream settings and activity](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/AgentDreams.tsx#L87-L124)

@@ -1,5 +1,8 @@
 # Conversation history and archives
 
+!!! warning "Earlier technical reference"
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 A conversation is scoped by agent and session. PostgreSQL stores active entries, immutable archive snapshots and session metadata. Explicit session search and Dream can resolve evidence through these persisted originals. Brains stores saved memories separately.
 
 ## Original-message storage

@@ -1,54 +1,42 @@
 # Source and coverage
 
-This manual is grounded in the assembled BURROW repository and the exact Backend and UI revisions it records. Source inspection is evidence of implementation; it is not a claim that a particular deployed installation was tested.
+The user guide documents the public **2026.10.19** release of Burrow. It is grounded in executable code from the public repository, not assumed parity with newer NightShaman development work.
 
-## Documented baseline
+## Public baseline
 
-| Component | Revision |
-|---|---|
-| Published assembled release | `2026.10.10.4` |
-| Public BURROW commit | `c15064dd177788afcdda357a5e545510f754a754` |
-| Backend source pin | `2bf4844c0834e67e0993049131a8c86d5baad024` |
-| UI source pin | `86dee9ec34bdec9f415e1d7a924cb3cc990bab60` |
-| Node Goblin source pin (provenance only) | `53ad311dfa5a41839d219c94a574f07b0a8b036f` |
+- Repository: [GoblinKing-Burrow/Burrow](https://github.com/GoblinKing-Burrow/Burrow)
+- Inspected public commit: [`deec39818955db1711161b5310d5822e65fda39a`](https://github.com/GoblinKing-Burrow/Burrow/tree/deec39818955db1711161b5310d5822e65fda39a)
+- Release date/version: `2026.10.19`
+- Frozen Burrow source: `6b0284c605dc6ed8ba0dae03ee5bbf9194bad981`
+- Backend: `77f6da160ecae849aa83fc67d08ef4cc903d0b46`
+- UI: `eee912f1e55308c79695bc7a304224cc6a501eab`
+- Node Goblin: `42422cc42df619e47fec36e98293e5e4e51a7802`
+- Goblin Secret Store: `15eeea33e4d179c2571a976e5ec9cbfbd9a1673a`
+- Burrow Skills: `6860ba70b483e4bbd6ee3b7e5ea967dda6dfc211`
+- Burrow Backdoor: `8e9a1d9b1bd5950c3a1882883ea2fde78f035f16`
 
-These pins come from [`SOURCE_VERSIONS`](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/SOURCE_VERSIONS). The [release](https://github.com/NightShaman/Burrow/releases/tag/v2026.10.10.4) was published on 10 October 2026 at 03:39 UTC. This is a fixed documentation baseline, not a promise that a local installation or moving `main` is the same version.
+These source pins are recorded in the public [PUBLIC_RELEASE.json](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/PUBLIC_RELEASE.json). A component pin records provenance; it does not mean that component is installed, enabled, or tested in your environment.
 
-## Inspection scope and limits
+## What was refreshed
 
-The October 10 refresh checks operator-facing changes against the assembled source: setup, model connections and selection, provider cache behavior, Chat activity and steering, Brains and optional embeddings, explicit conversation recall, task execution, maintenance and the older known-limitations list. Storage coverage includes the migration manifest through version 49. Steps name current UI controls and separate an accepted action from its observed result.
+The eight **User guide** pages were written for this public snapshot: installation, first agent, everyday interface use, models, tools/mods, skills/memory, projects/tasks, and maintenance. Their source links point to immutable public code. The homepage and documentation build instructions were also refreshed.
 
-The initial manual was based on the October 2 `.6`/`.7` audit. Historical immutable source links remain where that background has not been independently re-audited in full; they are evidence for their cited revision, not proof that every line is unchanged. The refresh is not an exhaustive audit of all intervening runtime changes. The downloadable OpenAPI artifact is explicitly historical; use the current source-backed endpoint pages for newly added or retired routes.
+The **Earlier technical reference** is preserved for historical context and existing links. Every retained page is marked as not fully revalidated for 2026.10.19. Older NightShaman links on those pages document their cited revisions, not necessarily today's public behavior. Do not use old image tags, install commands, or security assumptions as current instructions.
 
-No production installation, paid model call, database migration, destructive cleanup, OAuth login, or restore was executed for this documentation refresh. Static source review and documentation checks do not certify runtime behavior or deployment security. Node Goblin deployment/integration instructions remain outside this manual's scope.
+Existing screenshots remain with the earlier reference. They were captured from synthetic development fixtures on October 16, not from a tested public-release installation; they have not been relabeled as current screenshots. The new homepage uses the repository's existing Burrow logo.
 
-## Documentation ownership
+## Verification limits
 
-The public assembly preserves root `docs/`, `mkdocs.yml`, documentation dependencies, `scripts/docs/`, and the documentation workflow. These are the correct source for this site. Assembly replaces `backend/`, `ui/`, and the root README; change the upstream Backend deployment README for any permanent root README edit. See [documentation development](../development/documentation.md) and [assembly workflow](https://github.com/NightShaman/Burrow/blob/c15064dd177788afcdda357a5e545510f754a754/.github/workflows/assemble.yml).
+Code inspection establishes what the release implements. It does not certify that every feature works with every provider or deployment. This refresh did not execute a live installation, model call, OAuth login, database restore, mod install, remote command, or production deployment. Documentation checks validate the site itself; they do not replace runtime testing.
 
-## Evidence precedence
+NightShaman development versions use `YYYY.MM.DD.#`; GoblinKing-Burrow public versions use `YYYY.MM.DD` without the numeric suffix. This formatting difference is expected and does not itself mean a release is stale. Compare the manifest and source revisions.
 
-When artifacts disagree, this manual follows the executable code and configuration at the pinned revision, with schemas, scripts, tests, comments, and existing docs used as supporting evidence. Disagreement is recorded instead of resolved by inventing behavior.
+The public release and development builds have different publication boundaries. A feature seen in NightShaman after the frozen source revisions is not automatically included here. Use the public release manifest and installed version when reporting problems.
 
-Examples include inactive JSON configuration loading, retired Dream CLI commands, missing packaged API schema, historical runbooks, and generated API types that lag server behavior. See [known limitations](known-limitations.md).
+## Where documentation changes belong
 
-## Coverage map
+The public tree is promoted from NightShaman/Burrow. The promotion copies `docs/`, `mkdocs.yml`, documentation dependency files, and `scripts/docs/`. Its publisher replaces the public repository contents, so editing only the public copy will not survive a later promotion.
 
-| Question | Documentation |
-|---|---|
-| What is BURROW and how do its parts relate? | [Core concepts](../concepts/core-concepts.md), [architecture](../architecture/overview.md) |
-| What happens during a request? | [Runtime](../architecture/runtime.md), [execution flow](../architecture/execution-flow.md) |
-| How do agents, Minions, tasks, and tools operate? | [Agents and Minions](../concepts/agents-minions.md), [workers](../concepts/workers-tasks.md), [tools](../concepts/tools.md), [MCP](../concepts/mcp.md) |
-| What persists and what enters context? | [Persistence](../architecture/persistence.md), [memory](../concepts/memory.md), [Dreams](../concepts/dreams.md), [history](../concepts/conversation-history.md) |
-| Where are the security boundaries? | [Authentication](../security/authentication.md), [permissions](../security/permissions.md), [trust boundaries](../security/trust-boundaries.md) |
-| How is the system installed and configured? | [Installation](../getting-started/installation.md), [setup](../getting-started/initial-setup.md), [configuration](../reference/configuration.md), [environment](../reference/environment.md) |
-| What commands and endpoints exist? | [CLI](../reference/cli.md), [API](../reference/api.md), [schema](../reference/storage-schema.md) |
-| How is it operated and recovered? | [Deployment](../operations/deployment.md), [containers](../operations/containers.md), [upgrades](../operations/upgrades.md), [recovery](../operations/backup-recovery.md), [procedures](../operations/procedures.md) |
-| How are problems diagnosed? | [Observability](../operations/observability.md), [troubleshooting](../operations/troubleshooting.md) |
-| How is it developed and released? | [Development](../development/setup.md), [extensions](../development/extensions.md), [releases](../development/releases.md) |
+Maintain this hand-written documentation in the upstream Burrow documentation paths, while keeping its product claims pinned to an inspected public release. Do not put documentation edits into generated application directories or change the root README as part of this site refresh. The documentation workflow is preserved separately in public promotion and deploys only from GoblinKing-Burrow/Burrow; development and release workflows are not copied. Hosting and custom-domain configuration remain separate from the documentation build.
 
-## Validation boundaries
-
-Documentation validation covers the strict static build, internal links/anchors/assets, and actual browser rendering of Mermaid diagrams. See the [reproducible commands](../development/documentation.md#required-checks).
-
-Application source inspection and focused tests are not a production acceptance test. No live runtime, real provider, real database, authentication account, or operator workspace is required for documentation builds. Database migrations, remote execution, recovery, and deployment must be validated in the target environment before an operator relies on them.
+See [Build this documentation](../development/documentation.md) for preview and validation commands.

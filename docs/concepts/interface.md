@@ -1,5 +1,8 @@
 # Interface guide
 
+!!! warning "Earlier technical reference"
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 The BURROW interface brings conversations, agent configuration, project tasks, retained evidence, and media generation into one operator console. This guide describes release **2026.10.10.4**. Start by checking the agent and session: these determine which conversation and records you are viewing.
 
 The runtime owns durable state. The browser presents API responses and live activity, and keeps some local preferences and conversation caches. A visible answer, an accepted job, and a verified result are different states; inspect the relevant run or evidence before treating work as complete.

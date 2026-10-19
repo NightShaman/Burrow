@@ -1,5 +1,8 @@
 # Environment variables
 
+!!! warning "Earlier technical reference"
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 This reference separates supported service settings from installer, test and compatibility names. Defaults below describe the pinned source. Installation scripts and containers can override them; inspect the actual service environment before diagnosing a mismatch. Never paste encryption keys, database passwords or provider credentials into a diagnostic report.
 
 See [configuration ownership](configuration.md), [deployment](../operations/deployment.md) and [containers](../operations/containers.md).

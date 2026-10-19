@@ -1,10 +1,10 @@
-# Build and maintain the documentation
+# Build this documentation
 
-The documentation lives in the public assembled repository. It uses MkDocs Material, pinned Python dependencies, strict Markdown link validation, a generated-HTML link checker, and browser-based Mermaid rendering tests.
+This is a hand-written MkDocs Material site. Its sources are `docs/`, `mkdocs.yml`, `requirements-docs.txt`, and `scripts/docs/`. Building it does not require a running Burrow instance, database, model account, or application dependencies.
 
-## Local preview
+## Preview locally
 
-Use Python 3.12, the same version as documentation CI. From the repository root:
+From the repository root, with Python 3.12:
 
 ```sh
 python3 -m venv .venv-docs
@@ -13,76 +13,55 @@ python -m pip install -r requirements-docs.txt
 python -m mkdocs serve --dev-addr 127.0.0.1:8000
 ```
 
-Open `http://127.0.0.1:8000/`. On Windows PowerShell, activate with `.venv-docs\Scripts\Activate.ps1` instead of the POSIX activation command.
+Open `http://127.0.0.1:8000/`. Windows PowerShell uses `.venv-docs\Scripts\Activate.ps1` for activation.
 
-No BURROW runtime, provider account, PostgreSQL instance, private source credential, or application dependency installation is needed to build this site.
-
-## Required checks
+## Validate the site
 
 ```sh
 python -m mkdocs build --strict
-python scripts/docs/check_site.py site
-python -m pip install -r requirements-docs-test.txt
-python -m playwright install chromium
-python scripts/docs/check_mermaid.py site
+python scripts/docs/check_site.py site --base-path /
 ```
 
-For an existing Chromium installation, set `DOCS_CHROMIUM_EXECUTABLE` to its executable path before the rendering check. This is a documentation-test override, not a BURROW runtime variable.
+The strict build validates configuration, navigation, Markdown links, and anchors. The HTML checker validates built local links, assets, and fragments. The custom-domain configuration uses the root path `/`; a project-subdirectory deployment needs the corresponding `site_url` and checker `--base-path`.
 
-On Linux systems missing browser libraries, Playwright's `python -m playwright install --with-deps chromium` also installs OS prerequisites and may require administrative privileges. CI uses this option on its disposable runner.
+The retained technical reference includes Mermaid diagrams. Check actual browser rendering separately:
 
-- **Strict build:** fails on configuration, missing navigation pages, unlisted pages, broken Markdown targets, and missing anchors.
-- **HTML check:** traverses every built HTML file and checks local links, anchors, and referenced assets, including the GitHub Pages `/Burrow/` base path.
-- **Mermaid check:** serves the built site on loopback, opens every diagram-bearing page in Chromium, requires one nonempty, nonzero-size SVG for each source diagram, and fails on JavaScript or Mermaid errors. It inspects Material's closed shadow roots without changing their mode. A code block alone is not a rendering pass.
+```sh
+python -m pip install -r requirements-docs-test.txt
+python -m playwright install chromium
+python scripts/docs/check_mermaid.py site --artifacts docs-browser-artifacts
+```
 
-For visual review and failure diagnostics, run `python scripts/docs/check_mermaid.py site --artifacts docs-browser-artifacts`. The directory contains homepage and diagram-page screenshots plus JSON reports with SVG dimensions, browser errors, and failed network requests. CI uploads these artifacts even when the rendering check fails.
+Set `DOCS_CHROMIUM_EXECUTABLE` to an existing Chromium executable if needed. Diagram rendering requires its external Mermaid distribution to be reachable. A failed network request is a blocked render check, not a pass. Check the homepage and user-guide layout at desktop and phone widths as well.
 
-Material loads Mermaid from its configured distribution when rendering diagrams. Browser checks therefore need network access to the Mermaid CDN as well as the local test server. A network-blocked test must be reported as blocked, not passed. The ordinary Python build does not render diagrams.
+## Keep the source durable
 
-## GitHub Pages
+The public snapshot is promoted from NightShaman/Burrow. Current promotion staging includes the documentation paths, and the publisher replaces the public tree with that staged snapshot. A change made only to GoblinKing-Burrow/Burrow can therefore disappear at the next promotion.
 
-The dedicated [Documentation workflow](https://github.com/NightShaman/Burrow/blob/main/.github/workflows/docs.yml) builds on documentation pull requests and documentation changes pushed to `main`. It can also be run manually.
+Keep the manual documentation changes in the preserved upstream paths, then let the reviewed public release process carry them forward. Product instructions should continue to describe an inspected public release even when the upstream development code has moved ahead. Do not mechanically repoint old source citations to a new commit without checking their claims.
 
-1. In repository **Settings → Pages**, select **GitHub Actions** as the deployment source.
-2. Review repository/environment access and any required `github-pages` approvals before publishing.
-3. Merge the reviewed documentation changes to `main` or run the workflow manually from `main`.
-4. Check both the build and deployment jobs. A successful artifact upload is not a successful Pages deployment.
-5. Open the workflow's deployment URL and verify the expected content.
+The upstream assembly explicitly preserves README, docs, LICENSE, and `.github`; this refresh does not need a README generator or any README change.
 
-The configured project-site URL is `https://nightshaman.github.io/Burrow/`. It is a deployment target, not a statement that the site is currently live. A custom domain or different repository name requires updating `site_url` and the HTML checker's `--base-path` argument together.
+Provenance checked at upstream commit `650cfc4`: [assembly preservation](https://github.com/NightShaman/Burrow/blob/650cfc4ff54335f3bf7bdb8074422b71832dd292/.github/workflows/assemble.yml#L113-L128), [public staging allowlist](https://github.com/NightShaman/Burrow/blob/650cfc4ff54335f3bf7bdb8074422b71832dd292/scripts/promotion/stage-snapshots.mjs#L6-L10), and [snapshot replacement](https://github.com/NightShaman/Burrow/blob/650cfc4ff54335f3bf7bdb8074422b71832dd292/scripts/promotion/publish-snapshot.sh#L20-L22). These links explain publication mechanics only; the user guide remains based on the public release.
 
-Pull requests only build and upload a review artifact. Deployment uses a separate job with `pages: write` and `id-token: write`; application/container publishing permissions and private-source tokens are not needed. Repository or organization settings may still prevent Pages publication.
+## Publishing the documentation
 
-!!! warning "Public documentation"
-    This repository is public. Do not include credentials, real operator environments, private transcripts, personal paths, or sensitive deployment details in examples. Use fictional placeholders and source-backed defaults.
+The configured canonical URL is `https://blissful-psychosis.com/`, the intended existing website domain. This configuration does not publish the site, provision hosting, configure DNS, or establish that the current domain serves this content. Build output is in `site/`.
 
-## Source ownership
+The Documentation workflow builds and checks documentation in both repositories. Only in **GoblinKing-Burrow/Burrow**, after successful checks on `main`, it uploads the static `site/` directory and deploys to that repository’s configured GitHub Pages site. NightShaman and pull requests run checks only. Public promotion preserves this one documentation workflow; it does not copy development/release workflows. This workflow does not build or publish Burrow application images.
 
-The assembly workflow replaces application payloads and the root README from upstream sources. It preserves root `docs/`, `mkdocs.yml`, documentation dependency files, `scripts/docs/`, and the separate documentation workflow. Do not put hand-maintained documentation inside generated `backend/` or `ui/` directories.
+The deploy job has narrowly scoped `pages: write` and `id-token: write` permissions and uses the `github-pages` environment. Hosting and custom-domain settings are managed separately. The workflow reads existing Pages settings with automatic enablement disabled; an unconfigured Pages site must be configured by its owner before deployment can succeed. Do not assume that a successful build or an uploaded artifact updates the website: verify the deployment job and live URL.
 
-A README change made only in this public repository will be overwritten by assembly. For a permanent root README link, update its Backend deployment source through the normal source-repository process. This documentation change intentionally leaves that generated file alone.
+Before publication:
 
-The site documents a pinned source baseline, shown in [Source and coverage](../project/source-map.md). The workflow does not pretend to regenerate architectural prose automatically when application code changes. Before changing that baseline, inspect source differences and update affected pages and reference inventories.
+1. Review the documentation source changes and confirm they are stored where promotion preserves them.
+2. Run the static and browser checks against the final files.
+3. Confirm the existing host and custom-domain settings without changing DNS unnecessarily.
+4. Publish through the approved host, then verify its homepage, guide pages, assets, and canonical URLs.
+5. Confirm that the deployment source will survive the next promotion.
 
-## Writing conventions
+No credentials, real operator data, private transcripts, or secret-bearing screenshots belong in this public site.
 
-- Explain operator/developer behavior before listing implementation files.
-- Keep one main topic per page; use relative `.md` links so MkDocs validates them.
-- Use actual commands and exact option names from source. Distinguish installed launcher commands from direct source CLI commands.
-- Label compatibility, experimental, incomplete, inferred, and source-visible untested behavior.
-- Add a warning where a procedure can destroy data, expose a listener, modify schema, or lose encrypted settings.
-- Link substantial claims to the documented public commit. Prefer public equivalents over private upstream links.
-- Keep configuration and environment defaults in their references and cross-link them from guides.
-- Check the [known limitations](../project/known-limitations.md) before promising a feature works end-to-end.
+## Updating the guide
 
-## Diagrams
-
-Use fenced `mermaid` blocks for relationships, sequence diagrams, and trust boundaries. `mkdocs.yml` configures Material's native Mermaid integration through SuperFences; no second Mermaid plugin or custom loader is necessary.
-
-Prefer quoted node labels, short identifiers, and diagrams that remain readable on a narrow screen. Test every new or changed diagram with `check_mermaid.py`. Avoid embedding real deployment addresses or secrets in diagram labels.
-
-## Reproducible dependencies
-
-`requirements-docs.txt` pins the complete resolved static-build dependency set. `requirements-docs-test.txt` pins the browser test package separately. Refresh these intentionally in an isolated environment and rerun the strict build, local-link check, and rendering check before merging.
-
-See [MkDocs validation configuration](https://www.mkdocs.org/user-guide/configuration/#validation) and [Material diagrams](https://squidfunk.github.io/mkdocs-material/reference/diagrams/) for upstream tooling behavior.
+Use concrete UI labels, small safe examples, and links to immutable public source. Distinguish installed, enabled, connected, accepted, running, and completed states. Record verification limits in [Source and coverage](../project/source-map.md). Retained historical pages must stay visibly marked until their claims have been checked against a new public baseline.

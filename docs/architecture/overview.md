@@ -1,5 +1,8 @@
 # Architecture overview
 
+!!! warning "Earlier technical reference"
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 BURROW separates the operator surface, runtime orchestration, authoritative state, execution placement, and provider transport. This keeps the conversational interface small while preserving inspectable evidence for work performed behind it.
 
 ## Component map

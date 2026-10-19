@@ -1,5 +1,8 @@
 # Permissions and execution boundaries
 
+!!! warning "Earlier technical reference"
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 BURROW separates HTTP access, agent tool grants, concrete action checks, and operating-system access. These controls answer different questions. A successful UI login does not make a tool result safe, and an agent workspace is not a filesystem sandbox.
 
 This page describes static implementation at commit `c15064dd177788afcdda357a5e545510f754a754` (version **2026.10.10.4**). It does not certify a deployed host's isolation.

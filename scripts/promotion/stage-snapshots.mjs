@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 
 const TARGETS = {
   burrow: {
-    paths: ['.dockerignore', '.gitignore', 'Dockerfile', 'LICENSE', 'README.md', 'SOURCE_VERSIONS', 'backend', 'burrow-logo.png', 'compose.yml', 'docker-entrypoint.sh', 'docs', 'install.sh', 'mkdocs.yml', 'requirements-docs-test.txt', 'requirements-docs.txt', 'scripts/assembly', 'scripts/docs', 'scripts/install', 'ui'],
+    paths: ['.github/workflows/docs.yml', '.dockerignore', '.gitignore', 'Dockerfile', 'LICENSE', 'README.md', 'SOURCE_VERSIONS', 'backend', 'burrow-logo.png', 'compose.yml', 'docker-entrypoint.sh', 'docs', 'install.sh', 'mkdocs.yml', 'requirements-docs-test.txt', 'requirements-docs.txt', 'scripts/assembly', 'scripts/docs', 'scripts/install', 'ui'],
     excludes: []
   },
   nodeGoblin: {

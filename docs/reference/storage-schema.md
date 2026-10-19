@@ -1,5 +1,8 @@
 # Storage schema
 
+!!! warning "Earlier technical reference"
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 This reference describes the current PostgreSQL schema at application migration **49**, plus runtime-owned filesystem data. It is an ownership and relationship guide, not a supported direct-write API. Use the application stores or [API](api.md) for mutation so validation, evidence checks, encryption and lifecycle rules remain intact.
 
 See [Persistence architecture](../architecture/persistence.md) for the data flow and [Backup and recovery](../operations/backup-recovery.md) for recovery scope.
