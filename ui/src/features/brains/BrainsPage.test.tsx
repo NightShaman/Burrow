@@ -12,11 +12,29 @@ describe('Brains workspace', () => {
     vi.mocked(api).mockResolvedValue({items:[brain()],nextCursor:null});
     render(<Brains agents={agents} />);
     expect(screen.getByRole('region', {name:'Memory detail'})).toBeTruthy();
-    const card = await screen.findByRole('button', {name:/Remember this.*Explicit saved memory/});
+    const card = await screen.findByRole('button', {name:/Remember this.*Operator-saved/});
     fireEvent.click(card);
     expect(card.getAttribute('aria-pressed')).toBe('true');
     expect(screen.queryByRole('region', {name:'Memory detail'})).toBeNull();
     expect(screen.getByRole('region', {name:'Memory editor'})).toBeTruthy();
+  });
+
+  it('labels Dream, agent, operator, migration, and unknown provenance truthfully', async () => {
+    vi.mocked(api).mockResolvedValue({items:[
+      brain({id:'dream',title:'Dream',origin:'dreaming',operatorOwned:false}),
+      brain({id:'agent',title:'Agent',operatorOwned:false}),
+      brain({id:'operator',title:'Operator',operatorOwned:true}),
+      brain({id:'migration',title:'Migration',origin:'migrated_albdruck'}),
+      brain({id:'future',title:'Future',origin:'future_origin'}),
+    ],nextCursor:null});
+    render(<Brains agents={agents} />);
+    expect(await screen.findByRole('button',{name:/Dream.*Dream-generated/})).toBeTruthy();
+    expect(screen.getByRole('button',{name:/Agent.*Agent-saved/})).toBeTruthy();
+    expect(screen.getByRole('button',{name:/Operator.*Operator-saved/})).toBeTruthy();
+    expect(screen.getByRole('button',{name:/Migration.*Migrated from legacy Albdruck/})).toBeTruthy();
+    const future=screen.getByRole('button',{name:/Future.*future_origin/});
+    fireEvent.click(future);
+    expect(screen.getByText('Origin: future_origin')).toBeTruthy();
   });
 
   it('fences owner interleavings and keeps agentId in the URL', async () => {

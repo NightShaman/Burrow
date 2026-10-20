@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 // Bump whenever the extraction prompt, normalization, or citation contract changes.
-export const DREAM_EXTRACTION_CONTRACT_VERSION = 'dream-raw-v3-synthesis-evidence';
+export const DREAM_EXTRACTION_CONTRACT_VERSION = 'dream-raw-v4-connections';
 export function dreamSourceIdentity(message) {
   return createHash('sha256').update(JSON.stringify([message.sourceRef, message.sessionId, message.entryId, message.role, message.at, message.content])).digest('hex');
 }

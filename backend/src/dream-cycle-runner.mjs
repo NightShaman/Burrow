@@ -425,19 +425,35 @@ export async function extractPhaseCandidates({ phase, messages, generatedAt, mod
         throw error;
       }
       const allowed = new Set(chunk.map((item) => item.sourceRef));
-      const citationFailures = (value) => [...value.memories, ...value.preferences].flatMap((item, candidate) => !Array.isArray(item?.sourceRefs) || !item.sourceRefs.length ? [{ candidate, reason: 'missing_source_refs' }] : item.sourceRefs.filter(ref => !allowed.has(ref)).map(ref => ({ candidate, reason: 'outside_chunk', sourceRef: typeof ref === 'string' && /^session:[^\s:]+:message:[a-zA-Z0-9-]+$/.test(ref) ? ref : '[invalid reference format]' })));
-      const invalid = (value) => [...value.memories, ...value.preferences].filter(item => !Array.isArray(item?.sourceRefs) || !item.sourceRefs.length || item.sourceRefs.some(ref => !allowed.has(ref))).length;
-      if (invalid(parsed)) {
-        output.diagnostics.push({ stage: 'citation_validation', chunk: output.chunks, allowedCount: allowed.size, invalidCandidates: invalid(parsed), citationFailures: citationFailures(parsed), repairAttempt: 1 });
+      const citationValidation = (value) => {
+        const valid = { memories: [], preferences: [] };
+        const failures = [];
+        for (const candidateType of ['memories', 'preferences']) {
+          for (const [candidate, item] of value[candidateType].entries()) {
+            const refs = Array.isArray(item?.sourceRefs) ? item.sourceRefs : [];
+            const invalidRefs = refs.filter(ref => !allowed.has(ref));
+            if (refs.length && !invalidRefs.length) { valid[candidateType].push(item); continue; }
+            if (!refs.length) failures.push({ candidateType, candidate, reason: 'missing_source_refs' });
+            else for (const ref of invalidRefs) failures.push({ candidateType, candidate, reason: 'outside_chunk', sourceRef: typeof ref === 'string' && /^session:[^\s:]+:message:[a-zA-Z0-9-]+$/.test(ref) ? ref : '[invalid reference format]' });
+          }
+        }
+        return { valid, failures, invalidCandidates: new Set(failures.map(failure => `${failure.candidateType}:${failure.candidate}`)).size };
+      };
+      let validation = citationValidation(parsed);
+      if (validation.invalidCandidates) {
+        output.diagnostics.push({ stage: 'citation_validation', chunk: output.chunks, allowedCount: allowed.size, invalidCandidates: validation.invalidCandidates, citationFailures: validation.failures, repairAttempt: 1 });
         // Re-extract from original evidence, not from the untrusted failed answer.
         // The repair instruction is included in partition budgeting as well.
         completion = await completeTextResult({ content: repairPrompt(chunk), modelAdapter, modelConfig: extractionModelConfig, traceLogger, onProgress });
         output.diagnostics.push(...completion.diagnostics);
         parsed = extractionPayload(parseModelJson(completion.text));
         if (!Array.isArray(parsed?.memories) || !Array.isArray(parsed?.preferences)) throw new Error('dream_extraction_invalid_shape');
-        if (invalid(parsed)) {
-          output.diagnostics.push({ stage: 'citation_validation', chunk: output.chunks, allowedCount: allowed.size, invalidCandidates: invalid(parsed), citationFailures: citationFailures(parsed), repairExhausted: true });
-          throw new Error('dream_extraction_invalid_citation');
+        validation = citationValidation(parsed);
+        if (validation.invalidCandidates) {
+          // Citation-invalid candidates are independently separable. Drop only
+          // those claims; never let one hallucinated ref poison valid evidence.
+          output.diagnostics.push({ stage: 'citation_validation', chunk: output.chunks, allowedCount: allowed.size, invalidCandidates: validation.invalidCandidates, droppedCandidates: validation.invalidCandidates, citationFailures: validation.failures, repairExhausted: true, disposition: 'dropped_invalid_candidates' });
+          parsed = validation.valid;
         }
       }
       const source = parsePhaseExtraction(JSON.stringify(parsed), chunk.map((item) => item.sourceRef));
@@ -525,24 +541,34 @@ Candidates: ${JSON.stringify(items)}`;
         let raw = extractionPayload(parseModelJson(completion.text));
         if (!Array.isArray(raw?.memories) || !Array.isArray(raw?.preferences)) throw new Error('dream_reconciliation_invalid_shape');
         const allowed = new Set(chunk.flatMap((item) => item.sourceRefs));
-        const failures = (value) => [...value.memories, ...value.preferences].flatMap((item, candidate) =>
-          !Array.isArray(item?.sourceRefs) || !item.sourceRefs.length
-            ? [{ candidate, reason: 'missing_source_refs' }]
-            : item.sourceRefs.filter(ref => !allowed.has(ref)).map(ref => ({ candidate, reason: 'outside_candidates', sourceRef: typeof ref === 'string' && /^session:[^\s:]+:message:[a-zA-Z0-9-]+$/.test(ref) ? ref : '[invalid reference format]' })));
-        const recordFailures = (citationFailures, state) => diagnostics.push({ stage: 'reconciliation_citation_validation', allowedCount: allowed.size, invalidCandidates: new Set(citationFailures.map(failure => failure.candidate)).size, citationFailures, ...state });
-        let citationFailures = failures(raw);
-        if (citationFailures.length) {
-          recordFailures(citationFailures, { repairAttempt: 1 });
+        const citationValidation = (value) => {
+          const valid = { memories: [], preferences: [] };
+          const failures = [];
+          for (const candidateType of ['memories', 'preferences']) {
+            for (const [candidate, item] of value[candidateType].entries()) {
+              const refs = Array.isArray(item?.sourceRefs) ? item.sourceRefs : [];
+              const invalidRefs = refs.filter(ref => !allowed.has(ref));
+              if (refs.length && !invalidRefs.length) { valid[candidateType].push(item); continue; }
+              if (!refs.length) failures.push({ candidateType, candidate, reason: 'missing_source_refs' });
+              else for (const ref of invalidRefs) failures.push({ candidateType, candidate, reason: 'outside_candidates', sourceRef: typeof ref === 'string' && /^session:[^\s:]+:message:[a-zA-Z0-9-]+$/.test(ref) ? ref : '[invalid reference format]' });
+            }
+          }
+          return { valid, failures, invalidCandidates: new Set(failures.map(failure => `${failure.candidateType}:${failure.candidate}`)).size };
+        };
+        const recordFailures = (validation, state) => diagnostics.push({ stage: 'reconciliation_citation_validation', allowedCount: allowed.size, invalidCandidates: validation.invalidCandidates, citationFailures: validation.failures, ...state });
+        let validation = citationValidation(raw);
+        if (validation.invalidCandidates) {
+          recordFailures(validation, { repairAttempt: 1 });
           // Retry from the trusted input, never the invalid model answer.
           try { completion = await completeTextResult({ content: repairPrompt(chunk, stage), modelAdapter, modelConfig, traceLogger, onProgress }); }
           catch (error) { diagnostics.push(...(error.diagnostics || [])); throw error; }
           diagnostics.push(...completion.diagnostics);
           raw = extractionPayload(parseModelJson(completion.text));
           if (!Array.isArray(raw?.memories) || !Array.isArray(raw?.preferences)) throw new Error('dream_reconciliation_invalid_shape');
-          citationFailures = failures(raw);
-          if (citationFailures.length) {
-            recordFailures(citationFailures, { repairExhausted: true });
-            throw new Error('dream_reconciliation_invalid_citation');
+          validation = citationValidation(raw);
+          if (validation.invalidCandidates) {
+            recordFailures(validation, { droppedCandidates: validation.invalidCandidates, repairExhausted: true, disposition: 'dropped_invalid_candidates' });
+            raw = validation.valid;
           }
         }
         const parsed = parsePhaseExtraction(JSON.stringify(raw), [...allowed]);
