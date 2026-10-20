@@ -59,7 +59,7 @@ export function buildCompressionSummaryRecord({ sessionId = 'default', transcrip
   const last = sourceMessages.at(-1);
   return {
     kind: 'context-compression-summary',
-    version: 1,
+    version: 2,
     sessionId: String(sessionId || 'default'),
     createdAt: clock(),
     source: 'bounded-conversation-recap',
@@ -82,31 +82,46 @@ export function buildCompressionSummaryRecord({ sessionId = 'default', transcrip
   };
 }
 
+const HANDOFF_DISCLOSURE = '# Compacted Conversation Handoff\nOlder conversation is a lossy recap: prose may be omitted, not lossless evidence. Retrieve authoritative originals with session_search before relying on exact history. Later corrections override earlier statements.\n## Goal and constraints / Completed actions and active state\n## Latest unresolved user ask (inspect originals)\n## Explicit retained state is rendered separately\n';
+const OMITTED_ITEM = '[older items omitted; retrieve archived originals]';
+
+function summaryItems(messages = []) {
+  return (Array.isArray(messages) ? messages : []).filter(isCompressionEntry).map((entry) => ({
+    sourceEntryId: entry.id || null,
+    text: compressionEntryText(entry),
+  }));
+}
+
+// Conversation owns a lossy navigation recap, not inferred task truth. Render the
+// wrapper once and omit whole source items; never splice unrelated prose together.
+function renderSummaryItems(items = [], maxChars = 6000) {
+  if (HANDOFF_DISCLOSURE.length > maxChars) throw Object.assign(new Error('compression_preservation_budget_exceeded'), { code: 'compression_preservation_budget_exceeded' });
+  const normalized = items.map(item => ({ sourceEntryId: item?.sourceEntryId || null, text: String(item?.text || '').trim() })).filter(item => item.text);
+  const full = HANDOFF_DISCLOSURE + normalized.map(item => item.text).join('\n');
+  if (full.length <= maxChars) return full;
+  const available = maxChars - HANDOFF_DISCLOSURE.length;
+  if (OMITTED_ITEM.length > available) return HANDOFF_DISCLOSURE;
+  const kept = []; let used = OMITTED_ITEM.length;
+  // Prefer the newest complete items so corrections and unresolved work survive.
+  for (let index = normalized.length - 1; index >= 0; index--) {
+    const cost = normalized[index].text.length + 1;
+    if (used + cost > available) continue;
+    kept.unshift(normalized[index]); used += cost;
+  }
+  return HANDOFF_DISCLOSURE + [OMITTED_ITEM, ...kept.map(item => item.text)].join('\n');
+}
+
 export function structuredCompressionSummary(messages = [], { maxChars = 6000, retainedStates = [] } = {}) {
-  const source = (Array.isArray(messages) ? messages : []).filter(isCompressionEntry);
-  return boundedRecap(source.map(compressionEntryText).join('\n'), maxChars);
+  return renderSummaryItems(summaryItems(messages), maxChars);
 }
 
-// Conversation owns a lossy navigation recap, not inferred task truth. Explicit
-// lifecycle state is rendered independently and must never be clipped to fit it.
-function boundedRecap(value, maxChars) {
-  const disclosure = '# Compacted Conversation Handoff\nOlder conversation is a lossy recap: prose may be omitted, not lossless evidence. Retrieve authoritative originals with session_search before relying on exact history. Later corrections override earlier statements.\n## Goal and constraints / Completed actions and active state\n## Latest unresolved user ask (inspect originals)\n## Explicit retained state is rendered separately\n';
-  if (disclosure.length > maxChars) throw Object.assign(new Error('compression_preservation_budget_exceeded'), { code: 'compression_preservation_budget_exceeded' });
-  const text = String(value || '').trim();
-  const available = maxChars - disclosure.length;
-  if (text.length <= available) return disclosure + text;
-  const marker = '\n[older prose omitted; retrieve archived originals]\n';
-  if (available < marker.length) return disclosure;
-  const chars = available - marker.length;
-  const head = Math.floor(chars / 2);
-  return disclosure + text.slice(0, head) + marker + text.slice(text.length - (chars - head));
-}
-
+// Compatibility helper for callers outside the persisted structured path. Strip
+// legacy wrappers before rendering one successor wrapper, and keep line items whole.
 export function mergeCompressionSummaries({ previousSummary = '', nextSummary = '', maxChars = 6000 } = {}) {
-  const prior = String(previousSummary || '').trim();
-  const next = String(nextSummary || '').trim();
-  const merged = [prior, next].filter(Boolean).join('\n\n');
-  return merged.length <= maxChars ? merged : boundedRecap(merged, maxChars);
+  const strip = value => String(value || '').split('\n').map(line => line.trim()).filter(line => line && line !== '# Compacted Conversation Handoff' && !line.startsWith('Older conversation is a lossy recap:') && !line.startsWith('## ') && !line.startsWith('[older prose omitted;'));
+  const seen = new Set();
+  const items = [...strip(previousSummary), ...strip(nextSummary)].filter(text => !seen.has(text) && seen.add(text)).map(text => ({ sourceEntryId: null, text }));
+  return renderSummaryItems(items, maxChars);
 }
 
 function tokenTargetToCharBudget(tokens, fallback = 6000) {
@@ -115,16 +130,27 @@ function tokenTargetToCharBudget(tokens, fallback = 6000) {
 }
 
 export async function appendCompressionSummary({ rootDir, sessionId = 'default', transcript = [], plan, text = null, maxChars = 6000, conversation = null } = {}) {
-  const previousSummary = compressionSummariesFromTranscript(transcript).at(-1)?.text || '';
   const sourceMessages = (plan.sourceEntryIds || []).length
     ? transcript.filter((entry) => (plan.sourceEntryIds || []).includes(entry?.id) && isCompressionEntry(entry))
     : [];
-  const combinedText = text ?? structuredCompressionSummary(sourceMessages, { maxChars, retainedStates: contextStatesFromTranscript(transcript) });
-  const mergedText = mergeCompressionSummaries({ previousSummary, nextSummary: combinedText, maxChars });
-  const summary = buildCompressionSummaryRecord({ sessionId, transcript, plan, text: mergedText, maxChars });
   const previous = compressionSummariesFromTranscript(transcript);
-  summary.sourceEntryIds = [...new Set([...previous.flatMap(item => item.sourceEntryIds || []), ...summary.sourceEntryIds])];
-  summary.sourceTurnCount += previous.reduce((count, item) => count + Number(item.sourceTurnCount || 0), 0);
+  const coveredIds = previous.flatMap(item => item.sourceEntryIds || []);
+  let priorItems = [];
+  // Rebuild covered items from authoritative originals on every cycle. Persisted
+  // summaries keep IDs and bounded rendered text, never a second unbounded copy.
+  if (coveredIds.length && typeof conversation?.originalEntries === 'function') {
+    const wanted = new Set(coveredIds);
+    priorItems = summaryItems((await conversation.originalEntries(sessionId)).filter(entry => wanted.has(entry?.id)));
+  } else {
+    priorItems = previous.flatMap(item => Array.isArray(item.items) ? item.items : []);
+  }
+  const allItems = [...priorItems, ...summaryItems(sourceMessages)];
+  const seenIds = new Set();
+  const uniqueItems = allItems.filter(item => !item.sourceEntryId || (!seenIds.has(item.sourceEntryId) && seenIds.add(item.sourceEntryId)));
+  const mergedText = text ?? renderSummaryItems(uniqueItems, maxChars);
+  const summary = buildCompressionSummaryRecord({ sessionId, transcript, plan, text: mergedText, maxChars });
+  summary.sourceEntryIds = [...new Set([...coveredIds, ...summary.sourceEntryIds])];
+  summary.sourceTurnCount = summary.sourceEntryIds.length;
   summary.firstSummarizedEntryId = previous[0]?.firstSummarizedEntryId || summary.firstSummarizedEntryId;
   // Semantic compaction creates a compact successor transcript. The prior
   // transcript remains an auditable artifact, but is no longer normal prompt
