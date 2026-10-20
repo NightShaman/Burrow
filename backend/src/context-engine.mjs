@@ -90,8 +90,11 @@ export async function buildTurnContext({
     if (!store) throw new Error('agent_profile_store_required');
     try {
       const documents = await store.list(agentRuntime.agentId);
+      // DREAM_MEMORY remains operator-readable legacy state, but is retired from
+      // runtime prompt injection. Dreaming now publishes individual Brains.
+      const promptDocuments = documents.filter(document => document.kind !== 'DREAM_MEMORY');
       profileFiles = documents.length === AGENT_PROFILE_KINDS.length
-        ? profileFilesFromDocuments(documents, { agentId: agentRuntime.agentId, globalDocuments: await store.listGlobal(), globalProfile: await store.globalProfile(agentRuntime.agentId) })
+        ? profileFilesFromDocuments(promptDocuments, { agentId: agentRuntime.agentId, globalDocuments: await store.listGlobal(), globalProfile: await store.globalProfile(agentRuntime.agentId) })
         : { profileDir: 'postgres:agent_profile_documents', files: [{ id: 'profile-unavailable', name: 'PROFILE_UNAVAILABLE.md', path: `postgres:agent_profile_documents/${agentRuntime.agentId}`, content: 'Agent profile documents are unavailable. Do not borrow another agent profile; report this configuration blocker if it affects the task.', chars: 125 }], chars: 125 };
     } finally { /* composed store remains open */ }
   }

@@ -40,10 +40,28 @@ export class PostgresBrainStore {
   return {items,nextCursor:rows.length>n ? Buffer.from(JSON.stringify({v:1,agentId,query,id:items.at(-1).id})).toString('base64url') : null};
  }
  async get({agentId,id}) { scope(agentId); return record((await this.pool.query('SELECT * FROM brain_memories WHERE agent_id=$1 AND id=$2 AND deleted_at IS NULL',[agentId,id])).rows[0]); }
- async create(input,{operator=false}={}) {
+ async create(input,{operator=false,origin='explicit_saved_memory',id=null,repeatSafe=false}={}) {
   scope(input.agentId); fields(input);
-  // IDs are allocated here; a deleted identity can never be resurrected by a save.
-  return record((await this.pool.query('INSERT INTO brain_memories(agent_id,id,title,content,source_refs,operator_owned) VALUES($1,$2,$3,$4,$5::json,$6) RETURNING *',[input.agentId,randomUUID(),input.title,input.content,JSON.stringify(input.sourceRefs || []),operator])).rows[0]);
+  if (typeof origin !== 'string' || !origin.trim()) fail('invalid_origin');
+  if (id !== null && (typeof id !== 'string' || !id.trim())) fail('invalid_id');
+  // Explicit saves receive a fresh identity. Trusted background publishers may
+  // supply a stable identity so retrying a completed publication is harmless.
+  const memoryId=id || randomUUID();
+  const conflict=repeatSafe ? ' ON CONFLICT(agent_id,id) DO NOTHING' : '';
+  const sql=`INSERT INTO brain_memories(agent_id,id,title,content,source_refs,operator_owned,origin) VALUES($1,$2,$3,$4,$5::json,$6,$7)${conflict} RETURNING *`;
+  return record((await this.pool.query(sql,[input.agentId,memoryId,input.title,input.content,JSON.stringify(input.sourceRefs || []),operator,origin])).rows[0]);
+ }
+ async listByOrigin({agentId,origin,limit=1000,cursor=null}={}) {
+  scope(agentId); if (typeof origin !== 'string' || !origin.trim()) fail('invalid_origin');
+  const n=Number(limit); if (!Number.isSafeInteger(n) || n < 1) fail('invalid_limit');
+  let after='';
+  if (cursor) {
+   try { const c=JSON.parse(Buffer.from(cursor,'base64url').toString('utf8')); if(c.v!==1||c.agentId!==agentId||c.origin!==origin||typeof c.id!=='string'||!c.id) fail('invalid_cursor'); after=c.id; }
+   catch { fail('invalid_cursor'); }
+  }
+  const rows=(await this.pool.query(`SELECT * FROM brain_memories WHERE agent_id=$1 AND origin=$2 AND deleted_at IS NULL AND id COLLATE "C">$4 COLLATE "C" ORDER BY id COLLATE "C" LIMIT $3::bigint + 1`,[agentId,origin,n,after])).rows;
+  const items=rows.slice(0,n).map(record);
+  return {items,nextCursor:rows.length>n ? Buffer.from(JSON.stringify({v:1,agentId,origin,id:items.at(-1).id})).toString('base64url') : null};
  }
  async update(input,{operator=false}={}) { fields(input); return this.mutate(input,operator,false); }
  async remove(input,{operator=false}={}) { return this.mutate(input,operator,true); }

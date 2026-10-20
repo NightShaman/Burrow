@@ -72,9 +72,8 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
     activeProject = await stores.tasks.getConversationProject({ agentId: runtimeState.agentId, sessionId: resolvedSessionId });
   } catch { activeProject = null; }
   const ambientWorkingContext = { ...initialWorkingContext, ...(interruptedRun ? { interruptedRun } : {}), ...(activeProject ? { activeProject } : {}), continuity: workingContinuity, continuityScopeSource: generatedContinuityScope ? 'runtime_generated' : 'session_persisted' };
-  let dreamPreload = null;
-  try {
-    dreamPreload = await stores.workingMemory.getDreamPreload({ agentId: runtimeState.agentId, project: continuityScope }) || await stores.workingMemory.getDreamPreload({ agentId: runtimeState.agentId, project: 'global' });
-  } catch { dreamPreload = null; }
+  // Legacy Dream preloads remain persisted for compatibility but are no longer
+  // injected into every turn. Dreaming publishes durable, searchable Brains.
+  const dreamPreload = null;
   return { turnStartedAt, lastOperatorMessageAt, priorSession, sessionSnapshot, conversationId, resolvedWorkingRoot, continuityHandoffs, compatibilityScope, continuityScope, generatedContinuityScope, verifiedSubjectScope, deicticFiles, workspaceFiles, initialWorkingContext, ambientWorkingContext, dreamPreload };
 }
