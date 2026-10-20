@@ -85,7 +85,7 @@ export function useChatSession(selectedAgentId: string) {
       const cacheKey = conversationCacheKey(selectedAgentId, sessionId);
       const cachedTurns = conversationCacheRef.current[cacheKey];
       const session = await sessionRepository.loadSession(selectedAgentId, sessionId);
-      if (!current() || conversationCacheGeneration !== generation || conversationCacheRef.current[cacheKey] !== cachedTurns) return;
+      if (!current() || conversationCacheGeneration !== generation || conversationCacheRef.current[cacheKey] !== cachedTurns) return false;
       const nextTurns = reconcileSessionTurns(session, cachedTurns ?? [], pendingTurnsRef.current.get(cacheKey) ?? []).map((turn) => {
         if (turn.role !== 'assistant' || !turn.runId || turn.metadata?.progress) return turn;
         const recovered = recoveredProgress[turn.runId];
@@ -99,6 +99,7 @@ export function useChatSession(selectedAgentId: string) {
       conversationCacheRef.current[cacheKey] = nextTurns;
       writeConversationCache(conversationCacheRef.current, cacheKey);
       if (current() && selectedChatRef.current.agentId === selectedAgentId && selectedChatRef.current.sessionId === sessionId) setTurns(nextTurns);
+      return true;
     },
   });
 

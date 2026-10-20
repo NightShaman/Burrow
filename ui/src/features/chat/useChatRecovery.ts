@@ -8,7 +8,7 @@ type RunIdentity = Pick<RuntimeRunForSelection, 'agentId' | 'sessionId' | 'runId
 const runKey = (run: RunIdentity) => JSON.stringify([run.agentId, run.sessionId, run.runId]);
 type Projection = ReturnType<typeof projectChatActivity>;
 type RecoveryContext = { current: () => boolean; generation: number; recoveredProgress: Record<string, ProgressEntry[]> };
-type Options = { agentId: string; sessionId: string; enabled: boolean; isChildSession: boolean; onRefresh: (context: RecoveryContext) => Promise<void>; onError: (message: string) => void };
+type Options = { agentId: string; sessionId: string; enabled: boolean; isChildSession: boolean; onRefresh: (context: RecoveryContext) => Promise<boolean>; onError: (message: string) => void };
 const emptyActivity = { runtimeRun: null, childActivities: [], a2aActivities: [] };
 
 /** Owns supplemental activity polling/cancellation, never a second transcript/cache. */
@@ -21,6 +21,7 @@ export function useChatRecovery({ agentId, sessionId, enabled, isChildSession, o
   // the retired identity and one final transcript refresh succeeds.
   const retiredRuns = useRef(new Set<string>());
   const retiredRefreshNeeded = useRef(new Set<string>());
+  const terminalRefreshNeeded = useRef(new Set<string>());
   const retireRuntimeRun = useCallback((run: RunIdentity) => {
     const key = runKey(run);
     retiredRuns.current.add(key);
@@ -41,6 +42,7 @@ export function useChatRecovery({ agentId, sessionId, enabled, isChildSession, o
     const current = () => scope.current === owner && !controller.signal.aborted;
     let timer: number | undefined;
     let hadRuns = false;
+    const terminalScopeKey = JSON.stringify([agentId, sessionId]);
     const poll = async () => {
       const generation = conversationCacheGeneration;
       try {
@@ -53,6 +55,7 @@ export function useChatRecovery({ agentId, sessionId, enabled, isChildSession, o
         }, { agentId, sessionId, isChildSession, hadRuns, now: Date.now() });
         if (projection.runtimeRun) recoveredProgress.current[projection.runtimeRun.runId] = projection.runtimeRun.progress;
         setActivity(projection);
+        if (hadRuns && !projection.hadRuns) terminalRefreshNeeded.current.add(terminalScopeKey);
         hadRuns = projection.hadRuns;
         // Child workers persist outside the active-run registry; also refresh
         // after the last active run disappears to pick up terminal writes.
@@ -60,9 +63,12 @@ export function useChatRecovery({ agentId, sessionId, enabled, isChildSession, o
           const [retiredAgentId, retiredSessionId] = JSON.parse(key) as [string, string, string];
           return retiredAgentId === agentId && retiredSessionId === sessionId && !reportedRunKeys.has(key);
         });
-        if (projection.shouldRefresh || settledRetired.length) {
-          await callbacks.current.onRefresh({ current, generation, recoveredProgress: recoveredProgress.current });
-          if (current()) settledRetired.forEach((key) => retiredRefreshNeeded.current.delete(key));
+        if (projection.shouldRefresh || terminalRefreshNeeded.current.has(terminalScopeKey) || settledRetired.length) {
+          const applied = await callbacks.current.onRefresh({ current, generation, recoveredProgress: recoveredProgress.current });
+          if (current() && applied) {
+            terminalRefreshNeeded.current.delete(terminalScopeKey);
+            settledRetired.forEach((key) => retiredRefreshNeeded.current.delete(key));
+          }
         }
       } catch {
         // Supplemental activity failure must not replace durable chat/error state.

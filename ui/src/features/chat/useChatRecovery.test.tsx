@@ -15,7 +15,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 function options() {
-  return { agentId: 'a', sessionId: 's', enabled: true, isChildSession: false, onRefresh: vi.fn().mockResolvedValue(undefined), onError: vi.fn() };
+  return { agentId: 'a', sessionId: 's', enabled: true, isChildSession: false, onRefresh: vi.fn().mockResolvedValue(true), onError: vi.fn() };
 }
 beforeEach(() => { vi.useFakeTimers(); apiMock.mockReset(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
@@ -50,12 +50,52 @@ it.each(['success', 'not_found'])('retires a recovered run immediately on %s, re
   unmount();
 });
 
+it('retries ordinary terminal reconciliation after runtime disappearance until refresh is applied', async () => {
+  let active: ActiveChatRunsResponse = response();
+  let applied = false;
+  apiMock.mockImplementation(async () => active);
+  const opts = options();
+  opts.onRefresh.mockImplementation(async () => applied);
+  const { unmount } = renderHook(() => useChatRecovery(opts));
+  await act(async () => {});
+  active = { ok: true, runs: [] };
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  const afterDiscard = opts.onRefresh.mock.calls.length;
+  expect(afterDiscard).toBeGreaterThan(0);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(opts.onRefresh.mock.calls.length).toBeGreaterThan(afterDiscard);
+  applied = true;
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  const afterApplied = opts.onRefresh.mock.calls.length;
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(opts.onRefresh.mock.calls.length).toBe(afterApplied);
+  unmount();
+});
+
+it('keeps ordinary terminal reconciliation pending across navigation', async () => {
+  let active: ActiveChatRunsResponse = response();
+  apiMock.mockImplementation(async () => active);
+  const opts = options();
+  opts.onRefresh.mockResolvedValue(false);
+  const { rerender, unmount } = renderHook(({ sessionId }) => useChatRecovery({ ...opts, sessionId }), { initialProps: { sessionId: 's' } });
+  await act(async () => {});
+  active = { ok: true, runs: [] };
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  const afterDiscard = opts.onRefresh.mock.calls.length;
+  rerender({ sessionId: 'other' });
+  await act(async () => {});
+  rerender({ sessionId: 's' });
+  await act(async () => {});
+  expect(opts.onRefresh.mock.calls.length).toBeGreaterThan(afterDiscard);
+  unmount();
+});
+
 it('retries retired-run transcript reconciliation after runtime disappearance until refresh succeeds', async () => {
   let active: ActiveChatRunsResponse = response();
   let allowRefresh = false;
   apiMock.mockImplementation(async (path) => path.endsWith('/cancel') ? { ok: true } : active);
   const opts = options();
-  opts.onRefresh.mockImplementation(async () => { if (!allowRefresh) throw new Error('transcript not ready'); });
+  opts.onRefresh.mockImplementation(async () => { if (!allowRefresh) throw new Error('transcript not ready'); return true; });
   const { result, unmount } = renderHook(() => useChatRecovery(opts));
   await act(async () => {});
   await act(async () => { await result.current.cancelRuntimeRun(result.current.runtimeRun!); });
@@ -75,14 +115,17 @@ it('retries retired-run transcript reconciliation after runtime disappearance un
 });
 
 it('retries reconciliation while a retired terminal summary remains retained', async () => {
+  let active: ActiveChatRunsResponse = response();
   let allowRefresh = false;
-  const terminal = { ...response().runs[0], status: 'cancelled' };
-  apiMock.mockImplementation(async (path) => path.endsWith('/cancel') ? { ok: true } : { ok: true, runs: [terminal] });
+  apiMock.mockImplementation(async (path) => path.endsWith('/cancel') ? { ok: true } : active);
   const opts = options();
-  opts.onRefresh.mockImplementation(async () => { if (!allowRefresh) throw new Error('transcript not ready'); });
+  opts.onRefresh.mockImplementation(async () => { if (!allowRefresh) throw new Error('transcript not ready'); return true; });
   const { result, unmount } = renderHook(() => useChatRecovery(opts));
   await act(async () => {});
+  expect(result.current.runtimeRun?.runId).toBe('old');
   await act(async () => { await result.current.cancelRuntimeRun(result.current.runtimeRun!); });
+  expect(opts.onError).not.toHaveBeenCalled();
+  active = { ok: true, runs: [{ ...response().runs[0], status: 'cancelled' }] };
   const before = opts.onRefresh.mock.calls.length;
   await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
   expect(opts.onRefresh.mock.calls.length).toBeGreaterThan(before);
@@ -98,7 +141,7 @@ it('keeps terminal reconciliation scoped to its original session across navigati
   const refreshes: string[] = [];
   apiMock.mockImplementation(async (path) => path.endsWith('/cancel') ? { ok: true } : active);
   const base = options();
-  base.onRefresh.mockImplementation(async () => { refreshes.push(base.sessionId); if (base.sessionId === 's') throw new Error('not ready'); });
+  base.onRefresh.mockImplementation(async () => { refreshes.push(base.sessionId); if (base.sessionId === 's') throw new Error('not ready'); return true; });
   const { result, rerender, unmount } = renderHook((props: typeof base) => useChatRecovery(props), { initialProps: base });
   await act(async () => {});
   await act(async () => { await result.current.cancelRuntimeRun(result.current.runtimeRun!); });
@@ -195,9 +238,9 @@ it('ignores a late previous-selection response and lets only the current scope r
   expect(opts.onRefresh).not.toHaveBeenCalled();
 });
 it('invalidates an already-started reconciliation callback on scope change', async () => {
-  let finish!: () => void;
+  let finish!: (applied: boolean) => void;
   const opts = options();
-  opts.onRefresh.mockImplementation(() => new Promise<void>(r => { finish = r; }));
+  opts.onRefresh.mockImplementation(() => new Promise<boolean>(r => { finish = r; }));
   vi.mocked(api).mockResolvedValue({ ok: true, runs: [] });
   const view = renderHook(({ sessionId }) => useChatRecovery({ ...opts, sessionId, isChildSession: true }), { initialProps: { sessionId: 'one' } });
   await act(async () => {});
@@ -205,5 +248,5 @@ it('invalidates an already-started reconciliation callback on scope change', asy
   expect(context.current()).toBe(true);
   view.rerender({ sessionId: 'two' });
   expect(context.current()).toBe(false);
-  await act(async () => finish());
+  await act(async () => finish(false));
 });
