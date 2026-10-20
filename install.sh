@@ -1,7 +1,9 @@
 #!/bin/sh
 # Burrow user-local installer. It replaces app while preserving runtime state.
 set -eu
-REPOSITORY="GoblinKing-Burrow/Burrow"
+DEFAULT_REPOSITORY="NightShaman/Burrow"
+REQUESTED_REPOSITORY="${BURROW_UPDATE_REPOSITORY:-}"
+REPOSITORY="${REQUESTED_REPOSITORY:-$DEFAULT_REPOSITORY}"
 INSTALL_DIR="${HOME}/.burrow"
 SOURCE_DIR=""
 INSTALL_DEPS=1
@@ -56,7 +58,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 # Shell and systemd consume generated paths. Reject unsupported encodings before
-# download, mkdir, uninstall, or durable-state mutation.
+# reading configuration, downloading, mkdir, uninstall, or durable-state mutation.
 case "$INSTALL_DIR" in
   /*) ;;
   *) echo "Burrow install: --dir must be absolute." >&2; exit 2 ;;
@@ -64,6 +66,23 @@ esac
 case "$INSTALL_DIR" in
   *[!A-Za-z0-9_./-]*) echo "Burrow install: --dir contains unsupported characters (use letters, digits, _, ., /, -)." >&2; exit 2 ;;
 esac
+
+# An explicit process override wins. Otherwise an existing installation's durable
+# channel remains authoritative even when this installer is invoked directly.
+if [ -z "$REQUESTED_REPOSITORY" ] && [ -f "$INSTALL_DIR/burrow.env" ]; then
+  durable_repository=$(sed -n 's/^BURROW_UPDATE_REPOSITORY=//p' "$INSTALL_DIR/burrow.env" | tail -n 1)
+  [ -z "$durable_repository" ] || REPOSITORY=$durable_repository
+fi
+# Repository authority becomes part of URLs and durable shell configuration.
+# Accept exactly one GitHub owner/repository pair before download or mutation.
+case "$REPOSITORY" in
+  */*) ;;
+  *) echo "Burrow install: BURROW_UPDATE_REPOSITORY must be owner/repository." >&2; exit 2 ;;
+esac
+repository_owner=${REPOSITORY%%/*}
+repository_name=${REPOSITORY#*/}
+case "$repository_owner" in ''|*[!A-Za-z0-9_.-]*) echo "Burrow install: BURROW_UPDATE_REPOSITORY must be owner/repository." >&2; exit 2 ;; esac
+case "$repository_name" in ''|*/*|*[!A-Za-z0-9_.-]*) echo "Burrow install: BURROW_UPDATE_REPOSITORY must be owner/repository." >&2; exit 2 ;; esac
 
 [ -z "$LISTEN_HOST" ] || case "$LISTEN_HOST" in
   *[!A-Za-z0-9._:-]*|'') echo "Burrow install: --host contains unsupported characters." >&2; exit 2 ;;
@@ -287,14 +306,20 @@ if [ -z "$SOURCE_DIR" ]; then
   verbose_log "downloading immutable assembly archive from codeload.github.com"
   curl -fsSL "https://codeload.github.com/${REPOSITORY}/tar.gz/$assembly_sha" -o "$TMP_ROOT/burrow.tar.gz"
   tar -xzf "$TMP_ROOT/burrow.tar.gz" -C "$TMP_ROOT"
-  SOURCE_DIR=$(find "$TMP_ROOT" -mindepth 1 -maxdepth 1 -type d -name "Burrow-*" | head -n 1)
-  [ -n "$SOURCE_DIR" ] && [ -x "$SOURCE_DIR/install.sh" ] || { echo "Burrow install: downloaded assembly has no executable installer." >&2; exit 1; }
+  SOURCE_DIR=""
+  for archive_root in "$TMP_ROOT"/*; do
+    [ -d "$archive_root" ] && [ -x "$archive_root/install.sh" ] || continue
+    [ -z "$SOURCE_DIR" ] || { echo "Burrow install: downloaded assembly has multiple installer roots." >&2; exit 1; }
+    SOURCE_DIR=$archive_root
+  done
+  [ -n "$SOURCE_DIR" ] || { echo "Burrow install: downloaded assembly has no executable installer." >&2; exit 1; }
 
   # The installed launcher enters the installer from the previous release. Hand
   # control to the downloaded release before applying migrations so an update
   # uses the installer semantics shipped with the payload it is activating.
   # Without this handoff, every installer migration takes effect one update late.
   set -- --source-dir "$SOURCE_DIR" --dir "$INSTALL_DIR"
+  BURROW_UPDATE_REPOSITORY="$REPOSITORY"; export BURROW_UPDATE_REPOSITORY
   [ "$INSTALL_SERVICE" -ne 0 ] || set -- "$@" --no-service
   [ "$INSTALL_DEPS" -ne 0 ] || set -- "$@" --no-install-dependencies
   [ "$INSTALL_NODE" -ne 1 ] || set -- "$@" --install-node
@@ -517,6 +542,11 @@ set_env_value BURROW_RUNTIME_ROOT "$INSTALL_DIR"
 set_env_value BURROW_WORKSPACE_ROOT "$INSTALL_DIR/workspace"
 set_env_value BURROW_CACHE_ROOT "$INSTALL_DIR/cache"
 set_env_value BURROW_CLAUDE_BIN "$INSTALL_DIR/integrations/claude-code/node_modules/.bin/claude"
+# Persist the selected update channel once. Existing operator configuration wins;
+# fresh installs and legacy installs inherit the repository that supplied this run.
+if [ -z "$(env_setting BURROW_UPDATE_REPOSITORY)" ]; then
+  set_env_value BURROW_UPDATE_REPOSITORY "$REPOSITORY"
+fi
 if ! grep -q '^BURROW_SETTINGS_KEY=' "$ENV_FILE"; then
   set_env_value BURROW_SETTINGS_KEY "$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))')"
 fi
