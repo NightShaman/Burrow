@@ -1,7 +1,7 @@
 # Extending BURROW
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Use the current contract linked below for mod authoring.
 
 Choose the smallest extension boundary that owns the behavior you need.
 
@@ -15,144 +15,50 @@ Choose the smallest extension boundary that owns the behavior you need.
 
 A skill does not install a tool. A discovered tool does not grant itself to an agent. A mod is executable code, not a permissions sandbox.
 
-## Create a filesystem skill
-
-The effective catalog discovers `SKILL.md` recursively under:
-
-```text
-<workspaceRoot>/global/skills/<skill-id>/SKILL.md
-<workspaceRoot>/<agent-id>/skills/<skill-id>/SKILL.md
-```
-
-The containing directory name is the skill ID. A simple frontmatter header supplies the advertised name and description:
-
-```markdown
----
-name: Review parser changes
-description: Review parser behavior and test coverage using source evidence
----
-
-# Review parser changes
-
-1. Read the changed parser and the relevant tests
-2. Identify boundary cases and behavior changes
-3. Run the project's documented focused checks when requested
-4. Report findings with file references and distinguish tested facts from inference
-```
-
-Use simple single-line metadata fields: the current header reader is a bounded, lightweight parser, not a complete YAML processor. Hidden directories are skipped. Catalog discovery reads bounded metadata; the full body is loaded separately and receives a content hash/version. 
-
-### Ownership and precedence
-
-```mermaid
-flowchart LR
-    DB[Assigned PostgreSQL text skill] -->|Shadowed by same ID| G[Global filesystem skill]
-    G -->|Shadowed by same ID| A[Agent filesystem skill]
-    A --> C[Effective catalog]
-    C --> S[Explicit selection or load]
-    S --> P[Versioned instructions]
-```
-
-The collision order is explicit: assigned PostgreSQL text, then shared filesystem, then agent filesystem. Disabled skills are unavailable. Experimental and deprecated are lifecycle labels; neither is automatically equivalent to disabled. 
-
-Only explicitly selected/loaded bodies belong in the prompt. Discovery advertises capabilities and does not infer authority from a matching phrase. Where supplied in the current tool surface, `list_skills` and `load_skill` provide agent-driven discovery/loading. Their current schema availability has a known gating caveat; see [Known limitations](../project/known-limitations.md). 
-
-For asset-bearing packages, keep scripts/templates alongside the filesystem skill. Do not assume a text-only database copy includes those files. Built-in synchronization treats text-only skills and asset packages differently. 
-
-## Add an MCP capability
-
-Use the existing connection/catalog/grant model instead of adding a permanent provider-specific schema to every prompt. The model-facing interface is the stable `mcp_providers`, `mcp_capabilities`, and `mcp_call` menu. The exact discovered tool name and its schema guide invocation; grant checks remain runtime-owned.
-
-Read [MCP](../concepts/mcp.md) for connection setup, tool discovery, encrypted secret ownership, and per-agent grants.
-
 ## Build a mod
 
-A mod is discovered under `<runtimeRoot>/mods/<id>/burrow.mod.json`. The manifest ID must match the directory and use lowercase alphanumeric segments separated by hyphens. A name is required; server/UI entrypoints are safe relative paths. `mod-data` is reserved for persistent mod data and is not a discoverable mod package.  
+Use the current [third-party mod contract](mod-contract.md) and public [Burrow Reference Mod](https://github.com/NightShaman/Burrow-Reference-Mod) as the canonical authoring sources. They cover manifests, routes, tools, storage, UI, distribution, lifecycle, compatibility, and trust behavior with runnable current-Core tests.
 
-Minimal package layout:
-
-```text
-example-status/
-  burrow.mod.json
-  server.mjs
-```
-
-`burrow.mod.json`:
+Minimal server shape:
 
 ```json
 {
-  "id": "example-status"
-  "name": "Example status"
+  "id": "example-status",
+  "name": "Example status",
   "server": "server.mjs"
 }
 ```
 
-`server.mjs`:
-
 ```javascript
 export async function activate(context) {
   context.api.get('/status', async () => ({ ok: true, version: 1 }));
-
   context.tools.register({
-    name: 'example_status'
-    description: 'Return the example mod version without reading private data.'
-    inputSchema: {
-      type: 'object'
-      additionalProperties: false
-      properties: {}
-    }
+    name: 'example_status',
+    description: 'Return the example mod version.',
+    inputSchema: { type: 'object', additionalProperties: false, properties: {} },
     handler: async (args) => {
-      if (!args || typeof args !== 'object' || Array.isArray(args)
-          || Object.keys(args).length !== 0) {
-        throw new Error('invalid_arguments');
-      }
+      if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).length) throw new Error('invalid_arguments');
       return { ok: true, version: 1 };
     }
   });
-
-  return async () => {
-    // Release resources owned by this mod when the host closes it.
-  };
+  return () => {};
 }
 ```
 
-The host imports an `activate(context)` export. Register routes and tools during activation. Activation may return a cleanup function or an object with `close()`. The example advertises a harmless static result; it does not expose host files, credentials, conversation data, or arbitrary process execution. 
+Install only trusted mod code. The child host isolates lifecycle and faults; it is not an operating-system sandbox. Installation, enablement, and agent tool grants are separate decisions.
 
-### Validate input in the handler
+## Other extension points
 
-The catalog's JSON schema advertises the contract, but it is not a substitute for handler validation. Treat tool arguments and route requests as untrusted. The tool handler's second argument contains trusted caller context and an abort signal; do not allow user arguments to redefine those identities.
-
-Use scoped asynchronous settings/secrets APIs rather than inventing files as configuration authority. Additional host APIs expose bounded conversation/model/agent/operator/scheduler capabilities; use only those required by the extension and respect their ownership rules. 
-
-!!! warning "Install only trusted mod code"
-    A forked host isolates lifecycle and faults; it is not an operating-system or environment sandbox. Installing/enabling a mod and granting an agent a tool are separate actions. Keep secrets out of returned payloads and logs, and review [Trust boundaries](../security/trust-boundaries.md).
-
-Mod tools join the shared MCP catalog as a `mod.<id>` provider. The default registration availability is `grant-required`; do not change it to bypass operator grant decisions. UI contributions can occupy `control`, `settings`, or `archive` slots, with separately validated settings contributions. See the [API reference](../reference/api.md) for installation and lifecycle operations.  
-
-## Extend a model adapter
-
-Provider serialization belongs in the adapter layer, selected by `createModelAdapter`. Preserve the normalized model result shape and native tool IDs, and implement continuation according to the provider's protocol. Keep visible text, thought deltas, artifacts, usage, and errors separate.
-
-A new adapter needs coverage for:
-
-- Plain and role-structured requests
-- Tool call/result pairing across multiple rounds
-- Multimodal content without accidental string coercion
-- Streaming, cancellation, malformed/error responses, and partial results
-- Bounded transport reads and safe diagnostic projections
-- Context inspection and estimates
-- Final text or explicit incomplete/failure outcomes
-
-Use controlled provider fixtures, not live paid endpoints, for repeatable tests. Review [Models](../concepts/models.md) and [Execution flow](../architecture/execution-flow.md) before changing this boundary. 
+- Read [MCP](../concepts/mcp.md) for external capabilities and per-agent grants.
+- Read [Skills and memory](../guide/skills-and-memory.md) for reusable instructions.
+- Provider wire protocols belong in Core's model adapter layer and require protocol-specific tests.
 
 ## Development checklist
 
-1. Choose the owner: instruction, profile, tool integration, mod, or provider transport
-2. Validate inputs and preserve trusted caller/state boundaries
-3. Produce bounded outputs with clear failure and truncation behavior
-4. Test activation, rejection, cancellation, failure, cleanup, and repeated calls
-5. Confirm disabled/ungranted capabilities remain unavailable
-6. Update the affected contract/reference documentation alongside the code
-7. Build and validate a new release rather than editing the active release in place
-
-Use [Development setup](setup.md), [Repository structure](repository.md), and [Release engineering](releases.md) for the supported source/build workflow.
+1. Choose the smallest correct extension owner.
+2. Validate inputs and preserve trusted caller boundaries.
+3. Bound output and failure behavior.
+4. Test activation, rejection, cancellation, cleanup, and repeated calls.
+5. Confirm disabled/ungranted capabilities remain unavailable.
+6. Update contract/reference documentation with behavior changes.
+7. Publish a tagged build rather than editing an active install.
