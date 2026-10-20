@@ -12,7 +12,7 @@ import { isChatMessage } from './session-entry.mjs';
 import { appendPreferenceSignalAsync, markPreferenceReviewedAsync, applyPreferenceUpdateAsync, parsePreferenceAdjudication, preferenceAdjudicationPrompt, preferenceLearningStateAsync, preferenceSignalsAsync, validatePreferenceAdjudication } from './preference-learning.mjs';
 
 const PHASES = Object.freeze(['light', 'deep', 'rem']);
-export const DREAM_SYNTHESIS_CONTRACT_VERSION = 'dream-brain-connections-v1';
+export const DREAM_SYNTHESIS_CONTRACT_VERSION = 'dream-brain-connections-v2';
 // Historical reflection windows; durable Albdruck maintenance is independent.
 const PHASE_WINDOWS_DAYS = Object.freeze({ light: 1, deep: 14, rem: 30 });
 export const DREAM_INTERRUPTED_ERROR = 'Dream interrupted by runtime restart before completion';
@@ -489,20 +489,25 @@ CONNECT AND RECONCILE
 - Preserve uncertainty when it materially affects the understanding. Do not infer resolutions, relationships, or context not supported by evidence.
 
 WHAT BELONGS IN THE FINAL OUTPUT
-- Connections between distinct threads where considering them together reveals something useful that neither says alone.
+- A connection must combine at least two genuinely distinct subjects, projects, relationships, experiences, or recurring patterns. Earlier and later events from one implementation, incident, feature, or investigation are one thread, not two.
+- The combined view must reveal a useful implication, pattern, tension, cause, opportunity, or understanding that is not already stated by either thread alone. A clarification, distinction, chronology, validation caveat, or summary of known facts is not a discovery.
+- Write the discovered understanding and why the association matters. Do not merely say that two facts are different, related, or should be interpreted separately.
 - Unexpected but evidence-supported associations may remain tentative; preserve uncertainty rather than discarding an interesting connection.
 - Prior Dreaming connections may be extended, corrected, split, or superseded when newer evidence changes the understanding.
-- Use judgment about novelty and usefulness. No discovery is a valid outcome.
+- Use judgment about novelty and usefulness. No discovery is a successful and preferred outcome over a weak connection.
 
 WHAT BELONGS ELSEWHERE
 - Repeated behavioral corrections and stable working guidance belong in Preferences, not here.
 - Standalone decisions, constraints, incidents, and current work do not become Dream connections merely because they are important.
+- Architecture descriptions, product taxonomy, subsystem boundaries, migration history, and explanations of how Burrow features differ belong in documentation or ordinary saved memory unless connected to a separate lived pattern that yields a new implication.
 
 WHAT DOES NOT BELONG BY ITSELF
 - Release lists, test counts, run receipts, or completed-work summaries.
-- Historical validation caveats with no continuing consequence.
+- Historical validation caveats, epistemic disclaimers, or warnings that an observation did not prove something.
 - Instructions to perform or review a particular run.
 - Isolated excerpts selected merely because they might be useful.
+- Restatements such as “these are distinct stages,” “visibility does not prove deletion,” or “partial results do not prove completion.” Those are clarifications, not associative discoveries.
+Before emitting each final memory, silently test it: identify the two distinct threads and state the new implication produced by joining them. If either cannot be identified, omit it. Do not include that test in the output.
 Historical details may support a connection, but include them in the final prose only when needed to explain that connection. Keep supporting chronology in sourceRefs rather than reproducing an operational log.
 
 COVERAGE AND BATCHING
