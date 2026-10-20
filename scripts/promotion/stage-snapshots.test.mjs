@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { setNodeGoblinReleaseAuthority, TARGETS, validateInputs } from './stage-snapshots.mjs';
+import { setBurrowReleaseAuthority, setNodeGoblinReleaseAuthority, TARGETS, validateInputs } from './stage-snapshots.mjs';
 
 const sha = 'a'.repeat(40);
 const sources = { burrow: sha, burrowBackend: sha, burrowUi: sha, nodeGoblin: sha, goblinSecretStore: sha, burrowSkills: sha, burrowBackdoor: sha };
@@ -22,6 +22,28 @@ test('rejects revision suffixes and incomplete source sets', () => {
   assert.throws(() => validateInputs({ releaseDate: '2026.10.17.1', sources }), /promotion_release_date_invalid/);
   const incomplete = { ...sources }; delete incomplete.burrowUi;
   assert.throws(() => validateInputs({ releaseDate: '2026.10.17', sources: incomplete }), /promotion_source_missing:burrowUi/);
+});
+
+test('public snapshot rewrites Burrow installer release authority', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'burrow-public-authority-'));
+  try {
+    const installer = path.join(root, 'install.sh');
+    fs.writeFileSync(installer, 'DEFAULT_REPOSITORY="NightShaman/Burrow"\nREPOSITORY="${BURROW_UPDATE_REPOSITORY:-$DEFAULT_REPOSITORY}"\n');
+    setBurrowReleaseAuthority(root, 'GoblinKing-Burrow/Burrow');
+    assert.equal(fs.readFileSync(installer, 'utf8'), 'DEFAULT_REPOSITORY="GoblinKing-Burrow/Burrow"\nREPOSITORY="${BURROW_UPDATE_REPOSITORY:-$DEFAULT_REPOSITORY}"\n');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('public snapshot fails closed when Burrow installer authority is missing', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'burrow-public-authority-'));
+  try {
+    fs.writeFileSync(path.join(root, 'install.sh'), '#!/bin/sh\n');
+    assert.throws(() => setBurrowReleaseAuthority(root, 'GoblinKing-Burrow/Burrow'), /burrow_installer_authority_missing/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('public snapshot rewrites Node Goblin installer release authority', () => {
