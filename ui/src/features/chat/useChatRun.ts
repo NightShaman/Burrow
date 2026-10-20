@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { answerFromChatResult, api, createRunId, type ChatAttachment, type ProgressEntry, type RunProgress, type SessionTurn, type ToolActivityItem } from '../../app/api';
 import type { Agent, SavedProvider } from '../../app/types';
 import { streamChat } from './chatStream';
+import { isChatRunNotFoundError } from './useLiveSteering';
 import { appendThoughtDelta, finalizeThoughtProgress } from './chatThoughtProgress';
 
 import { projectLiveStage, type LiveStageProjection, type ChatLiveStage } from './chatLiveStage';
@@ -33,6 +34,7 @@ type UseChatRunOptions = {
   savedProviders: SavedProvider[];
   session: ChatRunSession;
   setAgentActivity: (agentId: string, status: string) => void;
+  onRunStopped?: (run: { agentId: string; sessionId: string; runId: string }) => void;
 };
 
 const runKey = (agentId: string, sessionId: string) => `${agentId}:${sessionId}`;
@@ -54,7 +56,7 @@ export function trimStreamedAnswer(streamedAnswer: string, finalAnswer: string) 
 }
 
 /** Owns one-to-one chat run state, stream lifecycle, and cancellation. */
-export function useChatRun({ selectedAgentId, selected, savedProviders, session, setAgentActivity }: UseChatRunOptions) {
+export function useChatRun({ selectedAgentId, selected, savedProviders, session, setAgentActivity, onRunStopped }: UseChatRunOptions) {
   const [activeRuns, setActiveRuns] = useState<Record<string, ActiveRun>>({});
   const [liveProgressByRun, setLiveProgressByRun] = useState<Record<string, ProgressEntry[]>>({});
   const [liveAnswerByRun, setLiveAnswerByRun] = useState<Record<string, string>>({});
@@ -93,7 +95,7 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
     performance.mark(`chat:${runId}:send`, { startTime: sentAt });
     let firstUseful = false;
     let streamedAnswer = ''; let progressEntries: ProgressEntry[] = []; let toolSequence = 0; let frame = 0;
-    const flushLiveText = () => { frame = 0; setLiveProgressByRun((current) => ({ ...current, [targetKey]: progressEntries })); setLiveAnswerByRun((current) => ({ ...current, [targetKey]: streamedAnswer })); };
+    const flushLiveText = () => { frame = 0; if (streamAbortRef.current[targetKey] !== abortController || abortController.signal.aborted) return; setLiveProgressByRun((current) => ({ ...current, [targetKey]: progressEntries })); setLiveAnswerByRun((current) => ({ ...current, [targetKey]: streamedAnswer })); };
     const scheduleLiveFlush = () => { if (!frame) frame = requestAnimationFrame(flushLiveText); };
     try {
       const handleEvent = (event: unknown) => {
@@ -139,6 +141,7 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
         }
       };
       const { terminalType, finalResult } = await streamChat({ requestBody, signal: abortController.signal, onEvent: handleEvent });
+      if (streamAbortRef.current[targetKey] !== abortController || abortController.signal.aborted) return;
       if (frame) { cancelAnimationFrame(frame); flushLiveText(); }
       const runStatus: NonNullable<RunProgress['status']> = terminalType === 'run.failed' ? 'failed' : terminalType === 'run.cancelled' ? 'cancelled' : terminalType === 'run.superseded' ? 'superseded' : 'complete';
       const terminalError = runStatus === 'complete' ? '' : answerFromChatResult(finalResult);
@@ -172,26 +175,55 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
       ]).catch((error) => session.reportError(error instanceof Error ? `Could not refresh chat: ${error.message}` : 'Could not refresh chat.'));
       if (runStatus === 'failed' || runStatus === 'cancelled') throw new Error(runStatus === 'cancelled' ? 'Run cancelled.' : terminalError.replace(/^Request failed:\s*/, '') || 'Run failed.');
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === 'AbortError')) session.reportError(error instanceof Error ? `Message failed: ${error.message}` : 'Message failed.');
+      if (streamAbortRef.current[targetKey] === abortController && !abortController.signal.aborted && !(error instanceof DOMException && error.name === 'AbortError')) session.reportError(error instanceof Error ? `Message failed: ${error.message}` : 'Message failed.');
     } finally {
       if (frame) cancelAnimationFrame(frame);
-      if (streamAbortRef.current[targetKey] === abortController) delete streamAbortRef.current[targetKey];
-      setLiveProgressByRun((current) => { const next = { ...current }; delete next[targetKey]; return next; });
-      setLiveAnswerByRun((current) => { const next = { ...current }; delete next[targetKey]; return next; });
-      setAgentActivity(target.agentId, 'idle'); setActiveRuns((current) => { const next = { ...current }; if (next[targetKey]?.runId === runId) delete next[targetKey]; return next; });
+      // A stopped stream may settle after a replacement started in this session.
+      if (streamAbortRef.current[targetKey] === abortController) {
+        delete streamAbortRef.current[targetKey];
+        setLiveProgressByRun((current) => { const next = { ...current }; delete next[targetKey]; return next; });
+        setLiveAnswerByRun((current) => { const next = { ...current }; delete next[targetKey]; return next; });
+        setAgentActivity(target.agentId, 'idle'); setActiveRuns((current) => { const next = { ...current }; if (next[targetKey]?.runId === runId) delete next[targetKey]; return next; });
+      }
     }
   };
 
   const cancelController = useRef<AbortController | null>(null);
-  useEffect(() => () => { cancelController.current?.abort(); }, [selected?.id, session.sessionId]);
+  useEffect(() => () => { cancelController.current?.abort(); }, [selectedAgentId, selected?.id, session.sessionId]);
   const cancelRun = async () => {
     if (!activeRunForSelection) return;
-    const targetKey = runKey(activeRunForSelection.agentId, activeRunForSelection.sessionId);
-    streamAbortRef.current[targetKey]?.abort();
+    const run = activeRunForSelection;
+    const targetKey = runKey(run.agentId, run.sessionId);
+    const streamController = streamAbortRef.current[targetKey];
+    const resourceAgentId = selected?.resourceId ?? run.agentId;
+    // Stop owns this exact local run even if navigation aborts the request
+    // observer. Retire the stream immediately; the runtime projection/polling
+    // remains authoritative if cancellation itself fails.
+    if (streamAbortRef.current[targetKey] === streamController) {
+      streamController?.abort();
+      delete streamAbortRef.current[targetKey];
+      setActiveRuns((current) => { if (current[targetKey]?.runId !== run.runId) return current; const next = { ...current }; delete next[targetKey]; return next; });
+      setLiveProgressByRun((current) => { const next = { ...current }; delete next[targetKey]; return next; });
+      setLiveAnswerByRun((current) => { const next = { ...current }; delete next[targetKey]; return next; });
+      setAgentActivity(run.agentId, 'idle');
+    }
     cancelController.current?.abort();
     const controller = new AbortController(); cancelController.current = controller;
-    try { await api(`/api/chat/${encodeURIComponent(activeRunForSelection.runId)}/cancel`, { signal: controller.signal, method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: selected?.resourceId ?? activeRunForSelection.agentId, reason: 'Stopped by operator' }) }); }
-    catch (error) { if (controller.signal.aborted) return; session.reportError(error instanceof Error ? `Could not stop run: ${error.message}` : 'Could not stop run.'); }
+    try {
+      await api(`/api/chat/${encodeURIComponent(run.runId)}/cancel`, { signal: controller.signal, method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: resourceAgentId, reason: 'Stopped by operator' }) });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      if (!isChatRunNotFoundError(error)) {
+        session.reportError(error instanceof Error ? `Could not stop run: ${error.message}` : 'Could not stop run.');
+        return;
+      }
+    }
+    if (controller.signal.aborted) return;
+    // Acknowledged Stop (including an already-gone run) is a terminal runtime
+    // projection boundary. Local stream ownership was retired at request start.
+    onRunStopped?.({ agentId: resourceAgentId, sessionId: run.sessionId, runId: run.runId });
+    void Promise.all([session.refreshSessions(run.agentId), session.refreshConversation(run.agentId, run.sessionId)])
+      .catch((error) => session.reportError(error instanceof Error ? `Could not refresh chat: ${error.message}` : 'Could not refresh chat.'));
   };
 
   return { liveStage: activeRunForSelection?.stage, activeRunForSelection, activeRunId: activeRunForSelection?.runId ?? '', sendMessage, cancelRun, liveProgress: activeRunForSelection ? liveProgressByRun[runKey(activeRunForSelection.agentId, activeRunForSelection.sessionId)] ?? [] : [], liveAnswer: activeRunForSelection ? liveAnswerByRun[runKey(activeRunForSelection.agentId, activeRunForSelection.sessionId)] ?? '' : '' };

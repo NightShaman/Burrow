@@ -77,7 +77,7 @@ export function useChatSession(selectedAgentId: string) {
   useEffect(() => { writeDraftCache(draftCache); }, [draftCache]);
   useEffect(() => { selectedChatRef.current = { agentId: selectedAgentId, sessionId }; }, [selectedAgentId, sessionId]);
 
-  const { a2aActivities, runtimeRun, runtimeChildActivities, clearActivity, cancelRuntimeRun } = useChatRecovery({
+  const { a2aActivities, runtimeRun, runtimeChildActivities, clearActivity, cancelRuntimeRun, retireRuntimeRun } = useChatRecovery({
     agentId: selectedAgentId, sessionId, enabled: !isNewSession,
     isChildSession: childSessionsRef.current.has(conversationCacheKey(selectedAgentId, sessionId)),
     onError: setChatError,
@@ -349,5 +349,5 @@ export function useChatSession(selectedAgentId: string) {
   const reportError = useCallback((message: string) => setChatError(message), []);
   const clearError = useCallback(() => setChatError(''), []);
 
-  return { composerResetGeneration, isAttachmentScopeCurrent, attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation: isLoadingConversation || isSwitchingAgent, draft, setDraft, refreshSessions, refreshConversation, selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, appendTransientTurn, storeToolActivity, toolActivityForRun, clearRunState, a2aActivities, runtimeRun, runtimeChildActivities, cancelRuntimeRun };
+  return { composerResetGeneration, isAttachmentScopeCurrent, attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation: isLoadingConversation || isSwitchingAgent, draft, setDraft, refreshSessions, refreshConversation, selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, appendTransientTurn, storeToolActivity, toolActivityForRun, clearRunState, a2aActivities, runtimeRun, runtimeChildActivities, cancelRuntimeRun, retireRuntimeRun };
 }

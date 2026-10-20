@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, type ActiveChatRunsResponse, type ProgressEntry } from '../../app/api';
+import { isChatRunNotFoundError } from './useLiveSteering';
 import { conversationCacheGeneration } from './chatConversationCache';
 import { projectChatActivity, type RuntimeRunForSelection } from './chatActivityProjection';
 
+type RunIdentity = Pick<RuntimeRunForSelection, 'agentId' | 'sessionId' | 'runId'>;
+const runKey = (run: RunIdentity) => JSON.stringify([run.agentId, run.sessionId, run.runId]);
 type Projection = ReturnType<typeof projectChatActivity>;
 type RecoveryContext = { current: () => boolean; generation: number; recoveredProgress: Record<string, ProgressEntry[]> };
 type Options = { agentId: string; sessionId: string; enabled: boolean; isChildSession: boolean; onRefresh: (context: RecoveryContext) => Promise<void>; onError: (message: string) => void };
@@ -13,6 +16,17 @@ export function useChatRecovery({ agentId, sessionId, enabled, isChildSession, o
   const [activity, setActivity] = useState<Pick<Projection, 'runtimeRun' | 'childActivities' | 'a2aActivities'>>(emptyActivity);
   const callbacks = useRef({ onRefresh, onError });
   useLayoutEffect(() => { callbacks.current = { onRefresh, onError }; });
+  // Keep acknowledged stops retired even if an in-flight/stale poll repeats
+  // them. Reconciliation remains pending until the runtime no longer reports
+  // the retired identity and one final transcript refresh succeeds.
+  const retiredRuns = useRef(new Set<string>());
+  const retiredRefreshNeeded = useRef(new Set<string>());
+  const retireRuntimeRun = useCallback((run: RunIdentity) => {
+    const key = runKey(run);
+    retiredRuns.current.add(key);
+    retiredRefreshNeeded.current.add(key);
+    setActivity((current) => current.runtimeRun && runKey(current.runtimeRun) === key ? { ...current, runtimeRun: null } : current);
+  }, []);
   const recoveredProgress = useRef<Record<string, ProgressEntry[]>>({});
   const scopeKey = JSON.stringify([agentId, sessionId, enabled, isChildSession]);
   const scope = useRef({ key: scopeKey });
@@ -32,13 +46,24 @@ export function useChatRecovery({ agentId, sessionId, enabled, isChildSession, o
       try {
         const response = await api<ActiveChatRunsResponse>(`/api/chat/runs/active?agentId=${encodeURIComponent(agentId)}&sessionId=${encodeURIComponent(sessionId)}`, { signal: controller.signal });
         if (!current() || conversationCacheGeneration !== generation) return;
-        const projection = projectChatActivity(response, { agentId, sessionId, isChildSession, hadRuns, now: Date.now() });
+        const reportedRunKeys = new Set((response.runs ?? []).filter((run) => ['running', 'cancelling'].includes(String(run.status || '').toLowerCase())).map(runKey));
+        const projection = projectChatActivity({ ...response,
+          runs: (response.runs ?? []).filter((run) => !retiredRuns.current.has(runKey(run))),
+          subagents: response.subagents?.filter((child) => !retiredRuns.current.has(runKey({ agentId: child.agentId || '', sessionId: child.sessionId || (typeof child.trace?.childSessionId === 'string' ? child.trace.childSessionId : ''), runId: child.runId || child.id }))),
+        }, { agentId, sessionId, isChildSession, hadRuns, now: Date.now() });
         if (projection.runtimeRun) recoveredProgress.current[projection.runtimeRun.runId] = projection.runtimeRun.progress;
         setActivity(projection);
         hadRuns = projection.hadRuns;
         // Child workers persist outside the active-run registry; also refresh
         // after the last active run disappears to pick up terminal writes.
-        if (projection.shouldRefresh) await callbacks.current.onRefresh({ current, generation, recoveredProgress: recoveredProgress.current });
+        const settledRetired = [...retiredRefreshNeeded.current].filter((key) => {
+          const [retiredAgentId, retiredSessionId] = JSON.parse(key) as [string, string, string];
+          return retiredAgentId === agentId && retiredSessionId === sessionId && !reportedRunKeys.has(key);
+        });
+        if (projection.shouldRefresh || settledRetired.length) {
+          await callbacks.current.onRefresh({ current, generation, recoveredProgress: recoveredProgress.current });
+          if (current()) settledRetired.forEach((key) => retiredRefreshNeeded.current.delete(key));
+        }
       } catch {
         // Supplemental activity failure must not replace durable chat/error state.
       } finally {
@@ -52,14 +77,23 @@ export function useChatRecovery({ agentId, sessionId, enabled, isChildSession, o
   const cancelController = useRef<AbortController | null>(null);
   useEffect(() => () => { cancelController.current?.abort(); }, [scopeKey]);
   const cancelRuntimeRun = useCallback(async (run: RuntimeRunForSelection) => {
+    const owner = scope.current;
+    const generation = conversationCacheGeneration;
     cancelController.current?.abort();
     const controller = new AbortController(); cancelController.current = controller;
     try {
       await api(`/api/chat/${encodeURIComponent(run.runId)}/cancel`, { signal: controller.signal, method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: run.agentId, reason: 'Stopped by operator' }) });
     } catch (error) {
-      if (controller.signal.aborted) return;
-      callbacks.current.onError(error instanceof Error ? `Could not stop run: ${error.message}` : 'Could not stop run.');
+      if (controller.signal.aborted || scope.current !== owner) return;
+      if (!isChatRunNotFoundError(error)) {
+        callbacks.current.onError(error instanceof Error ? `Could not stop run: ${error.message}` : 'Could not stop run.');
+        return;
+      }
     }
-  }, []);
-  return { a2aActivities: activity.a2aActivities, runtimeRun: activity.runtimeRun, runtimeChildActivities: activity.childActivities, clearActivity, cancelRuntimeRun };
+    if (controller.signal.aborted || scope.current !== owner) return;
+    retireRuntimeRun(run);
+    const current = () => scope.current === owner && !controller.signal.aborted;
+    try { await callbacks.current.onRefresh({ current, generation, recoveredProgress: recoveredProgress.current }); } catch { /* Final reconciliation waits for runtime disappearance and retries by poll. */ }
+  }, [retireRuntimeRun]);
+  return { a2aActivities: activity.a2aActivities, runtimeRun: activity.runtimeRun, runtimeChildActivities: activity.childActivities, clearActivity, cancelRuntimeRun, retireRuntimeRun };
 }

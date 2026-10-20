@@ -1,7 +1,10 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { api } from '../../app/api';
 import { streamChat } from './chatStream';
 import { trimStreamedAnswer, useChatRun } from './useChatRun';
+
+vi.mock('../../app/api', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../app/api')>()), api: vi.fn() }));
 
 vi.mock('./chatStream', () => ({ streamChat: vi.fn() }));
 
@@ -29,6 +32,7 @@ function createSession() {
 
 beforeEach(() => {
   streamChatMock.mockReset();
+  vi.mocked(api).mockReset();
 });
 
 describe('useChatRun', () => {
@@ -312,5 +316,75 @@ describe('truthful live stages', () => {
     act(() => currentEmit({ type: 'model.started' }));
     expect(result.current.liveStage).toBe('request-intent');
     await act(async () => { complete({ terminalType: 'run.completed', finalResult: { ok: true, answerText: 'Next final' } }); await pending; });
+  });
+});
+
+describe('Stop retirement', () => {
+  it.each(['success', 'not_found'])('retires exact local/projected run on %s without waiting for a stalled stream', async (outcome) => {
+    const completions: Array<(value: Awaited<ReturnType<typeof streamChat>>) => void> = [];
+    streamChatMock.mockImplementation(() => new Promise((resolve) => { completions.push(resolve); }));
+    if (outcome === 'success') vi.mocked(api).mockResolvedValue({ ok: true });
+    else vi.mocked(api).mockRejectedValue(Object.assign(new Error('chat_run_not_found'), { status: 404 }));
+    const session = createSession();
+    const onRunStopped = vi.fn();
+    const { result } = renderHook(() => useChatRun({ selectedAgentId: 'nigel', selected: undefined, savedProviders: [], session, setAgentActivity: vi.fn(), onRunStopped }));
+    let oldCompletion!: Promise<void>;
+    act(() => { oldCompletion = result.current.sendMessage(); });
+    const oldRunId = result.current.activeRunId;
+    act(() => streamChatMock.mock.calls[0][0].onEvent({ type: 'assistant.delta', data: { delta: 'Old text' } }));
+    await waitFor(() => expect(result.current.liveAnswer).toBe('Old text'));
+    await act(async () => { await result.current.cancelRun(); });
+    expect(result.current.activeRunId).toBe('');
+    expect(result.current.liveAnswer).toBe('');
+    expect(result.current.liveProgress).toEqual([]);
+    expect(onRunStopped).toHaveBeenCalledWith({ agentId: 'nigel', sessionId: 'session-1', runId: oldRunId });
+    expect(streamChatMock.mock.calls[0][0].signal.aborted).toBe(true);
+    expect(session.refreshConversation).toHaveBeenCalledWith('nigel', 'session-1');
+    expect(session.reportError).not.toHaveBeenCalled();
+    let nextCompletion!: Promise<void>;
+    act(() => { nextCompletion = result.current.sendMessage('Next'); });
+    const nextRunId = result.current.activeRunId;
+    act(() => streamChatMock.mock.calls[1][0].onEvent({ type: 'assistant.delta', data: { delta: 'New text' } }));
+    await waitFor(() => expect(result.current.liveAnswer).toBe('New text'));
+    await act(async () => { completions[0]({ terminalType: 'run.completed', finalResult: { answerText: 'Stale answer' } }); await oldCompletion; });
+    expect(result.current.activeRunId).toBe(nextRunId);
+    expect(result.current.liveAnswer).toBe('New text');
+    expect(session.appendTurn).not.toHaveBeenCalledWith('nigel', 'session-1', expect.objectContaining({ role: 'assistant', runId: oldRunId }));
+    await act(async () => { completions[1]({ terminalType: 'run.completed', finalResult: { answerText: 'New answer' } }); await nextCompletion; });
+  });
+
+  it('retires the local stream even when Stop fails, while reporting the runtime failure', async () => {
+    let complete!: (value: Awaited<ReturnType<typeof streamChat>>) => void;
+    streamChatMock.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    vi.mocked(api).mockRejectedValue(Object.assign(new Error('chat_run_not_found'), { status: 503 }));
+    const session = createSession();
+    const { result } = renderHook(() => useChatRun({ selectedAgentId: 'nigel', selected: undefined, savedProviders: [], session, setAgentActivity: vi.fn() }));
+    let completion!: Promise<void>;
+    act(() => { completion = result.current.sendMessage(); });
+    await act(async () => { await result.current.cancelRun(); });
+    expect(result.current.activeRunId).toBe('');
+    expect(streamChatMock.mock.calls[0][0].signal.aborted).toBe(true);
+    expect(session.reportError).toHaveBeenCalledWith('Could not stop run: chat_run_not_found');
+    await act(async () => { complete({ terminalType: 'run.completed', finalResult: { answerText: 'Done' } }); await completion; });
+  });
+
+  it('cannot strand the old local run when navigation aborts a pending Stop request', async () => {
+    let resolveStop!: (value: unknown) => void;
+    vi.mocked(api).mockReturnValue(new Promise(resolve => { resolveStop = resolve; }));
+    let complete!: (value: Awaited<ReturnType<typeof streamChat>>) => void;
+    streamChatMock.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    const session = createSession();
+    const { result, rerender } = renderHook(({ agent }) => useChatRun({ selectedAgentId: agent, selected: undefined, savedProviders: [], session, setAgentActivity: vi.fn() }), { initialProps: { agent: 'nigel' } });
+    let completion!: Promise<void>;
+    act(() => { completion = result.current.sendMessage(); });
+    let stopping!: Promise<void>;
+    act(() => { stopping = result.current.cancelRun(); });
+    expect(result.current.activeRunId).toBe('');
+    rerender({ agent: 'other' });
+    rerender({ agent: 'nigel' });
+    expect(result.current.activeRunId).toBe('');
+    await act(async () => { resolveStop({ ok: true }); await stopping; });
+    expect(result.current.activeRunId).toBe('');
+    await act(async () => { complete({ terminalType: 'run.completed', finalResult: { answerText: 'Late' } }); await completion; });
   });
 });

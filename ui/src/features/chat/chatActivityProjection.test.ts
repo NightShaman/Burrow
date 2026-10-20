@@ -34,3 +34,12 @@ it('requests one terminal refresh after activity disappears, and keeps child ter
   expect(projectChatActivity({ ok: true, runs: [] }, { ...selection, hadRuns: true })).toMatchObject({ shouldRefresh: true, hadRuns: false });
   expect(projectChatActivity({ ok: true, runs: [] }, { ...selection, isChildSession: true }).shouldRefresh).toBe(true);
 });
+
+it.each(['cancelled', 'completed', 'failed', 'superseded'])('never projects a %s summary as live, including child fallback and A2A', (status) => {
+  const terminal = { runId: 'old', agentId: 'a', sessionId: 'parent', status, source: 'a2a', a2a: { parentAgentId: 'b' } };
+  const response = { ok: true, runs: [terminal], subagents: [{ id: 'child', runId: 'old', agentId: 'a', sessionId: 'parent', final: false }] };
+  expect(projectChatActivity(response, { ...selection, isChildSession: true })).toMatchObject({ runtimeRun: null, a2aActivities: [], shouldRefresh: true });
+  for (const liveStatus of ['running', 'cancelling']) {
+    expect(projectChatActivity({ ...response, runs: [terminal, { ...terminal, runId: 'new', status: liveStatus }] }, selection).runtimeRun?.runId).toBe('new');
+  }
+});

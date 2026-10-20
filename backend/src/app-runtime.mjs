@@ -1,5 +1,5 @@
 import { performance } from 'node:perf_hooks';
-import { serializeSessionAdmission } from './session-admission.mjs';
+import { beginSessionAdmissionSupersession, finishSessionAdmissionSupersession, serializeSessionAdmission } from './session-admission.mjs';
 import { operatorTimezone } from './timezone.mjs';
 import { postgresContinuity } from './postgres-continuity.mjs';
 import { promises as fs } from 'node:fs';
@@ -58,6 +58,14 @@ function sessionExecutionKey({ rootDir, sessionId, args = {}, agentRuntime = nul
 async function serializeSessionExecution(options, operation) {
   const key = sessionExecutionKey(options);
   return serializeSessionAdmission(sessionExecutionQueues, key, operation, options.args?.abort_signal || options.args?.abortSignal);
+}
+
+export function beginRuntimeSessionExecutionSupersession({ rootDir, sessionId, args = {}, agentRuntime = null } = {}) {
+  return beginSessionAdmissionSupersession(sessionExecutionQueues, sessionExecutionKey({ rootDir, sessionId, args, agentRuntime }));
+}
+
+export function finishRuntimeSessionExecutionSupersession(token) {
+  return finishSessionAdmissionSupersession(token);
 }
 
 export async function runAskChat(options = {}) {

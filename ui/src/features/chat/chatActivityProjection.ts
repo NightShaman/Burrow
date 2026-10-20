@@ -90,7 +90,7 @@ function subagentToolActivity(child: ActiveSubagent, now: number): ToolActivity 
 }
 
 function runtimeRunForSubagent(child: ActiveSubagent | undefined, targetId: string, now: number): RuntimeRunForSelection | null {
-  if (!child || child.final) return null;
+  if (!child || child.final || ['cancelled', 'completed', 'failed', 'superseded', 'succeeded', 'incomplete', 'timed_out'].includes(String(child.status || child.activity?.status || '').toLowerCase())) return null;
   const runId = child.runId || child.id;
   const agentId = child.agentId || '';
   const traceChildSessionId = child.trace && 'childSessionId' in child.trace && typeof child.trace.childSessionId === 'string' ? child.trace.childSessionId : '';
@@ -101,22 +101,26 @@ function runtimeRunForSubagent(child: ActiveSubagent | undefined, targetId: stri
 
 /** Pure active-run projection. Selection and clock are inputs, never global state. */
 export function projectChatActivity(response: ActiveChatRunsResponse, { agentId, sessionId, isChildSession, hadRuns, now }: { agentId: string; sessionId: string; isChildSession: boolean; hadRuns: boolean; now: number }) {
-  const selectedRuntimeRun = response.runs?.find((run) => run.agentId === agentId && run.sessionId === sessionId);
+  // The active endpoint can retain terminal summaries; only live statuses own
+  // the composer lock (and a terminal summary must not hide a newer live run).
+  const liveRuns = (response.runs ?? []).filter((run) => run.status === 'running' || run.status === 'cancelling');
+  const selectedRuntimeRun = liveRuns.find((run) => run.agentId === agentId && run.sessionId === sessionId);
   const matchingLiveSubagents = (response.subagents ?? []).filter((child) => {
     const traceChildSessionId = child.trace && 'childSessionId' in child.trace && typeof child.trace.childSessionId === 'string' ? child.trace.childSessionId : '';
     const childAgentId = child.agentId || '';
     const parentRunId = child.parentRunId || (child.trace && 'runId' in child.trace && typeof child.trace.runId === 'string' ? child.trace.runId : '');
-    return !child.final
+    const terminalRun = response.runs?.some((run) => run.runId === (child.runId || child.id) && run.agentId === childAgentId && run.sessionId === (child.sessionId || traceChildSessionId) && !liveRuns.includes(run));
+    return !child.final && !terminalRun
       && (child.parentSessionId === sessionId || (isChildSession && (child.sessionId === sessionId || traceChildSessionId === sessionId)))
       && (!childAgentId || childAgentId === agentId)
       && (!parentRunId || !selectedRuntimeRun || parentRunId === selectedRuntimeRun.runId);
   });
   const childActivities = matchingLiveSubagents.map((child) => subagentToolActivity(child, now));
-  const projectedRuntimeRun = runtimeRunForSelection(selectedRuntimeRun, 'local') ?? runtimeRunForSubagent(isChildSession ? matchingLiveSubagents[0] : undefined, 'local', now);
-  const activities = (response.runs ?? []).flatMap((run) => {
+  const projectedRuntimeRun = runtimeRunForSelection(selectedRuntimeRun, 'local') ?? (isChildSession ? matchingLiveSubagents.map((child) => runtimeRunForSubagent(child, 'local', now)).find(Boolean) ?? null : null);
+  const activities = liveRuns.flatMap((run) => {
     if (run.a2aActivities?.length) return run.a2aActivities;
     if (run.source !== 'a2a' || !run.a2a) return [];
-    const status: ActiveA2AActivity['status'] = run.status === 'cancelled' ? 'cancelled' : run.phase === 'streaming' ? 'streaming' : 'running';
+    const status: ActiveA2AActivity['status'] = run.phase === 'streaming' ? 'streaming' : 'running';
     return [{ id: `a2a:${run.runId}`, status, parentAgentId: run.a2a.parentAgentId, recipient: { agentId: run.agentId, sessionId: run.sessionId, runId: run.runId }, messageMode: run.a2a.messageMode, progress: run.progress ?? [] }];
   });
   const hasLiveSubagents = Boolean(matchingLiveSubagents.length);

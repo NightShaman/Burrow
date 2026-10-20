@@ -34,6 +34,9 @@ export function createSessionRoutes({
   sessionWriteHandoffCandidate,
   archiveSummaryForReset,
   archiveSummaryForSession,
+  supersedeSessionRuns = null,
+  beginSessionAdmissionsReset = null,
+  finishSessionAdmissionsReset = null,
   latestAuthorityExplanationForSession,
   listAuthorityExplanationsForSession,
   conversationStore = null,
@@ -185,7 +188,7 @@ export function createSessionRoutes({
         return true;
       }
       if (req.method === 'GET' && !action) { const session = await sessionDetail(sessionId, { rootDir, agentId: resolvedAgentId }); sendJson(res, session ? 200 : 404, session ? { ok: true, session } : { ok: false, error: 'not_found' }); return true; }
-      if (req.method === 'POST' && action === 'reset') { await sessionWriteHandoff({ agentId: resolvedAgentId, sessionId, title: `Boundary checkpoint before session reset: ${sessionId}`, runId: `session-reset-${Date.now()}`, message: `Preserve the useful state from session ${sessionId} before resetting it.` }); const result = await conversationStore.reset({ agentId: resolvedAgentId, sessionId }); sendJson(res, 200, result); void Promise.resolve().then(() => archiveSummaryForReset?.({agentId:resolvedAgentId,sessionId,archiveId:result.archiveId})).catch(() => {}); return true; }
+      if (req.method === 'POST' && action === 'reset') { const resetBarrier = await beginSessionAdmissionsReset?.({ agentId: resolvedAgentId, sessionId }); try { await sessionWriteHandoff({ agentId: resolvedAgentId, sessionId, title: `Boundary checkpoint before session reset: ${sessionId}`, runId: `session-reset-${Date.now()}`, message: `Preserve the useful state from session ${sessionId} before resetting it.` }); const superseded = await supersedeSessionRuns?.({ agentId: resolvedAgentId, sessionId, reason: 'superseded by session reset' }) || []; const result = await conversationStore.reset({ agentId: resolvedAgentId, sessionId }); sendJson(res, 200, { ...result, ...(superseded.length ? { supersededRuns: superseded } : {}) }); void Promise.resolve().then(() => archiveSummaryForReset?.({agentId:resolvedAgentId,sessionId,archiveId:result.archiveId})).catch(() => {}); return true; } finally { finishSessionAdmissionsReset?.(resetBarrier); } }
       if (req.method === 'POST' && action === 'rename') { const body = await readJsonBody(req); sendJson(res, 200, await conversationStore.rename({ agentId: resolvedAgentId, sessionId, targetSessionId: body.targetSessionId })); return true; }
       if (req.method === 'POST' && action === 'archive') { const body = await readJsonBody(req); const result = await conversationStore.archive({ agentId: resolvedAgentId, sessionId, archived: body.archived !== false }); if (result.archived) await archiveSummaryForSession?.({agentId:resolvedAgentId,rootDir,sessionId}); sendJson(res, 200, result); return true; }
       if (req.method === 'POST' && action === 'unarchive') { sendJson(res, 200, await conversationStore.archive({ agentId: resolvedAgentId, sessionId, archived: false })); return true; }

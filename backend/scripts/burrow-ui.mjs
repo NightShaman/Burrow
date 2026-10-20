@@ -7,7 +7,7 @@ import { SkillGitSync } from '../src/skill-git-sync.mjs';
 import { createSkillSourceRoutes } from './ui/skill-source-routes.mjs';
 import { performance } from 'node:perf_hooks';
 import { createChatStreamDelta } from '../src/chat-stream-delta.mjs';
-import { serializeSessionAdmission } from '../src/session-admission.mjs';
+import { beginSessionAdmissionSupersession, finishSessionAdmissionSupersession, serializeSessionAdmission } from '../src/session-admission.mjs';
 import { createBrainRoutes } from './ui/brain-routes.mjs';
 import { createArchiveService } from './ui/archive-service.mjs';
 import { completeSetupOperation } from '../src/setup-operation.mjs';
@@ -38,7 +38,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectSessionContext, inspectSessionContextStatus } from '../src/context-engine.mjs';
 import { activeConversationLimits } from '../src/context-preparation.mjs';
-import { chatTurnInputFromBody, createChatTurnRunId, runChatTurnFromBody, runChatTurnFromWorkbenchContinuation, chatTurnResponse, chatTurnProgressResponse, chatTurnErrorResponse, loadRuntimeConfig } from '../src/chat-turn-controller.mjs';
+import { beginRuntimeSessionExecutionSupersession, chatTurnInputFromBody, createChatTurnRunId, finishRuntimeSessionExecutionSupersession, runChatTurnFromBody, runChatTurnFromWorkbenchContinuation, chatTurnResponse, chatTurnProgressResponse, chatTurnErrorResponse, loadRuntimeConfig } from '../src/chat-turn-controller.mjs';
 import { resolveModelConfig, resolveRuntimeTracePath } from '../src/config.mjs';
 import { API_TOKEN_SCOPES } from '../src/api-token-store.mjs';
 import { loadEffectiveSkillCatalog, skillManifest } from '../src/skill-catalog.mjs';
@@ -2438,7 +2438,8 @@ async function agentOverview(body = {}) {
         agentStatusForSession(sessionId, agentRuntime),
         runtimeConfig(agent.id),
       ]);
-      const active = [...activeChatRuns.values()].find((run) => run.agentId === agent.id && run.sessionId === sessionId && !run.controller.signal.aborted) || null;
+      const matchingRuns = [...activeChatRuns.values()].filter((run) => run.agentId === agent.id && run.sessionId === sessionId);
+      const active = matchingRuns.find((run) => !run.controller.signal.aborted) || matchingRuns.at(-1) || null;
       const limits = activeConversationLimits({ modelConfig: runtime.modelConfig, contextConfig: runtime.contextConfig });
       const childSessionIds = status.agents
         .filter((item) => item.sessionId !== sessionId)
@@ -2501,11 +2502,12 @@ async function agentStatusForSession(sessionId = 'default', agentRuntime = null)
       subagentId: item.id,
       result: item.result || null,
     }));
-  const active = [...activeChatRuns.values()].find((run) => run.agentId === agentRuntime?.agentId && run.sessionId === sessionId && !run.controller.signal.aborted) || null;
+  const matchingRuns = [...activeChatRuns.values()].filter((run) => run.agentId === agentRuntime?.agentId && run.sessionId === sessionId);
+  const active = matchingRuns.find((run) => !run.controller.signal.aborted) || matchingRuns.at(-1) || null;
   return {
     sessionId,
     agents: [
-      { sessionId, parentSessionId: null, label: agentRuntime?.agent?.name || agentRuntime?.agentId || 'Hatchet', status: active ? (active.phase === 'streaming' ? 'STREAMING' : 'THINKING') : 'IDLE', since: active ? new Date().toISOString() : null },
+      { sessionId, parentSessionId: null, label: agentRuntime?.agent?.name || agentRuntime?.agentId || 'Hatchet', status: active ? (active.controller.signal.aborted ? 'CANCELLING' : active.phase === 'streaming' ? 'STREAMING' : 'THINKING') : 'IDLE', since: active ? new Date().toISOString() : null },
       ...children,
     ],
   };
@@ -2627,22 +2629,28 @@ async function handleChatCommand({ parsed, sessionId, agentRuntime } = {}) {
   if (parsed.args && !(parsed.command === 'context' && parsed.args === 'full')) return { status: 400, response: chatCommandResponse({ command: parsed.command, sessionId, text: `${parsed.definition.usage} does not accept arguments.`, receipt: { error: 'command_arguments_not_supported' }, ok: false }) };
   if (parsed.command === 'help') return { status: 200, response: chatCommandResponse({ command: 'help', sessionId, text: chatCommandHelpText(), receipt: { available: ['help', 'context', 'status', 'new', 'stop'] } }) };
   if (parsed.command === 'new') {
-    const active = [...activeChatRuns.values()].find((run) => run.agentId === agentRuntime.agentId && run.sessionId === sessionId && !run.controller.signal.aborted) || null;
-    if (active) await cancelChatRun(active.runId, { reason: 'superseded by /new' }, agentRuntime);
-    await sessionWriteHandoff({ agentId: agentRuntime.agentId, sessionId, title: `Boundary checkpoint before new conversation: ${sessionId}`, runId: `session-reset-${Date.now()}`, message: `Preserve the useful state from session ${sessionId} before starting a new conversation.` });
-    const reset = await postgresApplication.stores.conversations.reset({ agentId: agentRuntime.agentId, sessionId });
-    void archiveSummaryForReset({ agentId: agentRuntime.agentId, rootDir: agentRuntime.agentWorkspaceRoot, sessionId, archiveId: reset.archiveId, archivedPath: reset.archivedPath }).catch(() => {});
-    return { status: 200, response: chatCommandResponse({ command: 'new', sessionId, text: 'Started a fresh conversation. Prior history was archived; it was not deleted.', receipt: { conversationId: reset.conversationId, archivedPath: reset.archivedPath || null, resetAt: reset.resetAt || reset.metadata?.resetAt || null, ...(reset.archiveId ? { archiveId: reset.archiveId } : {}), ...(active ? { cancelledRunId: active.runId } : {}) } }) };
+    const resetBarrier = await beginSessionAdmissionsReset({ agentId: agentRuntime.agentId, sessionId });
+    try {
+      const supersededRuns = await supersedeSessionRuns({ agentId: agentRuntime.agentId, sessionId, reason: 'superseded by /new' });
+      const active = supersededRuns[0] || null;
+      await sessionWriteHandoff({ agentId: agentRuntime.agentId, sessionId, title: `Boundary checkpoint before new conversation: ${sessionId}`, runId: `session-reset-${Date.now()}`, message: `Preserve the useful state from session ${sessionId} before starting a new conversation.` });
+      const reset = await postgresApplication.stores.conversations.reset({ agentId: agentRuntime.agentId, sessionId });
+      void archiveSummaryForReset({ agentId: agentRuntime.agentId, rootDir: agentRuntime.agentWorkspaceRoot, sessionId, archiveId: reset.archiveId, archivedPath: reset.archivedPath }).catch(() => {});
+      return { status: 200, response: chatCommandResponse({ command: 'new', sessionId, text: 'Started a fresh conversation. Prior history was archived; it was not deleted.', receipt: { conversationId: reset.conversationId, archivedPath: reset.archivedPath || null, resetAt: reset.resetAt || reset.metadata?.resetAt || null, ...(reset.archiveId ? { archiveId: reset.archiveId } : {}), ...(active ? { cancelledRunId: active.runId } : {}) } }) };
+    } finally { finishSessionAdmissionsReset(resetBarrier); }
   }
   if (parsed.command === 'stop') {
-    const active = [...activeChatRuns.values()].find((run) => run.agentId === agentRuntime.agentId && run.sessionId === sessionId && !run.controller.signal.aborted) || null;
+    const matchingRuns = [...activeChatRuns.values()].filter((run) => run.agentId === agentRuntime.agentId && run.sessionId === sessionId);
+    const active = matchingRuns.find((run) => !run.controller.signal.aborted) || matchingRuns.at(-1) || null;
     if (!active) return { status: 200, response: chatCommandResponse({ command: 'stop', sessionId, text: 'No active run in this session.', receipt: { status: 'idle' } }) };
+    if (active.controller.signal.aborted) return { status: 200, response: chatCommandResponse({ command: 'stop', sessionId, text: `Run ${active.runId} is already cancelling.`, receipt: { status: 'cancelling', runId: active.runId, agentId: active.agentId, sessionId: active.sessionId, reason: active.reason || null } }) };
     const cancelled = await cancelChatRun(active.runId, { reason: 'stopped by /stop' }, agentRuntime);
     return { status: 200, response: chatCommandResponse({ command: 'stop', sessionId, text: `Stopped active run ${active.runId}.`, receipt: cancelled }) };
   }
   const runtime = await runtimeConfig(agentRuntime.agentId);
   const limits = activeConversationLimits({ modelConfig: runtime.modelConfig, contextConfig: runtime.contextConfig });
-  const active = [...activeChatRuns.values()].find((run) => run.agentId === agentRuntime.agentId && run.sessionId === sessionId && !run.controller.signal.aborted) || null;
+  const matchingRuns = [...activeChatRuns.values()].filter((run) => run.agentId === agentRuntime.agentId && run.sessionId === sessionId);
+  const active = matchingRuns.find((run) => !run.controller.signal.aborted) || matchingRuns.at(-1) || null;
   const status = await inspectSessionContextStatus({ stores: postgresApplication.stores, agentId: agentRuntime.agentId, rootDir: projectRoot, dataRoot: agentRuntime.agentWorkspaceRoot, sessionId, limits, contextConfig: runtime.contextConfig, contextWindow: runtime.modelConfig?.contextWindow, contextTokens: runtime.modelConfig?.contextTokens, liveContext: active?.contextUsage || null });
   const context = status.context || {};
   if (parsed.command === 'context') {
@@ -2668,10 +2676,10 @@ async function handleChat(req, res) {
     return sendJson(res, error?.statusCode || 500, { ok: false, error: String(error?.message || error) });
   }
   const sessionId = String(body.sessionId || 'default');
-  // Cancellation must reach the active turn, not wait for that turn to finish.
-  // Keep boundary validation, agent resolution, and command response handling
-  // shared with ordinary requests; only /stop bypasses session serialization.
-  if (parseChatCommand(body.message)?.command === 'stop') {
+  // Cancellation, reset, and read-only status must reach the active turn, not
+  // wait for that turn to finish. Mutating ordinary chat remains serialized
+  // within the current session generation.
+  if (['stop', 'new', 'status'].includes(parseChatCommand(body.message)?.command)) {
     return handleSerializedChat({ req, res, body, agentRuntime, sessionId });
   }
   const admission = new AbortController();
@@ -2782,15 +2790,15 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
     if (streaming) { writeNdjson(res, { type: 'run.completed', runId, sessionId, ts: new Date().toISOString(), data: { response: streamResponse } }); return res.end(); }
     return sendJson(res, 200, response);
   } catch (error) {
-    const errorResponse = chatTurnErrorResponse(error);
-    if (errorResponse) {
-      if (streaming) { writeNdjson(res, { type: 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: errorResponse.body } }); return res.end(); }
-      return sendJson(res, errorResponse.status, errorResponse.body);
-    }
     if (controller.signal.aborted) {
       const response = { ok: false, error: String(record.reason || error?.message || 'agent_stopped'), runId };
       if (streaming) { writeNdjson(res, { type: 'run.cancelled', runId, sessionId, ts: new Date().toISOString(), data: { response } }); return res.end(); }
       return sendJson(res, 499, response);
+    }
+    const errorResponse = chatTurnErrorResponse(error);
+    if (errorResponse) {
+      if (streaming) { writeNdjson(res, { type: 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: errorResponse.body } }); return res.end(); }
+      return sendJson(res, errorResponse.status, errorResponse.body);
     }
     if (streaming) { writeNdjson(res, { type: 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: { ok: false, error: String(error?.message || error), runId } } }); return res.end(); }
     throw error;
@@ -2812,6 +2820,34 @@ async function cancelGroupChannelRun(channelId, runId, body = {}) {
 
 async function cancelChatRun(runId, body = {}, agentRuntime = null) {
   return cancelActiveChatRun(activeChatRuns, runId, { body, agentId: agentRuntime?.agentId || null });
+}
+
+async function supersedeSessionRuns({ agentId, sessionId, reason = 'superseded by session reset' } = {}) {
+  const matches = [...activeChatRuns.values()].filter((run) => run.agentId === agentId && run.sessionId === sessionId);
+  const superseded = [];
+  for (const run of matches) {
+    sessionContinuityHeads.delete(sessionContinuityHeadKey(agentId, sessionId));
+    const result = cancelActiveChatRun(activeChatRuns, run.runId, { body: { reason }, agentId });
+    if (result.ok) superseded.push(...result.cancelledRuns);
+    else if (run.controller.signal.aborted) superseded.push({ runId: run.runId, agentId: run.agentId, sessionId: run.sessionId });
+  }
+  return superseded.filter((run, index, all) => all.findIndex((candidate) => candidate.agentId === run.agentId && candidate.runId === run.runId) === index);
+}
+
+async function beginSessionAdmissionsReset({ agentId, sessionId } = {}) {
+  const agentRuntime = await resolveAgentRuntime(agentId);
+  const http = beginSessionAdmissionSupersession(sessionChatQueues, sessionChatQueueKey(agentId, sessionId));
+  try {
+    return { http, runtime: beginRuntimeSessionExecutionSupersession({ rootDir: projectRoot, sessionId, agentRuntime }) };
+  } catch (error) {
+    finishSessionAdmissionSupersession(http);
+    throw error;
+  }
+}
+
+function finishSessionAdmissionsReset(tokens = {}) {
+  finishRuntimeSessionExecutionSupersession(tokens.runtime);
+  finishSessionAdmissionSupersession(tokens.http);
 }
 
 async function steerChatRun(runId, body, agentRuntime) {
@@ -2886,7 +2922,7 @@ const { archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, arc
   resolveAgentRuntime, runtimeConfig, runtimeTraceRoot, settingsKeyFromEnvironment,
   isChatMessage, compactChatTurn, summarizeSessionTurns, boundedInteger,
 });
-const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
+const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, supersedeSessionRuns, beginSessionAdmissionsReset, finishSessionAdmissionsReset, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
 const brainRoute = createBrainRoutes({ store: postgresApplication.stores.brains, embeddings: postgresApplication.stores.brainEmbeddings, readJsonBody, sendJson });
 const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, browserOriginSettings: () => browserOriginSettings({ metadata: metadataStore() }), saveBrowserOriginSettings: body => saveBrowserOriginSettings(body, { metadata: metadataStore() }), browserTabSettings: () => browserTabSettings({ metadata: metadataStore() }), saveBrowserTabSettings: body => saveBrowserTabSettings(body, { metadata: metadataStore() }), otelSettings: () => otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }), saveOtelSettings: async body => { let result = await saveOtelSettings(body, { store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); if (result.ok) { try { await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore() })); await applyOtelConfigurationToNodeGoblins(); } catch (error) { serverLogger.event('otel_configuration_apply_failed', { error: String(error?.message || 'configuration_failed') }); return { ok: false, status: 500, error: 'opentelemetry_configuration_apply_failed' }; } result = await otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); } return result; }, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
 const observabilityRoute = createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, codexLbAccounts, anthropicOauthUsage, openaiOauthUsage, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore: postgresApplication.stores.conversations, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });

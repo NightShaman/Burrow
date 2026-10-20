@@ -1,6 +1,7 @@
 import { createChatTurnRunId } from './chat-turn-run-id.mjs';
 export { createChatTurnRunId } from './chat-turn-run-id.mjs';
 import { loadRuntimeConfig, runAskChat } from './app-runtime.mjs';
+export { beginRuntimeSessionExecutionSupersession, finishRuntimeSessionExecutionSupersession } from './app-runtime.mjs';
 import { buildChatSupportStatus } from './workbench-status.mjs';
 
 // ChatTurnController owns one user-visible chat turn.
