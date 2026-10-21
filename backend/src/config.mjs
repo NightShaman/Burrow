@@ -63,7 +63,7 @@ function selectedModels(connection) {
   return (Array.isArray(connection?.models) ? connection.models : []).filter((model) => model && model.selected !== false && text(model.id));
 }
 
-function modelSupportsTemperature({ provider = '', api = '', model = '', declared = undefined } = {}) {
+export function modelSupportsTemperature({ provider = '', api = '', model = '', declared = undefined } = {}) {
   if (declared === false) return false;
   if (isAnthropicMessagesConnection({ provider, apiType: api })) return anthropicSupportsTemperature(model);
   return true;

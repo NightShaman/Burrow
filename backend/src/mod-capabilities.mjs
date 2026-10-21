@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { readModConversationPage } from './mod-conversation-pager.mjs';
-import { resolveModelConfig } from './config.mjs';
+import { MODEL_REASONING_EFFORT_VALUES, modelSupportsTemperature, normalizeModelReasoningEffort, resolveModelConfig } from './config.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
 
 function invalid() { throw new Error('mod_capability_input_invalid'); }
 function bounded(value, max) { if (typeof value !== 'string' || !value || value.length > max) invalid(); return value; }
 function count(value, fallback, max) { if (value === undefined) return fallback; if (!Number.isInteger(value) || value < 1 || value > max) invalid(); return value; }
 function positiveSafeInteger(value) { if (value === undefined) return undefined; if (!Number.isSafeInteger(value) || value < 1) invalid(); return value; }
+function optionalTemperature(value) { if (value === undefined) return undefined; if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 2) invalid(); return value; }
+function publicReasoningEfforts(value) { return [...new Set((Array.isArray(value) ? value : []).map((item) => typeof item === 'string' ? item.trim().toLowerCase() : '').filter((item) => MODEL_REASONING_EFFORT_VALUES.includes(item)))]; }
 function plain(value) { if (!value || typeof value !== 'object' || Array.isArray(value)) invalid(); return value; }
 const SCHEDULER_PAGE_MAX_BYTES = 240_000;
 function resultBytes(value) { return Buffer.byteLength(JSON.stringify(value)); }
@@ -251,20 +253,44 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
           if (!(await store.hasAuth(connection.id))) continue;
           for (const model of connection.models || []) {
             if (model.selected === false) continue;
+            const reasoningEfforts = publicReasoningEfforts(model.reasoningEfforts);
+            const declaredDefaultReasoningEffort = typeof model.defaultReasoningEffort === 'string' ? model.defaultReasoningEffort.trim().toLowerCase() : '';
+            const defaultReasoningEffort = MODEL_REASONING_EFFORT_VALUES.includes(declaredDefaultReasoningEffort)
+              && (declaredDefaultReasoningEffort === 'off' || reasoningEfforts.includes(declaredDefaultReasoningEffort))
+              ? declaredDefaultReasoningEffort
+              : reasoningEfforts[0] ?? 'off';
+            const supportsTemperature = modelSupportsTemperature({ provider: connection.provider, api: connection.apiType, model: model.id, declared: model.supportsTemperature });
             out.push({ connectionId: connection.id, model: model.id, provider: connection.provider,
-              ...(Number(model.contextWindow) > 0 ? { contextWindow: Number(model.contextWindow) } : {}) });
+              ...(typeof model.displayName === 'string' && model.displayName.trim() ? { label: model.displayName.trim() } : {}),
+              ...(Number(model.contextWindow) > 0 ? { contextWindow: Number(model.contextWindow) } : {}),
+              reasoningEfforts,
+              defaultReasoningEffort,
+              supportsTemperature,
+              ...(supportsTemperature ? { defaultTemperature: 0.2 } : {}) });
           }
         }
         return out;
       });
     },
     async generateText(input, { signal } = {}) {
-      const { connectionId, model, prompt, maxTokens } = plain(input);
+      const { connectionId, model, prompt, maxTokens, effort, reasoningEffort, temperature } = plain(input);
       bounded(connectionId, 128); bounded(model, 256);
       if (typeof prompt !== 'string' || !prompt) invalid();
+      if (effort !== undefined && reasoningEffort !== undefined && effort !== reasoningEffort) invalid();
       const tokens = positiveSafeInteger(maxTokens);
+      const requestedEffortValue = reasoningEffort ?? effort;
+      let requestedEffort;
+      if (requestedEffortValue !== undefined) {
+        if (typeof requestedEffortValue !== 'string') invalid();
+        try { requestedEffort = normalizeModelReasoningEffort(requestedEffortValue); } catch { invalid(); }
+      }
+      const requestedTemperature = optionalTemperature(temperature);
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
-      const config = await resolveModelConfig({ modelConnectionId: connectionId, model, fetchImpl, modelSettings: injected.models });
+      const config = await resolveModelConfig({ modelConnectionId: connectionId, model, fetchImpl, modelSettings: injected.models,
+        ...(requestedEffort === undefined ? {} : { model_reasoning_effort: requestedEffort }),
+        ...(requestedTemperature === undefined ? {} : { temperature: requestedTemperature }) });
+      if (requestedEffort !== undefined && requestedEffort !== 'off' && Array.isArray(config.reasoningEfforts) && config.reasoningEfforts.length && !config.reasoningEfforts.includes(requestedEffort)) throw new Error('model_reasoning_effort_not_supported');
+      if (requestedTemperature !== undefined && config.supportsTemperature === false) throw new Error('model_temperature_not_supported');
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
       let result;
       try {
