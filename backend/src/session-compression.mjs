@@ -129,7 +129,7 @@ function tokenTargetToCharBudget(tokens, fallback = 6000) {
   return Number.isFinite(number) && number > 0 ? Math.ceil(number * 4) : fallback;
 }
 
-export async function appendCompressionSummary({ rootDir, sessionId = 'default', transcript = [], plan, text = null, maxChars = 6000, conversation = null } = {}) {
+export async function appendCompressionSummary({ rootDir, sessionId = 'default', transcript = [], expectedGeneration = null, plan, text = null, maxChars = 6000, conversation = null } = {}) {
   const sourceMessages = (plan.sourceEntryIds || []).length
     ? transcript.filter((entry) => (plan.sourceEntryIds || []).includes(entry?.id) && isCompressionEntry(entry))
     : [];
@@ -163,14 +163,25 @@ export async function appendCompressionSummary({ rootDir, sessionId = 'default',
   const tailEntries = transcript.filter((entry) => !entry?.metadata?.compressionSummary && (entry.type !== 'provider_history' || retainedUserRuns.has(entry.runId)) && (String(entry?.type || '') === 'context_state' || isCanonicalExecutionEntry(entry) || !sourceIds.has(entry?.id)));
   if (!conversation) throw new Error('conversation_store_required');
   const authority = conversation;
-  const rotation = await authority.compact(sessionId, { summary, tailEntries });
+  const rotation = await authority.compact(sessionId, { summary, tailEntries, expectedEntries: transcript, expectedGeneration });
+  if (rotation?.stale) return { stale: true, summary, rotation };
   return { entry: rotation.summaryEntry, summary, rotation };
 }
 
-export async function runSessionCompression({ rootDir, sessionId = 'default', config = {}, contextBudget = null, maxChars = null, logger = null, stores = null, agentId = 'hatchet', conversation = null, transcriptSnapshot = null } = {}) {
+export async function runSessionCompression({ rootDir, sessionId = 'default', config = {}, contextBudget = null, maxChars = null, logger = null, stores = null, agentId = 'hatchet', conversation = null, transcriptSnapshot = null, transcriptGeneration = null } = {}) {
   if (!conversation && !stores?.conversations) throw new Error('conversation_store_required');
   const authority = conversation || conversationAuthority({ store: stores?.conversations || null, agentId });
-  const transcript = Array.isArray(transcriptSnapshot) ? transcriptSnapshot : await authority.entriesAll(sessionId);
+  let resolvedGeneration = transcriptGeneration;
+  let transcript;
+  if (Array.isArray(transcriptSnapshot)) {
+    transcript = transcriptSnapshot;
+  } else if (typeof authority.sessionSnapshot === 'function') {
+    const snapshot = await authority.sessionSnapshot(sessionId);
+    transcript = snapshot.entries;
+    resolvedGeneration = snapshot.metadata?.generation ?? null;
+  } else {
+    transcript = await authority.entriesAll(sessionId);
+  }
   const existingSummaries = compressionSummariesFromTranscript(transcript);
   // The active successor already contains the current semantic summary. Only
   // its unsummarized chat tail is eligible for the next rotation.
@@ -193,10 +204,15 @@ export async function runSessionCompression({ rootDir, sessionId = 'default', co
   if (Array.isArray(transcriptSnapshot)) return runSessionCompression({ rootDir, sessionId, config, contextBudget, maxChars, logger, stores, agentId, conversation: authority });
   let appended;
   try {
-    appended = await appendCompressionSummary({ rootDir, sessionId, transcript, plan, maxChars: maxChars ?? tokenTargetToCharBudget(config.summaryTargetTokens, 6000), conversation: authority });
+    appended = await appendCompressionSummary({ rootDir, sessionId, transcript, expectedGeneration: resolvedGeneration, plan, maxChars: maxChars ?? tokenTargetToCharBudget(config.summaryTargetTokens, 6000), conversation: authority });
   } catch (error) {
     if (error.code !== 'compression_preservation_budget_exceeded') throw error;
     const skipped = { ...result, reason: error.code };
+    await logger?.event?.('context-compression-skip', skipped);
+    return skipped;
+  }
+  if (appended.stale) {
+    const skipped = { ...result, reason: 'stale_transcript', plan: appended.rotation?.currentEntries ? planContextCompression({ transcript: appended.rotation.currentEntries.filter((entry) => !entry?.metadata?.compressionSummary), config, contextBudget }) : plan };
     await logger?.event?.('context-compression-skip', skipped);
     return skipped;
   }

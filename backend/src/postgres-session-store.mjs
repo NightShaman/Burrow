@@ -1243,7 +1243,7 @@ export class PostgresSessionStore {
     return result.rows[0]?.metadata || null;
   }
 
-  async compact({ agentId: rawAgentId, sessionId: rawSessionId, summary, tailEntries = [] } = {}) {
+  async compact({ agentId: rawAgentId, sessionId: rawSessionId, summary, tailEntries = [], expectedEntries = null, expectedGeneration = null } = {}) {
     const agentId = required(rawAgentId, 'agentId'); const sid = required(rawSessionId, 'sessionId');
     if (!summary || typeof summary !== 'object' || !String(summary.text || '').trim()) throw new Error('session_compaction_summary_required');
     const now = this.clock();
@@ -1252,6 +1252,17 @@ export class PostgresSessionStore {
       const session = await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sid]);
       const prior = session.rows[0]?.metadata || {};
       const old = await client.query('SELECT sequence,entry,entry::text AS raw_entry,entry_id,idempotency_key,created_at FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence', [agentId, sid]);
+      const currentGeneration = Number(prior.generation || 0);
+      if (expectedGeneration !== null && expectedGeneration !== undefined && Number(expectedGeneration) !== currentGeneration) {
+        return { stale: true, currentEntries: old.rows.map(rowEntry), metadata: prior };
+      }
+      if (Array.isArray(expectedEntries)) {
+        const expectedIds = expectedEntries.map(entry => String(entry?.id || ''));
+        const currentIds = old.rows.map(row => String(row.entry?.id || ''));
+        if (expectedIds.length !== currentIds.length || expectedIds.some((id, index) => id !== currentIds[index])) {
+          return { stale: true, currentEntries: old.rows.map(rowEntry), metadata: prior };
+        }
+      }
       const archiveId = old.rows.length ? randomUUID() : null;
       const generation = Number(prior.generation || 0) + 1;
       if (archiveId) await client.query('INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)', [agentId, sid, archiveId, generation - 1, 'compacted', JSON.stringify({ ...prior, compressionSummary: summary }), now]);

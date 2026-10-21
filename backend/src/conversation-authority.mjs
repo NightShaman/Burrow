@@ -85,12 +85,15 @@ export function conversationAuthority({ store = null, agentId } = {}) {
     // planner's pending-action projection. Callers must not reuse it after a
     // turn is appended or compression persists a successor transcript.
     async sessionSnapshot(sessionId) {
-      const entries = await readAllEntries(pg, agentId, sessionId);
-      return { entries, pendingActions: projectPendingActions(entries) };
+      const [entries, metadata] = await Promise.all([
+        readAllEntries(pg, agentId, sessionId),
+        pg.getMetadata(key(sessionId)),
+      ]);
+      return { entries, metadata, pendingActions: projectPendingActions(entries) };
     },
-    async compact(sessionId, { summary, tailEntries = [] } = {}) {
+    async compact(sessionId, { summary, tailEntries = [], expectedEntries = null, expectedGeneration = null } = {}) {
       if (typeof pg.compact !== 'function') throw new Error('conversation_store_compaction_unsupported');
-      return pg.compact({ ...key(sessionId), summary, tailEntries });
+      return pg.compact({ ...key(sessionId), summary, tailEntries, expectedEntries, expectedGeneration });
     },
     async append(entry, { idempotencyKey = null } = {}) {
       return pg.append({ ...key(entry.sessionId), entry: buildSessionEntry(entry), idempotencyKey });
