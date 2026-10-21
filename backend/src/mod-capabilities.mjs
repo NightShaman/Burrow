@@ -8,6 +8,7 @@ function bounded(value, max) { if (typeof value !== 'string' || !value || value.
 function count(value, fallback, max) { if (value === undefined) return fallback; if (!Number.isInteger(value) || value < 1 || value > max) invalid(); return value; }
 function positiveSafeInteger(value) { if (value === undefined) return undefined; if (!Number.isSafeInteger(value) || value < 1) invalid(); return value; }
 function optionalTemperature(value) { if (value === undefined) return undefined; if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 2) invalid(); return value; }
+function exactKeys(value, allowed) { if (Object.keys(value).some((key) => !allowed.includes(key))) invalid(); return value; }
 function publicReasoningEfforts(value) { return [...new Set((Array.isArray(value) ? value : []).map((item) => typeof item === 'string' ? item.trim().toLowerCase() : '').filter((item) => MODEL_REASONING_EFFORT_VALUES.includes(item)))]; }
 function plain(value) { if (!value || typeof value !== 'object' || Array.isArray(value)) invalid(); return value; }
 const SCHEDULER_PAGE_MAX_BYTES = 240_000;
@@ -78,6 +79,23 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
   const withJobs = (fn) => withStore('scheduledJobs', fn);
   const conversationStore = injected.conversations;
   const schedulerOwner = () => { if (typeof ownerModId !== 'string' || !ownerModId) throw new Error('mod_scheduler_owner_unavailable'); return ownerModId; };
+  const forgeOwner = () => { if (typeof ownerModId !== 'string' || !ownerModId) throw new Error('mod_forge_owner_unavailable'); return ownerModId; };
+  const forgeKeyPrefix = () => `mod:${forgeOwner()}:`;
+  const forgeStore = () => { if (!injected.forge) throw new Error('forge_unavailable'); return injected.forge; };
+  function projectForgeImageJob(store, job) {
+    const prefix = forgeKeyPrefix();
+    if (!job || job.kind !== 'image' || job.modOwnerId !== forgeOwner() || typeof job.idempotencyKey !== 'string' || !job.idempotencyKey.startsWith(prefix)) throw new Error('forge_job_not_found');
+    const projected = store.public(job);
+    return {
+      id: projected.id,
+      kind: 'image',
+      status: projected.status,
+      createdAt: projected.createdAt,
+      updatedAt: projected.updatedAt,
+      error: projected.error || null,
+      artifacts: (projected.artifacts || []).map(({ id, kind, name, mimeType, sizeBytes, previewUrl }) => ({ id, kind, name, mimeType, sizeBytes, previewUrl })),
+    };
+  }
   async function readRuntimeDiagnostics(input, { caller, signal } = {}) {
     if (!runtimeDiagnostics?.read || !modAuthority || !caller?.agentId) throw new Error('mod_diagnostic_caller_required');
     const value = plain(input);
@@ -271,6 +289,29 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
         }
         return out;
       });
+    },
+    async getForgeImageStatus(input = {}) {
+      exactKeys(plain(input), []);
+      const store = forgeStore();
+      const [catalog, selections] = await Promise.all([store.catalog(), store.selections()]);
+      const selection = selections?.image;
+      if (!selection) return { available: false, reason: 'forge_selection_missing' };
+      const model = catalog?.models?.find((item) => item.connectionId === selection.connectionId && item.modelId === selection.modelId && item.kind === 'image' && item.available === true);
+      if (!model) return { available: false, reason: 'forge_model_unavailable' };
+      return { available: true };
+    },
+    async createForgeImage(input) {
+      const value = exactKeys(plain(input), ['prompt', 'idempotencyKey']);
+      const prompt = bounded(value.prompt, 100_000);
+      const idempotencyKey = bounded(value.idempotencyKey, 256);
+      const store = forgeStore();
+      const result = await store.create({ mode: 'image', prompt, idempotencyKey: `${forgeKeyPrefix()}${idempotencyKey}` }, { ownerModId: forgeOwner() });
+      return { job: projectForgeImageJob(store, await store.get(result.job.id)), replayed: result.replayed === true };
+    },
+    async readForgeImageJob(input) {
+      const value = exactKeys(plain(input), ['jobId']);
+      const store = forgeStore();
+      return projectForgeImageJob(store, await store.get(bounded(value.jobId, 96)));
     },
     async generateText(input, { signal } = {}) {
       const { connectionId, model, prompt, maxTokens, effort, reasoningEffort, temperature } = plain(input);

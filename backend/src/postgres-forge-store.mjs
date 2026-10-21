@@ -47,6 +47,7 @@ const stable = (value) => {
 };
 const sameRequest = (a, b, current) => {
   if (stable(a) === stable(b)) return true;
+  if (current.modOwnerId) return false;
   try {
     if (
       current.implicitSelection &&
@@ -88,6 +89,7 @@ function publicJob(job) {
     legacySourceAgentId,
     ownerToken,
     ownerId,
+    modOwnerId,
     ...safe
   } = job;
   return {
@@ -290,7 +292,7 @@ export class PostgresForgeStore {
           )))
     );
   }
-  async create(body, {agentId = null} = {}) {
+  async create(body, {agentId = null, ownerModId = null} = {}) {
     if (!body || typeof body !== "object" || Array.isArray(body))
       fail("forge_request_invalid");
     if ("attachments" in body || "sourceAttachments" in body)
@@ -341,6 +343,7 @@ export class PostgresForgeStore {
       (!model || !this.selectionMatches(body.mode, model, catalog))
     )
       fail("forge_model_unavailable", 409);
+    if (ownerModId !== null && (typeof ownerModId !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(ownerModId))) fail('forge_request_invalid');
     const request = {
       mode: body.mode ?? null,
       connectionId: saved.connectionId,
@@ -348,6 +351,7 @@ export class PostgresForgeStore {
       prompt: body.prompt,
       idempotencyKey: body.idempotencyKey,
       implicitSelection: !explicit,
+      ...(ownerModId ? { modOwnerId: ownerModId } : {}),
     };
     const owner = await this.owner();
     let result;

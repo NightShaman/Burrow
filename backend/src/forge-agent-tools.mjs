@@ -35,7 +35,7 @@ export async function executeForgeTool(name, args, context = {}) {
   if(name==='forge_catalog') return store.catalog({agentId:context.agentId});
   if(name==='forge_create_job') return {ok:true,...await store.create({mode:args.mode,connectionId:args.connectionId,modelId:args.modelId,prompt:args.prompt,idempotencyKey:args.idempotencyKey},{agentId:context.agentId})};
   if(name==='forge_list_jobs') return {ok:true,jobs:await store.list()};
-  if(name==='forge_inspect_job') return {ok:true,job:store.public(store.get(args.jobId))};
+  if(name==='forge_inspect_job') return {ok:true,job:store.public(await store.get(args.jobId))};
   if(name==='forge_attach_artifact') {
     const agentId=context.agentId, sessionId=context.sessionId;
     if(typeof agentId!=='string'||!agentId||typeof sessionId!=='string'||!sessionId) throw new Error('forge_context_unavailable');
