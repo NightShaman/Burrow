@@ -2,6 +2,16 @@
 
 This guide follows the public **2026.10.19** release. Use **skills** for reusable instructions, **profile documents** for agent-specific guidance, and **Brains** for explicit saved memories.
 
+Burrow automatically provisions its runtime skill and adopts its official update source by default. Bundled and Git-managed instructions are read-only; creating a text skill is for your own optional instructions. Meet Tinker and Trixie and inspect the public instructions in [Burrow Skills](https://burrow-docs.blissful-psychosis.com/burrow-skills/). The [managed-skills guide](https://burrow-docs.blissful-psychosis.com/burrow-skills/managed-skills/) distinguishes the current public runtime from the forthcoming automatic Core/mod-managed system.
+
+## Official managed skills
+
+Burrow's official operating skills have their own [repository and user guide](https://burrow-docs.blissful-psychosis.com/burrow-skills/). Read the source instructions and companion files before trusting them. Repository visibility helps inspection; it does not certify that a skill is safe.
+
+Public Core 2026.10.19 adopts the official `burrow-runtime` Git source automatically while preserving an existing operator-managed source. The newer managed-skill implementation supplies Core and loaded mods' declared skills automatically from a dedicated read-only catalog, synchronizes at startup and mod lifecycle changes, and checks again every six hours by default. These managed copies are not edited or individually assigned through the ordinary skill editor. Customize a separate operator-owned skill instead.
+
+The manual and Git-import controls below describe ordinary operator-managed skills. See [release status](../project/release-status.md) before expecting the newer mod-managed catalog on an older Core.
+
 ## Create a text skill
 
 1. Open **Settings → Skills → New text skill**.
@@ -47,6 +57,8 @@ Assignment makes the skill available for discovery. It does not inject the full 
 
 Open **Settings → Agents**, choose the agent, then **Profile documents**. Select **SOUL.md**, **RULES.md**, **ORIENTATION.md**, **PREFERENCES.md**, **TOOLS.md**, or **DreamMemory.md**. Edit the Markdown and click **Save profile documents**.
 
+In newer Core, **Settings → General → Global documents** also provides Global Rules and Global Orientation. Each agent independently opts in through **Include Global Rules** and **Include Global Orientation**; included global text comes first, followed by that agent's local text. Both are off by default for existing agents.
+
 These are agent guidance documents. Writing a permission into a document does not create an operating-system sandbox or an MCP grant; configure actual access separately in [Tools and mods](tools-and-mods.md).
 
 [Source: profile document editor](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/AgentProfileDocuments.tsx#L6-L52)
@@ -63,6 +75,7 @@ Search within the selected agent's memories, then select one to read or edit it.
 Memories you create or edit through the operator interface are operator-owned; agents cannot modify operator-owned records. Memories are separated by agent owner. They have no automatic expiration or full-memory preload: the agent uses explicit memory tools to retrieve them. A saved fact and its references may become stale; neither proves current runtime state.
 
 [Source: Brains UI](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/brains/BrainsPage.tsx#L72-L119) · [Source: ownership and revisions](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/postgres-brain-store.mjs#L43-L56) · [Source: operator mutations](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/scripts/ui/brain-routes.mjs#L23-L26) · [Source: retrieval contract](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/action-proposal.mjs#L230-L231)
+
 
 !!! warning "Check the selection before deleting"
     **Delete memory** and **Delete selected memories** act directly in this release; there is no confirmation dialog in the Brains page. **Select page** selects only the visible page. Bulk deletion runs independently for each record, so some deletions may succeed while others fail. Read the per-record result before retrying. This page has no restore button.
@@ -81,6 +94,6 @@ Enabling a remote embedding provider involves sending memory text to that provid
 
 Open **Settings → Agents → [agent] → Dreams**. Enable scheduled dreaming, set the cron schedule, choose a model override or inherit the chat model, edit the prompt, and click **Save dream settings**. The schedule follows the operator timezone. **Dream on quiet days** controls whether a day with no new material still generates a diary from retained continuity; when off, such days skip model work.
 
-Check **Recent activity** for completed, partial, failed, or interrupted cycles and any phase errors. Browse retained dream entries in **Archive → Dreams**. Dream continuity and explicit Brains records are separate features.
+Check **Recent activity** for completed, partial, failed, or interrupted cycles and any phase errors. Browse retained dream entries in **Archive → Dreams**. In public Core 2026.10.19, DreamMemory/preloads and Brains are separate publication paths. Newer Core instead saves individual **Dream-generated** connections in Brains and excludes DreamMemory and Dream preloads from ordinary context. Those connections are searchable on demand, not injected into every turn. A cycle may legitimately save no new connection. See [Dream cycles](../concepts/dreams.md) for the version-specific behavior.
 
 [Source: dream settings and activity](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/AgentDreams.tsx#L87-L124)

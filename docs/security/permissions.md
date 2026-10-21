@@ -1,11 +1,13 @@
 # Permissions and execution boundaries
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
+
 BURROW separates HTTP access, agent tool grants, concrete action checks, and operating-system access. These controls answer different questions. A successful UI login does not make a tool result safe, and an agent workspace is not a filesystem sandbox.
 
-This page describes static implementation at commit `c15064dd177788afcdda357a5e545510f754a754` (version **2026.10.10.4**). It does not certify a deployed host's isolation.
+The execution-boundary call sites and mod-authority additions below were checked against public release **2026.10.19**, commit `aa5a30da683a3a8ea919025f107ff53f182ef8d6`. This is a focused static review; it does not certify a deployed host's isolation or remove the earlier-reference warning.
 
 ## Where authority lives
 
@@ -17,7 +19,7 @@ This page describes static implementation at commit `c15064dd177788afcdda357a5e5
 | Agent context and profiles | Prompt content, instructions, selected skills and working context | New executable grants or kernel-enforced file permissions |
 | Host/container configuration | Actual process credentials, mounts, network and OS controls | A property supplied automatically by workspace naming |
 
-The request router selects prompt/context support and emits action observability. It is not a general approval engine. Concrete tool inputs and execution capabilities are checked later. 
+The request router selects prompt/context support and emits action observability. It is not a general approval engine. Concrete tool inputs and execution capabilities are checked later.
 
 ## Agent roots are selected context
 
@@ -51,8 +53,10 @@ The accepted operation vocabulary is broader than the native review call sites. 
 | Filesystem reads/list/find/inspect/search and Git status/diff | Validation review; this branch does not evaluate execution hard blocks |
 
 There is no independent native `delete` hard-block evaluation in this review function. A shell command's eventual file effects are not parsed into complete read/write/delete targets; checking its command string or `cwd` is not equivalent to controlling every file it accesses. Patch-path extraction recognizes particular diff headers, not every possible patch representation. These limitations are important when designing deny rules.
+
 !!! warning "No default command safety classifier"
     Ordinary mutations are permitted absent applicable configured blockers. A command's display labels, a natural-language instruction, or a selected project do not create a hard deny rule. Shell commands can reach resources permitted by the host account.
+
 
 The execution-policy helper filters for explicit user-configured hard blockers. Its mutation capability is allowed when those blockers are absent, and its commit capability additionally requires structural action `factory` or `commit`. This is the helper's workflow policy, not a guarantee that arbitrary `git` commands inside unrestricted shell are prohibited. Legacy mutation/commit gates use observed tool receipts and verification evidence; they are workflow safeguards, not kernel isolation.
 ## Minion boundary propagation
@@ -62,10 +66,12 @@ Local minion dispatch forwards the parent's `executionBoundaries` in its child p
 
 Saving a connection or discovering its catalog does not grant an agent permission to invoke all its tools. A normal invocation needs an enabled connection, an exact catalog tool name, and an agent grant for that connection/tool pair. Provider selection uses an exact connection ID or a unique case-insensitive display name. An ambiguous name cannot select a provider.
 
-Catalog visibility and invocation permission are distinct: capability discovery can show `granted: false`. Follow [MCP connections and grants](../concepts/mcp.md) to configure the intended set; scope the provider's own credentials to the minimum required access. `mcporter` transports the request and is not the authority for BURROW agent grants. 
+Catalog visibility and invocation permission are distinct: capability discovery can show `granted: false`. Follow [MCP connections and grants](../concepts/mcp.md) to configure the intended set; scope the provider's own credentials to the minimum required access. `mcporter` transports the request and is not the authority for BURROW agent grants.
 
 Mod-provided tools use the same catalog model with a live `mod` transport. A tool marked `mod-authorized` delegates record/agent authorization to its trusted handler; this exception does not apply to arbitrary HTTP or stdio MCP providers. For mod calls, execution re-reads current connection/grant state and checks the live host/tool identity, including when an action was queued earlier in the turn. Ordinary external MCP calls use the resolved execution-context connection/grant data. Do not promise the same database reread for every transport.
-Mod handlers receive untrusted arguments separately from trusted caller context and must implement their own argument and record-access checks. Installation is a code-trust decision; see [Extensions](../development/extensions.md) and [Trust boundaries](trust-boundaries.md#installed-mods-are-trusted-code). 
+Core system-mod capabilities also require operator-owned authority. `core_mod_authority` stores explicit capability grants, administrative agent IDs and diagnostic agent IDs; a mod manifest does not grant those powers. `GET`/`PUT /api/operator/mods/{modId}/access` manages the full replacement and reports restart requirements. In public 2026.10.19 this route requires an authenticated operator even when the ordinary auth mode is `none`; diagnostics tokens cannot use it.
+
+Mod handlers receive untrusted arguments separately from trusted caller context and must implement their own argument and record-access checks. Installation is a code-trust decision; see [Extensions](../development/extensions.md) and [Trust boundaries](trust-boundaries.md#installed-mods-are-trusted-code).
 
 ## Protected values
 
@@ -86,3 +92,11 @@ Once a process receives a credential, that process can use it. Protected handles
 - [Authentication](authentication.md): UI/API admission and diagnostics token scope
 - [Trust boundaries](trust-boundaries.md): secret storage, code trust, and deployment controls
 - [Known limitations](../project/known-limitations.md): cross-cutting implementation caveats
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/src/action-safety.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/action-safety.mjs)
+- [backend/src/execution-boundaries.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/execution-boundaries.mjs)
+- [backend/src/mod-authority.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-authority.mjs)

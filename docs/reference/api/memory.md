@@ -1,9 +1,11 @@
 # Memory and Dreams
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
-Brains stores explicit saved memories. Conversation originals, temporary continuity and Dream processing are separate surfaces. Read [memory](../../concepts/memory.md), [Dreams](../../concepts/dreams.md) and [conversation history](../../concepts/conversation-history.md) for lifecycle semantics. This page reflects the published 2026.10.10.4 source; it does not assert a live deployment test.
+
+Brains stores explicit saved memories. Conversation originals, temporary continuity and Dream processing are separate surfaces. Read [memory](../../concepts/memory.md), [Dreams](../../concepts/dreams.md) and [conversation history](../../concepts/conversation-history.md) for lifecycle semantics. The focused corrections here were checked against public release 2026.10.19; the earlier-reference warning remains and no live deployment test is asserted.
 
 ## Brains CRUD
 
@@ -56,9 +58,9 @@ Use [session search and Archive](sessions.md) for original conversation evidence
 `GET /api/settings/tiddle` returns status for an agent. `/api/tiddle/cards` accepts `agentId`, `scope`, `limit`; `/api/tiddle/history` accepts `agentId`, `cardId`, `since`, `limit`. Signal history is not the complete original chat transcript. Current working-memory/rolling TTL defaults are 90 days, and `cardTtlDays` reads the persisted rolling policy.
 
 Brain-promotion candidate list/review routes remain a separate surface. A candidate's presence does not mean a saved Brain memory was created.
-## Dream controls missing from the pinned OpenAPI
+## Dream controls
 
-All these routes share the normal API authentication boundary. They are implemented even though the downloadable contract omits them.
+All these routes share the normal API authentication boundary. They are present in the public assembly's OpenAPI document as well as the route module; older contract copies omitted them.
 
 | Method | Path | Behavior |
 |---|---|---|
@@ -67,7 +69,7 @@ All these routes share the normal API authentication boundary. They are implemen
 | `POST` | `/api/agents/{agentId}/dream-memory/consolidate` | Consolidate working memory into Dream-memory material |
 | `GET`, `POST` | `/api/agents/{agentId}/dream-cycle` | Read receipts or run a cycle |
 
-Dream settings include `enabled`, `cron`, `timezone`, `prompt`, optional `modelConnectionId` and `model`. The persisted default is enabled at `0 4 * * *`, with inherited operator timezone and model selection. Null timezone means inheritance, not a stored snapshot of the effective zone. Explicit model overrides must supply a complete valid pair. A Dream prompt is at most 20,000 characters.
+Dream settings include `enabled`, `quietDayDreams`, `cron`, `prompt`, optional `modelConnectionId` and `model`. The persisted default is enabled at `0 4 * * *`, with quiet-day Dreams enabled and operator timezone/model selection. Public migration 53 retires per-Dream timezone overrides; the retained `timezone` field is returned as null and the operator timezone governs scheduling. Explicit model overrides must supply a complete valid pair. A Dream prompt is at most 20,000 characters.
 
 Diary GET supports `date`, `phase`, `limit` (default 30) and `format`/`markdown`. Cycle receipt GET defaults to 20 entries. Consolidation/cycle POST accept `limit` and optional `generatedAt`; these are processing controls, not a separate scheduling API. A cycle result should be inspected for actual phase outcomes.
 ## Additional endpoint inventory
@@ -81,3 +83,12 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `GET` | `/api/settings/tiddle` | Read Tiddle rolling-continuity status |
 | `GET` | `/api/tiddle/cards` | List current Tiddle warm cards |
 | `GET` | `/api/tiddle/history` | Read append-only Tiddle Signal history |
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/scripts/ui/brain-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/brain-routes.mjs)
+- [backend/scripts/ui/dream-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/dream-routes.mjs)
+- [backend/src/postgres-dream-settings-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-dream-settings-store.mjs)
+- [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)

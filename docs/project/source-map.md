@@ -17,13 +17,21 @@ The user guide documents the public **2026.10.19** release of Burrow. It is grou
 
 These source pins are recorded in the public [PUBLIC_RELEASE.json](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/PUBLIC_RELEASE.json). A component pin records provenance; it does not mean that component is installed, enabled, or tested in your environment.
 
+## Reconciliation on 21 October 2026
+
+The original user-guide baseline remains `deec398` (public 2026.10.19). The public head inspected for this review is [`aa5a30d`](https://github.com/GoblinKing-Burrow/Burrow/tree/aa5a30da683a3a8ea919025f107ff53f182ef8d6). Its executable `backend/`, `ui/` and installer content has not changed from that release baseline. Subsequent public commits changed documentation and presentation.
+
+Newer implementation and source documentation were also compared through the current assembled build, including Dream-generated Brains, Global profiles, managed skills, compression, lifecycle recovery, the mod contract and update-channel handling. These behaviors are identified as newer/unpromoted in [release status](release-status.md); the public guide does not imply they shipped in 2026.10.19.
+
+The older technical pages have mixed historical baselines, including early-October source and later corrections. Their warning labels remain where a full end-to-end revalidation has not been performed. A page's publication date alone is not a runtime compatibility claim.
+
 ## What was refreshed
 
 The eight **User guide** pages were written for this public snapshot: installation, first agent, everyday interface use, models, tools/mods, skills/memory, projects/tasks, and maintenance. Their source links point to immutable public code. The homepage and documentation build instructions were also refreshed.
 
 The **Earlier technical reference** is preserved for historical context and existing links. Every retained page is marked as not fully revalidated for 2026.10.19. Historical descriptions may differ from today's public behavior. Do not use old image tags, install commands, or security assumptions as current instructions.
 
-Existing screenshots remain with the earlier reference. They were captured from synthetic development fixtures on October 16, not from a tested public-release installation; they have not been relabeled as current screenshots. The homepage uses the repository's canonical `docs/assets/hero.png`, shared with its README; the header logo and favicon remain separate.
+The illustrated first-run guide now includes operator-supplied wizard screenshots supplied for the first-run guide. Those images illustrate the flow; they are not proof that every illustrated build is the public release. Existing earlier screenshots remain with the technical reference. They were captured from synthetic development fixtures on October 16, not from a tested public-release installation; they have not been relabeled as current screenshots. The homepage uses the repository's canonical `docs/assets/hero.png`, shared with its README; the header logo and favicon remain separate.
 
 ## Verification limits
 
@@ -33,6 +41,6 @@ Public release versions use `YYYY.MM.DD`, such as `2026.10.19`. Use the public r
 
 ## Documentation sources
 
-The hand-written site lives in `docs/`, with configuration in `mkdocs.yml`, documentation dependency files, and validation tools in `scripts/docs/`. Keep product claims grounded in an inspected public release and verify source citations when updating the guide.
+The shared Docusaurus site lives in Docs-Website, with this project’s guides in `docs/burrow/`, navigation in `sidebars.json`, and settings in `docusaurus.config.js`. The original Burrow repository retains its separate MkDocs source and tooling. Keep behavior claims grounded in an inspected public release and verify source citations when updating the guide.
 
 See [Build this documentation](../development/documentation.md) for preview and validation commands.

@@ -1,25 +1,30 @@
-# Extending BURROW
-
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Use the current contract linked below for mod authoring.
+# Extending Burrow
 
 Choose the smallest extension boundary that owns the behavior you need.
 
 | Need | Extension point |
 |---|---|
 | Reusable operating instructions | Skill |
-| Persistent agent identity or environment facts | Profile documents |
-| An external service capability | MCP connection and per-agent grants |
-| Runtime-integrated tools, routes, or UI contributions | Mod |
-| A new provider wire protocol | Model adapter in backend source |
+| Persistent agent identity or working guidance | Profile documents |
+| An external service capability | MCP provider |
+| Runtime-integrated tools, routes or UI contributions | Mod |
+| A new provider wire protocol | Model adapter in Core |
 
-A skill does not install a tool. A discovered tool does not grant itself to an agent. A mod is executable code, not a permissions sandbox.
+A skill does not install a tool or grant permission. Mods run executable code; a child host separates lifecycle and failures but is not an operating-system sandbox.
+
+## Create a skill
+
+Use the [Burrow Skills authoring guide](https://burrow-docs.blissful-psychosis.com/burrow-skills/authoring/) for `SKILL.md`, companion files and validation. Ordinary operator-owned skills can be imported and assigned through Settings. Official managed copies are maintained by their source and are not customized in place; see [Skills and memory](../guide/skills-and-memory.md).
+
+## Add an MCP capability
+
+Configure the provider, discover tools and apply the relevant access controls. Ordinary MCP connections and mod-managed providers do not necessarily expose the same grant UI. A discovered tool is not evidence that a call will be authorized. See [MCP](../concepts/mcp.md) and [Tools and mods](../guide/tools-and-mods.md).
 
 ## Build a mod
 
-Use the current [third-party mod contract](mod-contract.md) and public [Burrow Tutor](https://github.com/GoblinKing-Burrow/Burrow-Tutor) as the canonical authoring sources. They cover manifests, routes, tools, storage, UI, distribution, lifecycle, compatibility, and trust behavior with runnable current-Core tests.
+Use [Burrow Tutor](https://burrow-docs.blissful-psychosis.com/burrow-tutor/) as the runnable example, and its [contract walkthrough](https://burrow-docs.blissful-psychosis.com/burrow-tutor/contract/) for manifests, routes, tools, storage, UI and lifecycle. Read the checked source/version limits before treating an example as compatible with an older installed Core.
 
-Minimal server shape:
+Minimal manifest:
 
 ```json
 {
@@ -29,36 +34,20 @@ Minimal server shape:
 }
 ```
 
-```javascript
-export async function activate(context) {
-  context.api.get('/status', async () => ({ ok: true, version: 1 }));
-  context.tools.register({
-    name: 'example_status',
-    description: 'Return the example mod version.',
-    inputSchema: { type: 'object', additionalProperties: false, properties: {} },
-    handler: async (args) => {
-      if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).length) throw new Error('invalid_arguments');
-      return { ok: true, version: 1 };
-    }
-  });
-  return () => {};
-}
-```
+A server module exports `activate(context)`, registers only its own routes/tools and returns cleanup when needed. Validate arguments in the handler and handle cancellation. Installation, enablement, ordinary tool grants and privileged system-mod capabilities are separate concerns; a manifest cannot grant itself Core authority.
 
-Install only trusted mod code. The child host isolates lifecycle and faults; it is not an operating-system sandbox. Installation, enablement, and agent tool grants are separate decisions.
+The current authoring material describes the newer reviewed contract. [Release status](../project/release-status.md) distinguishes that work from the latest public Core snapshot. The public Tutor release tag must come from coordinated promotion; do not invent a tag because a default branch exists.
 
-## Other extension points
+## Extend a model adapter
 
-- Read [MCP](../concepts/mcp.md) for external capabilities and per-agent grants.
-- Read [Skills and memory](../guide/skills-and-memory.md) for reusable instructions.
-- Provider wire protocols belong in Core's model adapter layer and require protocol-specific tests.
+Provider wire protocols belong in Core's model-adapter layer. Test request construction, supported options, streaming, tool continuations, error handling and credential boundaries against that provider's contract. A model name alone does not establish support for every endpoint or capability.
 
 ## Development checklist
 
-1. Choose the smallest correct extension owner.
-2. Validate inputs and preserve trusted caller boundaries.
+1. Choose the smallest correct owner.
+2. Validate inputs and preserve trusted caller identity.
 3. Bound output and failure behavior.
-4. Test activation, rejection, cancellation, cleanup, and repeated calls.
-5. Confirm disabled/ungranted capabilities remain unavailable.
-6. Update contract/reference documentation with behavior changes.
-7. Publish a tagged build rather than editing an active install.
+4. Test activation, rejection, cancellation, cleanup and repeated calls.
+5. Verify disabled or ungranted capabilities remain unavailable.
+6. Update documentation alongside the behavior.
+7. Publish through the supported tagged release process rather than editing an active installation.

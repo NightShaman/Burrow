@@ -1,11 +1,13 @@
 # Trust boundaries
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
+
 BURROW is an operator-controlled runtime with native filesystem/process tools, model connections, MCP integrations, and installable code. Deploy it inside a trust boundary suitable for the data and credentials available to its service account. HTTP login, encrypted settings, and child processes each provide specific protections; together they do not establish hostile multi-tenant isolation.
 
-This page describes source-verified behavior at commit `c15064dd177788afcdda357a5e545510f754a754` (**2026.10.10.4**). Live network, identity-provider, database, and host isolation must be verified in the actual deployment.
+The focused corrections below were checked against public release **2026.10.19**, commit `aa5a30da683a3a8ea919025f107ff53f182ef8d6`. Earlier-reference caveats remain; live network, identity-provider, database, and host isolation must be verified in the actual deployment.
 
 ## Boundary map
 
@@ -49,7 +51,7 @@ The host box is a deployment trust boundary, not a claim that the components ins
 
 ## Secrets at rest
 
-`BURROW_SETTINGS_KEY` must base64-decode to exactly 32 bytes. Model/provider authentication, MCP secrets, UI OIDC client secrets, mod secrets, and private mod-source credentials use AES-256-GCM with fresh 12-byte nonces and authentication tags. Associated data binds ciphertext to its secret/connection/mod/source identity, with distinct format prefixes. Some decryptors accept historical prefixes for compatibility.
+`BURROW_SETTINGS_KEY` must base64-decode to exactly 32 bytes. Model/provider authentication, MCP secrets, UI OIDC client secrets, mod secrets, private mod-source credentials, and saved OpenTelemetry exporter headers use AES-256-GCM with fresh 12-byte nonces and authentication tags. Associated data binds ciphertext to its secret/connection/mod/source identity, with distinct format prefixes. Some decryptors accept historical prefixes for compatibility.
 
 This protects the designated secret records, not every database field or every file. Conversation text, ordinary settings, browser caches, generated artifacts, and generic traces are not automatically encrypted by the settings-secret mechanism. A running process with the settings key can decrypt the records it can access. An environment-provided credential already exists in plaintext in that environment.
 ### Preserve the settings key
@@ -64,9 +66,9 @@ The database is the settings authority, but `mcporter` needs a materialized conf
 - `ephemeral`: a temporary configuration is removed after the operation
 - `keep_alive`: a stable `runtime/mcp-{id}.json` is retained for the daemon; stop/reconciliation removes it when appropriate
 
-HTTP API keys become provider `Authorization: Bearer` headers. Stdio provider configuration includes the service `PATH` plus explicitly configured provider environment variables. File modes restrict other OS users under normal ownership; they do not hide secrets from the same account or trusted installed code. Review permissions on existing directories as well as newly created files. 
+HTTP API keys become provider `Authorization: Bearer` headers. Stdio provider configuration includes the service `PATH` plus explicitly configured provider environment variables. File modes restrict other OS users under normal ownership; they do not hide secrets from the same account or trusted installed code. Review permissions on existing directories as well as newly created files.
 
-The current server keeps sanitized MCP lifecycle events in PostgreSQL, but its one-time legacy import also preserves the complete original JSONL text in a separate receipt. Unknown fields and malformed lines in that raw receipt are not guaranteed redacted. Protect database backups accordingly. 
+The current server keeps sanitized MCP lifecycle events in PostgreSQL, but its one-time legacy import also preserves the complete original JSONL text in a separate receipt. Unknown fields and malformed lines in that raw receipt are not guaranteed redacted. Protect database backups accordingly.
 
 ## Redaction has a defined scope
 
@@ -80,11 +82,15 @@ BURROW's redaction is boundary-driven:
 Ordinary prose that resembles a credential assignment is deliberately not heuristically rewritten. A result labeled `clear` by the protected-value adapter means no supported protected declaration was found; it is not a guarantee that the content contains no secrets.
 Generic trace payload handling bounds content but does not apply blanket redaction. Different producers apply different projections. Chat progress can include commands, paths, queries, reasons, and errors, and diagnostics access includes private-content endpoints. Inspect and sanitize the actual material before sharing logs, trace artifacts, transcripts, or screenshots.  ·  · [Diagnostics scope](authentication.md#exact-allowlist)
 
+## Telemetry export is data sharing
+
+OpenTelemetry export is disabled by default and requires a configured collector endpoint. Saved exporter headers are encrypted, but enabling export sends selected spans and metrics to that collector. Review the effective endpoint and provider-specific headers before enabling it. Environment overrides can supersede saved settings; keep exported operational metadata and collector access within the intended trust boundary.
+
 ## Installed mods are trusted code
 
-A mod server runs in a Node child process. The host owns lifecycle, availability, RPC routing, and access through the mod-scoped settings/secrets APIs. The `fork` call does not configure a separate OS user, filesystem/network sandbox, or sanitized environment. It inherits the service environment. A child process failure boundary is therefore not a security boundary against hostile code. 
+A mod server runs in a Node child process. The host owns lifecycle, availability, RPC routing, and access through the mod-scoped settings/secrets APIs. The `fork` call does not configure a separate OS user, filesystem/network sandbox, or sanitized environment. It inherits the service environment. A child process failure boundary is therefore not a security boundary against hostile code.
 
-Core-owned APIs keep normal mod operations scoped and explicit. Mod HTTP projections strip `authorization`, `cookie`, `proxy-authorization`, and `x-api-key` headers and provide verified `enabled`/`authenticated` booleans. This protects that particular API projection; it does not remove the host/environment powers of installed JavaScript. 
+Core-owned APIs keep normal mod operations scoped and explicit. System-mod capabilities additionally depend on operator-owned grants and agent allowlists; declaring a capability in a manifest is insufficient. Those API checks do not sandbox the installed code. Mod HTTP projections strip `authorization`, `cookie`, `proxy-authorization`, and `x-api-key` headers and provide verified `enabled`/`authenticated` booleans. This protects that particular API projection; it does not remove the host/environment powers of installed JavaScript.
 
 Mod UI code is also trusted: it is dynamically imported into the operator page and mounts into DOM surfaces. Scoped API helpers, namespace validation, cleanup handlers, and error boundaries are useful contracts, not an iframe sandbox. Review a source's code and dependencies before installation or update, even when its tools have no agent grants.  · [Extensions](../development/extensions.md)
 
@@ -105,7 +111,7 @@ None of those environment choices alone changes the process's OS file or network
 The UI stores entered Basic credentials only in module memory, but the server also issues a browser session cookie. Separately, browser-local storage can retain drafts and conversation turns. Closing a tab or clearing the in-memory Basic value does not prove those other data stores have been cleared. Use a trusted browser profile and protect shared devices.
 The built-in UI is local-runtime-only: API helpers use relative paths on the serving origin, and the former remote API-target selector and its credential-stripping transport are removed. This does not restrict the listener to loopback. Protect whichever network origin serves the UI. Agent remote execution assignments still choose where supported backend tools run; they do not switch the browser to another runtime.
 
-See the [Interface guide](../concepts/interface.md) for runtime ownership and [Authentication](authentication.md#browser-origin-controls) for browser-origin, JSON mutation, and opt-in Host authority checks. 
+See the [Interface guide](../concepts/interface.md) for runtime ownership and [Authentication](authentication.md#browser-origin-controls) for browser-origin, JSON mutation, and opt-in Host authority checks.
 ## Safe deployment checklist
 
 These are operator controls to apply and verify; they are not a claim of built-in hardening.
@@ -124,3 +130,12 @@ These are operator controls to apply and verify; they are not a claim of built-i
 - [ ] Review actual logs/traces before sharing and test authentication from outside the trusted network as well as through the normal proxy
 
 Read [Deployment](../operations/deployment.md), [Configuration](../reference/configuration.md), [Environment variables](../reference/environment.md), and the [API reference](../reference/api.md) for implementation-specific setup. The [Known limitations](../project/known-limitations.md) page records additional static gaps; live validation is still required for the deployed system.
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/src/mod-host.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-host.mjs)
+- [backend/src/mod-runtime.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-runtime.mjs)
+- [backend/src/postgres-otel-settings-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-otel-settings-store.mjs)
+- [backend/src/otel-settings.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/otel-settings.mjs)

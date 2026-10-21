@@ -36,6 +36,12 @@ Wait for the command to finish. Startup checks allow time for database initializ
 
 Updates preserve durable state and operator settings, while reconciling installer-owned paths. A successful download or active service alone is insufficient: verify the health version and a real chat. Do not assume copying an old `app/` back will undo database migrations.
 
+### Check the native update channel
+
+The public 2026.10.19 updater selects the public repository. Newer installer/launcher code also persists `BURROW_UPDATE_REPOSITORY` in `burrow.env` and retains the installation's selected repository when updating. A process-level override affects the requested operation; do not assume that it permanently rewrites an existing saved channel.
+
+For a public installation, the intended repository is `GoblinKing-Burrow/Burrow`. Check the installed version and configuration before changing anything. The native updater resolves assembled source; the absence of a GitHub Release alone does not prove it cannot update. Containers follow their configured image repository and tag instead. See [release status](../project/release-status.md).
+
 ### Container installation
 
 Back up the persistent volume and any external database using your deployment's recovery procedure, then run from the same Compose directory:
@@ -101,9 +107,9 @@ For an otherwise unmodified native Ubuntu installation, a mapping may look like 
 
 ```json
 {
-  "BURROW_POSTGRES_LIFECYCLE": "managed"
-  "BURROW_POSTGRES_INITDB": "/usr/lib/postgresql/17/bin/initdb"
-  "BURROW_POSTGRES_PG_CTL": "/usr/lib/postgresql/17/bin/pg_ctl"
+  "BURROW_POSTGRES_LIFECYCLE": "managed",
+  "BURROW_POSTGRES_INITDB": "/usr/lib/postgresql/17/bin/initdb",
+  "BURROW_POSTGRES_PG_CTL": "/usr/lib/postgresql/17/bin/pg_ctl",
   "BURROW_POSTGRES_BIN": "/usr/lib/postgresql/17/bin/postgres"
 }
 ```

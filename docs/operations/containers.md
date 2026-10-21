@@ -1,18 +1,21 @@
 # Containers
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 
 The assembled repository supplies the canonical `Dockerfile`, `docker-entrypoint.sh`, and `compose.yml`. The public release image is `ghcr.io/goblinking-burrow/burrow`.
 
 ## Start with an explicit configuration
 
-This core-only example binds to loopback on the Docker host. It intentionally shows only the core HTTP port:
+This core-only example builds from the checked-out assembled source and binds to loopback on the Docker host. Run it from the pinned checkout described under [Build from the assembled checkout](#build-from-the-assembled-checkout). It intentionally shows only the core HTTP port:
 
 ```yaml
 services:
   burrow:
-    image: ghcr.io/goblinking-burrow/burrow:2026.10.18
+    build: .
+    image: burrow-local:2026.10.19
     init: true
     user: "4226:4226"
     environment:
@@ -28,13 +31,13 @@ volumes:
 ```
 
 ```sh
-docker compose pull
+docker compose build
 docker compose up -d
 docker compose ps
 docker compose logs --tail=100 burrow
 ```
 
-The tag above matches the reviewed source snapshot. Choose an explicit release tag for controlled upgrades; `latest` follows the newest published image. The repository's root Compose example publishes on all host interfaces and has no explicit restart policy, so review it before use.
+The local tag above names the reviewed source snapshot; it is not a claim that a matching registry tag was checked. To use the published image instead, remove `build`, select an existing explicit registry tag or digest, and use `docker compose pull` before startup. Verify that published artifact separately; `latest` is a moving tag. The repository's root Compose example publishes on all host interfaces and has no explicit restart policy, so review it before use.
 
 Open `http://127.0.0.1:42817` on the Docker host and follow [initial setup](../getting-started/initial-setup.md). Remote access requires deliberate port/proxy configuration and [authentication](../security/authentication.md).
 
@@ -76,7 +79,7 @@ Use the connection/TLS settings in [deployment](deployment.md#external-postgresq
 
 ## Healthcheck meaning
 
-The image probes `/api/health` every 10 seconds with a 5-second timeout, 20-second start period, and six retries. HTTP success or **401** counts as liveness. This accommodates authenticated installations but does not prove successful model/tool execution. Inspect the authenticated health payload and complete a chat as separate acceptance checks.
+The image probes `/api/health` every 10 seconds with a 5-second timeout, 20-second start period, and six retries. HTTP success or **401** counts as liveness. This accommodates authenticated installations but does not prove successful model/tool execution. Inspect the public build identity and authenticated runtime status and complete a chat as separate acceptance checks.
 
 ## Upgrade and backup
 
@@ -97,9 +100,19 @@ Do not run the native `burrow update` procedure inside a container as a substitu
 ```sh
 git clone https://github.com/GoblinKing-Burrow/Burrow.git
 cd Burrow
-git checkout 2d979fecca8434fe02a6ed2e8225c46eb4690098
-docker build -t burrow-local:2026.10.10.4 .
+git checkout aa5a30da683a3a8ea919025f107ff53f182ef8d6
+docker build -t burrow-local:2026.10.19 .
 ```
 
 This is a build command, not a deployment to an existing runtime. The build needs access to npm, Debian/PGDG packages, and base images.
 
+
+
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [Dockerfile](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/Dockerfile)
+- [docker-entrypoint.sh](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/docker-entrypoint.sh)
+- [SOURCE_VERSIONS](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/SOURCE_VERSIONS)

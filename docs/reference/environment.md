@@ -1,9 +1,11 @@
 # Environment variables
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
-This reference separates supported service settings from installer, test and compatibility names. Defaults below describe the pinned source. Installation scripts and containers can override them; inspect the actual service environment before diagnosing a mismatch. Never paste encryption keys, database passwords or provider credentials into a diagnostic report.
+
+This reference separates supported service settings from installer, test and compatibility names. The focused additions below are checked against public release 2026.10.19; the earlier-reference warning still applies to the full inventory. Installation scripts and containers can override them; inspect the actual service environment before diagnosing a mismatch. Never paste encryption keys, database passwords or provider credentials into a diagnostic report.
 
 See [configuration ownership](configuration.md), [deployment](../operations/deployment.md) and [containers](../operations/containers.md).
 
@@ -21,6 +23,7 @@ Authentication settings resolve as explicit runtime arguments → environment �
 | `BURROW_UI_AUTH_BASIC_USERNAME` | Unset; required for Basic mode |
 | `BURROW_UI_AUTH_BASIC_PASSWORD_HASH` | Unset; stored scrypt hash, not a plaintext password |
 | `BURROW_UI_AUTH_BASIC_SESSION_TTL_SECONDS` | `43200`; minimum 60 seconds |
+| `BURROW_UI_AUTH_BASIC_INSECURE_COOKIES` | Case-insensitive `true` disables Basic Secure cookies; HTTP development only |
 | `BURROW_UI_AUTH_OIDC_ISSUER` | Unset; required for OIDC |
 | `BURROW_UI_AUTH_OIDC_CLIENT_ID` | Unset; required for OIDC |
 | `BURROW_UI_AUTH_OIDC_CLIENT_SECRET` | Unset; alternatively encrypted PostgreSQL secret |
@@ -28,9 +31,16 @@ Authentication settings resolve as explicit runtime arguments → environment �
 | `BURROW_UI_AUTH_OIDC_SCOPES` | `openid,email,profile` |
 | `BURROW_UI_AUTH_OIDC_ALLOWED_EMAILS` | Empty; optional comma-separated allowlist |
 | `BURROW_UI_AUTH_OIDC_ALLOWED_DOMAINS` | Empty; optional comma-separated allowlist |
-| `BURROW_UI_AUTH_OIDC_INSECURE_COOKIES` | Only literal `true` disables OIDC Secure cookies; local development only |
-
- ·  · [Authentication caveats](../security/authentication.md)
+| `BURROW_UI_AUTH_OIDC_INSECURE_COOKIES` | Case-insensitive `true` disables OIDC Secure cookies; HTTP development only |
+| `BURROW_UI_ORIGIN_CHECK` | `true` by default; `true`/`false` overrides saved browser `checkOrigin`; keep enabled for browser-facing deployments |
+| `BURROW_UI_ALLOWED_ORIGINS` | Empty; comma-separated exact additional origins |
+| `BURROW_UI_ALLOWED_HOSTS` | Empty disables Host allowlist enforcement; otherwise exact host/port authorities, no wildcards |
+| `BURROW_UI_TRUSTED_PROXIES` | Empty; exact peer IPs trusted for forwarded host/protocol, separate from authentication proxies |
+| `BURROW_REQUEST_MAX_BYTES` | `100663296` (96 MiB) JSON body limit |
+| `BURROW_REQUEST_TIMEOUT_MS` | `30000` JSON body read timeout |
+| `BURROW_JSON_MAX_DEPTH` | `128` JSON traversal depth |
+| `BURROW_JSON_MAX_ITEMS` | `1000000` JSON traversal item budget |
+See [Authentication caveats](../security/authentication.md)
 
 ## Runtime paths and key material
 
@@ -111,6 +121,20 @@ Compression controls normalize invalid values to supported defaults. The retaine
 | `BURROW_MOD_ARCHIVE_RESERVE_BYTES` | `268435456` (256 MiB); nonnegative safe-integer free-space reserve during mod extraction |
 
 MCP provider-specific environment variables are saved per connection; they are not arbitrary `BURROW_*` service settings. Mod Git credentials are injected into a subprocess internally and should not be configured as global service variables. See [MCP](../concepts/mcp.md) and [extensions](../development/extensions.md).
+## OpenTelemetry export
+
+Export starts disabled unless enabled in saved settings or overridden below. A usable collector endpoint is also required. Environment endpoint/header fields override their saved counterparts; signal-specific fields can override the generic transport for that signal. Saved headers are encrypted and are not returned in settings reads. Enabling export sends operational telemetry to the chosen collector.
+
+| Variable | Default / purpose |
+|---|---|
+| `BURROW_OTEL_ENABLED` | Optional `true`/`false` override for saved enablement |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Generic HTTP(S) collector endpoint; no URL credentials, query or fragment |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | Trace-specific endpoint |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | Metric-specific endpoint |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Comma-separated `key=value` exporter headers; treat as credentials |
+| `OTEL_EXPORTER_OTLP_TRACES_HEADERS` | Trace-specific headers |
+| `OTEL_EXPORTER_OTLP_METRICS_HEADERS` | Metric-specific headers |
+
 ## Compatibility, installer and development-only names
 
 These names occur in the repository but are not a second supported application-configuration system.
@@ -135,3 +159,13 @@ These names occur in the repository but are not a second supported application-c
 | `BURROW_TEST_TIMEOUT_MS`, `BURROW_VERIFY_DEPLOYED_ISOLATION`, `BURROW_POSTGRES_LIFECYCLE_REHEARSAL` | Test/rehearsal controls |
 | `BURROW_OOM_REPRO_ITERATIONS`, `BURROW_OOM_REPRO_FILE_BYTES`, `BURROW_OOM_REPRO_CALLS_PER_ITERATION`, `BURROW_OOM_REPRO_GC_INTERVAL`, `BURROW_OOM_REPRO_MAX_HEAP_MIB` | Isolated diagnostic reproducer inputs |
 | `BURROW_SOURCE_TOKEN` | Assembly CI secret for pinned source access; never a runtime API token |
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/src/config.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/config.mjs)
+- [backend/src/browser-origin-policy.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/browser-origin-policy.mjs)
+- [backend/src/http-authority.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/http-authority.mjs)
+- [backend/src/request-resource-budgets.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/request-resource-budgets.mjs)
+- [backend/src/otel-settings.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/otel-settings.mjs)

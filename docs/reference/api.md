@@ -1,7 +1,9 @@
 # HTTP API
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 
 The API serves BURROW's UI and external clients. It is an operator-level control surface: it can create agents, change credentials and grants, execute model/tool work, import data and delete retained content. Read [authentication](../security/authentication.md) and [trust boundaries](../security/trust-boundaries.md) before exposing it.
 
@@ -19,27 +21,30 @@ The API serves BURROW's UI and external clients. It is an operator-level control
 | [Mods](api/mods.md) | Distribution, lifecycle, extension routes and UI assets |
 | [Health and diagnostics](api/diagnostics.md) | Health, metrics, traces, diagnostic projections and provider usage |
 
-## Contract download and provenance
+## Contract source and provenance
 
-[Download the historical OpenAPI JSON](../assets/reference/openapi-2026.08.25.json)
+[Read the public-release OpenAPI JSON](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
 
 | Property | Value |
 |---|---|
 | Specification | OpenAPI `3.1.0` |
-| Contract `info.version` | `2026.08.25` |
-| Inventory | 150 paths, 193 operations, 112 component schemas |
-| Contract artifact source revision | Backend `b20376440086340e8746507ca700a4cd9e07bf96` |
-| Documented assembled baseline | `2026.10.10.4`, commit `c15064dd177788afcdda357a5e545510f754a754` |
-| SHA-256 | `e91eb15cd7a4c17d3a104aee6156ff8c559ad4306ae53c7aaf90492dca4ae564` |
+| Contract `info.version` | `2026.08.25` (retained schema label, not the release date) |
+| Public source inventory | 176 paths, 232 operations, 121 component schemas |
+| Reviewed public release | `2026.10.19` |
+| Reviewed public commit | `aa5a30da683a3a8ea919025f107ff53f182ef8d6` |
+| SHA-256 | `67d27fbc347c78ab56671f466733a87bb7d916366adec5ba8bb83f1cc6d8f726` |
 
-The download and [route index](../assets/reference/api-route-index.json) are unchanged historical artifacts from the October 2 audit. They are not the current runtime contract. In particular, their `/api/albdruck/*` operations are retired and are not mounted in this build. Current memory routes use `/api/brains`; original recall uses `/api/session/search` and source expansion. See the source-backed endpoint pages above. This refresh does not claim to have regenerated the upstream OpenAPI contract.
+The public assembly includes `backend/docs/openapi.json`. Its contract includes Brains, Dream controls, Git-skill management, Minion model selection, task history/attachments and OpenTelemetry settings. Retired `/api/albdruck/*` routes are absent. The source-backed endpoint pages still need to be read alongside the schema: its inventory is not proof of request/response parity or live compatibility.
+
+Unpromoted development build **2026.10.21.2** has 177 paths and 234 operations because it adds shared profile-document settings. Do not treat that development contract as part of public 2026.10.19.
+
 
 !!! warning "The schema is incomplete"
-    It has no authentication security schemes, omits seven Dream operations and the non-API OIDC/logout routes, and contains broad open-object schemas. Its Forge request/catalog and mod-catalog shapes lag implementation. Do not infer anonymous access, unsupported features or complete client compatibility from generated types alone.
+    It has no authentication security schemes, omits non-API OIDC/logout routes, and contains broad open-object schemas. Its Forge request/catalog and mod-catalog shapes lag implementation. Do not infer anonymous access, unsupported features or complete client compatibility from generated types alone.
+
 
 Specific drift:
 
-- Dream settings, diary, consolidation and cycle routes are documented from the current route module
 - Mod catalog responses also carry lifecycle status, failure information, version and Archive UI contributions
 - Forge accepts mode-based selection; its source artifact still requires an explicit connection/model pair and omits the `mode` property
 - Music availability is catalog-dependent; it is not unconditionally false as the old schema states
@@ -57,7 +62,7 @@ The source drift checker scans literal route comparisons. Passing it does not es
 
 These routes are behind the usual authentication gate. The schema endpoint reads `backend/docs/openapi.json` within the installed Backend source tree.
 
-That file is absent from this public assembled snapshot. The explorer shell can load while its contract request fails. The download on this documentation site does not change that runtime behavior. The same omitted source assets can affect API-contract export categories.
+That file is present in the reviewed public assembly. Its presence and static route wiring were verified; the explorer and API-contract export have not been exercised against a live deployment.
 
 ## Request conventions
 
@@ -75,7 +80,7 @@ Invalid JSON returns `400 invalid_json`. Selected route boundaries reject non-ob
 
 Use the configured Basic, trusted-proxy or OIDC session flow for the full API. Scoped Bearer tokens currently support only `diagnostics:read` and an exact GET allowlist; they cannot administer settings or run chat. A rejected Bearer token returns 403 rather than falling back to interactive authentication.
 
-`GET /health` is public and contains runtime metadata. `/api/health` is gated. `GET /api/auth/session` reports OIDC-session presence, not a general Basic/proxy introspection result. See the [complete authentication reference](../security/authentication.md).
+`GET /health` and `GET /api/health` are both public minimal build-identity routes; `/api/status` is gated. `GET /api/auth/session` reports OIDC-session presence, not a general Basic/proxy introspection result. See the [complete authentication reference](../security/authentication.md).
 
 ## Minimal read example
 
@@ -86,3 +91,10 @@ curl --fail-with-body http://127.0.0.1:42817/api/agents
 ```
 
 For Basic authentication, add `--user "$BURROW_USERNAME"` and let curl prompt for the password. Do not embed passwords or tokens in command history, URLs, source files or documentation examples. Use your deployment's configured authentication for all other examples.
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
+- [backend/scripts/burrow-ui.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/burrow-ui.mjs)

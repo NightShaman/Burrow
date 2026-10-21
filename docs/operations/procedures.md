@@ -1,9 +1,11 @@
 # Common operational procedures
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
-These recipes describe **2026.10.10.4** and assume the default native user installation. For containers, use the corresponding [container commands](containers.md). Replace example agent/session IDs with real values and run as the installation owner.
+
+These retained recipes include targeted corrections against public **2026.10.19** and assume the default native user installation. For containers, use the corresponding [container commands](containers.md). Replace example agent/session IDs with real values and run as the installation owner.
 
 ## Start, stop, inspect
 
@@ -106,7 +108,7 @@ Managed cleanup is disabled until enabled with at least one limit. This surface 
 
 The CLI reads environment/default retention values. It does **not** read the persisted Settings policy or its disabled flag. Defaults are 60 days for eligible main-kind sessions, 30 for task sessions, and 7 for subagent sessions; trace age/byte limits are unset unless configured. A disabled UI policy does not make CLI `--confirm` harmless.
 
-With the correct database connection (use the managed subshell above when needed), preview the **full** target list:
+With the correct lifecycle-aware database connection, preview the **full** target list:
 
 ```sh
 "$HOME/.burrow/bin/burrow" retention --agent-id assistant --json
@@ -136,4 +138,9 @@ Full removal also destroys the installation's durable state. Back up first, then
 
 ## Source evidence
 
-Additional implementation evidence: , .
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/src/cli-postgres.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/cli-postgres.mjs)
+- [backend/src/retention.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/retention.mjs)

@@ -1,87 +1,59 @@
 # Dream cycles
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
-
-Dream periodically revisits original conversation evidence to extract, reconcile and retain useful context. It can update compact DreamMemory, propose preferences and write an operator-facing diary. Those outputs have different authority and retention rules.
+Dreaming revisits retained conversation evidence. It produces operator-facing diary entries and can derive useful connections or preference signals. The memory publication path depends on Core's version; see [release status](../project/release-status.md).
 
 ## Schedule and model
 
-Dream is enabled by default for an agent's settings, with cron `0 4 * * *`. A null timezone inherits the operator timezone, with UTC as the fallback. An explicit model override requires both a connection and a valid selected model; otherwise the runtime resolves its configured model. A schedule alone does not guarantee a successful provider call. See [Models](models.md) and [Configuration](../reference/configuration.md). 
+Open **Settings → Agents → [agent] → Dreams**. Set enabled state, cron, prompt, and an optional model override, then save. Dreams follows the operator timezone, with UTC as fallback. The default schedule is `0 4 * * *`. A configured schedule does not verify provider credentials or model availability.
 
-The scheduler checks every 30 seconds, starts with an immediate tick and processes agents serially. PostgreSQL locks and the unique `(agent_id, scheduled_for)` occurrence identity prevent duplicate claims for an occurrence. Completion rereads current settings before calculating the next run.
-The **Quiet-day dreams** setting controls whether diary prose is generated when no new material needs processing. With it off, a quiet run can complete without a new diary entry; existing DreamMemory and preferences are preserved. This is not evidence that scheduling failed.
+**Dream on quiet days** controls diary work when there is no new material to process. A quiet cycle may legitimately produce no new connections. Inspect Recent activity for the actual result rather than treating an unchanged memory list as a scheduler failure.
 
 ## Three evidence windows
 
-Phases run in this order:
-
-| Phase | Lookback | Role |
+| Phase | Lookback | Purpose |
 |---|---:|---|
-| Light | 1 day | Recent conversation evidence |
-| Deep | 14 days | Broader recurring and project context |
-| REM | 30 days | Longest-window reconciliation and final DreamMemory input |
+| Light | 1 day | Recent conversation evidence and reflection |
+| Deep | 14 days | Broader recurring context |
+| REM | 30 days | Longest-window synthesis |
 
-All phases use chronological original messages. In the current implementation, **REM supplies the final DreamMemory candidates**. An extraction or reconciliation failure in that longest window preserves the existing DreamMemory.
-## Source boundary
+The cycle uses retained original person-facing messages, including reset archives. It excludes system/tool/debug entries and subagent-provenance messages. Original identities prevent repeated archive occurrences from being counted as independent evidence. Compression summaries do not replace originals.
 
-Dream reads persisted person-facing user, assistant and agent-to-agent chat messages, including retained reset archives. It excludes system/tool/debug entries, subagent-provenance messages and sessions in the canonical `subagent-` namespace. It does not substitute compression summaries for originals. Timestamps bound the window, and entry identities prevent repeated originals from being counted repeatedly. 
+## Public Core 2026.10.19
 
-Source text is evidence, not instructions for the curator. Extraction asks for exact original-message citations and preserves explicitly stated rationale, alternatives, constraints and relationships. It must not invent a reason merely because a decision exists. Preference candidates must cite user-role originals.
-```mermaid
-flowchart TB
-    Originals[Original persisted chat and reset archives] --> Boundary[Role, provenance and time-window filters]
-    Boundary --> Check[Validate source fingerprints and cached batches]
-    Check --> Missing[Extract uncached evidence within prompt budgets]
-    Missing --> Cite[Validate exact citations]
-    Cite --> Days[Checkpoint fully extracted UTC-day groups]
-    Check --> Cached[Reuse valid pre-reconciliation candidates]
-    Days --> Reconcile[Chronological reconciliation for each phase]
-    Cached --> Reconcile
-    Reconcile --> Preferences[User-grounded preference signals]
-    Reconcile --> Diary[Operator-only diary]
-    Reconcile --> REM[REM candidates]
-    REM --> Profile[Compact DREAM_MEMORY and scoped preloads]
-```
+In the inspected public release, REM candidates feed the compact `DREAM_MEMORY` profile and bounded scoped preload records. DreamMemory remains human-editable. This older publication path is separate from Brains and does not automatically create Brain records.
 
-## Lossless extraction and incremental checkpoints
+The public consolidator limits the compact document to 12 items, with bounded titles/content. Scoped preloads retain up to five items per selected scope, expire after seven days and are distinct from ordinary working-memory/rolling-card recall. Failed extraction or reconciliation preserves existing publication rather than claiming a new successful synthesis.
 
-Prompt budgeting recursively splits large source batches and, when necessary, a single oversized message. It does not silently discard the source tail to fit a prompt. Citations are checked against trusted evidence. One repair re-extraction is permitted from that same evidence; a second invalid result fails the phase. Reconciliation then processes the full chronological candidate stream, using hierarchical passes that must reduce the material enough to fit.
-The incremental extraction contract is `dream-raw-v2-lossless`. A source fingerprint includes its original reference, session, entry identity, role, timestamp and content. A cached batch becomes invalid if **any contributing source** changes or disappears, even if the final candidates did not cite that particular source. A contract-version change also invalidates reuse. 
+[Public cycle implementation](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/dream-cycle-runner.mjs) · [Public consolidator](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/dream-memory-consolidator.mjs)
 
-Checkpoints contain derived, pre-reconciliation candidates and source fingerprints, not original transcripts or summaries. Each **UTC-day source group** is checkpointed atomically only after extraction of all its chunks succeeds, including a valid empty candidate result. Successful chunks from a failed group do not establish partial-day coverage. This is an extraction-completion boundary, not a requirement to wait until that calendar day ends. Successful earlier groups can survive a later failure. A candidate citing multiple sources only participates in a narrower phase when all contributing sources are inside that phase.
-The model may still omit or misinterpret a fact. Lossless source splitting and grounded citation validation establish the source boundary; they do not establish that every generated conclusion is correct.
+## Newer Core: searchable Dream-generated connections
 
-## Outputs
+The newer implementation reviewed on 21 October replaces that publication path:
 
-### DreamMemory and preloads
+1. Extract grounded evidence from the configured windows.
+2. Consider that evidence alongside existing Dream-generated connections owned by the same agent.
+3. Synthesize useful associations across distinct subjects or recurring patterns. Producing no discovery is valid.
+4. Save accepted results as individual Brains records with `origin: dreaming`, title, content, source references and revision/ownership metadata.
+5. Keep retrieval explicit. Agents search/read Brains when relevant; the normal turn path supplies neither a Dream preload nor the legacy DreamMemory profile.
 
-The `DREAM_MEMORY` profile is compact, semi-durable and human-editable. The consolidator defaults to at most 12 items, clips titles to 180 characters and content to 700 characters, and labels the result as non-authoritative context whose mutable facts should be verified. It excludes session-window entries. 
+The Brains interface labels these records **Dream-generated**. Operator edits make records operator-owned, and ordinary agent mutation cannot overwrite those records. The old DreamMemory document can still be visible as legacy stored data; editing it does not restore automatic prompt injection in this newer path.
 
-Only the longest-window REM candidates are used for final consolidation. Dream also stores up to five preload items for the global scope and for each of at most eight projects, with a seven-day expiry. These persisted preload records should not be confused with automatic injection of all working or rolling memory: ordinary working-continuity assembly returns empty records/cards.
-Preloads, Dream ledgers and scope-review candidates now have native entry tables beneath `dream_state_envelopes`. Migration 25 moves the old working-memory metadata envelopes while preserving order, empty collections and extra metadata. Store helpers no longer silently truncate collection counts or source-reference lists; the cycle still deliberately selects the five-item/eight-project preload budget above. Ledger appends keep prior entries, and assigning a scope-review candidate removes only its selected native row.
-### Preferences
+Publication uses stable IDs and conflict-safe insertion for repeat publication. That is retry safety, not semantic deduplication of every similar connection. The inspected publisher creates individual records; it does not implement a general automatic edit/split/supersede workflow for older connections. Review and correct records using the existing Brains editor. Uncertainty can be expressed in a connection's prose; this review does not establish a separate confidence or epistemic-status schema.
 
-User-grounded preference candidates become learning signals. The preference adjudicator compares them with the existing `PREFERENCES` document, validates the proposed update and commits document/state/audit changes together. A diary passage or an assistant's unsupported inference is not preference authority. See [Memory and continuity](memory.md#profiles-and-preferences).
-### Brains is separate
+### Preferences and diary remain separate
 
-Dream does not automatically populate Brains or keep the retired Albdruck write path active. Brains is deliberate saved memory owned by an agent. Ask for a memory to be saved or use the Brains editor when you want a durable explicit record; inspect it afterward. The retained legacy reconciliation helper is not called by the current cycle.
+User-grounded preference candidates pass through preference adjudication into `PREFERENCES`. A diary passage is not an instruction or permission grant. Diary entries are operator-facing narrative, retained separately from searchable Brain connections.
 
-### Diary
+## Citation and failure behavior
 
-The diary is operator-facing prose, using `SOUL` only for tone. The generation prompt requests a 100–250-word narrative rather than machinery or status language. Stored entries support up to 12,000 characters and 16 source references, with duplicate prevention by agent, date, phase and narrative digest. The diary is never runtime prompt authority.
+Source references must identify available evidence. Both reviewed paths have a bounded citation-repair attempt. In the newer implementation, candidates still containing invalid references after repair are dropped individually, with diagnostics; valid candidates can survive. A cycle with no useful connection can complete successfully with zero saved records.
 
-Light diary output is independent from knowledge publication. If Light extraction still has invalid citations after its bounded repair attempt, Burrow records the extraction error, rejects those candidates from memory and preference processing, and generates the Light diary directly from the original one-day conversation window. The cycle is `partial`, not successful, but the operator-facing Light dream remains available. Deep and REM remain dependent on validated extraction, and no DreamMemory or preload publication occurs while an extraction error exists.
-## Failures and observability
+Other extraction, provider or reconciliation errors remain visible in cycle receipts. Review `completed`, `partial`, `failed` or interrupted status, phase errors, source coverage and model diagnostics. The newer receipt reports `dreamConnectionCount` and `dreamConnectionIds`; these are publication receipts, not proof that the model's association is correct.
 
-Cycle receipts record phase progress, source counts, source characters, extraction chunks, coverage, model requests and errors. They distinguish `completed`, `partial` and `failed`; a partial result requires errors alongside some diary output. A running receipt owned by an earlier runtime instance can be marked interrupted after restart.
-Provider calls have one retry for designated transient HTTP/network errors and one empty-text retry. Progress updates are throttled and omit generated text; request diagnostics are bounded and redacted. Persistent provider or citation failures remain visible rather than triggering an unlimited retry loop.
-When diagnosing a missing update:
+Check enabled state and effective timezone first, then the selected provider/model and cycle's phase errors. A successful diary is not evidence that memory publication also succeeded.
 
-1. Check enabled state, cron and effective timezone
-2. Check the selected connection/model and provider availability
-3. Inspect the cycle's source coverage and phase errors
-4. Distinguish diary success and REM extraction/reconciliation failure
-5. Remember that a failed REM extraction or reconciliation deliberately preserves the old DreamMemory
+## Storage and retention
 
-See [Observability](../operations/observability.md), [Troubleshooting](../operations/troubleshooting.md) and the [API reference](../reference/api.md). Independent retention cleanup is scheduled separately and can continue even when Dream is disabled. 
+Brains connections have no automatic TTL and remain separated by agent owner. Original conversations, diaries, legacy preload rows, preferences and Brain records have independent lifecycles. Removing a Brain record does not remove its cited conversation or every exported/backup copy.
+
+See [Memory and continuity](memory.md), [Conversation history](conversation-history.md), and [Backup and recovery](../operations/backup-recovery.md).

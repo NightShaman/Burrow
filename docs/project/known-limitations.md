@@ -1,9 +1,11 @@
 # Known limitations
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
-These observations were rechecked against release **2026.10.10.4**, the [documented source baseline](source-map.md). They describe published source and packaging, not an independently tested running installation. Recheck them when upgrading.
+
+These retained observations include targeted source checks against public **2026.10.19** and explicitly labeled newer development behavior. They are not an independently tested running installation or a claim that every historical statement has been revalidated. Recheck them when upgrading.
 
 ## Configuration and command compatibility
 
@@ -11,21 +13,17 @@ These observations were rechecked against release **2026.10.10.4**, the [documen
 
 The retained loader deliberately does not read JSON application configuration. Editing an old `burrow.json` does not configure the runtime. Use PostgreSQL-backed settings and the service environment described in [configuration](../reference/configuration.md).
 
-Source: .
-
 ### Direct model CLI commands lack store wiring
 
 The raw CLI resolves a model before dispatching `ask`, `chat`, `plan`, `run`, and `factory`, without supplying the model-settings store required by the resolver. These paths can fail with `model_settings_store_required`. The composed HTTP/UI chat path supplies its stores separately. `doctor` now uses the composed PostgreSQL application; the previous missing-store doctor caveat no longer applies. The obsolete `dream-memory` and `dream-cycle` command names are no longer accepted.
 
 Sources: , , . See [CLI distinctions](../reference/cli.md).
 
-### Public assembly omits Backend tests and API contract assets
+### Public assembly omits Backend tests
 
-The published tree does not contain `backend/tests/` or `backend/docs/`, although package scripts reference them. In particular, `openapi:check` cannot validate the absent contract/tests in this assembly. The old `runtime:restore:rehearsal` npm script has been removed.
+The public **2026.10.19** tree does not contain `backend/tests/`, although package scripts reference it. It does include `backend/docs/openapi.json`; `openapi:check` still cannot execute the missing test stage in this assembly. The old `runtime:restore:rehearsal` npm script has been removed.
 
-The Scalar explorer reads `backend/docs/openapi.json`; its shell can load while the schema request fails. The [API reference](../reference/api.md) provides a historical source-pinned contract, not proof of current route/body/response parity. The literal-route drift checker is not a complete method or schema comparison. Report blocked checks explicitly; an npm script's existence does not prove it is runnable.
-
-Sources: , , .
+The Scalar explorer reads the packaged `backend/docs/openapi.json`. Its presence is not proof of current route/body/response parity; see the [API reference](../reference/api.md). The literal-route drift checker is not a complete method or schema comparison. Report blocked checks explicitly; an npm script's existence does not prove it is runnable.
 
 ## Installation, recovery, and retention
 
@@ -35,13 +33,9 @@ Sources: , , .
 
 Restore validates archive contents and checksums, rejects unsafe links, requires explicit mappings for retained absolute paths/database settings, and requires the original OS owner name and target UID for a managed physical archive. These checks do not make raw clusters portable across PostgreSQL major versions or platforms. Use the main `burrow install-restore --mapping-file ...` command; the standalone helper's argument parser does not accept that flag even though its restore function supports it. Follow [backup and recovery](../operations/backup-recovery.md).
 
-Sources: , , .
-
 ### Diagnostic commands can initialize application schema
 
 CLI helpers that construct the PostgreSQL application can apply pending migrations. They are not read-only merely because their output looks diagnostic. Take and verify a backup before running new-release CLI tools against an older production database.
-
-Sources: , .
 
 ### CLI retention uses a separate policy source
 
@@ -55,13 +49,9 @@ Sources: , , . See [retention procedures](../operations/procedures.md#retention-
 
 The current first-run UI submits all six profile documents and repairs its known retained legacy five-kind payload by inserting empty `PREFERENCES` before retrying. It persists the repair before sending and preserves the durable operation ID and every other field. Complete retained submissions replay unchanged. The setup operation commits all stages transactionally; profile validation failures do not record the operation. The historical `2026.10.10.4` mismatch is not a current source limitation. Verify the installed release and see [initial setup](../getting-started/initial-setup.md) for recovery; do not clear retained submissions or assume older partial records are absent.
 
-Sources: , , , .
-
 ### Verify terminal execution on the installed deployment
 
 Scheduler dispatch now receives the composed stores, and task-board execution awaits asynchronous store lookups and execution updates. These historical wiring defects are resolved in the inspected source. This documentation update did not execute a real scheduled or task-board model turn. A dispatch acknowledgement still does not prove completion: inspect terminal run/task receipts and test a harmless job before relying on unattended work. See [workers and tasks](../concepts/workers-tasks.md).
-
-Sources: , .
 
 ### Minion process lifecycle is not a guaranteed deadline
 
@@ -79,3 +69,13 @@ Sources: , , . See [Agents and minions](../concepts/agents-minions.md#completion
 - Context usage is an estimate, not an exact token-meter guarantee.
 
 Source: . See [trust boundaries](../security/trust-boundaries.md), [observability](../operations/observability.md), and [troubleshooting](../operations/troubleshooting.md).
+
+
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/package.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/package.json)
+- [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
+- [backend/src/cli-postgres.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/cli-postgres.mjs)

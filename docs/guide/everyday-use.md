@@ -36,6 +36,12 @@ Type `/help` to see chat commands. The composer also offers `/context`, `/contex
 
 [Source: session and group dialogs](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/chat/ChatComposerDialogs.tsx#L30-L60) · [Source: reset result](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/scripts/burrow-ui.mjs#L2625-L2626) · [Source: commands](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/chat/ChatComposer.tsx#L8-L14) · [Source: group mentions](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/groups/GroupChannelsPage.tsx#L122-L147)
 
+### If a run appears stuck
+
+Use **Stop response**, then check the run's terminal status and reload the persisted transcript before retrying the request. Reset preserves archives but changes the active conversation generation; avoid treating it as a routine retry button while an important write may still be running.
+
+Newer Core/UI code reviewed on 21 October adds cancellation deadlines, reset-generation fencing and terminal transcript reconciliation. These are not part of the inspected public 2026.10.19 snapshot. They do not undo an external side effect already completed before cancellation. See [release status](../project/release-status.md).
+
 ## Read and edit workspace files
 
 In chat, open a file from the **Workspace** panel. It opens in a document tab. Click **Edit**, make your changes, then **Save**. Closing a modified file tab asks whether to discard unsaved edits. Saving writes to that tab's agent workspace; changing the selected agent does not retarget an already-open file tab.

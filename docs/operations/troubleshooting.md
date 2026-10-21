@@ -1,7 +1,9 @@
 # Troubleshooting
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 
 Start with the installed version, exact error, expected deployment shape, and relevant agent/session/run ID. Avoid changing several settings at once or retrying an operation that may still be running.
 
@@ -50,16 +52,16 @@ Create a private `setup.json` file with this shape, replacing the fictional name
 
 ```json
 {
-  "operationId": "initial-setup-assistant-2026-10-10"
-  "operator": { "name": "Your display name", "avatar": "" }
-  "agent": { "id": "assistant", "name": "Assistant", "enabled": true }
-  "agentIdentity": { "avatar": "" }
+  "operationId": "initial-setup-assistant-2026-10-10",
+  "operator": { "name": "Your display name", "avatar": "" },
+  "agent": { "id": "assistant", "name": "Assistant", "enabled": true },
+  "agentIdentity": { "avatar": "" },
   "documents": [
-    { "kind": "SOUL", "markdown": "Describe the agent's role here." }
-    { "kind": "RULES", "markdown": "" }
-    { "kind": "ORIENTATION", "markdown": "" }
-    { "kind": "PREFERENCES", "markdown": "" }
-    { "kind": "TOOLS", "markdown": "" }
+    { "kind": "SOUL", "markdown": "Describe the agent's role here." },
+    { "kind": "RULES", "markdown": "" },
+    { "kind": "ORIENTATION", "markdown": "" },
+    { "kind": "PREFERENCES", "markdown": "" },
+    { "kind": "TOOLS", "markdown": "" },
     { "kind": "DREAM_MEMORY", "markdown": "" }
   ]
 }
@@ -80,8 +82,6 @@ curl --fail-with-body -sS "$BASE/api/setup/status"
 If authentication is configured, use an authorized client instead. For Basic authentication, add `--user "$BURROW_USERNAME"` and let curl prompt; never disable authentication for this workaround. An OIDC-only deployment needs its authenticated session/client.
 
 Expected result: the operation returns `ok: true` and the intended agent, and setup status reports `configured: true` / `wizardStep: "ready"`. Reload the UI, review the saved profiles and schedules, then follow [model setup](../getting-started/initial-setup.md#configure-a-usable-model). Retain the request privately until an uncertain response is resolved, then remove the temporary copy when no longer needed. Do not put credentials in it.
-
- ·  ·  · .
 
 ## Update reports health failure
 
@@ -131,10 +131,10 @@ Confirm the actual socket directory first. The default is `$HOME/.burrow/postgre
   PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=1000' \
   "$PSQL" -X -w -v ON_ERROR_STOP=1 \
     -h "$SOCKET" -p 5432 -U "$(id -un)" -d postgres <<'SQL'
-SELECT pid, state
-       clock_timestamp() - query_start AS query_age
-       clock_timestamp() - xact_start AS transaction_age
-       wait_event_type, wait_event
+SELECT pid, state,
+       clock_timestamp() - query_start AS query_age,
+       clock_timestamp() - xact_start AS transaction_age,
+       wait_event_type, wait_event,
        pg_blocking_pids(pid) AS blocking_pids
 FROM pg_stat_activity
 WHERE datname = current_database()
@@ -157,11 +157,9 @@ Burrow holds a transaction-scoped advisory lock and applies pending migrations i
 
 If diagnosis remains inconclusive, preserve the build, PID, elapsed observations, wait/blocker details and sanitized errors for investigation. Do not kill the backend, restart repeatedly, clear the migration ledger, edit checksums or force an older app onto the database as a progress test. Any interruption or recovery needs a deliberate plan and a restorable backup.
 
- ·  · .
-
 ## API documentation does not load
 
-The server expects `backend/docs/openapi.json` for `/api/openapi.json`, but the current assembly does not package upstream Backend docs. The Scalar page can load while its schema request fails. Use this site's [API reference](../reference/api.md) and note the packaging limitation; copying files into a running app is not part of documentation maintenance.
+The public **2026.10.19** assembly includes `backend/docs/openapi.json`, served at `/api/openapi.json`. If Scalar loads without a schema, inspect the schema request, authentication and installed file/version rather than assuming all public assemblies omit it. The packaged contract is not proof of complete current handler parity; use the [API reference](../reference/api.md).
 
 ## Model configuration or provider failure
 
@@ -191,3 +189,12 @@ Preview cleanup and inspect the selected retention policy before confirming. Cur
 
 Include build version/source pins, deployment shape, sanitized exact error, relevant IDs, attempted steps, and terminal check results. Exclude settings keys, tokens/passwords, raw environment dumps, and unrelated conversation material. Distinguish a static source limitation from a reproduced failure.
 
+
+
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
+- [backend/scripts/burrow-ui.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/burrow-ui.mjs)

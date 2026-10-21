@@ -51,7 +51,16 @@ If an assigned remote provider is unavailable, Core reports an execution error r
 
 [Source: agent assignment format](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/agent-registry.mjs#L10-L35) · [Source: remote routing](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/process-execution-router.mjs#L24-L45) · [Source: Node Goblin provider eligibility](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/execution-provider-approval.mjs#L1-L33)
 
+### Keep access to the home Burrow
+
+When Node Goblin points shell and filesystem tools at a remote host, those tools operate on that host. Install [Burrow Backdoor](https://burrow-docs.blissful-psychosis.com/burrow-backdoor/) in the agent's home Burrow for its diagnostic and supported administrative operations. Backdoor's agent scope and administrative authority still apply.
+
+Core's mod-access settings changed after public 2026.10.19: newer Core permits direct UI use with `authMode: none`, while authenticated mode requires operator login. API tokens do not authorize the operator access-settings route in either path. Updating only the Backdoor package does not update this Core behavior.
+
+For authoring a mod, start with [Burrow Tutor](https://burrow-docs.blissful-psychosis.com/burrow-tutor/) and its [contract guide](https://burrow-docs.blissful-psychosis.com/burrow-tutor/contract/).
+
 ## Permissions and hard blocks
+
 
 !!! warning "A workspace is not a sandbox"
     Agent workspaces organize files and context. Core explicitly does not create an agent-specific filesystem boundary. Run Burrow and third-party code with appropriate operating-system permissions and only give it access you intend it to have. Mods run JavaScript in a child process; a separate process is not an operating-system sandbox.

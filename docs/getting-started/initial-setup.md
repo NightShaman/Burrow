@@ -1,7 +1,9 @@
 # Initial setup
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 
 Complete setup from the local listener before exposing Burrow to other machines. Keep [authentication](../security/authentication.md) and the [settings encryption key](../reference/configuration.md) under operator control.
 
@@ -21,8 +23,10 @@ Setup completion is based on persisted records: a nonempty operator name and at 
 
 The current wizard submits all six profile kinds: `SOUL`, `RULES`, `ORIENTATION`, `PREFERENCES`, `TOOLS`, and `DREAM_MEMORY`. `/api/setup/operation` commits identity, agent, profiles, completion and its replay record together in one PostgreSQL transaction.
 
+
 !!! note "Recovering the historical 2026.10.10.4 profile error"
     That wizard omitted `PREFERENCES` and could fail with `agent_profile_documents_complete_set_required`. The current UI repairs its known retained five-document submission by adding empty `PREFERENCES` and saving the repaired payload in this browser before sending. It preserves the operation ID, existing text and all other input. Failed profile validation does not commit that operation. Older installations may have partial records; use the [targeted recovery procedure](../operations/troubleshooting.md#first-run-profile-error) rather than assuming an agent exists or changing its name repeatedly.
+
 
 For a lost response or transient error, retry in the same browser to recover the original submission. Complete six-document submissions are replayed unchanged: do not clear browser storage or change a committed operation's input. If saving the legacy repair to browser storage fails, no request is sent; restore storage access and retry. OAuth connections created separately are outside the setup transaction.
 
@@ -53,7 +57,7 @@ Set an explicit agent identity and useful instructions. Avoid copying private ho
 
 ## Set operating preferences
 
-- **Settings → General → Operator timezone:** choose the intended IANA timezone; inherited schedules follow it
+- **Settings → General → Operator timezone:** choose the intended IANA timezone; scheduled jobs use it, including jobs with retired legacy timezone overrides
 - **Settings → Connections → Authentication:** configure the chosen authentication mode before remote access
 - **Settings → Connections → MCP servers:** add only required integrations; assign permitted tools to the intended agent
 - **Settings → General → Trace retention:** review retention and preview cleanup before destructive maintenance
@@ -74,6 +78,14 @@ The main UI also has **Tasks**, **Archive**, **Brains**, **Forge**, and **Settin
 
 ## Source evidence
 
--  and 
--  and 
+-  and
+-  and
 
+
+
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/src/postgres-scheduled-job-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-scheduled-job-store.mjs)

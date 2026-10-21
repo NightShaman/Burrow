@@ -1,9 +1,12 @@
 # Memory and continuity
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 BURROW separates original conversation evidence, editable agent profiles, operational working memory and explicit saved memories. These have different scopes, lifetimes and routes into model context. Understanding those boundaries helps explain both recall and retention.
+
+The detailed contracts below describe the public 2026.10.19 baseline unless a newer behavior is explicitly marked. [Release status](../project/release-status.md) identifies the differences.
 
 ## Memory layers
 
@@ -22,11 +25,15 @@ Originals remain the evidence authority. A memory record, excerpt or summary can
 ## Profiles and preferences
 
 Every agent has six profile kinds: `SOUL`, `RULES`, `ORIENTATION`, `PREFERENCES`, `TOOLS` and `DREAM_MEMORY`. Each stores Markdown in PostgreSQL and is bounded to 48,000 characters. References beginning `postgres:agent_profile_documents/` are virtual file-like references, not physical Markdown files to edit on disk. Complete profile replacement requires all six documents.
-`PREFERENCES` holds learned or operator-edited behavioral preferences. Accepted automatic changes commit the document, learning state and audit metadata atomically. `DREAM_MEMORY` is a compact, human-editable, semi-durable summary produced by [Dream](dreams.md); mutable facts should be checked against current evidence. Profile roles and prompt assembly are covered in [Agents and minions](agents-minions.md).
+`PREFERENCES` holds learned or operator-edited behavioral preferences. Accepted automatic changes commit the document, learning state and audit metadata atomically. `DREAM_MEMORY` is the compact, human-editable summary used by the public 2026.10.19 Dream path. In the newer reviewed Core, it remains legacy stored data and is excluded from ordinary prompt assembly; Dreaming publishes searchable Brains connections instead. Mutable facts still require current evidence. See [Dream cycles](dreams.md). Profile roles and prompt assembly are covered in [Agents and minions](agents-minions.md).
+
+### Newer Core: shared Rules and Orientation
+
+**Settings → General → Global documents** edits Global Rules and Global Orientation. Each agent's **Profile documents** has independent **Include Global Rules** and **Include Global Orientation** controls. Enabled global prose precedes the corresponding local document; the local document is preserved. Existing agents default to both controls off. These are prompt guidance, not tool grants or operating-system access controls.
 
 ## Explicit scope and recall
 
-The runtime/operator selects the continuity scope. A model can select within its current scope but cannot invent a scope from a path or chat prose. A tool request with a different project value fails with `continuity_scope_mismatch`; missing scope also fails closed. 
+The runtime/operator selects the continuity scope. A model can select within its current scope but cannot invent a scope from a path or chat prose. A tool request with a different project value fails with `continuity_scope_mismatch`; missing scope also fails closed.
 
 | Tool | Contract |
 |---|---|
@@ -36,36 +43,36 @@ The runtime/operator selects the continuity scope. A model can select within its
 | `session_read_handoff` | Read a recent local handoff |
 | `session_write_handoff` | Write an explicit agent/session-local handoff |
 
-These names describe memory executors; availability also depends on the runtime's [tool configuration and permissions](tools.md). 
+These names describe memory executors; availability also depends on the runtime's [tool configuration and permissions](tools.md).
 
-Ordinary working-continuity assembly deliberately returns no ambient working records or rolling cards. It also keeps handoffs as recall metadata rather than projecting them into active prompt rows. Explicit tool recall remains available; `entersPrompt: false` describes this ambient-continuity policy and does not mean that a requested tool result is invisible to the agent. 
+Ordinary working-continuity assembly deliberately returns no ambient working records or rolling cards. It also keeps handoffs as recall metadata rather than projecting them into active prompt rows. Explicit tool recall remains available; `entersPrompt: false` describes this ambient-continuity policy and does not mean that a requested tool result is invisible to the agent.
 
 ## Operational working memory
 
-Records have a kind (`decision`, `finding`, `blocker`, `handoff` or `task`) and state (`active`, `resolved` or `superseded`). Titles allow 240 characters, content 6,000 characters and source-reference lists up to 12 entries. Records retain creation/update/expiry timestamps and optional pinning. 
+Records have a kind (`decision`, `finding`, `blocker`, `handoff` or `task`) and state (`active`, `resolved` or `superseded`). Titles allow 240 characters, content 6,000 characters and source-reference lists up to 12 entries. Records retain creation/update/expiry timestamps and optional pinning.
 
 The default record TTL is **90 days**, configurable from 1 to 36,500 days. Pinned records bypass expiry filtering. Rewriting unchanged material preserves its existing expiry rather than extending it indefinitely. Search is bounded to ten results; listing is bounded to 100.
 A memory item whose kind is `task` is operational evidence. Board task status and execution receipts have their own store and lifecycle; see [Workers and tasks](workers-tasks.md).
 
 ## Tiddle rolling continuity
 
-Tiddle collects terminal-turn residue with bounded message excerpts and periodically proposes continuity cards. The terminal append is intentionally cheap: it stores residue without a model call or direct card mutation. The normal pass runs every **four hours**, considers the last **24 hours** of residue and tracks success separately per scope. A failed scope therefore does not require replaying already successful scopes. 
+Tiddle collects terminal-turn residue with bounded message excerpts and periodically proposes continuity cards. The terminal append is intentionally cheap: it stores residue without a model call or direct card mutation. The normal pass runs every **four hours**, considers the last **24 hours** of residue and tracks success separately per scope. A failed scope therefore does not require replaying already successful scopes.
 
 Residue and history are native `tiddle_entries` rows with `tiddle_envelopes` retaining scheduling and envelope metadata. Residue appends prune older than the 24-hour cutoff and replace the same reference; history appends prune older than 180 days. The previous 240-residue count cap is removed. Due work uses an indexed `next_run_at` projection. These storage changes do not remove the bounded evidence excerpts or synthesis selection budget.
 The default proposal is a no-op. One vivid exchange alone is not sufficient recurrence. Accepted updates target exact card identities and preserve evidence references. Behavioral corrections may become preference signals, but Tiddle does not directly rewrite agent profiles. Card changes, history and per-scope success commit atomically under an agent-scoped PostgreSQL advisory lock.
 Cross-scope synthesis considers a 21-day window, requires at least two source cards across two scopes and checks referenced card identities. Its daily boundary is the first due pass on a different **UTC date**, rather than a separate local-time nightly cron. The scheduler checks every 60 seconds and starts with an immediate tick.
-Rolling cards use the persisted rolling TTL, **90 days by default**. Expired cards are filtered from reads; that is not a guarantee of immediate physical deletion. Relational scope and identity are `(agent_id, project, card_id)`, and card JSON preserves evidence and legacy metadata. 
+Rolling cards use the persisted rolling TTL, **90 days by default**. Expired cards are filtered from reads; that is not a guarantee of immediate physical deletion. Relational scope and identity are `(agent_id, project, card_id)`, and card JSON preserves evidence and legacy metadata.
 
-`tiddleStatus.cardTtlDays` now reads the persisted rolling TTL, so status and the write policy share the same setting. 
+`tiddleStatus.cardTtlDays` now reads the persisted rolling TTL, so status and the write policy share the same setting.
 
 ## Session handoffs
 
 A handoff summarizes the current goal, result and evidence references. Runtime-generated handoffs skip trivial exchanges but can retain substantive planning even when no tool ran. The curator distinguishes an assistant's assertion from successful tool evidence.
-Handoffs default to **14 days**, with a 240-character title, 24,000-character body and at most eight source references. An explicit handoff cannot be overwritten by an automatic runtime handoff. Recent-handoff selection prioritizes explicit material, then the current session. Handoffs are recall aids, separate from the execution-owner protocol described in [Persistence architecture](../architecture/persistence.md#runtime-continuity-and-crash-recovery). 
+Handoffs default to **14 days**, with a 240-character title, 24,000-character body and at most eight source references. An explicit handoff cannot be overwritten by an automatic runtime handoff. Recent-handoff selection prioritizes explicit material, then the current session. Handoffs are recall aids, separate from the execution-owner protocol described in [Persistence architecture](../architecture/persistence.md#runtime-continuity-and-crash-recovery).
 
 ## Brains: explicit saved memories
 
-Brains replaces the retired Albdruck operator surface. Each memory has a single `agentId` owner, a generated immutable ID, `title`, `content`, string `sourceRefs`, a revision and ownership/provenance metadata. Saved memories have **no TTL** and are **not automatically loaded into prompts**. They are useful for durable preferences and compact project knowledge, but a saved claim or source reference is not verification of current state.
+Brains replaces the retired Albdruck operator surface. Newer Core also stores Dream-generated connections here, marked by their `dreaming` origin; public 2026.10.19 does not yet use that publication path. Each memory has a single `agentId` owner, a generated immutable ID, `title`, `content`, string `sourceRefs`, a revision and ownership/provenance metadata. Saved memories have **no TTL** and are **not automatically loaded into prompts**. They are useful for durable preferences and compact project knowledge, but a saved claim or source reference is not verification of current state.
 ### Use Brains in the interface
 
 1. Open **Brains** and choose **Agent owner** before searching or writing.
@@ -76,11 +83,11 @@ Brains replaces the retired Albdruck operator surface. Each memory has a single 
 ### Explicit retrieval and updates
 
 Agents use `brain_search`, `brain_read`, `brain_save`, `brain_update` and `brain_remove`, subject to their tool permissions. The executor binds these calls to the active agent; it rejects a different requested agent. Updates and removals require `expectedRevision`. Removal creates a tombstone and hides the item from normal reads/search; it does not purge conversation originals or constitute physical erasure. Search before writing and read back important changes.
-The operator list uses case-insensitive substring matching over title/content, with agent/query-bound cursors. Optional Brain embeddings enrich explicit `brain_search`; they do not change the operator list into semantic search and do not enable automatic recall. Embeddings are disabled by default. When enabled, the store combines lexical matching with exact cosine ranking over the current agent's saved memories. Provider failure falls back to lexical results with `retrieval.fallback: embedding_unavailable`. See [memory API](../reference/api/memory.md#brain-embeddings) for settings and indexing status. 
+The operator list uses case-insensitive substring matching over title/content, with agent/query-bound cursors. Optional Brain embeddings enrich explicit `brain_search`; they do not change the operator list into semantic search and do not enable automatic recall. Embeddings are disabled by default. When enabled, the store combines lexical matching with exact cosine ranking over the current agent's saved memories. Provider failure falls back to lexical results with `retrieval.fallback: embedding_unavailable`. See [memory API](../reference/api/memory.md#brain-embeddings) for settings and indexing status.
 
 ### Legacy Albdruck migration
 
-The repeat-safe import preserves legacy knowledge/evidence/revision snapshots. Agent-scoped records retain their owner; legacy global records become owned by `hatchet`. Imported records are labelled `migrated_albdruck`, and the UI exposes **Legacy migration details**. Non-active legacy records are imported as deleted; operator-corrected/deleted records preserve operator ownership. Re-running the import does not overwrite edits or resurrect tombstones. Legacy tables remain present for migration/internal compatibility; they are not the current operator API. 
+The repeat-safe import preserves legacy knowledge/evidence/revision snapshots. Agent-scoped records retain their owner; legacy global records become owned by `hatchet`. Imported records are labelled `migrated_albdruck`, and the UI exposes **Legacy migration details**. Non-active legacy records are imported as deleted; operator-corrected/deleted records preserve operator ownership. Re-running the import does not overwrite edits or resurrect tombstones. Legacy tables remain present for migration/internal compatibility; they are not the current operator API.
 
 ## Retention is per store
 

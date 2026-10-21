@@ -1,7 +1,9 @@
 # Tasks, schedules and groups
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 
 BURROW exposes several work surfaces with different state models. The task board, scheduled jobs, group channels and retained Workbench compatibility API are not interchangeable task queues.
 
@@ -11,18 +13,21 @@ Create a project with `{name}`. Create a task with at least `projectId` and `tit
 
 `POST /api/task-board/tasks/{id}/execute` launches work through the assigned agent after awaiting the task/project lookups and execution record. Verify the returned outcome and then inspect the terminal execution receipt. Its response is not final task completion, and execution does not automatically move the task through board columns. The current UI shows five columns and creates tasks in To Do; the API/store default is Backlog.
 
-A conversation can bind an active project. GET/DELETE use `agentId` and optional `sessionId` (default `default`); PUT additionally requires `projectId`. The binding supports continuity and task context, not filesystem confinement.
+Task history is available through `GET /api/task-board/tasks/{taskId}/history` with `limit` and `before`. Task document attachments have separate list/upload/download/delete endpoints; their bytes and audit metadata are stored in PostgreSQL. These are distinct from chat attachment artifacts.
 
- · [Task semantics](../../concepts/workers-tasks.md)
+A conversation can bind an active project. GET/DELETE use `agentId` and optional `sessionId` (default `default`); PUT additionally requires `projectId`. The binding supports continuity and task context, not filesystem confinement.
+See [Task semantics](../../concepts/workers-tasks.md)
 
 ## Scheduled jobs
 
-Create requires nonblank `agentId`, `name`, `prompt` and a five-field `cron` expression; timezone and model selection are separate stored settings. List can filter `agentId` and `enabled`. Job detail, PATCH, DELETE and run history use the job ID; run history accepts `limit`.
+Create requires nonblank `agentId`, `name`, `prompt` and a five-field `cron` expression; model selection is a separate stored setting. Scheduling uses the operator timezone; legacy per-job timezone input is not authoritative in public 2026.10.19. List can filter `agentId` and `enabled`. Job detail, PATCH, DELETE and run history use the job ID; run history accepts `limit`.
 
 `POST /api/scheduled-jobs/{jobId}/trigger` returns 202 admission. Inspect run history for terminal outcome. To cancel an active run, POST its `/runs/{runId}/cancel` path with optional `reason`; a non-active run returns 404. Cancellation does not undo completed tools.
 
+
 !!! warning "Validate execution, not only scheduling"
     The current scheduler receives the composed stores; the old missing-store wiring defect is resolved. Saving a cron job or receiving a trigger acknowledgement still does not establish successful unattended execution. Inspect terminal receipts and try a harmless job before relying on it.
+
 
 ## Group channels
 
@@ -74,6 +79,19 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `GET` | `/api/task-board/tasks/{taskId}` | Read task-board task |
 | `PATCH` | `/api/task-board/tasks/{taskId}` | Update task-board task |
 | `DELETE` | `/api/task-board/tasks/{taskId}` | Delete task-board task |
+| `GET` | `/api/task-board/tasks/{taskId}/history` | Read task audit history |
+| `GET` | `/api/task-board/tasks/{taskId}/attachments` | List task document attachments |
+| `POST` | `/api/task-board/tasks/{taskId}/attachments` | Upload a task document attachment |
+| `GET` | `/api/task-board/tasks/{taskId}/attachments/{attachmentId}` | Download task document bytes |
+| `DELETE` | `/api/task-board/tasks/{taskId}/attachments/{attachmentId}` | Delete a task document attachment |
 | `GET` | `/api/task-board/conversation-project` | Get the conversation active project |
 | `PUT` | `/api/task-board/conversation-project` | Set the conversation active project |
 | `DELETE` | `/api/task-board/conversation-project` | Clear the conversation active project |
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/scripts/ui/task-board-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/task-board-routes.mjs)
+- [backend/src/postgres-task-audit-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-task-audit-schema.mjs)
+- [backend/src/postgres-scheduled-job-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-scheduled-job-store.mjs)

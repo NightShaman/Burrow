@@ -1,7 +1,9 @@
 # Settings and integrations
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 
 These are privileged operator routes. They share the normal interactive authentication gate; `diagnostics:read` Bearer tokens do not authorize them. Stored settings, environment overrides and effective runtime behavior are explained in [configuration](../configuration.md).
 
@@ -16,7 +18,7 @@ In the UI, use **Settings → Connections → Model providers → Connect**, sel
 
 Connection save accepts `provider`, `apiType`, `baseUrl`, and `models`; include `id` to update an existing connection. Omit `apiKey` to preserve an existing credential, or supply a nonblank replacement. Discovery refreshes provider/catalog facts while preserving explicit operator capability overrides. Discovery, connection authentication, model enablement, and agent selection are separate state transitions.
 
-A per-agent selection uses `connectionId` and `model`, with optional `reasoningEffort` (default `off`) and `temperature` (0–2; omission preserves the prior value or defaults to 0.2). The backend rejects an unknown connection, a model not enabled in its catalog, absent authentication, or an advertised unsupported reasoning effort. Archive-summary selection is independent and can be cleared. Adapter compatibility rules can omit a saved temperature from the provider request.
+A per-agent selection uses `connectionId` and `model`, with optional `reasoningEffort` (default `off`) and `temperature` (0–2; omission preserves the prior value or defaults to 0.2). The backend rejects an unknown connection, a model not enabled in its catalog, absent authentication, or an advertised unsupported reasoning effort. Archive-summary selection is independent and can be cleared. Public 2026.10.19 also has a separate per-agent Minion selection at `/api/agents/{agentId}/minion-model-selection`, using the same connection/model, effort and temperature fields. Adapter compatibility rules can omit a saved temperature from the provider request.
 
 Prompt-cache flags, arbitrary request extras and cache-retention controls are not exposed by the standard model-connection form. See [current cache semantics](../../concepts/models.md#what-caching-currently-means) before treating an adapter option as a supported settings field.
 
@@ -36,11 +38,13 @@ Discover/diagnose use `connectionId`; Diagnose may also receive `toolName` and a
 Agent grants use `{ "tools": [{ "connectionId": "…", "toolName": "…" }] }`; PUT replaces the full set. Read-modify-write deliberately. Secret update rules and the asynchronous delete-acknowledgement caveat are in [MCP](../../concepts/mcp.md).
 ## Skills, identities and policy
 
-Managed skills are central text records with per-agent assignments. They describe reusable instructions; assignments do not install executables or expand execution permission. Identity/profile settings likewise differ from authentication principals.
+Skills have central PostgreSQL records and per-agent assignments. Public 2026.10.19 also supports Git-backed filesystem packages, tracked package files and synchronization receipts. An assignment does not expand execution permission; importing a package can place executable support files on disk, so review its source before use. Git preview/import, source management, explicit sync, history and file-download endpoints are listed below. Identity/profile settings likewise differ from authentication principals.
 
-Timezone GET/PUT manages the operator's IANA timezone. Explicit-timezone schedules retain that timezone; inherited schedules track the current operator zone. Execution-boundary GET/PUT manages concrete configured blockers; see [enforcement limits](../../security/permissions.md).
+Timezone GET/PUT manages the operator's IANA timezone. Scheduled jobs, Dreams and Git-skill sync schedules all use that zone in public 2026.10.19; per-schedule timezone overrides are retired and reconciliation recalculates upcoming occurrences. Execution-boundary GET/PUT manages concrete configured blockers; see [enforcement limits](../../security/permissions.md).
 
-Trace retention supports read/save, a non-deleting preview and an explicit run. `/api/retention` and `/api/retention/cleanup` are compatibility aliases; new clients use `/api/settings/retention/*`. This is trace retention, not a per-conversation purge API. Retired Albdruck routes are not a supported cleanup path; see [memory boundaries](memory.md).
+Browser-origin settings read/save a boolean `checkOrigin`; the environment can override it. Keep checking enabled unless the deployment has an independent reason to disable it. OpenTelemetry settings read/save export enablement, collector endpoint and write-only exporter headers; enabling export shares telemetry with that collector.
+
+Trace retention supports read/save, a non-deleting preview and an explicit run. `/api/retention` and `/api/retention/cleanup` are compatibility aliases; new clients use `/api/settings/retention/*`. Preview and run require the exact current `policy` object; a missing or changed policy returns 409 `retention_policy_changed`. The explicit run uses that supplied current policy without requiring the background enabled flag. This is trace retention, not a per-conversation purge API. Retired Albdruck routes are not a supported cleanup path; see [memory boundaries](memory.md).
 ## Endpoint inventory
 
 Methods are significant. Braced segments are placeholders; URL-encode identifiers. See the [contract and conventions](../api.md) for artifact limitations.
@@ -69,6 +73,8 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `POST` | `/api/retention/cleanup` | Deprecated: run retention cleanup (compatibility) |
 | `GET` | `/api/agents/{agentId}/model-selection` | Read agent model selection |
 | `PUT` | `/api/agents/{agentId}/model-selection` | Update agent model selection |
+| `GET` | `/api/agents/{agentId}/minion-model-selection` | Read separate Minion model selection |
+| `PUT` | `/api/agents/{agentId}/minion-model-selection` | Save separate Minion model selection |
 | `GET` | `/api/agents/{agentId}/mcp-tools` | Read agent MCP tools |
 | `PUT` | `/api/agents/{agentId}/mcp-tools` | Update agent MCP tools |
 | `POST` | `/api/settings/model-connections/openai-oauth/start` | Start OpenAI OAuth login |
@@ -85,17 +91,36 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `GET` | `/api/settings/retention` | Read operator-managed retention policy and cleanup preview |
 | `PUT` | `/api/settings/retention` | Save operator-managed retention policy |
 | `POST` | `/api/settings/retention/preview` | Preview retention cleanup without deleting traces |
-| `POST` | `/api/settings/retention/run` | Run cleanup using the enabled retention policy |
+| `POST` | `/api/settings/retention/run` | Run cleanup with the exact current policy |
 | `POST` | `/api/settings/mcp-connections/diagnose` | Diagnose MCP connection |
 | `GET` | `/api/settings/api-tokens` | List API token metadata |
 | `POST` | `/api/settings/api-tokens` | Create a scoped API token |
 | `DELETE` | `/api/settings/api-tokens/{tokenId}` | Revoke an API token |
-| `GET` | `/api/settings/skills` | List centrally managed text skills |
+| `GET` | `/api/settings/skills` | List managed skill records |
 | `POST` | `/api/settings/skills` | Create a centrally managed text skill |
 | `GET` | `/api/settings/skills/{id}` | Read a text skill |
 | `PATCH` | `/api/settings/skills/{id}` | Update a text skill |
 | `DELETE` | `/api/settings/skills/{id}` | Delete a text skill |
 | `GET` | `/api/agents/{agentId}/skills` | Read an agent skill assignment and effective catalog |
 | `PUT` | `/api/agents/{agentId}/skills` | Replace an agent skill assignment |
-| `GET` | `/api/settings/timezone` | Read operator timezone for agent context and schedule defaults |
-| `PUT` | `/api/settings/timezone` | Save IANA operator timezone without changing browser-local UI or existing schedules |
+| `GET` | `/api/settings/timezone` | Read operator timezone for agent context and schedules |
+| `PUT` | `/api/settings/timezone` | Save operator timezone; schedule reconciliation uses the new zone |
+| `GET`, `PUT` | `/api/settings/browser-origin` | Read/save browser Origin checking |
+| `GET`, `PUT` | `/api/settings/browser-tab` | Read/save browser tab settings |
+| `GET`, `PUT` | `/api/settings/opentelemetry` | Read/save collector and export settings |
+| `POST` | `/api/settings/skills/git/preview` | Preview a Git skill package |
+| `POST` | `/api/settings/skills/git/import` | Import a Git skill package |
+| `GET`, `PUT`, `DELETE` | `/api/settings/skills/{id}/source` | Read/save/remove Git source metadata |
+| `POST` | `/api/settings/skills/{id}/sync` | Synchronize a saved Git source |
+| `GET` | `/api/settings/skills/{id}/history` | Read synchronization receipts |
+| `GET` | `/api/settings/skills/{id}/files` | List tracked package files |
+| `GET` | `/api/settings/skills/{id}/files/{filePath}` | Download a tracked package file |
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/scripts/ui/settings-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/settings-routes.mjs)
+- [backend/scripts/ui/general-settings-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/general-settings-routes.mjs)
+- [backend/scripts/ui/skill-source-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/skill-source-routes.mjs)
+- [backend/src/postgres-scheduled-job-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-scheduled-job-store.mjs)

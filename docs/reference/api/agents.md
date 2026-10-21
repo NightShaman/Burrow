@@ -1,7 +1,9 @@
 # Agents and setup
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 
 The agent registry is PostgreSQL-backed. An empty registry is valid; a fallback agent label in code does not establish that a real agent exists. Start with `GET /api/setup/status` and `GET /api/agents`.
 
@@ -11,7 +13,7 @@ Setup status distinguishes `fresh`, `incomplete` and `ready`. `POST /api/setup/c
 
 Use the [initial setup guide](../../getting-started/initial-setup.md). The current wizard calls `POST /api/setup/operation` with an `operationId`, operator identity, agent, agent identity, a documents array and optional model selection. These durable stages share one transaction. A completed operation can be replayed with the same ID and identical input; changed input with that ID conflicts.
 
-The current wizard sends all six profile kinds. Before retrying its known retained legacy five-kind submission, it inserts empty `PREFERENCES` and persists that repair while preserving the operation ID and every other field. Complete retained submissions replay unchanged. Profile validation failures roll back the operation's writes and do not record a replay ID; a changed payload against an already committed ID conflicts. Separately created provider connections are outside the transaction. See the [recovery procedure](../../operations/troubleshooting.md#first-run-profile-error) and .
+The current wizard sends all six profile kinds. Before retrying its known retained legacy five-kind submission, it inserts empty `PREFERENCES` and persists that repair while preserving the operation ID and every other field. Complete retained submissions replay unchanged. Profile validation failures roll back the operation's writes and do not record a replay ID; a changed payload against an already committed ID conflicts. Separately created provider connections are outside the transaction. See the [recovery procedure](../../operations/troubleshooting.md#first-run-profile-error).
 ## Registry
 
 Create requires `name`; an optional `id` must be a string and pass registry validation. Update supported identity/configuration fields through PATCH; deleting an agent affects its related store records, so treat it as a destructive administrative action. Disabling an agent is separate from deletion.
@@ -21,7 +23,11 @@ Create requires `name`; an optional `id` must be a string and pass registry vali
 
 The six kinds are `SOUL`, `RULES`, `ORIENTATION`, `PREFERENCES`, `TOOLS` and `DREAM_MEMORY`. Each is at most 48,000 characters. GET returns the persisted documents; PUT replaces a complete set and requires all six, rather than merging an arbitrary one-document patch. Preserve the other current documents when preparing a replacement.
 
-These documents live in PostgreSQL, even when rendered with file-like names or `postgres:` references. Descriptive tool/profile text is not an MCP grant. Per-agent [model selection and MCP/skill assignments](settings.md) have separate endpoints; [Dream settings](memory.md#dream-controls-missing-from-the-pinned-openapi) also have separate routes.
+These documents live in PostgreSQL, even when rendered with file-like names or `postgres:` references. Descriptive tool/profile text is not an MCP grant. Per-agent [model selection and MCP/skill assignments](settings.md) have separate endpoints; [Dream settings](memory.md#dream-controls) also have separate routes.
+## Development-only shared profiles
+
+Unpromoted build **2026.10.21.2** adds shared `RULES` and `ORIENTATION` documents with per-agent `useGlobalRules` and `useGlobalOrientation` flags. Its `GET`/`PUT /api/settings/global-profile-documents` route and migration 61 are absent from public 2026.10.19; do not require them in a public-release client.
+
 ## Endpoint inventory
 
 Methods are significant. Braced segments are placeholders; URL-encode identifiers. See the [contract and conventions](../api.md) for artifact limitations.
@@ -38,3 +44,10 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `POST` | `/api/setup/complete` | Mark installation setup complete after checking persisted requirements |
 | `POST` | `/api/setup/operation` | Transactional, replay-safe complete first-run setup |
 | `POST` | `/api/agents/overview` | Read bulk agent UI overview |
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/src/agent-profile-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/agent-profile-store.mjs)
+- [backend/scripts/ui/agent-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/agent-routes.mjs)

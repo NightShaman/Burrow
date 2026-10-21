@@ -1,7 +1,9 @@
 # Tools and execution
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 
 Tools are structured capabilities supplied to a model request. The model chooses a tool and arguments; the runtime normalizes the call, reviews it, dispatches it, and returns an observed result. A tool's presence does not establish that a particular invocation will succeed.
 
@@ -15,41 +17,42 @@ The effective schema depends on runtime context and enabled integrations. The na
 | File mutation | `files_write`, `files_edit`, `files_patch` | Write complete content, exact replacement, or patch |
 | Process and Git | `shell_exec`, `git_status`, `git_diff` | Execute commands or collect repository evidence |
 | Conversation and continuity | `session_search`, `session_read_handoff`, `memory_working_search`, `memory_rolling_search` | Retrieve agent-scoped support evidence |
+| Saved memories | `brain_search`, `brain_read`, `brain_save`, `brain_update`, `brain_remove` | Explicit agent-owned saved memories |
 | Continuity updates | `memory_working_write`, `session_write_handoff` | Record explicitly structured operational context |
 | Coordination | `spawn_subagent`, `agent_send_message` | Child tasks or registered peer agents |
 | Work records | `tasks_*`, `scheduled_jobs_*` | Task metadata and scheduled prompts |
 | Discovery | `list_skills`, `load_skill`, `mcp_providers`, `mcp_capabilities`, `mcp_call` | Load instructions or discover/invoke integrations |
 | Generation | `forge_*` | Asynchronous media jobs and artifact attachment |
 
-Schemas, required fields, and feature filters are defined centrally. The supplied schema is authoritative for a particular turn; do not assume every row is available to every agent or minion. 
+Schemas, required fields, and feature filters are defined centrally. The supplied schema is authoritative for a particular turn; do not assume every row is available to every agent or minion.
 
 See [MCP](mcp.md), [Agents and minions](agents-minions.md), and [Workers and tasks](workers-tasks.md) for those specific workflows.
 
 ## Files and working directories
 
-Relative file paths resolve under the current execution root, normally the agent home. A structural filesystem target replaces that root for the turn. An absolute `cwd` applies to one `shell_exec` call; it does not persist as a UI/session project selection. 
+Relative file paths resolve under the current execution root, normally the agent home. A structural filesystem target replaces that root for the turn. An absolute `cwd` applies to one `shell_exec` call; it does not persist as a UI/session project selection.
 
 Example native calls:
 
 ```json
 {
-  "filePath": "/srv/projects/example/src/parser.mjs"
-  "offsetBytes": 0
+  "filePath": "/srv/projects/example/src/parser.mjs",
+  "offsetBytes": 0,
   "maxBytes": 32000
 }
 ```
 
 ```json
 {
-  "command": "npm test"
-  "cwd": "/srv/projects/example"
+  "command": "npm test",
+  "cwd": "/srv/projects/example",
   "reason": "Run the project's test command after the change"
 }
 ```
 
 ### Read evidence and truncation
 
-`files_read` supports byte ranges and reports total size, returned bytes, offset, truncation, and the next offset. Its harness default is 512,000 bytes. Later receipt/prompt projections can be smaller than the raw read, so distinguish the source range read from the content actually delivered to the model. Continue at the reported next range when necessary; a truncated read is not a full-file inspection.  
+`files_read` supports byte ranges and reports total size, returned bytes, offset, truncation, and the next offset. Its harness default is 512,000 bytes. Later receipt/prompt projections can be smaller than the raw read, so distinguish the source range read from the content actually delivered to the model. Continue at the reported next range when necessary; a truncated read is not a full-file inspection.
 
 Listing, finding, and searching are bounded operations:
 
@@ -59,28 +62,30 @@ Listing, finding, and searching are bounded operations:
 - Search skips oversized files and uses a cumulative scan budget
 - Directory traversal does not descend symlink directories
 
-Inspect truncation and warning fields before interpreting an empty or partial result as exhaustive. 
+Inspect truncation and warning fields before interpreting an empty or partial result as exhaustive.
 
 ### Mutations
 
 `files_write` writes complete content and can create parent directories. `files_edit` requires the exact `oldText` to occur once. `files_patch` accepts unified diff or the supported structured patch dialect and records Git evidence around the operation.
 
+
 !!! warning "Multi-file patches are not transactions"
     A structured patch may change earlier files before a later operation fails. Inspect the actual results and repository diff after a failure; do not assume rollback. Workspace validation is advisory, not a sandbox guarantee.
 
-For another project, prefer explicit absolute paths or a shell command with explicit `cwd`, as directed by the tool schema. `files_patch` is not in the remote-native filesystem routing set.  
+
+For another project, prefer explicit absolute paths or a shell command with explicit `cwd`, as directed by the tool schema. `files_patch` is not in the remote-native filesystem routing set.
 
 ## Process execution
 
 The harness supports either a shell command string or an executable plus string argument array. Those forms are mutually exclusive. Native `shell_exec` exposes the command-string form; built-in Git helpers use argument arrays.
 
-Defaults include a 30-second timeout and bounded stdout/stderr capture. The normal harness environment starts with `PATH` and `HOME`, then explicit overrides; it is not a promise to inherit the complete service environment. On Unix, timeout/cancellation terminates the process group and escalates from TERM to KILL. 
+Defaults include a 30-second timeout and bounded stdout/stderr capture. The normal harness environment starts with `PATH` and `HOME`, then explicit overrides; it is not a promise to inherit the complete service environment. On Unix, timeout/cancellation terminates the process group and escalates from TERM to KILL.
 
-Remote process/filesystem operations carry provider ID, target ID, parent run ID, tool call ID, and an operation ID. Those fields establish where a result came from; a familiar path alone does not identify the machine. 
+Remote process/filesystem operations carry provider ID, target ID, parent run ID, tool call ID, and an operation ID. Those fields establish where a result came from; a familiar path alone does not identify the machine.
 
 ## Review and permissions
 
-Every allowed action is re-reviewed at the concrete executor boundary. A stale or forged earlier “allowed” review cannot bypass current malformed-argument checks or configured hard blocks. Denied or invalid native calls produce failed tool results so the model can correct its arguments while preserving provider call/result pairing.  
+Every allowed action is re-reviewed at the concrete executor boundary. A stale or forged earlier “allowed” review cannot bypass current malformed-argument checks or configured hard blocks. Denied or invalid native calls produce failed tool results so the model can correct its arguments while preserving provider call/result pairing.
 
 Agent roots do not provide operating-system isolation. Read [Permissions](../security/permissions.md) and [Trust boundaries](../security/trust-boundaries.md) for the actual enforcement model and caveats.
 
@@ -90,14 +95,14 @@ An integration may return a `protected://` reference instead of a sensitive valu
 
 ```json
 {
-  "command": "example-client status"
+  "command": "example-client status",
   "protectedBindings": {
     "EXAMPLE_TOKEN": "protected://reference-from-an-earlier-result"
   }
 }
 ```
 
-This is illustrative: the reference must come from a real earlier result and remain valid for that caller and turn. It is not a persistent credential string. 
+This is illustrative: the reference must come from a real earlier result and remain valid for that caller and turn. It is not a persistent credential string.
 
 ## Results, verification, and diagnostics
 
@@ -105,4 +110,12 @@ Raw outputs belong to the producing tool and its trace artifacts. Loop state, pe
 
 Normal chat reports completion evidence; legacy mutation workflows apply additional verification gates. A test-looking command name alone is not a universal proof of verification, and mutation recognition differs between current and legacy helpers. See [Execution flow](../architecture/execution-flow.md) and [Known limitations](../project/known-limitations.md).
 
-Treat traces as potentially sensitive. Bounded output and selective redaction are not a guarantee that all artifacts are safe to publish. 
+Treat traces as potentially sensitive. Bounded output and selective redaction are not a guarantee that all artifacts are safe to publish.
+
+
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/src/action-proposal.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/action-proposal.mjs)

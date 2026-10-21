@@ -1,14 +1,18 @@
 # Authentication
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
+
 BURROW authenticates access to its operator UI and HTTP API through one configured mode: `none`, `trusted-proxy`, `basic`, or `oidc`. Diagnostics bearer tokens are a separate, restricted access path. Authentication identifies an operator-facing request; it does not create per-agent operating-system isolation.
 
-This page describes the implementation in version **2026.10.10.4**, source commit `c15064dd177788afcdda357a5e545510f754a754`. The behavior is verified from source, not a live deployment or penetration test.
+The authentication gates, browser controls and diagnostics scope below were checked against public release **2026.10.19**, source commit `aa5a30da683a3a8ea919025f107ff53f182ef8d6`. This is static source review, not a live deployment or penetration test; the broader earlier-reference warning still applies.
+
 
 !!! warning "Configure access before exposing the listener"
     Authentication defaults to `none`. The native installer initially binds to loopback, but direct server execution and the container default to `0.0.0.0`. Do not assume the listener is private because the configuration resolver has a loopback fallback. Follow the [deployment checklist](trust-boundaries.md#safe-deployment-checklist).
+
 
 See [Configuration](../reference/configuration.md) for database/environment precedence, [Environment variables](../reference/environment.md) for every setting, and [Deployment](../operations/deployment.md) for listener and proxy setup.
 ## Request order
@@ -33,7 +37,7 @@ These routes do not return filesystem roots, model settings, policy, or trace co
 
 ### None
 
-`none` admits requests without login. Its verified request context is `{ enabled: false, authenticated: false }`. Routes such as settings and API-token creation remain reachable to anyone who can reach the listener. Use this only inside an appropriately restricted trust boundary.
+`none` admits requests without login. Its verified request context is `{ enabled: false, authenticated: false }`. Routes such as settings and API-token creation remain reachable to anyone who can reach the listener. Use this only inside an appropriately restricted trust boundary. One public-release exception is `GET`/`PUT /api/operator/mods/{modId}/access`: it requires an authenticated operator even in `none` mode and rejects diagnostics tokens. Unpromoted development build **2026.10.21.2** changes this particular route to accept direct operator requests in `none` mode; that change is not part of public 2026.10.19.
 
 ### Trusted proxy
 
@@ -82,7 +86,7 @@ Keep secure cookies enabled for deployments. The login-state cookie's ten-minute
 `GET /api/auth/session` reports OIDC-session presence and auth configuration. It is not a general Basic/proxy session introspector. `GET /api/auth/discovery` exposes only mode and enabled status before authentication. `GET /api/auth/validate` is behind the main gate and returns HTTP 401 when authentication is disabled. `POST /auth/logout` clears the two OIDC cookies and the Basic cookie; it does not call the identity provider's logout endpoint.
 ## Diagnostics bearer tokens
 
-The only supported scope is `diagnostics:read`. Tokens contain the `brw_` prefix and 32 random bytes encoded as base64url. PostgreSQL stores a SHA-256 hash and a 12-character prefix, not the complete token. The full value is returned on creation. Tokens support optional future expiry, revocation, and last-use tracking; omitted expiry means no configured expiration. Unsupported or duplicate scopes are rejected. 
+The only supported scope is `diagnostics:read`. Tokens contain the `brw_` prefix and 32 random bytes encoded as base64url. PostgreSQL stores a SHA-256 hash and a 12-character prefix, not the complete token. The full value is returned on creation. Tokens support optional future expiry, revocation, and last-use tracking; omitted expiry means no configured expiration. Unsupported or duplicate scopes are rejected.
 
 Token management uses the ordinary auth mode:
 
@@ -99,6 +103,7 @@ A diagnostics bearer token cannot manage tokens. With auth mode `none`, manageme
 |---|---|
 | Runtime | `/api/health`, `/api/status`, `/api/metrics` |
 | Inventory and database | `/api/diagnostics/inventory`, `/api/diagnostics/postgres` |
+| Brain diagnostics | `/api/diagnostics/brains`, `/api/diagnostics/brains/memories`, `/api/diagnostics/brains/embedding-jobs` |
 | Forge diagnostics | `/api/diagnostics/forge/jobs`, `/api/diagnostics/forge/jobs/{id}` where the final segment matches `[0-9a-f-]{36}` case-insensitively |
 | Mod diagnostics | `/api/diagnostics/mods`; `/api/diagnostics/mods/{modId}/pending`; `/api/diagnostics/mods/{modId}/jobs`; `/api/diagnostics/mods/{modId}/jobs/{jobId}` |
 | Agents | `/api/agents`, `/api/agent-status` |
@@ -110,18 +115,29 @@ A diagnostics bearer token cannot manage tokens. With auth mode `none`, manageme
 
 In the mod patterns, `modId` matches `[a-z0-9-]+` and `jobId` matches `[A-Za-z0-9_-]+`. The Forge pattern is the literal gate's character/length check, not a claim of complete UUID validation.
 
-The token does not grant chat submission, mutation, ordinary settings, model/MCP connection management, arbitrary mod routes, general export routes, or Forge generation/artifact access. 
+The token does not grant chat submission, mutation, ordinary settings, model/MCP connection management, arbitrary mod routes, general export routes, or Forge generation/artifact access.
+
 
 !!! warning "Read-only can include private content"
     Session detail, context, traces, and archived sessions/runs can expose conversations and operational content. Issue diagnostics tokens only to trusted consumers, give them an expiry, and revoke them when no longer needed. `/api/diagnostics/inventory` is specifically count-only, but a token used for that endpoint still has the full allowlist above.
 
+
 ## Browser-origin controls
 
-Requests under `/api/` and `/auth/` are checked against their origin. A supplied Origin must match the request origin, an HTTP(S) origin with the same host/port, or an exact entry in `BURROW_UI_ALLOWED_ORIGINS`; otherwise the response is HTTP 403 `browser_origin_not_allowed`. Allowed origins are echoed with `Vary: Origin` and `Access-Control-Allow-Credentials: true`, rather than wildcard CORS. Requests without an Origin remain possible for non-browser clients.
+By default, requests under `/api/` and `/auth/` are checked against their origin. With origin checking enabled, a supplied Origin must match the request origin, an HTTP(S) origin with the same host/port, or an exact entry in `BURROW_UI_ALLOWED_ORIGINS`; otherwise the response is HTTP 403 `browser_origin_not_allowed`. Allowed origins are echoed with `Vary: Origin` and `Access-Control-Allow-Credentials: true`, rather than wildcard CORS. Requests without an Origin remain possible for non-browser clients. `GET`/`PUT /api/settings/browser-origin` reads/saves the boolean `checkOrigin`; `BURROW_UI_ORIGIN_CHECK` overrides that saved value. Disabling it skips the Origin allowlist check and echoes supplied origins, so keep it enabled unless an independently controlled deployment requires otherwise. The JSON content-type checks below remain active even when origin checking is disabled.
 
 API mutations (`POST`, `PUT`, `PATCH`, `DELETE`) require `application/json`, except a bodyless DELETE. Non-JSON mutations receive HTTP 415 `application_json_required`. These checks reduce browser-origin/form attack paths; they are not an independent identity or tenant boundary.
-Host authority enforcement is opt-in through `BURROW_UI_ALLOWED_HOSTS` (exact host/port authorities, no wildcards). With enforcement enabled, `none` mode rejects authorities outside that list; malformed authorities and absolute request targets that override the checked authority are rejected. `BURROW_UI_TRUSTED_PROXIES` names exact peer IPs allowed to supply forwarded host/protocol. This is separate from the trusted-proxy authentication peer list. Configure and verify both when applicable. 
+Host authority enforcement is opt-in through `BURROW_UI_ALLOWED_HOSTS` (exact host/port authorities, no wildcards). With enforcement enabled, `none` mode rejects authorities outside that list; malformed authorities and absolute request targets that override the checked authority are rejected. `BURROW_UI_TRUSTED_PROXIES` names exact peer IPs allowed to supply forwarded host/protocol. This is separate from the trusted-proxy authentication peer list. Configure and verify both when applicable.
 
-The shared JSON-body reader has a default 96 MiB ceiling and 30-second read timeout, plus structural limits of depth 128 and 1,000,000 items. Configure `BURROW_REQUEST_MAX_BYTES`, `BURROW_REQUEST_TIMEOUT_MS`, `BURROW_JSON_MAX_DEPTH`, and `BURROW_JSON_MAX_ITEMS` for the workload. These are allocation/traversal budgets, not request-rate limiting. Continue to use appropriate network access controls and rate limits, and verify the deployed behavior. 
+The shared JSON-body reader has a default 96 MiB ceiling and 30-second read timeout, plus structural limits of depth 128 and 1,000,000 items. Configure `BURROW_REQUEST_MAX_BYTES`, `BURROW_REQUEST_TIMEOUT_MS`, `BURROW_JSON_MAX_DEPTH`, and `BURROW_JSON_MAX_ITEMS` for the workload. These are allocation/traversal budgets, not request-rate limiting. Continue to use appropriate network access controls and rate limits, and verify the deployed behavior.
 
 Review [Trust boundaries](trust-boundaries.md), [Permissions](permissions.md), and the [API reference](../reference/api.md) before integrating a client.
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/scripts/burrow-ui.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/burrow-ui.mjs)
+- [backend/src/browser-origin-policy.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/browser-origin-policy.mjs)
+- [backend/src/mod-authority.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-authority.mjs)
+- [backend/src/ui-oidc-auth.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/ui-oidc-auth.mjs)

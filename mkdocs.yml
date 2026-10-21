@@ -83,6 +83,7 @@ nav:
       - Updates, backups, and help: guide/maintenance.md
   - About this release:
       - Source and coverage: project/source-map.md
+      - Release behavior: project/release-status.md
       - Build this documentation: development/documentation.md
   - Earlier technical reference:
       - Start:

@@ -1,7 +1,9 @@
 # Configuration
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 
 BURROW stores operator-managed configuration in PostgreSQL. The service environment supplies deployment paths, database connectivity, encryption keys and optional overrides. The retained `loadBurrowConfig()` function is inert: it does not read or write `burrow.json`.
 ## Choose the right configuration surface
@@ -14,7 +16,10 @@ BURROW stores operator-managed configuration in PostgreSQL. The service environm
 | UI authentication | PostgreSQL settings and secret store, with explicit environment overrides | Settings → Connections → Authentication |
 | Execution hard boundaries | PostgreSQL metadata | Settings → General |
 | Operator timezone | PostgreSQL metadata | Settings → General |
-| Skills and per-agent assignments | PostgreSQL skill store | Settings → Skills; per-agent assignments under Agents |
+| Skills, Git sources and per-agent assignments | PostgreSQL skill/source records; installed package files on disk | Settings → Skills; per-agent assignments under Agents |
+| Browser Origin checking | Persisted `checkOrigin`, with environment override | Settings browser-origin control; `/api/settings/browser-origin` |
+| OpenTelemetry export | PostgreSQL endpoint/enabled state and encrypted headers, with environment overrides | `/api/settings/opentelemetry` |
+| System-mod authority | Core-owned capability and agent grants | `/api/operator/mods/{modId}/access`; authenticated operator required in public 2026.10.19 |
 | Dream schedule and model selection | PostgreSQL agent Dream settings | Agent Dreams settings |
 | Retention | Saved trace policy; separate CLI session-retention policy | Settings → General → Trace retention; deliberate CLI maintenance |
 | Brains | Agent-owned saved memories; optional embedding settings | Brains; Settings → General → Brain memory |
@@ -42,8 +47,7 @@ The native installer normally uses `$HOME/.burrow`. The generic runtime fallback
 | Archive | `<runtimeRoot>/archive` |
 
 An explicit workspace-root argument suppresses the ambient agent-workspace override. A workspace or data root is ownership/context information, not a filesystem sandbox. Configure [execution boundaries](../security/permissions.md) separately and use operating-system isolation where required.
-
- · [Installation](../getting-started/installation.md)
+See [Installation](../getting-started/installation.md)
 
 ## Models and generation defaults
 
@@ -64,9 +68,12 @@ Compression policy is runtime configuration, not a client-owned chat-body settin
 
 ## Timezone and independent retention policies
 
-The operator timezone is an IANA name used by agent context and inherited schedules. Jobs with a null timezone inherit the current operator zone; reconciliation recomputes their next run when that zone changes. Jobs with an explicit timezone retain it. Saving the operator zone does not force browser-local display into that zone. Dreams likewise support explicit or inherited timezone. Trace cleanup, original-conversation retention, working-memory expiration and rolling-continuity history are separate mechanisms. Do not use old session-age environment defaults as a substitute for the current operator policy.
+The operator timezone is the IANA zone used by agent context, scheduled jobs, Dreams and scheduled Git-skill synchronization in public 2026.10.19. Migration 53 removes prior per-job and Dream timezone overrides. Legacy job timezone input is accepted but is no longer authoritative; reconciliation recomputes the next occurrence when the operator zone changes. Saving the operator zone does not force browser-local display into that zone. Trace cleanup, original-conversation retention, working-memory expiration and rolling-continuity history are separate mechanisms. Do not use old session-age environment defaults as a substitute for the current operator policy.
+See [Dreams](../concepts/dreams.md) · [Memory retention](../concepts/memory.md)
 
- ·  ·  · [Dreams](../concepts/dreams.md) · [Memory retention](../concepts/memory.md)
+## Development-only profile additions
+
+Unpromoted development build **2026.10.21.2** adds shared `RULES` and `ORIENTATION` documents with per-agent opt-in flags. These use migration 61 and `/api/settings/global-profile-documents`; neither is part of the public 2026.10.19 contract. The public release retains six agent-owned profile documents.
 
 ## Portable agent context
 
@@ -74,3 +81,11 @@ The `burrow.agent-context/v1` format carries descriptive context: personality, o
 
 Unknown fields are discarded. This format does not define executable tools, grant permissions, select a model or establish memory-routing authority. Its text limits differ from the six profile-document limits. An advertised UI target is context, not an automatic browser launch.
 
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/src/config.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/config.mjs)
+- [backend/src/postgres-application-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-application-schema.mjs)
+- [backend/src/postgres-scheduled-job-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-scheduled-job-store.mjs)
+- [backend/src/postgres-dream-settings-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-dream-settings-store.mjs)

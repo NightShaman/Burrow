@@ -1,7 +1,9 @@
 # Development setup
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 
 Keep development sources and test state separate from any installed Burrow runtime. Documentation builds do not require a running application, provider credentials, or database.
 
@@ -26,7 +28,7 @@ npm run test:files -- tests/agent-context-config.test.mjs
 npm test
 ```
 
-`npm run check` also syntax-checks source/tests/bin/scripts and runs the suite. Inspect the exact scripts before selecting the aggregate check for your change. The public assembly does not contain backend tests or upstream docs, so these commands do not have the same meaning in its bundled `backend/` directory.
+`npm run check` also syntax-checks source/tests/bin/scripts and runs the suite. Inspect the exact scripts before selecting the aggregate check for your change. The public assembly includes the OpenAPI JSON artifact but not backend tests or the full upstream documentation, so these commands do not have the same meaning in its bundled `backend/` directory.
 
 The test runner creates private temporary runtime roots, clears selected runtime/key environment values, provides a test-only key, and enforces a whole-suite timeout (120 seconds locally by default; configurable through `BURROW_TEST_TIMEOUT_MS`). Do not point tests at a deployed database or live workspace.
 
@@ -59,8 +61,10 @@ npm run postman:check
 
 These check schema structure, literal-route coverage, generated TypeScript, and generated Postman content. They do not replace method/body/authorization review against handlers.
 
+
 !!! note "Check scripts against the source checkout"
     `openapi:check` includes `tests/live-api-contract.test.mjs`; the public assembly does not ship the backend test tree, so confirm that stage exists in your authorized Backend checkout before running the aggregate. `runtime:restore:rehearsal` is no longer defined in the published backend package. Use the supported lifecycle rehearsal below for its documented coverage. Report missing/skipped stages explicitly; a subset passing is not an aggregate pass.
+
 
 ## Database migration development
 
@@ -79,3 +83,13 @@ The existing lifecycle rehearsal uses a disposable PostgreSQL17/pgvector Docker 
 
 Source pushes can trigger assembly through the upstream dispatch workflow. A source push and a running user's upgrade are distinct events; do not restart or update a live runtime as an unrequested development step.
 
+
+
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/package.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/package.json)
+- [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
+- [ui/vitest.config.ts](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/ui/vitest.config.ts)

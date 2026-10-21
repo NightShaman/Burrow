@@ -1,7 +1,9 @@
 # MCP connections and tools
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 
 BURROW separates a provider connection, its discovered tool catalog and each agent's grants. Saving or discovering a connection does not grant an agent permission to call its tools. PostgreSQL owns these records; mcporter supplies transport.
 
@@ -40,7 +42,7 @@ Three stable native tools expose external capabilities:
 
 Provider lookup accepts an exact ID or a unique case-insensitive name. Capability pages default to 12 items and allow at most 20; descriptions are bounded to 2,000 characters. Ungranted tools can appear with `granted: false` so the agent can explain a missing capability. Visibility does not confer permission.
 
-Execution rechecks the connection, exact tool and agent grant. Mod-provided tools additionally require the live mod registration. The runtime includes the menu when its resolved MCP connection map is nonempty. In this release the native `list_skills`/`load_skill` schema inclusion also shares that menu flag; a skill assignment alone does not guarantee those schemas are exposed in a connection-free turn.
+Execution rechecks the connection, exact tool and agent grant. Mod-provided tools additionally require the live mod registration. The runtime includes the menu when its resolved MCP connection map is nonempty. In public **2026.10.19**, `list_skills` and `load_skill` are independent of that MCP menu flag; a connection-free turn can expose the skill tools.
 ## Connection lifecycle
 
 | Lifecycle | Behavior | Secret-bearing local files |
@@ -63,7 +65,7 @@ Secret values are write-only in normal list responses. For connection updates:
 - Blank or omitted `apiKey` does not clear the stored API key
 - `PUT /api/agents/{agentId}/mcp-tools` replaces the complete grant set
 
-Deleting a connection cascades its stored secrets and grants. The current HTTP deletion handler does not await its asynchronous removal before forming the response; re-list connections to establish the final result rather than treating that acknowledgement as definitive.
+Deleting a connection cascades its stored secrets and grants. The current HTTP handler awaits removal, including keep-alive reconciliation, before returning its result. Re-list connections when a response is lost or an error leaves the result uncertain.
 ## Protected values
 
 A cooperating provider can declare sensitive leaves with BURROW's typed sensitive-value envelope. The runtime substitutes opaque in-memory handles, binds consumption to the caller and redacts known resolved values from supported output paths. Managed handles additionally check issuer, scope, expiry, provider availability and current authorization.
@@ -81,3 +83,12 @@ Installed mods are trusted code. A mod's special `mod-authorized` tool availabil
 Check the enabled state, transport settings, saved secret indicators, discovered catalog and exact agent grants in that order. Then use Diagnose and inspect its bounded classification. For stdio failures, verify the executable exists in the service environment, not only your interactive shell. For `keep_alive`, distinguish historical receipts from present liveness.
 
 The API endpoints are listed in [settings and integrations](../reference/api/settings.md); installation paths are in the [environment reference](../reference/environment.md#mcp-provider-login-and-mods).
+
+
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/scripts/ui/settings-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/settings-routes.mjs)
+- [backend/src/action-proposal.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/action-proposal.mjs)

@@ -1,7 +1,9 @@
 # Health and diagnostics
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 
 Health, operational projections and conversation/trace evidence expose different levels of information. A read-only route is not necessarily content-free, and an HTTP success is not proof that a full model/tool workflow succeeded.
 
@@ -22,6 +24,12 @@ Traces and context/session endpoints can contain private user or tool content. R
 Forge diagnostics list uses `limit` (default 50) and opaque `cursor`; UUID job detail exposes safe job summary fields, not prompts, credentials, output bytes or the full generation response.
 
 Mod diagnostics list reports opt-in status. Job list/detail uses the extension's bounded sanitized diagnostic capability; `/pending` shows active host capability operations. Unsupported and unavailable diagnostics are distinct from an empty successful list. These routes do not run arbitrary mod GET handlers.
+## Brain diagnostic metadata
+
+`GET /api/diagnostics/brains` returns global or optional `agentId` counts and embedding status. `/api/diagnostics/brains/memories` requires `agentId`; `/api/diagnostics/brains/embedding-jobs` permits global or agent scope. The two lists accept positive `limit` (default 50) and a server-issued cursor bound to scope and list type. Unknown/duplicate query fields are rejected, and the summary does not accept pagination.
+
+These projections exclude saved-memory text, source references, vectors, legacy snapshots, connection IDs and raw provider errors. Counts and record metadata remain operational information. They are included in the public `diagnostics:read` allowlist.
+
 ## Scoped Bearer clients
 
 `diagnostics:read` tokens are accepted only for the exact GET allowlist in [authentication](../../security/authentication.md). That list also permits selected agents/sessions/context/traces/archive reads, which can expose conversational evidence. It does not permit workspace files, model/MCP settings, exports, Forge artifact bytes/generation or arbitrary mod routes.
@@ -69,5 +77,15 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `GET` | `/api/diagnostics/mods/{modId}/jobs/{jobId}` | Read sanitized opt-in mod diagnostics |
 | `GET` | `/api/diagnostics/mods/{modId}/pending` | Read current mod capability operations |
 | `GET` | `/api/diagnostics/postgres` | Read PostgreSQL availability and pgvector installation |
+| `GET` | `/api/diagnostics/brains` | Read Brain counts and embedding status |
+| `GET` | `/api/diagnostics/brains/memories` | Read per-agent saved-memory metadata |
+| `GET` | `/api/diagnostics/brains/embedding-jobs` | Read embedding job metadata |
 | `GET` | `/api/diagnostics/forge/jobs` | List sanitized Forge job summaries |
 | `GET` | `/api/diagnostics/forge/jobs/{jobId}` | Read sanitized Forge job summary |
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/scripts/burrow-ui.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/burrow-ui.mjs)
+- [backend/src/brain-diagnostic-summary.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/brain-diagnostic-summary.mjs)

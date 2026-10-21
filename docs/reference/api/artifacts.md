@@ -1,7 +1,9 @@
 # Files, Forge and exports
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 
 These endpoints read and modify runtime-owned files or produce transferable data. These routes pass through the configured interactive-auth gate; diagnostics tokens do not grant them. With authentication mode `none`, that gate does not require credentials.
 
@@ -16,8 +18,7 @@ Listing is bounded to 1,000 entries and omits most hidden/generated directories.
 List session-referenced attachments with `agentId`, `sessionId` (default `default`) and `limit` (default 200). The artifact path/storage reference is relative runtime metadata returned by BURROW, not an arbitrary absolute path. Use the returned identity to read bytes. DELETE attachment removes that artifact early; it is separate from transcript or conversation deletion.
 
 Generated artifact download and attachment download return bytes with server-selected content type. Keep these URLs and browser caches private. Artifact bytes live under agent workspaces while conversation references are stored in PostgreSQL, so coordinated backup needs both.
-
- · [Storage ownership](../../architecture/persistence.md)
+See [Storage ownership](../../architecture/persistence.md)
 
 ## Forge generation
 
@@ -39,7 +40,7 @@ Read `/api/export/catalog` to discover categories. POST export with the selected
 
 Import is preview-first: submit the encoded bundle to `/api/export/import/preview`, inspect changes/conflicts, then apply with explicit confirmation and conflict policy through `/api/export/import`. Without confirmation the apply endpoint returns `400 import_confirmation_required` with the preview.
 
-Categories can span stores; do not assume a full installation image or a single all-or-nothing cross-category transaction. Source API-contract export assets are omitted from the assembled Backend tree, which can affect that category. Follow [backup and recovery](../../operations/backup-recovery.md) for disaster recovery rather than relying on selective export alone.
+Categories can span stores; do not assume a full installation image or a single all-or-nothing cross-category transaction. The public assembly includes `backend/docs/openapi.json`; the earlier missing-contract-asset claim no longer applies. API-contract export still needs live verification for the installed release. Follow [backup and recovery](../../operations/backup-recovery.md) for disaster recovery rather than relying on selective export alone.
 
 ## Endpoint inventory
 
@@ -66,3 +67,11 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `GET` | `/api/forge/jobs/{id}/artifacts/{artifactId}` | Read/download artifact bytes |
 | `GET` | `/api/forge/selections` | Read per-mode model selections |
 | `PUT` | `/api/forge/selections` | Save a mode selection |
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
+- [backend/scripts/ui/export-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/export-routes.mjs)
+- [backend/src/postgres-forge-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-forge-store.mjs)

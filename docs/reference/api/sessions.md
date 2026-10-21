@@ -1,7 +1,9 @@
 # Sessions and Archive
 
+
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
 
 A session's canonical conversation evidence is in PostgreSQL. The current prompt tail, human-facing transcript, original export, trace proof and reset/archive snapshots are distinct views. See [conversation history](../../concepts/conversation-history.md) before choosing an export or deleting data.
 
@@ -19,7 +21,7 @@ For `/api/sessions/{sessionId}` and its actions, pass `agentId` in the query. Re
 | `unarchive` | Clears the archive flag |
 | `fork` | Optional `targetSessionId`, otherwise `<source>-fork`; separate copy/provenance, not a live branch |
 
-Reset and archive retain original evidence. The former Albdruck purge endpoint is retired. The current retention preview/run controls manage traces, not individual conversation purge; see [retention and deletion](../../concepts/conversation-history.md#retention-and-deletion). Do not conflate hiding a session with deleting retained content.
+Reset and archive retain original evidence. The public reset handler captures a handoff and resets the stored conversation. Unpromoted development build **2026.10.21.2** adds an admission barrier and explicit supersession of active session runs; do not assume that newer reset coordination is present in public 2026.10.19. The former Albdruck purge endpoint is retired. The current retention preview/run controls manage traces, not individual conversation purge; see [retention and deletion](../../concepts/conversation-history.md#retention-and-deletion). Do not conflate hiding a session with deleting retained content.
 ## Context, search and continuity
 
 `/api/session/context` and `/api/context` inspect context; `/api/session/context-status` includes current limits and live usage where available. Defaults use session `default`. These responses may expose private conversational material.
@@ -48,8 +50,7 @@ Continuity scope is an operator-selected namespace. GET/DELETE use query fields;
 Use server-returned cursors and completeness/continuation information. A visible page or “copy loaded” UI action is not necessarily a full-history export. Calendar grouping uses the requested timezone. Invalid calendar/date/timezone/cursor arguments return a 400-class error.
 
 Authority endpoints return execution explanations, not a new permission grant. Archive proof success, child completion, verification and final delivery are separate pieces of evidence.
-
- · [Archive UI](../../concepts/interface.md)
+See [Archive UI](../../concepts/interface.md)
 
 ## Endpoint inventory
 
@@ -86,3 +87,10 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `GET` | `/api/archive/runs/{runId}` | Read one archived runtime proof packet |
 | `GET` | `/api/sessions/{sessionId}/export` | Export canonical raw session records |
 | `GET` | `/api/archive/calendar` | List retained Archive days in the requested timezone |
+
+## Targeted source review
+
+Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+
+- [backend/scripts/ui/session-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/session-routes.mjs)
+- [backend/src/postgres-session-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-session-store.mjs)
