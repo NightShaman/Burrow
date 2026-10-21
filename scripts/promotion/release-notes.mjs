@@ -19,7 +19,8 @@ export const releaseTargets = Object.freeze({
   goblinSecretStore: { title: 'Goblin Secret Store', projects: [['goblinSecretStore', 'Goblin Secret Store']] },
   burrowSkills: { title: 'Burrow Skills', projects: [['burrowSkills', 'Burrow Skills']] },
   burrowBackdoor: { title: 'Burrow Backdoor', projects: [['burrowBackdoor', 'Burrow Backdoor']] },
-  burrowTutor: { title: 'Burrow Tutor', projects: [['burrowTutor', 'Burrow Tutor']] }
+  burrowTutor: { title: 'Burrow Tutor', projects: [['burrowTutor', 'Burrow Tutor']] },
+  burrowTheater: { title: 'Burrow Theater', projects: [['burrowTheater', 'Burrow Theater']] }
 });
 
 function git(root, args) {

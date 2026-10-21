@@ -45,6 +45,26 @@ test('component notes contain only that repository and omit provenance noise', (
   }
 });
 
+test('Theater notes contain only Theater changes', () => {
+  const theater = fixture(['chore: previous Theater state', 'feat: improve roleplay']);
+  const backend = fixture(['chore: previous backend state', 'fix: unrelated backend change']);
+  try {
+    const notes = generateReleaseNotes({
+      target: 'burrowTheater',
+      releaseDate: '2026.10.22',
+      sources: { burrowTheater: theater.current, burrowBackend: backend.current },
+      previousSources: { burrowTheater: theater.first, burrowBackend: backend.first },
+      roots: { burrowTheater: theater.root, burrowBackend: backend.root }
+    });
+    assert.match(notes, /^# Burrow Theater 2026\.10\.22/m);
+    assert.match(notes, /feat: improve roleplay/);
+    assert.doesNotMatch(notes, /unrelated backend change/);
+  } finally {
+    fs.rmSync(theater.root, { recursive: true, force: true });
+    fs.rmSync(backend.root, { recursive: true, force: true });
+  }
+});
+
 test('Burrow notes include only assembled Burrow, backend, and UI changes', () => {
   const burrow = fixture(['chore: previous Burrow state', 'build: assemble Burrow', 'feat: installer improvement']);
   const backend = fixture(['chore: previous backend state', 'fix: backend behavior']);

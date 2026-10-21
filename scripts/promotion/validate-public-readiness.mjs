@@ -8,7 +8,8 @@ const projects = [
   ['Goblin-Secret-Store', 'Goblin Secret Store'],
   ['Burrow-Skills', 'Burrow Skills'],
   ['Burrow-Backdoor', 'Burrow Backdoor'],
-  ['Burrow-Tutor', 'Burrow Tutor']
+  ['Burrow-Tutor', 'Burrow Tutor'],
+  ['Burrow-Theater', 'Burrow Theater']
 ];
 
 async function pngSize(file) {

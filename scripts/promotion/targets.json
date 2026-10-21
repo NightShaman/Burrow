@@ -62,6 +62,16 @@
         "burrowTutor",
         "burrowBackend"
       ]
+    },
+    "burrowTheater": {
+      "repository": "Burrow-Theater",
+      "releaseAssets": [
+        "source-snapshot"
+      ],
+      "dependsOn": [
+        "burrowTheater",
+        "burrowBackend"
+      ]
     }
   }
 }

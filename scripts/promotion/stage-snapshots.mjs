@@ -27,6 +27,10 @@ export const TARGETS = {
   burrowTutor: {
     paths: ['README.md', 'LICENSE', 'burrow.mod.json', 'docs', 'package.json', 'scripts', 'server', 'test', 'ui'],
     excludes: []
+  },
+  burrowTheater: {
+    paths: ['README.md', 'LICENSE', 'burrow.mod.json', 'docs', 'package.json', 'server', 'test', 'ui'],
+    excludes: []
   }
 };
 
@@ -53,7 +57,7 @@ export function validateInputs({ releaseDate, sources }) {
   for (const [name, sha] of Object.entries(sources || {})) {
     if (!SHA.test(String(sha || ''))) throw new Error(`promotion_source_sha_invalid:${name}`);
   }
-  for (const required of ['burrow', 'burrowBackend', 'burrowUi', 'nodeGoblin', 'goblinSecretStore', 'burrowSkills', 'burrowBackdoor', 'burrowTutor']) {
+  for (const required of ['burrow', 'burrowBackend', 'burrowUi', 'nodeGoblin', 'goblinSecretStore', 'burrowSkills', 'burrowBackdoor', 'burrowTutor', 'burrowTheater']) {
     if (!sources?.[required]) throw new Error(`promotion_source_missing:${required}`);
   }
 }
@@ -131,6 +135,12 @@ function stampTutor(root, version, sources) {
   writeJson(path.join(root, 'PUBLIC_RELEASE.json'), { schemaVersion: 1, releaseDate: version, sources });
 }
 
+function stampTheater(root, version, sources) {
+  stampJson(path.join(root, 'burrow.mod.json'), version);
+  stampJson(path.join(root, 'package.json'), version);
+  writeJson(path.join(root, 'PUBLIC_RELEASE.json'), { schemaVersion: 1, releaseDate: version, sources });
+}
+
 export function stageSnapshots({ roots, outputRoot, releaseDate, sources }) {
   validateInputs({ releaseDate, sources });
   const staged = {};
@@ -139,7 +149,7 @@ export function stageSnapshots({ roots, outputRoot, releaseDate, sources }) {
     const actual = run('git', ['rev-parse', 'HEAD'], { cwd: root });
     const sourceKey = id === 'burrow' ? 'burrow' : id;
     if (actual !== sources[sourceKey]) throw new Error(`promotion_checkout_mismatch:${id}`);
-    const directory = { burrow: 'Burrow', nodeGoblin: 'Node-Goblin', goblinSecretStore: 'Goblin-Secret-Store', burrowSkills: 'Burrow-Skills', burrowBackdoor: 'Burrow-Backdoor', burrowTutor: 'Burrow-Tutor' }[id];
+    const directory = { burrow: 'Burrow', nodeGoblin: 'Node-Goblin', goblinSecretStore: 'Goblin-Secret-Store', burrowSkills: 'Burrow-Skills', burrowBackdoor: 'Burrow-Backdoor', burrowTutor: 'Burrow-Tutor', burrowTheater: 'Burrow-Theater' }[id];
     const output = path.resolve(outputRoot, directory);
     archiveTracked(root, output, spec);
     staged[id] = output;
@@ -150,6 +160,7 @@ export function stageSnapshots({ roots, outputRoot, releaseDate, sources }) {
   stampSkills(staged.burrowSkills, releaseDate, sources);
   stampBackdoor(staged.burrowBackdoor, releaseDate, sources);
   stampTutor(staged.burrowTutor, releaseDate, sources);
+  stampTheater(staged.burrowTheater, releaseDate, sources);
   return staged;
 }
 

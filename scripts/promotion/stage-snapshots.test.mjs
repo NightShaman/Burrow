@@ -6,7 +6,7 @@ import test from 'node:test';
 import { setBurrowReleaseAuthority, setNodeGoblinReleaseAuthority, TARGETS, validateInputs } from './stage-snapshots.mjs';
 
 const sha = 'a'.repeat(40);
-const sources = { burrow: sha, burrowBackend: sha, burrowUi: sha, nodeGoblin: sha, goblinSecretStore: sha, burrowSkills: sha, burrowBackdoor: sha, burrowTutor: sha };
+const sources = { burrow: sha, burrowBackend: sha, burrowUi: sha, nodeGoblin: sha, goblinSecretStore: sha, burrowSkills: sha, burrowBackdoor: sha, burrowTutor: sha, burrowTheater: sha };
 
 test('accepts the complete frozen source set', () => {
   assert.doesNotThrow(() => validateInputs({ releaseDate: '2026.10.17', sources }));
@@ -105,4 +105,13 @@ test('Burrow Backdoor snapshot preserves documentation without other workflows',
   }
   assert.deepEqual(paths.filter(file => file.startsWith('.github')), ['.github/workflows/docs.yml']);
   assert.deepEqual(paths.filter(file => file.startsWith('scripts')), ['scripts/docs']);
+});
+
+test('Burrow Theater snapshot includes the standalone mod without development workflows', () => {
+  const paths = TARGETS.burrowTheater.paths;
+  for (const file of ['README.md', 'LICENSE', 'burrow.mod.json', 'docs', 'package.json', 'server', 'test', 'ui']) {
+    assert.ok(paths.includes(file), `missing public Theater path: ${file}`);
+  }
+  assert.ok(!paths.some(file => file.startsWith('.github')));
+  assert.ok(!paths.includes('scripts'));
 });

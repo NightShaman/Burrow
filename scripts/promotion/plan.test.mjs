@@ -5,13 +5,13 @@ import { createPromotionPlan, utcReleaseDate } from './plan.mjs';
 
 const config = JSON.parse(await readFile(new URL('./targets.json', import.meta.url), 'utf8'));
 const sha = character => character.repeat(40);
-const sources = { burrow:sha('f'), burrowBackend:sha('a'), burrowUi:sha('b'), nodeGoblin:sha('c'), goblinSecretStore:sha('d'), burrowSkills:sha('e'), burrowBackdoor:sha('1'), burrowTutor:sha('2') };
+const sources = { burrow:sha('f'), burrowBackend:sha('a'), burrowUi:sha('b'), nodeGoblin:sha('c'), goblinSecretStore:sha('d'), burrowSkills:sha('e'), burrowBackdoor:sha('1'), burrowTutor:sha('2'), burrowTheater:sha('3') };
 
 test('assigns one atomic UTC calendar release to every target', () => {
   const plan = createPromotionPlan({ config, sources, now:new Date('2026-10-18T01:02:03Z') });
   assert.equal(plan.releaseDate, '2026.10.18');
   assert.equal(plan.publishable, true);
-  assert.deepEqual(plan.targets.map(target => target.version), Array(6).fill('2026.10.18'));
+  assert.deepEqual(plan.targets.map(target => target.version), Array(7).fill('2026.10.18'));
   assert(plan.targets.every(target => target.action === 'stage'));
 });
 
