@@ -52,6 +52,16 @@
         "burrowBackdoor",
         "burrowBackend"
       ]
+    },
+    "burrowTutor": {
+      "repository": "Burrow-Tutor",
+      "releaseAssets": [
+        "source-snapshot"
+      ],
+      "dependsOn": [
+        "burrowTutor",
+        "burrowBackend"
+      ]
     }
   }
 }

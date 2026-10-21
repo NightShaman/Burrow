@@ -17,7 +17,7 @@ A skill does not install a tool. A discovered tool does not grant itself to an a
 
 ## Build a mod
 
-Use the current [third-party mod contract](mod-contract.md) and public [Burrow Reference Mod](https://github.com/NightShaman/Burrow-Reference-Mod) as the canonical authoring sources. They cover manifests, routes, tools, storage, UI, distribution, lifecycle, compatibility, and trust behavior with runnable current-Core tests.
+Use the current [third-party mod contract](mod-contract.md) and public [Burrow Tutor](https://github.com/GoblinKing-Burrow/Burrow-Tutor) as the canonical authoring sources. They cover manifests, routes, tools, storage, UI, distribution, lifecycle, compatibility, and trust behavior with runnable current-Core tests.
 
 Minimal server shape:
 

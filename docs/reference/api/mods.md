@@ -1,6 +1,6 @@
 # Mods
 
-Mods are trusted installed server/UI code. Distribution, activation, tool grants, and application data are separate lifecycles. Authors should use the current [third-party mod contract](../../development/mod-contract.md) and public [Burrow Reference Mod](https://github.com/NightShaman/Burrow-Reference-Mod).
+Mods are trusted installed server/UI code. Distribution, activation, tool grants, and application data are separate lifecycles. Authors should use the current [third-party mod contract](../../development/mod-contract.md) and public [Burrow Tutor](https://github.com/GoblinKing-Burrow/Burrow-Tutor).
 
 ## Catalog and management
 

@@ -1,6 +1,6 @@
 # Third-party mod contract
 
-This page is the public author contract for **ordinary third-party Burrow mods**. The companion [Burrow Reference Mod](https://github.com/NightShaman/Burrow-Reference-Mod) is an installable, deliberately boring implementation.
+This page is the public author contract for **ordinary third-party Burrow mods**. The companion [Burrow Tutor](https://github.com/GoblinKing-Burrow/Burrow-Tutor) is an installable, deliberately boring implementation.
 
 !!! warning "Trusted code, not a sandbox"
     A mod is executable server and/or browser code. The forked host contains faults and narrows Core APIs, but is not an operating-system sandbox. Install only code you trust.

@@ -6,7 +6,7 @@ import test from 'node:test';
 import { setBurrowReleaseAuthority, setNodeGoblinReleaseAuthority, TARGETS, validateInputs } from './stage-snapshots.mjs';
 
 const sha = 'a'.repeat(40);
-const sources = { burrow: sha, burrowBackend: sha, burrowUi: sha, nodeGoblin: sha, goblinSecretStore: sha, burrowSkills: sha, burrowBackdoor: sha };
+const sources = { burrow: sha, burrowBackend: sha, burrowUi: sha, nodeGoblin: sha, goblinSecretStore: sha, burrowSkills: sha, burrowBackdoor: sha, burrowTutor: sha };
 
 test('accepts the complete frozen source set', () => {
   assert.doesNotThrow(() => validateInputs({ releaseDate: '2026.10.17', sources }));
@@ -89,6 +89,14 @@ test('Goblin Secret Store snapshot preserves documentation without other workflo
   assert.deepEqual(paths.filter(file => file.startsWith('scripts')), ['scripts/docs']);
 });
 
+
+test('Burrow Tutor snapshot includes the complete standalone author source without development workflows', () => {
+  const paths = TARGETS.burrowTutor.paths;
+  for (const file of ['README.md', 'LICENSE', 'burrow.mod.json', 'docs', 'package.json', 'scripts', 'server', 'test', 'ui']) {
+    assert.ok(paths.includes(file), `missing public Tutor path: ${file}`);
+  }
+  assert.ok(!paths.some(file => file.startsWith('.github')));
+});
 
 test('Burrow Backdoor snapshot preserves documentation without other workflows', () => {
   const paths = TARGETS.burrowBackdoor.paths;
