@@ -1,4 +1,5 @@
 import { SUPPORTED_SYSTEM_MOD_CAPABILITIES } from './mod-runtime.mjs';
+import { isOperatorModAction } from './execution-provider-approval.mjs';
 
 // Core-only authority. Never pass this object's mutator to a mod host.
 export const POSTGRES_MOD_AUTHORITY_SCHEMA_SQL = `
@@ -53,12 +54,14 @@ export function createModAuthority({ repositoryFactory }) {
   return Object.freeze({ ready, read, allowed, assertAllowed, deny, replace });
 }
 
-// Mounted before mod-owned routes and protected independently of authMode=none.
+// Mounted before mod-owned routes. It follows Core's operator-action contract:
+// authenticated UI requests when auth is enabled, or direct UI requests when
+// authMode=none. API tokens never gain this operator-only authority.
 export function createModAuthorityRoute({ authority, getMods, readJsonBody, sendJson }) {
   return async ({ req, res, url }) => {
     const match = /^\/api\/operator\/mods\/([a-z0-9]+(?:-[a-z0-9]+)*)\/access$/.exec(url.pathname);
     if (!match) return false;
-    if (!req.burrowVerifiedAuth?.authenticated || req.burrowApiToken) { sendJson(res, 403, { ok: false, error: 'operator_authentication_required' }); return true; }
+    if (!isOperatorModAction(req)) { sendJson(res, 403, { ok: false, error: 'operator_authentication_required' }); return true; }
     const mod = getMods().find(mod => mod.id === match[1]);
     if (!mod) { sendJson(res, 404, { ok: false, error: 'mod_not_found' }); return true; }
     if (!['GET','PUT'].includes(req.method)) { sendJson(res, 405, { ok: false, error: 'method_not_allowed' }); return true; }
