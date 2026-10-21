@@ -28,8 +28,14 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
     const abandoned=head && ['running','finalizing'].includes(head.state) && head.ownershipProtocol==='postgres-session-lock-v1' && !(await owner.alive(head.ownerId));
     const abandonedQueue=queue?.status==='running' && queue.ownershipProtocol==='postgres-session-lock-v1' && !(await owner.alive(queue.ownerId));
     if(!abandoned && !abandonedQueue)return metadata;
-    // An already durable terminal completion must never schedule a second turn.
-    if(abandonedQueue && head?.state==='completed' && head.runId===queue.claimedByRunId) return {...metadata,recoveryQueue:{...queue,status:'completed',completedAt:head.completedAt},interruptedRun:{...metadata.interruptedRun,status:'recovered',recoveredByRunId:head.runId}};
+    // A recovery attempt is never promoted into a fresh interrupted objective.
+    // If its owner disappears, preserve the original manifest and terminate the
+    // same queue lineage instead of creating recovery-of-recovery work.
+    if(abandonedQueue){
+     if(head?.state==='completed' && head.runId===queue.claimedByRunId) return {...metadata,recoveryQueue:{...queue,status:'completed',autoResume:false,completedAt:head.completedAt},interruptedRun:{...metadata.interruptedRun,status:'recovered',recoveredByRunId:head.runId}};
+     const at=clock();
+     return {...metadata,recoveryQueue:{...queue,status:'failed',autoResume:false,completedAt:at,result:'recovery_owner_lost'},...(head?.runId===queue.claimedByRunId && ['running','finalizing'].includes(head.state)?{continuityHead:{...head,state:'retired',retiredAt:at,reason:'recovery_owner_lost'}}:{})};
+    }
     const manifest=abandoned ? {version:1,sessionId,runId:head.runId,generation:head.generation,status:'interrupted',reason:head.state==='finalizing'?'terminal_finalization_abandoned':'process_lost',interruptedAt:clock(),objective:head.objective || transcript.findLast(entry=>entry.role==='user' || entry.role==='agent')?.content || null,pendingVerification:['Reconcile durable effects and terminal receipts before continuing.']} : metadata.interruptedRun;
     if(!manifest)return metadata;
     const assessment=await assessInterruptedRunRecovery({sessionId,manifest,readChatMessages:async()=>transcript});
@@ -83,9 +89,32 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
    await updateMetadata({...scope(sessionId),update:metadata=>{
     const queue=metadata.recoveryQueue;
     if(queue?.status!=='running' || queue.claimedByRunId!==recoveryRunId || queue.ownerId!==ownerId)return metadata;
-    const continuation={...queue,status:ok?'completed':'failed',completedAt:clock(),result};outcome={ok:true,stale:false,continuation};
+    const continuation={...queue,status:ok?'completed':'failed',autoResume:false,completedAt:clock(),result};outcome={ok:true,stale:false,continuation};
     return {...metadata,recoveryQueue:continuation,...(ok&&metadata.interruptedRun?{interruptedRun:{...metadata.interruptedRun,status:'recovered',recoveredByRunId:recoveryRunId,recoveredAt:continuation.completedAt}}:{})};
    }});return outcome;
+  },
+  async retire({sessionId,runId,generation=null,reason='cancellation_deadline_exceeded',objective=null,recovery=false}) {
+   return owner.guard(async () => {
+    let outcome={ok:false,stale:true};
+    await updateMetadata({...scope(sessionId),update:metadata=>{
+     const head=metadata.continuityHead;
+     if(head?.state!=='running' || head.ownerId!==ownerId || head.runId!==String(runId) || (generation!=null && Number(head.generation)!==Number(generation))) return metadata;
+     const at=clock();
+     if(recovery){
+      const queue=metadata.recoveryQueue;
+      const continuation=queue?.status==='running' && queue.claimedByRunId===String(runId) && queue.ownerId===ownerId
+       ? {...queue,status:'failed',autoResume:false,completedAt:at,result:reason}
+       : queue;
+      outcome={ok:true,stale:false,head:{...head,state:'retired',retiredAt:at,reason},continuation};
+      return {...metadata,continuityHead:outcome.head,recoveryQueue:continuation};
+     }
+     const manifest={version:1,sessionId,runId:String(runId),generation:head.generation,status:'interrupted',reason,interruptedAt:at,objective:objective||head.objective||null,lastCompletedStep:null,pendingVerification:['Reconcile durable effects and terminal receipts before continuing.'],changedFiles:[],traceRef:null};
+     const continuation={version:1,key:`${manifest.runId}:${manifest.generation}`,status:'pending',decision:'needs_user_input',decisionReason:reason,transcriptMessages:0,autoResume:false,queuedAt:at,attempts:0};
+     outcome={ok:true,stale:false,head:{...head,state:'retired',retiredAt:at,reason},manifest,continuation};
+     return {...metadata,continuityHead:outcome.head,interruptedRun:manifest,recoveryQueue:continuation};
+    }});
+    return outcome;
+   }, migrationLockKey(`burrow-session-boundary:${JSON.stringify([agentId,sessionId])}`));
   },
   async commit(args) {
    return owner.guard(async () => {

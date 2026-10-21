@@ -47,6 +47,7 @@ import { listSubagentRecords, subagentVisibilitySummary } from '../src/subagent-
 import { buildContinuityHandoff } from '../src/continuity-handoff-store.mjs';
 import { createRecoveryContinuationScheduler } from '../src/recovery-continuation-runner.mjs';
 import { recordActiveRunInterruptions } from '../src/interrupted-run-recovery.mjs';
+import { postgresContinuity } from '../src/postgres-continuity.mjs';
 import { generateArchiveSummary } from '../src/archive-summary.mjs';
 import { loadWorkingContinuityAsync, normalizeContinuityScope, projectHandoffsIntoWorkingContinuity } from '../src/working-memory-continuity.mjs';
 import { workingContextFromSession } from '../src/working-context.mjs';
@@ -144,6 +145,8 @@ const uiDistRoot = path.join(projectRoot, 'public', 'ui');
 const apiDocsRoot = path.join(sourceRoot, 'public', 'api-docs');
 const port = Number(process.env.BURROW_UI_PORT || process.argv.find((arg) => arg.startsWith('--port='))?.split('=')[1] || 42817);
 const host = process.env.BURROW_UI_HOST || '0.0.0.0';
+const configuredRunCancellationGraceMs = Number(process.env.BURROW_RUN_CANCELLATION_GRACE_MS || 5_000);
+const RUN_CANCELLATION_GRACE_MS = Number.isFinite(configuredRunCancellationGraceMs) ? Math.max(1_000, configuredRunCancellationGraceMs) : 5_000;
 const authorityConfig = httpAuthorityConfig({ host, port });
 browserOriginConfig(); // Validate optional environment override at startup.
 const requestLifecycle = createBackgroundLifecycle({ name: 'runtime_request' });
@@ -156,9 +159,10 @@ const sessionContinuityHeads = new Map();
 // runtime queue in app-runtime.
 const sessionChatQueues = new Map();
 function sessionChatQueueKey(agentId, sessionId) { return `${String(agentId)}:${String(sessionId || 'default')}`; }
-async function serializeSessionChat({ agentId, sessionId, operation, signal }) {
+async function serializeSessionChat({ agentId, sessionId, operation, signal, onCancellationDeadline = null }) {
   const key = sessionChatQueueKey(agentId, sessionId);
-  return serializeSessionAdmission(sessionChatQueues, key, operation, signal);
+  const cancellationGraceMs = typeof RUN_CANCELLATION_GRACE_MS === 'number' ? RUN_CANCELLATION_GRACE_MS : 10_000;
+  return serializeSessionAdmission(sessionChatQueues, key, operation, signal, { cancellationGraceMs, onCancellationDeadline });
 }
 const claudeCodeLoginConnectionIds = new Map();
 const groupChannelRuns = new Map();
@@ -306,7 +310,7 @@ async function executeBoardTask(taskId) {
   if (!dispatch.ok) return dispatch;
   const { task, project, agentRuntime, sessionId, runId, updated } = dispatch;
   const controller = new AbortController();
-  const record = { agentId: agentRuntime.agentId, runId, sessionId, controller, startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: taskExecutionMessage(task, project).slice(0, 16_000), progress: [], contextUsage: null, cancelled: false, reason: null, detached: true, steeringReady: false, taskId: task.id };
+  const record = { agentId: agentRuntime.agentId, runId, sessionId, controller, startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: taskExecutionMessage(task, project).slice(0, 16_000), objective: taskExecutionMessage(task, project).slice(0, 16_000), progress: [], contextUsage: null, cancelled: false, reason: null, detached: true, steeringReady: false, taskId: task.id };
   const headKey = sessionContinuityHeadKey(agentRuntime.agentId, sessionId);
   sessionContinuityHeads.set(headKey, record);
   activeChatRuns.set(activeChatRunKey(agentRuntime.agentId, runId), record);
@@ -319,7 +323,9 @@ async function executeBoardTask(taskId) {
     resolveAgentRuntime,
     telemetry: otelRuntime,
     runSource: 'task-board',
-    registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerActiveAgentRun(activeChatRuns, { agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
+    cancellationGraceMs: RUN_CANCELLATION_GRACE_MS,
+    onCancellationDeadline: () => retireCancelledRun(record),
+    registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerRuntimeActiveRun({ agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
     onModelTextDelta: createChatStreamDelta({ record, type: 'assistant.delta', runId, sessionId, write: () => {} }),
     onModelThoughtDelta: createChatStreamDelta({ record, type: 'assistant.thought', runId, sessionId, write: () => {} }),
     onSteeringReady: () => { record.steeringReady = true; },
@@ -360,6 +366,29 @@ function updateContextUsageHighWater(previous, usage) {
   if (!candidates.length) return { ...usage };
   const highWater = Math.max(...candidates);
   return { ...usage, estimatedTokens: highWater, highWaterEstimatedTokens: highWater, highWaterProviderInputTokens: Math.max(...[previousProvider, currentProvider].filter((value) => value !== null), 0) || null, provenance: usage.continuation ? 'run-high-water-continuation' : 'run-high-water-initial' };
+}
+
+function registerRuntimeActiveRun(options) {
+  const lifecycle = registerActiveAgentRun(activeChatRuns, options);
+  lifecycle.cancellationGraceMs = RUN_CANCELLATION_GRACE_MS;
+  lifecycle.onCancellationDeadline = () => retireCancelledRun(lifecycle.record);
+  return lifecycle;
+}
+
+async function retireCancelledRun(record, { recovery = record?.source === 'recovery' } = {}) {
+  if (!record?.agentId || !record?.sessionId || !record?.runId) return { ok: false, stale: true };
+  const authority = postgresContinuity({ store: postgresApplication.stores.conversations, agentId: record.agentId });
+  const retired = await authority.retire({
+    sessionId: record.sessionId,
+    runId: record.runId,
+    generation: Number.isSafeInteger(record.generation) ? record.generation : null,
+    reason: String(record.reason || 'cancellation_deadline_exceeded'),
+    objective: record.objective || record.latestUserMessage || null,
+    recovery,
+  });
+  const key = activeChatRunKey(record.agentId, record.runId);
+  if (retired.ok && activeChatRuns.get(key) === record) activeChatRuns.delete(key);
+  return retired;
 }
 
 function sessionContinuityHeadKey(agentId, sessionId) {
@@ -2721,7 +2750,7 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
   const runId = body.runId ? String(body.runId) : createChatTurnRunId({ sessionId, prefix: 'ui' });
   if (activeChatRuns.has(activeChatRunKey(agentRuntime.agentId, runId))) throw Object.assign(new Error('chat_run_id_already_used'), { statusCode: 409 });
   const controller = new AbortController();
-  const record = { agentId: agentRuntime.agentId, runId, sessionId, controller, startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: String(body.message || '').trim().slice(0, 16_000), progress: [], contextUsage: null, cancelled: false, reason: null, detached: false, steeringReady: false };
+  const record = { agentId: agentRuntime.agentId, runId, sessionId, controller, startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: String(body.message || '').trim().slice(0, 16_000), objective: String(body.message || '').trim().slice(0, 16_000), progress: [], contextUsage: null, cancelled: false, reason: null, detached: false, steeringReady: false };
   const headKey = sessionContinuityHeadKey(agentRuntime.agentId, sessionId);
   sessionContinuityHeads.set(headKey, record);
   activeChatRuns.set(activeChatRunKey(agentRuntime.agentId, runId), record);
@@ -2743,7 +2772,9 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
       latencyTiming,
       telemetry: otelRuntime,
       runSource: 'operator-chat',
-      registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerActiveAgentRun(activeChatRuns, { agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
+      cancellationGraceMs: RUN_CANCELLATION_GRACE_MS,
+      onCancellationDeadline: () => retireCancelledRun(record),
+      registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerRuntimeActiveRun({ agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
       onTraceRecord: (traceRecord) => {
         const progress = publicChatProgress(traceRecord);
         if (progress) {
@@ -3293,7 +3324,8 @@ async function handleRequest(req, res) {
 }
 
 let shuttingDown = false;
-const SHUTDOWN_DRAIN_MS = Math.max(1_000, Number(process.env.BURROW_SHUTDOWN_DRAIN_MS || 10_000));
+const configuredShutdownDrainMs = Number(process.env.BURROW_SHUTDOWN_DRAIN_MS || 10_000);
+const SHUTDOWN_DRAIN_MS = Number.isFinite(configuredShutdownDrainMs) ? Math.max(1_000, configuredShutdownDrainMs) : 10_000;
 let shutdownReason = 'service_shutdown';
 let httpClosePromise = null;
 // These existing producer close methods stop polling and drain their retained
@@ -3406,11 +3438,12 @@ server.listen(port, host, () => {
     stores:postgresApplication.stores,
     agentRuntimes: await Promise.all((await agentsStore().list({ includeDisabled: false })).map((agent) => resolveAgentRuntime(agent.id))),
     createRunId: createChatTurnRunId,
+    cancellationGraceMs: Math.min(RUN_CANCELLATION_GRACE_MS, Math.max(0, SHUTDOWN_DRAIN_MS - 1_000)),
     runContinuation: async ({ runtime, sessionId, runId, manifest, continuation, signal }) => {
       const recoveryInstruction = continuation?.decision === 'resume'
         ? 'Continue the interrupted work using the runtime recovery record and bounded same-session transcript.'
         : 'Recover the interrupted work using the runtime recovery record. Reconcile durable state before acting; do not repeat completed work blindly.';
-      const lifecycle = registerActiveAgentRun(activeChatRuns, { agentId: runtime.agentId, sessionId, runId, message: `Recover interrupted run: ${manifest.objective || 'reconcile durable state'}`, source: 'recovery', parentSignal: signal });
+      const lifecycle = registerRuntimeActiveRun({ agentId: runtime.agentId, sessionId, runId, message: `Recover interrupted run: ${manifest.objective || 'reconcile durable state'}`, objective: manifest.objective || null, source: 'recovery', parentSignal: signal });
       try {
         return await runChatTurnFromBody({
           stores:postgresApplication.stores,
@@ -3420,7 +3453,9 @@ server.listen(port, host, () => {
           onTraceRecord: lifecycle.onTraceRecord, onModelTextDelta: lifecycle.onModelTextDelta,
           onModelThoughtDelta: lifecycle.onModelThoughtDelta, onModelContextUsage: lifecycle.onModelContextUsage,
           onSteeringReady: lifecycle.onSteeringReady,
-          registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerActiveAgentRun(activeChatRuns, { agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
+          cancellationGraceMs: lifecycle.cancellationGraceMs,
+          onCancellationDeadline: lifecycle.onCancellationDeadline,
+          registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerRuntimeActiveRun({ agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
         });
       } finally { lifecycle.finish(); }
     },

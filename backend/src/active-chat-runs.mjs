@@ -32,13 +32,14 @@ export function activeChatRunSummaries(activeChatRuns, { agentId = null, session
     .map(activeChatRunSummary);
 }
 
-export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'default', runId, message = '', source = 'internal', a2a = null, parentSignal = null } = {}) {
+export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'default', runId, message = '', objective = null, source = 'internal', a2a = null, parentSignal = null } = {}) {
   if (!agentId || !runId) throw new Error('active_agent_run_identity_required');
   if (activeChatRuns.has(activeChatRunKey(agentId, runId))) throw Object.assign(new Error('chat_run_id_already_used'), { statusCode: 409 });
   const controller = new AbortController();
   const record = {
     agentId: String(agentId), runId: String(runId), sessionId: String(sessionId || 'default'), controller,
     startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: String(message || '').slice(0, 16_000),
+    objective: objective == null ? null : String(objective).slice(0, 16_000),
     progress: [], contextUsage: null, cancelled: false, reason: null, detached: true, steeringReady: false, source, a2a, a2aActivities: [],
   };
   const key = activeChatRunKey(record.agentId, record.runId);
@@ -104,8 +105,9 @@ export function cancelActiveChatRun(activeChatRuns, runId, { body = {}, agentId 
     for (const child of activeChatRuns.values()) {
       if (child.a2a?.parentAgentId === candidate.agentId && child.a2a?.parentRunId === candidate.runId) cancelTree(child);
     }
+    candidate.cancelledAt ||= new Date().toISOString();
     candidate.controller.abort(new Error(reason));
   };
   cancelTree(record);
-  return { ok: true, runId, agentId: record.agentId, sessionId: record.sessionId, status: 'cancelled', reason, cancelledRuns };
+  return { ok: true, runId, agentId: record.agentId, sessionId: record.sessionId, status: 'cancelling', reason, cancelledRuns };
 }

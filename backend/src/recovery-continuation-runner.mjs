@@ -5,7 +5,7 @@ import { postgresContinuity } from './postgres-continuity.mjs';
 // durable before model work begins; duplicate startups see it as running and
 // leave it alone. The next normal turn still receives the manifest if a
 // recovery run itself fails.
-export async function runPendingRecoveryContinuations({ stores = null, agentRuntimes = [], runContinuation, createRunId, limit = 20, logger = console, signal = null, authorityFactory = postgresContinuity } = {}) {
+export async function runPendingRecoveryContinuations({ stores = null, agentRuntimes = [], runContinuation, createRunId, limit = 20, logger = console, signal = null, authorityFactory = postgresContinuity, cancellationGraceMs = 10_000 } = {}) {
   if (!stores?.conversations) throw new Error('runtime_stores_required');
   if (typeof runContinuation !== 'function') throw new Error('recovery_continuation_runner_required');
   if (typeof createRunId !== 'function') throw new Error('recovery_continuation_run_id_required');
@@ -22,7 +22,24 @@ export async function runPendingRecoveryContinuations({ stores = null, agentRunt
       if (!claim.ok) continue;
       try {
         signal?.throwIfAborted();
-        const result = await runContinuation({ runtime, sessionId: item.sessionId, runId, manifest: claim.manifest, continuation: claim.continuation, signal });
+        const execution = Promise.resolve(runContinuation({ runtime, sessionId: item.sessionId, runId, manifest: claim.manifest, continuation: claim.continuation, signal }));
+        execution.catch(() => {});
+        let timer = null;
+        let schedule = null;
+        const cancellationDeadline = new Promise((_, reject) => {
+          if (!signal) return;
+          schedule = () => {
+            timer = setTimeout(() => reject(signal.reason || new Error('recovery_cancellation_deadline_exceeded')), Math.max(0, Number(cancellationGraceMs) || 0));
+          };
+          if (signal.aborted) schedule();
+          else signal.addEventListener('abort', schedule, { once: true });
+        });
+        let result;
+        try { result = await Promise.race([execution, cancellationDeadline]); }
+        finally {
+          if (timer !== null) clearTimeout(timer);
+          if (schedule) signal?.removeEventListener('abort', schedule);
+        }
         const completed = await authority.completeRecovery({
           rootDir: runtime.agentWorkspaceRoot, sessionId: item.sessionId, recoveryRunId: runId,
           ok: Boolean(result?.ok), result: result?.decision || (result?.ok ? 'completed' : 'failed'),

@@ -57,7 +57,13 @@ function sessionExecutionKey({ rootDir, sessionId, args = {}, agentRuntime = nul
 }
 async function serializeSessionExecution(options, operation) {
   const key = sessionExecutionKey(options);
-  return serializeSessionAdmission(sessionExecutionQueues, key, operation, options.args?.abort_signal || options.args?.abortSignal);
+  return serializeSessionAdmission(
+    sessionExecutionQueues,
+    key,
+    operation,
+    options.args?.abort_signal || options.args?.abortSignal,
+    { cancellationGraceMs: options.cancellationGraceMs, onCancellationDeadline: options.onCancellationDeadline },
+  );
 }
 
 export function beginRuntimeSessionExecutionSupersession({ rootDir, sessionId, args = {}, agentRuntime = null } = {}) {
@@ -282,6 +288,8 @@ async function runAskChatUnserialized({
         onModelThoughtDelta: lifecycle?.onModelThoughtDelta || null,
         onModelContextUsage: lifecycle?.onModelContextUsage || null,
         onSteeringReady: lifecycle?.onSteeringReady || null,
+        cancellationGraceMs: lifecycle?.cancellationGraceMs ?? null,
+        onCancellationDeadline: lifecycle?.onCancellationDeadline || null,
         args: { abort_signal: lifecycle?.signal || parentSignal || normalizedArgs.abort_signal || null },
       });
       return { ok: reply.ok === true, decision: reply.decision || null, answerText: reply.answerText || null, runId: reply.runId || null, recipientReplyEntryId: reply.assistantTurn?.id || null, error: reply.error || null };

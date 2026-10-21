@@ -10,23 +10,33 @@ function boundedText(value, limit = 2_000) {
  * Records are deliberately compact: the next same-session run reconciles these
  * facts against the durable transcript, workspace, and receipts before acting.
  */
-export async function recordActiveRunInterruptions({ stores = null, activeRuns, resolveAgentRuntime, reason = 'service_shutdown' } = {}) {
+export async function recordActiveRunInterruptions({ stores = null, activeRuns, resolveAgentRuntime, reason = 'service_shutdown', authorityFactory = postgresContinuity } = {}) {
   if (!stores?.conversations) throw new Error('runtime_stores_required');
   const records = activeRuns instanceof Map ? [...activeRuns.values()] : Array.isArray(activeRuns) ? activeRuns : [];
   const settled = await Promise.allSettled(records.map(async (record) => {
     if (!record?.agentId || !record?.sessionId || !record?.runId) return null;
     const runtime = await resolveAgentRuntime(record.agentId);
-    const authority = postgresContinuity({ store: stores.conversations, agentId: record.agentId });
-    const manifest = await authority.interrupt({
-      rootDir: runtime.agentWorkspaceRoot,
-      sessionId: record.sessionId,
-      runId: record.runId,
-      generation: Number.isSafeInteger(record.generation) ? record.generation : null,
-      reason,
-      objective: boundedText(record.latestUserMessage),
-      lastCompletedStep: `Run was active in phase ${boundedText(record.phase, 120) || 'unknown'} when the runtime received ${reason}.`,
-      pendingVerification: ['Reconcile durable workspace, tool, and child-run state before continuing.'],
-    });
+    const authority = authorityFactory({ store: stores.conversations, agentId: record.agentId });
+    const generation = Number.isSafeInteger(record.generation) ? record.generation : null;
+    const manifest = record.source === 'recovery'
+      ? await authority.retire({
+          rootDir: runtime.agentWorkspaceRoot,
+          sessionId: record.sessionId,
+          runId: record.runId,
+          generation,
+          reason,
+          recovery: true,
+        })
+      : await authority.interrupt({
+          rootDir: runtime.agentWorkspaceRoot,
+          sessionId: record.sessionId,
+          runId: record.runId,
+          generation,
+          reason,
+          objective: boundedText(record.objective || record.latestUserMessage),
+          lastCompletedStep: `Run was active in phase ${boundedText(record.phase, 120) || 'unknown'} when the runtime received ${reason}.`,
+          pendingVerification: ['Reconcile durable workspace, tool, and child-run state before continuing.'],
+        });
     record.reason = reason;
     record.cancelled = true;
     record.controller?.abort?.(new Error(reason));
