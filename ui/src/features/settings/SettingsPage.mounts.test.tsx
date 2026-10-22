@@ -5,10 +5,12 @@ import { Settings } from './SettingsPage';
 import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { api } from '../../app/api';
 import type { SettingsTab } from '../../app/types';
+import type { ModContribution } from '../../app/apiTargets';
 vi.mock('../../app/api', async original => ({ ...await original<typeof import('../../app/api')>(), api: vi.fn() }));
-vi.mock('../../app/apiTargets', () => ({ loadModSettingsContributions: async () => [], modContributionsChangedEvent: 'mods-changed' }));
+const { loadModSettingsContributions } = vi.hoisted(() => ({ loadModSettingsContributions: vi.fn<() => Promise<ModContribution[]>>(async () => []) }));
+vi.mock('../../app/apiTargets', () => ({ loadModSettingsContributions, modContributionsChangedEvent: 'mods-changed' }));
 vi.mock('./SystemStatsRail', () => ({ SystemStatsRail: () => null }));
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
+afterEach(() => { cleanup(); vi.resetAllMocks(); loadModSettingsContributions.mockResolvedValue([]); });
 it('mounts only the selected configuration, with no hidden duplicate reads', async () => {
  vi.mocked(api).mockImplementation(async path => {
   if (path === '/api/settings/identities') return { operator: { name: 'Test', avatar: '' } };
@@ -101,6 +103,37 @@ it('places Skills navigation in the supplied card without duplicating it in the 
  unmount();
  expect(navigationTarget.childElementCount).toBe(0);
  navigationTarget.remove();
+});
+
+it('groups a mod settings contributions under one top-level tab and exposes secondary sections', async () => {
+ loadModSettingsContributions.mockResolvedValue([{
+  modId: 'burrow-switchboard',
+  name: 'Switchboard',
+  settings: [
+   { id: 'status', navigation: { title: 'Status' }, primary: { title: 'Status', capability: 'settingsUi' } },
+   { id: 'configuration', navigation: { title: 'Configuration' }, primary: { title: 'Configuration', capability: 'settingsUi' } },
+   { id: 'pending-admissions', navigation: { title: 'Pending admissions' }, primary: { title: 'Pending admissions', capability: 'settingsUi' } },
+   { id: 'chat-mappings', navigation: { title: 'Chat mappings' }, primary: { title: 'Chat mappings', capability: 'settingsUi' } },
+  ],
+ }]);
+ vi.mocked(api).mockResolvedValue({ wizardStep: 'ready' });
+ function Parent() {
+  const [tab, setTab] = useState<SettingsTab>('general');
+  return <Settings {...{ tab, setTab, agents: [], selected: { id: '', name: '' }, savedProviders: [], onOperatorProfileChanged: vi.fn(), agentRailPreferences: { view: 'regular', order: [] } } as unknown as ComponentProps<typeof Settings>} />;
+ }
+ render(<Parent />);
+ const switchboard = await screen.findByRole('button', { name: 'Switchboard' });
+ expect(screen.getAllByRole('button', { name: 'Switchboard' })).toHaveLength(1);
+ fireEvent.click(switchboard);
+ const secondary = screen.getByRole('navigation', { name: 'Switchboard settings sections' });
+ for (const name of ['Status', 'Configuration', 'Pending admissions', 'Chat mappings']) expect(secondary.querySelector(`button:nth-child(${['Status', 'Configuration', 'Pending admissions', 'Chat mappings'].indexOf(name) + 1})`)?.textContent).toBe(name);
+ expect(screen.getByRole('button', { name: 'Status' }).getAttribute('aria-current')).toBe('page');
+ fireEvent.click(screen.getByRole('button', { name: 'Chat mappings' }));
+ expect(screen.getByRole('button', { name: 'Chat mappings' }).getAttribute('aria-current')).toBe('page');
+ expect(screen.getByRole('button', { name: 'Switchboard' }).getAttribute('aria-current')).toBe('page');
+ fireEvent.click(screen.getByRole('button', { name: 'General' }));
+ fireEvent.click(screen.getByRole('button', { name: 'Switchboard' }));
+ expect(screen.getByRole('button', { name: 'Status' }).getAttribute('aria-current')).toBe('page');
 });
 
 it('uses the top menu for General while retaining the three content columns', async () => {

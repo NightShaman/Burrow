@@ -84,14 +84,20 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
     setSetupStatus(status);
   };
   const nativeSettingMatch = tab.match(/^mod-settings:([^:]+):(.+)$/);
-  const selectedContribution = nativeSettingMatch ? targetContributions.find((item) => item.modId === nativeSettingMatch[1]) : undefined;
+  const selectedModId = nativeSettingMatch?.[1];
+  const selectedContribution = selectedModId ? targetContributions.find((item) => item.modId === selectedModId) : undefined;
   const selectedModSettings: ModSettingsContribution | undefined = selectedContribution?.settings?.find((item) => item.id === nativeSettingMatch?.[2]) ?? selectedContribution?.settings?.[0];
   const builtInTabs = ['general', 'agents', 'skills', 'connections', 'mods'] as SettingsTab[];
+  const modSettingsTab = (modId: string, settingId: string) => `mod-settings:${modId}:${settingId}` as SettingsTab;
   const settingsNavigation = <nav className="settings-blank-column settings-prototype-menu" aria-label="Settings sections">
         <div className="settings-prototype-menu-items">
           {builtInTabs.map((item) => <button type="button" className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => setTab(item)} key={item}>{item === 'connections' ? 'Connections' : item[0].toUpperCase() + item.slice(1)}</button>)}
           {targetContributions.length > 0 && <div className="settings-prototype-menu-divider" role="separator" aria-label="Installed mods" />}
-          {targetContributions.flatMap((item) => item.settings?.map((setting) => { const itemTab = `mod-settings:${item.modId}:${setting.id}` as SettingsTab; return <button type="button" className={tab === itemTab ? 'active' : ''} aria-current={tab === itemTab ? 'page' : undefined} onClick={() => setTab(itemTab)} key={`${item.modId}:${setting.id}`}>{item.name}</button>; }) ?? [])}
+          {targetContributions.map((item) => {
+            const active = selectedModId === item.modId;
+            const settingId = active ? nativeSettingMatch?.[2] ?? item.settings?.[0]?.id ?? '__default__' : item.settings?.[0]?.id ?? '__default__';
+            return <button type="button" className={active ? 'active' : ''} aria-current={active ? 'page' : undefined} onClick={() => setTab(modSettingsTab(item.modId, settingId))} key={item.modId}>{item.name}</button>;
+          })}
         </div>
       </nav>;
   return <>
@@ -144,7 +150,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
             ['automatic-checks', 'Automatic source checks'],
           ] as const).map(([id, label]) => <button type="button" className={modsSection === id ? 'active' : ''} aria-current={modsSection === id ? 'page' : undefined} onClick={() => setModsSection(id)} key={id}>{label}</button>)}
         </nav>}
-        {selectedContribution?.settingsUrl ? <div ref={setModNavigationColumn} /> : selectedModSettings ? <nav className="settings-prototype-section-items" aria-label={`${selectedModSettings.navigation.title} settings sections`}><button type="button" className="active" aria-current="page">{selectedModSettings.navigation.title}</button></nav> : selectedContribution && <span>Extension settings</span>}
+        {selectedContribution?.settings?.length ? <nav className="settings-prototype-section-items" aria-label={`${selectedContribution.name} settings sections`}>{selectedContribution.settings.map((setting) => { const active = setting.id === selectedModSettings?.id; return <button type="button" className={active ? 'active' : ''} aria-current={active ? 'page' : undefined} onClick={() => setTab(modSettingsTab(selectedContribution.modId, setting.id))} key={setting.id}>{setting.navigation.title}</button>; })}</nav> : selectedContribution?.settingsUrl ? <div ref={setModNavigationColumn} /> : selectedContribution && <span>Extension settings</span>}
       </section>
       <section className="settings-blank-column settings-prototype-configuration">
         {tab === 'general' && generalSection === 'opentelemetry' && <OpenTelemetrySettings />}
@@ -167,7 +173,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
         {tab === 'connections' && connectionSection === 'mcp-servers' && <McpConnections overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'api-tokens' && <ApiTokensSettings overflowTarget={overflowColumn} />}
         {tab === 'mods' && <ModsSettings section={modsSection} overflowTarget={overflowColumn} />}
-        {selectedContribution?.settingsUrl && <ModSettingsHost key={`${selectedContribution.modId}:${selectedContribution.version ?? ''}`} modId={selectedContribution.modId} settingsUrl={`${selectedContribution.settingsUrl}${selectedContribution.version ? `?v=${encodeURIComponent(selectedContribution.version)}` : ''}`} agents={agents} onAgentsChanged={onAgentsChanged} navigationTarget={modNavigationColumn} overflowTarget={overflowColumn} />}
+        {selectedContribution?.settingsUrl && <ModSettingsHost key={`${selectedContribution.modId}:${selectedContribution.version ?? ''}`} modId={selectedContribution.modId} settingsUrl={`${selectedContribution.settingsUrl}${selectedContribution.version ? `?v=${encodeURIComponent(selectedContribution.version)}` : ''}`} agents={agents} onAgentsChanged={onAgentsChanged} navigationTarget={modNavigationColumn} overflowTarget={overflowColumn} selectedSectionId={selectedModSettings?.id} onSectionChange={selectedContribution.settings?.length ? (sectionId) => setTab(modSettingsTab(selectedContribution.modId, sectionId)) : undefined} />}
       </section>
       <section className="settings-blank-column settings-prototype-overflow" ref={setOverflowColumn} aria-label="Additional settings">
         {tab === 'general' && generalSection === 'rail-panels' && hasAgentsPanel && <div className="settings-overflow-content"><AgentSidebarSettings agents={agents} preferences={agentRailPreferences} setPreferences={setAgentRailPreferences} /></div>}

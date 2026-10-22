@@ -150,7 +150,7 @@ function settingsFactoryContext(modId: string, agents: readonly Agent[]) {
   return { api: modApi(modId), accessApi: modAccessApi(modId), agents };
 }
 
-export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, navigationTarget, overflowTarget }: { modId: string; settingsUrl: string; agents: Agent[]; onAgentsChanged: () => Promise<void>; navigationTarget: HTMLElement | null; overflowTarget: HTMLElement | null }) {
+export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, navigationTarget, overflowTarget, selectedSectionId, onSectionChange }: { modId: string; settingsUrl: string; agents: Agent[]; onAgentsChanged: () => Promise<void>; navigationTarget: HTMLElement | null; overflowTarget: HTMLElement | null; selectedSectionId?: string; onSectionChange?: (sectionId: string) => void }) {
   const primaryRef = useRef<HTMLDivElement>(null);
   const [module, setModule] = useState<ModSettingsModule | null>(null);
   const [contribution, setContribution] = useState<SettingsContribution | null>(null);
@@ -174,10 +174,21 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
       if (!active) return;
       const next = contribution?.sections ?? validSections(loaded.settingsSections);
       if ((!contribution && typeof loaded.mountSettings !== 'function') || !next.length) throw new Error('The mod settings entry does not implement the Burrow settings contract.');
-      setModule(loaded); setContribution(contribution); setSections(next); setSection(next[0].id);
+      const initialSection = next.find((item) => item.id === selectedSectionId)?.id ?? next[0].id;
+      setModule(loaded); setContribution(contribution); setSections(next); setSection(initialSection);
     }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'Could not load mod settings.'); });
     return () => { active = false; };
   }, [settingsUrl, modId]);
+
+  useEffect(() => {
+    if (!selectedSectionId || !sections.some((item) => item.id === selectedSectionId)) return;
+    setSection(selectedSectionId);
+  }, [selectedSectionId, sections]);
+
+  const selectSection = (sectionId: string) => {
+    setSection(sectionId);
+    onSectionChange?.(sectionId);
+  };
 
   useEffect(() => {
     const primary = primaryRef.current;
@@ -219,7 +230,7 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
   }, [module, contribution, section, modId, overflowTarget]);
 
   return <>
-    {navigationTarget && createPortal(<nav className="settings-prototype-section-items" aria-label={`${modId} settings sections`}>{sections.map((item) => <button type="button" className={section === item.id ? 'active' : ''} aria-current={section === item.id ? 'page' : undefined} onClick={() => setSection(item.id)} key={item.id}>{item.label}</button>)}</nav>, navigationTarget)}
+    {navigationTarget && createPortal(<nav className="settings-prototype-section-items" aria-label={`${modId} settings sections`}>{sections.map((item) => <button type="button" className={section === item.id ? 'active' : ''} aria-current={section === item.id ? 'page' : undefined} onClick={() => selectSection(item.id)} key={item.id}>{item.label}</button>)}</nav>, navigationTarget)}
     {error && <section className="setting-section"><h2>Mod settings unavailable</h2><p className="settings-request-error" role="alert">{error}</p></section>}
     <div ref={primaryRef} className="mod-settings-mount" data-mod-id={modId}>
       {contribution && <DeclarativeSection key={section} contribution={contribution} module={{ ...module, handleSettingsAction: async (actionId, values) => {
