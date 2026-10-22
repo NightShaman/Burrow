@@ -150,4 +150,9 @@ ALTER TABLE agents ADD COLUMN use_global_orientation BOOLEAN NOT NULL DEFAULT FA
 CREATE TABLE global_profile_documents (kind TEXT PRIMARY KEY CHECK(kind IN ('RULES','ORIENTATION')), markdown TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 INSERT INTO global_profile_documents(kind,markdown,created_at,updated_at) VALUES ('RULES','',CURRENT_TIMESTAMP::text,CURRENT_TIMESTAMP::text),('ORIENTATION','',CURRENT_TIMESTAMP::text,CURRENT_TIMESTAMP::text);
 ` },
+  { version: 62, name: 'global-profile-document-timestamps', sql: `
+ALTER TABLE global_profile_documents
+  ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at::timestamptz,
+  ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at::timestamptz;
+` },
 ]);
