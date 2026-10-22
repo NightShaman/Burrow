@@ -59,6 +59,38 @@ Core's mod-access settings changed after public 2026.10.19: newer Core permits d
 
 For authoring a mod, start with [Burrow Tutor](https://burrow-docs.blissful-psychosis.com/burrow-tutor/) and its [contract guide](https://burrow-docs.blissful-psychosis.com/burrow-tutor/contract/).
 
+## Image generation in ordinary mods
+
+Core builds with ordinary-mod Forge support let a mod check image availability, submit an asynchronous image request, and read its own job later. The operator configures the image selection in Core's Forge settings. The mod supplies its own enablement, authorization, and potential-cost consent flow.
+
+The host API is deliberately small:
+
+```js
+await context.forge.images.status();
+await context.forge.images.create({ prompt, idempotencyKey });
+await context.forge.jobs.read(jobId);
+```
+
+These are server-side mod-host calls, not new public HTTP endpoints or agent tools. Installing a mod does not authorize paid image creation. A mod may expose its own routes or tools, but it must apply the appropriate authorization before dispatch.
+
+Creation returns a job receipt; it does not wait for an image. Save stable request intent before submission and retain the returned job ID. Read completion in later requests. `queued` and `running` are nonterminal; `succeeded`, `failed`, and `interrupted` are terminal. A failed read does not establish completion. Reuse the original request key after an ambiguous failure, and never change to a fresh key merely to bypass an unresolved retry or conflict.
+
+Core returns the mod's own image-job status and authenticated preview metadata. It does not expose credentials, storage references, prompts, connection/model IDs, downloads, or another mod's jobs through this facade. The facade has no provider picker, Forge settings mutation, cancellation, attachment delivery, or non-image generation methods.
+
+See [Burrow Tutor's contract guide](https://burrow-docs.blissful-psychosis.com/burrow-tutor/contract/) and [Forge image lesson](https://burrow-docs.blissful-psychosis.com/burrow-tutor/forge-images/) for an authoring example. Check your installed Core's support before adopting it; updating a mod alone does not add a missing Core capability.
+
+## Tutor and the separate Reference Mod example
+
+This walkthrough describes the scaffold bundled in **Burrow Tutor**. The separate **Burrow Reference Mod** is another implementation of the same ordinary-mod contract; its image demonstration has a different UI and route design.
+
+Tutor provides four optional image routes, starts image submission disabled, and requires `confirmPaid: true` with a stable caller-supplied `requestId`. Its existing Control pane remains the greeting example. Add an explicit image-consent UI before exposing the scaffold to operators.
+
+The separate Reference Mod provides a complete manual image demonstration in its Control pane. It has three image routes, accepts prompts up to 4,000 characters with `confirmCost: true`, and retains one request. The server saves a generated key and pending prompt before dispatch, then saves the job ID and removes the pending prompt after a receipt. **Poll saved image job** reads the retained job later; **Retry saved submission** reuses unresolved saved intent. It does not generate images on activation, page load, refresh, or greeting-tool use.
+
+These route names, limits, request fields, and storage choices belong to each example. They are not additional Core APIs. Both examples use only `context.forge.images.status()`, `context.forge.images.create({ prompt, idempotencyKey })`, and `context.forge.jobs.read(jobId)`.
+
+Both examples currently declare the mod ID `burrow-reference-mod`. Treat them as alternative starting points, not two independently installable mods with unchanged manifests. Give an adapted mod its own ID and matching install directory; Core scopes storage, job ownership, and request keys to that identity.
+
 ## Permissions and hard blocks
 
 
@@ -72,3 +104,4 @@ To configure a hard block, open **Settings → General → Execution boundaries*
 For command rules, select **execute**: command-pattern matching is only evaluated for that operation. An allowed native call is reviewed again at execution, but that does not broaden the rule coverage above.
 
 [Source: boundary editor](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/ExecutionBoundaries.tsx#L92-L115) · [Source: actual action coverage](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/action-safety.mjs#L43-L243) · [Source: command matching](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/execution-boundaries.mjs#L131-L140) · [Source: execution recheck](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/proposal-execution.mjs#L102-L114) · [Source: workspace scope](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/agent-registry.mjs#L76-L91) · [Source: mod process](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/mod-host.mjs#L110-L112)
+

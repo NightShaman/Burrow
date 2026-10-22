@@ -14,6 +14,10 @@ Later Core implementation was also reviewed. The changes below are **implemented
 | Stop, reset and restart | Earlier lifecycle behavior | Cancellation deadline handling, reset-generation fencing and bounded recovery protect subsequent work from stale runs |
 | Native update channel | Public updater selects the public repository | Installer/launcher preserve a configured update repository across updates |
 
+## Forge image capability
+
+Reviewed on **22 October 2026**: ordinary mods can request asynchronous, potentially paid image jobs through Core’s saved Forge selection and read only their own image jobs. The [Tutor Forge lesson](https://burrow-docs.blissful-psychosis.com/burrow-tutor/forge-images/) covers consent, durable retries, and previews. This interface is absent from the older public snapshot above. Current guides follow implementation; the public snapshot follows the daily sync. Update Core alongside mods that use this capability.
+
 ## What to do now
 
 - If you run the public release, use the version-pinned [user guides](../guide/installation.md).
@@ -22,3 +26,4 @@ Later Core implementation was also reviewed. The changes below are **implemented
 - For remote execution, use [Node Goblin](https://burrow-docs.blissful-psychosis.com/node-goblin/) with [Backdoor](https://burrow-docs.blissful-psychosis.com/burrow-backdoor/) to retain an internal path to the agent's home Burrow.
 
 Public calendar tags are created by coordinated promotion. This review did not create a release or advance a tag. Future release dates are not promised here.
+
