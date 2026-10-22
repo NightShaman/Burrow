@@ -71,7 +71,7 @@ function summarizedRun(run) {
 }
 
 // Only this core-side service has access to PostgreSQL secrets and provider credentials.
-export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null, stores = null, modStore = null, runtimeDiagnostics = null, modManagement = null, modAuthority = null } = {}) {
+export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null, externalTurnDispatcher = null, stores = null, modStore = null, runtimeDiagnostics = null, modManagement = null, modAuthority = null } = {}) {
   if (typeof resolveAgentRuntime !== 'function') throw new Error('mod_agent_resolver_required');
   const injected = stores || {};
   for (const key of ['agents','models','scheduledJobs','conversations']) if (!injected[key]) throw new Error(`mod_${key}_store_required`);
@@ -189,6 +189,29 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
       if (!(await withJobs((store) => ownedJob(store, jobId)))) throw new Error('scheduled_job_not_found');
       if (!scheduledJobScheduler) throw new Error('scheduled_job_scheduler_unavailable');
       return scheduledJobScheduler.trigger(jobId, { ownerModId: schedulerOwner() });
+    },
+    async submitExternalTurn(input) {
+      if (!externalTurnDispatcher) throw new Error('mod_external_turns_unavailable');
+      const value = exactKeys(plain(input), ['agentId', 'sessionId', 'message', 'idempotencyKey']);
+      const agentId = bounded(value.agentId, 96).trim();
+      const sessionId = bounded(value.sessionId, 128).trim();
+      const message = bounded(value.message, 100_000);
+      const idempotencyKey = bounded(value.idempotencyKey, 256).trim();
+      if (!agentId || !sessionId || !message.trim() || !idempotencyKey) invalid();
+      const request = { ownerModId: schedulerOwner(), agentId, sessionId, message, idempotencyKey };
+      const replay = await externalTurnDispatcher.replay?.(request);
+      if (replay) return replay;
+      const agent = await withStore('agents', store => store.get(agentId));
+      if (!agent) throw new Error('agent_not_found');
+      if (!agent.enabled) throw new Error('agent_disabled');
+      return externalTurnDispatcher.submit(request);
+    },
+    async readExternalTurn(input) {
+      if (!externalTurnDispatcher) throw new Error('mod_external_turns_unavailable');
+      const value = exactKeys(plain(input), ['turnId']);
+      const turn = await externalTurnDispatcher.read(schedulerOwner(), bounded(value.turnId, 96));
+      if (!turn) throw new Error('mod_external_turn_not_found');
+      return turn;
     },
     async listAgents() {
       return await withStore('agents', async (store) => (await store.list()).map(({ id, name, enabled }) => ({ id, name, enabled })));

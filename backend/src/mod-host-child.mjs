@@ -189,7 +189,7 @@ async function activate(message) {
     conversations: Object.freeze({ list: (input) => capabilityRequest("listConversations", input), read: (input, options) => capabilityRequest("readConversation", input, options) }),
     models: Object.freeze({ list: () => capabilityRequest("listModels", {}), generateText: (input, options) => capabilityRequest("generateText", input, options) }),
     forge: Object.freeze({ images: Object.freeze({ status: () => capabilityRequest("getForgeImageStatus", {}), create: (input) => capabilityRequest("createForgeImage", input) }), jobs: Object.freeze({ read: (jobId) => capabilityRequest("readForgeImageJob", { jobId }) }) }),
-    agents: Object.freeze({ list: () => capabilityRequest("listAgents", {}) }),
+    agents: Object.freeze({ list: () => capabilityRequest("listAgents", {}), turns: Object.freeze({ submit: (input) => capabilityRequest("submitExternalTurn", input), read: (turnId) => capabilityRequest("readExternalTurn", { turnId }) }) }),
     operator: Object.freeze({ timezone: () => capabilityRequest("getOperatorTimezone", {}), displayIdentity: () => capabilityRequest("getOperatorIdentity", {}) }),
     scheduler: Object.freeze({ list: (input = {}) => capabilityRequest("listScheduledJobs", input), read: (jobId) => capabilityRequest("readScheduledJob", { jobId }), create: (input) => capabilityRequest("createScheduledJob", input), update: (jobId, patch) => capabilityRequest("updateScheduledJob", { jobId, patch }), delete: (jobId) => capabilityRequest("deleteScheduledJob", { jobId }), runs: (jobId, input = {}) => capabilityRequest("listScheduledJobRuns", { ...input, jobId }), trigger: (jobId) => capabilityRequest("triggerScheduledJob", { jobId }) }),
     logger: logger(modId),

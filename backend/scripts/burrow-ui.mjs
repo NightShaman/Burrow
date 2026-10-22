@@ -81,6 +81,7 @@ import { cleanupAgentAttachments, deleteAttachmentArtifact, listSessionAttachmen
 import { resolveGeneratedArtifact } from '../src/generated-artifact-store.mjs';
 import { TASK_PRIORITIES, TASK_STATUSES } from '../src/task-board-store.mjs';
 import { createScheduledJobScheduler } from '../src/scheduled-job-scheduler.mjs';
+import { createModExternalTurnDispatcher } from '../src/mod-external-turns.mjs';
 import { backgroundSchedulersEnabled } from '../src/background-scheduler-policy.mjs';
 import { diagnoseMcpConnection as diagnoseMcpConnectionRuntime, discoverMcpTools, configureMcpProviderStateStore, hydrateMcpProviderStates, reconcilePersistentMcpConnection } from '../src/mcporter-adapter.mjs';
 import { createRuntimeMetricsCollector } from '../src/runtime-metrics.mjs';
@@ -194,6 +195,8 @@ await hydrateMcpProviderStates({ runtimeRoot: process.env.BURROW_MCPORTER_ROOT |
 const runtimeMetrics = createRuntimeMetricsCollector({ runtimeRoot });
 const otelRuntime = createReconfigurableOtelRuntime({ serviceVersion: releaseVersion });
 await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: postgresApplication.stores.metadata }));
+await postgresApplication.stores.externalTurns.interruptIncomplete('core_restart_before_completion');
+const externalTurnDispatcher = createModExternalTurnDispatcher({ store: postgresApplication.stores.externalTurns, stores: postgresApplication.stores, resolveAgentRuntime, rootDir: projectRoot, telemetry: otelRuntime });
 async function applyOtelConfigurationToNodeGoblins() {
   const configuration = otelRuntime.remoteConfiguration();
   try { return await executionProviders.configure('node-goblin', configuration); }
@@ -3034,7 +3037,7 @@ const modManagementCapability = Object.freeze(Object.fromEntries(['inventory', '
   if (!coreModManagement) throw new Error('mod_management_unavailable');
   return coreModManagement[method](...args);
 }])));
-const modLoadOptions = { modAuthority, modManagement: modManagementCapability, onExecutionProviderActivated: async modId => { if (modId === 'node-goblin') await applyOtelConfigurationToNodeGoblins(); }, stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), runtimeDiagnostics, resolveAgentWorkspaceRoot: async (id) => {
+const modLoadOptions = { modAuthority, modManagement: modManagementCapability, onExecutionProviderActivated: async modId => { if (modId === 'node-goblin') await applyOtelConfigurationToNodeGoblins(); }, stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), externalTurnDispatcher, runtimeDiagnostics, resolveAgentWorkspaceRoot: async (id) => {
   const agent = await agentsStore().get(id);
   if (!agent) throw new Error('agent_not_found');
   return agentRuntimeContext({ runtimeState: (await runtimeConfig()).runtimeState, agent }).agentWorkspaceRoot;
@@ -3348,7 +3351,7 @@ const closeRuntimeResources = createCoordinatedShutdown({
     httpClosePromise = new Promise(resolve => server.close(() => resolve()));
     server.closeIdleConnections?.();
   },
-  producers: () => [skillSyncProducer, managedSkillSynchronizer, modDistributionProducer, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
+  producers: () => [skillSyncProducer, managedSkillSynchronizer, modDistributionProducer, externalTurnDispatcher, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
   beforeDrain: async () => {
     try {
       await recordActiveRunInterruptions({ stores: postgresApplication.stores, activeRuns: activeChatRuns, resolveAgentRuntime, reason: shutdownReason });

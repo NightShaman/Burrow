@@ -134,7 +134,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       child.send({ type: "capability-result", requestId, error: "mod_busy" }, () => {}); return;
     }
     const controller = new AbortController();
-    if (activeCapabilities.size >= 4 || !capabilities || !["managementInventory", "managementSubmit", "managementOperation", "readRuntimeDiagnostics", "listAgents", "getOperatorIdentity", "getOperatorTimezone", "listConversations", "readConversation", "listModels", "generateText", "getForgeImageStatus", "createForgeImage", "readForgeImageJob", "listScheduledJobs", "readScheduledJob", "createScheduledJob", "updateScheduledJob", "deleteScheduledJob", "listScheduledJobRuns", "triggerScheduledJob"].includes(message.method)) {
+    if (activeCapabilities.size >= 4 || !capabilities || !["managementInventory", "managementSubmit", "managementOperation", "readRuntimeDiagnostics", "listAgents", "getOperatorIdentity", "getOperatorTimezone", "listConversations", "readConversation", "listModels", "generateText", "submitExternalTurn", "readExternalTurn", "getForgeImageStatus", "createForgeImage", "readForgeImageJob", "listScheduledJobs", "readScheduledJob", "createScheduledJob", "updateScheduledJob", "deleteScheduledJob", "listScheduledJobRuns", "triggerScheduledJob"].includes(message.method)) {
       child.send({ type: "capability-result", requestId, error: "mod_capability_unavailable" }, () => {}); return;
     }
     // Capability methods validate their own inputs; transport does not impose a
