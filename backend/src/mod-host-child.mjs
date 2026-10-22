@@ -15,13 +15,16 @@ let systemController = null;
 const handlers = new Map();
 const toolHandlers = new Map();
 const protectedResolvers = new Map();
-const activeTools = new Map();
+const activeInvocations = new Map();
+const cancelledInvocations = new Set();
 let diagnosticHandlers = null;
 const pendingStore = new Map();
 const pendingCapabilities = new Map();
 const invocationScope = new AsyncLocalStorage();
 function capabilityRequest(method, input, { signal } = {}) {
   if (stopping || !process.connected) return Promise.reject(new Error("mod_capability_unavailable"));
+  const invocationSignal = invocationScope.getStore()?.signal;
+  signal = signal && invocationSignal ? AbortSignal.any([signal, invocationSignal]) : signal || invocationSignal;
   if (signal?.aborted) return Promise.reject(new Error("mod_capability_cancelled"));
   const requestId = `cap-${process.pid}-${++sequence}`;
   return new Promise((resolve, reject) => {
@@ -187,7 +190,7 @@ async function activate(message) {
     settings: settingsApi(),
     secrets: secretsApi(),
     conversations: Object.freeze({ list: (input) => capabilityRequest("listConversations", input), read: (input, options) => capabilityRequest("readConversation", input, options) }),
-    models: Object.freeze({ list: () => capabilityRequest("listModels", {}), generateText: (input, options) => capabilityRequest("generateText", input, options) }),
+    models: Object.freeze({ list: () => capabilityRequest("listModels", {}), generateText: (input, options) => capabilityRequest("generateText", input, options), generations: Object.freeze({ submit: (input) => capabilityRequest("submitGeneration", input), read: (jobId) => capabilityRequest("readGeneration", { jobId }) }) }),
     forge: Object.freeze({ images: Object.freeze({ status: () => capabilityRequest("getForgeImageStatus", {}), create: (input) => capabilityRequest("createForgeImage", input) }), jobs: Object.freeze({ read: (jobId) => capabilityRequest("readForgeImageJob", { jobId }) }) }),
     agents: Object.freeze({ list: () => capabilityRequest("listAgents", {}), turns: Object.freeze({ submit: (input) => capabilityRequest("submitExternalTurn", input), read: (turnId) => capabilityRequest("readExternalTurn", { turnId }) }) }),
     operator: Object.freeze({ timezone: () => capabilityRequest("getOperatorTimezone", {}), displayIdentity: () => capabilityRequest("getOperatorIdentity", {}) }),
@@ -230,18 +233,19 @@ async function activate(message) {
 async function invoke(message) {
   const handler = message.routeId?.startsWith("protected:") ? protectedResolvers.get(message.routeId.slice(10)) : message.routeId?.startsWith("tool:") ? toolHandlers.get(message.routeId.slice(5)) : message.routeId === "diagnostic-list" ? diagnosticHandlers?.listJobs : message.routeId === "diagnostic-detail" ? diagnosticHandlers?.getJob : handlers.get(message.routeId);
   if (!handler) throw new Error('mod_route_handler_not_found');
-  if (message.routeId?.startsWith('protected:')) return handler(message.request.reference, Object.freeze(message.request.caller));
-  if (!message.routeId?.startsWith('tool:')) return handler(message.request);
-  const validate = toolValidators.get(message.routeId.slice(5));
-  if (!validate || !validate(message.request.arguments)) {
-    throw Object.assign(new Error('mod_tool_input_invalid'), { statusCode: 400 });
-  }
   const controller = new AbortController();
-  activeTools.set(message.requestId, controller);
+  activeInvocations.set(message.requestId, controller);
   try {
-    return await invocationScope.run(Object.freeze({ invocationId: message.requestId }), () =>
-      handler(message.request.arguments, Object.freeze({ ...message.request.caller, signal: controller.signal })));
-  } finally { activeTools.delete(message.requestId); }
+    return await invocationScope.run(Object.freeze({ invocationId: message.requestId, signal: controller.signal }), async () => {
+      if (message.routeId?.startsWith('protected:')) return handler(message.request.reference, Object.freeze(message.request.caller));
+      if (message.routeId?.startsWith('tool:')) {
+        const validate = toolValidators.get(message.routeId.slice(5));
+        if (!validate || !validate(message.request.arguments)) throw Object.assign(new Error('mod_tool_input_invalid'), { statusCode: 400 });
+        return handler(message.request.arguments, Object.freeze({ ...message.request.caller, signal: controller.signal }));
+      }
+      return handler(message.request, Object.freeze({ signal: controller.signal }));
+    });
+  } finally { if (activeInvocations.get(message.requestId) === controller) activeInvocations.delete(message.requestId); }
 }
 
 async function shutdown() {
@@ -254,14 +258,14 @@ async function shutdown() {
   activeSystemProcesses.clear();
   for (const active of activeSystemFilesystems.values()) active.abort.abort();
   activeSystemFilesystems.clear();
-  for (const controller of activeTools.values()) controller.abort();
-  activeTools.clear();
+  for (const controller of activeInvocations.values()) controller.abort();
+  activeInvocations.clear();
   if (cleanup) await cleanup();
   cleanup = null;
 }
 
 process.on('message', async (message) => {
-  if (message?.type === 'invoke-cancel') { activeTools.get(message.requestId)?.abort(); return; }
+  if (message?.type === 'invoke-cancel') { const controller = activeInvocations.get(message.requestId); if (controller) { cancelledInvocations.add(message.requestId); controller.abort(); } return; }
   if (message?.type === 'system-controller-configure-telemetry') {
     if (!validSystemMessage(message, 'system-controller-configure-telemetry', { operation: false }) || !systemController?.configureTelemetry) return;
     try {
@@ -358,14 +362,14 @@ process.on('message', async (message) => {
   }
   try {
     if (message?.type === 'activate') await activate(message);
-    else if (message?.type === 'invoke') send({ type: 'result', requestId: message.requestId, result: await invoke(message) });
+    else if (message?.type === 'invoke') { const result = await invoke(message); if (!cancelledInvocations.delete(message.requestId)) send({ type: 'result', requestId: message.requestId, result }); }
     else if (message?.type === 'shutdown') {
       try { await shutdown(); send({ type: 'shutdown-complete' }); }
       catch (error) { send({ type: 'shutdown-failed', error: errorText(error) }); }
       process.disconnect();
     }
   } catch (error) {
-    if (message?.type === 'invoke') send({ type: 'result', requestId: message.requestId, error: errorText(error), statusCode: Number(error?.statusCode) || 500 });
+    if (message?.type === 'invoke') { if (!cancelledInvocations.delete(message.requestId)) send({ type: 'result', requestId: message.requestId, error: errorText(error), statusCode: Number(error?.statusCode) || 500 }); }
     else {
       try { await shutdown(); } catch {}
       send({ type: 'activation-failed', error: errorText(error) });

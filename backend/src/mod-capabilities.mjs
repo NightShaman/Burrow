@@ -71,10 +71,11 @@ function summarizedRun(run) {
 }
 
 // Only this core-side service has access to PostgreSQL secrets and provider credentials.
-export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null, externalTurnDispatcher = null, stores = null, modStore = null, runtimeDiagnostics = null, modManagement = null, modAuthority = null } = {}) {
+export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null, externalTurnDispatcher = null, generationDispatcher = null, stores = null, modStore = null, runtimeDiagnostics = null, modManagement = null, modAuthority = null } = {}) {
   if (typeof resolveAgentRuntime !== 'function') throw new Error('mod_agent_resolver_required');
   const injected = stores || {};
   for (const key of ['agents','models','scheduledJobs','conversations']) if (!injected[key]) throw new Error(`mod_${key}_store_required`);
+  const generateTextImpl = createModTextGenerator({ models: injected.models, fetchImpl });
   const withStore = async (key, fn) => fn(injected[key]);
   const withJobs = (fn) => withStore('scheduledJobs', fn);
   const conversationStore = injected.conversations;
@@ -336,7 +337,45 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
       const store = forgeStore();
       return projectForgeImageJob(store, await store.get(bounded(value.jobId, 96)));
     },
-    async generateText(input, { signal } = {}) {
+    generateText: generateTextImpl,
+    async submitGeneration(input) {
+      if (!generationDispatcher) throw new Error('mod_generations_unavailable');
+      const value = exactKeys(plain(input), ['connectionId', 'model', 'prompt', 'maxTokens', 'effort', 'reasoningEffort', 'temperature', 'idempotencyKey']);
+      const idempotencyKey = bounded(value.idempotencyKey, 256);
+      if (!idempotencyKey.trim()) invalid();
+      const payload = canonicalGenerationInput(value);
+      return generationDispatcher.submit({ ownerModId: schedulerOwner(), idempotencyKey, payload });
+    },
+    async readGeneration(input) {
+      if (!generationDispatcher) throw new Error('mod_generations_unavailable');
+      const value = exactKeys(plain(input), ['jobId']);
+      const job = await generationDispatcher.read(schedulerOwner(), bounded(value.jobId, 96));
+      if (!job) throw new Error('mod_generation_not_found');
+      return job;
+    },
+  });
+}
+
+export function canonicalGenerationInput(value) {
+  bounded(value.connectionId, 128); bounded(value.model, 256);
+  if (typeof value.prompt !== 'string' || !value.prompt || value.prompt.length > 100_000) invalid();
+  positiveSafeInteger(value.maxTokens);
+  optionalTemperature(value.temperature);
+  if (value.effort !== undefined && value.reasoningEffort !== undefined && value.effort !== value.reasoningEffort) invalid();
+  const effort = value.reasoningEffort ?? value.effort;
+  let normalized;
+  if (effort !== undefined) {
+    if (typeof effort !== 'string') invalid();
+    try { normalized = normalizeModelReasoningEffort(effort); } catch { invalid(); }
+  }
+  return { connectionId: value.connectionId, model: value.model, prompt: value.prompt,
+    ...(value.maxTokens === undefined ? {} : { maxTokens: value.maxTokens }),
+    ...(normalized === undefined ? {} : { effort: normalized }),
+    ...(value.temperature === undefined ? {} : { temperature: value.temperature }) };
+}
+
+export function createModTextGenerator({ models, fetchImpl = fetch }) {
+  return async function generateText(input, { signal } = {}) {
       const { connectionId, model, prompt, maxTokens, effort, reasoningEffort, temperature } = plain(input);
       bounded(connectionId, 128); bounded(model, 256);
       if (typeof prompt !== 'string' || !prompt) invalid();
@@ -350,7 +389,7 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
       }
       const requestedTemperature = optionalTemperature(temperature);
       if (signal?.aborted) throw new Error('mod_capability_cancelled');
-      const config = await resolveModelConfig({ modelConnectionId: connectionId, model, fetchImpl, modelSettings: injected.models,
+      const config = await resolveModelConfig({ modelConnectionId: connectionId, model, fetchImpl, modelSettings: models, abortSignal: signal,
         ...(requestedEffort === undefined ? {} : { model_reasoning_effort: requestedEffort }),
         ...(requestedTemperature === undefined ? {} : { temperature: requestedTemperature }) });
       if (requestedEffort !== undefined && requestedEffort !== 'off' && Array.isArray(config.reasoningEfforts) && config.reasoningEfforts.length && !config.reasoningEfforts.includes(requestedEffort)) throw new Error('model_reasoning_effort_not_supported');
@@ -368,6 +407,5 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
       const text = result.choice.text;
       if (typeof text !== 'string' || (result.choice.finishReason === 'max_tokens' && !text)) throw modelGenerationFailure(result, 'model_generation_failed');
       return { text };
-    },
-  });
+  };
 }

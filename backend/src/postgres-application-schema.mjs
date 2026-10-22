@@ -1,3 +1,4 @@
+import { POSTGRES_MOD_GENERATION_SCHEMA_SQL } from './postgres-mod-generation-store.mjs';
 import { POSTGRES_MOD_EXTERNAL_TURN_SCHEMA_SQL } from './postgres-mod-external-turn-store.mjs';
 import { POSTGRES_MOD_AUTHORITY_SCHEMA_SQL } from './mod-authority.mjs';
 import { POSTGRES_SKILL_SOURCES_SQL } from './postgres-skill-sources.mjs';
@@ -157,4 +158,5 @@ ALTER TABLE global_profile_documents
   ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at::timestamptz;
 ` },
   { version: 63, name: 'mod-external-agent-turns', sql: POSTGRES_MOD_EXTERNAL_TURN_SCHEMA_SQL },
+  { version: 64, name: 'mod-text-generations', sql: POSTGRES_MOD_GENERATION_SCHEMA_SQL },
 ]);

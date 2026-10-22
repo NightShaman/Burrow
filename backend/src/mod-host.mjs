@@ -134,12 +134,19 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       child.send({ type: "capability-result", requestId, error: "mod_busy" }, () => {}); return;
     }
     const controller = new AbortController();
-    if (activeCapabilities.size >= 4 || !capabilities || !["managementInventory", "managementSubmit", "managementOperation", "readRuntimeDiagnostics", "listAgents", "getOperatorIdentity", "getOperatorTimezone", "listConversations", "readConversation", "listModels", "generateText", "submitExternalTurn", "readExternalTurn", "getForgeImageStatus", "createForgeImage", "readForgeImageJob", "listScheduledJobs", "readScheduledJob", "createScheduledJob", "updateScheduledJob", "deleteScheduledJob", "listScheduledJobRuns", "triggerScheduledJob"].includes(message.method)) {
+    const parentInvocationId = String(message.parentInvocationId || "");
+    const invocation = pending.get(parentInvocationId);
+    const parentRequired = message.method === 'readRuntimeDiagnostics' || message.method.startsWith('management');
+    if (parentRequired && parentInvocationId && !invocation) {
+      child.send({ type: "capability-result", requestId, error: message.method.startsWith('management') ? 'mod_management_caller_required' : 'mod_diagnostic_caller_required' }, () => {}); return;
+    }
+    if (!parentRequired && parentInvocationId && !invocation) { child.send({ type: "capability-result", requestId, error: "mod_capability_cancelled" }, () => {}); return; }
+    if (activeCapabilities.size >= 4 || !capabilities || !["managementInventory", "managementSubmit", "managementOperation", "readRuntimeDiagnostics", "listAgents", "getOperatorIdentity", "getOperatorTimezone", "listConversations", "readConversation", "listModels", "generateText", "submitGeneration", "readGeneration", "submitExternalTurn", "readExternalTurn", "getForgeImageStatus", "createForgeImage", "readForgeImageJob", "listScheduledJobs", "readScheduledJob", "createScheduledJob", "updateScheduledJob", "deleteScheduledJob", "listScheduledJobRuns", "triggerScheduledJob"].includes(message.method)) {
       child.send({ type: "capability-result", requestId, error: "mod_capability_unavailable" }, () => {}); return;
     }
     // Capability methods validate their own inputs; transport does not impose a
     // smaller arbitrary envelope than the model/provider or archive reader.
-    activeCapabilities.set(requestId, { controller, method: message.method, startedAt: Date.now() });
+    activeCapabilities.set(requestId, { controller, parentInvocationId, method: message.method, startedAt: Date.now() });
     const configuredTimeout = message.method === "generateText" ? modelCapabilityTimeoutMs : capabilityTimeoutMs;
     const deadline = Number(configuredTimeout);
     const timer = Number.isFinite(deadline) && deadline > 0
@@ -178,6 +185,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       if (!closing && child.connected) child.send({ type: "capability-result", requestId, ...capabilityErrorEnvelope(error) }, () => {});
     } finally { controller.signal.removeEventListener("abort", onAbort); clearTimeout(timer); if (activeCapabilities.get(requestId)?.controller === controller) activeCapabilities.delete(requestId); }
   }
+  const cancelInvocationCapabilities = requestId => { for (const entry of activeCapabilities.values()) if (entry.parentInvocationId === requestId) entry.controller.abort(hostError("mod_capability_cancelled")); };
   const pendingSystemFilesystem = new Map();
   const rejectSystemProcesses = (code = 'remote_process_controller_unavailable') => {
     const error = hostError(code);
@@ -216,7 +224,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   const exited = new Promise((resolve) => { resolveExit = resolve; });
 
   const rejectPending = (error) => {
-    for (const entry of pending.values()) { clearTimeout(entry.timer); entry.abortSignal?.removeEventListener('abort', entry.cancel); entry.reject(error); }
+    for (const [requestId, entry] of pending) { cancelInvocationCapabilities(requestId); clearTimeout(entry.timer); entry.abortSignal?.removeEventListener('abort', entry.cancel); entry.reject(error); }
     pending.clear();
   };
 
@@ -358,6 +366,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     const entry = pending.get(message.requestId);
     if (!entry) return;
     pending.delete(message.requestId);
+    cancelInvocationCapabilities(message.requestId);
     clearTimeout(entry.timer);
     entry.abortSignal?.removeEventListener('abort', entry.cancel);
     if (message.error) {
@@ -552,6 +561,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       const cancel = () => {
         if (!pending.has(requestId)) return;
         pending.delete(requestId);
+        cancelInvocationCapabilities(requestId);
         clearTimeout(timer);
         abortSignal?.removeEventListener('abort', cancel);
         child.send({ type: 'invoke-cancel', requestId }, () => {});
@@ -562,11 +572,9 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
         if (!pending.has(requestId)) return;
         pending.delete(requestId);
         abortSignal?.removeEventListener('abort', cancel);
-        const error = hostError('mod_route_timeout', mod.id);
-        markUnavailable('mod_route_timeout');
-        fail(error);
-        rejectPending(hostError('mod_host_unavailable', mod.id));
-        child.kill('SIGKILL');
+        cancelInvocationCapabilities(requestId);
+        child.send({ type: 'invoke-cancel', requestId }, () => {});
+        fail(hostError('mod_route_timeout', mod.id));
       }, finiteTimeout(routeTimeoutMs, DEFAULT_MOD_ROUTE_TIMEOUT_MS));
       pending.set(requestId, { resolve: succeed, reject: fail, completed, timer, routeId, abortSignal, cancel, trustedCaller: routeId?.startsWith('tool:') ? Object.freeze({ ...(request?.caller || {}) }) : null });
       if (abortSignal?.aborted) { cancel(); return; }

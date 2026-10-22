@@ -207,7 +207,7 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
   }
 }
 
-export async function loadMods({ runtimeRoot, logger = console, executionProviders = null, replaceExecutionProviders = false, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null, externalTurnDispatcher = null, stores = null, runtimeDiagnostics = null, modManagement = null, modAuthority = null, onlyModIds = null, modStoreFactory = null, enabledModIds = null, modCatalogWriter = null } = {}) {
+export async function loadMods({ runtimeRoot, logger = console, executionProviders = null, replaceExecutionProviders = false, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null, externalTurnDispatcher = null, generationDispatcher = null, stores = null, runtimeDiagnostics = null, modManagement = null, modAuthority = null, onlyModIds = null, modStoreFactory = null, enabledModIds = null, modCatalogWriter = null } = {}) {
   const discoveredAll = await discoverMods({ runtimeRoot });
   const selectedIds = onlyModIds ? new Set(onlyModIds) : null;
   const discovered = selectedIds ? discoveredAll.filter((mod) => selectedIds.has(mod.id)) : discoveredAll;
@@ -230,7 +230,7 @@ export async function loadMods({ runtimeRoot, logger = console, executionProvide
         let unregisterController = null;
         store = await modStoreFactory(mod.id);
         host = startModHost({
-          mod: { ...mod, systemCapabilities: effectiveCapabilities }, store, logger, systemCapability, modAuthority, capabilities: resolveAgentRuntime ? createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl: capabilityFetch, ownerModId: mod.id, scheduledJobScheduler, externalTurnDispatcher, stores, modStore: store, runtimeDiagnostics, modAuthority, modManagement: effectiveCapabilities.includes('mod-management-v1') ? modManagement : null }) : null, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs,
+          mod: { ...mod, systemCapabilities: effectiveCapabilities }, store, logger, systemCapability, modAuthority, capabilities: resolveAgentRuntime ? createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl: capabilityFetch, ownerModId: mod.id, scheduledJobScheduler, externalTurnDispatcher, generationDispatcher, stores, modStore: store, runtimeDiagnostics, modAuthority, modManagement: effectiveCapabilities.includes('mod-management-v1') ? modManagement : null }) : null, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs,
           onSystemControllerReady(controllerProxy) {
             if (!systemCapability || !executionProviders) return;
             unregisterController = executionProviders.register(mod.id, controllerProxy, { replace: replaceExecutionProviders });
