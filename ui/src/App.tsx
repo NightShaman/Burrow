@@ -139,6 +139,7 @@ function AppContent() {
       try {
         await api(`/api/agents/${encodeURIComponent(selected.resourceId ?? selected.id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contextConfig }) });
         setAgents((all) => all.map((agent) => agent.id === selected.id ? { ...agent, contextConfig: { ...agent.contextConfig, ...contextConfig } } : agent));
+        await refreshSessions(selected.id).catch((error: Error) => reportError(`A2A routing saved, but could not refresh sessions: ${error.message}`));
       } catch (error) {
         reportError(error instanceof Error ? `Could not update A2A routing: ${error.message}` : 'Could not update A2A routing.');
       }

@@ -6,7 +6,7 @@ import { api } from './app/api';
 import { ConfirmProvider } from './app/ConfirmDialog';
 import type { Agent } from './app/types';
 
-const mocks = vi.hoisted(() => ({ reportError: vi.fn(), writeModelSelection: vi.fn() }));
+const mocks = vi.hoisted(() => ({ reportError: vi.fn(), writeModelSelection: vi.fn(), refreshSessions: vi.fn().mockResolvedValue(undefined) }));
 const contextConfig = { a2aInDefault: true, personality: 'keep-personality', tools: ['keep-tool'], skills: ['keep-skill'] };
 const agent: Agent = {
   id: 'smatchet', resourceId: 'runtime-agent', name: 'Smatchet', avatar: 'S', activity: 'idle', context: null,
@@ -37,7 +37,7 @@ vi.mock('./features/panels/RightRail', () => ({ RightRail: () => null }));
 vi.mock('./features/chat/useChatRun', () => ({ useChatRun: () => ({ activeRunId: '', activeRunForSelection: null }) }));
 vi.mock('./features/chat/useChatSession', () => ({
   useChatSession: () => ({
-    reportError: mocks.reportError, toolActivityForRun: vi.fn(), sessionId: 'default', sessions: [{ id: 'default' }], attached: [], turns: [], draft: '',
+    refreshSessions: mocks.refreshSessions, reportError: mocks.reportError, toolActivityForRun: vi.fn(), sessionId: 'default', sessions: [{ id: 'default' }], attached: [], turns: [], draft: '',
   }),
 }));
 vi.mock('./features/chat/ChatPage', async (original) => {
@@ -82,6 +82,7 @@ describe('App A2A routing persistence', () => {
     expect(JSON.parse(screen.getByTestId('context-config').textContent!)).toEqual({ ...contextConfig, a2aInDefault: false });
     expect(mocks.writeModelSelection).not.toHaveBeenCalled();
     expect(mocks.reportError).not.toHaveBeenCalled();
+    expect(mocks.refreshSessions).toHaveBeenCalledWith('smatchet');
   });
 
   it('keeps the saved routing/config on PATCH failure, reports it, and allows retry', async () => {
@@ -95,9 +96,20 @@ describe('App A2A routing persistence', () => {
     expect(JSON.parse(screen.getByTestId('context-config').textContent!)).toEqual(contextConfig);
     expect(mocks.reportError).toHaveBeenCalledWith('Could not update A2A routing: Routing unavailable');
     expect(mocks.writeModelSelection).not.toHaveBeenCalled();
+    expect(mocks.refreshSessions).not.toHaveBeenCalled();
     vi.mocked(api).mockResolvedValue({});
     await act(async () => { fireEvent.click(toggle); });
     expect(toggle).toHaveProperty('checked', false);
     expect(patches()).toHaveLength(2);
   });
+
+  it('hydrates the persisted inbox after toggling Off and keeps it visible after restoring On', async () => {
+    const toggle = renderApp();
+    await act(async () => { fireEvent.click(toggle); });
+    expect(mocks.refreshSessions).toHaveBeenCalledWith('smatchet');
+    await act(async () => { fireEvent.click(toggle); });
+    expect(toggle).toHaveProperty('checked', true);
+    expect(mocks.refreshSessions).toHaveBeenCalledTimes(2);
+  });
+
 });
