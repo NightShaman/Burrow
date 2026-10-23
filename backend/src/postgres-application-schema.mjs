@@ -50,7 +50,7 @@ import { POSTGRES_WORKING_MEMORY_RETENTION_SCHEMA_SQL } from './postgres-working
 import { POSTGRES_SESSION_SCHEMA_SQL, POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL, POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL, POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL, POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL, POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL, POSTGRES_SESSION_SEARCH_SCHEMA_SQL, POSTGRES_SESSION_NATIVE_SCHEMA_SQL, POSTGRES_SESSION_METADATA_SCHEMA_SQL, POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL, POSTGRES_ARCHIVE_LISTING_INDEX_SQL, POSTGRES_ARCHIVE_RUN_INDEX_SQL } from './postgres-session-store.mjs';
 import { POSTGRES_UI_AUTH_SECRET_SCHEMA_SQL } from './postgres-ui-auth-secret-store.mjs';
 import { POSTGRES_OTEL_SETTINGS_SCHEMA_SQL } from './postgres-otel-settings-store.mjs';
-import { POSTGRES_AGENT_DELIVERY_SCHEMA_SQL } from './postgres-agent-delivery-store.mjs';
+import { POSTGRES_AGENT_DELIVERY_OWNER_SQL, POSTGRES_AGENT_DELIVERY_SCHEMA_SQL } from './postgres-agent-delivery-store.mjs';
 
 // Version 1 and its component SQL are immutable after adoption. Schema changes
 // require an appended migration, never edits to a previously applied checksum.
@@ -161,4 +161,5 @@ ALTER TABLE global_profile_documents
   { version: 63, name: 'mod-external-agent-turns', sql: POSTGRES_MOD_EXTERNAL_TURN_SCHEMA_SQL },
   { version: 64, name: 'mod-text-generations', sql: POSTGRES_MOD_GENERATION_SCHEMA_SQL },
   { version: 65, name: 'native-compaction-projection-reuse', sql: POSTGRES_COMPACTION_PROJECTIONS_SQL },
+  { version: 66, name: 'owned-agent-message-deliveries', sql: POSTGRES_AGENT_DELIVERY_OWNER_SQL },
 ]);

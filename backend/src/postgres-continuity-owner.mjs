@@ -11,6 +11,13 @@ export function continuityOwner(pool, label = 'runtime') {
   let registry = owners.get(pool);
   if (!registry) { registry = new Map(); owners.set(pool, registry); }
   if (registry.has(label)) return registry.get(label);
+  const owner = createContinuityOwner(pool);
+  registry.set(label, owner);
+  return owner;
+}
+
+// Independently scoped work may release its owner without retiring the runtime.
+export function createContinuityOwner(pool) {
   const id = randomUUID();
   const client = new pg.Client(pool.options);
   let lost = false;
@@ -56,7 +63,6 @@ export function continuityOwner(pool, label = 'runtime') {
     },
     async close() { lost = true; if (starting) { await starting.catch(() => {}); await client.end(); } },
   };
-  registry.set(label, owner);
   return owner;
 }
 

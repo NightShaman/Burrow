@@ -138,79 +138,89 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
   // observes the same durable terminal result rather than waking the recipient twice.
   const claim = await conversationStore.claimAgentMessageDelivery({ deliveryId, request: deliveryRequest });
   if (!claim.execute) {
-    if (claim.status === 'completed') return claim.result;
+    if (claim.status === 'completed' || claim.status === 'unowned') return claim.result;
     for (;;) {
       abortSignal?.throwIfAborted();
       await new Promise((resolve) => setTimeout(resolve, 20));
       const observed = await conversationStore.readAgentMessageDelivery({ deliveryId });
-      if (observed?.status === 'completed') return observed.result;
+      if (observed?.status === 'completed' || observed?.status === 'unowned') return observed.result;
       if (!observed) throw new Error('agent_message_delivery_claim_missing');
     }
   }
 
-  // Ingress is part of the recipient reply transaction. Appending a second
-  // A2A message while the first recipient run owns this session advances the
-  // transcript underneath it and makes the first terminal commit stale. Queue
-  // both delivery and execution per recipient session instead.
-  let releaseWait;
-  try {
-    releaseWait = beginReplyWait(
-      replySessionKey(senderRuntime.agentWorkspaceRoot, source),
-      replySessionKey(recipientRuntime.agentWorkspaceRoot, session),
-    );
-  } catch (error) {
-    const failed = { tool: 'agent_send_message', ok: false, messageMode: resolvedMode, deliveryId,
-      senderAgentId: sender, recipientAgentId: recipient, sourceSessionId: source, targetSessionId: session,
-      reply: { ok: false, decision: null, error: error?.message || String(error), content: null }, autoExecuted: false };
-    return conversationStore.completeAgentMessageDelivery({ deliveryId, result: failed });
-  }
-  let exchange;
-  try {
-    exchange = await serializeRecipientReply({
-      rootDir: recipientRuntime.agentWorkspaceRoot,
-      sessionId: session,
-      abortSignal,
-      operation: async () => {
-        abortSignal?.throwIfAborted();
-        const delivery = await deliver();
-        abortSignal?.throwIfAborted();
-        const response = await runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, messageMode: resolvedMode, inboundEntryId: delivery.recipientEntry.id, parentSignal: abortSignal });
-        return { ...delivery, reply: response };
-      },
-    });
-  } catch (error) {
-    const failed = { tool: 'agent_send_message', ok: false, messageMode: resolvedMode, deliveryId,
-      senderAgentId: sender, recipientAgentId: recipient, sourceSessionId: source, targetSessionId: session,
-      reply: { ok: false, decision: null, error: error?.message || String(error), content: null }, autoExecuted: false };
-    await conversationStore.completeAgentMessageDelivery({ deliveryId, result: failed });
-    return failed;
-  } finally { releaseWait(); }
-  const { sourceEntry, receipt, reply } = exchange;
-  const replyText = text(reply?.answerText);
-  if (!replyText) {
-    const failed = { ...receipt, ok: false, reply: { ok: Boolean(reply?.ok), decision: reply?.decision || reply?.reply?.decision || null, error: reply?.error || reply?.reply?.error || 'agent_message_reply_empty', content: null } };
-    return conversationStore.completeAgentMessageDelivery({ deliveryId, result: failed });
-  }
-  const replyEntry = await appendAgentMessage({
-    conversationStore, agentId: sender, sessionId: source, content: replyText,
-    sender: recipient, senderRuntime: recipientRuntime, recipient: sender,
-    sourceSessionId: session, sourceRunId: reply?.runId || null,
-    messageMode: 'reply', direction: 'inbound', deliveryId: `${deliveryId}:reply`, replyToEntryId: sourceEntry.id,
+  const ownership = { deliveryId, ownerId: claim.ownerId };
+  const complete = result => conversationStore.completeAgentMessageDelivery({ ...ownership, result });
+  const assertOwner = () => conversationStore.assertAgentMessageDeliveryOwner?.(ownership);
+  const execute = work => typeof conversationStore.executeAgentMessageDelivery === 'function'
+    ? conversationStore.executeAgentMessageDelivery(ownership, work) : work();
+  return execute(async () => {
+    let releaseWait;
+    let exchange;
+    try {
+      // Ingress is part of the recipient reply transaction. Appending a second
+      // A2A message while the first recipient run owns this session advances the
+      // transcript underneath it and makes the first terminal commit stale. Queue
+      // both delivery and execution per recipient session instead.
+      releaseWait = beginReplyWait(
+        replySessionKey(senderRuntime.agentWorkspaceRoot, source),
+        replySessionKey(recipientRuntime.agentWorkspaceRoot, session),
+      );
+      exchange = await serializeRecipientReply({
+        rootDir: recipientRuntime.agentWorkspaceRoot,
+        sessionId: session,
+        abortSignal,
+        operation: async () => {
+          abortSignal?.throwIfAborted();
+          await assertOwner();
+          const delivery = await deliver();
+          abortSignal?.throwIfAborted();
+          await assertOwner();
+          const response = await runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, messageMode: resolvedMode, inboundEntryId: delivery.recipientEntry.id, parentSignal: abortSignal });
+          return { ...delivery, reply: response };
+        },
+      });
+      const { sourceEntry, receipt, reply } = exchange;
+      const replyText = text(reply?.answerText);
+      if (!replyText) {
+        const failed = { ...receipt, ok: false, reply: { ok: Boolean(reply?.ok), decision: reply?.decision || reply?.reply?.decision || null, error: reply?.error || reply?.reply?.error || 'agent_message_reply_empty', content: null } };
+        return await complete(failed);
+      }
+      await assertOwner();
+      const replyEntry = await appendAgentMessage({
+        conversationStore, agentId: sender, sessionId: source, content: replyText,
+        sender: recipient, senderRuntime: recipientRuntime, recipient: sender,
+        sourceSessionId: session, sourceRunId: reply?.runId || null,
+        messageMode: 'reply', direction: 'inbound', deliveryId: `${deliveryId}:reply`, replyToEntryId: sourceEntry.id,
+      });
+      const result = {
+        ...receipt,
+        ok: reply?.ok !== false,
+        reply: {
+          ok: reply?.ok !== false,
+          decision: reply?.decision || null,
+          error: reply?.error || null,
+          runId: reply.runId || null,
+          entryId: replyEntry.id,
+          recipientReplyEntryId: reply.recipientReplyEntryId || null,
+          // This bounded reply is the explicit result of the sender's tool call,
+          // so it must reach the sender's continuation as well as its transcript.
+          content: replyText,
+        },
+      };
+      return await complete(result);
+    } catch (error) {
+      const reply = exchange?.reply;
+      const failed = {
+        ...(exchange?.receipt || {}), tool: 'agent_send_message', ok: false,
+        messageMode: resolvedMode, deliveryId, senderAgentId: sender, recipientAgentId: recipient,
+        sourceSessionId: source, targetSessionId: session, autoExecuted: false,
+        reply: { ok: false, decision: reply?.decision || null, error: error?.message || String(error),
+          content: null, runId: reply?.runId || null, recipientReplyEntryId: reply?.recipientReplyEntryId || null,
+          executionOutcome: reply ? 'returned' : 'unknown', retryable: false },
+      };
+      // If persistence acknowledged an earlier terminal result, the store returns
+      // that exact winner. If it is unavailable, propagate rather than invent one.
+      return await complete(failed);
+    } finally { releaseWait?.(); }
   });
-  const result = {
-    ...receipt,
-    ok: reply?.ok !== false,
-    reply: {
-      ok: reply?.ok !== false,
-      decision: reply?.decision || null,
-      error: reply?.error || null,
-      runId: reply.runId || null,
-      entryId: replyEntry.id,
-      recipientReplyEntryId: reply.recipientReplyEntryId || null,
-      // This bounded reply is the explicit result of the sender's tool call,
-      // so it must reach the sender's continuation as well as its transcript.
-      content: replyText,
-    },
-  };
-  return conversationStore.completeAgentMessageDelivery({ deliveryId, result });
 }
