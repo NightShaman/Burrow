@@ -54,10 +54,8 @@ function textFromMessagePart(value) {
   return '';
 }
 
-function normalizeMessageFromBody(body = {}, attachments = []) {
-  const message = textFromMessagePart(body.message).trim();
-  if (message) return message;
-  return attachments.some(isImageAttachment) ? 'Please analyze the attached image.' : '';
+function normalizeMessageFromBody(body = {}) {
+  return textFromMessagePart(body.message).trim();
 }
 
 export function chatTurnInputFromBody({ body = {}, rootDir, dataRoot, agentDataRoot, agentRuntime = null } = {}) {
@@ -65,8 +63,8 @@ export function chatTurnInputFromBody({ body = {}, rootDir, dataRoot, agentDataR
   const attachments = Array.isArray(body.attachments)
     ? body.attachments.map(normalizeAttachment).filter((attachment) => attachment.content || attachment.size !== null)
     : [];
-  const message = normalizeMessageFromBody(body, attachments);
-  if (!message) {
+  const message = normalizeMessageFromBody(body);
+  if (!message && !attachments.length) {
     const error = new Error('message_required');
     error.statusCode = 400;
     throw error;
@@ -101,7 +99,7 @@ export function chatTurnInputFromBody({ body = {}, rootDir, dataRoot, agentDataR
 
 export async function runChatTurnFromBody({ attachmentInput = null, body = {}, rootDir, dataRoot, agentDataRoot, agentRuntime = null, resolveAgentRuntime = null, stores = null, groupChannelContext = null, turnSource = null, externalTurnMetadata = null, latencyTiming = null, telemetry = null, parentTraceContext = null, runSource = null, onTraceRecord = null, onModelTextDelta = null, onModelThoughtDelta = null, onModelContextUsage = null, onSteeringReady = null, registerNestedAgentRun = null, cancellationGraceMs = null, onCancellationDeadline = null } = {}) {
   // Internal group producer supplies validated byte-bearing attachments, not client references.
-  const input = chatTurnInputFromBody({ body: attachmentInput ? { ...body, attachments: [] } : body, rootDir, dataRoot, agentDataRoot, agentRuntime });
+  const input = chatTurnInputFromBody({ body: attachmentInput ? { ...body, attachments: attachmentInput } : body, rootDir, dataRoot, agentDataRoot, agentRuntime });
   if (attachmentInput) input.args.attachments = attachmentInput;
   return runChatTurn({ ...input, agentRuntime, resolveAgentRuntime, stores, groupChannelContext, turnSource, externalTurnMetadata, latencyTiming, telemetry, parentTraceContext, runSource, onTraceRecord, onModelTextDelta, onModelThoughtDelta, onModelContextUsage, onSteeringReady, registerNestedAgentRun, cancellationGraceMs, onCancellationDeadline });
 }

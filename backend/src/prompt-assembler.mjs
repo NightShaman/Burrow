@@ -456,7 +456,7 @@ export async function assemblePrompt({
   availableSkills = [],
 } = {}) {
   if (!rootDir) throw new Error('rootDir is required');
-  if (!task || typeof task !== 'string') throw new Error('task is required');
+  if (typeof task !== 'string' || (!task && !attachments.length && !attachmentManifest.length && !currentAttachmentManifest.length)) throw new Error('task is required');
 
   const logger = traceLogger || (persistBuildTrace ? createTraceLogger({ rootDir: await resolveRuntimeTraceRoot(rootDir), runId }) : null);
   // Skill instructions are loaded only by an explicit agent choice. The compact

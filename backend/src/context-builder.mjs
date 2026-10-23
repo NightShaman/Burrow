@@ -152,7 +152,7 @@ export async function buildContextForTurn({
   if ('contextEngine' in unsupported) throw new Error('context_engine_retired_use_prepared_context');
   if ('initialContextPreparation' in unsupported) throw new Error('initial_context_preparation_retired_use_prepared_context');
   if (!rootDir) throw new Error('rootDir is required');
-  if (!task || typeof task !== 'string') throw new Error('task is required');
+  if (typeof task !== 'string' || (!task && !attachments.length && !attachmentManifest.length)) throw new Error('task is required');
 
   const normalizedPreparedContext = preparedContext ? normalizePreparedContext(preparedContext) : null;
   let turnContext = normalizedPreparedContext?.turnContext || await buildTurnContext({

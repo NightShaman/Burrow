@@ -155,9 +155,9 @@ async function runAskChatUnserialized({
 } = {}) {
   if (!rootDir) throw new Error('rootDir is required');
   if (!stores?.metadata || !stores?.conversations) throw new Error('runtime_stores_required');
-  if (!message) throw new Error('message is required');
 
   const { normalizedArgs, attachments } = normalizeRuntimeTurnInput({ args, workspaceRoot, target, action, noCallModel, callModel, agentRuntime });
+  if (!message && !attachments.length) throw new Error('message is required');
   normalizedArgs.abort_signal?.throwIfAborted();
   const runtimeConfig = await loadRuntimeConfig({ rootDir, args: normalizedArgs, stores });
   const { defaults, modelConfig, executionBoundaries, runtimeState: loadedRuntimeState, skillsConfig } = runtimeConfig
@@ -329,6 +329,7 @@ async function runAskChatUnserialized({
   const route = await routeRequest({
     rootDir,
     message,
+    attachments,
     memoryContext: turnMemoryContext,
     skillConfig: scopedSkillsConfig,
     availableSkills: effectiveSkillCatalog.skills,

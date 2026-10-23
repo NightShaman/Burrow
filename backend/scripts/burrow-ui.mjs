@@ -1899,13 +1899,13 @@ function validateBoundaryBody(kind, input = {}) {
     normalizeOverviewBody(body);
   }
   if (kind === 'agent-patch') { for (const field of ['name', 'enabled', 'availableCapabilities', 'contextConfig']) if (body[field] !== undefined && !['string', 'boolean', 'object'].includes(typeof body[field])) throw Object.assign(new Error(`${field}_invalid`), { statusCode: 400 }); }
-  if (kind === 'chat') { const hasMessage = typeof body.message === 'string' && body.message.trim(); const hasImage = Array.isArray(body.attachments) && body.attachments.some((item) => String(item?.type || item?.mimeType || '').toLowerCase().startsWith('image/')); if (!hasMessage && !hasImage) throw Object.assign(new Error('message_required'), { statusCode: 400 }); }
+  if (kind === 'chat') { const hasMessage = typeof body.message === 'string' && body.message.trim(); const hasAttachment = Array.isArray(body.attachments) && body.attachments.length > 0; if (!hasMessage && !hasAttachment) throw Object.assign(new Error('message_required'), { statusCode: 400 }); }
   if (kind === 'workspace-write') { requireStringField(body, 'path'); if (typeof body.content !== 'string') throw Object.assign(new Error('content_required'), { statusCode: 400 }); }
   if (kind === 'project-create') requireStringField(body, 'name');
   if (kind === 'task-create') { requireStringField(body, 'projectId'); requireStringField(body, 'title'); }
   if (kind === 'scheduled-job-create') for (const field of ['agentId', 'name', 'prompt', 'cron']) requireStringField(body, field);
   if (kind === 'group-create') { requireStringField(body, 'name'); if (!Array.isArray(body.participantAgentIds) || !body.participantAgentIds.length || body.participantAgentIds.some((id) => typeof id !== 'string' || !id.trim())) throw Object.assign(new Error('group_participants_required'), { statusCode: 400 }); }
-  if (kind === 'group-message') requireStringField(body, 'message');
+  if (kind === 'group-message') { const hasMessage = typeof body.message === 'string' && body.message.trim(); const hasAttachment = Array.isArray(body.attachments) && body.attachments.length > 0; if (!hasMessage && !hasAttachment) throw Object.assign(new Error('message_required'), { statusCode: 400 }); }
   return body;
 }
 

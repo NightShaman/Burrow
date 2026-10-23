@@ -45,7 +45,7 @@ export function createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgent
         if (lifecycle?.stopped) controller.abort(lifecycle.signal.reason);
         return runChatTurnFromBody({
         attachmentInput: attachments,
-        body: { message: message || 'Please analyze the attached files.', attachments, sessionId, runId, abortSignal: controller.signal }, rootDir: projectRoot, agentRuntime, stores, resolveAgentRuntime,
+        body: { message, attachments, sessionId, runId, abortSignal: controller.signal }, rootDir: projectRoot, agentRuntime, stores, resolveAgentRuntime,
         telemetry, runSource: 'group-channel',
         groupChannelContext: { channelId, channelName: channel.name, turns: room?.turns || [] },
       }).then(async (result) => {

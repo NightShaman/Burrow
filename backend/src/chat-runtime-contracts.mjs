@@ -178,6 +178,7 @@ export function createRuntimeTurnContract({
   support = {},
   trace = {},
   envelope = null,
+  attachments = [],
 } = {}) {
   const source = envelope && typeof envelope === 'object' ? envelope : null;
   return {
@@ -186,6 +187,7 @@ export function createRuntimeTurnContract({
     rootPrimitive: CHAT_TURN_KIND,
     sessionId: compactString(source?.sessionId || sessionId) || 'default',
     message: compactString(source?.message || message),
+    attachments: Array.isArray(source?.input?.attachments) ? source.input.attachments : attachments,
     envelopeKind: source?.kind || undefined,
     routeDecision: normalizeRouteDecision(source?.routeDecision),
     planner: normalizePlanner(source?.planner || planner),
@@ -275,7 +277,7 @@ export function assertContextEngineContract(context) {
 export function assertCanonicalTurnEnvelope(envelope) {
   if (envelope?.kind !== CANONICAL_TURN_ENVELOPE_KIND) throw new Error('canonical turn envelope requires kind="canonical-turn-envelope"');
   if (envelope?.rootPrimitive !== CHAT_TURN_KIND) throw new Error('canonical turn envelope requires chat root primitive');
-  if (!compactString(envelope.message)) throw new Error('canonical turn envelope requires message');
+  if (!compactString(envelope.message) && !envelope.input?.attachments?.length) throw new Error('canonical turn envelope requires message');
   if (!envelope.routeDecision || typeof envelope.routeDecision !== 'object') throw new Error('canonical turn envelope requires routeDecision');
   if (!envelope.planner || typeof envelope.planner !== 'object') throw new Error('canonical turn envelope requires planner');
   if (!envelope.context || typeof envelope.context !== 'object') throw new Error('canonical turn envelope requires context');
@@ -287,7 +289,7 @@ export function assertCanonicalTurnEnvelope(envelope) {
 export function assertRuntimeTurnContract(contract) {
   if (contract?.kind !== RUNTIME_TURN_KIND) throw new Error('runtime turn contract requires kind="runtime-turn"');
   if (contract?.rootPrimitive !== CHAT_TURN_KIND) throw new Error('runtime turn contract requires chat root primitive');
-  if (!compactString(contract.message)) throw new Error('runtime turn contract requires message');
+  if (!compactString(contract.message) && !contract.attachments?.length) throw new Error('runtime turn contract requires message');
   if (!contract.planner || typeof contract.planner !== 'object') throw new Error('runtime turn contract requires planner envelope');
   if (!contract.executionPolicy || typeof contract.executionPolicy !== 'object') throw new Error('runtime turn contract requires executionPolicy');
   return true;

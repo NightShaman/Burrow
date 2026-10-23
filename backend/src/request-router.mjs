@@ -20,6 +20,7 @@ function memoryPlanFromTurnPlan(turnPlan = null) {
 export async function routeRequest({
   rootDir,
   message,
+  attachments = [],
   memoryContext = {},
   workspaceContext = {},
   action = null,
@@ -29,7 +30,7 @@ export async function routeRequest({
 } = {}) {
   void memoryContext;
   if (!rootDir) throw new Error('rootDir is required');
-  if (!message || typeof message !== 'string') throw new Error('message is required');
+  if (typeof message !== 'string' || (!message && !attachments.length)) throw new Error('message is required');
 
   const { skillConfig: resolvedSkillConfig, skills, promptSkills, skillIndex } = await resolvePromptSkillPlan({ rootDir, workspaceContext, skillConfig, availableSkills, turnPlan });
   const memory = memoryPlanFromTurnPlan(turnPlan);
