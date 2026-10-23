@@ -8,7 +8,7 @@ import type { SettingsTab } from '../../app/types';
 import type { ModContribution } from '../../app/apiTargets';
 vi.mock('../../app/api', async original => ({ ...await original<typeof import('../../app/api')>(), api: vi.fn() }));
 const { loadModSettingsContributions } = vi.hoisted(() => ({ loadModSettingsContributions: vi.fn<() => Promise<ModContribution[]>>(async () => []) }));
-vi.mock('../../app/apiTargets', () => ({ loadModSettingsContributions, modContributionsChangedEvent: 'mods-changed' }));
+vi.mock('../../app/apiTargets', async original => ({ ...await original<typeof import('../../app/apiTargets')>(), loadModSettingsContributions, modContributionsChangedEvent: 'mods-changed' }));
 vi.mock('./SystemStatsRail', () => ({ SystemStatsRail: () => null }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); loadModSettingsContributions.mockResolvedValue([]); });
 it('mounts only the selected configuration, with no hidden duplicate reads', async () => {
