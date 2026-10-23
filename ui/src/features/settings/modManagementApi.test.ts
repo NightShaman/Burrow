@@ -8,13 +8,13 @@ describe('normalizeModManagement', () => {
     expect(normalizeModManagement({
       sourceRefresh: { enabled: true, intervalMs: 21_600_000, staleMs: 900_000, refreshing: true, failures: 2 },
       mods: [{ id: 'chat', name: 'Chat', status: 'installed' }, { name: 'bad' }],
-      sources: [{ id: 'one', url: 'https://example.test' }, { id: 'bad' }],
+      sources: [{ id: 'one', url: 'https://example.test', credential: { configured: true } }, { id: 'bad' }],
     })).toEqual({
       ok: undefined,
       restartRequired: false,
       sourceRefresh: { enabled: true, intervalMs: 21_600_000, staleMs: 900_000, refreshing: true, failures: 2 },
       mods: [{ id: 'chat', name: 'Chat', status: 'installed' }],
-      sources: [{ id: 'one', url: 'https://example.test' }],
+      sources: [{ id: 'one', url: 'https://example.test', credential: { configured: true } }],
     });
   });
   it('normalizes missing or invalid payloads to empty collections', () => {

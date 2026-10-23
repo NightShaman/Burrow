@@ -231,6 +231,23 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   const lifecycle = (mod: ModRecord, action: 'uninstall' | 'enable' | 'disable') => {
     void run(mod.id, modLifecyclePath(mod.id, action), { method: 'POST' });
   };
+  const removeStoredCredential = async () => {
+    if (!selectedSource?.credential?.configured) return;
+    setBusy('source-credential');
+    setError(null);
+    try {
+      await modManagementAction(`/api/mod-management/sources/${encodeURIComponent(selectedSource.id)}/credential`, { method: 'DELETE' });
+      setSelectedSecretReference(null);
+      setSourceUsername('');
+      if (sourceSecretRef.current) sourceSecretRef.current.value = '';
+      setState(await loadModManagement());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not remove the stored credential.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const addSource = async () => {
     const url = selectedSource?.url ?? sourceUrl.trim();
     if (!url) return;
@@ -341,6 +358,11 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
         : 'Background source checks are disabled.'}</p>
     <Field label="Git repository URL"><input value={selectedSource?.url ?? sourceUrl} readOnly={!!selectedSource} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://git.example.com/team/mod.git" /></Field>
     <Field label="Private repository username (optional)"><input value={sourceUsername} onChange={(event) => setSourceUsername(event.target.value)} autoComplete="off" /></Field>
+    {selectedSource?.credential?.configured && !selectedSecretReference && <div className="credential-configured" role="status">
+      <span className="credential-configured-icon" aria-hidden="true">🔒</span>
+      <span><strong>Stored credential configured</strong><small>Leave the password or token empty to keep using it.</small></span>
+      <button className="danger" type="button" aria-label="Remove stored credential" disabled={busy !== null} onClick={() => void removeStoredCredential()}>{busy === 'source-credential' ? 'Removing…' : 'Remove'}</button>
+    </div>}
     <div className="credential-picker" ref={credentialPickerRef}>
       <div className="field"><label htmlFor="mod-source-secret">Password or access token (optional)</label><div className="credential-entry"><input id="mod-source-secret" ref={sourceSecretRef} type="password" autoComplete="new-password" placeholder={selectedSecretReference ? 'Stored credential selected' : "Paste a credential or type {{gss:…}}"} aria-haspopup={secretReferences.length ? 'listbox' : undefined} aria-expanded={secretReferences.length ? credentialPickerOpen : undefined} aria-controls={credentialPickerOpen ? 'mod-source-credentials' : undefined} onChange={(event) => { const exact = secretReferences.find(item => item.reference === event.target.value) || null; setSelectedSecretReference(exact); if (event.target.value === '{{' && secretReferences.length) openCredentialPicker(); }} />{secretReferences.length > 0 && <button className="credential-browse" type="button" disabled={busy !== null} aria-label="Browse stored credentials" aria-expanded={credentialPickerOpen} aria-controls="mod-source-credentials" onClick={() => credentialPickerOpen ? setCredentialPickerOpen(false) : openCredentialPicker()}>Browse</button>}</div></div>
       {selectedSecretReference && <div className="credential-selection" role="status" title={selectedSecretReference.reference}><span aria-hidden="true">🔒</span><span><strong>{selectedSecretReference.label}</strong><small>{[selectedSecretReference.service, selectedSecretReference.username].filter(Boolean).join(' · ') || 'Stored credential'}</small></span><button type="button" aria-label={`Clear ${selectedSecretReference.label}`} onClick={() => { setSelectedSecretReference(null); sourceSecretRef.current?.focus(); }}>×</button></div>}

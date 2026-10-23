@@ -16,7 +16,7 @@ export type ModRecord = {
   reason?: string;
 };
 
-export type ModSource = { id: string; url: string; status?: string; error?: string; lastCheckedAt?: string };
+export type ModSource = { id: string; url: string; status?: string; error?: string; lastCheckedAt?: string; credential?: { configured: boolean } };
 export type SecretReference = { reference: string; label: string; type: string; username?: string; url?: string; service?: string };
 export type SourceRefreshState = { enabled: boolean; intervalMs?: number; staleMs?: number; refreshing: boolean; failures: number };
 export type SourceRefreshConfig = { enabled: boolean; intervalMs: number; staleMs: number };

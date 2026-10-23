@@ -249,6 +249,30 @@ describe('Git mod sources', () => {
     unmount(); overflow.remove();
   });
 
+  it('shows, preserves, replaces, and explicitly removes an existing stored credential without exposing it', async () => {
+    const url = 'https://git.example.com/private.git';
+    const configured = { restartRequired: false, mods: [], sources: [{ id: 'private', url, status: 'ready', credential: { configured: true } }] };
+    const removed = { restartRequired: false, mods: [], sources: [{ id: 'private', url, status: 'ready', credential: { configured: false } }] };
+    loadMock.mockResolvedValueOnce(configured).mockResolvedValueOnce(configured).mockResolvedValueOnce(removed);
+    vi.mocked(management.modManagementAction).mockResolvedValue({ ok: true });
+    render(<ModsSettings section="sources" />);
+    fireEvent.click(await screen.findByRole('button', { name: `Edit ${url}` }));
+    expect(screen.getByText('Stored credential configured')).toBeTruthy();
+    expect(screen.getByText('Leave the password or token empty to keep using it.')).toBeTruthy();
+    expect((screen.getByLabelText('Password or access token (optional)') as HTMLInputElement).value).toBe('');
+    expect(document.body.textContent).not.toContain('{{gss:');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update source' }));
+    await waitFor(() => expect(management.modManagementAction).toHaveBeenNthCalledWith(1, '/api/mod-management/sources', {
+      method: 'POST', body: JSON.stringify({ url }),
+    }));
+    expect(screen.getByText('Stored credential configured')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove stored credential' }));
+    await waitFor(() => expect(management.modManagementAction).toHaveBeenNthCalledWith(2, '/api/mod-management/sources/private/credential', { method: 'DELETE' }));
+    await waitFor(() => expect(screen.queryByText('Stored credential configured')).toBeNull());
+  });
+
   it('keeps automatic source checks separate from source editing and inventory', async () => {
     loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [{ id: 'x', url: 'https://git.example.com/x.git' }] });
     const overflow = document.createElement('section'); document.body.appendChild(overflow);
