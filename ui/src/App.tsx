@@ -133,7 +133,17 @@ function AppContent() {
   const writeModelSelection = useModelSelectionWriter(savedProviders,
     (id, patch) => setAgents(all => all.map(agent => agent.id === id ? { ...agent, ...patch } : agent)), reportError);
   const updateAgent = async (patch: Partial<Agent>) => {
-    if (selected) await writeModelSelection(selected, patch);
+    if (!selected) return;
+    if (patch.contextConfig) {
+      try {
+        await api(`/api/agents/${encodeURIComponent(selected.resourceId ?? selected.id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contextConfig: patch.contextConfig }) });
+        setAgents((all) => all.map((agent) => agent.id === selected.id ? { ...agent, contextConfig: patch.contextConfig } : agent));
+      } catch (error) {
+        reportError(error instanceof Error ? `Could not update A2A routing: ${error.message}` : 'Could not update A2A routing.');
+      }
+      return;
+    }
+    await writeModelSelection(selected, patch);
   };
 
   const confirmDiscard = useConfirm();

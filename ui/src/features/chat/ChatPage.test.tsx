@@ -70,6 +70,32 @@ describe('Chat session picker', () => {
     const picker = screen.getByRole('combobox', { name: 'Session' });
     expect(Array.from((picker as HTMLSelectElement).options).map((option) => option.value)).toEqual(['default', 'Issues']);
   });
+
+  it('defaults A2A routing to the default session and persists only the routing preference', () => {
+    const provider = { id: 'provider', provider: 'test', apiType: 'openai', url: '', apiKey: '', models: ['test-model'] };
+    const updateAgent = vi.fn();
+    const onSessionChange = vi.fn();
+
+    render(<ChatModelSelector selected={agent} savedProviders={[provider]} updateAgent={updateAgent} sessions={[{ id: 'default' }]} sessionId="default" onSessionChange={onSessionChange} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} locked />);
+
+    const toggle = screen.getByRole('checkbox', { name: 'A2A in default' });
+    expect(toggle).toHaveProperty('checked', true);
+    expect(toggle).toHaveProperty('disabled', false);
+    fireEvent.click(toggle);
+    expect(updateAgent).toHaveBeenCalledWith({ contextConfig: { a2aInDefault: false } });
+    expect(onSessionChange).not.toHaveBeenCalled();
+  });
+
+  it('shows the dedicated A2A session before it has messages when A2A routing is separate', () => {
+    const provider = { id: 'provider', provider: 'test', apiType: 'openai', url: '', apiKey: '', models: ['test-model'] };
+    const separateAgent = { ...agent, contextConfig: { a2aInDefault: false } };
+
+    render(<ChatModelSelector selected={separateAgent} savedProviders={[provider]} updateAgent={vi.fn()} sessions={[{ id: 'default' }]} sessionId="default" onSessionChange={vi.fn()} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} />);
+
+    const picker = screen.getByRole('combobox', { name: 'Session' }) as HTMLSelectElement;
+    expect(Array.from(picker.options).map((option) => [option.value, option.text])).toEqual([['default', 'default'], ['a2a', 'A2A']]);
+    expect(screen.getByRole('checkbox', { name: 'A2A in default' })).toHaveProperty('checked', false);
+  });
 });
 
 describe('Chat composer draft ownership', () => {

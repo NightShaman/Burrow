@@ -99,7 +99,7 @@ describe('useRuntimeAgents registry state', () => {
       if (path === '/api/agents') return { agents: [{ id: 'smatchet', name: 'Smatchet', enabled: true }] };
       if (path !== '/api/agents/overview') throw new Error(`Unexpected path: ${path}`);
       return { agents: [{
-        agent: { id: 'smatchet', name: 'Smatchet', enabled: true },
+        agent: { id: 'smatchet', name: 'Smatchet', enabled: true, contextConfig: { a2aInDefault: false } },
         identity: { id: 'smatchet', name: 'Smatchet UI', avatar: 'S' },
         sessionId: 'default',
         selection: null,
@@ -122,7 +122,7 @@ describe('useRuntimeAgents registry state', () => {
     expect(apiMock).toHaveBeenCalledTimes(2);
     expect(apiMock).toHaveBeenNthCalledWith(1, '/api/agents', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(apiMock).toHaveBeenNthCalledWith(2, '/api/agents/overview', expect.objectContaining({ method: 'POST', signal: expect.any(AbortSignal) }));
-    expect(result.current.agents[0]).toMatchObject({ name: 'Smatchet UI', activity: 'Thinking', context: 42 });
+    expect(result.current.agents[0]).toMatchObject({ name: 'Smatchet UI', activity: 'Thinking', context: 42, contextConfig: { a2aInDefault: false } });
     expect(result.current.agents[0].subagents[0]).toMatchObject({ name: 'CSS audit', activity: 'Verifying', context: 12 });
     expect(result.current.agents[0].subagents[1]).toMatchObject({ activity: 'Incomplete', outcomeReason: 'Audit stopped · subagent_incomplete' });
     expect(result.current.agents[0].subagents[2]).toMatchObject({ activity: 'Error' });

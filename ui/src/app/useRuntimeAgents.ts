@@ -38,7 +38,7 @@ const asAgent = (entry: AgentOverviewEntry): Agent => ({
   name: entry.identity?.name || entry.agent.name,
   avatar: entry.identity?.avatar || avatarFor(entry.agent),
   activity: entry.agent.enabled ? 'Idle' : 'Disabled',
-  context: null, provider: '', model: '', effort: 'medium', temperature: 0.2,
+  context: null, contextConfig: entry.agent.contextConfig, provider: '', model: '', effort: 'medium', temperature: 0.2,
   workspace: workspacePathFor(entry.agent.id), files: [], subagents: [],
   executionEnvironment: entry.agent.executionEnvironment ?? null,
 });
