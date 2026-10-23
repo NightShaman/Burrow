@@ -351,18 +351,69 @@ describe('Git mod sources', () => {
     expect(secret.value).toBe('private-token');
   });
 
-  it('selects a stored secret reference without putting its value in the browser request', async () => {
+  it('discovers and selects a stored reference on demand without exposing a button wall', async () => {
+    const reference = '{{gss:00000000-0000-4000-8000-000000000000/token}}';
     loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
-    loadSecretReferencesMock.mockResolvedValue([{ reference: '{{gss:00000000-0000-4000-8000-000000000000/token}}', label: 'GitHub — NightShaman PAT', type: 'token', username: 'oauth2' }]);
+    loadSecretReferencesMock.mockResolvedValue([
+      { reference: '{{gss:11111111-0000-4000-8000-000000000000/token}}', label: 'GitLab — Other team', type: 'token', username: 'oauth2', service: 'GitLab' },
+      { reference, label: 'GitHub — NightShaman PAT', type: 'token', username: 'oauth2', service: 'GitHub', url: 'https://github.com/NightShaman' },
+    ]);
     vi.mocked(management.modManagementAction).mockResolvedValue({ ok: true });
     render(<ModsSettings section="sources" />);
-    await screen.findByRole('button', { name: 'GitHub — NightShaman PAT' });
+    const browse = await screen.findByRole('button', { name: 'Browse stored credentials' });
+    expect(screen.queryByRole('option')).toBeNull();
     fireEvent.change(screen.getByLabelText('Git repository URL'), { target: { value: 'https://github.com/NightShaman/private.git' } });
-    fireEvent.click(screen.getByRole('button', { name: 'GitHub — NightShaman PAT' }));
-    expect(screen.getByText(/Using 🔒 GitHub — NightShaman PAT/)).toBeTruthy();
+    fireEvent.click(browse);
+    const search = screen.getByRole('combobox', { name: 'Search stored credentials' });
+    await waitFor(() => expect(document.activeElement).toBe(search));
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+      expect.stringContaining('GitHub — NightShaman PAT'),
+      expect.stringContaining('GitLab — Other team'),
+    ]);
+    fireEvent.change(search, { target: { value: 'nightshaman' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect(screen.queryByRole('listbox', { name: 'Stored credentials' })).toBeNull();
+    expect(screen.getByText('GitHub — NightShaman PAT')).toBeTruthy();
+    expect(screen.queryByText(reference)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
     await waitFor(() => expect(management.modManagementAction).toHaveBeenCalledWith('/api/mod-management/sources', {
-      method: 'POST', body: JSON.stringify({ url: 'https://github.com/NightShaman/private.git', auth: { username: 'oauth2', token: '{{gss:00000000-0000-4000-8000-000000000000/token}}' } }),
+      method: 'POST', body: JSON.stringify({ url: 'https://github.com/NightShaman/private.git', auth: { username: 'oauth2', token: reference } }),
+    }));
+  });
+
+  it('opens discovery when typing a reference prefix and supports keyboard navigation at scale', async () => {
+    loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
+    loadSecretReferencesMock.mockResolvedValue(Array.from({ length: 120 }, (_, index) => ({
+      reference: `{{gss:00000000-0000-4000-8000-${String(index).padStart(12, '0')}/token}}`,
+      label: `Credential ${String(index).padStart(3, '0')}`,
+      type: index === 119 ? 'private-key' : 'token',
+      service: index % 2 ? 'GitHub' : 'GitLab',
+    })));
+    render(<ModsSettings section="sources" />);
+    const secret = screen.getByLabelText('Password or access token (optional)');
+    await screen.findByRole('button', { name: 'Browse stored credentials' });
+    fireEvent.change(secret, { target: { value: '{{' } });
+    const search = screen.getByRole('combobox', { name: 'Search stored credentials' });
+    expect(screen.getAllByRole('option')).toHaveLength(100);
+    expect(screen.getByText('Showing 100 of 119. Refine your search.')).toBeTruthy();
+    fireEvent.change(search, { target: { value: 'Credential 118' } });
+    expect(screen.getAllByRole('option')).toHaveLength(1);
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect(screen.getByText('Credential 118')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Credential 118' }));
+    expect(screen.queryByText('Credential 118')).toBeNull();
+  });
+
+  it('preserves a pasted raw secret reference even when it is not in discovery metadata', async () => {
+    loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
+    vi.mocked(management.modManagementAction).mockResolvedValue({ ok: true });
+    render(<ModsSettings section="sources" />);
+    const reference = '{{gss:ffffffff-0000-4000-8000-000000000000/token}}';
+    fireEvent.change(screen.getByLabelText('Git repository URL'), { target: { value: 'https://git.example.com/private.git' } });
+    fireEvent.change(screen.getByLabelText('Password or access token (optional)'), { target: { value: reference } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
+    await waitFor(() => expect(management.modManagementAction).toHaveBeenCalledWith('/api/mod-management/sources', {
+      method: 'POST', body: JSON.stringify({ url: 'https://git.example.com/private.git', auth: { token: reference } }),
     }));
   });
 
