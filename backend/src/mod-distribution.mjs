@@ -455,7 +455,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       const refreshConfig = await refreshSettings(db);
       const stale = sources.some((row) => !row.last_checked_at || Date.now() - Date.parse(row.last_checked_at) >= refreshConfig.staleMs);
       if (refreshConfig.enabled && stale && !refreshPromise) queueMicrotask(() => { void refresh().catch((error) => { failureCount += 1; logger.error?.(`Burrow mod source refresh failed: ${String(error?.message || error)}`); }); });
-      return { ok: true, restartRequired: false, sourceRefresh: { enabled: Boolean(refreshConfig.enabled), intervalMs: refreshConfig.intervalMs, staleMs: refreshConfig.staleMs, concurrency: refreshConfig.concurrency, maxBackoffMs: refreshConfig.maxBackoffMs, refreshing: Boolean(refreshPromise), failures: failureCount }, mods, sources: sources.map((row) => ({ id: row.id, url: row.url, status: row.status, ...(row.error ? { error: row.error } : {}), ...(row.last_checked_at ? { lastCheckedAt: row.last_checked_at } : {}) })) };
+      return { ok: true, restartRequired: false, sourceRefresh: { enabled: Boolean(refreshConfig.enabled), intervalMs: refreshConfig.intervalMs, staleMs: refreshConfig.staleMs, concurrency: refreshConfig.concurrency, maxBackoffMs: refreshConfig.maxBackoffMs, refreshing: Boolean(refreshPromise), failures: failureCount }, mods, sources: sources.map((row) => ({ id: row.id, url: row.url, status: row.status, credential: { configured: [true, 1].includes(row.credential_configured) }, ...(row.error ? { error: row.error } : {}), ...(row.last_checked_at ? { lastCheckedAt: row.last_checked_at } : {}) })) };
     } finally { await db.close(); }
   }
   async function addSource(urlValue, authValue = null) {
@@ -493,6 +493,8 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
   }
   async function removeSource(id) {
     await ready; const db = await repositoryFactory(); try { const removed = (await db.removeSource(String(id))).changes > 0; return { ok: removed, removed }; } finally { await db.close(); } }
+  async function removeSourceCredential(id) {
+    await ready; const db = await repositoryFactory(); try { const removed = (await db.removeCredential(String(id))).changes > 0; return { ok: true, removed }; } finally { await db.close(); } }
   async function install(modId, requestedVersion = null, { operatorInitiated = false } = {}) {
     await ready;
     const id = String(modId || '').trim(); if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id))) throw new Error('mod_id_invalid');
@@ -680,7 +682,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
   }
   const pollingReady = ready.then(() => schedulePoll());
   void pollingReady.catch((error) => logger.error?.(`Burrow mod source polling failed: ${String(error?.message || error)}`));
-  return { ready, list, sourceRefreshConfig, saveSourceRefreshConfig, addSource, refresh, removeSource, install, enable: (id, options) => setEnabled(id, true, options), disable: (id) => setEnabled(id, false), uninstall, async close() { closed = true; clearPoll(); try { await ready; await pollingReady; await refreshPromise; } catch {} } };
+  return { ready, list, sourceRefreshConfig, saveSourceRefreshConfig, addSource, refresh, removeSource, removeSourceCredential, install, enable: (id, options) => setEnabled(id, true, options), disable: (id) => setEnabled(id, false), uninstall, async close() { closed = true; clearPoll(); try { await ready; await pollingReady; await refreshPromise; } catch {} } };
 }
 
 export function createModManagementRoute({ distribution, readJsonBody, sendJson } = {}) {
@@ -691,7 +693,9 @@ export function createModManagementRoute({ distribution, readJsonBody, sendJson 
     if (url.pathname === '/api/mod-management/secret-references' && req.method === 'GET') { sendJson(res, 200, await distribution.listSecretReferences?.(url.searchParams.get('scheme') || null) || { references: [] }); return true; }
     if (url.pathname === '/api/mod-management/sources' && req.method === 'POST') { const body = await readJsonBody(req); const result = await distribution.addSource(body.url, body.auth || body.credentials || (body.token ? { token: body.token, username: body.username } : null)); sendJson(res, result.ok ? 201 : 502, result); return true; }
     if (url.pathname === '/api/mod-management/refresh' && req.method === 'POST') { sendJson(res, 200, await distribution.refresh()); return true; }
-    let match = url.pathname.match(/^\/api\/mod-management\/sources\/([^/]+)$/);
+    let match = url.pathname.match(/^\/api\/mod-management\/sources\/([^/]+)\/credential$/);
+    if (match && req.method === 'DELETE') { const result = await distribution.removeSourceCredential(decodeURIComponent(match[1])); sendJson(res, 200, result); return true; }
+    match = url.pathname.match(/^\/api\/mod-management\/sources\/([^/]+)$/);
     if (match && req.method === 'DELETE') { const result = await distribution.removeSource(decodeURIComponent(match[1])); sendJson(res, result.ok ? 200 : 404, result); return true; }
     match = url.pathname.match(/^\/api\/mod-management\/([^/]+)\/(install|enable|disable|uninstall)$/);
     if (match && req.method === 'POST') {

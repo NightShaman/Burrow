@@ -124,7 +124,7 @@ export function createPostgresModDistributionRepository({ pool } = {}) {
         if (changed.changes !== 1) throw new Error('mod_management_operation_conflict');
         return changed;
       },
-      async sourceRows() { return rows(await query('SELECT id,url,provider,mod_id,mod_name,latest_version,archive_url,status,error,last_checked_at FROM mod_sources ORDER BY created_at')); },
+      async sourceRows() { return rows(await query('SELECT id,url,provider,mod_id,mod_name,latest_version,archive_url,status,error,last_checked_at,EXISTS(SELECT 1 FROM mod_source_secrets secret WHERE secret.source_id=mod_sources.id) AS credential_configured FROM mod_sources ORDER BY created_at')); },
       async installationRows() { return rows(await query('SELECT mod_id,source_id,version,archive_sha256,installed_at,updated_at FROM mod_installations')); },
       async lifecycleRows() { return rows(await query('SELECT mod_id,enabled,created_at,updated_at FROM mod_lifecycle')); },
       async refreshSettings() { return first(await query("SELECT value_json::text AS value_json FROM settings_meta WHERE key='mod_source_refresh'")); },
@@ -134,6 +134,7 @@ export function createPostgresModDistributionRepository({ pool } = {}) {
       async updateSourceFailed(id, message, timestamp) { return changes(await query("UPDATE mod_sources SET status='failed',error=$1,last_checked_at=$2,updated_at=$2 WHERE id=$3", [message,timestamp,id])); },
       async ensureSource(id,url,timestamp) { await query("INSERT INTO mod_sources (id,url,provider,status,created_at,updated_at) VALUES ($1,$2,$3,'pending',$4,$4) ON CONFLICT(url) DO NOTHING", [id,url,'git',timestamp]); return first(await query('SELECT * FROM mod_sources WHERE url=$1',[url])); },
       async saveCredential(row, encrypted, timestamp) { return changes(await query('INSERT INTO mod_source_secrets (source_id,ciphertext,nonce,auth_tag,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$5) ON CONFLICT(source_id) DO UPDATE SET ciphertext=EXCLUDED.ciphertext,nonce=EXCLUDED.nonce,auth_tag=EXCLUDED.auth_tag,updated_at=EXCLUDED.updated_at', [row.id,encrypted.ciphertext,encrypted.nonce,encrypted.authTag,timestamp])); },
+      async removeCredential(id) { return changes(await query('DELETE FROM mod_source_secrets WHERE source_id=$1',[id])); },
       async removeSource(id) { return changes(await query('DELETE FROM mod_sources WHERE id=$1',[id])); },
       async sourceByMod(id) { return first(await query('SELECT * FROM mod_sources WHERE mod_id=$1 LIMIT 1',[id])); },
       async installationExists(id) { return first(await query('SELECT 1 AS present FROM mod_installations WHERE mod_id=$1',[id])); },
