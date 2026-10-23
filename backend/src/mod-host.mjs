@@ -123,6 +123,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   const controllerInstanceId = systemCapability ? randomUUID() : null;
   const pendingSystemProcess = new Map();
   const pendingSystemConfiguration = new Map();
+  const pendingSystemHostDescriptions = new Map();
   const activeCapabilities = new Map();
   const cancelCapabilities = () => { for (const { controller } of activeCapabilities.values()) controller.abort(hostError("mod_capability_shutdown")); activeCapabilities.clear(); capabilities?.dispose?.(); };
   async function serviceCapabilityRequest(message) {
@@ -197,6 +198,8 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     pendingSystemProcess.clear();
     for (const entry of pendingSystemConfiguration.values()) { clearTimeout(entry.timer); entry.reject(error); }
     pendingSystemConfiguration.clear();
+    for (const entry of pendingSystemHostDescriptions.values()) { clearTimeout(entry.timer); entry.reject(error); }
+    pendingSystemHostDescriptions.clear();
   };
   const rejectSystemFilesystems = (code = 'remote_native_filesystem_controller_unavailable') => {
     const error = hostError(code);
@@ -328,6 +331,23 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       else entry.resolve(validateJsonBody(message.result));
       return;
     }
+    if (message?.type === 'system-controller-host-description-result') {
+      if (message.protocol !== systemCapability || message.controllerInstanceId !== controllerInstanceId) return;
+      const entry = pendingSystemHostDescriptions.get(message.requestId);
+      if (!entry || message.targetId !== entry.targetId) return;
+      pendingSystemHostDescriptions.delete(message.requestId);
+      clearTimeout(entry.timer);
+      if (message.ok !== true) entry.reject(hostError('remote_host_description_failed'));
+      else {
+        try {
+          const encoded = JSON.stringify(message.result);
+          if (encoded === undefined || encoded.length > 8_192) throw new Error('invalid');
+          const result = JSON.parse(encoded);
+          entry.resolve(result === null ? null : jsonObject(result, 'remote_host_description_invalid'));
+        } catch { entry.reject(hostError('remote_host_description_invalid')); }
+      }
+      return;
+    }
     if (message?.type === 'system-controller-process-result') {
       if (message.protocol !== systemCapability || message.controllerInstanceId !== controllerInstanceId) return;
       const requestId = typeof message.requestId === 'string' ? message.requestId : '';
@@ -451,6 +471,27 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
             pendingSystemConfiguration.delete(requestId);
             clearTimeout(timer);
             reject(hostError('remote_configuration_send_failed'));
+          });
+        });
+      },
+      async describeHost(targetId) {
+        if (!modAuthority) throw hostError('mod_authority_forbidden');
+        await modAuthority.assertAllowed(mod.id, 'execution-provider-v1');
+        if (admissionsPaused || !systemControllerReady || closing || stopped || !child.connected) return null;
+        if (typeof targetId !== 'string' || !targetId.trim() || targetId.length > 240) return null;
+        const requestId = randomUUID();
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            pendingSystemHostDescriptions.delete(requestId);
+            reject(hostError('remote_host_description_timeout'));
+          }, 1_000);
+          timer.unref?.();
+          pendingSystemHostDescriptions.set(requestId, { targetId, resolve, reject, timer });
+          child.send({ type: 'system-controller-describe-host', protocol: systemCapability, controllerInstanceId, requestId, targetId }, error => {
+            if (!error || !pendingSystemHostDescriptions.has(requestId)) return;
+            pendingSystemHostDescriptions.delete(requestId);
+            clearTimeout(timer);
+            reject(hostError('remote_host_description_send_failed'));
           });
         });
       },

@@ -279,6 +279,20 @@ process.on('message', async (message) => {
     }
     return;
   }
+  if (message?.type === 'system-controller-describe-host') {
+    if (!validSystemMessage(message, 'system-controller-describe-host', { operation: false })
+      || typeof message.targetId !== 'string' || !message.targetId || stopping) return;
+    try {
+      const result = typeof systemController?.describeHost === 'function'
+        ? await systemController.describeHost(message.targetId) : null;
+      send({ type: 'system-controller-host-description-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId,
+        requestId: message.requestId, targetId: message.targetId, ok: true, result: result ?? null }, () => {});
+    } catch {
+      send({ type: 'system-controller-host-description-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId,
+        requestId: message.requestId, targetId: message.targetId, ok: false }, () => {});
+    }
+    return;
+  }
   if (message?.type === 'system-controller-filesystem-cancel') {
     if (!validSystemMessage(message, 'system-controller-filesystem-cancel')) return;
     activeSystemFilesystems.get(message.requestId)?.abort.abort();

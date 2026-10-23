@@ -102,6 +102,11 @@ export function createExecutionProviderRegistry() {
       return unregister;
     },
     get(providerId) { return controllers.get(String(providerId || '')) || null; },
+    async describeHost(providerId, targetId) {
+      const controller = controllers.get(requiredId(providerId, 'provider_id'));
+      if (!controller || typeof controller.describeHost !== 'function') return null;
+      return controller.describeHost(requiredId(targetId, 'target_id'));
+    },
     async configure(providerId, configuration) {
       const controller = controllers.get(requiredId(providerId, 'provider_id'));
       if (!controller || typeof controller.configureTelemetry !== 'function') return { configured: false, reason: 'provider_configuration_unsupported' };

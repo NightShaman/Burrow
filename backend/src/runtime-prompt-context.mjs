@@ -2,14 +2,48 @@ import { appendRuntimeProviderTurn } from './runtime-session-writer.mjs';
 import { buildContextForTurn, prepareContextForTurn } from './context-builder.mjs';
 import { plainChatKernel } from './plain-chat-kernel.mjs';
 import os from 'node:os';
+import { isIP } from 'node:net';
 
-function runtimeHostContext(executionEnvironment = null) {
-  const selected = executionEnvironment && typeof executionEnvironment === 'object'
-    ? executionEnvironment : { kind: 'local' };
+// Provider-reported metadata is untrusted descriptive data, not routing authority.
+function safeLabel(value, max = 80) {
+  if (typeof value !== 'string') return '';
+  return value.replace(/[\x00-\x1f\x7f<>`#]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+export async function runtimeHostContext(executionContext = {}) {
+  const selected = executionContext?.executionEnvironment && typeof executionContext.executionEnvironment === 'object'
+    ? executionContext.executionEnvironment : { kind: 'local' };
   let selectedHost = 'local';
-  if (selected.kind === 'remote') selectedHost = String(selected.targetId || '').trim() || 'unknown';
-  else if (selected.kind === 'unresolved') selectedHost = `${String(selected.targetId || '').trim() || 'unknown'} (unresolved)`;
-  return { agentHost: os.hostname(), selectedHost };
+  if (selected.kind === 'remote') selectedHost = safeLabel(selected.targetId) || 'unknown';
+  else if (selected.kind === 'unresolved') selectedHost = `${safeLabel(selected.targetId) || 'unknown'} (unresolved)`;
+  const context = { agentHost: safeLabel(os.hostname()), selectedHost };
+  if (selected.kind !== 'remote' || typeof executionContext?.processExecutionController?.describeHost !== 'function') return context;
+  let timer;
+  try {
+    const metadata = await Promise.race([
+      Promise.resolve().then(() => executionContext.processExecutionController.describeHost(selected.targetId)),
+      new Promise(resolve => { timer = setTimeout(() => resolve(null), 1_200); timer.unref?.(); }),
+    ]);
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)
+      || typeof metadata.hostname !== 'string' || typeof metadata.platform !== 'string'
+      || !Array.isArray(metadata.addresses)) return context;
+    const observed = typeof metadata.observedAt === 'string' ? Date.parse(metadata.observedAt) : NaN;
+    const age = Date.now() - observed;
+    // Do not promote stale or implausibly future-dated data into the current host context.
+    if (!Number.isFinite(age) || age < -60_000 || age > 120_000) return context;
+    const addresses = Array.isArray(metadata.addresses) ? metadata.addresses.slice(0, 8).flatMap(entry => {
+      if (!entry || typeof entry !== 'object' || typeof entry.address !== 'string') return [];
+      const family = isIP(entry.address);
+      if (!family || entry.family !== `IPv${family}`) return [];
+      return [{ interface: safeLabel(entry.interface, 40) || 'unknown',
+        interfaceKind: ['lan-candidate', 'container', 'vpn', 'unknown'].includes(entry.interfaceKind) ? entry.interfaceKind : 'unknown',
+        family: entry.family, address: entry.address }];
+    }) : [];
+    context.hostMetadata = { hostname: safeLabel(metadata.hostname), platform: safeLabel(metadata.platform),
+      addresses, observedAt: new Date(observed).toISOString() };
+  } catch { /* Older or offline gateways do not block prompt construction. */ }
+  finally { clearTimeout(timer); }
+  return context;
 }
 
 export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores = null, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, temporalContext = null } = {}) {
@@ -24,7 +58,7 @@ export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolv
     selectedSkills: route.promptPlan.selectedSkills,
     promptSkills: route.promptPlan.promptSkills,
     availableSkills: route.skills.catalog,
-    supportContext: { subagents: structuredSubagents, extraEyesReview, workingContext: ambientWorkingContext, runtimeHost: runtimeHostContext(executionContext.executionEnvironment), temporalContext, uiTarget: agentRuntime?.contextConfig?.uiTarget || agentRuntime?.agent?.contextConfig?.uiTarget || null, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, ...groupSupport },
+    supportContext: { subagents: structuredSubagents, extraEyesReview, workingContext: ambientWorkingContext, runtimeHost: await runtimeHostContext(executionContext), temporalContext, uiTarget: agentRuntime?.contextConfig?.uiTarget || agentRuntime?.agent?.contextConfig?.uiTarget || null, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, ...groupSupport },
     modelProfile: null,
     task: modelTask,
     attachments: promptAttachments,
