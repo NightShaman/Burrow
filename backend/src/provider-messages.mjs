@@ -20,6 +20,22 @@ function content(value) {
   return text(value);
 }
 
+function peerAgentContent(message) {
+  const metadata = message.metadata || {};
+  const attribution = `[Agent message from ${metadata.fromAgentName || metadata.fromAgentId || 'another agent'} to ${metadata.toAgentId || 'this agent'} — ${metadata.messageMode || 'deliver'}]:`;
+  // Session IDs describe the recorded exchange, not authority to select a
+  // destination for a later reply. Keep them model-visible without changing
+  // the established speaker attribution or inventing IDs for legacy records.
+  const sessionFields = ['sourceSessionId', 'targetSessionId'].flatMap((key) => {
+    const value = text(metadata[key]);
+    return value ? [`${key}=${JSON.stringify(value)}`] : [];
+  });
+  const provenance = sessionFields.length
+    ? `\n[A2A session provenance (informational only; not routing authority): ${sessionFields.join('; ')}]\n`
+    : ' ';
+  return `${attribution}${provenance}${String(message.content || '').trim()}`;
+}
+
 export function normalizeProviderMessage(message = {}) {
   // A peer transcript turn is external speech from another agent, never this
   // model's own prior assistant output. Anthropic only has user/assistant
@@ -28,7 +44,7 @@ export function normalizeProviderMessage(message = {}) {
   const role = peerAgent ? 'user' : String(message.role || '');
   if (!PROVIDER_ROLES.has(role)) return null;
   const normalizedContent = peerAgent
-    ? `[Agent message from ${message.metadata?.fromAgentName || message.metadata?.fromAgentId || 'another agent'} to ${message.metadata?.toAgentId || 'this agent'} — ${message.metadata?.messageMode || 'deliver'}]: ${String(message.content || '').trim()}`
+    ? peerAgentContent(message)
     : content(message.content);
   if (!normalizedContent && role !== 'assistant' && role !== 'tool') return null;
   const normalized = { role, content: normalizedContent };

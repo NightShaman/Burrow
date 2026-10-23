@@ -517,12 +517,12 @@ export async function executeReviewedProposalActions({ conversationStore = null,
     }
 
     if (action.tool === 'agent_send_message') {
-      const started = await traceLogger?.toolStart?.({ tool: 'agent_send_message', recipientAgentId: action.recipientAgentId, targetSessionId: action.targetSessionId || 'default', messageMode: action.messageMode || 'request_reply' });
+      const started = await traceLogger?.toolStart?.({ tool: 'agent_send_message', recipientAgentId: action.recipientAgentId, targetSessionId: action.targetSessionId || null, messageMode: action.messageMode || 'request_reply' });
       let result;
       try {
-        result = await sendAgentMessage({ conversationStore: conversationStore || executionContext?.conversationStore || executionContext?.stores?.conversations, senderRuntime: agentRuntime || executionContext?.agentRuntime, resolveRecipientRuntime: resolveAgentRuntime || executionContext?.resolveAgentRuntime, runRecipientReply: runAgentReply || executionContext?.runAgentReply, recipientAgentId: action.recipientAgentId, targetSessionId: action.targetSessionId || 'default', content: action.content, messageMode: action.messageMode || 'request_reply', runId: traceLogger?.runId || null, sourceSessionId: sessionId, abortSignal });
+        result = await sendAgentMessage({ conversationStore: conversationStore || executionContext?.conversationStore || executionContext?.stores?.conversations, senderRuntime: agentRuntime || executionContext?.agentRuntime, resolveRecipientRuntime: resolveAgentRuntime || executionContext?.resolveAgentRuntime, runRecipientReply: runAgentReply || executionContext?.runAgentReply, recipientAgentId: action.recipientAgentId, targetSessionId: action.targetSessionId, replyTo: executionContext?.agentMessageReplyTo, content: action.content, messageMode: action.messageMode || 'request_reply', runId: traceLogger?.runId || null, sourceSessionId: sessionId || executionContext?.sessionId, abortSignal });
       } catch (error) {
-        result = { tool: 'agent_send_message', ok: false, recipientAgentId: action.recipientAgentId || null, targetSessionId: action.targetSessionId || 'default', error: error?.message || String(error), autoExecuted: false };
+        result = { tool: 'agent_send_message', ok: false, recipientAgentId: action.recipientAgentId || null, targetSessionId: action.targetSessionId || null, error: error?.message || String(error), autoExecuted: false };
       }
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({
@@ -531,8 +531,8 @@ export async function executeReviewedProposalActions({ conversationStore = null,
         ok: result.ok,
         senderAgentId: result.senderAgentId || agentRuntime?.agentId || executionContext?.agentRuntime?.agentId || null,
         recipientAgentId: result.recipientAgentId || action.recipientAgentId || null,
-        sourceSessionId: result.sourceSessionId || sessionId || null,
-        targetSessionId: result.targetSessionId || action.targetSessionId || 'default',
+        sourceSessionId: result.sourceSessionId || sessionId || executionContext?.sessionId || null,
+        targetSessionId: result.targetSessionId || action.targetSessionId || null,
         sourceEntryId: result.sourceEntryId || null,
         recipientEntryId: result.recipientEntryId || null,
         mirroredReplyEntryId: result.reply?.entryId || null,

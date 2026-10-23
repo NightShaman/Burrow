@@ -86,7 +86,7 @@ async function appendAgentMessage({ conversationStore, agentId: transcriptAgentI
 
 // An agent message is a first-class, attributed transcript turn. It is not a
 // user turn; attribution identifies where the message came from.
-export async function sendAgentMessage({ conversationStore = null, senderRuntime, resolveRecipientRuntime, runRecipientReply = null, recipientAgentId, targetSessionId = 'default', content, messageMode = 'request_reply', runId = null, sourceSessionId = null, abortSignal = null } = {}) {
+export async function sendAgentMessage({ conversationStore = null, senderRuntime, resolveRecipientRuntime, runRecipientReply = null, recipientAgentId, targetSessionId = null, replyTo = null, content, messageMode = 'request_reply', runId = null, sourceSessionId = null, abortSignal = null } = {}) {
   if (!conversationStore) throw new Error('conversation_store_required');
   const sender = agentId(senderRuntime?.agentId, 'agent_message_sender');
   const requestedRecipient = agentId(recipientAgentId, 'agent_message_recipient');
@@ -99,7 +99,10 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
   if (!recipientRuntime?.agentWorkspaceRoot || !recipientRuntime?.agentId) throw new Error('agent_message_recipient_unavailable');
   const recipient = agentId(recipientRuntime.agentId, 'agent_message_recipient');
   if (sender === recipient) throw new Error('agent_message_self_send_forbidden');
-  const session = sessionId(targetSessionId);
+  // Only runtime-attested exchange context supplies an implicit return address.
+  // Resolve agent aliases first, and never infer routes from transcript/prose.
+  const implicitReplySession = replyTo?.recipientAgentId === recipient ? replyTo.sessionId : null;
+  const session = sessionId(text(targetSessionId) || implicitReplySession || 'default');
   const source = sessionId(sourceSessionId || 'default');
   const deliveryId = createHash('sha256').update(JSON.stringify([sender, recipient, source, session, runId || null, resolvedMode, body])).digest('hex');
   const deliveryRequest = { sender, recipient, sourceSessionId: source, targetSessionId: session, runId: runId || null, messageMode: resolvedMode, content: body };
@@ -170,7 +173,7 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
         abortSignal?.throwIfAborted();
         const delivery = await deliver();
         abortSignal?.throwIfAborted();
-        const response = await runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, inboundEntryId: delivery.recipientEntry.id, parentSignal: abortSignal });
+        const response = await runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, messageMode: resolvedMode, inboundEntryId: delivery.recipientEntry.id, parentSignal: abortSignal });
         return { ...delivery, reply: response };
       },
     });

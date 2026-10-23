@@ -1,10 +1,11 @@
+import { normalizeProviderMessage } from './provider-messages.mjs';
 import { contextUsageFromRequest } from './model-adapters/adapter-primitives.mjs';
 import { summarizeSessionTurns } from './session-entry.mjs';
 import { compressionSummariesFromTranscript } from './session-compression.mjs';
 import { contextStatesFromTranscript, renderContextStates } from './session-context-state.mjs';
 
 function messageText(message) {
-  if (message.role === 'agent') return `[Agent message from ${message.metadata?.fromAgentName || message.metadata?.fromAgentId || 'another agent'} to ${message.metadata?.toAgentId || 'this agent'} — ${message.metadata?.messageMode || 'deliver'}]: ${String(message.content || '').trim()}`;
+  if (message.role === 'agent') return normalizeProviderMessage(message).content;
   return `${message.role}: ${String(message.content || '').trim()}`;
 }
 

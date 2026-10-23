@@ -1,4 +1,5 @@
 import { performance } from 'node:perf_hooks';
+import { normalizeProviderMessage } from './provider-messages.mjs';
 import { beginSessionAdmissionSupersession, finishSessionAdmissionSupersession, serializeSessionAdmission } from './session-admission.mjs';
 import { operatorTimezone } from './timezone.mjs';
 import { postgresContinuity } from './postgres-continuity.mjs';
@@ -261,10 +262,10 @@ async function runAskChatUnserialized({
   const logger = createTraceLogger({ rootDir: traceRoot, runId: resolvedRunId, sessionId: resolvedSessionId, conversationId, onRecord: observeTrace });
   if (latencyTiming) await logger.event('chat-admission-timing', { ...latencyTiming, clockDomain: 'server-process' });
   const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, logger, onTerminal: telemetryRun ? (result) => telemetry.endRun?.(resolvedRunId, result) : null, testHooks });
-  const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, inboundEntryId, parentSignal = null }) => {
+  const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, messageMode = 'request_reply', inboundEntryId, parentSignal = null }) => {
     const nestedRunId = `${resolvedRunId}-reply-${recipientRuntime.agentId}`;
     const lifecycle = typeof registerNestedAgentRun === 'function'
-      ? registerNestedAgentRun({ agentRuntime: recipientRuntime, sessionId: recipientSessionId, runId: nestedRunId, message: content, source: 'a2a', parentSignal, parentAgentId: runtimeState.agentId, parentRunId: resolvedRunId, parentSessionId: resolvedSessionId, messageMode: 'request_reply', senderAgentId, sourceSessionId, sourceRunId, inboundEntryId })
+      ? registerNestedAgentRun({ agentRuntime: recipientRuntime, sessionId: recipientSessionId, runId: nestedRunId, message: content, source: 'a2a', parentSignal, parentAgentId: runtimeState.agentId, parentRunId: resolvedRunId, parentSessionId: resolvedSessionId, messageMode, senderAgentId, sourceSessionId, sourceRunId, inboundEntryId })
       : null;
     try {
       const reply = await runAskChat({
@@ -279,7 +280,7 @@ async function runAskChatUnserialized({
         json: true,
         agentRuntime: recipientRuntime,
         resolveAgentRuntime,
-        incomingAgentMessage: { senderAgentId, sourceSessionId, sourceRunId, inboundEntryId },
+        incomingAgentMessage: { senderAgentId, sourceSessionId, sourceRunId, messageMode, inboundEntryId },
         registerNestedAgentRun,
         stores,
         onTraceRecord: lifecycle?.onTraceRecord || null,
@@ -300,7 +301,10 @@ async function runAskChatUnserialized({
     }
   };
   const { mcpTools, mcpConnections } = await loadRuntimeMcpCapabilities({ agentId: runtimeState.agentId, stores });
-  const executionContext = createRuntimeExecutionContext({ stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, traceContext: telemetryRun ? telemetry.traceContextForRun?.(resolvedRunId) : null, telemetry: telemetryRun ? telemetry : null, abortSignal: normalizedArgs.abort_signal || null, skillOverrides: scopedSkillsConfig });
+  const agentMessageReplyTo = incomingAgentMessage?.senderAgentId && incomingAgentMessage?.sourceSessionId
+    ? { recipientAgentId: incomingAgentMessage.senderAgentId, sessionId: incomingAgentMessage.sourceSessionId }
+    : null;
+  const executionContext = createRuntimeExecutionContext({ agentMessageReplyTo, stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, traceContext: telemetryRun ? telemetry.traceContextForRun?.(resolvedRunId) : null, telemetry: telemetryRun ? telemetry : null, abortSignal: normalizedArgs.abort_signal || null, skillOverrides: scopedSkillsConfig });
   const effectiveSkillCatalog = await loadEffectiveSkillCatalog({
     workspaceRoot: runtimeState.workspaceRoot,
     agentId: runtimeState.agentId,
@@ -431,7 +435,13 @@ async function runAskChatUnserialized({
 
   const shouldCallModel = normalizedArgs.call_model || !normalizedArgs.no_call_model;
   const modelTask = incomingAgentMessage
-    ? `[Agent message from ${incomingAgentMessage.senderAgentId || 'another agent'}]: ${message}`
+    ? normalizeProviderMessage({ role: 'agent', content: message, metadata: {
+      fromAgentId: incomingAgentMessage.senderAgentId,
+      toAgentId: runtimeState.agentId,
+      sourceSessionId: incomingAgentMessage.sourceSessionId,
+      targetSessionId: resolvedSessionId,
+      messageMode: incomingAgentMessage.messageMode || 'request_reply',
+    } }).content
     : message;
   let promptContext;
   try {
