@@ -7,8 +7,18 @@ import { api } from '../../app/api';
 import type { SettingsTab } from '../../app/types';
 import type { ModContribution } from '../../app/apiTargets';
 vi.mock('../../app/api', async original => ({ ...await original<typeof import('../../app/api')>(), api: vi.fn() }));
-const { loadModSettingsContributions } = vi.hoisted(() => ({ loadModSettingsContributions: vi.fn<() => Promise<ModContribution[]>>(async () => []) }));
+const { loadModSettingsContributions, mountModSettings } = vi.hoisted(() => ({ loadModSettingsContributions: vi.fn<() => Promise<ModContribution[]>>(async () => []), mountModSettings: vi.fn() }));
 vi.mock('../../app/apiTargets', () => ({ loadModSettingsContributions, modContributionsChangedEvent: 'mods-changed' }));
+vi.mock('./ModSettingsHostFixture', () => ({
+ settingsSections: [
+  { id: 'controller', label: 'Controller & TLS' },
+  { id: 'pairings', label: 'Pending pairings' },
+  { id: 'gateways', label: 'Gateways' },
+  { id: 'assignments', label: 'Agent assignments' },
+  { id: 'operations', label: 'Operation activity' },
+ ],
+ mountSettings: mountModSettings, settingsContribution: undefined, createSettingsContribution: undefined,
+}));
 vi.mock('./SystemStatsRail', () => ({ SystemStatsRail: () => null }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); loadModSettingsContributions.mockResolvedValue([]); });
 it('mounts only the selected configuration, with no hidden duplicate reads', async () => {
@@ -134,6 +144,30 @@ it('groups a mod settings contributions under one top-level tab and exposes seco
  fireEvent.click(screen.getByRole('button', { name: 'General' }));
  fireEvent.click(screen.getByRole('button', { name: 'Switchboard' }));
  expect(screen.getByRole('button', { name: 'Status' }).getAttribute('aria-current')).toBe('page');
+});
+
+it('uses dynamic mod sections when manifest metadata is only a top-level contribution', async () => {
+ loadModSettingsContributions.mockResolvedValue([{
+  modId: 'node-goblin',
+  name: 'Node Goblin',
+  settingsUrl: './ModSettingsHostFixture',
+  settings: [{ id: 'node-goblin', navigation: { title: 'Node Goblin' }, primary: { title: 'Node Goblin', capability: 'settingsUi' } }],
+ }]);
+ mountModSettings.mockImplementation(({ section, primary }: { section: string; primary: { replace: (node: Node) => void } }) => {
+  const node = document.createElement('span'); node.textContent = `Mounted ${section}`; primary.replace(node);
+ });
+ vi.mocked(api).mockResolvedValue({ wizardStep: 'ready' });
+ function Parent() {
+  const [tab, setTab] = useState<SettingsTab>('general');
+  return <Settings {...{ tab, setTab, agents: [], selected: { id: '', name: '' }, savedProviders: [], onOperatorProfileChanged: vi.fn(), agentRailPreferences: { view: 'regular', order: [] } } as unknown as ComponentProps<typeof Settings>} />;
+ }
+ render(<Parent />);
+ fireEvent.click(await screen.findByRole('button', { name: 'Node Goblin' }));
+ const secondary = await screen.findByRole('navigation', { name: 'node-goblin settings sections' });
+ await waitFor(() => expect(Array.from(secondary.querySelectorAll('button'), (button) => button.textContent)).toEqual(['Controller & TLS', 'Pending pairings', 'Gateways', 'Agent assignments', 'Operation activity']));
+ expect(await screen.findByText('Mounted controller')).toBeTruthy();
+ fireEvent.click(screen.getByRole('button', { name: 'Gateways' }));
+ expect(await screen.findByText('Mounted gateways')).toBeTruthy();
 });
 
 it('uses the top menu for General while retaining the three content columns', async () => {
