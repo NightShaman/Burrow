@@ -1,3 +1,5 @@
+import { matchCompactionOccurrences, COMPACTION_COPY_BATCH_SIZE } from './postgres-compaction.mjs';
+import { POSTGRES_COMPACTION_PROJECTIONS_SQL } from './postgres-compaction-projections.mjs';
 import { POSTGRES_OPERATOR_INSTANT_SQL } from './postgres-operator-instant.mjs';
 import { exportSessionRawEvidence } from './session-evidence-export.mjs';
 import { POSTGRES_LOGICAL_MEMBER_SQL, POSTGRES_ARCHIVE_RELATIONAL_ID_SQL, POSTGRES_CATALOG_SCALAR_ID_SQL, POSTGRES_LOGICAL_LOOKUP_INDEX_SQL } from './postgres-lexical-identity.mjs';
@@ -646,7 +648,7 @@ UPDATE conversation_entries SET has_payload_id=NULL;
 UPDATE conversation_archive_entries SET has_payload_id=NULL;
 `;
 
-export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL + POSTGRES_RESET_INSTANT_SQL + POSTGRES_HISTORY_KEYSET_SQL + POSTGRES_LOGICAL_MEMBER_SQL + POSTGRES_ARCHIVE_RELATIONAL_ID_SQL + POSTGRES_CATALOG_SCALAR_ID_SQL + POSTGRES_LOGICAL_LOOKUP_INDEX_SQL + POSTGRES_AGENT_DELIVERY_SCHEMA_SQL + POSTGRES_OPERATOR_INSTANT_SQL + POSTGRES_ARCHIVE_LISTING_INDEX_SQL;
+export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL + POSTGRES_RESET_INSTANT_SQL + POSTGRES_HISTORY_KEYSET_SQL + POSTGRES_LOGICAL_MEMBER_SQL + POSTGRES_ARCHIVE_RELATIONAL_ID_SQL + POSTGRES_CATALOG_SCALAR_ID_SQL + POSTGRES_LOGICAL_LOOKUP_INDEX_SQL + POSTGRES_AGENT_DELIVERY_SCHEMA_SQL + POSTGRES_OPERATOR_INSTANT_SQL + POSTGRES_ARCHIVE_LISTING_INDEX_SQL + POSTGRES_COMPACTION_PROJECTIONS_SQL;
 
 const text = (value) => String(value ?? '');
 const required = (value, name) => { const result = text(value).trim(); if (!result) throw new Error(`${name} is required`); return result; };
@@ -1251,7 +1253,7 @@ export class PostgresSessionStore {
       await client.query(`INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,'{}'::jsonb,$3,$3) ON CONFLICT DO NOTHING`, [agentId, sid, now]);
       const session = await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sid]);
       const prior = session.rows[0]?.metadata || {};
-      const old = await client.query('SELECT sequence,entry,entry::text AS raw_entry,entry_id,idempotency_key,created_at FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence', [agentId, sid]);
+      const old = await client.query('SELECT sequence,entry,entry_id FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence', [agentId, sid]);
       const currentGeneration = Number(prior.generation || 0);
       if (expectedGeneration !== null && expectedGeneration !== undefined && Number(expectedGeneration) !== currentGeneration) {
         return { stale: true, currentEntries: old.rows.map(rowEntry), metadata: prior };
@@ -1266,26 +1268,46 @@ export class PostgresSessionStore {
       const archiveId = old.rows.length ? randomUUID() : null;
       const generation = Number(prior.generation || 0) + 1;
       if (archiveId) await client.query('INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)', [agentId, sid, archiveId, generation - 1, 'compacted', JSON.stringify({ ...prior, compressionSummary: summary }), now]);
-      if (archiveId) await client.query(`INSERT INTO conversation_archive_entries
-        (agent_id,session_id,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation,entry_id,idempotency_key)
-        SELECT agent_id,session_id,'archive',$3,sequence,to_json(entry_id)::text,entry,
-          COALESCE(burrow_json_member(entry,'content')::text,''),created_at,$4,$5,entry_id,idempotency_key
-        FROM conversation_entries WHERE agent_id=$1 AND session_id=$2`, [agentId,sid,archiveId,'compacted',generation-1]);
+      const hasProofProjection = await this.hasProofProjection(client);
+      const projections = 'entry_key,search_projection,search_grams,has_payload_id,has_compression_summary,operator_at,operator_ts_fallback,operator_projected';
+      const runColumn = hasProofProjection ? ',run_key' : '';
+      // Copy originals in bounded ordered ranges, including relational identity and
+      // projections. Never reserialize payloads or recompute their candidate index.
+      for (let offset = 0; offset < old.rows.length; offset += COMPACTION_COPY_BATCH_SIZE) {
+        const batch = old.rows.slice(offset, offset + COMPACTION_COPY_BATCH_SIZE);
+        await client.query(`INSERT INTO conversation_archive_entries
+          (agent_id,session_id,source_store,source_id,ordinal,entry,created_at,archive_kind,generation,entry_id,idempotency_key,${projections}${runColumn})
+          SELECT agent_id,session_id,'archive',$3,sequence,entry,created_at,'compacted',$4,entry_id,idempotency_key,${projections}${runColumn}
+          FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND sequence >= $5::bigint AND sequence <= $6::bigint
+          ORDER BY sequence`, [agentId,sid,archiveId,generation-1,String(batch[0].sequence),String(batch.at(-1).sequence)]);
+      }
+      const retained = Array.isArray(tailEntries) ? tailEntries : [];
+      const originals = matchCompactionOccurrences(old.rows, retained, sid);
       await client.query('DELETE FROM conversation_entries WHERE agent_id=$1 AND session_id=$2', [agentId, sid]);
       const summaryEntry = { id: randomUUID(), ts: now, sessionId: sid, type: 'summary', role: null, content: String(summary.text), visibility: 'debug', entersPrompt: false, metadata: { compressionSummary: summary } };
-      const retained = Array.isArray(tailEntries) ? tailEntries : [];
-      const used = new Set();
-      for (const entry of [summaryEntry, ...retained]) {
-        // Match each occurrence once; equal id-less messages are distinct originals.
-        const original = entry === summaryEntry ? null : old.rows.find(row => !used.has(row.entry_id) &&
-          ((entry.sequence && String(row.sequence) === String(entry.sequence)) ||
-           (entry.id && row.entry.id === entry.id) ||
-           JSON.stringify(row.entry) === JSON.stringify(entry) ||
-           JSON.stringify({ ...row.entry, sessionId: sid, metadata: { ...(row.entry.metadata || {}) } }) === JSON.stringify(entry)));
-        if (original) used.add(original.entry_id);
-        const args = [agentId, sid, original?.entry_id || text(entry.id).trim() || randomUUID(), original?.idempotency_key || null, original?.raw_entry || JSON.stringify(entry), now];
-        if (await this.hasProofProjection(client)) await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at,run_key) VALUES($1,$2,$3,$4,$5::json,$6,$7)', [...args, proofRunKey(entry)]);
+      const insertNew = async entry => {
+        const args = [agentId,sid,text(entry.id).trim() || randomUUID(),null,JSON.stringify(entry),now];
+        if (hasProofProjection) await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at,run_key) VALUES($1,$2,$3,$4,$5::json,$6,$7)', [...args,proofRunKey(entry)]);
         else await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at) VALUES($1,$2,$3,$4,$5::json,$6)', args);
+      };
+      await insertNew(summaryEntry);
+      for (let offset = 0; offset < retained.length;) {
+        if (!originals[offset]) {
+          await insertNew(retained[offset++]);
+          continue;
+        }
+        // Consecutive matched occurrences share one copy. WITH ORDINALITY keeps
+        // arbitrary caller order, and omitted sequence allocates fresh cursors.
+        const ordinals = [];
+        while (offset < retained.length && originals[offset] && ordinals.length < COMPACTION_COPY_BATCH_SIZE) {
+          ordinals.push(String(originals[offset++].sequence));
+        }
+        await client.query(`INSERT INTO conversation_entries
+          (agent_id,session_id,entry_id,idempotency_key,entry,created_at,${projections}${runColumn})
+          SELECT e.agent_id,e.session_id,e.entry_id,e.idempotency_key,e.entry,$5,${projections.split(',').map(column => `e.${column}`).join(',')}${hasProofProjection ? ',e.run_key' : ''}
+          FROM unnest($4::bigint[]) WITH ORDINALITY AS retained(ordinal,position)
+          JOIN conversation_archive_entries e ON e.agent_id=$1 AND e.session_id=$2 AND e.source_store='archive' AND e.source_id=$3 AND e.ordinal=retained.ordinal
+          ORDER BY retained.position`, [agentId,sid,archiveId,ordinals,now]);
       }
       const next = { ...prior, generation, archived: false, transcriptGeneration: randomUUID(), activeTranscript: 'postgres', archiveId, updatedAt: now, turnCount: 1 + retained.length, chatTurnCount: retained.filter((entry) => entry.type === 'message' && ['user','assistant','agent'].includes(entry.role)).length };
       await client.query('UPDATE conversation_sessions SET metadata=$3::jsonb,updated_at=$4 WHERE agent_id=$1 AND session_id=$2', [agentId, sid, JSON.stringify(next), now]);

@@ -13,21 +13,4 @@ describe('runtime and mod boundaries', () => {
   expect(fetchMock).toHaveBeenCalledWith('/api/mods', expect.any(Object));
  });
 
- it('groups repeated settings contribution rows into one mod without duplicate sections', async () => {
-  const { groupModSettingsContributions } = await import('./apiTargets');
-  const settings = [
-   { id: 'status', navigation: { title: 'Switchboard' }, primary: { title: 'Status', capability: 'settingsUi' as const } },
-   { id: 'configuration', navigation: { title: 'Switchboard' }, primary: { title: 'Configuration', capability: 'settingsUi' as const } },
-  ];
-  expect(groupModSettingsContributions(settings.flatMap((setting) => [
-   { modId: 'burrow-switchboard', name: 'Switchboard', settingsUrl: '/api/mods/burrow-switchboard/ui/settings.js', settings: [setting] },
-   { modId: 'burrow-switchboard', name: 'Switchboard', settings: [setting] },
-  ]))).toEqual([{
-   modId: 'burrow-switchboard',
-   name: 'Switchboard',
-   settingsUrl: '/api/mods/burrow-switchboard/ui/settings.js',
-   settings,
-  }]);
- });
-
 });

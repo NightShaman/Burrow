@@ -24,7 +24,7 @@ import { BrowserOriginSettings } from './BrowserOriginSettings';
 import { BrainEmbeddingSettings } from './BrainEmbeddingSettings';
 import { CuratorSettings } from './CuratorSettings';
 import { RetentionSettings } from './RetentionSettings';
-import { groupModSettingsContributions, loadModSettingsContributions, modContributionsChangedEvent, type ModContribution, type ModSettingsContribution } from '../../app/apiTargets';
+import { loadModSettingsContributions, modContributionsChangedEvent, type ModContribution, type ModSettingsContribution } from '../../app/apiTargets';
 import { ExecutionBoundaries } from './ExecutionBoundaries';
 import { Chevron } from '../workspace/WorkspaceRail';
 import { readStoredValue, writeStoredValue } from '../../app/browserStorage';
@@ -67,7 +67,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
   useEffect(() => {
     let cancelled = false;
     let sequence = 0;
-    const refresh = () => { const current = ++sequence; void loadModSettingsContributions().then((items) => { if (!cancelled && current === sequence) setTargetContributions(groupModSettingsContributions(items)); }); };
+    const refresh = () => { const current = ++sequence; void loadModSettingsContributions().then((items) => { if (!cancelled && current === sequence) setTargetContributions(items); }); };
     refresh();
     window.addEventListener(modContributionsChangedEvent, refresh);
     return () => { cancelled = true; window.removeEventListener(modContributionsChangedEvent, refresh); };

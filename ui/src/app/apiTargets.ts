@@ -47,23 +47,6 @@ export type ModContribution = {
 
 export const modContributionsChangedEvent = 'burrow:mod-contributions-changed';
 
-export function groupModSettingsContributions(items: ModContribution[]): ModContribution[] {
-  const grouped = new Map<string, ModContribution>();
-  for (const item of items) {
-    const current = grouped.get(item.modId);
-    if (!current) {
-      grouped.set(item.modId, { ...item, ...(item.settings ? { settings: [...item.settings] } : {}) });
-      continue;
-    }
-    if (!current.settingsUrl && item.settingsUrl) current.settingsUrl = item.settingsUrl;
-    if (!current.version && item.version) current.version = item.version;
-    const existingIds = new Set(current.settings?.map((setting) => setting.id) ?? []);
-    const additions = item.settings?.filter((setting) => !existingIds.has(setting.id)) ?? [];
-    if (additions.length) current.settings = [...(current.settings ?? []), ...additions];
-  }
-  return [...grouped.values()];
-}
-
 async function loadModsCatalog(): Promise<ModsResponse> {
   return apiLocal<ModsResponse>('/api/mods').catch(() => ({ ok: true as const, mods: [] }));
 }
