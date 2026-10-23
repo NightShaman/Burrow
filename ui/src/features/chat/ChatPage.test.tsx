@@ -54,6 +54,16 @@ afterEach(() => {
 });
 
 describe('Chat session picker', () => {
+  it('orders session controls from actions through routing to the picker', () => {
+    render(<ChatModelSelector selected={agent} savedProviders={[]} updateAgent={vi.fn()} sessions={[{ id: 'default' }]} sessionId="default" onSessionChange={vi.fn()} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} />);
+
+    const controls = screen.getByRole('combobox', { name: 'Session' }).closest('.session-controls');
+    expect(Array.from(controls?.children ?? []).map((element) =>
+      element instanceof HTMLButtonElement ? element.textContent : element.querySelector('input, select')?.id,
+    )).toEqual(['Group Chat', 'New session', 'Reset Session', 'chat-a2a-in-default', 'chat-session']);
+    expect(screen.getByRole('combobox', { name: 'Session' }).closest('label')?.className).toBe('session-selector-control');
+  });
+
   it('excludes group and artifact sessions even when the API omits classification metadata', () => {
     const sessions = [
       { id: 'default' },
