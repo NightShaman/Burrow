@@ -73,8 +73,8 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
 
   // Acceptance is synchronous; the returned promise still tracks run completion.
   const sendMessage = async (draftOverride?: string, onAccepted?: () => void) => {
-    const message = (draftOverride ?? session.draft).trim() || (session.attached.length ? 'Please analyze the attached files.' : '');
-    if (!message || !selectedAgentId || !session.sessionId || activeRunForSelection || streamAbortRef.current[runKey(selectedAgentId, session.sessionId)]) return;
+    const message = (draftOverride ?? session.draft).trim();
+    if ((!message && !session.attached.length) || !selectedAgentId || !session.sessionId || activeRunForSelection || streamAbortRef.current[runKey(selectedAgentId, session.sessionId)]) return;
     const transientContextCommand = /^\/context(?:\s+full)?$/i.test(message);
     const target = { agentId: selectedAgentId, resourceAgentId: selected?.resourceId ?? selectedAgentId, sessionId: session.sessionId };
     const sentAt = performance.now();

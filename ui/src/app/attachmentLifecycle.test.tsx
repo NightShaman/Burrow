@@ -41,7 +41,8 @@ describe('attachment navigation and send lifecycle', () => {
       };
       const { result } = renderHook(() => useChatRun({ selectedAgentId: 'b', selected: undefined, savedProviders: [], session, setAgentActivity: vi.fn() }));
       await act(async () => { await result.current.sendMessage(); });
-      expect(streamMock).toHaveBeenCalledWith(expect.objectContaining({ requestBody: expect.objectContaining({ agentId: 'b', sessionId: 's-b', attachments: [currentAttachment] }) }));
+      expect(streamMock).toHaveBeenCalledWith(expect.objectContaining({ requestBody: expect.objectContaining({ agentId: 'b', sessionId: 's-b', message: '', attachments: [currentAttachment] }) }));
+      expect(session.appendTurn).toHaveBeenCalledWith('b', 's-b', expect.objectContaining({ role: 'user', content: '' }));
     } finally { globalThis.FileReader = OriginalReader; }
   });
 

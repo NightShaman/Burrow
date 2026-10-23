@@ -110,8 +110,8 @@ export function Chat({ selected, parent, operator, draft, setDraft, attached, on
   const sendLocalDraft = useCallback(() => {
     const value = localDraftRef.current;
     if (isSending && steeringReady) {
-      const message = value.trim() || (attached.length ? 'Please analyze the attached files.' : '');
-      if (!message) return;
+      const message = value.trim();
+      if (!message && !attached.length) return;
       setSteeringError('');
       void steering.submit(message, attached).then(input => {
         if (!input) return;

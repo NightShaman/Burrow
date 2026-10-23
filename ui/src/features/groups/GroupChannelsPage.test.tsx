@@ -147,7 +147,7 @@ it.each([false, true])('submits attachment-only files and clears only with persi
     if (path === '/api/settings/identities') return {};
     if (init?.method === 'POST') {
       const body = JSON.parse(String(init.body));
-      expect(body.message).toBe('Please analyze the attached files.');
+      expect(body.message).toBe('');
       expect(body.attachments[0]).toMatchObject({ name: 'input.txt', type: 'text/plain', encoding: 'data-url' });
       return { ok: true, operatorTurn: { metadata: { attachments: confirmed ? [{ name: 'input.txt', artifactPath: 'attachments/input.txt' }] : [] } } };
     }

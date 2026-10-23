@@ -151,8 +151,8 @@ export function GroupChannelsPage({ channelId, agents, operator }: { channelId: 
   async function send() {
     // Keep the original composer value intact: the backend owns mention parsing
     // and delivery routing. Only use trim() to decide whether the composer is empty.
-    const content = message || (attached.length ? 'Please analyze the attached files.' : '');
-    if (!content.trim() || sending) return;
+    const content = message;
+    if ((!content.trim() && !attached.length) || sending) return;
     const owner = scope.current;
     const submittedMessage = message;
     const submittedAttachments = attached;
