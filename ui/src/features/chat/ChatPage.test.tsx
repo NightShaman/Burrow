@@ -96,6 +96,24 @@ describe('Chat session picker', () => {
     expect(onSessionChange).toHaveBeenCalledWith('default');
   });
 
+  it('renders Discord labels and thread titles while keeping raw option values and routing', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ mods: [{ id: 'burrow-switchboard', status: 'loaded' }] }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ connections: [
+        { id: 'guild', transportType: 'discord', mappings: [{ channelId: '123', chatTitle: 'Town Hall' }] },
+      ] }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const onSessionChange = vi.fn();
+    render(<ChatModelSelector selected={agent} savedProviders={[]} updateAgent={vi.fn()} sessions={[{ id: 'discord:guild:123' }, { id: 'discord:guild:unknown' }]} sessionId="discord:guild:123" onSessionChange={onSessionChange} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} />);
+    const option = await screen.findByRole('option', { name: 'Discord · Town Hall' });
+    expect(option).toHaveProperty('value', 'discord:guild:123');
+    expect(option.getAttribute('title')).toBe('discord:guild:123');
+    expect(screen.getByRole('option', { name: 'discord:guild:unknown' })).toHaveProperty('value', 'discord:guild:unknown');
+    fireEvent.change(screen.getByRole('combobox', { name: 'Session' }), { target: { value: 'discord:guild:unknown' } });
+    expect(onSessionChange).toHaveBeenCalledWith('discord:guild:unknown');
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/mods', '/api/mods/burrow-switchboard/bootstrap']);
+  });
+
   it('defaults A2A routing to the default session and persists only the routing preference', () => {
     const provider = { id: 'provider', provider: 'test', apiType: 'openai', url: '', apiKey: '', models: ['test-model'] };
     const updateAgent = vi.fn();
