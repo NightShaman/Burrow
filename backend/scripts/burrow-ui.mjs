@@ -746,7 +746,8 @@ async function archiveSummaryForSession({ agentId, rootDir, sessionId } = {}) {
 async function archiveSummaryForReset({ agentId, rootDir, sessionId, archiveId = null, archivedPath = null } = {}) {
   if (!archiveId) return null;
   const store = postgresApplication.stores.conversations;
-  const snapshot = await store.readArchive({agentId,sessionId,archiveId});
+  const transcript = await store.exportArchiveTranscript({agentId,sessionId,archiveId});
+  const snapshot = transcript ? { entries: transcript.entries, metadata: transcript.session.metadata } : null;
   if (!snapshot) return null;
   const modelConfig = await archiveSummaryModelConfig(agentId);
   if (!modelConfig) return null;

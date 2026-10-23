@@ -209,11 +209,18 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
     const agentRuntime = await resolveAgentRuntime(agentId);
     const agent = await agentsStore().resolve(agentRuntime.agentId) || { id: agentRuntime.agentId, name: agentRuntime.agentId };
     const store = stores().conversations;
-    const archive = typeof store.readArchiveById === 'function'
-      ? await store.readArchiveById({ agentId: agentRuntime.agentId, archiveId: sessionId, kind: 'reset' })
-      : (await store.listArchives({ agentId: agentRuntime.agentId, limit: null })).find((item) => item.kind === 'reset' && item.archiveId === sessionId);
-    const resetSnapshot = archive ? { id: archive.archiveId, sourceSessionId: archive.sessionId, turnCount: archive.entries.length, createdAt: archive.createdAt, updatedAt: archive.createdAt, archiveSummary: archive.metadata?.summary, summaryStatus: archive.metadata?.summaryStatus, archiveTitle: archive.metadata?.archiveTitle } : null;
-    const source = archive ? archive.entries : (await store.exportTranscript({ agentId: agentRuntime.agentId, sessionId }))?.entries;
+    // Native stores reconstruct reset history from its bounded compaction
+    // generations. Raw archive reads intentionally remain evidence snapshots.
+    const reconstructed = typeof store.exportArchiveTranscript === 'function'
+      ? await store.exportArchiveTranscript({ agentId: agentRuntime.agentId, archiveId: sessionId }) : null;
+    const archive = typeof store.exportArchiveTranscript === 'function' ? null
+      : typeof store.readArchiveById === 'function'
+        ? await store.readArchiveById({ agentId: agentRuntime.agentId, archiveId: sessionId, kind: 'reset' })
+        : (await store.listArchives({ agentId: agentRuntime.agentId, limit: null })).find((item) => item.kind === 'reset' && item.archiveId === sessionId);
+    const reset = reconstructed ? { archiveId: reconstructed.archiveId, sessionId: reconstructed.sourceSessionId,
+      entries: reconstructed.entries, createdAt: reconstructed.createdAt, metadata: reconstructed.session.metadata } : archive;
+    const resetSnapshot = reset ? { id: reset.archiveId, sourceSessionId: reset.sessionId, turnCount: reset.entries.length, createdAt: reset.createdAt, updatedAt: reset.createdAt, archiveSummary: reset.metadata?.summary, summaryStatus: reset.metadata?.summaryStatus, archiveTitle: reset.metadata?.archiveTitle } : null;
+    const source = reset ? reset.entries : (await store.exportTranscript({ agentId: agentRuntime.agentId, sessionId }))?.entries;
     if (!source) return null;
     const page = uiArchivePage(source, { agentId: agentRuntime.agentId, sessionId, ...pageOptions });
     if (resetSnapshot) {

@@ -679,6 +679,25 @@ function proofRunKey(entry = {}) {
   return runId ? Buffer.from(JSON.stringify(runId), 'utf8').toString('hex') : null;
 }
 
+// Preserve first transcript position while later snapshots replace payloads.
+// Relational occurrence IDs keep equal-content id-less messages distinct.
+function mergeTranscriptSnapshots(snapshots) {
+  const entries = []; const positions = new Map();
+  for (const snapshot of snapshots) {
+    const seen = new Set();
+    for (const occurrence of snapshot) {
+      const entry = occurrence.entry;
+      const identity = entry?.id ? `payload:${entry.id}` : occurrence.occurrence ? `occurrence:${occurrence.occurrence}` : null;
+      if (!identity) { entries.push(entry); continue; }
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      if (positions.has(identity)) entries[positions.get(identity)] = entry;
+      else { positions.set(identity, entries.length); entries.push(entry); }
+    }
+  }
+  return entries;
+}
+
 export function assertConversationDeletionAllowed(sessionId, metadata = {}) {
   if (['running', 'finalizing'].includes(metadata.continuityHead?.state)) throw new Error('session_retention_active');
   if (metadata.current === true || metadata.currentMain === true || (['main', 'default'].includes(sessionId) && (!metadata.kind || metadata.kind === 'main'))) throw new Error('retention_refused_current_main');
@@ -1188,23 +1207,42 @@ export class PostgresSessionStore {
     [required(agentId, 'agentId'), required(sessionId, 'sessionId')]);
     const row = result.rows[0];
     if (!row) return null;
-    // Keep each identity's first transcript position, but replace its payload with
-    // the canonical winner. Each archive retains its earliest duplicate ordinal;
-    // ascending generation/source snapshots then live establish precedence.
-    const entries = []; const positions = new Map();
-    for (const snapshot of [...row.history, row.entries]) {
-      const seen = new Set();
-      for (const occurrence of snapshot) {
-        const entry = occurrence.entry;
-        const identity = entry?.id ? `payload:${entry.id}` : occurrence.occurrence ? `occurrence:${occurrence.occurrence}` : null;
-        if (!identity) { entries.push(entry); continue; }
-        if (seen.has(identity)) continue;
-        seen.add(identity);
-        if (positions.has(identity)) entries[positions.get(identity)] = entry;
-        else { positions.set(identity, entries.length); entries.push(entry); }
-      }
-    }
+    const entries = mergeTranscriptSnapshots([...row.history, row.entries]);
     return { schemaVersion: '1', session: { id: sessionId, metadata: { ...row.metadata, createdAt: row.created_at, updatedAt: row.updated_at } }, entries };
+  }
+
+
+  // Reconstruct a reset's entire conversation without rewriting immutable
+  // evidence. The target's generation window, not today's live metadata, owns
+  // its history. One statement gives selection and payloads one MVCC snapshot.
+  async exportArchiveTranscript({ agentId, sessionId = null, archiveId } = {}) {
+    const result = await this.pool.query(`WITH target AS (
+      SELECT * FROM conversation_archives WHERE agent_id=$1 AND archive_id=$2
+        AND kind='reset' AND ($3::text IS NULL OR session_id=$3)
+      ORDER BY created_at DESC,session_id DESC LIMIT 1
+    ) SELECT t.archive_id,t.session_id,t.generation,t.metadata,t.created_at,
+      COALESCE((SELECT json_agg((SELECT COALESCE(json_agg(
+          json_build_object('occurrence',e.entry_id,'entry',e.entry) ORDER BY e.ordinal),'[]'::json)
+        FROM conversation_archive_entries e WHERE e.agent_id=a.agent_id
+          AND e.session_id=a.session_id AND e.source_id=a.archive_id)
+        ORDER BY a.generation,a.archive_id)
+        FROM conversation_archives a WHERE a.agent_id=t.agent_id AND a.session_id=t.session_id
+          AND a.kind='compacted' AND a.generation<=t.generation
+          AND a.generation>=COALESCE((t.metadata->>'resetGeneration')::bigint,
+            (SELECT max(r.generation)+1 FROM conversation_archives r
+              WHERE r.agent_id=t.agent_id AND r.session_id=t.session_id
+                AND r.kind='reset' AND r.generation<t.generation),0)), '[]'::json) AS history,
+      COALESCE((SELECT json_agg(json_build_object('occurrence',e.entry_id,'entry',e.entry)
+        ORDER BY e.ordinal) FROM conversation_archive_entries e
+        WHERE e.agent_id=t.agent_id AND e.session_id=t.session_id AND e.source_id=t.archive_id),
+        '[]'::json) AS entries FROM target t`,
+    [required(agentId, 'agentId'), required(archiveId, 'archiveId'), sessionId == null ? null : required(sessionId, 'sessionId')]);
+    const row = result.rows[0];
+    if (!row) return null;
+    const entries = mergeTranscriptSnapshots([...row.history, row.entries]);
+    return { schemaVersion: '1', archiveId: row.archive_id, sourceSessionId: row.session_id,
+      generation: Number(row.generation), createdAt: row.created_at,
+      session: { id: row.archive_id, metadata: { ...row.metadata, createdAt: row.created_at, updatedAt: row.created_at } }, entries };
   }
 
   async getMetadata({ agentId: rawAgentId, sessionId: rawSessionId } = {}) {
@@ -1588,8 +1626,22 @@ export class PostgresSessionStore {
       AND ($7::timestamptz IS NULL OR (updated_at,agent_id || ':' || id)<($7::timestamptz,$8::text))
       ORDER BY updated_at DESC,agent_id || ':' || id DESC LIMIT $9
     ) SELECT bounded.*,
-      CASE WHEN archive_snapshot THEN (SELECT count(*) FROM conversation_archive_entries e
-        WHERE e.agent_id=bounded.agent_id AND e.session_id=bounded.session_id AND e.source_id=bounded.id)
+      CASE WHEN archive_snapshot THEN (SELECT count(*) FROM (
+        SELECT DISTINCT COALESCE(
+          CASE WHEN e.has_payload_id THEN 'payload:' || NULLIF(burrow_history_key(e.entry_key),'') END,
+          'occurrence:' || e.entry_id,
+          'row:' || e.source_id || ':' || e.ordinal::text) AS identity
+        FROM conversation_archives target JOIN conversation_archives a
+          ON a.agent_id=target.agent_id AND a.session_id=target.session_id
+        JOIN conversation_archive_entries e ON e.agent_id=a.agent_id
+          AND e.session_id=a.session_id AND e.source_id=a.archive_id
+        WHERE target.agent_id=bounded.agent_id AND target.session_id=bounded.session_id AND target.archive_id=bounded.id
+          AND (a.archive_id=target.archive_id OR (a.kind='compacted' AND a.generation<=target.generation
+            AND a.generation>=COALESCE((target.metadata->>'resetGeneration')::bigint,
+              (SELECT max(r.generation)+1 FROM conversation_archives r
+                WHERE r.agent_id=target.agent_id AND r.session_id=target.session_id
+                  AND r.kind='reset' AND r.generation<target.generation),0)))
+      ) occurrences)
       WHEN metadata->>'turnCount' ~ '^[0-9]+$' THEN (metadata->>'turnCount')::bigint ELSE 0 END AS turn_count
       FROM bounded ORDER BY updated_at DESC,identity DESC`,
     [agentId, Boolean(includeArchived), search, date, month, timezone, boundary?.t || null, boundary?.i || null, size + 1, windowStart?.toISOString() || null, windowEnd?.toISOString() || null]);

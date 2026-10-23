@@ -44,7 +44,10 @@ async function readPostgresConversationPage({ conversationStore, agentId, sessio
   if (archiveId) {
     const archive = await conversationStore.readArchive({ agentId, sessionId, archiveId });
     if (!archive) return null;
-    source = archive.entries || [];
+    const transcript = archive.kind === 'reset' && typeof conversationStore.exportArchiveTranscript === 'function'
+      ? await conversationStore.exportArchiveTranscript({ agentId, sessionId, archiveId }) : archive;
+    if (!transcript) return null;
+    source = transcript.entries || [];
   } else {
     const transcript = await conversationStore.exportTranscript({ agentId, sessionId });
     if (!transcript) return null;
