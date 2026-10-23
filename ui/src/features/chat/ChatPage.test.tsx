@@ -71,6 +71,21 @@ describe('Chat session picker', () => {
     expect(Array.from((picker as HTMLSelectElement).options).map((option) => option.value)).toEqual(['default', 'Issues']);
   });
 
+  it('renders resolved Telegram labels while preserving raw routing values and titles', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ mods: [{ id: 'burrow-switchboard', status: 'loaded' }] }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ connections: [{ id: 'default', name: 'Telegram', mappings: [{ chatId: '-1001', topicId: null, chatTitle: 'Kingdom Trouble' }] }] }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const onSessionChange = vi.fn();
+    render(<ChatModelSelector selected={agent} savedProviders={[]} updateAgent={vi.fn()} sessions={[{ id: 'default' }, { id: 'telegram:-1001:root' }]} sessionId="telegram:-1001:root" onSessionChange={onSessionChange} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} />);
+
+    const option = await screen.findByRole('option', { name: 'Telegram · Kingdom Trouble' });
+    expect(option).toHaveProperty('value', 'telegram:-1001:root');
+    expect(option.getAttribute('title')).toBe('telegram:-1001:root');
+    fireEvent.change(screen.getByRole('combobox', { name: 'Session' }), { target: { value: 'default' } });
+    expect(onSessionChange).toHaveBeenCalledWith('default');
+  });
+
   it('defaults A2A routing to the default session and persists only the routing preference', () => {
     const provider = { id: 'provider', provider: 'test', apiType: 'openai', url: '', apiKey: '', models: ['test-model'] };
     const updateAgent = vi.fn();
