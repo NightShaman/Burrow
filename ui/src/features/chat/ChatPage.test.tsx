@@ -79,7 +79,7 @@ describe('Chat session picker', () => {
     const configuredAgent = { ...agent, contextConfig: { a2aInDefault: true, personality: 'stale', tools: ['stale-tool'], skills: ['stale-skill'] } };
     render(<ChatModelSelector selected={configuredAgent} savedProviders={[provider]} updateAgent={updateAgent} sessions={[{ id: 'default' }]} sessionId="default" onSessionChange={onSessionChange} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} locked />);
 
-    const toggle = screen.getByRole('checkbox', { name: 'A2A in default' });
+    const toggle = screen.getByRole('switch', { name: 'A2A in default' });
     expect(toggle).toHaveProperty('checked', true);
     expect(toggle).toHaveProperty('disabled', false);
     fireEvent.click(toggle);
@@ -95,7 +95,7 @@ describe('Chat session picker', () => {
 
     const picker = screen.getByRole('combobox', { name: 'Session' }) as HTMLSelectElement;
     expect(Array.from(picker.options).map((option) => [option.value, option.text])).toEqual([['default', 'default'], ['a2a', 'A2A']]);
-    expect(screen.getByRole('checkbox', { name: 'A2A in default' })).toHaveProperty('checked', false);
+    expect(screen.getByRole('switch', { name: 'A2A in default' })).toHaveProperty('checked', false);
   });
 
   it('retains the selected synthetic inbox when routing is toggled back on before metadata arrives', () => {
@@ -107,7 +107,7 @@ describe('Chat session picker', () => {
     const { rerender } = render(<ChatModelSelector {...props} />);
     const picker = screen.getByRole('combobox', { name: 'Session' }) as HTMLSelectElement;
     expect(picker.value).toBe('a2a');
-    fireEvent.click(screen.getByRole('checkbox', { name: 'A2A in default' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'A2A in default' }));
     expect(props.updateAgent).toHaveBeenCalledWith({ contextConfig: { a2aInDefault: true } });
     rerender(<ChatModelSelector {...props} selected={{ ...agent, contextConfig: { a2aInDefault: true } }} />);
     expect(picker.value).toBe('a2a');

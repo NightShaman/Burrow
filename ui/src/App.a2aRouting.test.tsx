@@ -60,7 +60,7 @@ afterEach(cleanup);
 
 function renderApp() {
   render(<ConfirmProvider><App /></ConfirmProvider>);
-  return screen.getByRole('checkbox', { name: 'A2A in default' });
+  return screen.getByRole('switch', { name: 'A2A in default' });
 }
 function patches() {
   return vi.mocked(api).mock.calls.filter(([, options]) => options?.method === 'PATCH');
