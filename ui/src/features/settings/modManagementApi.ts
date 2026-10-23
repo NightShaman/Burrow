@@ -17,6 +17,7 @@ export type ModRecord = {
 };
 
 export type ModSource = { id: string; url: string; status?: string; error?: string; lastCheckedAt?: string };
+export type SecretReference = { reference: string; label: string; type: string; username?: string; url?: string; service?: string };
 export type SourceRefreshState = { enabled: boolean; intervalMs?: number; staleMs?: number; refreshing: boolean; failures: number };
 export type SourceRefreshConfig = { enabled: boolean; intervalMs: number; staleMs: number };
 export type ModManagementState = { ok?: boolean; restartRequired?: boolean; sourceRefresh?: Partial<SourceRefreshState>; mods?: ModRecord[]; sources?: ModSource[] };
@@ -56,6 +57,11 @@ export async function modManagementAction(path: string, init: RequestInit = {}) 
     return api<ModManagementState>(path, jsonMutation(method as JsonMutationMethod, body, init));
   }
   return api<ModManagementState>(path, init);
+}
+
+export async function loadSecretReferences(scheme = 'gss'): Promise<SecretReference[]> {
+  const response = await api<{ references?: SecretReference[] }>(`/api/mod-management/secret-references?scheme=${encodeURIComponent(scheme)}`);
+  return Array.isArray(response.references) ? response.references.filter(item => item && typeof item.reference === 'string' && typeof item.label === 'string') : [];
 }
 
 export async function loadSourceRefreshConfig(): Promise<SourceRefreshConfig> {

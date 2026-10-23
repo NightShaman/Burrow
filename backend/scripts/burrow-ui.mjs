@@ -115,6 +115,7 @@ import { cleanupMods, createModRoute, discoverMods, loadMods } from '../src/mod-
 import { activeManagedSkillDeclarations, createManagedSkillSynchronizer, inspectManagedSkills, reconcileManagedSkills } from '../src/managed-skills.mjs';
 import { createModManagement } from '../src/mod-management.mjs';
 import { createModDistribution, createModManagementRoute } from '../src/mod-distribution.mjs';
+import { listSecretReferences, resolveSecretReference } from '../src/secret-references.mjs';
 import { MAX_OVERVIEW_CHILD_CONTEXTS, normalizeOverviewBody, overviewSessionIds } from '../src/agent-overview.mjs';
 
 function isChatMessage(entry) {
@@ -3125,6 +3126,7 @@ const modDistribution = createModDistribution({
   runtimeRoot: modsRuntimeRoot,
   repositoryFactory: postgresApplication.modDistributionRepositoryFactory,
   onLifecycleChange: transitionMod,
+  resolveSecretReference: reference => resolveSecretReference(loadedMods, reference),
 });
 // Complete durable uninstall reconciliation before accepting requests. The
 // callback above is self-contained and does not call back into the distribution,
@@ -3145,6 +3147,7 @@ await coreModManagement.ready;
 const modAuthorityRoute = createModAuthorityRoute({ authority: modAuthority, getMods: () => loadedMods, readJsonBody, sendJson });
 const modManagementDistribution = {
   ...modDistribution,
+  listSecretReferences: scheme => listSecretReferences(loadedMods, { scheme }),
   async list() {
     const result = await modDistribution.list();
     const workspaceRoot = (await runtimeConfig()).runtimeState.workspaceRoot;

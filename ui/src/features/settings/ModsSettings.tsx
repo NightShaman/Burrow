@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { modsChangedEvent } from '../../app/modPanels';
 import { modContributionsChangedEvent } from '../../app/apiTargets';
 import { Field } from './SettingsPrimitives';
-import { defaultSourceRefresh, isModBusyError, loadModManagement, loadSourceRefreshConfig, modLifecyclePath, modManagementAction, saveSourceRefreshConfig, type ModRecord, type ModSource, type NormalizedModManagement, type SourceRefreshConfig } from './modManagementApi';
+import { defaultSourceRefresh, isModBusyError, loadModManagement, loadSecretReferences, loadSourceRefreshConfig, modLifecyclePath, modManagementAction, saveSourceRefreshConfig, type ModRecord, type ModSource, type NormalizedModManagement, type SecretReference, type SourceRefreshConfig } from './modManagementApi';
 
 type ModsSection = 'installed' | 'sources' | 'automatic-checks';
 type Props = { section?: ModsSection; overflowTarget?: HTMLElement | null };
@@ -47,6 +47,9 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   const [sourceUrl, setSourceUrl] = useState('');
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
   const [sourceUsername, setSourceUsername] = useState('');
+  const [secretReferences, setSecretReferences] = useState<SecretReference[]>([]);
+  const [selectedSecretReference, setSelectedSecretReference] = useState<SecretReference | null>(null);
+  const [secretReferenceError, setSecretReferenceError] = useState<string | null>(null);
   const sourceSecretRef = useRef<HTMLInputElement>(null);
   // Do not retain the secret in React state or browser storage. Wipe the DOM field on unmount.
   useEffect(() => {
@@ -86,6 +89,14 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
     }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    if (section !== 'sources') return;
+    setSecretReferenceError(null);
+    void loadSecretReferences().then(setSecretReferences).catch((cause) => {
+      setSecretReferences([]);
+      setSecretReferenceError(cause instanceof Error ? cause.message : 'Stored credentials are unavailable.');
+    });
+  }, [section]);
   useEffect(() => { if (section === 'automatic-checks') void loadRefreshConfiguration(); }, [section, loadRefreshConfiguration]);
 
   useEffect(() => {
@@ -149,17 +160,19 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
     if (!url) return;
     const username = sourceUsername.trim();
     const secret = sourceSecretRef.current?.value ?? '';
-    if (username || secret) {
+    const credential = secret || selectedSecretReference?.reference || '';
+    const resolvedUsername = username || selectedSecretReference?.username || '';
+    if (resolvedUsername || credential) {
       if (!/^https:\/\/[^/]+/i.test(url)) {
         setError('Private repository credentials are supported only for HTTPS Git URLs. Configure SSH access on the Core service account instead.');
         return;
       }
-      if (username && !secret) {
+      if (resolvedUsername && !credential) {
         setError('Enter a password or access token when specifying a private repository username.');
         return;
       }
     }
-    const body = JSON.stringify({ url, ...(secret ? { auth: { ...(username ? { username } : {}), token: secret } } : {}) });
+    const body = JSON.stringify({ url, ...(credential ? { auth: { ...(resolvedUsername ? { username: resolvedUsername } : {}), token: credential } } : {}) });
     setBusy('source');
     setError(null);
     let submitted = false;
@@ -175,6 +188,7 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
     if (submitted) {
       if (!selectedSource) setSourceUrl('');
       setSourceUsername('');
+      setSelectedSecretReference(null);
       if (sourceSecretRef.current) sourceSecretRef.current.value = '';
     }
     try {
@@ -251,8 +265,11 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
         : 'Background source checks are disabled.'}</p>
     <Field label="Git repository URL"><input value={selectedSource?.url ?? sourceUrl} readOnly={!!selectedSource} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://git.example.com/team/mod.git" /></Field>
     <Field label="Private repository username (optional)"><input value={sourceUsername} onChange={(event) => setSourceUsername(event.target.value)} autoComplete="off" /></Field>
-    <Field label="Password or access token (optional)"><input ref={sourceSecretRef} type="password" autoComplete="new-password" /></Field>
-    <p className="settings-help">Public repositories need only a URL. Credentials are for HTTPS Git repositories only and are stored encrypted by Core, not shown here again. For SSH, configure keys and host trust on the Core service account.</p>
+    <Field label="Password or access token (optional)"><input ref={sourceSecretRef} type="password" autoComplete="new-password" placeholder={selectedSecretReference?.reference || "Paste a credential or type {{gss:…}}"} onChange={(event) => { const exact = secretReferences.find(item => item.reference === event.target.value) || null; setSelectedSecretReference(exact); }} /></Field>
+    {secretReferences.length > 0 && <div className="settings-help" aria-label="Stored credentials">Stored credentials: {secretReferences.map((item) => <button className="secondary" type="button" key={item.reference} aria-pressed={selectedSecretReference?.reference === item.reference} disabled={busy !== null} onClick={() => { setSelectedSecretReference(item); if (!sourceUsername && item.username) setSourceUsername(item.username); if (sourceSecretRef.current) sourceSecretRef.current.value = ''; }}>{item.label}</button>)}</div>}
+    {selectedSecretReference && <p className="settings-help" role="status">Using 🔒 {selectedSecretReference.label}. <button type="button" className="secondary" onClick={() => setSelectedSecretReference(null)}>Change</button></p>}
+    {secretReferenceError && <p className="settings-help">Stored credentials unavailable. You can still paste a credential or enter a secret reference.</p>}
+    <p className="settings-help">Public repositories need only a URL. Credentials are for HTTPS Git repositories only. Stored-secret references are resolved only by Core; the browser never receives their values. For SSH, configure keys and host trust on the Core service account.</p>
     <div className="model-actions"><button className="secondary" type="button" disabled={busy !== null} onClick={() => void run('refresh', '/api/mod-management/refresh', { method: 'POST' })}>{busy === 'refresh' ? 'Refreshing…' : 'Refresh sources'}</button><button className="primary" type="button" disabled={(!selectedSource && !sourceUrl.trim()) || busy !== null} onClick={() => void addSource()}>{busy === 'source' ? (selectedSource ? 'Updating…' : 'Adding…') : selectedSource ? 'Update source' : 'Add source'}</button></div>
   </section>;
 

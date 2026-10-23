@@ -5,14 +5,16 @@ import * as management from './modManagementApi';
 
 vi.mock('./modManagementApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./modManagementApi')>();
-  return { ...actual, loadModManagement: vi.fn(), loadSourceRefreshConfig: vi.fn(), saveSourceRefreshConfig: vi.fn(), modManagementAction: vi.fn() };
+  return { ...actual, loadModManagement: vi.fn(), loadSecretReferences: vi.fn(), loadSourceRefreshConfig: vi.fn(), saveSourceRefreshConfig: vi.fn(), modManagementAction: vi.fn() };
 });
 
 const loadMock = vi.mocked(management.loadModManagement);
+const loadSecretReferencesMock = vi.mocked(management.loadSecretReferences);
 const loadRefreshMock = vi.mocked(management.loadSourceRefreshConfig);
 const saveRefreshMock = vi.mocked(management.saveSourceRefreshConfig);
 
 beforeEach(() => {
+  loadSecretReferencesMock.mockResolvedValue([]);
   loadRefreshMock.mockResolvedValue({ enabled: true, intervalMs: 21_600_000, staleMs: 900_000 });
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -200,6 +202,7 @@ describe('Git mod sources', () => {
 
   it('preserves millisecond precision and surfaces save failures', async () => {
     loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
+    loadSecretReferencesMock.mockResolvedValue([]);
     loadRefreshMock.mockResolvedValue({ enabled: true, intervalMs: 1_234, staleMs: 5_678 });
     saveRefreshMock.mockRejectedValue(new Error('refresh settings unavailable'));
     render(<ModsSettings section="automatic-checks" />);
@@ -347,4 +350,20 @@ describe('Git mod sources', () => {
     expect(screen.getByRole('alert').textContent).not.toContain('secret-containing');
     expect(secret.value).toBe('private-token');
   });
+
+  it('selects a stored secret reference without putting its value in the browser request', async () => {
+    loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
+    loadSecretReferencesMock.mockResolvedValue([{ reference: '{{gss:00000000-0000-4000-8000-000000000000/token}}', label: 'GitHub — NightShaman PAT', type: 'token', username: 'oauth2' }]);
+    vi.mocked(management.modManagementAction).mockResolvedValue({ ok: true });
+    render(<ModsSettings section="sources" />);
+    await screen.findByRole('button', { name: 'GitHub — NightShaman PAT' });
+    fireEvent.change(screen.getByLabelText('Git repository URL'), { target: { value: 'https://github.com/NightShaman/private.git' } });
+    fireEvent.click(screen.getByRole('button', { name: 'GitHub — NightShaman PAT' }));
+    expect(screen.getByText(/Using 🔒 GitHub — NightShaman PAT/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
+    await waitFor(() => expect(management.modManagementAction).toHaveBeenCalledWith('/api/mod-management/sources', {
+      method: 'POST', body: JSON.stringify({ url: 'https://github.com/NightShaman/private.git', auth: { username: 'oauth2', token: '{{gss:00000000-0000-4000-8000-000000000000/token}}' } }),
+    }));
+  });
+
 });

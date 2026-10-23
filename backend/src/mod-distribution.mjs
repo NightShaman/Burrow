@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { execFile, spawn } from 'node:child_process';
 import { discoverMods, MOD_DATA_DIRECTORY } from './mod-runtime.mjs';
 import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
+import { isSecretReference } from './secret-references.mjs';
 
 const execFileAsync = promisify(execFile);
 const MOD_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -302,7 +303,7 @@ async function removeDurably(filePath) {
   try { await directory.sync(); } finally { await directory.close(); }
 }
 
-export function createModDistribution({ runtimeRoot, restart = null, onLifecycleChange = null, logger = console, settingsKey = null, archiveResources = {}, removePath = fs.rm, renamePath = fs.rename, copyPath = fs.cp, cleanupPath = fs.rm, repositoryPreparation = prepareRepository, repositoryFactory = null } = {}) {
+export function createModDistribution({ runtimeRoot, restart = null, onLifecycleChange = null, logger = console, settingsKey = null, archiveResources = {}, removePath = fs.rm, renamePath = fs.rename, copyPath = fs.cp, cleanupPath = fs.rm, repositoryPreparation = prepareRepository, repositoryFactory = null, resolveSecretReference = null } = {}) {
   if (!runtimeRoot || typeof repositoryFactory !== 'function') throw new Error('mod_distribution_configuration_required');
   const modsRoot = path.join(runtimeRoot, 'mods');
   const archivePolicy = {
@@ -417,7 +418,10 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
   async function sourceCredential(db, id) {
     const row = await db.sourceCredential(id);
     if (!row) return null;
-    return openCredential(settingsKey || settingsKeyFromEnvironment(), id, row);
+    const credential = openCredential(settingsKey || settingsKeyFromEnvironment(), id, row);
+    if (!isSecretReference(credential.password)) return credential;
+    if (typeof resolveSecretReference !== 'function') throw new Error('secret_reference_provider_unavailable');
+    return { ...credential, password: await resolveSecretReference(credential.password) };
   }
   async function refreshSource(db, row) {
     const checkedAt = now();
@@ -684,6 +688,7 @@ export function createModManagementRoute({ distribution, readJsonBody, sendJson 
     if (url.pathname === '/api/mod-management' && req.method === 'GET') { sendJson(res, 200, await distribution.list()); return true; }
     if (url.pathname === '/api/mod-management/source-refresh' && req.method === 'GET') { sendJson(res, 200, await distribution.sourceRefreshConfig()); return true; }
     if (url.pathname === '/api/mod-management/source-refresh' && req.method === 'PUT') { const body = await readJsonBody(req); sendJson(res, 200, await distribution.saveSourceRefreshConfig(body)); return true; }
+    if (url.pathname === '/api/mod-management/secret-references' && req.method === 'GET') { sendJson(res, 200, await distribution.listSecretReferences?.(url.searchParams.get('scheme') || null) || { references: [] }); return true; }
     if (url.pathname === '/api/mod-management/sources' && req.method === 'POST') { const body = await readJsonBody(req); const result = await distribution.addSource(body.url, body.auth || body.credentials || (body.token ? { token: body.token, username: body.username } : null)); sendJson(res, result.ok ? 201 : 502, result); return true; }
     if (url.pathname === '/api/mod-management/refresh' && req.method === 'POST') { sendJson(res, 200, await distribution.refresh()); return true; }
     let match = url.pathname.match(/^\/api\/mod-management\/sources\/([^/]+)$/);

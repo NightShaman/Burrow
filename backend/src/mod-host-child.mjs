@@ -15,6 +15,7 @@ let systemController = null;
 const handlers = new Map();
 const toolHandlers = new Map();
 const protectedResolvers = new Map();
+const secretReferenceProviders = new Map();
 const activeInvocations = new Map();
 const cancelledInvocations = new Set();
 let diagnosticHandlers = null;
@@ -152,6 +153,10 @@ function registrar(modId) {
       if (resolveProtectedReference) protectedResolvers.set(name, resolveProtectedReference);
       tools.push({ name, description, inputSchema: schema, availability });
     } }),
+    secretReferences: Object.freeze({ register({ scheme, list, resolve }) {
+      if (!registrationOpen || typeof scheme !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(scheme) || secretReferenceProviders.has(scheme) || typeof list !== 'function' || typeof resolve !== 'function') throw new Error('mod_secret_reference_provider_invalid');
+      secretReferenceProviders.set(scheme, { list, resolve });
+    } }),
     diagnostics: Object.freeze({ register(adapter) {
       if (diagnosticHandlers || !adapter || typeof adapter.listJobs !== "function" || typeof adapter.getJob !== "function") throw new Error("mod_diagnostics_invalid");
       diagnosticHandlers = { listJobs: adapter.listJobs, getJob: adapter.getJob };
@@ -186,6 +191,7 @@ async function activate(message) {
     api: registration.api,
     tools: registration.toolsApi,
     diagnostics: registration.diagnostics,
+    secretReferences: registration.secretReferences,
     runtimeDiagnostics: Object.freeze({ read: (input, options) => capabilityRequest("readRuntimeDiagnostics", input, options) }),
     settings: settingsApi(),
     secrets: secretsApi(),
@@ -227,11 +233,13 @@ async function activate(message) {
   const result = await module.activate(Object.freeze(context));
   registration.closeRegistration();
   cleanup = typeof result === 'function' ? result : result && typeof result.close === 'function' ? () => result.close() : null;
-  send({ type: 'activated', routes: registration.routes, tools: registration.tools, diagnostics: Boolean(diagnosticHandlers) });
+  send({ type: 'activated', routes: registration.routes, tools: registration.tools, diagnostics: Boolean(diagnosticHandlers), secretReferenceSchemes: [...secretReferenceProviders.keys()] });
 }
 
 async function invoke(message) {
-  const handler = message.routeId?.startsWith("protected:") ? protectedResolvers.get(message.routeId.slice(10)) : message.routeId?.startsWith("tool:") ? toolHandlers.get(message.routeId.slice(5)) : message.routeId === "diagnostic-list" ? diagnosticHandlers?.listJobs : message.routeId === "diagnostic-detail" ? diagnosticHandlers?.getJob : handlers.get(message.routeId);
+  const secretListScheme = message.routeId?.startsWith("secret-reference-list:") ? message.routeId.slice(22) : null;
+  const secretResolveScheme = message.routeId?.startsWith("secret-reference-resolve:") ? message.routeId.slice(25) : null;
+  const handler = secretListScheme ? secretReferenceProviders.get(secretListScheme)?.list : secretResolveScheme ? secretReferenceProviders.get(secretResolveScheme)?.resolve : message.routeId?.startsWith("protected:") ? protectedResolvers.get(message.routeId.slice(10)) : message.routeId?.startsWith("tool:") ? toolHandlers.get(message.routeId.slice(5)) : message.routeId === "diagnostic-list" ? diagnosticHandlers?.listJobs : message.routeId === "diagnostic-detail" ? diagnosticHandlers?.getJob : handlers.get(message.routeId);
   if (!handler) throw new Error('mod_route_handler_not_found');
   const controller = new AbortController();
   activeInvocations.set(message.requestId, controller);
