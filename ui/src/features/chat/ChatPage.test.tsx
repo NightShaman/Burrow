@@ -76,7 +76,8 @@ describe('Chat session picker', () => {
     const updateAgent = vi.fn();
     const onSessionChange = vi.fn();
 
-    render(<ChatModelSelector selected={agent} savedProviders={[provider]} updateAgent={updateAgent} sessions={[{ id: 'default' }]} sessionId="default" onSessionChange={onSessionChange} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} locked />);
+    const configuredAgent = { ...agent, contextConfig: { a2aInDefault: true, personality: 'stale', tools: ['stale-tool'], skills: ['stale-skill'] } };
+    render(<ChatModelSelector selected={configuredAgent} savedProviders={[provider]} updateAgent={updateAgent} sessions={[{ id: 'default' }]} sessionId="default" onSessionChange={onSessionChange} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} locked />);
 
     const toggle = screen.getByRole('checkbox', { name: 'A2A in default' });
     expect(toggle).toHaveProperty('checked', true);
@@ -96,6 +97,42 @@ describe('Chat session picker', () => {
     expect(Array.from(picker.options).map((option) => [option.value, option.text])).toEqual([['default', 'default'], ['a2a', 'A2A']]);
     expect(screen.getByRole('checkbox', { name: 'A2A in default' })).toHaveProperty('checked', false);
   });
+
+  it('retains the selected synthetic inbox when routing is toggled back on before metadata arrives', () => {
+    const props: Parameters<typeof ChatModelSelector>[0] = {
+      selected: { ...agent, contextConfig: { a2aInDefault: false } }, savedProviders: [],
+      updateAgent: vi.fn(), sessions: [{ id: 'default' }], sessionId: 'a2a',
+      onSessionChange: vi.fn(), onNewSession: vi.fn(), onNewNamedSession: vi.fn(), onCreateGroup: vi.fn(),
+    };
+    const { rerender } = render(<ChatModelSelector {...props} />);
+    const picker = screen.getByRole('combobox', { name: 'Session' }) as HTMLSelectElement;
+    expect(picker.value).toBe('a2a');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'A2A in default' }));
+    expect(props.updateAgent).toHaveBeenCalledWith({ contextConfig: { a2aInDefault: true } });
+    rerender(<ChatModelSelector {...props} selected={{ ...agent, contextConfig: { a2aInDefault: true } }} />);
+    expect(picker.value).toBe('a2a');
+    expect(picker.selectedOptions[0].text).toBe('A2A');
+    expect(props.onSessionChange).not.toHaveBeenCalled();
+  });
+
+  it('retains any current session while its metadata is unavailable', () => {
+    render(<ChatModelSelector selected={agent} savedProviders={[]} updateAgent={vi.fn()} sessions={[{ id: 'default' }]} sessionId="pending-session" onSessionChange={vi.fn()} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} />);
+    expect(screen.getByRole('combobox', { name: 'Session' })).toHaveProperty('value', 'pending-session');
+  });
+
+  it.each([false, true])('uses only exact lowercase a2a as inbox identity (stored=%s)', (stored) => {
+    const onSessionChange = vi.fn();
+    render(<ChatModelSelector selected={{ ...agent, contextConfig: { a2aInDefault: false } }} savedProviders={[]} updateAgent={vi.fn()} sessions={[{ id: 'default' }, { id: 'A2A' }, { id: 'A2a' }, ...(stored ? [{ id: 'a2a' }] : [])]} sessionId="default" onSessionChange={onSessionChange} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} />);
+    const picker = screen.getByRole('combobox', { name: 'Session' }) as HTMLSelectElement;
+    expect(Array.from(picker.options).map(option => [option.value, option.text])).toEqual([
+      ['default', 'default'], ['A2A', 'A2A'], ['A2a', 'A2a'], ['a2a', 'A2A'],
+    ]);
+    for (const value of ['A2A', 'A2a', 'a2a']) {
+      fireEvent.change(picker, { target: { value } });
+      expect(onSessionChange).toHaveBeenLastCalledWith(value);
+    }
+  });
+
 });
 
 describe('Chat composer draft ownership', () => {

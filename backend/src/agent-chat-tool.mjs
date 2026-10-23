@@ -102,7 +102,8 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
   // Only runtime-attested exchange context supplies an implicit return address.
   // Resolve agent aliases first, and never infer routes from transcript/prose.
   const implicitReplySession = replyTo?.recipientAgentId === recipient ? replyTo.sessionId : null;
-  const session = sessionId(text(targetSessionId) || implicitReplySession || 'default');
+  const incomingSession = recipientRuntime.agent?.contextConfig?.a2aInDefault === false ? 'a2a' : 'default';
+  const session = sessionId(text(targetSessionId) || implicitReplySession || incomingSession);
   const source = sessionId(sourceSessionId || 'default');
   const deliveryId = createHash('sha256').update(JSON.stringify([sender, recipient, source, session, runId || null, resolvedMode, body])).digest('hex');
   const deliveryRequest = { sender, recipient, sourceSessionId: source, targetSessionId: session, runId: runId || null, messageMode: resolvedMode, content: body };

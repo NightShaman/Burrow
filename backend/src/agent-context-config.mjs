@@ -43,9 +43,11 @@ export function normalizeAgentContextConfig(input = {}, { partial = false } = {}
   const toolIds = ids(input.toolIds, 'agent_context_tool_ids');
   const skillIds = ids(input.skillIds, 'agent_context_skill_ids');
   const target = uiTarget(input.uiTarget);
+  if (input.a2aInDefault !== undefined && typeof input.a2aInDefault !== 'boolean') throw new Error('agent_context_a2a_in_default_invalid');
 
   const result = {
     version: 1,
+    ...(input.a2aInDefault !== undefined ? { a2aInDefault: input.a2aInDefault } : {}),
     ...(personality !== undefined ? { personality } : {}),
     ...(operatorPreferences !== undefined ? { operatorPreferences } : {}),
     ...(goblinOrientation !== undefined ? { goblinOrientation } : {}),

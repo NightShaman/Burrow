@@ -1023,7 +1023,14 @@ async function createAgent(body = {}) {
 }
 
 async function updateAgent(id, body = {}) {
-  try { return { ok: true, agent: await agentsStore().update(id, body) }; }
+  try {
+    const agent = await agentsStore().update(id, body);
+    // Materialize the visible inbox before acknowledging Off, even when empty.
+    if (agent.contextConfig?.a2aInDefault === false) {
+      await postgresApplication.stores.conversations.updateMetadata({ agentId: agent.id, sessionId: 'a2a', update: (metadata) => metadata });
+    }
+    return { ok: true, agent };
+  }
   catch (error) { return { ok: false, status: String(error?.message || error) === 'agent_not_found' ? 404 : 400, error: String(error?.message || error) }; }
 }
 
