@@ -162,4 +162,9 @@ ALTER TABLE global_profile_documents
   { version: 64, name: 'mod-text-generations', sql: POSTGRES_MOD_GENERATION_SCHEMA_SQL },
   { version: 65, name: 'native-compaction-projection-reuse', sql: POSTGRES_COMPACTION_PROJECTIONS_SQL },
   { version: 66, name: 'owned-agent-message-deliveries', sql: POSTGRES_AGENT_DELIVERY_OWNER_SQL },
+  { version: 67, name: 'mod-external-turn-display-message', sql: `
+ALTER TABLE mod_external_turns ADD COLUMN display_message TEXT;
+UPDATE mod_external_turns SET display_message=message WHERE display_message IS NULL;
+ALTER TABLE mod_external_turns ALTER COLUMN display_message SET NOT NULL;
+` },
 ]);

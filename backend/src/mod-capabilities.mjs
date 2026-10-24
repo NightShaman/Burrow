@@ -193,13 +193,14 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
     },
     async submitExternalTurn(input) {
       if (!externalTurnDispatcher) throw new Error('mod_external_turns_unavailable');
-      const value = exactKeys(plain(input), ['agentId', 'sessionId', 'message', 'idempotencyKey']);
+      const value = exactKeys(plain(input), ['agentId', 'sessionId', 'message', 'displayMessage', 'idempotencyKey']);
       const agentId = bounded(value.agentId, 96).trim();
       const sessionId = bounded(value.sessionId, 128).trim();
       const message = bounded(value.message, 100_000);
+      const displayMessage = value.displayMessage === undefined ? message : bounded(value.displayMessage, 100_000);
       const idempotencyKey = bounded(value.idempotencyKey, 256).trim();
-      if (!agentId || !sessionId || !message.trim() || !idempotencyKey) invalid();
-      const request = { ownerModId: schedulerOwner(), agentId, sessionId, message, idempotencyKey };
+      if (!agentId || !sessionId || !message.trim() || !displayMessage.trim() || !idempotencyKey) invalid();
+      const request = { ownerModId: schedulerOwner(), agentId, sessionId, message, displayMessage, idempotencyKey };
       const replay = await externalTurnDispatcher.replay?.(request);
       if (replay) return replay;
       const agent = await withStore('agents', store => store.get(agentId));

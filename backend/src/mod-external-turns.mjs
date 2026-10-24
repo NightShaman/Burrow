@@ -56,7 +56,7 @@ export function createModExternalTurnDispatcher({ store, stores, resolveAgentRun
         resolveAgentRuntime,
         turnSource: 'mod/external',
         runSource: 'mod/external',
-        externalTurnMetadata: { ownerModId: turn.ownerModId, externalTurnId: turn.id },
+        externalTurnMetadata: { ownerModId: turn.ownerModId, externalTurnId: turn.id, displayMessage: turn.displayMessage || turn.message },
         telemetry,
       });
       const outcome = classifyRuntimeOutcome(result, { cancelled: lifecycle.signal.aborted });
@@ -80,7 +80,7 @@ export function createModExternalTurnDispatcher({ store, stores, resolveAgentRun
       if (typeof store.getByIdempotency !== 'function') return null;
       const turn = await store.getByIdempotency(input.ownerModId, input.idempotencyKey);
       if (!turn) return null;
-      if (turn.agentId !== input.agentId || turn.sessionId !== input.sessionId || turn.message !== input.message) throw new Error('mod_external_turn_idempotency_conflict');
+      if (turn.agentId !== input.agentId || turn.sessionId !== input.sessionId || turn.message !== input.message || (turn.displayMessage || turn.message) !== input.displayMessage) throw new Error('mod_external_turn_idempotency_conflict');
       return { turn: publicExternalTurn(turn), replayed: true };
     },
     async submit(input) {

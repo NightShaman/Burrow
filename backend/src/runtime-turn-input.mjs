@@ -97,3 +97,7 @@ export function normalizeRuntimeTurnInput({ args = {}, workspaceRoot = null, tar
     attachments: normalizedAttachments(normalizedArgs),
   };
 }
+
+export function visibleUserMessage(message, externalTurnMetadata = null) {
+  return externalTurnMetadata?.displayMessage || message;
+}

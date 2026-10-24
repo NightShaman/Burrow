@@ -1,3 +1,4 @@
+import { visibleUserMessage } from './runtime-turn-input.mjs';
 import { performance } from 'node:perf_hooks';
 import { normalizeProviderMessage } from './provider-messages.mjs';
 import { beginSessionAdmissionSupersession, finishSessionAdmissionSupersession, serializeSessionAdmission } from './session-admission.mjs';
@@ -418,7 +419,7 @@ async function runAskChatUnserialized({
       sessionRoot, stores, agentId: runtimeState.agentId,
       sessionId: resolvedSessionId,
       role: 'user',
-      content: message,
+      content: visibleUserMessage(message, externalTurnMetadata),
       runId: resolvedRunId,
       traceDir: logger.traceDir,
       metadata: {

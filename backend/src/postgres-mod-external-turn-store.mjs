@@ -33,6 +33,7 @@ function row(record) {
     agentId: record.agent_id,
     sessionId: record.session_id,
     message: record.message,
+    displayMessage: record.display_message || record.message,
     status: record.status,
     runId: record.run_id,
     result: parse(record.result),
@@ -51,20 +52,20 @@ export class PostgresModExternalTurnStore {
     this.clock = clock;
   }
 
-  async create({ ownerModId, idempotencyKey, agentId, sessionId, message }) {
+  async create({ ownerModId, idempotencyKey, agentId, sessionId, message, displayMessage = message }) {
     const now = this.clock();
     const id = randomUUID();
     const inserted = await this.pool.query(
-      `INSERT INTO mod_external_turns(id,owner_mod_id,idempotency_key,agent_id,session_id,message,status,created_at,updated_at)
-       VALUES($1,$2,$3,$4,$5,$6,'queued',$7,$7)
+      `INSERT INTO mod_external_turns(id,owner_mod_id,idempotency_key,agent_id,session_id,message,display_message,status,created_at,updated_at)
+       VALUES($1,$2,$3,$4,$5,$6,$7,'queued',$8,$8)
        ON CONFLICT(owner_mod_id,idempotency_key) DO NOTHING RETURNING *`,
-      [id, ownerModId, idempotencyKey, agentId, sessionId, message, now],
+      [id, ownerModId, idempotencyKey, agentId, sessionId, message, displayMessage, now],
     );
     if (inserted.rows[0]) return { turn: row(inserted.rows[0]), replayed: false };
     const existing = await this.pool.query('SELECT * FROM mod_external_turns WHERE owner_mod_id=$1 AND idempotency_key=$2', [ownerModId, idempotencyKey]);
     const turn = row(existing.rows[0]);
     if (!turn) throw new Error('mod_external_turn_persistence_failed');
-    if (turn.agentId !== agentId || turn.sessionId !== sessionId || turn.message !== message) throw new Error('mod_external_turn_idempotency_conflict');
+    if (turn.agentId !== agentId || turn.sessionId !== sessionId || turn.message !== message || turn.displayMessage !== displayMessage) throw new Error('mod_external_turn_idempotency_conflict');
     return { turn, replayed: true };
   }
 
