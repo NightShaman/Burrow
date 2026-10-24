@@ -10,6 +10,11 @@ const who = (actor: Actor) => actor.name || (actor.type === 'unknown' ? 'Unknown
 const date = (value: string) => new Date(value).toLocaleString();
 const valueText = (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value) ?? '—';
 
+export async function uploadTaskDocument(taskId: string, file: File) {
+  const content = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('Could not read the file.')); reader.readAsDataURL(file); });
+  await api(`/api/task-board/tasks/${encodeURIComponent(taskId)}/attachments`, jsonMutation('POST', { name: file.name, mimeType: file.type || 'application/octet-stream', content }));
+}
+
 /** Keyed by task ID at the editor boundary so responses cannot leak into another task. */
 export function TaskActivity({ taskId, revision }: { taskId: string; revision: string }) {
   const confirm = useConfirm();
@@ -42,8 +47,7 @@ export function TaskActivity({ taskId, revision }: { taskId: string; revision: s
   }
   async function upload(file: File) {
     await perform(async () => {
-      const content = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('Could not read the file.')); reader.readAsDataURL(file); });
-      await api(`${base}/attachments`, jsonMutation('POST', { name: file.name, mimeType: file.type || 'application/octet-stream', content }));
+      await uploadTaskDocument(taskId, file);
       if (mounted.current) await refresh();
     });
   }

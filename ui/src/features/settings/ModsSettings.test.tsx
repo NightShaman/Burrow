@@ -428,6 +428,26 @@ describe('Git mod sources', () => {
     expect(screen.queryByText('Credential 118')).toBeNull();
   });
 
+  it('clears a pasted known credential reference from both the chip and submitted auth', async () => {
+    const reference = '{{gss:00000000-0000-4000-8000-000000000000/token}}';
+    loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
+    loadSecretReferencesMock.mockResolvedValue([{ reference, label: 'Repository token', type: 'token', username: 'oauth2' }]);
+    vi.mocked(management.modManagementAction).mockResolvedValue({ ok: true });
+    render(<ModsSettings section="sources" />);
+    await screen.findByRole('button', { name: 'Browse stored credentials' });
+    fireEvent.change(screen.getByLabelText('Git repository URL'), { target: { value: 'https://git.example.com/private.git' } });
+    const secret = screen.getByLabelText('Password or access token (optional)') as HTMLInputElement;
+    fireEvent.change(secret, { target: { value: reference } });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Repository token' }));
+    expect(screen.queryByText('Repository token')).toBeNull();
+    expect(secret.value).toBe('');
+    expect(document.activeElement).toBe(secret);
+    fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
+    await waitFor(() => expect(management.modManagementAction).toHaveBeenCalledWith('/api/mod-management/sources', {
+      method: 'POST', body: JSON.stringify({ url: 'https://git.example.com/private.git' }),
+    }));
+  });
+
   it('preserves a pasted raw secret reference even when it is not in discovery metadata', async () => {
     loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
     vi.mocked(management.modManagementAction).mockResolvedValue({ ok: true });

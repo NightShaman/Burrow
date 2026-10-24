@@ -56,3 +56,36 @@ it.each(['success', 'failure'])('late project save %s preserves a newly opened p
  expect((screen.getByRole('button', {name:'Save project'}) as HTMLButtonElement).disabled).toBe(false);
  expect(screen.queryByRole('alert')).toBeNull();
 });
+
+it.each([false, true])('queues documents and retries upload failures without recreating the task (%s)', async fail => {
+ let creates = 0;
+ const uploads: string[] = [];
+ vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = String(input);
+  if (url.endsWith('/projects')) return response({ projects: [{ id: 'p', name: 'Project' }] });
+  if (url.endsWith('/attachments') && init?.method === 'POST') {
+   uploads.push(JSON.parse(String(init.body)).name);
+   if (fail && uploads.length === 2) return new Response('Upload failed', { status: 500 });
+   return response({});
+  }
+  if (url.endsWith('/tasks') && init?.method === 'POST') { creates++; return response({ task: a }); }
+  if (url.endsWith('/tasks/a') && init?.method === 'PATCH') return response({ task: a });
+  if (url.includes('/tasks/a/')) return response({ attachments: [], events: [] });
+  return response({ tasks: [] });
+ }));
+ render(<ConfirmProvider><Tasks agents={[]} /></ConfirmProvider>);
+ fireEvent.click(await screen.findByRole('button', { name: /New task/ }));
+ fireEvent.change(screen.getByRole('textbox', { name: /Title/ }), { target: { value: 'Task A' } });
+ fireEvent.change(screen.getByLabelText('Attach document'), { target: { files: [new File(['a'], 'first.txt'), new File(['b'], 'second.txt')] } });
+ expect(screen.getByRole('button', { name: 'Remove first.txt' })).toBeTruthy();
+ fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
+ if (fail) {
+  await screen.findByText(/Task saved, but a document/);
+  expect(screen.queryByRole('button', { name: 'Remove first.txt' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Remove second.txt' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+ }
+ await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+ expect(creates).toBe(1);
+ expect(uploads).toEqual(fail ? ['first.txt', 'second.txt', 'second.txt'] : ['first.txt', 'second.txt']);
+});

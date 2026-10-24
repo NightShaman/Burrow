@@ -26,3 +26,19 @@ it('retains draggable cards without visible reorder controls', async () => {
  expect(screen.queryByRole('button', {name:/^Move /})).toBeNull();
  expect(container.querySelectorAll('[draggable="true"]')).toHaveLength(2);
 });
+
+it('shows a completed account without waiting for a slow peer and retains usage on remount', async () => {
+ const providers: SavedProvider[] = ['fast-independent','slow-independent'].map(id => ({id,provider:'OpenAI',apiType:'openai-responses',url:'https://openai.com',apiKey:'',models:[],oauthConfigured:true}));
+ let finishSlow!: (value: unknown) => void;
+ vi.mocked(api).mockImplementation((path) => path.includes('slow-independent') ? new Promise(resolve => { finishSlow = resolve; }) as ReturnType<typeof api> : Promise.resolve({usage:{windows:[{key:'primary',label:'Primary',usedPercent:20,resetAt:null}]}}) as ReturnType<typeof api>);
+ const first = render(<AccountStatus providers={providers}/>);
+ await waitFor(() => expect(screen.getByText('80%')).toBeTruthy());
+ expect(screen.getByText('Checking')).toBeTruthy();
+ finishSlow({usage:{windows:[]}});
+ await waitFor(() => expect(screen.getAllByText('Connected')).toHaveLength(2));
+ first.unmount();
+ vi.mocked(api).mockImplementation(() => new Promise(() => {}));
+ render(<AccountStatus providers={providers}/>);
+ expect(screen.getByText('80%')).toBeTruthy();
+ expect(screen.queryByText('Loading usage…')).toBeNull();
+});

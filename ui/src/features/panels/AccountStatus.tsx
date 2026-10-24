@@ -79,6 +79,10 @@ export function openAiBars(usage: OpenAiUsage | null): UsageBar[] {
     .map((window) => ({ key: window.key, label: window.label || titleCase(window.key), remainingPercent: remainingFrom(window.usedPercent), resetAt: window.resetAt ?? null }));
 }
 
+// Session-only last successful values keep remounts from flashing empty cards.
+const usageCardCache = new Map<string, AccountUsageCard>();
+const accountCacheKey = (id: string, vendor: AccountVendor) => `${vendor}:${id}`;
+
 export function useAccountUsage(providers: SavedProvider[], refreshMs = 300_000) {
   const accounts = useMemo(() => oauthAccounts(providers), [providers]);
   const signature = accounts.map((entry) => `${entry.provider.id}:${entry.vendor}`).join('|');
@@ -87,23 +91,32 @@ export function useAccountUsage(providers: SavedProvider[], refreshMs = 300_000)
   useEffect(() => {
     if (!accounts.length) { setCards([]); return; }
     let cancelled = false;
-    setCards(accounts.map(({ provider, vendor }) => ({ id: provider.id, name: provider.provider || vendor, vendor, plan: null, state: 'loading', bars: [] })));
+    setCards(accounts.map(({ provider, vendor }) => ({ ...(usageCardCache.get(accountCacheKey(provider.id, vendor)) ?? { plan: null, state: 'loading' as const, bars: [] }), id: provider.id, name: provider.provider || vendor, vendor })));
 
+    let loading = false;
     const load = async () => {
-      const next = await Promise.all(accounts.map(async ({ provider, vendor }): Promise<AccountUsageCard> => {
+      if (loading) return;
+      loading = true;
+      await Promise.all(accounts.map(async ({ provider, vendor }) => {
+        const key = accountCacheKey(provider.id, vendor);
+        let next: AccountUsageCard;
         const base = { id: provider.id, name: provider.provider || vendor, vendor, plan: null as string | null };
         try {
           if (vendor === 'Anthropic') {
             const result = await api<{ usage?: AnthropicUsage | null }>(`/api/anthropic/oauth/usage?connectionId=${encodeURIComponent(provider.id)}`);
-            return { ...base, state: 'ready', bars: anthropicBars(result.usage ?? null) };
+            next = { ...base, state: 'ready', bars: anthropicBars(result.usage ?? null) };
+          } else {
+            const result = await api<{ usage?: OpenAiUsage | null }>(`/api/openai/oauth/usage?connectionId=${encodeURIComponent(provider.id)}`);
+            next = { ...base, plan: result.usage?.planType ? titleCase(result.usage.planType) : null, state: 'ready', bars: openAiBars(result.usage ?? null) };
           }
-          const result = await api<{ usage?: OpenAiUsage | null }>(`/api/openai/oauth/usage?connectionId=${encodeURIComponent(provider.id)}`);
-          return { ...base, plan: result.usage?.planType ? titleCase(result.usage.planType) : null, state: 'ready', bars: openAiBars(result.usage ?? null) };
         } catch (error) {
-          return { ...base, state: 'error', bars: [], error: error instanceof Error ? error.message : 'Usage unavailable' };
+          next = { ...base, plan: usageCardCache.get(key)?.plan ?? null, state: 'error', bars: usageCardCache.get(key)?.bars ?? [], error: error instanceof Error ? error.message : 'Usage unavailable' };
         }
+        if (cancelled) return;
+        if (next.state === 'ready') usageCardCache.set(key, next);
+        setCards(current => current.map(card => card.id === provider.id && card.vendor === vendor ? next : card));
       }));
-      if (!cancelled) setCards(next);
+      loading = false;
     };
 
     void load();
