@@ -311,7 +311,6 @@ async function executeBoardTask(taskId) {
     if (!task) return { ok: false, error: 'task_not_found' };
     if (!task.assignedAgentId) return { ok: false, error: 'task_assigned_agent_required', task };
     if (['done', 'cancelled'].includes(task.status)) return { ok: false, error: 'task_not_executable', task };
-    const project = await store.getProject(task.projectId);
     const agentRuntime = await resolveAgentRuntime(task.assignedAgentId);
     // Board tasks deliberately execute where Rob works: the assigned agent's
     // main/default conversation. The task record, not a task-specific session,
@@ -330,6 +329,8 @@ async function executeBoardTask(taskId) {
     if (!updated) return { ok: false, error: 'task_not_found' };
     // Only a successful durable claim may register or enqueue work. Use the
     // locked task snapshot rather than the preflight read for the prompt.
+    // A task can move projects while the claim waits for its row lock.
+    const project = await store.getProject(updated.projectId);
     return { ok: true, task: updated, project, agentRuntime, sessionId, runId, updated };
   });
   if (!dispatch.ok) return dispatch;
