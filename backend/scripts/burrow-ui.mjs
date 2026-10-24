@@ -22,7 +22,8 @@ import { browserTabSettings, saveBrowserTabSettings } from '../src/browser-tab-s
 import { otelSettings, readOtelRuntimeConfig, saveOtelSettings } from '../src/otel-settings.mjs';
 import { createReconfigurableOtelRuntime } from '../src/otel-runtime.mjs';
 import { artifactResponseHeaders } from '../src/artifact-response-policy.mjs';
-import { postgresTransactionContext, withPostgresTransaction } from '../src/postgres-foundation.mjs';
+import { postgresConfig, postgresTransactionContext, withPostgresTransaction } from '../src/postgres-foundation.mjs';
+import { acquirePostgresRuntimeOwnership } from '../src/postgres-runtime-ownership.mjs';
 import { readJsonBody } from '../src/request-resource-budgets.mjs';
 import { operatorTimezone, saveOperatorTimezone } from '../src/timezone.mjs';
 import { ensureDefaultGlobalWorkspace } from '../src/runtime-workspace-defaults.mjs';
@@ -184,7 +185,14 @@ const OPENAI_OAUTH_USAGE_URL = process.env.BURROW_OPENAI_OAUTH_USAGE_URL || 'htt
 const runtimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
 // PostgreSQL owns server persistence; startup fails if composition is unavailable.
 const serverLogger = createRuntimeServerLogger({ runtimeRoot });
+const runtimePostgresConfig = postgresConfig();
+// Acquire before composition starts any producers, and before orphan repair.
+// Keep the dedicated session through shutdown and store teardown until exit.
+let runtimeOwnership;
+try { runtimeOwnership = await acquirePostgresRuntimeOwnership({ config: runtimePostgresConfig }); }
+catch (error) { console.error(`Burrow UI startup refused: ${String(error?.message || error)}`); process.exit(1); }
 const postgresApplication = await createPostgresApplication({
+  poolConfig: runtimePostgresConfig,
   encryptionKey: settingsKeyFromEnvironment(),
   runtimeRoot,
   resolveAgent: async (agentId) => resolveAgentRuntime(agentId),
@@ -198,10 +206,9 @@ await hydrateMcpProviderStates({ runtimeRoot: process.env.BURROW_MCPORTER_ROOT |
 const runtimeMetrics = createRuntimeMetricsCollector({ runtimeRoot });
 const otelRuntime = createReconfigurableOtelRuntime({ serviceVersion: releaseVersion });
 await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: postgresApplication.stores.metadata }));
-await postgresApplication.stores.externalTurns.interruptIncomplete('core_restart_before_completion');
-await postgresApplication.stores.generations.interruptIncomplete('core_restart_before_completion');
+await runtimeOwnership.reconcileModJobs(postgresApplication.stores);
 const generationDispatcher = createModGenerationDispatcher({ store: postgresApplication.stores.generations, generateText: createModTextGenerator({ models: postgresApplication.stores.models }) });
-const externalTurnDispatcher = createModExternalTurnDispatcher({ store: postgresApplication.stores.externalTurns, stores: postgresApplication.stores, resolveAgentRuntime, rootDir: projectRoot, telemetry: otelRuntime });
+const externalTurnDispatcher = createModExternalTurnDispatcher({ store: postgresApplication.stores.externalTurns, stores: postgresApplication.stores, resolveAgentRuntime, rootDir: projectRoot, registerActiveRun: registerRuntimeActiveRun, telemetry: otelRuntime });
 async function applyOtelConfigurationToNodeGoblins() {
   const configuration = otelRuntime.remoteConfiguration();
   try { return await executionProviders.configure('node-goblin', configuration); }
@@ -312,8 +319,18 @@ async function executeBoardTask(taskId) {
     const sessionId = 'default';
     const runId = createChatTurnRunId({ sessionId, prefix: 'task' });
     lifecycle?.signal.throwIfAborted();
-    const updated = await store.startExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId }, { actor: { type: 'operator', id: 'default' } });
-    return { ok: true, task, project, agentRuntime, sessionId, runId, updated };
+    let updated;
+    try {
+      updated = await store.startExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId }, { actor: { type: 'operator', id: 'default' } });
+    } catch (error) {
+      if (['task_execution_running', 'task_not_executable', 'task_assigned_agent_required', 'task_assigned_agent_changed'].includes(error?.message))
+        return { ok: false, error: error.message };
+      throw error;
+    }
+    if (!updated) return { ok: false, error: 'task_not_found' };
+    // Only a successful durable claim may register or enqueue work. Use the
+    // locked task snapshot rather than the preflight read for the prompt.
+    return { ok: true, task: updated, project, agentRuntime, sessionId, runId, updated };
   });
   if (!dispatch.ok) return dispatch;
   const { task, project, agentRuntime, sessionId, runId, updated } = dispatch;
@@ -355,7 +372,7 @@ async function executeBoardTask(taskId) {
       verification: result.verification ? { required: Boolean(result.verification.required), ok: result.verification.ok ?? null, reason: result.verification.reason || null } : null,
       completionEvidence: result.completionEvidence || null,
     };
-    await withTaskBoard((store) => store.recordExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId: result.runId || runId, decision: result.decision || null, ok: Boolean(result.ok), executedAt: new Date().toISOString(), traceDir: result.traceDir || null, error: result.ok ? null : (result.error || null), result: taskResult }, { actor: { type: 'agent', id: agentRuntime.agentId } }));
+    await withTaskBoard((store) => store.recordExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId, decision: result.decision || null, ok: Boolean(result.ok), executedAt: new Date().toISOString(), traceDir: result.traceDir || null, error: result.ok ? null : (result.error || null), result: taskResult }, { actor: { type: 'agent', id: agentRuntime.agentId } }));
   }).catch(async (error) => {
     await withTaskBoard((store) => store.recordExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId, ok: false, error: String(error?.message || error), result: { answerText: null, blockers: [String(error?.message || error)], verification: null, completionEvidence: null } }, { actor: { type: 'agent', id: agentRuntime.agentId } }));
   }).finally(() => {

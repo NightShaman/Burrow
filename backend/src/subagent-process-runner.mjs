@@ -26,7 +26,9 @@ async function writePayload(payload, tempDir = os.tmpdir()) {
 
 function childEnv(baseEnv = process.env) {
   const env = {};
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'BURROW_RUNTIME_ROOT', 'BURROW_WORKSPACE_ROOT', 'BURROW_AGENT_WORKSPACE_ROOT', 'BURROW_AGENT_DATA_ROOT', 'BURROW_CACHE_ROOT', 'BURROW_TRACE_ISOLATION', 'BURROW_SETTINGS_KEY', 'BURROW_POSTGRES_URL', 'BURROW_POSTGRES_HOST', 'BURROW_POSTGRES_PORT', 'BURROW_POSTGRES_DATABASE', 'BURROW_POSTGRES_USER', 'BURROW_POSTGRES_PASSWORD', 'DATABASE_URL']) {
+  // Preserve the explicit TLS policy; the child validates it with postgresConfig.
+  // Pool sizing/timeouts remain child-local defaults.
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'BURROW_RUNTIME_ROOT', 'BURROW_WORKSPACE_ROOT', 'BURROW_AGENT_WORKSPACE_ROOT', 'BURROW_AGENT_DATA_ROOT', 'BURROW_CACHE_ROOT', 'BURROW_TRACE_ISOLATION', 'BURROW_SETTINGS_KEY', 'BURROW_POSTGRES_URL', 'BURROW_POSTGRES_HOST', 'BURROW_POSTGRES_PORT', 'BURROW_POSTGRES_DATABASE', 'BURROW_POSTGRES_USER', 'BURROW_POSTGRES_PASSWORD', 'BURROW_POSTGRES_SSL_MODE', 'BURROW_POSTGRES_SSL_CA_FILE', 'DATABASE_URL']) {
     if (baseEnv[key]) env[key] = baseEnv[key];
   }
   for (const [key, value] of Object.entries(baseEnv)) {

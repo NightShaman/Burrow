@@ -87,7 +87,8 @@ export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'd
 export function cancelActiveChatRun(activeChatRuns, runId, { body = {}, agentId = null } = {}) {
   const requestedAgentId = agentId || body.agentId || null;
   let record = requestedAgentId ? activeChatRuns.get(activeChatRunKey(requestedAgentId, runId)) : null;
-  if (!record) {
+  // Legacy run-only lookup is allowed only when no agent was requested.
+  if (!requestedAgentId) {
     const matches = [...activeChatRuns.values()].filter((run) => run.runId === runId && !run.controller?.signal?.aborted);
     if (matches.length === 1) record = matches[0];
     else if (matches.length > 1) return { ok: false, error: 'chat_run_ambiguous', runId, matches: matches.map(activeChatRunSummary) };

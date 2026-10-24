@@ -1417,18 +1417,55 @@ export class PostgresSessionStore {
       if (!sourceRow.rows[0]) return null;
       const reserved = await client.query('INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,$3::jsonb,$4,$5) ON CONFLICT DO NOTHING RETURNING session_id', [agentId, target, JSON.stringify({ ...sourceRow.rows[0].metadata, sessionId: target }), sourceRow.rows[0].created_at, sourceRow.rows[0].updated_at]);
       if (!reserved.rows[0]) throw new Error('rename_target_exists');
-      await client.query(`INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at) SELECT agent_id,$3,entry_id,idempotency_key,entry,created_at FROM conversation_entries WHERE agent_id=$1 AND session_id=$2`, [agentId, source, target]);
+      const hasProofProjection = await this.hasProofProjection(client);
+      const runColumn = hasProofProjection ? ',run_key' : '';
+      // Owned occurrence payloads and complete mutable projections move together.
+      // Copy JSON directly in SQL: parsing/serializing would destroy lexical
+      // evidence (duplicate keys, escapes, whitespace and unsafe Unicode).
+      const projections = 'entry_key,search_projection,search_grams,has_payload_id,has_compression_summary,operator_at,operator_ts_fallback,operator_projected';
+      await client.query(`INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at,${projections}${runColumn})
+        SELECT agent_id,$3,entry_id,idempotency_key,entry,created_at,${projections}${runColumn}
+        FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence`, [agentId, source, target]);
       await client.query(`INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,metadata,created_at) SELECT agent_id,$3,archive_id,generation,kind,metadata,created_at FROM conversation_archives WHERE agent_id=$1 AND session_id=$2`, [agentId, source, target]);
       await client.query(`INSERT INTO conversation_archive_entries
-        (agent_id,session_id,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation,search_grams,entry_id,idempotency_key)
-        SELECT agent_id,$3,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation,search_grams,entry_id,idempotency_key
+        (agent_id,session_id,source_store,source_id,ordinal,entry,created_at,archive_kind,generation,entry_id,idempotency_key,${projections}${runColumn})
+        SELECT agent_id,$3,source_store,source_id,ordinal,entry,created_at,archive_kind,generation,entry_id,idempotency_key,${projections}${runColumn}
         FROM conversation_archive_entries WHERE agent_id=$1 AND session_id=$2`, [agentId,source,target]);
+      // Session metadata's runEvidence trigger may already have inserted a
+      // subset. The source directory is authoritative, including runs with no
+      // runEvidence and their exact timestamps/sort keys.
+      if (hasProofProjection) await client.query(`INSERT INTO conversation_archive_runs
+        (agent_id,session_id,run_key,run_id,started_at,completed_at,last_activity_at,sort_timestamp)
+        SELECT agent_id,$3,run_key,run_id,started_at,completed_at,last_activity_at,sort_timestamp
+        FROM conversation_archive_runs WHERE agent_id=$1 AND session_id=$2
+        ON CONFLICT(agent_id,session_id,run_key) DO UPDATE SET run_id=EXCLUDED.run_id,
+          started_at=EXCLUDED.started_at,completed_at=EXCLUDED.completed_at,
+          last_activity_at=EXCLUDED.last_activity_at,sort_timestamp=EXCLUDED.sort_timestamp`, [agentId,source,target]);
       // Mutable ownership and citations follow the new identity; original JSON
       // entries/archives above remain byte-for-byte lexical evidence.
       const exists = async name => (await client.query('SELECT to_regclass($1) AS relation',[name])).rows[0].relation !== null;
       if (await exists('conversation_project_bindings')) await client.query('UPDATE conversation_project_bindings SET session_id=$3 WHERE agent_id=$1 AND session_id=$2',[agentId,source,target]);
       if (await exists('working_memory')) await client.query(`UPDATE working_memory SET session_id=$3,conversation_id=CASE WHEN conversation_id=$2 THEN $3 WHEN conversation_id=$1 || ':' || $2 THEN $1 || ':' || $3 ELSE conversation_id END WHERE agent_id=$1 AND session_id=$2`,[agentId,source,target]);
-      if (await exists('continuity_handoffs')) await client.query('UPDATE continuity_handoffs SET session_id=$3 WHERE agent_id=$1 AND session_id=$2',[agentId,source,target]);
+      if (await exists('continuity_handoffs')) {
+        const oldId = `continuity:${agentId}:${source}`, newId = `continuity:${agentId}:${target}`;
+        // Only the canonical session-derived id changes; arbitrary historical
+        // ids stay stable. Never overwrite an existing destination handoff.
+        const collision = await client.query(`SELECT 1 FROM continuity_handoffs
+          WHERE id=$2 AND EXISTS (SELECT 1 FROM continuity_handoffs WHERE id=$1 AND agent_id=$3 AND session_id=$4)`, [oldId,newId,agentId,source]);
+        if (collision.rows[0]) throw new Error('rename_handoff_target_exists');
+        await client.query(`UPDATE continuity_handoffs SET session_id=$3,id=CASE WHEN id=$4 THEN $5 ELSE id END
+          WHERE agent_id=$1 AND session_id=$2`, [agentId,source,target,oldId,newId]);
+      }
+      // Steering is a mutable run/input directory with cascading owner FKs.
+      // Reserve parents before copying inputs, then source deletion is safe.
+      if (await exists('chat_steering_runs')) {
+        await client.query(`INSERT INTO chat_steering_runs(agent_id,session_id,run_id,accepting,generation)
+          SELECT agent_id,$3,run_id,accepting,generation FROM chat_steering_runs WHERE agent_id=$1 AND session_id=$2`, [agentId,source,target]);
+        await client.query(`INSERT INTO chat_steering_inputs
+          (agent_id,session_id,run_id,ordinal,input_id,idempotency_key,payload,status,created_at,delivered_at) OVERRIDING SYSTEM VALUE
+          SELECT agent_id,$3,run_id,ordinal,input_id,idempotency_key,payload,status,created_at,delivered_at
+          FROM chat_steering_inputs WHERE agent_id=$1 AND session_id=$2`, [agentId,source,target]);
+      }
       if (await exists('scheduled_jobs')) await client.query('UPDATE scheduled_jobs SET session_id=$3 WHERE agent_id=$1 AND session_id=$2',[agentId,source,target]);
       if (await exists('scheduled_job_runs')) await client.query('UPDATE scheduled_job_runs SET session_id=$3 WHERE agent_id=$1 AND session_id=$2',[agentId,source,target]);
       if (await exists('albdruck_evidence')) await client.query(`UPDATE albdruck_evidence SET source_ref=jsonb_set(source_ref,'{sessionId}',to_jsonb($3::text)) WHERE source_ref->>'agentId'=$1 AND source_ref->>'sessionId'=$2`,[agentId,source,target]);

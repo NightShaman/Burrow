@@ -449,12 +449,26 @@ export class PostgresTaskBoardStore {
     return withPostgresTransaction(this.pool, async (c) => {
       const current = await this.lockTask(c, taskId);
       if (!current) return null;
+      // The row lock is the claim authority, not the dispatcher's earlier read.
+      // A running receipt owns this task even while its turn is queued.
+      if (["done", "cancelled"].includes(current.status))
+        throw new Error("task_not_executable");
+      if (!current.assignedAgentId)
+        throw new Error("task_assigned_agent_required");
+      if (text(execution.agentId) !== current.assignedAgentId)
+        throw new Error("task_assigned_agent_changed");
+      if (["running", "queued"].includes(current.execution?.status))
+        throw new Error("task_execution_running");
+      const runId = text(execution.runId);
+      if (!runId) throw new Error("task_execution_run_id_required");
+      if (runId === current.execution?.runId)
+        throw new Error("task_execution_run_id_already_used");
       const stamp = this.clock(),
         receipt = {
           taskId: current.id,
-          agentId: text(execution.agentId) || current.assignedAgentId || null,
+          agentId: current.assignedAgentId,
           sessionId: text(execution.sessionId) || "default",
-          runId: text(execution.runId) || null,
+          runId,
           status: "running",
           dispatchedAt: stamp,
           traceDir: execution.traceDir || null,
@@ -476,13 +490,21 @@ export class PostgresTaskBoardStore {
     return withPostgresTransaction(this.pool, async (c) => {
       const current = await this.lockTask(c, taskId);
       if (!current) return null;
+      // Compare-and-set under the same task lock as startExecution. A late or
+      // repeated completion must not replace a newer attempt (or its result).
+      const owner = current.execution || {};
+      if (owner.status !== "running" || !text(execution.runId) ||
+          owner.runId !== text(execution.runId) ||
+          (execution.agentId != null && owner.agentId !== text(execution.agentId)) ||
+          (execution.sessionId != null && owner.sessionId !== text(execution.sessionId)))
+        return null;
       const stamp = this.clock(),
         receipt = {
-          ...(current.execution || {}),
+          ...owner,
           taskId: current.id,
-          agentId: text(execution.agentId) || current.assignedAgentId || null,
-          sessionId: text(execution.sessionId) || "default",
-          runId: text(execution.runId) || null,
+          agentId: owner.agentId,
+          sessionId: owner.sessionId,
+          runId: owner.runId,
           status: execution.status || (execution.ok ? "completed" : "failed"),
           executedAt: execution.executedAt || stamp,
           completedAt: stamp,

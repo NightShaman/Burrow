@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { visibleUserMessage } from './runtime-turn-input.mjs';
 import { performance } from 'node:perf_hooks';
 import { normalizeProviderMessage } from './provider-messages.mjs';
@@ -264,7 +265,13 @@ async function runAskChatUnserialized({
   if (latencyTiming) await logger.event('chat-admission-timing', { ...latencyTiming, clockDomain: 'server-process' });
   const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, logger, onTerminal: telemetryRun ? (result) => telemetry.endRun?.(resolvedRunId, result) : null, testHooks });
   const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, messageMode = 'request_reply', inboundEntryId, parentSignal = null }) => {
-    const nestedRunId = `${resolvedRunId}-reply-${recipientRuntime.agentId}`;
+    // Ingress is already durable/idempotent before this callback. Each distinct
+    // exchange needs a distinct run, while replays retain the same identity.
+    if (!inboundEntryId) throw new Error('agent_message_inbound_identity_required');
+    const nestedRunId = `a2a-${createHash('sha256').update(JSON.stringify([
+      runtimeState.agentId, resolvedRunId, recipientRuntime.agentId,
+      recipientSessionId, inboundEntryId,
+    ])).digest('hex')}`;
     const lifecycle = typeof registerNestedAgentRun === 'function'
       ? registerNestedAgentRun({ agentRuntime: recipientRuntime, sessionId: recipientSessionId, runId: nestedRunId, message: content, source: 'a2a', parentSignal, parentAgentId: runtimeState.agentId, parentRunId: resolvedRunId, parentSessionId: resolvedSessionId, messageMode, senderAgentId, sourceSessionId, sourceRunId, inboundEntryId })
       : null;

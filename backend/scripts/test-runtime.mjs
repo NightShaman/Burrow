@@ -135,12 +135,21 @@ export async function removeTestRuntime(runtime) {
   await fs.rm(runtime.root, { recursive: true, force: true });
 }
 
-export async function runTestSuite({ argv = null, spawnProcess = spawn, verifyDeployedIsolation = false, baseEnv = process.env, disposablePostgres = false, postgresBinDir = '/usr/lib/postgresql/17/bin', timeoutMs = Number(process.env.BURROW_TEST_TIMEOUT_MS || 120_000) } = {}) {
+export function testSuiteConcurrency({ baseEnv = process.env, disposablePostgres = false } = {}) {
+  // Schema-scoped HTTP fixtures share this runner's database-wide runtime lock.
+  // Separate runners own separate clusters and may still execute concurrently.
+  const concurrency = Number(baseEnv.BURROW_TEST_CONCURRENCY || (disposablePostgres ? 1 : 4));
+  if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error('BURROW_TEST_CONCURRENCY must be a positive integer');
+  return concurrency;
+}
+
+export async function runTestSuite({ argv = null, spawnProcess = spawn, verifyDeployedIsolation = false, baseEnv = process.env, disposablePostgres = false, postgresBinDir = '/usr/lib/postgresql/17/bin', timeoutMs = Number(process.env.BURROW_TEST_TIMEOUT_MS || (disposablePostgres ? 900_000 : 120_000)) } = {}) {
   // Bound simultaneous fixture processes and PostgreSQL work, not test coverage.
   // The full archive fixtures are CPU-heavy; callers can raise this on dedicated hosts.
-  const concurrency = Number(baseEnv.BURROW_TEST_CONCURRENCY || 4);
-  if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error('BURROW_TEST_CONCURRENCY must be a positive integer');
-  const resolvedArgv = argv || ['--test', `--test-concurrency=${concurrency}`, ...(await fs.readdir(path.join(process.cwd(), 'tests'))).filter((name) => name.endsWith('.test.mjs')).map((name) => path.join('tests', name))];
+  const concurrency = testSuiteConcurrency({ baseEnv, disposablePostgres });
+  const requestedArgv = argv?.[0] === '--test' && !argv.some(argument => argument.startsWith('--test-concurrency'))
+    ? [argv[0], `--test-concurrency=${concurrency}`, ...argv.slice(1)] : argv;
+  const resolvedArgv = requestedArgv || ['--test', `--test-concurrency=${concurrency}`, ...(await fs.readdir(path.join(process.cwd(), 'tests'))).filter((name) => name.endsWith('.test.mjs')).map((name) => path.join('tests', name))];
   assertNoInheritedDatabase(baseEnv);
   const runtime = await createTestRuntime();
   let postgres;

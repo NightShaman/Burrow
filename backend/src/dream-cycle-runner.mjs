@@ -781,7 +781,7 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
       const adapter = dreamAdapter;
       dreamAdapter = { complete: async options => {
         signal.throwIfAborted();
-        const result = await adapter.complete({ ...options, abortSignal: signal });
+        const result = await adapter.complete({ ...options, signal });
         signal.throwIfAborted();
         return result;
       } };
