@@ -342,7 +342,16 @@ async function executeBoardTask(taskId) {
       } catch (recoveryError) {
         // Persistence is unavailable: retain the fail-closed claim and surface
         // both failures instead of claiming the task is safe to retry.
-        throw new AggregateError([error, recoveryError], 'task_execution_pre_dispatch_recovery_failed', { cause: error });
+        const failure = new AggregateError([error, recoveryError], 'task_execution_pre_dispatch_recovery_failed', { cause: error });
+        // Preserve only diagnostic fields, not arbitrary error properties or
+        // credentials. The request logger applies its normal bounds/redaction;
+        // keep this separate from `details`, which is exposed over HTTP.
+        const diagnostic = (error) => ({ name: String(error?.name || 'Error'), message: String(error?.message || error), ...(error?.code != null ? { code: String(error.code) } : {}) });
+        failure.taskExecutionDiagnostics = {
+          taskId: updated.id, runId, agentId: agentRuntime.agentId, sessionId,
+          projectReadError: diagnostic(error), recoveryWriteError: diagnostic(recoveryError),
+        };
+        throw failure;
       }
       throw error;
     }
@@ -3369,7 +3378,7 @@ async function handleRequest(req, res) {
     return sendJson(res, 404, { ok: false, error: 'not_found' });
   } catch (error) {
     const status = Number(error?.statusCode) >= 400 && Number(error.statusCode) < 500 ? Number(error.statusCode) : 500;
-    void serverLogger.event('request_error', { method: req.method || null, path: req.url || null, status, error: String(error?.message || error), durationMs: Date.now() - startedAt });
+    void serverLogger.event('request_error', { method: req.method || null, path: req.url || null, status, error: String(error?.message || error), ...(error?.message === 'task_execution_pre_dispatch_recovery_failed' && error.taskExecutionDiagnostics ? { taskExecution: error.taskExecutionDiagnostics } : {}), durationMs: Date.now() - startedAt });
     return sendJson(res, status, { ok: false, error: String(error?.message || error), ...(error?.details ? { details: error.details } : {}), stack: process.env.NODE_ENV === 'development' ? error?.stack : undefined });
   }
 }
