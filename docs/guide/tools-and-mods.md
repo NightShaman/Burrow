@@ -1,6 +1,6 @@
 # Tools, mods, and execution
 
-This guide follows the public **2026.10.19** release. Start here when an agent needs access to files, a service, or another execution machine.
+The original guide follows public **2026.10.19**; explicitly dated updates below describe current implementation checked **24 October 2026**. Start here when an agent needs access to files, a service, or another execution machine.
 
 ## Understand the three layers
 
@@ -37,7 +37,15 @@ All mods, including Node Goblin and system mods, start disabled. **Update** and 
 
 **Automatic source checks** controls background catalog refreshes. Do not read “checks enabled” as “updates installed.” The mod details show installed, running, and latest source versions separately.
 
-For private repositories, the source form accepts HTTPS credentials and stores them encrypted in Core. SSH keys and host trust must be configured for the Core service account; the form does not configure SSH access.
+### Private-source credentials in current Core
+
+Checked **24 October 2026**: in **Mod sources**, select an existing source or enter its HTTPS Git URL. The password/access-token field accepts a credential or a supported stored-secret reference. When a loaded provider supplies compatible credentials, **Browse** opens a searchable metadata picker; selecting an entry can fill an empty username. Core resolves the stored reference when accessing the repository—the picker does not reveal its secret value.
+
+A saved source shows **Stored credential configured**. Leave the password/token field empty to keep it; use its explicit **Remove** action to clear it. **Update source** saves a replacement for the selected source. If discovery fails after saving, inspect that source's status rather than assuming nothing was persisted.
+
+This support is for **HTTPS Git mod sources**, not every password field in Burrow. The reference provider must remain loaded and able to resolve the selected value. See [Goblin Secret Store](https://burrow-docs.blissful-psychosis.com/goblin-secret-store/) for its own setup. SSH keys and host trust must be configured for the Core service account; the form does not configure SSH access.
+
+Implementation: `ModsSettings.tsx`, `mod-distribution.mjs` and `secret-references.mjs`; source pins are recorded in [release coverage](../project/release-status.md).
 
 [Source: mod actions and lifecycle](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/ModsSettings.tsx#L198-L266) · [Source: busy handling](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/ModsSettings.tsx#L99-L116)
 
