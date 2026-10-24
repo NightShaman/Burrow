@@ -1,7 +1,7 @@
 import { TaskActivity } from './TaskActivity';
 import { AccessibleModal } from '../../app/AccessibleModal';
 import { api, jsonMutation } from '../../app/api';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type SetStateAction } from 'react';
 import type { Agent } from '../../app/types';
 import { useConfirm } from '../../app/ConfirmDialog';
 
@@ -26,7 +26,7 @@ type BoardTask = {
 };
 
 type TaskDraft = Pick<BoardTask, 'title' | 'description' | 'status' | 'priority' | 'assignedAgentId' | 'projectId'>;
-type TaskEditorState = ({ mode: 'create' } | { mode: 'edit'; task: BoardTask }) & { draft?: TaskDraft };
+type TaskEditorState = ({ mode: 'create' } | { mode: 'edit'; task: BoardTask }) & { draft?: TaskDraft; owner?: symbol };
 const taskDraft = (task?: BoardTask, projectId = ''): TaskDraft => ({ title: task?.title ?? '', description: task?.description ?? '', status: task?.status ?? 'todo', priority: task?.priority ?? 'normal', assignedAgentId: task?.assignedAgentId ?? null, projectId: task?.projectId ?? projectId });
 function reconcileEditor(current: TaskEditorState | null, task: BoardTask): TaskEditorState | null {
   if (current?.mode !== 'edit' || current.task.id !== task.id) return current;
@@ -35,9 +35,9 @@ function reconcileEditor(current: TaskEditorState | null, task: BoardTask): Task
   for (const key of Object.keys(draft) as Array<keyof TaskDraft>) {
     if (current.draft && current.draft[key] !== previous[key]) Object.assign(draft, { [key]: current.draft[key] });
   }
-  return { mode: 'edit', task, draft };
+  return { ...current, task, draft };
 }
-type ProjectDraft = { id?: string; name: string; description: string; notes: string; pathEntries: ProjectPathEntry[] };
+type ProjectDraft = { owner?: symbol; id?: string; name: string; description: string; notes: string; pathEntries: ProjectPathEntry[] };
 
 const newProjectDraft = (project?: Project): ProjectDraft => ({ id: project?.id, name: project?.name ?? '', description: project?.description ?? '', notes: project?.notes ?? '', pathEntries: normalizePathEntries(project ?? { id: '', name: '' }) });
 const columns = [
@@ -57,11 +57,26 @@ export function Tasks({ agents, onDispatch }: { agents: Agent[]; onDispatch?: (s
   const [tasks, setTasks] = useState<BoardTask[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [search, setSearch] = useState('');
-  const [editor, setEditor] = useState<TaskEditorState | null>(null);
-  const [projectDraft, setProjectDraft] = useState<ProjectDraft | null>(null);
+  // Each opening owns its continuations, even when the same record is reopened.
+  const [editor, storeEditor] = useState<TaskEditorState | null>(null);
+  const editorRef = useRef<TaskEditorState | null>(null);
+  function setEditor(action: SetStateAction<TaskEditorState | null>) {
+    const next = typeof action === 'function' ? action(editorRef.current) : action;
+    editorRef.current = next ? { ...next, owner: next.owner ?? Symbol('task editor') } : null;
+    storeEditor(editorRef.current);
+  }
+  const [projectDraft, storeProjectDraft] = useState<ProjectDraft | null>(null);
+  const projectRef = useRef<ProjectDraft | null>(null);
+  function setProjectDraft(action: SetStateAction<ProjectDraft | null>) {
+    const next = typeof action === 'function' ? action(projectRef.current) : action;
+    projectRef.current = next ? { ...next, owner: next.owner ?? Symbol('project editor') } : null;
+    storeProjectDraft(projectRef.current);
+  }
   const [showProjects, setShowProjects] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [pending, setPending] = useState<Set<symbol>>(new Set());
+  const saving = pending.has(editor?.owner as symbol) || pending.has(projectDraft?.owner as symbol);
+  const setSaving = (owner: symbol, value: boolean) => setPending(current => { const next = new Set(current); if (value) next.add(owner); else next.delete(owner); return next; });
   const [error, setError] = useState('');
 
   async function loadBoard() {
@@ -102,6 +117,9 @@ export function Tasks({ agents, onDispatch }: { agents: Agent[]; onDispatch?: (s
   const changeDraft = (key: keyof TaskDraft, value: string) => setEditor((current) => current ? { ...current, draft: { ...(current.draft ?? taskDraft(current.mode === 'edit' ? current.task : undefined, selectedProjectId || projects[0]?.id || '')), [key]: key === 'assignedAgentId' ? value || null : value } } : current);
 
   async function saveTask(event: FormEvent<HTMLFormElement>) {
+    const owner = editorRef.current?.owner;
+    if (!owner) return;
+    const owns = () => editorRef.current?.owner === owner;
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const projectId = String(form.get('projectId') ?? '');
@@ -114,7 +132,7 @@ export function Tasks({ agents, onDispatch }: { agents: Agent[]; onDispatch?: (s
       priority: String(form.get('priority') ?? 'normal'),
       assignedAgentId: String(form.get('assignedAgentId') ?? '') || null,
     };
-    setSaving(true);
+    setSaving(owner, true);
     setError('');
     try {
       if (editingTask) {
@@ -124,44 +142,54 @@ export function Tasks({ agents, onDispatch }: { agents: Agent[]; onDispatch?: (s
         const result = await api<{ task: BoardTask }>('/api/task-board/tasks', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
         setTasks((current) => [result.task, ...current]);
       }
-      setEditor(null);
+      if (owns()) setEditor(null);
     } catch (saveError) {
-      setError(`Could not save the task: ${(saveError as Error).message}`);
-    } finally { setSaving(false); }
+      owns() && setError(`Could not save the task: ${(saveError as Error).message}`);
+    } finally { setSaving(owner, false); }
   }
 
   async function deleteTask() {
+    const owner = editorRef.current?.owner;
+    if (!owner) return;
+    const owns = () => editorRef.current?.owner === owner;
     if (!editingTask || !await confirm({ title: 'Delete task?', message: `Delete “${editingTask.title}”?`, confirmLabel: 'Delete task', tone: 'danger' })) return;
-    setSaving(true);
+    if (!owns()) return;
+    setSaving(owner, true);
     setError('');
     try {
       await api(`/api/task-board/tasks/${encodeURIComponent(editingTask.id)}`, { method: 'DELETE' });
       setTasks((current) => current.filter((task) => task.id !== editingTask.id));
-      setEditor(null);
-    } catch (deleteError) { setError(`Could not delete the task: ${(deleteError as Error).message}`); } finally { setSaving(false); }
+      if (owns()) setEditor(null);
+    } catch (deleteError) { owns() && setError(`Could not delete the task: ${(deleteError as Error).message}`); } finally { setSaving(owner, false); }
   }
 
   async function executeTask() {
+    const owner = editorRef.current?.owner;
+    if (!owner) return;
+    const owns = () => editorRef.current?.owner === owner;
     if (!editingTask) return;
     if (JSON.stringify(draft) !== JSON.stringify(taskDraft(editingTask))) {
       setError('Save changes before executing. Execute uses the saved task, not the unsaved draft.');
       return;
     }
-    setSaving(true);
+    setSaving(owner, true);
     setError('');
     try {
       const result = await api<{ task: BoardTask; execution?: { runId?: string; agentId?: string; sessionId?: string } }>(`/api/task-board/tasks/${encodeURIComponent(editingTask.id)}/execute`, jsonMutation('POST'));
       setTasks((current) => current.map((task) => task.id === result.task.id ? result.task : task));
-      setEditor((current) => reconcileEditor(current, result.task));
-      if (result.execution?.sessionId && result.execution.agentId) onDispatch?.(result.execution.sessionId, result.execution.agentId);
-    } catch (executeError) { setError(`Could not execute the task: ${(executeError as Error).message}`); } finally { setSaving(false); }
+      if (owns()) setEditor((current) => reconcileEditor(current, result.task));
+      if (owns() && result.execution?.sessionId && result.execution.agentId) onDispatch?.(result.execution.sessionId, result.execution.agentId);
+    } catch (executeError) { owns() && setError(`Could not execute the task: ${(executeError as Error).message}`); } finally { setSaving(owner, false); }
   }
 
   async function saveProject(event: FormEvent<HTMLFormElement>) {
+    const owner = projectRef.current?.owner;
+    if (!owner) return;
+    const owns = () => projectRef.current?.owner === owner;
     event.preventDefault();
     if (!projectDraft) return;
     const body = { name: projectDraft.name, description: projectDraft.description, notes: projectDraft.notes, pathEntries: projectDraft.pathEntries.map((entry, index) => ({ ...entry, sortOrder: index })) };
-    setSaving(true);
+    setSaving(owner, true);
     setError('');
     try {
       if (projectDraft.id) {
@@ -170,22 +198,23 @@ export function Tasks({ agents, onDispatch }: { agents: Agent[]; onDispatch?: (s
       } else {
         const result = await api<{ project: Project }>('/api/task-board/projects', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
         setProjects((current) => [...current, result.project].sort((a, b) => a.name.localeCompare(b.name)));
-        setSelectedProjectId(result.project.id);
+        if (owns()) setSelectedProjectId(result.project.id);
       }
-      setProjectDraft(null);
-    } catch (saveError) { setError(`Could not save the project: ${(saveError as Error).message}`); } finally { setSaving(false); }
+      if (owns()) setProjectDraft(null);
+    } catch (saveError) { owns() && setError(`Could not save the project: ${(saveError as Error).message}`); } finally { setSaving(owner, false); }
   }
 
   async function deleteProject(project: Project) {
     if (!await confirm({ title: 'Delete project?', message: `Delete project “${project.name}” and all of its tasks?`, confirmLabel: 'Delete project', tone: 'danger' })) return;
-    setSaving(true);
+    const owner = Symbol('delete project');
+    setSaving(owner, true);
     setError('');
     try {
       await api(`/api/task-board/projects/${encodeURIComponent(project.id)}`, { method: 'DELETE' });
       setProjects((current) => current.filter((item) => item.id !== project.id));
       setTasks((current) => current.filter((task) => task.projectId !== project.id));
-      if (selectedProjectId === project.id) setSelectedProjectId('');
-    } catch (deleteError) { setError(`Could not delete the project: ${(deleteError as Error).message}`); } finally { setSaving(false); }
+      setSelectedProjectId(current => current === project.id ? '' : current);
+    } catch (deleteError) { setError(`Could not delete the project: ${(deleteError as Error).message}`); } finally { setSaving(owner, false); }
   }
 
 

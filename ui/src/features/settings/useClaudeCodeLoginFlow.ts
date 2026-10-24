@@ -5,7 +5,7 @@ type RequestState = 'idle' | 'starting' | 'submitting' | 'importing' | 'cancelli
 
 type Options = {
   onConnection: (connection: OpenAiOAuthConnection) => void;
-  onImported: (login: ClaudeCodeLogin) => Promise<void>;
+  onImported: (login: ClaudeCodeLogin, isCurrent: () => boolean) => Promise<void>;
   autoImport?: boolean;
 };
 
@@ -130,7 +130,7 @@ export function useClaudeCodeLoginFlow({ onConnection, onImported, autoImport = 
       const result = await modelConnectionsApi.importClaudeCodeLogin(login.id, connectionId ?? existingConnectionId);
       if (!mounted.current || generation !== actionGeneration.current) return;
       setLogin(result.login);
-      if (result.login.status === 'imported') await onImportedRef.current(result.login);
+      if (result.login.status === 'imported') await onImportedRef.current(result.login, () => mounted.current && generation === actionGeneration.current);
     } catch (cause) {
       if (mounted.current && generation === actionGeneration.current) setError(errorMessage('import Claude Code auth', cause));
     } finally {

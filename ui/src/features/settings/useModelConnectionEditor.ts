@@ -98,7 +98,7 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
     }
   };
 
-  const saveProvider = async (modelsOverride?: RuntimeModel[]) => {
+  const saveProvider = async (modelsOverride?: RuntimeModel[], onSaved?: () => void) => {
     const models = modelsOverride ?? availableModels;
     if (!provider.trim() || !url.trim() || !models.some((model) => model.selected !== false)) return;
     const generation = ++editorGeneration.current;
@@ -133,6 +133,7 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
       if (!isEditorCurrent(generation)) return;
       setSavedProvidersOpen(true);
       resetProvider();
+      onSaved?.();
     } catch (error) {
       if (isEditorCurrent(generation)) setRequestError(error instanceof Error ? `Could not save provider: ${error.message}` : 'Could not save provider.');
     } finally {
@@ -167,13 +168,18 @@ export function useModelConnectionEditor({ onModelConnectionsChanged }: Options)
   });
   const claudeFlow = useClaudeCodeLoginFlow({
     onConnection: applyOAuthConnection,
-    onImported: async () => {
+    onImported: async (_login, isCurrent) => {
+      const generation = editorGeneration.current;
       await onModelConnectionsChanged();
-      const discoveredModels = await connect();
-      const selectedModels = (discoveredModels ?? availableModels).map((model) => ({ ...model, selected: true }));
+      if (!isCurrent() || !isEditorCurrent(generation)) return;
+      // Discovery advances the editor generation; retain that owner across its await.
+      const discovery = connect(undefined, isCurrent);
+      const discoveryGeneration = editorGeneration.current;
+      const discoveredModels = await discovery;
+      if (!isCurrent() || !isEditorCurrent(discoveryGeneration)) return;
+      const selectedModels = discoveredModels.map((model) => ({ ...model, selected: true }));
       setAvailableModels(selectedModels);
-      await saveProvider(selectedModels);
-      setOauthModal(null);
+      await saveProvider(selectedModels, () => setOauthModal(null));
     },
   });
   const { reset: resetOpenAiOAuth } = openAiFlow;
