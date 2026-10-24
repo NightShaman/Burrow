@@ -330,7 +330,22 @@ async function executeBoardTask(taskId) {
     // Only a successful durable claim may register or enqueue work. Use the
     // locked task snapshot rather than the preflight read for the prompt.
     // A task can move projects while the claim waits for its row lock.
-    const project = await store.getProject(updated.projectId);
+    let project;
+    try {
+      project = await store.getProject(updated.projectId);
+    } catch (error) {
+      // No turn has been registered or dispatched. Release only this known
+      // failed admission via the existing owner CAS; never reset other claims.
+      const message = String(error?.message || error);
+      try {
+        await store.recordExecution(updated.id, { agentId: agentRuntime.agentId, sessionId, runId, ok: false, error: message, result: { answerText: null, blockers: [message], verification: null, completionEvidence: null } }, { actor: { type: 'agent', id: agentRuntime.agentId } });
+      } catch (recoveryError) {
+        // Persistence is unavailable: retain the fail-closed claim and surface
+        // both failures instead of claiming the task is safe to retry.
+        throw new AggregateError([error, recoveryError], 'task_execution_pre_dispatch_recovery_failed', { cause: error });
+      }
+      throw error;
+    }
     return { ok: true, task: updated, project, agentRuntime, sessionId, runId, updated };
   });
   if (!dispatch.ok) return dispatch;
