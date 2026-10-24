@@ -24,7 +24,11 @@ const pendingCapabilities = new Map();
 const invocationScope = new AsyncLocalStorage();
 function capabilityRequest(method, input, { signal } = {}) {
   if (stopping || !process.connected) return Promise.reject(new Error("mod_capability_unavailable"));
-  const invocationSignal = invocationScope.getStore()?.signal;
+  const inheritedInvocation = invocationScope.getStore();
+  const activeInvocation = inheritedInvocation && activeInvocations.get(inheritedInvocation.invocationId)?.signal === inheritedInvocation.signal
+    ? inheritedInvocation
+    : null;
+  const invocationSignal = activeInvocation?.signal;
   signal = signal && invocationSignal ? AbortSignal.any([signal, invocationSignal]) : signal || invocationSignal;
   if (signal?.aborted) return Promise.reject(new Error("mod_capability_cancelled"));
   const requestId = `cap-${process.pid}-${++sequence}`;
@@ -36,7 +40,7 @@ function capabilityRequest(method, input, { signal } = {}) {
     };
     signal?.addEventListener("abort", cancel, { once: true });
     pendingCapabilities.set(requestId, { resolve, reject, signal, cancel });
-    send({ type: "capability-request", requestId, method, input, parentInvocationId: invocationScope.getStore()?.invocationId || null }, (error) => {
+    send({ type: "capability-request", requestId, method, input, parentInvocationId: activeInvocation?.invocationId || null }, (error) => {
       if (error && pendingCapabilities.delete(requestId)) { signal?.removeEventListener("abort", cancel); reject(new Error("mod_capability_unavailable")); }
     });
     if (signal?.aborted) cancel();
