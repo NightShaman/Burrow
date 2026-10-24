@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readModConversationPage } from './mod-conversation-pager.mjs';
 import { MODEL_REASONING_EFFORT_VALUES, modelSupportsTemperature, normalizeModelReasoningEffort, resolveModelConfig } from './config.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
@@ -138,6 +138,25 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
     if (typeof root !== 'string' || !root) throw new Error('agent_workspace_unavailable');
     return root;
   }
+  async function enabledAgent(agentId) {
+    bounded(agentId, 96);
+    const agent = await injected.agents.get(agentId);
+    if (!agent) throw new Error('agent_not_found');
+    if (!agent.enabled) throw new Error('agent_disabled');
+  }
+  function sessionTarget(input, extra = []) {
+    const value = exactKeys(plain(input), ['agentId', 'sessionId', ...extra]);
+    bounded(value.agentId, 96); bounded(value.sessionId, 128);
+    return value;
+  }
+  async function ownedSession(value) {
+    const metadata = await conversationStore.getMetadata(value);
+    if (metadata?.externalModOwnerId !== schedulerOwner()) throw new Error('mod_session_not_found');
+    return metadata;
+  }
+  function sessionModel(value, metadata) {
+    return { agentId: value.agentId, sessionId: value.sessionId, selection: metadata.externalModModel || null };
+  }
   // Per-installed-mod host instance: opaque cursors cannot cross owners, roots,
   // filters or reloads. Fixed expiry bounds abandoned traversals; disposal clears
   // all inventory on host shutdown. Never evict an active traversal silently.
@@ -206,6 +225,8 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
       const agent = await withStore('agents', store => store.get(agentId));
       if (!agent) throw new Error('agent_not_found');
       if (!agent.enabled) throw new Error('agent_disabled');
+      const metadata = await conversationStore.getMetadata?.({ agentId, sessionId });
+      if (metadata?.externalModOwnerId && metadata.externalModOwnerId !== schedulerOwner()) throw new Error('mod_session_not_found');
       return externalTurnDispatcher.submit(request);
     },
     async readExternalTurn(input) {
@@ -214,6 +235,49 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
       const turn = await externalTurnDispatcher.read(schedulerOwner(), bounded(value.turnId, 96));
       if (!turn) throw new Error('mod_external_turn_not_found');
       return turn;
+    },
+    async cancelExternalTurn(input) {
+      if (!externalTurnDispatcher) throw new Error('mod_external_turns_unavailable');
+      const value = exactKeys(plain(input), ['turnId']);
+      const result = await externalTurnDispatcher.cancel(schedulerOwner(), bounded(value.turnId, 96));
+      if (!result) throw new Error('mod_external_turn_not_found');
+      return result;
+    },
+    async createExternalSession(input) {
+      const value = exactKeys(plain(input), ['agentId', 'idempotencyKey']);
+      await enabledAgent(value.agentId);
+      const key = bounded(value.idempotencyKey, 256);
+      if (!key.trim()) invalid();
+      const operationId = 'mod:' + createHash('sha256').update(JSON.stringify([schedulerOwner(), value.agentId, key])).digest('hex');
+      const sessionId = operationId;
+      await conversationStore.createEmpty({ agentId: value.agentId, sessionId, operationId });
+      await conversationStore.updateMetadata({ agentId: value.agentId, sessionId, update: metadata => {
+        if (metadata.creationOperationId !== operationId || (metadata.externalModOwnerId && metadata.externalModOwnerId !== schedulerOwner())) throw new Error('mod_session_not_found');
+        return { ...metadata, externalModOwnerId: schedulerOwner() };
+      } });
+      return { agentId: value.agentId, sessionId };
+    },
+    async readExternalSessionModel(input) {
+      const value = sessionTarget(input);
+      return sessionModel(value, await ownedSession(value));
+    },
+    async setExternalSessionModel(input) {
+      const value = sessionTarget(input, ['connectionId', 'model']);
+      await ownedSession(value);
+      await enabledAgent(value.agentId);
+      let selection = null;
+      if (value.connectionId !== null || value.model !== null) {
+        bounded(value.connectionId, 128); bounded(value.model, 256);
+        if (!(await injected.models.hasAuth(value.connectionId))) throw new Error('model_connection_auth_required');
+        // Same selected/authenticated model resolver as ordinary chat; credentials stay in Core.
+        await resolveModelConfig({ modelConnectionId: value.connectionId, model: value.model, modelSettings: injected.models, fetchImpl });
+        selection = { connectionId: value.connectionId, model: value.model };
+      }
+      const metadata = await conversationStore.updateMetadata({ agentId: value.agentId, sessionId: value.sessionId, update: prior => {
+        if (prior.externalModOwnerId !== schedulerOwner()) throw new Error('mod_session_not_found');
+        return { ...prior, externalModModel: selection };
+      } });
+      return sessionModel(value, metadata);
     },
     async listAgents() {
       return await withStore('agents', async (store) => (await store.list()).map(({ id, name, enabled }) => ({ id, name, enabled })));

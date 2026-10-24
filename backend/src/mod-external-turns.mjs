@@ -36,20 +36,28 @@ export function createModExternalTurnDispatcher({ store, stores, resolveAgentRun
   if (!store || !stores || typeof resolveAgentRuntime !== 'function' || typeof executeTurn !== 'function') throw new Error('mod_external_turn_dispatcher_dependencies_required');
   const lifecycle = createBackgroundLifecycle({ name: 'mod_external_turn_dispatcher' });
 
+  const controllers = new Map();
+
   async function interrupt(turn) {
     return store.complete(turn.id, { status: 'interrupted', error: 'service_shutdown' });
   }
 
   async function run(turn) {
+    const controller = controllers.get(turn.id);
+    const signal = AbortSignal.any([lifecycle.signal, controller.signal]);
     const runId = createRunId({ sessionId: turn.sessionId, prefix: 'external' });
     try {
       if (lifecycle.stopped) { await interrupt(turn); return; }
       if (!(await store.markRunning(turn.id, runId))) return;
       if (lifecycle.stopped) { await interrupt(turn); return; }
       const agentRuntime = await resolveAgentRuntime(turn.agentId);
-      lifecycle.signal.throwIfAborted();
+      signal.throwIfAborted();
+      const metadata = await stores.conversations?.getMetadata?.({ agentId: turn.agentId, sessionId: turn.sessionId });
+      if (metadata?.externalModOwnerId && metadata.externalModOwnerId !== turn.ownerModId) throw new Error('mod_session_not_found');
+      const selection = metadata?.externalModOwnerId === turn.ownerModId ? metadata.externalModModel : null;
+      signal.throwIfAborted();
       const result = await executeTurn({
-        body: { message: turn.message, sessionId: turn.sessionId, runId, abortSignal: lifecycle.signal },
+        body: { message: turn.message, sessionId: turn.sessionId, runId, abortSignal: signal, ...(selection ? { modelConnectionId: selection.connectionId, model: selection.model } : {}) },
         rootDir,
         stores,
         agentRuntime,
@@ -59,19 +67,20 @@ export function createModExternalTurnDispatcher({ store, stores, resolveAgentRun
         externalTurnMetadata: { ownerModId: turn.ownerModId, externalTurnId: turn.id, displayMessage: turn.displayMessage || turn.message },
         telemetry,
       });
-      const outcome = classifyRuntimeOutcome(result, { cancelled: lifecycle.signal.aborted });
+      const outcome = classifyRuntimeOutcome(result, { cancelled: signal.aborted });
       await store.complete(turn.id, {
-        status: lifecycle.stopped ? 'interrupted' : outcome.ok ? 'succeeded' : 'failed',
+        status: signal.aborted ? 'interrupted' : outcome.ok ? 'succeeded' : 'failed',
         result: boundedResult(result),
-        error: lifecycle.stopped ? 'service_shutdown' : outcome.ok ? null : 'agent_turn_failed',
+        error: signal.aborted ? (lifecycle.stopped ? 'service_shutdown' : 'cancelled_by_mod') : outcome.ok ? null : 'agent_turn_failed',
       });
     } catch {
-      try { await store.complete(turn.id, { status: lifecycle.stopped ? 'interrupted' : 'failed', error: lifecycle.stopped ? 'service_shutdown' : 'agent_turn_failed' }); }
+      try { await store.complete(turn.id, { status: signal.aborted ? 'interrupted' : 'failed', error: signal.aborted ? (lifecycle.stopped ? 'service_shutdown' : 'cancelled_by_mod') : 'agent_turn_failed' }); }
       catch { /* Startup reconciliation will interrupt a receipt if terminal persistence is unavailable. */ }
-    }
+    } finally { controllers.delete(turn.id); }
   }
 
   function launch(turn) {
+    controllers.set(turn.id, new AbortController());
     void lifecycle.track(() => run(turn), 'dispatch').catch(() => {});
   }
 
@@ -94,6 +103,14 @@ export function createModExternalTurnDispatcher({ store, stores, resolveAgentRun
         launch(created.turn);
       }
       return { turn: publicExternalTurn(created.turn), replayed: created.replayed };
+    },
+    async cancel(ownerModId, id) {
+      const turn = await store.getOwned(ownerModId, id);
+      if (!turn) return null;
+      const controller = controllers.get(id);
+      const cancellationRequested = Boolean(controller && !controller.signal.aborted && ['queued', 'running'].includes(turn.status));
+      if (cancellationRequested) controller.abort(new Error('cancelled_by_mod'));
+      return { turn: publicExternalTurn(turn), cancellationRequested };
     },
     async read(ownerModId, id) {
       const turn = await store.getOwned(ownerModId, id);
