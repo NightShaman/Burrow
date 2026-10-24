@@ -9,7 +9,8 @@ const projects = [
   ['Burrow-Skills', 'Burrow Skills'],
   ['Burrow-Backdoor', 'Burrow Backdoor'],
   ['Burrow-Tutor', 'Burrow Tutor'],
-  ['Burrow-Theater', 'Burrow Theater']
+  ['Burrow-Theater', 'Burrow Theater'],
+  ['Burrow-Switchboard', 'Burrow Switchboard']
 ];
 
 async function pngSize(file) {

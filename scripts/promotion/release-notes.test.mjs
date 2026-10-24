@@ -65,6 +65,26 @@ test('Theater notes contain only Theater changes', () => {
   }
 });
 
+test('Switchboard notes contain only Switchboard changes', () => {
+  const switchboard = fixture(['chore: previous Switchboard state', 'feat: improve Telegram routing']);
+  const backend = fixture(['chore: previous backend state', 'fix: unrelated backend change']);
+  try {
+    const notes = generateReleaseNotes({
+      target: 'burrowSwitchboard',
+      releaseDate: '2026.10.24',
+      sources: { burrowSwitchboard: switchboard.current, burrowBackend: backend.current },
+      previousSources: { burrowSwitchboard: switchboard.first, burrowBackend: backend.first },
+      roots: { burrowSwitchboard: switchboard.root, burrowBackend: backend.root }
+    });
+    assert.match(notes, /^# Burrow Switchboard 2026\.10\.24/m);
+    assert.match(notes, /feat: improve Telegram routing/);
+    assert.doesNotMatch(notes, /unrelated backend change/);
+  } finally {
+    fs.rmSync(switchboard.root, { recursive: true, force: true });
+    fs.rmSync(backend.root, { recursive: true, force: true });
+  }
+});
+
 test('Burrow notes include only assembled Burrow, backend, and UI changes', () => {
   const burrow = fixture(['chore: previous Burrow state', 'build: assemble Burrow', 'feat: installer improvement']);
   const backend = fixture(['chore: previous backend state', 'fix: backend behavior']);

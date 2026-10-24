@@ -51,6 +51,7 @@ jobs:
           backdoor=$(gh api repos/NightShaman/Burrow-Backdoor/commits/main --jq .sha)
           tutor=$(gh api repos/NightShaman/Burrow-Tutor/commits/main --jq .sha)
           theater=$(gh api repos/NightShaman/Burrow-Theater/commits/main --jq .sha)
+          switchboard=$(gh api repos/NightShaman/Burrow-Switchboard/commits/main --jq .sha)
           for item in \
             "burrow $burrow NightShaman/Burrow" \
             "burrowBackend $backend NightShaman/Burrow-Backend" \
@@ -60,13 +61,14 @@ jobs:
             "burrowSkills $skills NightShaman/Burrow-Skills" \
             "burrowBackdoor $backdoor NightShaman/Burrow-Backdoor" \
             "burrowTutor $tutor NightShaman/Burrow-Tutor" \
-            "burrowTheater $theater NightShaman/Burrow-Theater"; do
+            "burrowTheater $theater NightShaman/Burrow-Theater" \
+            "burrowSwitchboard $switchboard NightShaman/Burrow-Switchboard"; do
             set -- $item
             resolved=$(gh api "repos/$3/commits/$2" --jq .sha)
             [ "$resolved" = "$2" ] || { echo "source resolution changed for $1" >&2; exit 1; }
           done
-          printf '{"burrow":"%s","burrowBackend":"%s","burrowUi":"%s","nodeGoblin":"%s","goblinSecretStore":"%s","burrowSkills":"%s","burrowBackdoor":"%s","burrowTutor":"%s","burrowTheater":"%s"}\n' \
-            "$burrow" "$backend" "$ui" "$node_goblin" "$gss" "$skills" "$backdoor" "$tutor" "$theater" > sources.json
+          printf '{"burrow":"%s","burrowBackend":"%s","burrowUi":"%s","nodeGoblin":"%s","goblinSecretStore":"%s","burrowSkills":"%s","burrowBackdoor":"%s","burrowTutor":"%s","burrowTheater":"%s","burrowSwitchboard":"%s"}\n' \
+            "$burrow" "$backend" "$ui" "$node_goblin" "$gss" "$skills" "$backdoor" "$tutor" "$theater" "$switchboard" > sources.json
       - name: Read last public manifest
         run: |
           curl --fail --silent --show-error \
@@ -88,7 +90,7 @@ jobs:
         if: steps.plan.outputs.validation_required == 'true'
         id: frozen
         run: |
-          for key in burrow burrowBackend burrowUi nodeGoblin goblinSecretStore burrowSkills burrowBackdoor burrowTutor burrowTheater; do
+          for key in burrow burrowBackend burrowUi nodeGoblin goblinSecretStore burrowSkills burrowBackdoor burrowTutor burrowTheater burrowSwitchboard; do
             printf '%s=%s\n' "$key" "$(node -p "require('./sources.json').$key")" >> "$GITHUB_OUTPUT"
           done
       - uses: actions/checkout@v4
@@ -163,6 +165,14 @@ jobs:
           token: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
           path: sources/Burrow-Theater
           fetch-depth: 0
+      - uses: actions/checkout@v4
+        if: steps.plan.outputs.validation_required == 'true'
+        with:
+          repository: NightShaman/Burrow-Switchboard
+          ref: ${{ steps.frozen.outputs.burrowSwitchboard }}
+          token: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
+          path: sources/Burrow-Switchboard
+          fetch-depth: 0
       - name: Install PostgreSQL 17 and pgvector for complete release validation
         if: steps.plan.outputs.validation_required == 'true'
         run: |
@@ -189,6 +199,7 @@ jobs:
           (cd sources/Burrow-Backdoor && npm ci --ignore-scripts --no-audit --no-fund && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm run check)
           (cd sources/Burrow-Tutor && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm run build && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm test)
           (cd sources/Burrow-Theater && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm run build && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm test)
+          (cd sources/Burrow-Switchboard && npm run build && node --test test/server.test.mjs test/discord.test.mjs test/room-history.test.mjs test/ui.test.mjs && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm run test:core)
           find sources/Burrow-Skills -name SKILL.md -type f -size +0c | grep -q .
       - uses: actions/setup-python@v6
         if: steps.plan.outputs.validation_required == 'true'
@@ -217,14 +228,14 @@ jobs:
           RELEASE_DATE: ${{ steps.plan.outputs.release_date }}
         run: |
           cat > roots.json <<JSON
-          {"burrow":"$GITHUB_WORKSPACE/sources/Burrow","nodeGoblin":"$GITHUB_WORKSPACE/sources/Node-Goblin","goblinSecretStore":"$GITHUB_WORKSPACE/sources/Goblin-Secret-Store","burrowSkills":"$GITHUB_WORKSPACE/sources/Burrow-Skills","burrowBackdoor":"$GITHUB_WORKSPACE/sources/Burrow-Backdoor","burrowTutor":"$GITHUB_WORKSPACE/sources/Burrow-Tutor","burrowTheater":"$GITHUB_WORKSPACE/sources/Burrow-Theater"}
+          {"burrow":"$GITHUB_WORKSPACE/sources/Burrow","nodeGoblin":"$GITHUB_WORKSPACE/sources/Node-Goblin","goblinSecretStore":"$GITHUB_WORKSPACE/sources/Goblin-Secret-Store","burrowSkills":"$GITHUB_WORKSPACE/sources/Burrow-Skills","burrowBackdoor":"$GITHUB_WORKSPACE/sources/Burrow-Backdoor","burrowTutor":"$GITHUB_WORKSPACE/sources/Burrow-Tutor","burrowTheater":"$GITHUB_WORKSPACE/sources/Burrow-Theater","burrowSwitchboard":"$GITHUB_WORKSPACE/sources/Burrow-Switchboard"}
           JSON
           cat > note-roots.json <<JSON
-          {"burrow":"$GITHUB_WORKSPACE/sources/Burrow","burrowBackend":"$GITHUB_WORKSPACE/sources/Burrow-Backend","burrowUi":"$GITHUB_WORKSPACE/sources/Burrow-UI","nodeGoblin":"$GITHUB_WORKSPACE/sources/Node-Goblin","goblinSecretStore":"$GITHUB_WORKSPACE/sources/Goblin-Secret-Store","burrowSkills":"$GITHUB_WORKSPACE/sources/Burrow-Skills","burrowBackdoor":"$GITHUB_WORKSPACE/sources/Burrow-Backdoor","burrowTutor":"$GITHUB_WORKSPACE/sources/Burrow-Tutor","burrowTheater":"$GITHUB_WORKSPACE/sources/Burrow-Theater"}
+          {"burrow":"$GITHUB_WORKSPACE/sources/Burrow","burrowBackend":"$GITHUB_WORKSPACE/sources/Burrow-Backend","burrowUi":"$GITHUB_WORKSPACE/sources/Burrow-UI","nodeGoblin":"$GITHUB_WORKSPACE/sources/Node-Goblin","goblinSecretStore":"$GITHUB_WORKSPACE/sources/Goblin-Secret-Store","burrowSkills":"$GITHUB_WORKSPACE/sources/Burrow-Skills","burrowBackdoor":"$GITHUB_WORKSPACE/sources/Burrow-Backdoor","burrowTutor":"$GITHUB_WORKSPACE/sources/Burrow-Tutor","burrowTheater":"$GITHUB_WORKSPACE/sources/Burrow-Theater","burrowSwitchboard":"$GITHUB_WORKSPACE/sources/Burrow-Switchboard"}
           JSON
           node orchestrator/scripts/promotion/stage-snapshots.mjs roots.json staged "$RELEASE_DATE" sources.json
           mkdir -p release-notes
-          for target in burrow nodeGoblin goblinSecretStore burrowSkills burrowBackdoor burrowTutor burrowTheater; do
+          for target in burrow nodeGoblin goblinSecretStore burrowSkills burrowBackdoor burrowTutor burrowTheater burrowSwitchboard; do
             node orchestrator/scripts/promotion/release-notes.mjs "$target" "$RELEASE_DATE" sources.json previous.json note-roots.json "release-notes/$target.md"
             cat "release-notes/$target.md"
           done
@@ -236,7 +247,7 @@ jobs:
           node orchestrator/scripts/promotion/validate-public-readiness.mjs staged
           (cd staged/Burrow && node --test scripts/install/*.test.mjs)
           sh -n staged/Burrow/install.sh staged/Node-Goblin/install.sh
-          node -e "for (const name of ['Burrow-Backdoor', 'Burrow-Tutor', 'Burrow-Theater']) { const root='staged/'+name; const version=require('./'+root+'/package.json').version; if (version !== process.env.VERSION || require('./'+root+'/burrow.mod.json').version !== version) throw Error(name+' version mismatch'); }"
+          node -e "for (const name of ['Burrow-Backdoor', 'Burrow-Tutor', 'Burrow-Theater', 'Burrow-Switchboard']) { const root='staged/'+name; const version=require('./'+root+'/package.json').version; if (version !== process.env.VERSION || require('./'+root+'/burrow.mod.json').version !== version) throw Error(name+' version mismatch'); }"
         env:
           VERSION: ${{ steps.plan.outputs.release_date }}
       - name: Build and smoke the public Burrow image
@@ -244,7 +255,7 @@ jobs:
         run: |
           docker build --build-arg BURROW_UI_SHA="$(node -p "require('./sources.json').burrowUi")" -t burrow-public-candidate staged/Burrow
           node staged/Burrow/scripts/assembly/packaged-smoke.mjs burrow-public-candidate staged/Burrow
-          for target in Burrow Node-Goblin Goblin-Secret-Store Burrow-Skills Burrow-Backdoor Burrow-Tutor Burrow-Theater; do
+          for target in Burrow Node-Goblin Goblin-Secret-Store Burrow-Skills Burrow-Backdoor Burrow-Tutor Burrow-Theater Burrow-Switchboard; do
             test ! -d "staged/$target/.git"
             ! find "staged/$target" -type f \( -name '*.env' -o -name '*.pem' -o -name '*.key' \) -print -quit | grep -q .
           done
@@ -289,6 +300,7 @@ jobs:
           orchestrator/scripts/promotion/publish-snapshot.sh Burrow-Backdoor staged/Burrow-Backdoor "$VERSION" "Release Burrow Backdoor $VERSION"
           orchestrator/scripts/promotion/publish-snapshot.sh Burrow-Tutor staged/Burrow-Tutor "$VERSION" "Release Burrow Tutor $VERSION"
           orchestrator/scripts/promotion/publish-snapshot.sh Burrow-Theater staged/Burrow-Theater "$VERSION" "Release Burrow Theater $VERSION"
+          orchestrator/scripts/promotion/publish-snapshot.sh Burrow-Switchboard staged/Burrow-Switchboard "$VERSION" "Release Burrow Switchboard $VERSION"
       - name: Build Node Goblin release assets
         env:
           VERSION: ${{ needs.stage.outputs.release_date }}
@@ -313,6 +325,7 @@ jobs:
           create_release Burrow-Backdoor release-notes/burrowBackdoor.md
           create_release Burrow-Tutor release-notes/burrowTutor.md
           create_release Burrow-Theater release-notes/burrowTheater.md
+          create_release Burrow-Switchboard release-notes/burrowSwitchboard.md
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
