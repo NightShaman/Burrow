@@ -64,6 +64,21 @@ describe('Chat session picker', () => {
     expect(screen.getByRole('combobox', { name: 'Session' }).closest('label')?.className).toBe('session-selector-control');
   });
 
+  it('allows switching sessions back and forth during an active run while keeping mutation controls locked', () => {
+    const onSessionChange = vi.fn();
+    const props = { selected: agent, savedProviders: [], updateAgent: vi.fn(), sessions: [{ id: 'default' }, { id: 'Issues' }], sessionId: 'default', onSessionChange, onNewSession: vi.fn(), onNewNamedSession: vi.fn(), onCreateGroup: vi.fn(), locked: true };
+    const { rerender } = render(<ChatModelSelector {...props} />);
+    const picker = screen.getByRole('combobox', { name: 'Session' });
+    expect(picker).toHaveProperty('disabled', false);
+    fireEvent.change(picker, { target: { value: 'Issues' } });
+    expect(onSessionChange).toHaveBeenLastCalledWith('Issues');
+    rerender(<ChatModelSelector {...props} sessionId="Issues" />);
+    fireEvent.change(picker, { target: { value: 'default' } });
+    expect(onSessionChange).toHaveBeenLastCalledWith('default');
+    expect(screen.getByRole('button', { name: 'Reset Session' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'New session' })).toHaveProperty('disabled', true);
+  });
+
   it('excludes group and artifact sessions even when the API omits classification metadata', () => {
     const sessions = [
       { id: 'default' },
