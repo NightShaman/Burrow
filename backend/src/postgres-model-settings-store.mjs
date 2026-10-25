@@ -315,6 +315,9 @@ export class PostgresModelSettingsStore {
     return { type: auth.type || 'api_key', provider: auth.provider || connection.provider, source: auth.source || null, token, expiresAt: auth.expiresAt || null };
   }
   async persistDiscoveredModels(id, discovered, { onlyIfEmpty = false, ticket = null, connection = null } = {}) {
+    // An empty upstream snapshot is not evidence that an OAuth account lost all models.
+    // Fail the refresh before replacing either its catalog or dependent pool catalogs.
+    if (!Array.isArray(discovered) || discovered.length === 0) throw new Error('member_catalog_empty');
     return withPostgresTransaction(this.pool, async client => {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [CONNECTION_WRITE_LOCK]);
       const result = await client.query(this.selectSql('WHERE c.id=$1'), [id]);
