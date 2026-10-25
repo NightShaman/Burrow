@@ -62,9 +62,16 @@ try {
  await c('Emulation.setDeviceMetricsOverride',{width:1100,height:900,deviceScaleFactor:1,mobile:false}); await sleep(80);
  const narrow = await overflow(); console.log(JSON.stringify({narrow})); assert(narrow.body<=narrow.width && narrow.columns.every(e=>e.scroll<=e.width+1),'narrow horizontal overflow');
  await c('Page.captureScreenshot',{format:'png'}).then(async r=>(await import('node:fs/promises')).writeFile('/tmp/smatchet-pool-narrow.png',Buffer.from(r.data,'base64')));
+ await click('Models');
+ assert(await evaluate("![...document.querySelectorAll('select option')].some(e=>e.value.endsWith('-lb'))"),'Models exposes pool types');
+ assert(await evaluate("![...document.querySelectorAll('.provider-card-select')].some(e=>e.textContent.startsWith('Anthropic LB') || e.textContent.startsWith('OpenAI LB'))"),'Models exposes saved pools');
  await evaluate("[...document.querySelectorAll('.provider-card-select')].find(e=>e.textContent.startsWith('Personal ChatGPT')).click()"); await sleep(80);
  assert(await evaluate("!!document.querySelector('input[type=password]') && !document.querySelector('.provider-pool')"),'direct account broken');
+ await click('Load Balancing');
+ assert(await evaluate("document.querySelector('select').value==='openai-lb' && document.querySelectorAll('.provider-card-select').length===2"),'pool relocation/reset failed');
+ await evaluate("[...document.querySelectorAll('.provider-card-select')].find(e=>e.textContent.startsWith('OpenAI LB')).click()"); await sleep(80);
+ assert(await evaluate("document.querySelectorAll('.pool-accounts input:checked').length===2"),'saved OpenAI members lost after navigation');
  assert(exceptions.length===0,'browser exceptions');
  assert(network.every(url=>url.startsWith(`http://127.0.0.1:${port}/`) || url==='about:blank'),'fixture external traffic');
- console.log(JSON.stringify({ok:true,checks:['OpenAI create/discover/select/save/edit','Anthropic disabled save/edit','credential-free contract','discovery failure','direct account preserved','desktop+narrow overflow'],desktop,narrow,exceptions,network},null,2));
+ console.log(JSON.stringify({ok:true,checks:['OpenAI create/discover/select/save/edit','Anthropic disabled save/edit','credential-free contract','discovery failure','direct account preserved','Models/pools separation and navigation reset','desktop+narrow overflow'],desktop,narrow,exceptions,network},null,2));
 } finally { browser?.kill('SIGTERM'); server.kill('SIGTERM'); await rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:150}); }

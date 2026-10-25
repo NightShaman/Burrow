@@ -4,17 +4,21 @@ import type { SavedProvider } from '../../app/types';
 import { ModelConnectionOAuthDialog } from './ModelConnectionOAuthDialog';
 import { ModelCapabilityEditor, ModelResults, SavedProviders, modelConnectionApiTypes } from './ModelConnectionViews';
 import { Field, SettingSection } from './SettingsPrimitives';
+import { isProviderPool } from './providerPools';
 import { useModelConnectionEditor } from './useModelConnectionEditor';
 
 type Props = {
   savedProviders: SavedProvider[];
+  loadBalancing?: boolean;
   onModelConnectionsChanged: () => Promise<void>;
   mcpConnections: ReactNode;
   overflowTarget?: HTMLElement | null;
 };
 
-export function ModelConnections({ savedProviders, onModelConnectionsChanged, mcpConnections, overflowTarget }: Props) {
-  const editor = useModelConnectionEditor({ savedProviders, onModelConnectionsChanged });
+export function ModelConnections({ savedProviders, onModelConnectionsChanged, mcpConnections, overflowTarget, loadBalancing = false }: Props) {
+  const editor = useModelConnectionEditor({ savedProviders, onModelConnectionsChanged, loadBalancing });
+  const visibleProviders = savedProviders.filter(item => isProviderPool(item.apiType) === loadBalancing);
+  const apiTypes = modelConnectionApiTypes.filter(type => isProviderPool(type.value) === loadBalancing);
   const selectedModel = editor.availableModels.find((model) => model.id === editor.selectedModelId) ?? null;
 
   const modelDetail = selectedModel ? <ModelCapabilityEditor
@@ -29,10 +33,10 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
 
   return <div className="connections-stack">
     <div className="connections-models-column">
-      <SettingSection title="Models">
+      <SettingSection title={loadBalancing ? 'Load Balancing' : 'Models'}>
         <div className="field-pair">
           <Field label="Provider"><input value={editor.provider} onChange={(event) => editor.setProvider(event.target.value)} placeholder="OpenAI" /></Field>
-          <Field label="API type"><select value={editor.apiType} onChange={(event) => editor.setApiType(event.target.value)}>{modelConnectionApiTypes.map((type) => <option value={type.value} key={type.value}>{type.label}</option>)}</select></Field>
+          <Field label={loadBalancing ? 'Pool type' : 'API type'}><select value={editor.apiType} onChange={(event) => editor.setApiType(event.target.value)}>{apiTypes.map((type) => <option value={type.value} key={type.value}>{type.label}</option>)}</select></Field>
         </div>
         {!editor.poolConnection && editor.apiType !== 'google-generative-language' && <p className="settings-description">{editor.apiType === 'anthropic-messages'
           ? 'Anthropic Messages uses Anthropic’s native API contract and provider authentication. Model discovery is handled by Burrow, not an OpenAI-compatible /models probe.'
@@ -82,7 +86,7 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
           onToggleModel={editor.toggleModel}
         />}
         {!overflowTarget && <SavedProviders
-          providers={savedProviders}
+          providers={visibleProviders}
           open={editor.savedProvidersOpen}
           onOpenChange={editor.setSavedProvidersOpen}
           onEdit={editor.editProvider}
@@ -92,7 +96,7 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
       </SettingSection>
     </div>
     {mcpConnections}
-    {overflowTarget && createPortal(<div className="settings-overflow-content model-detail-surface"><SettingSection title="Model details">{modelDetail}</SettingSection><SavedProviders providers={savedProviders} open={editor.savedProvidersOpen} onOpenChange={editor.setSavedProvidersOpen} onEdit={editor.editProvider}
+    {overflowTarget && createPortal(<div className="settings-overflow-content model-detail-surface"><SettingSection title="Model details">{modelDetail}</SettingSection><SavedProviders providers={visibleProviders} open={editor.savedProvidersOpen} onOpenChange={editor.setSavedProvidersOpen} onEdit={editor.editProvider}
           selectedId={editor.editingId} onDelete={(item) => void editor.deleteProvider(item)} expanded /></div>, overflowTarget)}
   </div>;
 }

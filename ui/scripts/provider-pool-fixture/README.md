@@ -7,7 +7,7 @@ node scripts/provider-pool-fixture/build.mjs
 node scripts/provider-pool-fixture/headless.mjs
 ```
 
-The owned Chromium runner checks both families, ordered membership, selected models, enabled/disabled round-trip, credential-free payloads, missing-membership guard, discovery failure, direct-account editing, and column overflow at 1440×1000 and 1100×900. Temporary profile/server are cleaned up; screenshot evidence is written to `/tmp/smatchet-pool-{desktop,error,narrow}.png`.
+The owned Chromium runner checks both families, ordered membership, selected models, enabled/disabled round-trip, credential-free payloads, missing-membership guard, discovery failure, direct-account editing, separate Models/Load Balancing navigation and saved-list filtering, and column overflow at 1440×1000 and 1100×900. Temporary profile/server are cleaned up; screenshot evidence is written to `/tmp/smatchet-pool-{desktop,error,narrow}.png`.
 
 For manual visual inspection, run `python3 scripts/provider-pool-fixture/serve.py` and open its printed port. Bundled files are ignored. Backend integration must be checked separately once pool endpoints are running.
 

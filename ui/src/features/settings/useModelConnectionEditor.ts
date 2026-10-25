@@ -15,17 +15,18 @@ const selectedRuntimeModels = (models: Array<string | RuntimeModel> = []): Runti
 
 type Options = {
   savedProviders?: SavedProvider[];
+  loadBalancing?: boolean;
   onModelConnectionsChanged: () => Promise<void>;
 };
 
-export function useModelConnectionEditor({ savedProviders = [], onModelConnectionsChanged }: Options) {
+export function useModelConnectionEditor({ savedProviders = [], onModelConnectionsChanged, loadBalancing = false }: Options) {
   const confirm = useConfirm();
   const editorGeneration = useRef(0);
   const isEditorCurrent = (generation: number) => generation === editorGeneration.current;
   useEffect(() => () => { editorGeneration.current += 1; }, []);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [provider, setProvider] = useState('');
-  const [apiType, setApiType] = useState('openai-chat-completions');
+  const [provider, setProvider] = useState(loadBalancing ? 'OpenAI LB' : '');
+  const [apiType, setApiType] = useState(loadBalancing ? 'openai-lb' : 'openai-chat-completions');
   const [poolEnabled, setPoolEnabled] = useState(true);
   const [memberConnectionIds, setMemberConnectionIds] = useState<string[]>([]);
   const poolConnection = isProviderPool(apiType);
@@ -54,8 +55,8 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
     setEditingId(null);
     setPoolEnabled(true);
     setMemberConnectionIds([]);
-    setProvider('');
-    setApiType('openai-chat-completions');
+    setProvider(loadBalancing ? 'OpenAI LB' : '');
+    setApiType(loadBalancing ? 'openai-lb' : 'openai-chat-completions');
     setUrl('');
     setApiKey('');
     setApiKeyConfigured(false);

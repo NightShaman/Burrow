@@ -13,7 +13,7 @@ window.fetch = (async (url, options) => {
   requests.push({ path, body });
   if (path.endsWith('/discover')) return Response.json(failDiscovery ? { models: [], discovery: { error: 'Fixture account unavailable' } } : { models: [{ id: 'shared-model', displayName: 'Shared model', selected: true }, { id: 'second-model', displayName: 'Reasoning model', selected: true }] });
   if (path === '/api/settings/model-connections' && options?.method === 'POST') {
-    const saved = { ...body, id: body.id || 'new-pool', url: '', apiKey: '', connectionModels: body.models, models: body.models.filter((m: { selected?: boolean }) => m.selected !== false).map((m: { id: string }) => m.id) };
+    const saved = { ...body, id: body.id || `new-pool-${connections.length}`, url: '', apiKey: '', connectionModels: body.models, models: body.models.filter((m: { selected?: boolean }) => m.selected !== false).map((m: { id: string }) => m.id) };
     connections = [...connections.filter(item => item.id !== saved.id), saved];
     return Response.json({ connection: saved });
   }
@@ -22,10 +22,11 @@ window.fetch = (async (url, options) => {
 Object.assign(window, { fixtureEvidence: { requests }, setFixtureDiscoveryFailure: (fail: boolean) => { failDiscovery = fail; } });
 function Fixture() {
   const [providers, setProviders] = useState(connections);
+  const [loadBalancing, setLoadBalancing] = useState(true);
   const [overflow, setOverflow] = useState<HTMLDivElement | null>(null);
   return <main className="settings-blank-slate" style={{ height: '100vh' }}>
-    <div className="settings-prototype-menu settings-blank-column"><h2>Settings</h2><button>Connections</button></div><div className="settings-prototype-sections settings-blank-column"><h2>Connections</h2><button>Models</button></div>
-    <div className="settings-prototype-configuration settings-blank-column"><ModelConnections savedProviders={providers} onModelConnectionsChanged={async () => setProviders([...connections])} mcpConnections={null} overflowTarget={overflow} /></div>
+    <div className="settings-prototype-menu settings-blank-column"><h2>Settings</h2><button>Connections</button></div><div className="settings-prototype-sections settings-blank-column"><h2>Connections</h2><button onClick={() => setLoadBalancing(false)}>Models</button><button onClick={() => setLoadBalancing(true)}>Load Balancing</button></div>
+    <div className="settings-prototype-configuration settings-blank-column"><ModelConnections key={String(loadBalancing)} loadBalancing={loadBalancing} savedProviders={providers} onModelConnectionsChanged={async () => setProviders([...connections])} mcpConnections={null} overflowTarget={overflow} /></div>
     <div className="settings-prototype-overflow settings-blank-column" ref={setOverflow} />
   </main>;
 }

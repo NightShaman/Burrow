@@ -43,7 +43,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
   const [settingsAgentId, setSettingsAgentId] = useState(selected.id);
   const [agentSection, setAgentSection] = useState<'details' | 'profile-documents' | 'mcp-tools' | 'cron-jobs' | 'dreams' | 'skills'>('details');
   const [generalSection, setGeneralSection] = useState<'opentelemetry' | 'browser-tab' | 'operator-timezone' | 'operator-profile' | 'execution-boundaries' | 'trace-retention' | 'brain-memory' | 'global-documents' | 'export' | 'rail-panels' | 'tiddle-signal' | 'appearance'>('operator-profile');
-  const [connectionSection, setConnectionSection] = useState<'authentication' | 'browser-origin' | 'model-providers' | 'mcp-servers' | 'api-tokens'>('authentication');
+  const [connectionSection, setConnectionSection] = useState<'authentication' | 'browser-origin' | 'model-providers' | 'load-balancing' | 'mcp-servers' | 'api-tokens'>('authentication');
   const [skillsSection, setSkillsSection] = useState<'installed' | 'repo' | 'text'>('installed');
   const [modsSection, setModsSection] = useState<'installed' | 'sources' | 'automatic-checks'>('installed');
   const hasAgentsPanel = (leftRailLayout === 'divided' ? [leftTopPanel, leftBottomPanel] : [leftSinglePanel])
@@ -140,7 +140,8 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
           {([
             ['authentication', 'Authentication'],
             ['browser-origin', 'Browser origin'],
-            ['model-providers', 'Model providers'],
+            ['model-providers', 'Models'],
+            ['load-balancing', 'Load Balancing'],
             ['mcp-servers', 'MCP servers'],
             ['api-tokens', 'API tokens'],
           ] as const).map(([id, label]) => <button type="button" className={connectionSection === id ? 'active' : ''} aria-current={connectionSection === id ? 'page' : undefined} onClick={() => { if (connectionSection !== id) navigate(() => setConnectionSection(id)); }} key={id}>{label}</button>)}
@@ -171,7 +172,8 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
         {tab === 'skills' && <SkillsSettings agents={agents} agentId={settingsSelected.id} section={skillsSection} onSectionChange={setSkillsSection} overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'authentication' && <AuthenticationSettings />}
         {tab === 'connections' && connectionSection === 'browser-origin' && <BrowserOriginSettings />}
-        {tab === 'connections' && connectionSection === 'model-providers' && <ModelConnections savedProviders={savedProviders} onModelConnectionsChanged={onModelConnectionsChanged} mcpConnections={null} overflowTarget={overflowColumn} />}
+        {tab === 'connections' && connectionSection === 'model-providers' && <ModelConnections key="models" savedProviders={savedProviders} onModelConnectionsChanged={onModelConnectionsChanged} mcpConnections={null} overflowTarget={overflowColumn} />}
+        {tab === 'connections' && connectionSection === 'load-balancing' && <ModelConnections key="load-balancing" loadBalancing savedProviders={savedProviders} onModelConnectionsChanged={onModelConnectionsChanged} mcpConnections={null} overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'mcp-servers' && <McpConnections overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'api-tokens' && <ApiTokensSettings overflowTarget={overflowColumn} />}
         {tab === 'mods' && <ModsSettings section={modsSection} overflowTarget={overflowColumn} />}

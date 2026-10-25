@@ -188,3 +188,21 @@ it('uses the top menu for General while retaining the three content columns', as
  expect(navigationTarget.childElementCount).toBe(0);
  navigationTarget.remove();
 });
+
+
+it('navigates between separate Models and Load Balancing editors without leaking identity', async () => {
+ vi.mocked(api).mockResolvedValue({ wizardStep: 'ready' });
+ render(<ConfirmProvider><Settings {...{ tab: 'connections', setTab: vi.fn(), agents: [], selected: { id: '', name: '' }, savedProviders: [], onModelConnectionsChanged: vi.fn(), agentRailPreferences: { view: 'regular', order: [] } } as unknown as ComponentProps<typeof Settings>} /></ConfirmProvider>);
+ fireEvent.click(screen.getByRole('button', { name: 'Models' }));
+ expect(screen.getByRole('heading', { name: 'Models' })).toBeTruthy();
+ fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'Direct draft' } });
+ fireEvent.click(screen.getByRole('button', { name: 'Load Balancing' }));
+ expect(screen.getByRole('heading', { name: 'Load Balancing' })).toBeTruthy();
+ expect((screen.getByLabelText('Provider') as HTMLInputElement).value).toBe('OpenAI LB');
+ expect(screen.queryByLabelText('API type')).toBeNull();
+ expect(screen.queryByLabelText('URL')).toBeNull();
+ fireEvent.click(screen.getByRole('button', { name: 'Models' }));
+ expect((screen.getByLabelText('Provider') as HTMLInputElement).value).toBe('');
+ expect((screen.getByLabelText('API type') as HTMLSelectElement).value).toBe('openai-chat-completions');
+ await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalled());
+});
