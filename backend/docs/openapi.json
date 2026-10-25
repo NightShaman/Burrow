@@ -9623,6 +9623,24 @@
             "items": {
               "$ref": "#/components/schemas/McpEnvironmentVariableWrite"
             }
+          },
+          "headers": {
+            "type": "object",
+            "writeOnly": true,
+            "maxProperties": 64,
+            "propertyNames": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
+            },
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 8192
+            },
+            "description": "HTTP headers, encrypted and never returned. Omit to preserve all; supplied map defines retained names; null preserves an existing case-insensitive name (error if absent); {} clears. Names are case-insensitive and duplicates rejected; values reject CR/LF/NUL and are limited to 8192 UTF-8 bytes. Explicit Authorization overrides legacy Bearer apiKey. Not sent to stdio providers."
           }
         },
         "additionalProperties": false
@@ -9640,7 +9658,8 @@
           "tools",
           "createdAt",
           "updatedAt",
-          "environmentVariables"
+          "environmentVariables",
+          "headerNames"
         ],
         "properties": {
           "id": {
@@ -9703,6 +9722,13 @@
             "items": {
               "$ref": "#/components/schemas/McpEnvironmentVariable"
             }
+          },
+          "headerNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Configured lowercase HTTP header names only; never values."
           }
         },
         "additionalProperties": false

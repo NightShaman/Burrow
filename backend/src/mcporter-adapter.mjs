@@ -1,3 +1,4 @@
+import { normalizeMcpHeaders } from './mcp-settings-store.mjs';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -176,7 +177,10 @@ function run(command, args, { cwd, timeoutMs = 20_000, killAfterMs = 1_000, maxS
   });
 }
 
-function configFor(connection, apiKey, environmentVariables = {}) {
+function configFor(connection, apiKey, environmentVariables = {}, headers = {}) {
+  const customHeaders = connection.transport === 'stdio' ? {} : normalizeMcpHeaders(headers);
+  if (Object.values(customHeaders).some(value => value === null)) throw new Error('mcp_header_value_required');
+  const httpHeaders = { ...(apiKey && !Object.hasOwn(customHeaders, 'authorization') ? { Authorization: `Bearer ${apiKey}` } : {}), ...customHeaders };
   const lifecycle = connection.lifecycle === 'keep_alive' ? { lifecycle: 'keep-alive' } : {};
   // mcporter treats a server env map as the complete child environment rather
   // than an overlay. Preserve the service PATH so stdio providers can resolve
@@ -188,11 +192,11 @@ function configFor(connection, apiKey, environmentVariables = {}) {
   };
   const definition = connection.transport === 'stdio'
     ? { command: connection.command, args: Array.isArray(connection.args) ? connection.args : [], ...(Object.keys(childEnvironment).length ? { env: childEnvironment } : {}), ...lifecycle }
-    : { baseUrl: connection.baseUrl, headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {}, ...lifecycle };
+    : { baseUrl: connection.baseUrl, headers: httpHeaders, ...lifecycle };
   return { mcpServers: { connection: definition } };
 }
 
-async function withConnectionConfig(connection, apiKey, environmentVariables, operation, { runtimeRoot = null, binary = null, runCommand = run } = {}) {
+async function withConnectionConfig(connection, apiKey, environmentVariables, headers, operation, { runtimeRoot = null, binary = null, runCommand = run } = {}) {
   const resolved = resolveMcporterRuntime({ runtimeRoot, binary });
   runtimeRoot = resolved.root; binary = resolved.binary;
   const configRoot = path.join(runtimeRoot, 'runtime');
@@ -201,7 +205,7 @@ async function withConnectionConfig(connection, apiKey, environmentVariables, op
   // daemon. Ephemeral calls retain the old disposable configuration behavior.
   if (connection.lifecycle === 'keep_alive') {
     const configPath = path.join(configRoot, `mcp-${text(connection.id) || 'connection'}.json`);
-    const config = JSON.stringify(configFor(connection, apiKey, environmentVariables));
+    const config = JSON.stringify(configFor(connection, apiKey, environmentVariables, headers));
     // Do not touch an unchanged config: mcporter uses its mtime to decide
     // whether an existing daemon must be replaced.
     const existing = await readFile(configPath, 'utf8').catch(() => null);
@@ -211,7 +215,7 @@ async function withConnectionConfig(connection, apiKey, environmentVariables, op
       // daemon start is idempotent in mcporter: it both verifies an existing
       // daemon and recreates one that vanished. Never advertise a keep-alive
       // provider merely because its old catalog is cached.
-      await runCommand(binary, ['daemon', 'start', '--config', configPath], { cwd: runtimeRoot, protectedValues: [apiKey, ...Object.values(environmentVariables || {})] });
+      await runCommand(binary, ['daemon', 'start', '--config', configPath], { cwd: runtimeRoot, protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
       await providerEvent(connection, 'ready', { runtimeRoot });
     } catch (error) {
       await providerEvent(connection, 'unavailable', { runtimeRoot, error });
@@ -222,10 +226,10 @@ async function withConnectionConfig(connection, apiKey, environmentVariables, op
   }
   const temporary = await mkdtemp(path.join(configRoot, 'mcp-'));
   const configPath = path.join(temporary, 'mcporter.json');
-  try { await writeFile(configPath, JSON.stringify(configFor(connection, apiKey, environmentVariables)), { mode: 0o600 }); return await operation(configPath, { binary, runtimeRoot }); } finally { await rm(temporary, { recursive: true, force: true }); }
+  try { await writeFile(configPath, JSON.stringify(configFor(connection, apiKey, environmentVariables, headers)), { mode: 0o600 }); return await operation(configPath, { binary, runtimeRoot }); } finally { await rm(temporary, { recursive: true, force: true }); }
 }
 
-export async function stopPersistentMcpConnection(connection, { apiKey, binary = null, runtimeRoot = null, runCommand = run } = {}) {
+export async function stopPersistentMcpConnection(connection, { apiKey, environmentVariables = {}, headers = {}, binary = null, runtimeRoot = null, runCommand = run } = {}) {
   if (connection?.lifecycle !== 'keep_alive') return false;
   ({ root: runtimeRoot, binary } = resolveMcporterRuntime({ runtimeRoot, binary }));
   const configPath = path.join(runtimeRoot, 'runtime', `mcp-${text(connection.id) || 'connection'}.json`);
@@ -237,7 +241,7 @@ export async function stopPersistentMcpConnection(connection, { apiKey, binary =
   });
   if (!configExists) return true;
   try {
-    await runCommand(binary, ['daemon', 'stop', '--config', configPath], { cwd: runtimeRoot });
+    await runCommand(binary, ['daemon', 'stop', '--config', configPath], { cwd: runtimeRoot, protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
     await providerEvent(connection, 'stopped', { runtimeRoot });
   } catch (error) {
     await providerEvent(connection, 'unavailable', { runtimeRoot, error });
@@ -247,27 +251,27 @@ export async function stopPersistentMcpConnection(connection, { apiKey, binary =
   return true;
 }
 
-export async function reconcilePersistentMcpConnection(previous, next, { previousApiKey, nextApiKey, previousEnvironmentVariables = {}, nextEnvironmentVariables = {}, binary = null, runtimeRoot = null, runCommand = run } = {}) {
+export async function reconcilePersistentMcpConnection(previous, next, { previousApiKey, nextApiKey, previousEnvironmentVariables = {}, nextEnvironmentVariables = {}, previousHeaders = {}, nextHeaders = {}, binary = null, runtimeRoot = null, runCommand = run } = {}) {
   if (previous?.lifecycle !== 'keep_alive') return false;
-  const changed = !next || !next.enabled || next.lifecycle !== 'keep_alive' || JSON.stringify(configFor(previous, previousApiKey, previousEnvironmentVariables)) !== JSON.stringify(configFor(next, nextApiKey, nextEnvironmentVariables));
+  const changed = !next || !next.enabled || next.lifecycle !== 'keep_alive' || JSON.stringify(configFor(previous, previousApiKey, previousEnvironmentVariables, previousHeaders)) !== JSON.stringify(configFor(next, nextApiKey, nextEnvironmentVariables, nextHeaders));
   if (!changed) return false;
-  return stopPersistentMcpConnection(previous, { apiKey: previousApiKey, binary, runtimeRoot, runCommand });
+  return stopPersistentMcpConnection(previous, { apiKey: previousApiKey, environmentVariables: previousEnvironmentVariables, headers: previousHeaders, binary, runtimeRoot, runCommand });
 }
 
-export async function ensureMcpProvider(connection, { apiKey, environmentVariables = {}, binary = null, runtimeRoot = null, runCommand = run } = {}) {
+export async function ensureMcpProvider(connection, { apiKey, environmentVariables = {}, headers = {}, binary = null, runtimeRoot = null, runCommand = run } = {}) {
   if (!connection?.enabled) throw new Error('mcp_connection_disabled');
   if (!['http', 'stdio'].includes(connection.transport)) throw new Error('mcp_transport_invalid');
   if (connection.lifecycle !== 'keep_alive') return mcpProviderState(connection);
-  await withConnectionConfig(connection, apiKey, environmentVariables, async () => null, { runtimeRoot, binary, runCommand });
+  await withConnectionConfig(connection, apiKey, environmentVariables, headers, async () => null, { runtimeRoot, binary, runCommand });
   return mcpProviderState(connection);
 }
 
-export async function discoverMcpTools(connection, { apiKey, environmentVariables = {}, binary = null, runtimeRoot = null, runCommand = run } = {}) {
+export async function discoverMcpTools(connection, { apiKey, environmentVariables = {}, headers = {}, binary = null, runtimeRoot = null, runCommand = run } = {}) {
   if (!connection?.enabled) throw new Error('mcp_connection_disabled');
   if (!['http', 'stdio'].includes(connection.transport)) throw new Error('mcp_transport_invalid');
   try {
-    return await withConnectionConfig(connection, apiKey, environmentVariables, async (configPath, runtime) => {
-      const output = await runCommand(runtime.binary, ['list', 'connection', '--config', configPath, '--json'], { cwd: runtime.runtimeRoot, protectedValues: [apiKey, ...Object.values(environmentVariables || {})] });
+    return await withConnectionConfig(connection, apiKey, environmentVariables, headers, async (configPath, runtime) => {
+      const output = await runCommand(runtime.binary, ['list', 'connection', '--config', configPath, '--json'], { cwd: runtime.runtimeRoot, protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
       const parsed = JSON.parse(output);
       if (parsed?.status !== 'ok' || !Array.isArray(parsed.tools)) throw new Error('mcp_discovery_invalid_response');
       return parsed.tools.map((tool) => ({ name: text(tool.name), description: text(tool.description) || null, inputSchema: tool.inputSchema && typeof tool.inputSchema === 'object' && !Array.isArray(tool.inputSchema) ? tool.inputSchema : { type: 'object', properties: {} } })).filter((tool) => tool.name);
@@ -275,11 +279,11 @@ export async function discoverMcpTools(connection, { apiKey, environmentVariable
   } catch (error) { if (error instanceof SyntaxError) throw new Error('mcp_discovery_invalid_response'); throw error; }
 }
 
-export async function invokeMcpTool(connection, { apiKey, environmentVariables = {}, toolName, arguments: toolArguments = {}, preserveContentResults = false, binary = null, runtimeRoot = null, runCommand = run } = {}) {
+export async function invokeMcpTool(connection, { apiKey, environmentVariables = {}, headers = {}, toolName, arguments: toolArguments = {}, preserveContentResults = false, binary = null, runtimeRoot = null, runCommand = run } = {}) {
   if (!connection?.enabled) throw new Error('mcp_connection_disabled');
   if (!['http', 'stdio'].includes(connection.transport)) throw new Error('mcp_transport_invalid');
   if (!text(toolName)) throw new Error('mcp_tool_name_invalid');
-  return withConnectionConfig(connection, apiKey, environmentVariables, async (configPath, runtime) => {
+  return withConnectionConfig(connection, apiKey, environmentVariables, headers, async (configPath, runtime) => {
     let output;
     let launcherFailure = null;
     try {
@@ -287,7 +291,7 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
       const args = preserveContentResults
         ? [fileURLToPath(new URL('./mcporter-content-launcher.mjs', import.meta.url)), runtime.binary, configPath, toolName, JSON.stringify(toolArguments), connection.lifecycle || 'ephemeral']
         : ['call', `connection.${toolName}`, '--config', configPath, '--args', JSON.stringify(toolArguments), '--output', 'json'];
-      output = await runCommand(command, args, { cwd: runtime.runtimeRoot, timeoutMs: 30_000, ...(preserveContentResults ? { maxStreamCaptureBytes: 32 * 1024 * 1024 } : {}), protectedValues: [apiKey, ...Object.values(environmentVariables || {})] });
+      output = await runCommand(command, args, { cwd: runtime.runtimeRoot, timeoutMs: 30_000, ...(preserveContentResults ? { maxStreamCaptureBytes: 32 * 1024 * 1024 } : {}), protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
     } catch (error) {
       // mcporter deliberately exits non-zero for a valid MCP `{ isError:
       // true }` result, while writing that result to stdout. Parse it before
@@ -305,7 +309,7 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
       if (preserveContentResults && parsed?.isError === true && Array.isArray(parsed.content)) return parsed;
       if (structuredFailure) {
         const providerFailure = providerFailureDetail(parsed);
-        throw runtimeFailure('mcp_tool_failed', { stdout: boundedJson(parsed), protectedValues: [apiKey, ...Object.values(environmentVariables || {})], toolErrorCode: providerFailure.toolErrorCode, httpStatus: providerFailure.httpStatus, detail: providerFailure.detail });
+        throw runtimeFailure('mcp_tool_failed', { stdout: boundedJson(parsed), protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})], toolErrorCode: providerFailure.toolErrorCode, httpStatus: providerFailure.httpStatus, detail: providerFailure.detail });
       }
       return parsed;
     } catch (error) {
@@ -316,16 +320,16 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
   }, { runtimeRoot, binary, runCommand });
 }
 
-export async function diagnoseMcpConnection(connection, { apiKey, environmentVariables = {}, toolName = null, arguments: toolArguments = {}, binary = null, runtimeRoot = null, runCommand = run } = {}) {
+export async function diagnoseMcpConnection(connection, { apiKey, environmentVariables = {}, headers = {}, toolName = null, arguments: toolArguments = {}, binary = null, runtimeRoot = null, runCommand = run } = {}) {
   try {
     if (toolName) {
-      await invokeMcpTool(connection, { apiKey, environmentVariables, toolName, arguments: toolArguments, binary, runtimeRoot, runCommand });
+      await invokeMcpTool(connection, { apiKey, environmentVariables, headers, toolName, arguments: toolArguments, binary, runtimeRoot, runCommand });
       return { ok: true, diagnostic: null };
     }
-    const tools = await discoverMcpTools(connection, { apiKey, environmentVariables, binary, runtimeRoot, runCommand });
+    const tools = await discoverMcpTools(connection, { apiKey, environmentVariables, headers, binary, runtimeRoot, runCommand });
     return { ok: true, diagnostic: null, toolCount: tools.length };
   } catch (error) {
-    return { ok: false, error: publicMcpError(error, toolName ? 'mcp_tool_failed' : 'mcp_runtime_failed'), ...publicMcpFailureDetail(error, [apiKey, ...Object.values(environmentVariables || {})]) };
+    return { ok: false, error: publicMcpError(error, toolName ? 'mcp_tool_failed' : 'mcp_runtime_failed'), ...publicMcpFailureDetail(error, [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})]) };
   }
 }
 

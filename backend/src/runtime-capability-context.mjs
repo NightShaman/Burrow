@@ -13,7 +13,7 @@ export async function loadRuntimeMcpCapabilities({ agentId, stores } = {}) {
       if (!connection.enabled) continue;
       const isMod = String(connection.id).startsWith('mod.') || String(connection.baseUrl || '').startsWith('mod://');
       if (isMod) continue; // Only the live host registry can authorize mod invocation.
-      const enriched = { ...connection, apiKey: await mcpStore.apiKey(connection.id), environmentVariables: await mcpStore.secretEnvironment(connection.id) };
+      const enriched = { ...connection, apiKey: await mcpStore.apiKey(connection.id), environmentVariables: await mcpStore.secretEnvironment(connection.id), headers: await mcpStore.secretHeaders?.(connection.id) || {} };
       mcpConnections.set(connection.id, enriched);
     }
     // The live host registry supplies invocation for mod tools. Its catalog is

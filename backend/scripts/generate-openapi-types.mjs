@@ -16,7 +16,7 @@ function tsType(schema = {}) {
   if (schema.anyOf) return schema.anyOf.map(tsType).join(' | ');
   if (schema.type === 'array') return `Array<${tsType(schema.items || {})}>`;
   if (schema.type === 'object' || schema.properties) {
-    if (!schema.properties) return 'Record<string, unknown>';
+    if (!schema.properties) return schema.additionalProperties && typeof schema.additionalProperties === 'object' ? `Record<string, ${tsType(schema.additionalProperties)}>` : 'Record<string, unknown>';
     return inlineObject(schema);
   }
   return primitive(schema.type);

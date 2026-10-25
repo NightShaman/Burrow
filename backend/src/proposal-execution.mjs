@@ -330,7 +330,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
         }
         const output = selected.connection.transport === 'mod'
           ? await selected.connection.invoke(action.mcpToolName, action.mcpArguments, { context: { agentId, sessionId, conversationId, runId: executionContext?.parentRunId || null }, abortSignal })
-          : await invokeMcp(selected.connection, { apiKey: selected.connection.apiKey, environmentVariables: selected.connection.environmentVariables, toolName: action.mcpToolName, arguments: action.mcpArguments, preserveContentResults: true });
+          : await invokeMcp(selected.connection, { apiKey: selected.connection.apiKey, headers: selected.connection.headers, environmentVariables: selected.connection.environmentVariables, toolName: action.mcpToolName, arguments: action.mcpArguments, preserveContentResults: true });
         const protectedOutput = selected.connection.transport === 'mod'
           ? protectToolOutput(output, { registry: executionContext?.protectedValues,
             managedIssuer: (declaration) => {
@@ -365,7 +365,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
           // Credential providers may place retrieved values in an isError text
           // payload. That payload has not crossed the protection adapter, so do
           // not project free-form diagnostics from it into model-visible state.
-          ...(selected.connection?.transport === 'mod' || sensitiveProducer ? {} : publicMcpFailureDetail(error, [selected.connection?.apiKey, ...Object.values(selected.connection?.environmentVariables || {})])),
+          ...(selected.connection?.transport === 'mod' || sensitiveProducer ? {} : publicMcpFailureDetail(error, [selected.connection?.apiKey, ...Object.values(selected.connection?.environmentVariables || {}), ...Object.values(selected.connection?.headers || {})])),
         };
       }
       toolResults.push(result);

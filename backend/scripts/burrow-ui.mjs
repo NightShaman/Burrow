@@ -509,6 +509,7 @@ async function saveMcpConnection(body = {}) { try {
   const { existing, next } = await prepared;
   const previousApiKey = existing ? await store.apiKey(existing.id) : null;
   const nextApiKey = body.apiKey === undefined || !String(body.apiKey || '').trim() ? previousApiKey : String(body.apiKey).trim();
+  const previousHeaders = existing ? await store.secretHeaders(existing.id) : {};
   const previousEnvironmentVariables = existing ? await store.secretEnvironment(existing.id) : {};
   const nextEnvironmentVariables = Array.isArray(body.environmentVariables) ? Object.fromEntries(body.environmentVariables.map((entry) => [String(entry?.name || '').trim(), entry?.value === undefined || !String(entry.value).trim() ? previousEnvironmentVariables[String(entry?.name || '').trim()] : String(entry.value).trim()]).filter(([name, value]) => name && value)) : previousEnvironmentVariables;
   // Persist configuration and scoped secrets before touching a running daemon.
@@ -516,7 +517,7 @@ async function saveMcpConnection(body = {}) { try {
   // a failed save (and lose the operator's replacement secret).
   const connection = await store.save(body);
   try {
-    await reconcilePersistentMcpConnection(existing, next, { previousApiKey, nextApiKey, previousEnvironmentVariables, nextEnvironmentVariables });
+    await reconcilePersistentMcpConnection(existing, connection, { previousApiKey, nextApiKey, previousEnvironmentVariables, nextEnvironmentVariables, previousHeaders, nextHeaders: await store.secretHeaders(connection.id) });
   } catch (error) {
     console.warn(`MCP connection ${connection.id} was saved but its prior keep-alive daemon could not be stopped: ${String(error?.message || error)}`);
   }
@@ -527,15 +528,15 @@ async function removeMcpConnection(id) {
     const store = mcpStore();
     const connection = await store.get(id);
     if (!connection) return false;
-    await reconcilePersistentMcpConnection(connection, null, { previousApiKey: await store.apiKey(connection.id), previousEnvironmentVariables: await store.secretEnvironment(connection.id) });
+    await reconcilePersistentMcpConnection(connection, null, { previousApiKey: await store.apiKey(connection.id), previousHeaders: await store.secretHeaders(connection.id), previousEnvironmentVariables: await store.secretEnvironment(connection.id) });
     return await store.remove(id);
   } catch (error) { throw error; }
 }
-async function discoverMcpConnection(body = {}) { try { const connection = await mcpStore().get(body.connectionId); if (!connection) return { ok: false, status: 404, error: 'mcp_connection_not_found' }; const tools = await discoverMcpTools(connection, { apiKey: await mcpStore().apiKey(connection.id), environmentVariables: await mcpStore().secretEnvironment(connection.id) }); return { ok: true, connection: await mcpStore().refreshTools(connection.id, tools), tools }; } catch (error) { return { ok: false, status: 400, error: String(error?.message || error) }; } }
+async function discoverMcpConnection(body = {}) { try { const connection = await mcpStore().get(body.connectionId); if (!connection) return { ok: false, status: 404, error: 'mcp_connection_not_found' }; const tools = await discoverMcpTools(connection, { apiKey: await mcpStore().apiKey(connection.id), headers: await mcpStore().secretHeaders(connection.id), environmentVariables: await mcpStore().secretEnvironment(connection.id) }); return { ok: true, connection: await mcpStore().refreshTools(connection.id, tools), tools }; } catch (error) { return { ok: false, status: 400, error: String(error?.message || error) }; } }
 async function diagnoseMcpConnection(body = {}) {
   const connection = await mcpStore().get(body.connectionId);
   if (!connection) return { ok: false, status: 404, error: 'mcp_connection_not_found' };
-  const result = await diagnoseMcpConnectionRuntime(connection, { apiKey: await mcpStore().apiKey(connection.id), environmentVariables: await mcpStore().secretEnvironment(connection.id), toolName: typeof body.toolName === 'string' && body.toolName.trim() ? body.toolName.trim() : null, arguments: body.arguments && typeof body.arguments === 'object' && !Array.isArray(body.arguments) ? body.arguments : {} });
+  const result = await diagnoseMcpConnectionRuntime(connection, { apiKey: await mcpStore().apiKey(connection.id), headers: await mcpStore().secretHeaders(connection.id), environmentVariables: await mcpStore().secretEnvironment(connection.id), toolName: typeof body.toolName === 'string' && body.toolName.trim() ? body.toolName.trim() : null, arguments: body.arguments && typeof body.arguments === 'object' && !Array.isArray(body.arguments) ? body.arguments : {} });
   return { ...result, ...(result.ok ? {} : { status: 400 }) };
 }
 async function agentMcpTools(agentId) { try { await resolveAgentRuntime(agentId); return { ok: true, agentId, tools: await mcpStore().agentTools(agentId) }; } catch (error) { return { ok: false, status: error?.statusCode || 400, error: String(error?.message || error) }; } }
@@ -1823,7 +1824,7 @@ async function exportSnapshot(categories = []) {
     const store = mcpStore();
     data['mcp-connections'] = {
       schema: 'burrow.mcp-connections/v3',
-      connections: await Promise.all((await store.list()).filter(connection => connection.transport !== 'mod' && !connection.id.startsWith('mod.')).map(async (connection) => ({ ...connection, apiKey: await store.apiKey(connection.id), environmentVariables: (connection.environmentVariables || []).map(({ name }) => ({ name, configured: true })) }))),
+      connections: await Promise.all((await store.list()).filter(connection => connection.transport !== 'mod' && !connection.id.startsWith('mod.')).map(async (connection) => ({ ...connection, apiKey: await store.apiKey(connection.id), headers: await store.secretHeaders(connection.id), environmentVariables: (connection.environmentVariables || []).map(({ name }) => ({ name, configured: true })) }))),
     };
   }
   if (categories.includes('ui-auth')) {
