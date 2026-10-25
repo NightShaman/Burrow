@@ -188,11 +188,14 @@ describe('useChatRun', () => {
     }));
   });
 
-  it('shows only safe MCP provider and tool identity in tool activity', async () => {
+  it.each([
+    { tool: 'mcp_call', provider: 'Bitwarden', mcpToolName: 'get', expectedLabel: 'MCP · Bitwarden · get', expectedDetail: 'Bitwarden · get' },
+    { tool: 'load_skill', skillId: 'frontend-review', expectedLabel: 'Load skill · frontend-review', expectedDetail: 'frontend-review' },
+  ])('shows only safe identity for $tool in tool activity', async (identity) => {
     const activity = { items: [] as Array<{ id: string; label: string; detail?: string; status?: 'pending' | 'ok' | 'error' }> };
     streamChatMock.mockImplementation(async ({ onEvent }) => {
       onEvent({ type: 'tool.started', data: {
-        tool: 'mcp_call', activityId: 'mcp-1', provider: 'Bitwarden', mcpToolName: 'get',
+        ...identity, activityId: 'mcp-1', detail: 'absolutely-not-for-the-transcript',
         mcpArguments: { secret: 'absolutely-not-for-the-transcript' }, output: 'also-not-for-the-transcript',
       } });
       return { terminalType: 'run.completed', finalResult: { ok: true, answerText: 'Done.' } };
@@ -208,7 +211,7 @@ describe('useChatRun', () => {
 
     await act(async () => { await result.current.sendMessage(); });
 
-    expect(session.storeToolActivity).toHaveBeenCalledWith(expect.objectContaining({ items: [expect.objectContaining({ label: 'MCP tool', detail: 'Bitwarden · get' })] }));
+    expect(session.storeToolActivity).toHaveBeenCalledWith(expect.objectContaining({ items: [expect.objectContaining({ label: identity.expectedLabel, detail: identity.expectedDetail })] }));
     expect(session.storeToolActivity).not.toHaveBeenCalledWith(expect.objectContaining({ items: [expect.objectContaining({ detail: expect.stringContaining('absolutely-not-for-the-transcript') })] }));
   });
 

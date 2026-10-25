@@ -1,3 +1,4 @@
+import { chatToolIdentity } from './chatToolIdentity';
 import { chatLiveStageLabel, type ChatLiveStage } from './chatLiveStage';
 import { ImagePreview } from '../../app/ImagePreview';
 import { isValidElement, memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -333,7 +334,7 @@ function A2AActivityCard({ activity, selectedName }: { activity: import('../../a
     const type = event.type ?? 'activity';
     const data = event.data ?? {};
     const tool = typeof data.tool === 'string' ? data.tool : type.replace(/^tool\./, '').replace('.', ' ');
-    return [{ id: `${activity.id}:${index}`, label: toolDisplayName(tool), status: type.endsWith('completed') ? (data.ok === false ? 'error' : 'ok') : 'pending' }];
+    return [{ id: `${activity.id}:${index}`, label: chatToolIdentity(data)?.label ?? toolDisplayName(tool), status: type.endsWith('completed') ? (data.ok === false ? 'error' : 'ok') : 'pending' }];
   });
   // A2A activity is supplemental operational context. The actual request and
   // reply are persisted as attributed `agent` chat turns above; never open this

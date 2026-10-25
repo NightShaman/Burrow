@@ -26,7 +26,7 @@ it('rejects foreign run/session progress for stage, thought and tool projection 
   ] }] } as ActiveChatRunsResponse;
   const { runtimeRun } = projectChatActivity(response, selection);
   expect(runtimeRun?.progress).toEqual([]);
-  expect(runtimeRun?.toolActivity?.items).toEqual([{ id: 'good', label: 'MCP tool', status: 'ok' }]);
+  expect(runtimeRun?.toolActivity?.items).toEqual([{ id: 'good', label: 'MCP · safe_name', status: 'ok', detail: 'safe_name' }]);
   expect(JSON.stringify(runtimeRun)).not.toContain('secret');
 });
 it('requests one terminal refresh after activity disappears, and keeps child terminal writes refreshable', () => {
@@ -49,4 +49,18 @@ it.each(['hatchet', 'smatchet'])('carries %s delegation provenance from the acti
   expect(runtimeRun).toMatchObject({ latestUserMessage: 'Review the interface', userMessageMetadata: { kind: 'subagent-delegated-task', parentAgentId: agentId, subagentId: 'child' } });
   const operatorRun = projectChatActivity({ ok: true, runs: [{ agentId, sessionId: 'child-session', runId: 'operator-run', status: 'running', latestUserMessage: 'Actual operator followup' }] }, { ...selection, agentId, sessionId: 'child-session', isChildSession: true }).runtimeRun;
   expect(operatorRun?.userMessageMetadata).toBeUndefined();
+});
+
+it('preserves exact MCP and skill identity across start/completion without copying payloads', () => {
+  const response = { ok: true, runs: [{ status: 'running', runId: 'r', agentId: 'a', sessionId: 'parent', progress: [
+    { type: 'tool.started', data: { tool: 'mcp_call', activityId: 'm', provider: 'Goblin-DevTools', mcpToolName: 'take_snapshot', detail: 'secret', output: 'secret' } },
+    { type: 'tool.completed', data: { tool: 'mcp_call', activityId: 'm', provider: 'Goblin-DevTools', mcpToolName: 'take_snapshot', ok: false } },
+    { type: 'tool.started', data: { tool: 'load_skill', activityId: 's', skillId: 'react-review', skillName: 'React review', version: 'v2', detail: 'secret', result: 'secret' } },
+  ] }] } as ActiveChatRunsResponse;
+  const activity = projectChatActivity(response, selection).runtimeRun?.toolActivity;
+  expect(activity?.items).toEqual([
+    { id: 'm', label: 'MCP · Goblin-DevTools · take_snapshot', detail: 'Goblin-DevTools · take_snapshot', status: 'error' },
+    { id: 's', label: 'Load skill · React review · react-review', detail: 'React review · react-review · v2', status: 'pending' },
+  ]);
+  expect(JSON.stringify(activity)).not.toContain('secret');
 });

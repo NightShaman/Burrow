@@ -348,3 +348,17 @@ it('keeps runtime operator followups in child sessions attributed to the operato
   expect(screen.getByLabelText('Rob avatar')).toBeTruthy();
   expect(screen.queryByLabelText('Hatchet avatar')).toBeNull();
 });
+
+it('renders exact projected MCP and skill names live and after saving', () => {
+  const activity = { runId: 'r', items: [
+    { id: 'm', label: 'MCP · Goblin-DevTools · take_snapshot', detail: 'Goblin-DevTools · take_snapshot', status: 'ok' as const },
+    { id: 's', label: 'Load skill · react-review', detail: 'react-review · v2', status: 'pending' as const },
+  ] };
+  const props = { selected: parent, parent, operator: { name: 'Rob', avatar: 'R' }, isNewSession: false, isLoading: false, error: '', liveProgress: [], liveAnswer: '' };
+  const { container, rerender } = render(<ChatTranscript {...props} turns={[]} isSending activeRunId="r" activeToolActivity={activity} />);
+  expect(container.querySelector('.tool-activity summary')?.textContent).toContain('Load skill · react-review');
+  expect(screen.getByText('MCP · Goblin-DevTools · take_snapshot')).toBeTruthy();
+  rerender(<ChatTranscript {...props} turns={[{ role: 'assistant', type: 'message', content: 'Done', runId: 'r', metadata: { toolActivity: activity } }]} isSending={false} activeRunId="" />);
+  expect(screen.getByText('MCP · Goblin-DevTools · take_snapshot')).toBeTruthy();
+  expect(screen.getByText('Load skill · react-review')).toBeTruthy();
+});

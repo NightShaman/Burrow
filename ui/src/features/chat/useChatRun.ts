@@ -1,3 +1,4 @@
+import { chatToolIdentity } from './chatToolIdentity';
 import { useEffect, useRef, useState } from 'react';
 import { answerFromChatResult, api, createRunId, type ChatAttachment, type ProgressEntry, type RunProgress, type SessionTurn, type ToolActivityItem } from '../../app/api';
 import type { Agent, SavedProvider } from '../../app/types';
@@ -8,7 +9,7 @@ import { appendThoughtDelta, finalizeThoughtProgress } from './chatThoughtProgre
 import { projectLiveStage, type LiveStageProjection, type ChatLiveStage } from './chatLiveStage';
 
 type ActiveRun = { runId: string; agentId: string; sessionId: string; stage?: ChatLiveStage; projection?: LiveStageProjection };
-type StreamToolEvent = { tool?: unknown; rawTool?: unknown; activityId?: unknown; ok?: unknown; status?: unknown; label?: unknown; detail?: unknown; provider?: unknown; mcpToolName?: unknown; command?: unknown; cwd?: unknown; filePath?: unknown; dirPath?: unknown; query?: unknown; reason?: unknown; result?: unknown; output?: unknown; error?: unknown };
+type StreamToolEvent = { tool?: unknown; rawTool?: unknown; activityId?: unknown; ok?: unknown; status?: unknown; label?: unknown; detail?: unknown; provider?: unknown; mcpToolName?: unknown; skillId?: unknown; skillName?: unknown; version?: unknown; command?: unknown; cwd?: unknown; filePath?: unknown; dirPath?: unknown; query?: unknown; reason?: unknown; result?: unknown; output?: unknown; error?: unknown };
 
 type ChatRunSession = {
   attached: ChatAttachment[];
@@ -118,21 +119,13 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
         } else if (envelope.type === 'tool.started' || envelope.type === 'tool.completed') {
           const data = envelope.data ?? {}; const tool = typeof data.tool === 'string' ? data.tool.trim() : '';
           if (!tool) return;
-          const isMcpCall = tool === 'mcp_call';
-          const provider = typeof data.provider === 'string' ? data.provider.trim() : '';
-          const mcpToolName = typeof data.mcpToolName === 'string' ? data.mcpToolName.trim() : '';
-          const label = isMcpCall && mcpToolName
-            ? 'MCP tool'
-            : typeof data.label === 'string' && data.label.trim() ? data.label.trim() : tool.replace(/[-_]/g, ' ');
+          const identity = chatToolIdentity(data);
+          const label = identity?.label ?? (typeof data.label === 'string' && data.label.trim() ? data.label.trim() : tool.replace(/[-_]/g, ' '));
           const activityId = typeof data.activityId === 'string' && data.activityId ? data.activityId : `${runId}:tool:${++toolSequence}`;
           const previous = session.toolActivityForRun(runId); const items = [...(previous?.items ?? [])];
           const index = items.findIndex((item) => item.id === activityId);
           const status: ToolActivityItem['status'] = envelope.type === 'tool.started' ? 'pending' : data.ok === false || data.status === 'failed' ? 'error' : 'ok';
-          // MCP arguments and output can contain credentials or other protected
-          // values. The provider and discovered tool name are the only MCP data
-          // suitable for the transcript.
-          const mcpDetail = [provider, mcpToolName].filter(Boolean).join(' · ');
-          const detailSource = isMcpCall ? mcpDetail : data.detail ?? data.command ?? data.filePath ?? data.dirPath ?? data.query ?? data.result ?? data.output ?? data.error;
+          const detailSource = identity ? identity.detail : data.detail ?? data.command ?? data.filePath ?? data.dirPath ?? data.query ?? data.result ?? data.output ?? data.error;
           const detail = typeof detailSource === 'string' ? detailSource : detailSource == null ? undefined : JSON.stringify(detailSource, null, 2);
           const item: ToolActivityItem = { id: activityId, label, status, ...(detail === undefined ? {} : { detail }) };
           if (index >= 0) items[index] = { ...items[index], ...item }; else items.push(item);

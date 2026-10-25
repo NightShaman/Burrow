@@ -1,3 +1,4 @@
+import { chatToolIdentity } from './chatToolIdentity';
 import { minionOutcome } from '../../app/minionOutcome';
 import { projectLiveStage, type LiveStageProjection, type ChatLiveStage } from './chatLiveStage';
 import type { ActiveA2AActivity, ActiveChatRun, ActiveChatRunsResponse, ActiveSubagent, SessionTurn, ProgressEntry, ToolActivity, ToolActivityItem } from '../../app/api';
@@ -29,13 +30,11 @@ function runtimeToolActivity(run: ActiveChatRun): ToolActivity | undefined {
     const data = event.data ?? {};
     const tool = typeof data.tool === 'string' ? data.tool.trim() : '';
     if (!tool) continue;
-    const mcpToolName = typeof data.mcpToolName === 'string' ? data.mcpToolName.trim() : '';
-    const label = tool === 'mcp_call' && mcpToolName
-      ? 'MCP tool'
-      : typeof data.label === 'string' && data.label.trim() ? data.label.trim() : tool.replace(/[-_]/g, ' ');
+    const identity = chatToolIdentity(data);
+    const label = identity?.label ?? (typeof data.label === 'string' && data.label.trim() ? data.label.trim() : tool.replace(/[-_]/g, ' '));
     const id = typeof data.activityId === 'string' && data.activityId ? data.activityId : `${run.runId}:tool:${index}`;
     const status = event.type === 'tool.started' ? 'pending' as const : data.ok === false || data.status === 'failed' ? 'error' as const : 'ok' as const;
-    itemsById.set(id, { ...itemsById.get(id), id, label, status });
+    itemsById.set(id, { ...itemsById.get(id), id, label, status, ...(identity?.detail ? { detail: identity.detail } : {}) });
   }
   const items = [...itemsById.values()];
   if (!items.length) return undefined;
