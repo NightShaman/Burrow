@@ -115,10 +115,10 @@ export function OpenAiResets({ connectionId, name, onUsageRefresh }: { connectio
   return <div className="account-resets" aria-busy={!!busy}>
     <div className="account-resets-row">
       <span className="account-resets-summary" title={known && snapshot.credits.nearestExpiresAt ? `Earliest expiry: ${new Date(snapshot.credits.nearestExpiresAt).toLocaleString()}` : undefined}>
-        <span>{known ? `${snapshot.credits.availableCount} banked` : fetchError ? 'Resets unavailable' : snapshot ? 'Resets stale' : 'Resets checking…'}</span>
+        <span>{known ? `${snapshot.credits.availableCount} banked` : fetchError ? 'Resets unavailable' : snapshot ? 'Resets stale' : 'Resets checking'}</span>
         {known && snapshot.credits.availableCount > 0 && <small>{snapshot.credits.nearestExpiresAt ? `expires ${formatResetIn(snapshot.credits.nearestExpiresAt, now)}` : 'expiry unknown'}</small>}
       </span>
-      <button type="button" className="secondary" disabled={!!busy || uncertain || (!!known && !credit)} onClick={() => void useReset()}>{busy === 'checking' ? 'Checking…' : busy === 'consuming' ? 'Using…' : 'Use reset…'}</button>
+      <button type="button" className="secondary" disabled={!!busy || uncertain || (!!known && !credit)} onClick={() => void useReset()}>{busy === 'checking' ? 'Checking' : busy === 'consuming' ? 'Using' : 'Use reset'}</button>
     </div>
     {(message || uncertain) && <small className="account-reset-message" role="status">{message || 'Reset outcome unknown. Do not retry; verify account usage and reset history first.'}</small>}
   </div>;

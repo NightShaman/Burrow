@@ -1,7 +1,7 @@
 import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { AccountStatus } from './AccountStatus';
+import { AccountStatus, accountUsageStatus, type AccountUsageCard } from './AccountStatus';
 import { api } from '../../app/api';
 import type { SavedProvider } from '../../app/types';
 vi.mock('../../app/api', async original => ({ ...await original<typeof import('../../app/api')>(), api: vi.fn() }));
@@ -11,7 +11,7 @@ it.each([false, true])('FE010 rendered Anthropic API-key vs OAuth configured=%s'
  const provider: SavedProvider = { id:'anthropic', provider:'Anthropic', apiType:'anthropic-messages',url:'https://example.invalid',apiKey:'',models:[],apiKeyConfigured:true,oauthConfigured:oauth };
  render(<ConfirmProvider><AccountStatus providers={[provider]} /></ConfirmProvider>);
  if (oauth) {
-  await waitFor(() => expect(screen.getByText('Connected')).toBeTruthy());
+  await waitFor(() => expect(screen.getByText('Unknown')).toBeTruthy());
   expect(vi.mocked(api).mock.calls.map(([path])=>path)).toEqual(['/api/anthropic/oauth/usage?connectionId=anthropic']);
  } else {
   expect(screen.getByText('No Anthropic or OpenAI OAuth connections yet.')).toBeTruthy();
@@ -23,7 +23,7 @@ it('retains draggable cards without visible reorder controls', async () => {
  vi.mocked(api).mockResolvedValue({usage:{windows:[]}});
  const providers: SavedProvider[] = ['First','Second'].map(name => ({id:name,provider:'Anthropic',name,apiType:'anthropic-messages',url:'https://example.invalid',apiKey:'',models:[],oauthConfigured:true}));
  const {container} = render(<ConfirmProvider><AccountStatus providers={providers}/></ConfirmProvider>);
- await waitFor(() => expect(screen.getAllByText('Connected')).toHaveLength(2));
+ await waitFor(() => expect(screen.getAllByText('Unknown')).toHaveLength(2));
  expect(screen.queryByRole('button', {name:/^Move /})).toBeNull();
  expect(container.querySelectorAll('[draggable="true"]')).toHaveLength(2);
 });
@@ -41,5 +41,13 @@ it('shows a completed account without waiting for a slow peer and retains usage 
  vi.mocked(api).mockImplementation(() => new Promise(() => {}));
  render(<ConfirmProvider><AccountStatus providers={providers}/></ConfirmProvider>);
  expect(screen.getByText('80%')).toBeTruthy();
- expect(screen.queryByText('Loading usage…')).toBeNull();
+ expect(screen.queryByText('Loading usage')).toBeNull();
+});
+
+it('uses the same successful status label for both vendors and preserves unknown/limited Anthropic usage', () => {
+ const base: AccountUsageCard = {id:'status', name:'Anthropic', vendor:'Anthropic', plan:null, state:'ready', bars:[{key:'five_hour',label:'Five Hour',remainingPercent:50,resetAt:null}]};
+ expect(accountUsageStatus(base)).toEqual({label:'Available',tone:'active'});
+ expect(accountUsageStatus({...base,vendor:'OpenAI',accountStatus:{status:'available',label:'Active',reason:'usage',scope:'account',resetAt:null,checkedAt:new Date().toISOString()}})).toMatchObject({label:'Available',tone:'active'});
+ expect(accountUsageStatus({...base,bars:[]})).toEqual({label:'Unknown',tone:'paused'});
+ expect(accountUsageStatus({...base,bars:[{...base.bars[0],remainingPercent:0}]})).toEqual({label:'Limit Exceeded',tone:'quota-exceeded'});
 });

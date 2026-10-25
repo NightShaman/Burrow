@@ -15,51 +15,45 @@
 .usage-percent.unknown{color:var(--muted)}
 .account-status .hint{margin-top:8px;font-size:11px}
 
-/* Share the available pane height between cards instead of scrolling the list. */
+/* Content-sized cards keep the same header/meter rhythm for both vendors. */
 .rail-panel:has(> .account-status){display:flex;flex-direction:column}
 .rail-panel:has(> .account-status) > .rail-head{flex:none}
-.rail-panel > .account-status{flex:1;min-height:0;overflow:visible;display:flex;flex-direction:column;gap:6px;container-type:size;container-name:account-pane}
-.account-status > .account-card{flex:0 1 120px;min-height:0;margin:0;display:flex;flex-direction:column;justify-content:space-between;gap:2px;padding:clamp(3px,2cqh,12px);container-type:size}
-.account-status .account-top{gap:6px;min-width:0;font-size:clamp(10px,15cqh,13px);line-height:1.15}
+.rail-panel > .account-status{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:4px;container-type:size;container-name:account-pane}
+.account-status > .account-card{flex:none;min-width:0;margin:0;display:flex;flex-direction:column;gap:6px;padding:8px}
+.account-status .account-top{gap:6px;min-width:0;font-size:13px;line-height:1.15}
 .account-status .account-top > span:first-child{min-width:0}
-.account-status .account-top b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.account-status .account-top small{font-size:clamp(9px,12cqh,11px);line-height:1.1}
-.account-status .account-meters{margin-top:0;gap:2px}
+.account-status .account-top b{white-space:normal;overflow-wrap:anywhere}
+.account-status .account-top small{font-size:11px;line-height:1.1}
+.account-status .account-meters{flex:none;margin-top:0;gap:2px}
 .account-status .account-meter{row-gap:2px}
-.account-status .account-connection-status{font-size:clamp(9px,12cqh,11px)}
-.account-status .account-footer small,.account-status .account-reset-time{font-size:clamp(9px,11cqh,10px)}
-.account-status .usage-percent{font-size:clamp(10px,13cqh,12px)}
-.account-status > .account-card{position:relative}
-.account-status .account-meters{flex:none}
-@container (height < 85px){
- .account-status .account-top > span:first-child{display:flex;align-items:baseline;gap:4px}
- .account-status .account-top small{flex:none}
- .account-status .account-meter{row-gap:1px}
- .account-status .account-meter .usage{height:4px}
-}
+.account-status .account-connection-status{max-width:48%;font-size:11px;text-align:right;overflow-wrap:anywhere}
+.account-status .account-connection-status.quota-exceeded{background:none}
 .account-status .account-meter .usage-percent{line-height:1}
+.account-status .account-reset-time{font-size:10px}
+.account-status .hint{margin:0;overflow-wrap:anywhere}
 
-/* Native reset controls stay in normal card flow, including compressed rails. */
-.account-status > .account-card:has(.account-resets){min-height:66px}
-.account-status:has(.account-resets){overflow:auto}
-.account-status .account-resets{flex:none;min-width:0;font-size:clamp(10px,12cqh,11px);line-height:1.2}
+/* Reset controls add only their own row, never stretch the header or meters. */
+.account-status .account-resets{flex:none;min-width:0;font-size:11px;line-height:1.2}
 .account-status .account-resets-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .account-status .account-resets-summary{display:flex;flex-wrap:wrap;gap:2px 6px;min-width:0;color:var(--text)}
 .account-status .account-resets-summary small{color:var(--muted);font-size:inherit}
-.account-status .account-resets button{flex:none;min-height:24px;height:clamp(24px,30cqh,28px);padding:0 6px;font-size:inherit;line-height:1.2;white-space:nowrap;cursor:pointer}
+.account-status .account-resets button{flex:none;min-height:24px;height:24px;padding:0 6px;font-size:inherit;line-height:1.2;white-space:nowrap;cursor:pointer}
 .account-status .account-resets button:disabled{cursor:default;opacity:.5}
 .account-status .account-reset-message{display:block;margin-top:4px;color:var(--warn);font-size:11px;line-height:1.35;overflow-wrap:anywhere}
-.account-status > .account-card:has(.account-reset-message){min-height:140px;flex-shrink:0}
-.account-status .account-connection-status{max-width:55%;text-align:right}
-.account-status .account-connection-status.quota-exceeded{background:none}
 
-/* Pane height, not viewport width, determines the nine-account laptop density. */
+/* Pane height, not viewport width, determines laptop density. Long names wrap. */
 @container account-pane (height < 800px){
- .account-status > .account-card{padding:4px;min-height:44px}
- .account-status > .account-card:has(.account-resets){min-height:66px}
- .account-status > .account-card:has(.account-reset-message){min-height:140px}
+ .account-status > .account-card{padding:3px;gap:1px}
+ .account-status .account-top{font-size:11px}
+ .account-status .account-top > span:first-child{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 4px}
+ .account-status .account-top small{font-size:9px}
+ .account-status .account-connection-status{font-size:10px}
+ .account-status .account-meter{row-gap:1px}
+ .account-status .account-meter .usage{height:4px}
+ .account-status .usage-percent{font-size:10px}
+ .account-status .account-reset-time{font-size:9px}
+ .account-status .account-resets{font-size:10px}
 }
 @media (pointer:coarse){
  .account-status .account-resets button{min-height:32px;height:32px}
- .account-status > .account-card:has(.account-resets){min-height:78px}
 }

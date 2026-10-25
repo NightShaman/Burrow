@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { AccountStatus } from '../../src/features/panels/AccountStatus';
 import { ConfirmProvider } from '../../src/app/ConfirmDialog';
 import '../../src/app.css';
-const providers = ['OpenAI Personal','OpenAI Studio','OpenAI Research long account name','OpenAI Development','OpenAI Operations','OpenAI Testing','OpenAI Spare','Anthropic Personal','Anthropic Studio'].map((provider,index) => ({id:`fixture-${index}`,provider,url:'',apiKey:'',models:[],oauthConfigured:true}));
+const providers = ['Anthropic Personal','OpenAI Personal','Anthropic Studio','OpenAI Research long account name','OpenAI Development','OpenAI Operations','OpenAI Testing','OpenAI Spare','OpenAI Studio'].map((provider,index) => ({id:`fixture-${index}`,provider,url:'',apiKey:'',models:[],oauthConfigured:true}));
 const expiry = () => new Date(Date.now()+3*86400_000).toISOString();
 let scenario = 'Normal';
 window.fetch = async (input, init) => {
@@ -18,7 +18,8 @@ window.fetch = async (input, init) => {
   return Response.json(creditData(connection));
  }
  const index = Number(connection.slice(-1));
- return Response.json({usage:{accountStatus:{status:index===0?'available':index===1?'rate_limited':'limit_exceeded',label:index===0?'Available':index===1?'Rate Limited':'Limit Exceeded',reason:'usage_window',scope:'account',checkedAt:new Date().toISOString(),resetAt:expiry()},windows:[{key:connection.endsWith('7')||connection.endsWith('8')?'five_hour':'primary',label:'5 hours',usedPercent:index===0?28:100,resetAt:expiry()},{key:connection.endsWith('7')||connection.endsWith('8')?'seven_day':'secondary',label:'7 days',usedPercent:index===2?100:54,resetAt:expiry()}]}});
+ const anthropic = providers[index].provider.startsWith('Anthropic');
+ return Response.json({usage:{accountStatus:{status:index<=1?'available':index===4?'rate_limited':'limit_exceeded',label:index<=1?'Available':index===4?'Rate Limited':'Limit Exceeded',reason:'usage_window',scope:'account',checkedAt:new Date().toISOString(),resetAt:expiry()},windows:[{key:anthropic?'five_hour':'primary',label:'5 hours',usedPercent:index===0||index===1?28:100,resetAt:expiry()},{key:anthropic?'seven_day':'secondary',label:'7 days',usedPercent:index===2?100:54,resetAt:expiry()}]}});
 };
 function creditData(connection: string) { const zero = connection.endsWith('2'); return {ok:true,fetchedAt:new Date().toISOString(),credits:{availableCount:zero?0:2,nearestExpiresAt:zero?null:expiry(),available:zero?[]:[{id:'first',expiresAt:expiry()}]}}; }
 function Fixture() {

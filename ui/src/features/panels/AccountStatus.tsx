@@ -132,12 +132,18 @@ export function useAccountUsage(providers: SavedProvider[], refreshMs = 300_000,
 export function accountUsageStatus(card: AccountUsageCard, now = Date.now()): { label: string; tone: 'active' | 'paused' | 'quota-exceeded'; detail?: string } {
   if (card.state === 'loading') return { label: 'Checking', tone: 'paused' };
   if (card.state === 'error') return { label: 'Usage unavailable', tone: 'paused' };
-  if (card.vendor !== 'OpenAI') return { label: 'Connected', tone: 'active' };
+  if (card.vendor !== 'OpenAI') {
+    const known = card.bars.filter(bar => bar.remainingPercent !== null);
+    if (!known.length) return { label: 'Unknown', tone: 'paused' };
+    return known.some(bar => bar.remainingPercent === 0)
+      ? { label: 'Limit Exceeded', tone: 'quota-exceeded' }
+      : { label: 'Available', tone: 'active' };
+  }
   const status = card.accountStatus;
   if (!status || !Number.isFinite(Date.parse(status.checkedAt))) return { label: 'Unknown', tone: 'paused' };
   const detail = `${status.reason} · ${status.scope}${status.resetAt ? ` · resets ${new Date(status.resetAt).toLocaleString()}` : ''} · checked ${new Date(status.checkedAt).toLocaleString()}`;
   if (now - Date.parse(status.checkedAt) > 600_000 || (status.resetAt && Date.parse(status.resetAt) <= now)) return { label: 'Stale', tone: 'paused', detail };
-  return { label: status.label, tone: status.status === 'available' ? 'active' : status.status === 'unknown' ? 'paused' : 'quota-exceeded', detail };
+  return { label: status.status === 'available' ? 'Available' : status.label, tone: status.status === 'available' ? 'active' : status.status === 'unknown' ? 'paused' : 'quota-exceeded', detail };
 }
 
 function UsageMeter({ bar, tone }: { bar: UsageBar; tone: 'primary' | 'secondary' }) {
@@ -201,7 +207,7 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
       const isDropTarget = dropTargetId === card.id && !isDragging;
       const status = accountUsageStatus(card, now);
       return <AccountCard key={card.id} name={card.name} subtitle={card.vendor} status={<span title={status.detail}>{status.label}</span>} statusTone={status.tone} className={`${isDragging ? 'dragging' : ''} ${isDropTarget ? 'drop-target' : ''}`} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', card.id); setDraggedId(card.id); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTargetId(card.id); }} onDragLeave={() => setDropTargetId((current) => current === card.id ? null : current)} onDrop={(event) => handleDrop(event, card.id)} onDragEnd={clearDrag}>
-        {card.state === 'loading' && <small className="hint">Loading usage…</small>}
+        {card.state === 'loading' && <small className="hint">Loading usage</small>}
         {card.state === 'error' && <small className="hint">{card.error ?? 'Usage unavailable'}</small>}
         {card.state === 'ready' && !card.bars.length && <small className="hint">No usage windows reported.</small>}
         {card.bars.length > 0 && <div className={`account-meters ${card.bars.length === 2 ? 'two-up' : ''}`}>

@@ -15,12 +15,12 @@ function setup() {
  return { ...view, refresh, connectionId };
 }
 const posts = () => vi.mocked(api).mock.calls.filter(([,init]) => init?.method === 'POST');
-async function openConfirm() { await screen.findByText('2 banked'); fireEvent.click(screen.getByRole('button', {name:'Use reset…'})); await screen.findByRole('alertdialog'); }
+async function openConfirm() { await screen.findByText('2 banked'); fireEvent.click(screen.getByRole('button', {name:'Use reset'})); await screen.findByRole('alertdialog'); }
 it('keeps banked count and soonest expiry inside its control, cancels without mutation', async () => {
  vi.mocked(api).mockResolvedValue(credits());
  setup(); await openConfirm();
  expect(screen.getByText(/Consume one banked reset expiring/)).toBeTruthy();
- expect(screen.getByRole('button',{name:'Use reset…'}).hasAttribute('disabled')).toBe(true);
+ expect(screen.getByRole('button',{name:'Use reset'}).hasAttribute('disabled')).toBe(true);
  fireEvent.click(screen.getByRole('button',{name:'Cancel'}));
  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
  expect(posts()).toHaveLength(0);
@@ -30,8 +30,8 @@ it('rechecks availability, picks soonest expiry, sends one UUID POST, blocks dup
  vi.mocked(api).mockImplementation((_path,init) => init?.method === 'POST' ? new Promise(resolve => {complete=resolve;}) as ReturnType<typeof api> : Promise.resolve(credits()) as ReturnType<typeof api>);
  const {refresh,connectionId} = setup(); await openConfirm();
  fireEvent.click(screen.getByRole('button',{name:'Consume one reset'}));
- await screen.findByRole('button',{name:'Using…'});
- fireEvent.click(screen.getByRole('button',{name:'Using…'}));
+ await screen.findByRole('button',{name:'Using'});
+ fireEvent.click(screen.getByRole('button',{name:'Using'}));
  expect(posts()).toHaveLength(1);
  const payload = JSON.parse(posts()[0][1]!.body as string);
  expect(payload).toMatchObject({connectionId,creditId:'first'});
@@ -42,7 +42,7 @@ it('rechecks availability, picks soonest expiry, sends one UUID POST, blocks dup
  await openAgain();
  expect(posts()).toHaveLength(2);
  expect(JSON.parse(posts()[1][1]!.body as string).requestId).not.toBe(payload.requestId);
- async function openAgain() { fireEvent.click(screen.getByRole('button',{name:'Use reset…'})); await screen.findByRole('alertdialog'); fireEvent.click(screen.getByRole('button',{name:'Consume one reset'})); }
+ async function openAgain() { fireEvent.click(screen.getByRole('button',{name:'Use reset'})); await screen.findByRole('alertdialog'); fireEvent.click(screen.getByRole('button',{name:'Consume one reset'})); }
 });
 it('reports successful redemption separately from failed refreshes', async () => {
  vi.mocked(api).mockImplementation((_path,init) => Promise.resolve(init?.method === 'POST' ? {ok:true,code:'nothing_to_reset',usageRefresh:{ok:false},creditsRefresh:{ok:false}} : credits()) as ReturnType<typeof api>);
@@ -53,26 +53,26 @@ it('reports successful redemption separately from failed refreshes', async () =>
 it('unknown is not zero; a GET failure never sends a POST', async () => {
  vi.mocked(api).mockRejectedValue(new Error('offline'));
  setup(); await screen.findByText('Resets unavailable');
- expect(screen.queryByText('0 banked')).toBeNull(); fireEvent.click(screen.getByRole('button',{name:'Use reset…'}));
+ expect(screen.queryByText('0 banked')).toBeNull(); fireEvent.click(screen.getByRole('button',{name:'Use reset'}));
  await screen.findByText('Could not check reset availability. No reset sent.'); expect(posts()).toHaveLength(0);
 });
 it('locks ambiguous operations across remount and never automatically retries', async () => {
  vi.mocked(api).mockImplementation((_path,init) => init?.method === 'POST' ? Promise.reject(new Error('network timeout')) : Promise.resolve(credits()) as ReturnType<typeof api>);
  const {connectionId,unmount} = setup(); await openConfirm(); fireEvent.click(screen.getByRole('button',{name:'Consume one reset'}));
  await screen.findByText(/Reset outcome unknown/);
- expect(screen.getByRole('button',{name:'Use reset…'}).hasAttribute('disabled')).toBe(true); expect(posts()).toHaveLength(1);
+ expect(screen.getByRole('button',{name:'Use reset'}).hasAttribute('disabled')).toBe(true); expect(posts()).toHaveLength(1);
  unmount(); render(<ConfirmProvider><OpenAiResets connectionId={connectionId} name="OpenAI" onUsageRefresh={vi.fn()}/></ConfirmProvider>);
- await screen.findByText('2 banked'); expect(screen.getByRole('button',{name:'Use reset…'}).hasAttribute('disabled')).toBe(true); expect(posts()).toHaveLength(1);
+ await screen.findByText('2 banked'); expect(screen.getByRole('button',{name:'Use reset'}).hasAttribute('disabled')).toBe(true); expect(posts()).toHaveLength(1);
 });
 it('handles explicit rejection without pretending success', async () => {
  vi.mocked(api).mockImplementation((_path,init) => init?.method === 'POST' ? Promise.reject(Object.assign(new Error('reset_credit_unavailable'),{status:409,details:'{"ambiguous":false}'})) : Promise.resolve(credits()) as ReturnType<typeof api>);
  setup(); await openConfirm(); fireEvent.click(screen.getByRole('button',{name:'Consume one reset'}));
  await screen.findByText('Reset no longer available. Availability will refresh.'); expect(posts()).toHaveLength(1);
- expect(screen.getByRole('button',{name:'Use reset…'}).hasAttribute('disabled')).toBe(false);
+ expect(screen.getByRole('button',{name:'Use reset'}).hasAttribute('disabled')).toBe(false);
 });
 it('uses refreshed availability rather than stale displayed credits', async () => {
  vi.mocked(api).mockResolvedValueOnce(credits()).mockResolvedValue({...credits(),credits:{availableCount:0,available:[],nearestExpiresAt:null}});
- setup(); await screen.findByText('2 banked'); fireEvent.click(screen.getByRole('button',{name:'Use reset…'}));
+ setup(); await screen.findByText('2 banked'); fireEvent.click(screen.getByRole('button',{name:'Use reset'}));
  await screen.findByText('No available reset. Availability refreshed.'); expect(screen.getByText('0 banked')).toBeTruthy(); expect(posts()).toHaveLength(0);
 });
 it('does not consume a credit that expires while confirming', async () => {
