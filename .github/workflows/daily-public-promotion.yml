@@ -42,7 +42,7 @@ jobs:
           GH_TOKEN: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
         run: |
           set -eu
-          burrow=$(gh api repos/NightShaman/Burrow/commits/main --jq .sha)
+          burrow=$(git -C orchestrator rev-parse HEAD)
           backend=$(awk '$1=="Burrow-Backend" {print $2}' orchestrator/SOURCE_VERSIONS)
           ui=$(awk '$1=="Burrow-UI" {print $2}' orchestrator/SOURCE_VERSIONS)
           node_goblin=$(gh api repos/NightShaman/Node-Goblin/commits/main --jq .sha)
@@ -71,9 +71,15 @@ jobs:
             "$burrow" "$backend" "$ui" "$node_goblin" "$gss" "$skills" "$backdoor" "$tutor" "$theater" "$switchboard" > sources.json
       - name: Read last public manifest
         run: |
-          curl --fail --silent --show-error \
+          set -eu
+          status=$(curl --silent --show-error --retry 3 \
             "https://raw.githubusercontent.com/$PUBLIC_OWNER/Burrow/main/PUBLIC_RELEASE.json" \
-            --output previous.json || printf 'null\n' > previous.json
+            --output previous.json --write-out '%{http_code}')
+          case "$status" in
+            200) node -e "const m=require('./previous.json'); if(m.schemaVersion!==1 || !m.releaseDate || !m.sources) throw Error('invalid public manifest')" ;;
+            404) printf 'null\n' > previous.json ;;
+            *) echo "public manifest HTTP $status" >&2; exit 1 ;;
+          esac
       - name: Build immutable promotion plan
         id: plan
         run: |
@@ -81,7 +87,7 @@ jobs:
           cat plan.json
           publishable=$(node -p "require('./plan.json').publishable")
           validation_required="$publishable"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.validate_only }}" = "true" ]; then validation_required=true; fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.validate_only }}" = "true" ]; then validation_required=true; publishable=false; fi
           printf 'publishable=%s\n' "$publishable" >> "$GITHUB_OUTPUT"
           printf 'validation_required=%s\n' "$validation_required" >> "$GITHUB_OUTPUT"
           printf 'release_date=%s\n' "$(node -p "require('./plan.json').releaseDate")" >> "$GITHUB_OUTPUT"
@@ -190,6 +196,7 @@ jobs:
         env:
           BURROW_TEST_TIMEOUT_MS: '1800000'
           BURROW_TEST_DISPOSABLE_POSTGRES: '1'
+        timeout-minutes: 45
         run: |
           set -eu
           (cd sources/Burrow-Backend && npm ci --no-audit --no-fund && npm test)
@@ -197,8 +204,8 @@ jobs:
           (cd sources/Node-Goblin/gateway && npm test)
           (cd sources/Goblin-Secret-Store && npm run build && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" BURROW_POSTGRES_BIN_DIR=/usr/lib/postgresql/17/bin npm test)
           (cd sources/Burrow-Backdoor && npm ci --ignore-scripts --no-audit --no-fund && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm run check)
-          (cd sources/Burrow-Tutor && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm run build && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm test)
-          (cd sources/Burrow-Theater && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm run build && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm test)
+          (cd sources/Burrow-Tutor && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm run build && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" timeout --kill-after=15s 10m npm test)
+          (cd sources/Burrow-Theater && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm run build && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" timeout --kill-after=15s 10m npm test)
           (cd sources/Burrow-Switchboard && npm run build && node --test test/server.test.mjs test/discord.test.mjs test/room-history.test.mjs test/ui.test.mjs && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm run test:core)
           find sources/Burrow-Skills -name SKILL.md -type f -size +0c | grep -q .
       - uses: actions/setup-python@v6
