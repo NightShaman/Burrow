@@ -240,6 +240,8 @@ const collection = {
       req('Run workbench step', 'POST', '/api/workbench/run', { body: { agentId: '{{agentId}}', step: 'inspect', message: 'Inspect.' } }),
     ]),
     folder('Forge', [
+      req('Forge retained archive', 'GET', '/api/archive/forge'),
+      req('Delete terminal Forge job', 'DELETE', '/api/forge/jobs/{{forgeJobId}}'),
       req('Forge catalog', 'GET', '/api/forge/catalog'),
       req('Forge history', 'GET', '/api/forge/jobs', { query: [['agentId', '{{agentId}}']] }),
       req('Generate media (paid)', 'POST', '/api/forge/jobs', { body: { agentId: '{{agentId}}', connectionId: '{{connectionId}}', modelId: '{{modelId}}', prompt: 'A quiet garden', idempotencyKey: 'replace-with-unique-request-key' } }),

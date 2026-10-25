@@ -4836,6 +4836,63 @@
             "$ref": "#/components/responses/ErrorResponse"
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "Forge"
+        ],
+        "summary": "deleteForgeJob",
+        "operationId": "deleteForgeJob",
+        "description": "Delete a terminal Forge job and its owned generated files, retaining metadata-only execution history. Active jobs return 409 forge_job_active. No request body. Idempotency keys remain reserved. Operator authentication required; diagnostics tokens forbidden.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "409": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
       }
     },
     "/api/forge/jobs/{id}/attach": {
@@ -7371,6 +7428,58 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/archive/forge": {
+      "get": {
+        "tags": [
+          "Forge"
+        ],
+        "summary": "listForgeArchive",
+        "operationId": "listForgeArchive",
+        "description": "Retained metadata-only Forge executions, including undeleted and deleted jobs, newest first. Operator-wide; diagnostics tokens forbidden. Legacy runs have no reconstructed provider calls. No media bytes, source URLs or storage references.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "records"
+                  ],
+                  "properties": {
+                    "records": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ForgeArchiveRecord"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "409": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorResponse"
           }
         }
       }
@@ -13030,6 +13139,101 @@
           }
         },
         "description": "Pool connections require pool, forbid credentials, and expose the union of matching OAuth member models. Non-pool connections require an HTTP(S) baseUrl."
+      },
+      "ForgeArchiveRecord": {
+        "type": "object",
+        "required": [
+          "id",
+          "jobId",
+          "calls",
+          "outcome"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "connectionId": {
+            "type": "string"
+          },
+          "modelId": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "deletedAt": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "calls": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "connectionId": {
+                  "type": "string"
+                },
+                "modelId": {
+                  "type": "string"
+                },
+                "startedAt": {
+                  "type": "string"
+                },
+                "completedAt": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "outcome": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "artifactCount": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "additionalProperties": false
       }
     }
   },

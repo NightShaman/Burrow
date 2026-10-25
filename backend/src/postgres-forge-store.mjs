@@ -17,6 +17,7 @@ import {
 } from "./model-adapters/google-lyria.mjs";
 import {
   persistGeneratedArtifact,
+  deleteGeneratedArtifact,
   resolveGeneratedArtifact,
 } from "./generated-artifact-store.mjs";
 import { persistChatAttachments } from "./attachment-store.mjs";
@@ -242,6 +243,39 @@ export class PostgresForgeStore {
     }
     const r = await this.pool.query(sql, values);
     return r.rows.map((x) => this.public(parse(x.record)));
+  }
+  async archive() {
+    await this.owner();
+    const result = await this.pool.query('SELECT record FROM forge_archive ORDER BY created_at DESC,id DESC');
+    return result.rows.map(row => parse(row.record));
+  }
+  async delete(id) {
+    const owner = await this.owner();
+    await withPostgresTransaction(this.pool, async client => {
+      const result = await client.query('SELECT record,agent_id FROM forge_jobs WHERE id=$1 FOR UPDATE', [id]);
+      if (!result.rows[0]) fail('forge_job_not_found', 404);
+      const row = result.rows[0];
+      const job = parse(row.record);
+      if (!['succeeded', 'failed', 'interrupted'].includes(job.status)) fail('forge_job_active', 409);
+      // Refuse file cleanup unless the terminal receipt was durably retained.
+      const retained = await client.query('SELECT 1 FROM forge_archive WHERE id=$1', [id]);
+      if (!retained.rowCount) fail('forge_archive_missing', 409);
+      if (job.agentId && !job.legacySourceAgentId) job.legacySourceAgentId = job.agentId;
+      if (!job.legacySourceAgentId && row.agent_id !== '__operator__') job.legacySourceAgentId = row.agent_id;
+      const root = await this.sourceRoot(job, owner);
+      for (const artifact of job.artifacts || []) {
+        if (!artifact.storageReference) continue;
+        // Legacy imports may share generated files with other jobs. Chat delivery
+        // writes a separate attachment copy and is never a deletion target.
+        const shared = await client.query(`SELECT 1 FROM forge_jobs WHERE id<>$1 AND
+          record->'artifacts' @> $2::jsonb LIMIT 1`,
+          [id, JSON.stringify([{ storageReference: artifact.storageReference }])]);
+        if (shared.rowCount) continue;
+        if (root) await deleteGeneratedArtifact({ agentWorkspaceRoot: root, storageReference: artifact.storageReference });
+      }
+      await client.query('DELETE FROM forge_jobs WHERE id=$1', [id]);
+    });
+    this.backgroundFailures.delete(id);
   }
   async save(job, client = this.pool) {
     job.updatedAt = at();
@@ -472,6 +506,8 @@ export class PostgresForgeStore {
         ? this.googleAdapterFactory({ config })
         : this.adapterFactory({ config });
       stage = "provider";
+      job.calls = [{ connectionId: job.connectionId, modelId: job.modelId, startedAt: at(), status: 'running' }];
+      if (!(await this.save(job))) return;
       const result = await adapter.complete({ prompt: job.prompt });
       if (!result.ok || !result.outputArtifacts?.length)
         throw Object.assign(
@@ -490,6 +526,8 @@ export class PostgresForgeStore {
             },
           },
         );
+      job.calls[0].status = 'succeeded';
+      job.calls[0].completedAt = at();
       stage = "artifact_storage";
       for (const artifact of result.outputArtifacts) {
         const stored = await persistGeneratedArtifact({
@@ -512,6 +550,10 @@ export class PostgresForgeStore {
       job.status = "succeeded";
       if (!(await this.save(job))) throw new Error("forge_job_ownership_lost");
     } catch (error) {
+      if (job.calls?.[0]?.status === 'running') {
+        job.calls[0].status = 'failed';
+        job.calls[0].completedAt = at();
+      }
       const retained = [];
       for (const a of job.artifacts) {
         try {
@@ -586,6 +628,8 @@ export class PostgresForgeStore {
     try {
       entry = await withPostgresTransaction(this.pool, async client => {
         await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`forge-delivery:${body.agentId}:${body.sessionId}:${key}`]);
+        const live = await client.query('SELECT 1 FROM forge_jobs WHERE id=$1 FOR SHARE', [id]);
+        if (!live.rowCount) fail('forge_job_not_found', 404);
         await client.query('SELECT 1 FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE',[body.agentId,body.sessionId]);
         const prior = await findSessionReplay(client, body.agentId, body.sessionId, null, key);
         if (prior) return prior.entry;

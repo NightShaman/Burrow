@@ -2,10 +2,11 @@ import { artifactResponseHeaders } from '../../src/artifact-response-policy.mjs'
 import { promises as fs } from 'node:fs';
 export function createForgeRoutes({ store, readJsonBody, sendJson }) {
   return async ({ req, res, url }) => {
-    if (!url.pathname.startsWith('/api/forge/')) return false;
+    if (!url.pathname.startsWith('/api/forge/') && url.pathname !== '/api/archive/forge') return false;
     try {
       const forge = store();
-      if (req.method === 'GET' && url.pathname === '/api/forge/catalog') sendJson(res, 200, await forge.catalog());
+      if (req.method === 'GET' && url.pathname === '/api/archive/forge') sendJson(res, 200, { records: await forge.archive() });
+      else if (req.method === 'GET' && url.pathname === '/api/forge/catalog') sendJson(res, 200, await forge.catalog());
       else if (req.method === 'GET' && url.pathname === '/api/forge/selections') sendJson(res, 200, { ok: true, selections: await forge.selections() });
       else if (req.method === 'PUT' && url.pathname === '/api/forge/selections') sendJson(res, 200, { ok: true, selections: await forge.setSelection(await readJsonBody(req)) });
       else if (req.method === 'GET' && url.pathname === '/api/forge/jobs') sendJson(res, 200, { ok: true, jobs: await forge.list() });
@@ -15,6 +16,7 @@ export function createForgeRoutes({ store, readJsonBody, sendJson }) {
         if (!match) { sendJson(res, 404, { ok: false, error: 'forge_job_not_found' }); return true; }
         const [, id, action, artifactId] = match;
         if (req.method === 'GET' && !action) { await forge.owner(); sendJson(res, 200, { ok: true, job: forge.public(await forge.get(id)) }); }
+        else if (req.method === 'DELETE' && !action) { await forge.delete(id); sendJson(res, 200, { ok: true }); }
         else if (req.method === 'POST' && action === 'attach') sendJson(res, 200, { ok: true, attachment: await forge.attach(id, await readJsonBody(req)) });
         else if (req.method === 'GET' && action === 'artifacts' && artifactId) { const { artifact, resolved } = await forge.artifact(id, artifactId); const bytes = await fs.readFile(resolved.filePath); res.writeHead(200, { 'content-type': artifact.mimeType, 'content-length': bytes.length, ...artifactResponseHeaders({ name: artifact.name, mimeType: artifact.mimeType, download: url.searchParams.get('download') === '1' }) }); res.end(bytes); }
         else sendJson(res, 405, { ok: false, error: 'method_not_allowed' });

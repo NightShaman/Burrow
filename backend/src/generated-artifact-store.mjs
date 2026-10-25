@@ -124,3 +124,29 @@ export async function resolveGeneratedArtifact({ agentWorkspaceRoot, storageRefe
   const basename = path.basename(candidate).replace(/^[0-9a-f]{8}-[0-9a-f-]{27}-/i, '');
   return { ...resolved, storageReference: path.relative(workspace, candidate).split(path.sep).join('/'), name: safeName(basename) };
 }
+
+/** Delete only a direct generated file through pinned directory descriptors.
+ * No recursive removal or re-resolved pathname unlink after validation. */
+export async function deleteGeneratedArtifact({ agentWorkspaceRoot, storageReference } = {}) {
+  if (typeof storageReference !== 'string' || !/^artifacts\/generated\/[^/]+$/.test(storageReference)) return false;
+  const name = storageReference.split('/')[2];
+  if (name === '.' || name === '..') return false;
+  const handles = [];
+  try {
+    let directory = path.resolve(agentWorkspaceRoot);
+    for (const part of ['', 'artifacts', 'generated']) {
+      if (part) directory = `/proc/self/fd/${handles.at(-1).fd}/${part}`;
+      handles.push(await fs.open(directory, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW));
+    }
+    const target = `/proc/self/fd/${handles.at(-1).fd}/${name}`;
+    const stat = await fs.lstat(target);
+    if (!stat.isFile() || stat.isSymbolicLink()) return false;
+    await fs.unlink(target);
+    return true;
+  } catch (error) {
+    if (['ENOENT', 'ENOTDIR', 'ELOOP'].includes(error?.code)) return false;
+    throw error;
+  } finally {
+    for (const handle of handles.reverse()) await handle.close();
+  }
+}

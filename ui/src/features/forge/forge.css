@@ -83,3 +83,5 @@
 .forge-recent-details{padding:16px 20px;overflow-wrap:anywhere;color:var(--muted)}
 .forge-recent-details p{white-space:pre-wrap}
 @container(max-width:700px){.forge-recents-grid .forge-preview{grid-column:1;grid-row:2}.forge-recents-grid .forge-jobs{max-height:40vh}}
+
+.forge-output-actions { display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:10px; }

@@ -1,3 +1,4 @@
+import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Agent } from '../../app/types';
@@ -17,7 +18,7 @@ function renderForge(initialJobs: unknown[] = []) {
     if (path === '/api/forge/jobs') return Promise.resolve({ jobs: initialJobs });
     return Promise.resolve({});
   });
-  return render(<Forge agents={[agent]} selectedAgentId="agent-a" sessionId="session-1" />);
+  return render(<ConfirmProvider><Forge agents={[agent]} selectedAgentId="agent-a" sessionId="session-1" /></ConfirmProvider>);
 }
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -105,7 +106,7 @@ describe('Forge workspace', () => {
       }
       return Promise.resolve({ jobs: [] });
     });
-    const view = render(<Forge selectedAgentId="a" sessionId="s" />);
+    const view = render(<ConfirmProvider><Forge selectedAgentId="a" sessionId="s" /></ConfirmProvider>);
     const select = await screen.findByRole('combobox', { name: 'Forge model' }) as HTMLSelectElement;
     await waitFor(() => expect(select.value).toBe(JSON.stringify(['c1', 'image-2'])));
     expect(apiMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
@@ -116,12 +117,12 @@ describe('Forge workspace', () => {
     expect(select.value).toBe(JSON.stringify(['c1', 'voice']));
     finishSave!();
     await waitFor(() => expect(select.disabled).toBe(false));
-    view.rerender(<Forge selectedAgentId="b" sessionId="s2" />);
+    view.rerender(<ConfirmProvider><Forge selectedAgentId="b" sessionId="s2" /></ConfirmProvider>);
     fireEvent.click(screen.getByRole('tab', { name: /Image/ }));
     expect(select.value).toBe(JSON.stringify(['c1', 'image-1']));
     expect((screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).value).toBe('keep my draft');
     view.unmount();
-    render(<Forge selectedAgentId="b" sessionId="s2" />);
+    render(<ConfirmProvider><Forge selectedAgentId="b" sessionId="s2" /></ConfirmProvider>);
     await waitFor(() => expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(JSON.stringify(['c1', 'image-1'])));
   });
 
@@ -133,7 +134,7 @@ describe('Forge workspace', () => {
         : Promise.resolve({ selections: { image: { connectionId: 'gone', modelId: 'missing' } } });
       return Promise.resolve({ jobs: [] });
     });
-    render(<Forge selectedAgentId="a" sessionId="s" />);
+    render(<ConfirmProvider><Forge selectedAgentId="a" sessionId="s" /></ConfirmProvider>);
     await screen.findByText(/Saved model unavailable/);
     fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), { target: { value: 'castle' } });
     expect((screen.getByRole('button', { name: 'Generate Image' }) as HTMLButtonElement).disabled).toBe(true);
@@ -186,7 +187,7 @@ describe('Forge workspace', () => {
       if (path === '/api/forge/jobs') return Promise.resolve({ jobs: [] });
       return Promise.resolve({});
     });
-    render(<Forge selectedAgentId="agent-a" sessionId="session-1" />);
+    render(<ConfirmProvider><Forge selectedAgentId="agent-a" sessionId="session-1" /></ConfirmProvider>);
     await screen.findByRole('option', { name: 'Image One' });
     fireEvent.click(screen.getByRole('tab', { name: /Music/ }));
     expect(screen.getByRole('option', { name: 'Lyria' })).toBeTruthy();
@@ -211,7 +212,7 @@ describe('Forge workspace', () => {
       if (path === '/api/forge/jobs') return Promise.resolve({ jobs: [] });
       return Promise.resolve({});
     });
-    render(<Forge selectedAgentId="agent-a" sessionId="session-1" />);
+    render(<ConfirmProvider><Forge selectedAgentId="agent-a" sessionId="session-1" /></ConfirmProvider>);
     await screen.findByRole('option', { name: 'Image One' });
     fireEvent.click(screen.getByRole('tab', { name: /Music/ }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Musical direction' }), { target: { value: 'dreamy synth pop' } });
@@ -278,7 +279,38 @@ it('attaches remote artifacts with verified raw conversation identity', async ()
   const job = { id: 'job-owner', kind: 'image', modelId: 'image-1', prompt: 'owner output', status: 'succeeded', createdAt: '2026-09-27T00:00:00Z', artifacts: [{ id: 'artifact', kind: 'image', name: 'a.png' }] };
   apiMock.mockImplementation((path: string) => Promise.resolve(path.endsWith('/catalog') ? catalog : path === '/api/forge/jobs' ? { jobs: [job] } : {}));
   const remote = { ...agent, id: 'same', resourceId: 'same' };
-  render(<Forge agents={[remote]} selectedAgentId={remote.id} sessionId="session" />);
+  render(<ConfirmProvider><Forge agents={[remote]} selectedAgentId={remote.id} sessionId="session" /></ConfirmProvider>);
   fireEvent.click(await screen.findByRole('button', { name: /Attach/ }));
   await waitFor(() => expect(apiMock).toHaveBeenCalledWith('/api/forge/jobs/job-owner/attach', expect.objectContaining({ body: JSON.stringify({ agentId: 'same', sessionId: 'session', artifactId: 'artifact' }) })));
+});
+
+const terminalJob = { id: 'delete-me', connectionId: 'c1', modelId: 'image-1', kind: 'image', prompt: 'a castle to delete', status: 'succeeded', createdAt: '2026-10-25T00:00:00Z', updatedAt: '2026-10-25T00:00:00Z', artifacts: [] };
+it('confirms deletion, cancels without mutation, removes selected job and refreshes', async () => {
+  renderForge([terminalJob]);
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete creation' }));
+  expect(screen.getByRole('alertdialog').textContent).toContain('Calls, prompts, and outcomes remain in Archive');
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(apiMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+  await Promise.resolve();
+  fireEvent.click(screen.getByRole('button', { name: 'Delete creation' }));
+  fireEvent.click(screen.getAllByRole('button', { name: 'Delete creation' }).at(-1)!);
+  await waitFor(() => expect(apiMock).toHaveBeenCalledWith('/api/forge/jobs/delete-me', expect.objectContaining({ method: 'DELETE' })));
+  await waitFor(() => expect(screen.queryByRole('button', { name: /Image succeeded: a castle to delete/ })).toBeNull());
+  expect(screen.getByText('Creation deleted. Execution evidence remains in Archive.')).toBeTruthy();
+  expect(apiMock.mock.calls.filter(([path]) => path === '/api/forge/jobs').length).toBe(2);
+});
+it.each(['queued', 'running'])('does not offer deletion for %s jobs', async status => {
+  renderForge([{ ...terminalJob, status }]);
+  await screen.findByRole('button', { name: `Image ${status}: a castle to delete` });
+  expect(screen.queryByRole('button', { name: 'Delete creation' })).toBeNull();
+});
+it('keeps job and shows retryable error when deletion fails', async () => {
+  renderForge([terminalJob]);
+  await screen.findByRole('button', { name: 'Delete creation' });
+  const original = apiMock.getMockImplementation()!;
+  apiMock.mockImplementation((path: string, init?: RequestInit) => init?.method === 'DELETE' ? Promise.reject(new Error('job is busy')) : original(path, init));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete creation' }));
+  fireEvent.click(screen.getAllByRole('button', { name: 'Delete creation' }).at(-1)!);
+  await screen.findByText('Could not delete creation: job is busy');
+  expect(screen.getByRole('button', { name: /Image succeeded: a castle to delete/ })).toBeTruthy();
 });

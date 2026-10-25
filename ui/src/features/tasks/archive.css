@@ -840,3 +840,7 @@
 .task-archive-description dl { display:flex; flex-wrap:wrap; gap:12px 24px; font-size:12px; }
 .task-archive-description dt { color:var(--muted); }
 .task-archive-description dd { margin:4px 0 0; }
+
+.forge-evidence-reader { padding:20px; overflow-wrap:anywhere; }
+.forge-evidence-reader pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; line-height:1.6; }
+.forge-evidence-prompt { white-space:pre-wrap; line-height:1.6; }
