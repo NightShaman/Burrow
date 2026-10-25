@@ -270,7 +270,7 @@ it('owns reader lifetime by filter scope, even if an aborted detail rejects late
   expect(screen.queryByRole('heading', { level: 2, name: 'Selected conversation' })).toBeNull();
 });
 
-it('does not prefetch inactive shelves and drops selection on leaving and returning', async () => {
+it('prefetches navigation counts and still drops selection on leaving and returning', async () => {
   const dreams = vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([]));
   const cards = vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([]));
   const item = { id: 's', sessionId: 's', agentId: 'a', title: 'Selected conversation', archived: true } as ArchiveSession;
@@ -280,10 +280,12 @@ it('does not prefetch inactive shelves and drops selection on leaving and return
   render(<Archive repository={archiveRepository} agents={[]} />);
   fireEvent.click(await screen.findByRole('button', { name: /Selected conversation.*turns/i }));
   await screen.findByText('Reader body');
-  expect(dreams).not.toHaveBeenCalled(); expect(cards).not.toHaveBeenCalled();
+  expect(dreams).toHaveBeenCalledTimes(1); expect(cards).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button', { name: /^Dreams\s*0$/ })).toBeTruthy();
+  expect(screen.getByRole('button', { name: /^Tiddle\s*0$/ })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: /Dreams/ }));
   await screen.findByText('No dreams match this shelf.');
-  expect(cards).not.toHaveBeenCalled();
+  expect(cards).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button', { name: /^Chat/ }));
   await screen.findByRole('button', { name: /Selected conversation.*turns/i });
   expect(screen.queryByText('Reader body')).toBeNull();
@@ -321,4 +323,20 @@ it('filters agent choices without filtering archive records or attribution', asy
   fireEvent.change(screen.getByRole('combobox', { name:'Filter by agent' }), { target:{ value:'on' } });
   rerender(<Archive repository={archiveRepository} agents={[{ ...base, id:'on', name:'Available colleague', enabled:false }]} />);
   await waitFor(() => expect((screen.getByRole('combobox', { name:'Filter by agent' }) as HTMLSelectElement).value).toBe(''));
+});
+
+it('loads all navigation badges before their shelves are clicked', async () => {
+  vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([]));
+  vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([{} as any, {} as any]));
+  vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([card('a', 'A')]));
+  vi.spyOn(archiveRepository, 'listCalendarAvailability').mockImplementation(async (kind, month) => ({ ok: true, kind, month, dates: [] }));
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => new Response(JSON.stringify(String(input).includes('/task-board/tasks') ? { tasks: [{ archived: true }, { archived: false }, { archived: true }] } : String(input).includes('/task-board/projects') ? { projects: [] } : { mods: [] }), { headers: { 'content-type': 'application/json' } }));
+  render(<Archive repository={archiveRepository} agents={[]} />);
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: /^Dreams\s*2$/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Tiddle\s*1$/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Tasks\s*2$/ })).toBeTruthy();
+  });
+  expect(fetch).toHaveBeenCalled();
+  expect(screen.queryByRole('region', { name: 'Archived tasks' })).toBeNull();
 });

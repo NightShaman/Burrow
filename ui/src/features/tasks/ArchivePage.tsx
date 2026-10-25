@@ -1,3 +1,5 @@
+import { api } from '../../app/api';
+import type { BoardTask, Project } from './TasksPage';
 import { enabledAgents } from '../../app/agentCatalog';
 import { loadModArchives, modsChangedEvent, type ModArchive } from '../../app/modPanels';
 import { ModArchiveHost } from '../mods/ModArchiveHost';
@@ -10,7 +12,7 @@ import { buildCalendarDays, dateFromMonthKey, monthKey } from './archiveDerivati
 import type { ArchiveKind } from './archiveTypes';
 import { ChatArchiveShelf } from './ChatArchiveShelf';
 import { DreamArchiveShelf } from './DreamArchiveShelf';
-import { TaskArchiveShelf } from './TaskArchiveShelf';
+import { TaskArchiveShelf, taskArchiveDate } from './TaskArchiveShelf';
 import { TiddleArchiveShelf } from './TiddleArchiveShelf';
 const archiveKinds: { id: ArchiveKind; label: string; detail: string }[] = [
   { id: 'chat', label: 'Chat', detail: 'Searchable conversations and session history.' },
@@ -49,6 +51,26 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
   const [chatCount, setChatCount] = useState<number | null>(null);
   const [dreamCount, setDreamCount] = useState<number | null>(null);
   const [tiddleCount, setTiddleCount] = useState<number | null>(null);
+  // Populate navigation badges on entry, not only after opening each shelf.
+  useEffect(() => {
+    const abort = new AbortController();
+    setDreamCount(null); setTiddleCount(null); setTaskCount(null);
+    void archiveRepository.listDreams(abort.signal, null, selectedDate || undefined, selectedAgent || undefined)
+      .then(page => { if (!abort.signal.aborted) setDreamCount(page.items.length); }).catch(() => {});
+    void archiveRepository.listContinuityCards(selectedAgent, abort.signal)
+      .then(page => { if (!abort.signal.aborted) setTiddleCount(page.items.filter(card => !search.trim() || `${card.title} ${card.summary}`.toLowerCase().includes(search.trim().toLowerCase())).length); }).catch(() => {});
+    void Promise.all([
+      api<{ tasks: BoardTask[] }>('/api/task-board/tasks', { signal: abort.signal }),
+      api<{ projects: Project[] }>('/api/task-board/projects', { signal: abort.signal }),
+    ]).then(([{ tasks }, { projects }]) => {
+        if (abort.signal.aborted) return;
+        const agentId = agents.find(agent => agent.id === selectedAgent)?.resourceId ?? selectedAgent;
+        setTaskCount(tasks.filter(task => task.archived && (!agentId || task.assignedAgentId === agentId) &&
+          (!selectedDate || taskArchiveDate(task.archivedAt) === selectedDate) &&
+          (!search.trim() || [task.title, task.description, projects.find(project => project.id === task.projectId)?.name ?? 'Unknown project', agents.find(agent => (agent.resourceId ?? agent.id) === task.assignedAgentId)?.name ?? task.assignedAgentId ?? 'Unassigned', task.priority].join(' ').toLowerCase().includes(search.trim().toLowerCase()))).length);
+      }).catch(() => {});
+    return () => abort.abort();
+  }, [archiveRepository, selectedAgent, selectedDate, search, agents]);
   const [calendarMonth, setCalendarMonth] = useState(() => monthKey(new Date()));
   const [calendarDates, setCalendarDates] = useState<string[]>([]);
   const [calendarAvailabilityState, setCalendarAvailabilityState] = useState<'loading' | 'ready' | 'error'>('loading');
