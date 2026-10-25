@@ -31,6 +31,8 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
     onSetModelContextOverride={editor.setModelContextOverride}
   /> : <div className="model-detail-empty"><strong>Select a model to edit capabilities</strong><span>Model cards stay compact here; capability controls appear in the detail column.</span></div>;
 
+  if (loadBalancing) return <LoadBalancingPools editor={editor} providers={visibleProviders} overflowTarget={overflowTarget} />;
+
   return <div className="connections-stack">
     <div className="connections-models-column">
       <SettingSection title={loadBalancing ? 'Load Balancing' : 'Models'}>
@@ -45,13 +47,6 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
           <button className={`oauth-trigger${editor.apiType !== 'anthropic-messages' ? ' active' : ''}`} type="button" onClick={editor.openOpenAiOAuth}><span>OpenAI OAuth</span><small>Sign in with ChatGPT</small></button>
           <button className={`oauth-trigger${editor.apiType === 'anthropic-messages' ? ' active' : ''}`} type="button" onClick={editor.openAnthropicOAuth}><span>Anthropic OAuth</span><small>Claude Code login</small></button>
         </div>}
-        {editor.poolConnection && <fieldset className="provider-pool"><legend>Account pool</legend>
-          <label className="pool-account"><input type="checkbox" checked={editor.poolEnabled} onChange={event => editor.setPoolEnabled(event.target.checked)} /><strong>Enable load balancing</strong></label>
-          <div className="pool-accounts">{editor.poolMembers.map(member => <label className="pool-account" key={member.id}><input type="checkbox" checked={editor.memberConnectionIds.includes(member.id)} onChange={() => editor.togglePoolMember(member.id)} /><span>{member.provider}</span></label>)}</div>
-          {!editor.poolMembers.length && <p className="settings-empty">Connect a compatible {editor.apiType === 'openai-lb' ? 'OpenAI' : 'Anthropic'} OAuth account first.</p>}
-          {editor.missingPoolMembers.map(id => <label className="pool-account" key={id}><input type="checkbox" checked onChange={() => editor.togglePoolMember(id)} /><span>Unavailable account: {id}</span></label>)}
-          {!!editor.missingPoolMembers.length && <p className="settings-request-error" role="alert">Remove unavailable accounts before saving.</p>}
-        </fieldset>}
         {editor.oauthModal && <ModelConnectionOAuthDialog
           kind={editor.oauthModal}
           editingId={editor.editingId}
@@ -99,4 +94,30 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
     {overflowTarget && createPortal(<div className="settings-overflow-content model-detail-surface"><SettingSection title="Model details">{modelDetail}</SettingSection><SavedProviders providers={visibleProviders} open={editor.savedProvidersOpen} onOpenChange={editor.setSavedProvidersOpen} onEdit={editor.editProvider}
           selectedId={editor.editingId} onDelete={(item) => void editor.deleteProvider(item)} expanded /></div>, overflowTarget)}
   </div>;
+}
+
+function LoadBalancingPools({ editor, providers, overflowTarget }: {
+  editor: ReturnType<typeof useModelConnectionEditor>;
+  providers: SavedProvider[];
+  overflowTarget?: HTMLElement | null;
+}) {
+  const saved = <SavedProviders pools providers={providers} open={editor.savedProvidersOpen} onOpenChange={editor.setSavedProvidersOpen} onEdit={editor.editProvider} selectedId={editor.editingId} onDelete={item => void editor.deleteProvider(item)} expanded={Boolean(overflowTarget)} />;
+  return <div className="connections-stack"><div className="connections-models-column">
+    <SettingSection title="Load Balancing">
+      <div className="field-pair">
+        <Field label="Name"><input value={editor.provider} onChange={event => editor.setProvider(event.target.value)} placeholder="Pool name" /></Field>
+        <Field label="Adapter"><select value={editor.apiType} onChange={event => editor.setApiType(event.target.value)}><option value="openai-lb">OpenAI</option><option value="anthropic-lb">Anthropic</option></select></Field>
+      </div>
+      <label className="pool-account"><input type="checkbox" checked={editor.poolEnabled} onChange={event => editor.setPoolEnabled(event.target.checked)} /><span>Enabled</span></label>
+      <fieldset className="provider-pool"><legend>Member accounts</legend>
+        <div className="pool-accounts">{editor.poolMembers.map(member => <label className="pool-account" key={member.id}><input type="checkbox" checked={editor.memberConnectionIds.includes(member.id)} onChange={() => editor.togglePoolMember(member.id)} /><span>{member.provider}</span></label>)}</div>
+        {!editor.poolMembers.length && <p className="settings-empty">Connect a compatible {editor.apiType === 'openai-lb' ? 'OpenAI' : 'Anthropic'} OAuth account in Models first.</p>}
+        {editor.missingPoolMembers.map(id => <label className="pool-account" key={id}><input type="checkbox" checked onChange={() => editor.togglePoolMember(id)} /><span>Unavailable account: {id}</span></label>)}
+        {!!editor.missingPoolMembers.length && <p className="settings-request-error" role="alert">Remove unavailable accounts before saving.</p>}
+      </fieldset>
+      <div className="model-actions"><button className="secondary" onClick={editor.resetProvider}>Cancel</button><button className="primary" onClick={() => void editor.saveProvider()} disabled={!editor.connectionReady || editor.requestState !== 'idle'}>{editor.requestState === 'saving' ? 'Saving…' : 'Save'}</button></div>
+      {editor.requestError && <p className="settings-request-error" role="alert">{editor.requestError}</p>}
+      {!overflowTarget && saved}
+    </SettingSection>
+  </div>{overflowTarget && createPortal(<div className="settings-overflow-content"><SettingSection title="Saved pools">{saved}</SettingSection></div>, overflowTarget)}</div>;
 }

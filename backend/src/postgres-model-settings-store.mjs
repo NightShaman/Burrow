@@ -129,7 +129,19 @@ export class PostgresModelSettingsStore {
     await client.query(`INSERT INTO model_connection_secrets (id,connection_id,name,ciphertext,nonce,auth_tag,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$7) ON CONFLICT (connection_id,name) DO UPDATE SET ciphertext=EXCLUDED.ciphertext,nonce=EXCLUDED.nonce,auth_tag=EXCLUDED.auth_tag,updated_at=EXCLUDED.updated_at`, [id, connectionId, name, sealed.ciphertext, sealed.nonce, sealed.authTag, timestamp]);
     return id;
   }
-  async save(input = {}) {
+  async save(input = {}, discoveryOptions = {}) {
+    // Provider I/O must complete before acquiring connection-write/SQL locks.
+    if (isProviderPool(input)) {
+      const connection = assertConnection(input);
+      if (input.auth || input.apiKey || input.oauthTokens) throw new Error('provider_pool_credentials_forbidden');
+      const members = await Promise.all(connection.pool.memberConnectionIds.map(id => this.get(id)));
+      assertProviderPoolMembers({ ...connection, id: input.id }, members.filter(Boolean));
+      for (const member of members) if (!member.models.length) {
+        const models = await this.discoverModels({ ...discoveryOptions, id: member.id, signal: discoveryOptions.signal || AbortSignal.timeout(15_000) });
+        if (!models.length) throw new Error('provider_pool_member_catalog_empty');
+        await this.persistDiscoveredModels(member.id, models, { onlyIfEmpty: true });
+      }
+    }
     const id = String(input.id ?? '').trim() || randomUUID();
     return withPostgresTransaction(this.pool, async (client) => {
       // Serialize all connection writes so provider-label renames cannot deadlock
@@ -150,6 +162,7 @@ export class PostgresModelSettingsStore {
         const memberRows = await client.query(this.selectSql('WHERE c.id=ANY($1::text[])'), [connection.pool.memberConnectionIds]);
         poolMembers = connection.pool.memberConnectionIds.map(memberId => memberRows.rows.map(publicConnection).find(member => member.id === memberId)).filter(Boolean);
         assertProviderPoolMembers({ ...connection, id }, poolMembers);
+        if (poolMembers.some(member => !member.models.length)) throw new Error('provider_pool_member_catalog_empty');
       }
       // Member credential/API changes must preserve every referencing pool.
       const references = await client.query(this.selectSql("WHERE c.pool_json->'memberConnectionIds' ? $1 AND c.id<>$1"), [id]);
@@ -168,8 +181,7 @@ export class PostgresModelSettingsStore {
       const priorById = new Map(existingModels.map((model) => [model.id, model]));
       let models = submittedModels.map((model) => { const prior = priorById.get(model.id); return (!prior || model.manual || prior.manual) ? model : normalizeModels([{ ...prior, ...model }], { provider: connection.provider, apiType: connection.apiType })[0]; });
       if (isProviderPool(connection)) {
-        const selected = new Map(submittedModels.map(model => [model.id, model]));
-        models = providerPoolModels(poolMembers).map(model => ({ ...model, ...(selected.get(model.id) || {}) }));
+        models = providerPoolModels(poolMembers);
       }
       await client.query(`INSERT INTO model_connections (id,provider,api_type,base_url,accepted_input_json,models_json,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$7) ON CONFLICT (id) DO UPDATE SET provider=EXCLUDED.provider,api_type=EXCLUDED.api_type,base_url=EXCLUDED.base_url,accepted_input_json=EXCLUDED.accepted_input_json,models_json=EXCLUDED.models_json,updated_at=EXCLUDED.updated_at`, [id, connection.provider, connection.apiType, connection.baseUrl, JSON.stringify(connection.acceptedInput), JSON.stringify(models), stamp]);
       await client.query('UPDATE model_connections SET pool_json=$2 WHERE id=$1', [id, connection.pool ? JSON.stringify(connection.pool) : null]);
@@ -178,8 +190,7 @@ export class PostgresModelSettingsStore {
         const parent = publicConnection(reference);
         const rows = await client.query(this.selectSql('WHERE c.id=ANY($1::text[])'), [parent.pool.memberConnectionIds]);
         const members = parent.pool.memberConnectionIds.map(memberId => rows.rows.map(publicConnection).find(member => member.id === memberId)).filter(Boolean);
-        const prior = new Map(parent.models.map(model => [model.id, model]));
-        const union = providerPoolModels(members).map(model => ({ ...model, ...(prior.has(model.id) ? { selected: prior.get(model.id).selected } : {}) }));
+        const union = providerPoolModels(members);
         await client.query('UPDATE model_connections SET models_json=$2,updated_at=$3 WHERE id=$1', [parent.id, JSON.stringify(union), stamp]);
       }
       const row = await client.query(this.selectSql('WHERE c.id=$1'), [id]); return publicConnection(row.rows[0]);
@@ -301,17 +312,45 @@ export class PostgresModelSettingsStore {
     if (!token) throw new Error('model_connection_auth_required');
     return { type: auth.type || 'api_key', provider: auth.provider || connection.provider, source: auth.source || null, token, expiresAt: auth.expiresAt || null };
   }
+  async persistDiscoveredModels(id, discovered, { onlyIfEmpty = false } = {}) {
+    return withPostgresTransaction(this.pool, async client => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [CONNECTION_WRITE_LOCK]);
+      const result = await client.query(this.selectSql('WHERE c.id=$1'), [id]);
+      const member = publicConnection(result.rows[0]);
+      if (!member) throw new Error('model_connection_not_found');
+      assertProviderPoolMembers({ apiType: member.auth?.provider === 'openai' ? 'openai-lb' : 'anthropic-lb', pool: { memberConnectionIds: [id] } }, [member]);
+      if (onlyIfEmpty && member.models.length) return;
+      const prior = new Map(member.models.map(model => [model.id, model]));
+      const models = normalizeModels(discovered.map(model => ({ ...prior.get(model.id), ...model, selected: prior.get(model.id)?.selected ?? false })), { provider: member.provider, apiType: member.apiType });
+      for (const model of member.models) if (model.manual && !models.some(item => item.id === model.id)) models.push(model);
+      const stamp = this.clock();
+      await client.query('UPDATE model_connections SET models_json=$2,updated_at=$3 WHERE id=$1', [id, JSON.stringify(models), stamp]);
+      const refs = await client.query(this.selectSql("WHERE c.pool_json->'memberConnectionIds' ? $1"), [id]);
+      for (const row of refs.rows) {
+        const parent = publicConnection(row);
+        const rows = await client.query(this.selectSql('WHERE c.id=ANY($1::text[])'), [parent.pool.memberConnectionIds]);
+        const members = parent.pool.memberConnectionIds.map(id => rows.rows.map(publicConnection).find(member => member.id === id)).filter(Boolean);
+        await client.query('UPDATE model_connections SET models_json=$2,updated_at=$3 WHERE id=$1', [parent.id, JSON.stringify(providerPoolModels(members)), stamp]);
+      }
+    });
+  }
   async discoverModels(options = {}) {
     const connection = await this.get(options.id || options.connectionId);
     if (!connection) throw new Error('model_connection_not_found');
     if (isProviderPool(connection)) {
       const members = await Promise.all(connection.pool.memberConnectionIds.map(id => this.get(id)));
       assertProviderPoolMembers(connection, members.filter(Boolean));
-      const catalogs = await Promise.all(members.map(async member => ({ ...member, models: await this.discoverModels({ ...options, id: member.id, connectionId: member.id, apiType: member.apiType, baseUrl: member.baseUrl }) })));
+      const catalogs = await Promise.all(members.map(async member => {
+        const models = await this.discoverModels({ ...options, id: member.id, connectionId: member.id, apiType: member.apiType, baseUrl: member.baseUrl });
+        await this.persistDiscoveredModels(member.id, models);
+        return { ...member, models };
+      }));
       return providerPoolModels(catalogs);
     }
-    const auth = options.auth || await this.auth(connection.id) || {};
-    const token = options.apiKey || auth.apiKey || auth.accessToken || auth.token;
+    let auth = options.auth || await this.auth(connection.id) || {};
+    const resolved = !options.auth && auth.type === 'oauth' ? await this.resolveAuth(connection.id, options) : null;
+    if (resolved) auth = await this.auth(connection.id) || auth;
+    const token = options.apiKey || resolved?.token || auth.apiKey || auth.accessToken || auth.token;
     return discoverModels({ ...options, baseUrl: options.baseUrl || connection.baseUrl, provider: options.provider || connection.provider, apiType: options.apiType || connection.apiType, auth, apiKey: token, fetchImpl: options.fetchImpl || fetch, catalogFetchImpl: options.catalogFetchImpl || options.fetchImpl || fetch, store: options.store || this });
   }
 

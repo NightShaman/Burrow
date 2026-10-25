@@ -104,9 +104,7 @@ export function assertProviderPoolMembers(connection, members = []) {
 export function providerPoolModels(members = []) {
   const models = new Map();
   for (const member of members) for (const model of member.models || []) {
-    const prior = models.get(model.id);
-    if (!prior) models.set(model.id, { ...model });
-    else if (model.selected !== false) prior.selected = true;
+    if (!models.has(model.id)) models.set(model.id, { ...model, selected: true });
   }
   return [...models.values()];
 }

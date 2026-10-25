@@ -70,12 +70,16 @@ export function modelSupportsTemperature({ provider = '', api = '', model = '', 
   if (isAnthropicMessagesConnection({ provider, apiType: api })) return anthropicSupportsTemperature(model);
   return true;
 }
+// Internal capability: only a pool resolver may bypass direct-selection flags.
+const POOL_MEMBER_MODEL = Symbol('pool-member-model');
 async function resolveInjectedModel(connectionId, modelId, args = {}) {
   const store = args.modelSettings || args.stores?.models || args.runtimeStores?.models;
   if (!store) throw new Error('model_settings_store_required');
   const connection = await store.get(connectionId);
   if (!connection) throw new Error('model_connection_not_found');
-  const model = selectedModels(connection).find((item) => item.id === modelId);
+  const poolMember = args[POOL_MEMBER_MODEL];
+  const catalog = poolMember?.connectionId === connectionId && poolMember?.modelId === modelId && !isProviderPool(connection) ? connection.models || [] : selectedModels(connection);
+  const model = catalog.find((item) => item.id === modelId);
   if (!model) throw new Error('model_not_enabled_for_connection');
   const auth = isProviderPool(connection) ? null : await store.resolveAuth(connection.id, { fetchImpl: args.fetchImpl ?? fetch, signal: args.abort_signal ?? args.abortSignal });
   const token = auth?.token ?? auth?.apiKey ?? auth?.accessToken;
@@ -166,7 +170,7 @@ export async function resolveModelConfig(args = {}) {
         assertProviderPoolMembers(current, members.filter(Boolean));
         return { connection: current, members };
       },
-      resolveMember: id => resolveModelConfig({ ...args, model_connection_id: id, modelConnectionId: id, model: model.id }),
+      resolveMember: id => resolveModelConfig({ ...args, [POOL_MEMBER_MODEL]: { connectionId: id, modelId: model.id }, model_connection_id: id, modelConnectionId: id, model: model.id }),
     };
   }
   Object.defineProperty(result, 'resolveChildModel', { enumerable: false, value: async (childId = null) => {

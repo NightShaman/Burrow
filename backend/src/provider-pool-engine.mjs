@@ -66,7 +66,7 @@ export class ProviderPoolEngine {
     const now = this.clock();
     const diagnostics = await Promise.all(ids.map(async (id) => {
       try {
-        if (refreshed && !refreshed.members.find(member => member.id === id)?.models?.some(item => item.id === model && item.selected !== false)) return { id, eligible: false, reason: 'model_unavailable' };
+        if (refreshed && !refreshed.members.find(member => member.id === id)?.models?.some(item => item.id === model)) return { id, eligible: false, reason: 'model_unavailable' };
         const method = family === 'anthropic' ? 'anthropicOauthUsage' : 'openaiOauthUsage';
         const usage = await this.usageService?.[method]?.({ connectionId: id });
         return { id, ...evaluatePoolUsage(usage, { family, model, now }) };

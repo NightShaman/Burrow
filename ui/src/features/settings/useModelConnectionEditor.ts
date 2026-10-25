@@ -111,7 +111,7 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
 
   const saveProvider = async (modelsOverride?: RuntimeModel[], onSaved?: () => void) => {
     const models = modelsOverride ?? availableModels;
-    if (!connectionReady || !models.some((model) => model.selected !== false)) return;
+    if (!connectionReady || (!poolConnection && !models.some((model) => model.selected !== false))) return;
     const generation = ++editorGeneration.current;
     setRequestState('saving');
     setRequestError('');
@@ -130,7 +130,7 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
             ...(oauthAccessToken.trim() ? { access_token: oauthAccessToken.trim() } : {}),
             ...(oauthRefreshToken.trim() ? { refresh_token: oauthRefreshToken.trim() } : {}),
           } } : {}),
-          models,
+          ...(!poolConnection ? { models } : {}),
         }),
       });
       if (isEditorCurrent(generation)) {
@@ -326,7 +326,13 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
 
   const changeApiType = (next: string) => {
     if (next === apiType) return;
-    if (isProviderPool(next) || poolConnection) {
+    if (isProviderPool(next) && poolConnection) {
+      editorGeneration.current += 1;
+      setMemberConnectionIds([]);
+      setAvailableModels([]);
+      setRequestError('');
+      setRequestState('idle');
+    } else if (isProviderPool(next) || poolConnection) {
       resetProvider();
       setProvider(next === 'openai-lb' ? 'OpenAI LB' : next === 'anthropic-lb' ? 'Anthropic LB' : '');
     } else {

@@ -198,7 +198,7 @@ it('navigates between separate Models and Load Balancing editors without leaking
  fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'Direct draft' } });
  fireEvent.click(screen.getByRole('button', { name: 'Load Balancing' }));
  expect(screen.getByRole('heading', { name: 'Load Balancing' })).toBeTruthy();
- expect((screen.getByLabelText('Provider') as HTMLInputElement).value).toBe('OpenAI LB');
+ expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('OpenAI LB');
  expect(screen.queryByLabelText('API type')).toBeNull();
  expect(screen.queryByLabelText('URL')).toBeNull();
  fireEvent.click(screen.getByRole('button', { name: 'Models' }));

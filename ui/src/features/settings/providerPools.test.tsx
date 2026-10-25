@@ -19,7 +19,7 @@ it('only offers matching-family OAuth members, never API keys or nested pools', 
   expect(compatiblePoolMembers('anthropic-lb', [...accounts, pool]).map(a => a.id)).toEqual(['claude']);
 });
 
-it.each(['openai-lb', 'anthropic-lb'])('discovers and saves %s without URL, own credentials or stale direct identity', async apiType => {
+it.each(['openai-lb', 'anthropic-lb'])('saves %s without discovery, models, credentials or stale direct identity', async apiType => {
   vi.mocked(api).mockResolvedValue({ models: [{ id: 'shared', selected: true }] });
   const changed = vi.fn().mockResolvedValue(undefined);
   const { result } = renderHook(() => useModelConnectionEditor({ savedProviders: accounts, onModelConnectionsChanged: changed }));
@@ -29,14 +29,11 @@ it.each(['openai-lb', 'anthropic-lb'])('discovers and saves %s without URL, own 
   expect(result.current.apiKey).toBe('');
   const id = apiType === 'openai-lb' ? 'first' : 'claude';
   act(() => result.current.togglePoolMember(id));
-  await act(async () => { await result.current.connect(); });
-  const discovery = JSON.parse(String(vi.mocked(api).mock.calls[0][1]?.body));
-  expect(discovery).toMatchObject({ apiType, pool: { enabled: true, memberConnectionIds: [id], sticky: true, preferEarlierReset: false } });
-  for (const key of ['id', 'baseUrl', 'apiKey', 'oauthTokens']) expect(discovery).not.toHaveProperty(key);
   await act(async () => { await result.current.saveProvider(); });
-  const saved = JSON.parse(String(vi.mocked(api).mock.calls[1][1]?.body));
-  expect(saved).toMatchObject({ apiType, models: [{ id: 'shared', selected: true }], pool: discovery.pool });
-  for (const key of ['id', 'baseUrl', 'apiKey', 'oauthTokens']) expect(saved).not.toHaveProperty(key);
+  expect(vi.mocked(api)).toHaveBeenCalledOnce();
+  const saved = JSON.parse(String(vi.mocked(api).mock.calls[0][1]?.body));
+  expect(saved).toMatchObject({ apiType, pool: { enabled: true, memberConnectionIds: [id], sticky: true, preferEarlierReset: false } });
+  for (const key of ['id', 'baseUrl', 'apiKey', 'oauthTokens', 'models']) expect(saved).not.toHaveProperty(key);
   expect(changed).toHaveBeenCalledOnce();
 });
 
@@ -48,7 +45,8 @@ it('round-trips disabled pools, ordered membership and model selection; membersh
   expect(result.current.memberConnectionIds).toEqual(['second', 'first']);
   await act(async () => { await result.current.saveProvider(); });
   const body = JSON.parse(String(vi.mocked(api).mock.calls[0][1]?.body));
-  expect(body).toMatchObject({ id: 'pool', pool: { enabled: false, memberConnectionIds: ['second', 'first'] }, models: pool.connectionModels });
+  expect(body).toMatchObject({ id: 'pool', pool: { enabled: false, memberConnectionIds: ['second', 'first'] } });
+  expect(body).not.toHaveProperty('models');
   act(() => result.current.editProvider(pool));
   act(() => result.current.togglePoolMember('first'));
   expect(result.current.availableModels).toEqual([]);
@@ -72,14 +70,15 @@ it('rejects stale discovery after membership changes and surfaces successful-HTT
 
 it('shows only account controls for pools, blocks empty membership, retains direct accounts, handles missing members', async () => {
   render(<ModelConnections loadBalancing savedProviders={[...accounts, { ...pool, pool: { enabled: true, memberConnectionIds: ['missing'] } }]} onModelConnectionsChanged={vi.fn()} mcpConnections={null} />);
-  expect((screen.getByLabelText('Pool type') as HTMLSelectElement).value).toBe('openai-lb');
+  expect((screen.getByLabelText('Adapter') as HTMLSelectElement).value).toBe('openai-lb');
   expect(screen.queryByLabelText('URL')).toBeNull();
   expect(screen.queryByLabelText('API key')).toBeNull();
   expect(screen.queryByRole('button', { name: /^OpenAI OAuth|^Anthropic OAuth/ })).toBeNull();
-  expect((screen.getByRole('button', { name: 'Connect' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull();
+  expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(screen.getByLabelText('first'));
-  expect((screen.getByRole('button', { name: 'Connect' }) as HTMLButtonElement).disabled).toBe(false);
-  fireEvent.click(screen.getByText('Saved providers'));
+  expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByText('Saved pools'));
   fireEvent.click(screen.getByRole('button', { name: /OpenAI LB.*accounts/ }));
   expect(screen.getByRole('alert').textContent).toContain('Remove unavailable accounts');
   expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
@@ -105,18 +104,48 @@ it.each(['openai-lb', 'anthropic-lb'])('pool surface saves and resets within Loa
   vi.mocked(api).mockResolvedValue({});
   const saved = { ...pool, apiType, provider: apiType, pool: { enabled: true, memberConnectionIds: [apiType === 'openai-lb' ? 'first' : 'claude'] } };
   render(<ModelConnections loadBalancing savedProviders={[...accounts, saved]} onModelConnectionsChanged={vi.fn().mockResolvedValue(undefined)} mcpConnections={null} />);
-  fireEvent.click(screen.getByText('Saved providers'));
+  fireEvent.click(screen.getByText('Saved pools'));
   fireEvent.click(screen.getByRole('button', { name: new RegExp(apiType + '.*accounts') }));
-  expect((screen.getByLabelText('Pool type') as HTMLSelectElement).value).toBe(apiType);
-  expect(screen.getByLabelText('Use shared')).toBeTruthy();
+  expect((screen.getByLabelText('Adapter') as HTMLSelectElement).value).toBe(apiType);
+  expect(screen.queryByLabelText('Use shared')).toBeNull();
+  expect(screen.queryByText('Model details')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-  await waitFor(() => expect((screen.getByLabelText('Pool type') as HTMLSelectElement).value).toBe('openai-lb'));
+  await waitFor(() => expect((screen.getByLabelText('Adapter') as HTMLSelectElement).value).toBe('openai-lb'));
   expect(screen.queryByLabelText('URL')).toBeNull();
   const body = JSON.parse(String(vi.mocked(api).mock.calls[0][1]?.body));
-  expect(body).toMatchObject({ id: 'pool', apiType, pool: saved.pool, models: pool.connectionModels });
-  fireEvent.change(screen.getByLabelText('Pool type'), { target: { value: 'anthropic-lb' } });
+  expect(body).toMatchObject({ id: 'pool', apiType, pool: saved.pool });
+  fireEvent.change(screen.getByLabelText('Adapter'), { target: { value: 'anthropic-lb' } });
   expect(screen.getByLabelText('claude')).toBeTruthy();
   expect(screen.queryByLabelText('first')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-  expect((screen.getByLabelText('Pool type') as HTMLSelectElement).value).toBe('openai-lb');
+  expect((screen.getByLabelText('Adapter') as HTMLSelectElement).value).toBe('openai-lb');
+});
+
+it('preserves pool ID, custom name and disabled state when switching adapters', async () => {
+  vi.mocked(api).mockResolvedValue({});
+  const { result } = renderHook(() => useModelConnectionEditor({ savedProviders: accounts, loadBalancing: true, onModelConnectionsChanged: vi.fn().mockResolvedValue(undefined) }));
+  act(() => result.current.editProvider({ ...pool, provider: 'My pool' }));
+  act(() => result.current.setApiType('anthropic-lb'));
+  expect(result.current.editingId).toBe('pool');
+  expect(result.current.provider).toBe('My pool');
+  expect(result.current.poolEnabled).toBe(false);
+  expect(result.current.memberConnectionIds).toEqual([]);
+  act(() => result.current.togglePoolMember('claude'));
+  await act(async () => { await result.current.saveProvider(); });
+  const body = JSON.parse(String(vi.mocked(api).mock.calls[0][1]?.body));
+  expect(body).toMatchObject({ id: 'pool', provider: 'My pool', apiType: 'anthropic-lb', pool: { enabled: false, memberConnectionIds: ['claude'] } });
+  expect(body).not.toHaveProperty('models');
+});
+
+it('keeps multiple pools separately editable without exposing direct accounts or model details', () => {
+  const overflow = document.createElement('div'); document.body.append(overflow);
+  const { unmount } = render(<ModelConnections loadBalancing savedProviders={[...accounts, pool, { ...pool, id: 'other', provider: 'Overflow' }]} onModelConnectionsChanged={vi.fn()} mcpConnections={null} overflowTarget={overflow} />);
+  expect(screen.getByRole('heading', { name: 'Saved pools' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: /Overflow.*accounts/ }));
+  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Overflow');
+  fireEvent.click(screen.getByRole('button', { name: /OpenAI LB.*accounts/ }));
+  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('OpenAI LB');
+  expect(screen.queryByText('Model details')).toBeNull();
+  expect(screen.queryByLabelText('Use shared')).toBeNull();
+  unmount(); overflow.remove();
 });
