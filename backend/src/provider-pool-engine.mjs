@@ -24,7 +24,7 @@ export function evaluatePoolUsage(result, { family, model = '', now = Date.now()
     return { eligible: false, reason: 'tier_unknown', tier: metadata?.tier || metadata?.planType || usage.planType || null };
   }
   const windows = (usage.windows || []).filter((window) => {
-    if (family !== 'anthropic') return true;
+    if (family !== 'anthropic') return !window.scope || window.scope === model;
     if (window.key === 'seven_day_sonnet') return /sonnet/i.test(model);
     if (window.key === 'seven_day_opus') return /opus/i.test(model);
     return window.key === 'five_hour' || window.key === 'seven_day' || window.key === 'seven_day_oauth_apps';

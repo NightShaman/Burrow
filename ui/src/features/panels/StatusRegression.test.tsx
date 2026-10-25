@@ -1,3 +1,4 @@
+import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { asCodexAccount } from '../../app/useRuntimeDashboard';
@@ -14,15 +15,15 @@ it('preserves unknown quota and numeric zero', () => {
 it('does not call pending account checks connected; distinguishes success and failure', async () => {
  vi.mocked(api).mockImplementation(() => new Promise(() => {}));
  const providers = [{id:'a',provider:'OpenAI',apiType:'openai-responses',oauthConfigured:true,models:[],apiKey:'',url:''}];
- const view = render(<AccountStatus providers={providers}/>);
+ const view = render(<ConfirmProvider><AccountStatus providers={providers}/></ConfirmProvider>);
  expect(screen.queryByText('Connected')).toBeNull();
  expect(screen.getByText('Checking')).toBeTruthy();
  view.unmount();
  vi.mocked(api).mockResolvedValue({usage:null});
- const ready = render(<AccountStatus providers={providers}/>);
- await screen.findByText('Connected'); ready.unmount();
+ const ready = render(<ConfirmProvider><AccountStatus providers={providers}/></ConfirmProvider>);
+ await screen.findByText('Unknown'); ready.unmount();
  vi.mocked(api).mockRejectedValue(new Error('offline'));
- render(<AccountStatus providers={providers}/>); await screen.findByText('Disconnected');
+ render(<ConfirmProvider><AccountStatus providers={providers}/></ConfirmProvider>); await screen.findByText('Usage unavailable');
 });
 it('runtime dot is not green while pending or failed and is green only on success', async () => {
   vi.mocked(api).mockImplementation(() => new Promise(() => {}));

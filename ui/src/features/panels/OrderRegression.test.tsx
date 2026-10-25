@@ -1,3 +1,4 @@
+import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AccountStatus, accountStatusOrderKey } from './AccountStatus';
@@ -9,9 +10,9 @@ vi.mock('../../app/api', () => ({api:vi.fn(() => new Promise(() => {}))}));
 afterEach(cleanup);
 it('preserves account order across empty/loading and other-node inventories', async () => {
  writeAccountOrder(accountStatusOrderKey,['b','a','remote']);
- const view = render(<AccountStatus providers={[]}/>);
+ const view = render(<ConfirmProvider><AccountStatus providers={[]}/></ConfirmProvider>);
  expect(readAccountOrder(accountStatusOrderKey)).toEqual(['b','a','remote']);
- view.rerender(<AccountStatus providers={[{id:'a',provider:'OpenAI',apiType:'openai-responses',oauthConfigured:true,apiKey:'',url:'',models:[]}]}/>);
+ view.rerender(<ConfirmProvider><AccountStatus providers={[{id:'a',provider:'OpenAI',apiType:'openai-responses',oauthConfigured:true,apiKey:'',url:'',models:[]}]}/></ConfirmProvider>);
  await waitFor(() => expect(view.container.querySelector('article')).toBeTruthy());
  expect(readAccountOrder(accountStatusOrderKey)).toEqual(['b','a','remote']);
 });

@@ -133,7 +133,10 @@ export type RuntimeModel = {
 export type AnthropicUsageWindow = { key: string; usedPercent: number; resetAt?: string | null };
 export type AnthropicUsage = { windows: AnthropicUsageWindow[] };
 export type OpenAiUsageWindow = { key: string; label: string; usedPercent: number | null; resetAt?: string | null; windowSeconds?: number | null };
+export type OpenAiAccountStatus = { status: string; label: string; reason: string; scope: string; resetAt: string | null; checkedAt: string };
+export type OpenAiResetCredits = { ok: boolean; fetchedAt: string; credits: { availableCount: number; nearestExpiresAt: string | null; available: Array<{ id: string; expiresAt: string | null }> } };
 export type OpenAiUsage = {
+  accountStatus?: OpenAiAccountStatus;
   planType?: string | null;
   blocked?: boolean;
   reachedType?: string | null;

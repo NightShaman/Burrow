@@ -7483,6 +7483,110 @@
           }
         }
       }
+    },
+    "/api/openai/oauth/reset-credits": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Read native OpenAI banked reset credits",
+        "operationId": "getOpenaiOauthResetCredits",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/JsonResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "409": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "502": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        },
+        "parameters": [
+          {
+            "name": "connectionId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "description": "Fetches native WHAM credits with stored OpenAI OAuth credentials. Returns ok, connectionId, fetchedAt and credits {availableCount, nearestExpiresAt, available: [{id, expiresAt}]}. Only available, unexpired credits are selectable."
+      }
+    },
+    "/api/openai/oauth/reset-credits/consume": {
+      "post": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Redeem one selected native OpenAI banked reset credit",
+        "operationId": "consumeOpenaiOauthResetCredit",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/JsonResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "409": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "502": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "connectionId",
+                  "creditId",
+                  "requestId"
+                ],
+                "properties": {
+                  "connectionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "creditId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "requestId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                }
+              }
+            }
+          }
+        },
+        "description": "Refreshes native credits, validates the selected credit, then sends exactly one redemption POST. Reuse requestId when reconciling an uncertain result; do not blindly retry using a new ID. Process-local account guard and request ledger prevent concurrent/replayed redemption. Success includes usageRefresh and creditsRefresh; their failures do not mean redemption failed. Ambiguous failures return ambiguous:true and require refresh/reconciliation."
+      }
     }
   },
   "components": {

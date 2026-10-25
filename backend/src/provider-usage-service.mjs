@@ -1,3 +1,7 @@
+import { createOpenAiResetCreditsService } from './openai-reset-credits-service.mjs';
+
+// Invalidation epoch reaches native pool service instances without sharing cache ownership.
+let openaiUsageGeneration = 0;
 // Reporting only: importing this module acquires no runtime resources.
 // Capacity is a relative plan weight, not remaining quota or a billing guarantee.
 export function openaiTierMetadata(planType) {
@@ -30,7 +34,8 @@ export function anthropicTierMetadata(profile, { unavailable = false } = {}) {
   return metadata;
 }
 
-export function createProviderUsageService({ modelLookup, authSecretToken, fetchImpl = globalThis.fetch, clock = Date.now, anthropicUsageCache = new Map(), anthropicProfileCache = new Map(), openaiOauthUsageCache = new Map(), openaiUsageUrl = 'https://chatgpt.com/backend-api/wham/usage' } = {}) {
+export function createProviderUsageService({ modelLookup, authSecretToken, fetchImpl = globalThis.fetch, clock = Date.now, anthropicUsageCache = new Map(), anthropicProfileCache = new Map(), openaiOauthUsageCache = new Map(), resetCreditsUrl, timeoutMs, openaiUsageUrl = 'https://chatgpt.com/backend-api/wham/usage' } = {}) {
+  let cacheGeneration = openaiUsageGeneration;
   const ANTHROPIC_USAGE_CACHE_MS = 60_000;
   const OPENAI_OAUTH_USAGE_CACHE_MS = 60_000;
   const OPENAI_OAUTH_USAGE_URL = openaiUsageUrl;
@@ -170,40 +175,64 @@ function anthropicConnectionCandidate(connection = {}) {
 
   function sanitizeAdditionalOpenAiRateLimits(additional) {
     if (!additional || typeof additional !== 'object') return [];
-    const entries = Array.isArray(additional) ? additional.map((value, index) => [`additional_${index + 1}`, value]) : Object.entries(additional);
-    const windows = [];
-    for (const [name, value] of entries) {
-      if (!value || typeof value !== 'object') continue;
-      const direct = sanitizeOpenAiUsageWindow(String(name), value);
-      if (direct) windows.push(direct);
-      for (const [childName, childValue] of Object.entries(value)) {
-        const child = sanitizeOpenAiUsageWindow(`${name}_${childName}`, childValue);
-        if (child) windows.push(child);
-      }
-    }
-    return windows;
+    return Object.entries(additional).flatMap(([name, value]) => {
+      if (!value || typeof value !== 'object') return [];
+      const scope = typeof value.metered_feature === 'string' ? value.metered_feature : String(name);
+      const limit = value.rate_limit ?? value.rateLimit ?? value;
+      const windows = ['primary', 'secondary'].map(key => sanitizeOpenAiUsageWindow(`additional_${name}_${key}`, limit[`${key}_window`] ?? limit[`${key}Window`])).filter(Boolean);
+      const direct = sanitizeOpenAiUsageWindow(`additional_${name}`, value);
+      return (windows.length ? windows : direct ? [direct] : []).map(window => ({ ...window, scope }));
+    });
   }
 
   function sanitizeOpenAiOauthUsage(data = {}) {
-    const rateLimit = data?.rate_limit && typeof data.rate_limit === 'object' ? data.rate_limit : data?.rateLimit;
-    const windows = [
+    const rateLimit = data?.rate_limit ?? data?.rateLimit;
+    const mainWindows = [
       sanitizeOpenAiUsageWindow('primary', rateLimit?.primary_window ?? rateLimit?.primaryWindow),
       sanitizeOpenAiUsageWindow('secondary', rateLimit?.secondary_window ?? rateLimit?.secondaryWindow),
-      ...sanitizeAdditionalOpenAiRateLimits(data?.additional_rate_limits ?? data?.additionalRateLimits),
     ].filter(Boolean);
+    const boolean = value => typeof value === 'boolean' ? value : null;
+    const allowed = boolean(rateLimit?.allowed ?? data.allowed);
+    const reached = data.rate_limit_reached_type ?? data.rateLimitReachedType ?? data.reachedType;
+    const reachedType = typeof reached === 'string' ? reached : typeof reached?.type === 'string' ? reached.type : null;
+    const spend = data.spend_control ?? data.spendControl;
+    const spendControl = spend && typeof spend === 'object' ? {
+      enabled: boolean(spend.enabled), limitReached: boolean(spend.reached ?? spend.limit_reached ?? spend.limitReached),
+      limit: finiteNumber(spend.limit), balance: finiteNumber(spend.balance),
+    } : null;
+    const credits = data?.credits && typeof data.credits === 'object' ? {
+      hasCredits: boolean(data.credits.has_credits ?? data.credits.hasCredits),
+      unlimited: boolean(data.credits.unlimited), balance: finiteNumber(data.credits.balance),
+      overageLimitReached: boolean(data.credits.overage_limit_reached ?? data.credits.overageLimitReached),
+    } : null;
+    const limitReached = boolean(rateLimit?.limit_reached ?? rateLimit?.limitReached);
+    const exhausted = exhaustedFromWindows(mainWindows);
+    const blocked = allowed === false || limitReached === true || exhausted === true || Boolean(reachedType);
+    const checkedAt = new Date(clock()).toISOString();
+    const status = (status, label, reason, scope = 'account', resetAt = null) => ({ status, label, reason, scope, resetAt, checkedAt });
+    let accountStatus;
+    if (spendControl?.limitReached === true || credits?.overageLimitReached === true || /spend.*(cap|limit)|spend_control|workspace_(owner|member)_usage_limit_reached/.test(reachedType || '')) {
+      accountStatus = status('spend_cap', 'Spend Cap Reached', 'spend_cap_reached');
+    } else if (/entitlement|subscription|not_entitled|usage_not_included/.test(reachedType || '')) {
+      accountStatus = status('entitlement', 'Entitlement Required', 'entitlement_required');
+    } else if (/credit/.test(reachedType || '') || (credits?.hasCredits === false && credits?.unlimited !== true && blocked && exhausted !== true)) {
+      accountStatus = status('credits_depleted', 'Credits Depleted', 'credits_depleted');
+    } else {
+      const long = mainWindows.find(window => window.exhausted && (window.windowSeconds >= 86400 || (window.windowSeconds === null && window.key === 'secondary')));
+      const short = mainWindows.find(window => window.exhausted && window !== long);
+      if (long) accountStatus = status('limit_exceeded', 'Limit Exceeded', 'long_window_exhausted', 'account', long.resetAt);
+      else if (short) accountStatus = status('rate_limited', 'Rate Limited', 'short_window_exhausted', 'account', short.resetAt);
+      else if (/weekly|secondary|long/.test(reachedType || '')) accountStatus = status('limit_exceeded', 'Limit Exceeded', 'long_window_exhausted');
+      else if (/primary|short|rate_limit/.test(reachedType || '')) accountStatus = status('rate_limited', 'Rate Limited', 'short_window_exhausted');
+      else if (allowed === true || (!blocked && exhausted === false)) accountStatus = status('available', 'Active', 'usage_available');
+      else accountStatus = status('unknown', 'Unknown', blocked ? 'restriction_unspecified' : 'usage_missing');
+    }
     return {
       tierMetadata: openaiTierMetadata(data.plan_type ?? data.planType),
-      exhausted: Boolean(rateLimit?.limit_reached ?? rateLimit?.limitReached ?? data.rate_limit_reached_type ?? data.rateLimitReachedType) || exhaustedFromWindows(windows),
-      planType: typeof data.plan_type === 'string' ? data.plan_type : (typeof data.planType === 'string' ? data.planType : null),
-      blocked: Boolean(rateLimit?.limit_reached ?? rateLimit?.limitReached ?? data.rate_limit_reached_type ?? data.rateLimitReachedType),
-      reachedType: typeof data.rate_limit_reached_type === 'string' ? data.rate_limit_reached_type : (typeof data.rateLimitReachedType === 'string' ? data.rateLimitReachedType : null),
-      windows,
-      credits: data?.credits && typeof data.credits === 'object' ? {
-        hasCredits: typeof data.credits.has_credits === 'boolean' ? data.credits.has_credits : (typeof data.credits.hasCredits === 'boolean' ? data.credits.hasCredits : null),
-        unlimited: typeof data.credits.unlimited === 'boolean' ? data.credits.unlimited : null,
-        balance: finiteNumber(data.credits.balance),
-        overageLimitReached: Boolean(data.credits.overage_limit_reached ?? data.credits.overageLimitReached),
-      } : null,
+      exhausted: blocked ? true : exhausted,
+      planType: typeof (data.plan_type ?? data.planType) === 'string' ? (data.plan_type ?? data.planType) : null,
+      blocked, allowed, reachedType, spendControl, accountStatus,
+      windows: [...mainWindows, ...sanitizeAdditionalOpenAiRateLimits(data.additional_rate_limits ?? data.additionalRateLimits)], credits,
     };
   }
 
@@ -261,7 +290,9 @@ function anthropicConnectionCandidate(connection = {}) {
   async function openaiOauthUsage({ connectionId = '', force = false } = {}) {
     const source = await resolveOpenAiOauthUsageSource(connectionId);
     if (!source?.token) return { ok: false, status: 503, error: 'openai_oauth_usage_config_missing', usage: null };
+    if (cacheGeneration !== openaiUsageGeneration) { openaiOauthUsageCache.clear(); cacheGeneration = openaiUsageGeneration; }
     const cacheKey = source.connectionId;
+    const fetchGeneration = openaiUsageGeneration;
     const cached = openaiOauthUsageCache.get(cacheKey);
     const nowMs = clock();
     if (!force && cached && nowMs - cached.fetchedAtMs < OPENAI_OAUTH_USAGE_CACHE_MS) return { ...cached.result, cached: true, cacheTtlMs: Math.max(0, OPENAI_OAUTH_USAGE_CACHE_MS - (nowMs - cached.fetchedAtMs)) };
@@ -282,12 +313,14 @@ function anthropicConnectionCandidate(connection = {}) {
         fetchedAt: new Date(nowMs).toISOString(),
         usage: sanitizeOpenAiOauthUsage(data),
       };
-      openaiOauthUsageCache.set(cacheKey, { fetchedAtMs: nowMs, result });
+      if (fetchGeneration === openaiUsageGeneration) openaiOauthUsageCache.set(cacheKey, { fetchedAtMs: nowMs, result });
       return result;
     } catch (error) {
       return { ok: false, status: 502, error: 'openai_oauth_usage_unavailable', usage: null };
     }
   }
 
-  return { anthropicOauthUsage, openaiOauthUsage };
+  const resets = createOpenAiResetCreditsService({ resolveSource: resolveOpenAiOauthUsageSource, fetchImpl, clock,
+    resetCreditsUrl, timeoutMs, refreshUsage: openaiOauthUsage, invalidateUsage: () => { openaiOauthUsageCache.clear(); openaiUsageGeneration++; } });
+  return { anthropicOauthUsage, openaiOauthUsage, ...resets };
 }

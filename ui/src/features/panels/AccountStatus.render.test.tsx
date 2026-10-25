@@ -1,3 +1,4 @@
+import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AccountStatus } from './AccountStatus';
@@ -8,7 +9,7 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 it.each([false, true])('FE010 rendered Anthropic API-key vs OAuth configured=%s', async oauth => {
  vi.mocked(api).mockResolvedValue({usage:{windows:[]}});
  const provider: SavedProvider = { id:'anthropic', provider:'Anthropic', apiType:'anthropic-messages',url:'https://example.invalid',apiKey:'',models:[],apiKeyConfigured:true,oauthConfigured:oauth };
- render(<AccountStatus providers={[provider]} />);
+ render(<ConfirmProvider><AccountStatus providers={[provider]} /></ConfirmProvider>);
  if (oauth) {
   await waitFor(() => expect(screen.getByText('Connected')).toBeTruthy());
   expect(vi.mocked(api).mock.calls.map(([path])=>path)).toEqual(['/api/anthropic/oauth/usage?connectionId=anthropic']);
@@ -21,7 +22,7 @@ it.each([false, true])('FE010 rendered Anthropic API-key vs OAuth configured=%s'
 it('retains draggable cards without visible reorder controls', async () => {
  vi.mocked(api).mockResolvedValue({usage:{windows:[]}});
  const providers: SavedProvider[] = ['First','Second'].map(name => ({id:name,provider:'Anthropic',name,apiType:'anthropic-messages',url:'https://example.invalid',apiKey:'',models:[],oauthConfigured:true}));
- const {container} = render(<AccountStatus providers={providers}/>);
+ const {container} = render(<ConfirmProvider><AccountStatus providers={providers}/></ConfirmProvider>);
  await waitFor(() => expect(screen.getAllByText('Connected')).toHaveLength(2));
  expect(screen.queryByRole('button', {name:/^Move /})).toBeNull();
  expect(container.querySelectorAll('[draggable="true"]')).toHaveLength(2);
@@ -30,15 +31,15 @@ it('retains draggable cards without visible reorder controls', async () => {
 it('shows a completed account without waiting for a slow peer and retains usage on remount', async () => {
  const providers: SavedProvider[] = ['fast-independent','slow-independent'].map(id => ({id,provider:'OpenAI',apiType:'openai-responses',url:'https://openai.com',apiKey:'',models:[],oauthConfigured:true}));
  let finishSlow!: (value: unknown) => void;
- vi.mocked(api).mockImplementation((path) => path.includes('slow-independent') ? new Promise(resolve => { finishSlow = resolve; }) as ReturnType<typeof api> : Promise.resolve({usage:{windows:[{key:'primary',label:'Primary',usedPercent:20,resetAt:null}]}}) as ReturnType<typeof api>);
- const first = render(<AccountStatus providers={providers}/>);
+ vi.mocked(api).mockImplementation((path) => path.includes('/reset-credits') ? Promise.resolve({ok:false}) as ReturnType<typeof api> : path.includes('slow-independent') ? new Promise(resolve => { finishSlow = resolve; }) as ReturnType<typeof api> : Promise.resolve({usage:{windows:[{key:'primary',label:'Primary',usedPercent:20,resetAt:null}]}}) as ReturnType<typeof api>);
+ const first = render(<ConfirmProvider><AccountStatus providers={providers}/></ConfirmProvider>);
  await waitFor(() => expect(screen.getByText('80%')).toBeTruthy());
  expect(screen.getByText('Checking')).toBeTruthy();
  finishSlow({usage:{windows:[]}});
- await waitFor(() => expect(screen.getAllByText('Connected')).toHaveLength(2));
+ await waitFor(() => expect(screen.getAllByText('Unknown')).toHaveLength(2));
  first.unmount();
  vi.mocked(api).mockImplementation(() => new Promise(() => {}));
- render(<AccountStatus providers={providers}/>);
+ render(<ConfirmProvider><AccountStatus providers={providers}/></ConfirmProvider>);
  expect(screen.getByText('80%')).toBeTruthy();
  expect(screen.queryByText('Loading usage…')).toBeNull();
 });

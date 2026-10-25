@@ -1,10 +1,19 @@
 import { validTraceRunId } from '../../src/trace-summary.mjs';
 
-export function createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, codexLbAccounts, anthropicOauthUsage, openaiOauthUsage, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot } = {}) {
+export function createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, codexLbAccounts, anthropicOauthUsage, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot } = {}) {
   return async function handleObservabilityRoute({ req, res, url } = {}) {
     if (req.method === 'GET' && url.pathname === '/api/codex-lb/accounts') { const result = await codexLbAccounts(); sendJson(res, result.ok ? 200 : (result.status || 500), result); return true; }
     if (req.method === 'GET' && url.pathname === '/api/anthropic/oauth/usage') { const result = await anthropicOauthUsage({ connectionId: url.searchParams.get('connectionId') || '', force: url.searchParams.get('force') === 'true' }); sendJson(res, result.ok ? 200 : (result.status || 500), result); return true; }
     if (req.method === 'GET' && url.pathname === '/api/openai/oauth/usage') { const result = await openaiOauthUsage({ connectionId: url.searchParams.get('connectionId') || '', force: url.searchParams.get('force') === 'true' }); sendJson(res, result.ok ? 200 : (result.status || 500), result); return true; }
+    if (req.method === 'GET' && url.pathname === '/api/openai/oauth/reset-credits') {
+      const result = await openaiResetCredits({ connectionId: url.searchParams.get('connectionId') });
+      sendJson(res, result.ok ? 200 : (result.status || 500), result); return true;
+    }
+    if (req.method === 'POST' && url.pathname === '/api/openai/oauth/reset-credits/consume') {
+      const body = await readJsonBody(req);
+      const result = await consumeOpenaiResetCredit(body && typeof body === 'object' ? body : {});
+      sendJson(res, result.ok ? 200 : (result.status || 500), result); return true;
+    }
     if (req.method === 'GET' && (url.pathname === '/api/health' || url.pathname === '/api/status')) { sendJson(res, 200, await runtimeStatus(url.searchParams.get('agentId'))); return true; }
     if (req.method === 'GET' && url.pathname === '/api/metrics') { sendJson(res, 200, await runtimeMetrics()); return true; }
     if (req.method === 'GET' && url.pathname === '/api/chat/runs/active') { sendJson(res, 200, { ok: true, ...(await currentActiveChatRunSummaries({ agentId: url.searchParams.get('agentId'), sessionId: url.searchParams.get('sessionId') })) }); return true; }

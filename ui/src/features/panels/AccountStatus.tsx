@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react';
-import { api, type AnthropicUsage, type OpenAiUsage } from '../../app/api';
+import { api, type AnthropicUsage, type OpenAiUsage, type OpenAiAccountStatus } from '../../app/api';
 import { readAccountOrder, writeAccountOrder } from '../../app/accountOrderStorage';
 import type { SavedProvider } from '../../app/types';
 import { AccountCard } from './AccountCard';
+import { OpenAiResets } from './OpenAiResets';
 
 export type AccountVendor = 'Anthropic' | 'OpenAI';
 export type UsageBar = { key: string; label: string; remainingPercent: number | null; resetAt: string | null };
-export type AccountUsageCard = { id: string; name: string; vendor: AccountVendor; plan: string | null; state: 'loading' | 'ready' | 'error'; bars: UsageBar[]; error?: string };
+export type AccountUsageCard = { id: string; name: string; vendor: AccountVendor; plan: string | null; state: 'loading' | 'ready' | 'error'; bars: UsageBar[]; accountStatus?: OpenAiAccountStatus; error?: string };
 
 const oauthConfigured = (provider: SavedProvider) =>
   provider.auth?.type === 'oauth' ||
@@ -83,7 +84,7 @@ export function openAiBars(usage: OpenAiUsage | null): UsageBar[] {
 const usageCardCache = new Map<string, AccountUsageCard>();
 const accountCacheKey = (id: string, vendor: AccountVendor) => `${vendor}:${id}`;
 
-export function useAccountUsage(providers: SavedProvider[], refreshMs = 300_000) {
+export function useAccountUsage(providers: SavedProvider[], refreshMs = 300_000, revision = 0) {
   const accounts = useMemo(() => oauthAccounts(providers), [providers]);
   const signature = accounts.map((entry) => `${entry.provider.id}:${entry.vendor}`).join('|');
   const [cards, setCards] = useState<AccountUsageCard[]>([]);
@@ -107,7 +108,7 @@ export function useAccountUsage(providers: SavedProvider[], refreshMs = 300_000)
             next = { ...base, state: 'ready', bars: anthropicBars(result.usage ?? null) };
           } else {
             const result = await api<{ usage?: OpenAiUsage | null }>(`/api/openai/oauth/usage?connectionId=${encodeURIComponent(provider.id)}`);
-            next = { ...base, plan: result.usage?.planType ? titleCase(result.usage.planType) : null, state: 'ready', bars: openAiBars(result.usage ?? null) };
+            next = { ...base, accountStatus: result.usage?.accountStatus, plan: result.usage?.planType ? titleCase(result.usage.planType) : null, state: 'ready', bars: openAiBars(result.usage ?? null) };
           }
         } catch (error) {
           next = { ...base, plan: usageCardCache.get(key)?.plan ?? null, state: 'error', bars: usageCardCache.get(key)?.bars ?? [], error: error instanceof Error ? error.message : 'Usage unavailable' };
@@ -123,9 +124,20 @@ export function useAccountUsage(providers: SavedProvider[], refreshMs = 300_000)
     const interval = window.setInterval(() => void load(), refreshMs);
     return () => { cancelled = true; window.clearInterval(interval); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature, refreshMs]);
+  }, [signature, refreshMs, revision]);
 
   return cards;
+}
+
+export function accountUsageStatus(card: AccountUsageCard, now = Date.now()): { label: string; tone: 'active' | 'paused' | 'quota-exceeded'; detail?: string } {
+  if (card.state === 'loading') return { label: 'Checking', tone: 'paused' };
+  if (card.state === 'error') return { label: 'Usage unavailable', tone: 'paused' };
+  if (card.vendor !== 'OpenAI') return { label: 'Connected', tone: 'active' };
+  const status = card.accountStatus;
+  if (!status || !Number.isFinite(Date.parse(status.checkedAt))) return { label: 'Unknown', tone: 'paused' };
+  const detail = `${status.reason} · ${status.scope}${status.resetAt ? ` · resets ${new Date(status.resetAt).toLocaleString()}` : ''} · checked ${new Date(status.checkedAt).toLocaleString()}`;
+  if (now - Date.parse(status.checkedAt) > 600_000 || (status.resetAt && Date.parse(status.resetAt) <= now)) return { label: 'Stale', tone: 'paused', detail };
+  return { label: status.label, tone: status.status === 'available' ? 'active' : status.status === 'unknown' ? 'paused' : 'quota-exceeded', detail };
 }
 
 function UsageMeter({ bar, tone }: { bar: UsageBar; tone: 'primary' | 'secondary' }) {
@@ -146,7 +158,10 @@ export function orderAccountStatusCards(cards: AccountUsageCard[], order: string
 }
 
 export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
-  const cards = useAccountUsage(providers);
+  const [revision, setRevision] = useState(0);
+  const cards = useAccountUsage(providers, 300_000, revision);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 30_000); return () => window.clearInterval(timer); }, []);
   const [order, setOrder] = useState(() => readAccountOrder(accountStatusOrderKey));
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
@@ -184,13 +199,15 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
     {orderedCards.map((card) => {
       const isDragging = draggedId === card.id;
       const isDropTarget = dropTargetId === card.id && !isDragging;
-      return <AccountCard key={card.id} name={card.name} subtitle={card.vendor} status={card.state === 'loading' ? 'Checking' : card.state === 'error' ? 'Disconnected' : 'Connected'} statusTone={card.state === 'ready' ? 'active' : 'paused'} className={`${isDragging ? 'dragging' : ''} ${isDropTarget ? 'drop-target' : ''}`} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', card.id); setDraggedId(card.id); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTargetId(card.id); }} onDragLeave={() => setDropTargetId((current) => current === card.id ? null : current)} onDrop={(event) => handleDrop(event, card.id)} onDragEnd={clearDrag}>
+      const status = accountUsageStatus(card, now);
+      return <AccountCard key={card.id} name={card.name} subtitle={card.vendor} status={<span title={status.detail}>{status.label}</span>} statusTone={status.tone} className={`${isDragging ? 'dragging' : ''} ${isDropTarget ? 'drop-target' : ''}`} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', card.id); setDraggedId(card.id); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTargetId(card.id); }} onDragLeave={() => setDropTargetId((current) => current === card.id ? null : current)} onDrop={(event) => handleDrop(event, card.id)} onDragEnd={clearDrag}>
         {card.state === 'loading' && <small className="hint">Loading usage…</small>}
         {card.state === 'error' && <small className="hint">{card.error ?? 'Usage unavailable'}</small>}
         {card.state === 'ready' && !card.bars.length && <small className="hint">No usage windows reported.</small>}
         {card.bars.length > 0 && <div className={`account-meters ${card.bars.length === 2 ? 'two-up' : ''}`}>
           {card.bars.map((bar, index) => <UsageMeter key={bar.key} bar={bar} tone={index === 0 ? 'primary' : 'secondary'} />)}
         </div>}
+        {card.vendor === 'OpenAI' && <OpenAiResets connectionId={card.id} name={card.name} onUsageRefresh={() => setRevision(value => value + 1)} />}
       </AccountCard>;
     })}
   </section>;
