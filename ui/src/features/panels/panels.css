@@ -14,3 +14,8 @@
 .account-meter.secondary .usage i{background:linear-gradient(90deg,var(--accent-strong),var(--accent))}
 .usage-percent.unknown{color:var(--muted)}
 .account-status .hint{margin-top:8px;font-size:11px}
+
+/* Keep account lists inside their allocated rail pane as the viewport/split changes. */
+.rail-panel:has(> .account-status){display:flex;flex-direction:column}
+.rail-panel:has(> .account-status) > .rail-head{flex:none}
+.rail-panel > .account-status{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain}
