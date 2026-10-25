@@ -9,11 +9,13 @@ import { buildCalendarDays, dateFromMonthKey, monthKey } from './archiveDerivati
 import type { ArchiveKind } from './archiveTypes';
 import { ChatArchiveShelf } from './ChatArchiveShelf';
 import { DreamArchiveShelf } from './DreamArchiveShelf';
+import { TaskArchiveShelf } from './TaskArchiveShelf';
 import { TiddleArchiveShelf } from './TiddleArchiveShelf';
 const archiveKinds: { id: ArchiveKind; label: string; detail: string }[] = [
   { id: 'chat', label: 'Chat', detail: 'Searchable conversations and session history.' },
   { id: 'dreams', label: 'Dreams', detail: 'Small remembered things from your agents.' },
   { id: 'tiddle', label: 'Tiddle', detail: 'Warm continuity cards and their history.' },
+  { id: 'tasks', label: 'Tasks', detail: 'Completed tasks.' },
   { id: 'proof', label: 'Proof', detail: 'Operator-readable run outcomes and evidence.' },
 ];
 
@@ -38,6 +40,8 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
   const [selectedDate, setSelectedDate] = useState('');
   const [search, setSearch] = useState('');
   const queryKey = archiveQueryCacheKey({ target: cacheOwner, agent: selectedAgent, query: search, date: selectedDate, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, kind });
+  const [taskCount, setTaskCount] = useState<number | null>(null);
+  const [taskDates, setTaskDates] = useState<string[]>([]);
   const [chatCount, setChatCount] = useState<number | null>(null);
   const [dreamCount, setDreamCount] = useState<number | null>(null);
   const [tiddleCount, setTiddleCount] = useState<number | null>(null);
@@ -60,23 +64,24 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
       .catch(() => { if (!abort.signal.aborted) { setCalendarDates([]); setCalendarAvailabilityState('error'); } });
     return () => abort.abort();
   }, [calendarKind, calendarMonth, selectedAgent, archiveRepository]);
-  const dateBuckets = useMemo(() => calendarDates.map((key) => ({ key, count: 1, year: '', month: '', day: '', label: '' })), [calendarDates]);
+  const shownDates = kind === 'tasks' && !activeMod ? taskDates.filter(date => date.startsWith(calendarMonth)) : calendarDates;
+  const dateBuckets = useMemo(() => shownDates.map((key) => ({ key, count: 1, year: '', month: '', day: '', label: '' })), [shownDates]);
   const calendarDays = useMemo(() => buildCalendarDays(calendarMonth, dateBuckets), [calendarMonth, dateBuckets]);
-  const availableDates = useMemo(() => new Set(calendarDates), [calendarDates]);
+  const availableDates = useMemo(() => new Set(shownDates), [shownDates]);
   const calendarLabel = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(dateFromMonthKey(calendarMonth));
   return (
     <div className="page-view archive-page">
       <header className="archive-heading">
         <div><h1>Archive</h1><p>Conversations and small remembered things, organized for later.</p></div>
-        <div className="archive-heading-tools" hidden={Boolean(activeMod)}><label className="archive-search"><span className="sr-only">Search archive</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={kind === 'chat' ? 'Search conversations' : kind === 'proof' ? 'Search proof runs' : 'Search dreams'} /></label><label className="archive-agent-filter"><span className="sr-only">Filter by agent</span><select value={selectedAgent} onChange={(event) => { setSelectedAgent(event.target.value); setSelectedDate(''); }}><option value="">All agents</option>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label></div>
+        <div className="archive-heading-tools" hidden={Boolean(activeMod)}><label className="archive-search"><span className="sr-only">Search archive</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={kind === 'chat' ? 'Search conversations' : kind === 'tasks' ? 'Search tasks' : kind === 'proof' ? 'Search proof runs' : 'Search dreams'} /></label><label className="archive-agent-filter"><span className="sr-only">Filter by agent</span><select value={selectedAgent} onChange={(event) => { setSelectedAgent(event.target.value); setSelectedDate(''); }}><option value="">All agents</option>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label></div>
       </header>
       <div className="archive-layout">
         <aside className="archive-sidebar" aria-label="Archive navigation">
-          <section><span className="archive-sidebar-label">Browse</span>{archiveKinds.map((item) => <button key={item.id} type="button" className={!activeMod && kind === item.id ? 'active' : ''} onClick={() => { setModId(''); setKind(item.id); }}><span>{item.label}</span><span className="archive-count">{item.id === 'dreams' ? dreamCount ?? '—' : item.id === 'tiddle' ? tiddleCount ?? '—' : item.id === 'proof' ? 'Runs' : chatCount ?? '—'}</span></button>)}</section>
+          <section><span className="archive-sidebar-label">Browse</span>{archiveKinds.map((item) => <button key={item.id} type="button" className={!activeMod && kind === item.id ? 'active' : ''} onClick={() => { setModId(''); setKind(item.id); }}><span>{item.label}</span><span className="archive-count">{item.id === 'tasks' ? taskCount ?? '—' : item.id === 'dreams' ? dreamCount ?? '—' : item.id === 'tiddle' ? tiddleCount ?? '—' : item.id === 'proof' ? 'Runs' : chatCount ?? '—'}</span></button>)}</section>
           <section><span className="archive-sidebar-label">MODS</span>{modArchives.map((mod) => <button key={mod.modId} type="button" className={activeMod?.modId === mod.modId ? 'active' : ''} onClick={() => setModId(mod.modId)}>{mod.name}</button>)}</section>
           <section className="archive-calendar" aria-label="Archive calendar">
             <div className="archive-calendar-heading"><span className="archive-sidebar-label">When <small>Local time</small></span><button type="button" className="archive-all-dates" onClick={() => setSelectedDate('')}>All dates</button></div>
-            <div className="sr-only" role="status" aria-live="polite">{calendarAvailabilityState === 'loading' ? 'Loading dates with archived records.' : calendarAvailabilityState === 'error' ? 'Could not load archive date availability; all dates remain selectable.' : `${calendarDates.length} dates with archived records in ${calendarMonth}.`}</div>
+            <div className="sr-only" role="status" aria-live="polite">{calendarAvailabilityState === 'loading' ? 'Loading dates with archived records.' : calendarAvailabilityState === 'error' ? 'Could not load archive date availability; all dates remain selectable.' : `${shownDates.length} dates with archived records in ${calendarMonth}.`}</div>
             <div className="archive-calendar-nav"><button type="button" aria-label="Previous month" onClick={() => { const month = dateFromMonthKey(calendarMonth); setCalendarMonth(monthKey(new Date(month.getFullYear(), month.getMonth() - 1, 1))); }}>‹</button><strong>{calendarLabel}</strong><button type="button" aria-label="Next month" onClick={() => { const month = dateFromMonthKey(calendarMonth); setCalendarMonth(monthKey(new Date(month.getFullYear(), month.getMonth() + 1, 1))); }}>›</button></div>
             <div className="archive-calendar-weekdays" aria-hidden="true">{['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
             <div className="archive-calendar-grid">{calendarDays.map((day, index) => day ? <button key={day.key} type="button" className={`${availableDates.has(day.key) ? 'has-data ' : ''}${selectedDate === day.key ? 'active ' : ''}date-selectable`} onClick={() => setSelectedDate(day.key)} aria-label={`Select ${day.key}${availableDates.has(day.key) ? ', has archived records' : ''}`} aria-pressed={selectedDate === day.key} aria-busy={calendarAvailabilityState === 'loading'}>{day.day}</button> : <span key={`blank-${index}`} aria-hidden="true" />)}</div>
@@ -89,7 +94,7 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
             <DreamArchiveShelf key={queryKey} archiveRepository={archiveRepository} selectedAgent={selectedAgent} selectedDate={selectedDate} search={search} queryKey={queryKey} onCount={setDreamCount} />
           ) : kind === 'tiddle' ? (
             <TiddleArchiveShelf key={queryKey} archiveRepository={archiveRepository} selectedAgent={selectedAgent} search={search} queryKey={queryKey} onCount={setTiddleCount} />
-          ) : <ArchiveRunsProof repository={archiveRepository} selectedAgent={selectedAgent} search={search} />}
+          ) : kind === 'tasks' ? <TaskArchiveShelf agents={agents} selectedAgent={selectedAgent} selectedDate={selectedDate} search={search} onCount={setTaskCount} onDates={setTaskDates} /> : <ArchiveRunsProof repository={archiveRepository} selectedAgent={selectedAgent} search={search} />}
         </main>
       </div>
     </div>

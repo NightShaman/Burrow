@@ -16,7 +16,7 @@ export async function uploadTaskDocument(taskId: string, file: File) {
 }
 
 /** Keyed by task ID at the editor boundary so responses cannot leak into another task. */
-export function TaskActivity({ taskId, revision }: { taskId: string; revision: string }) {
+export function TaskActivity({ taskId, revision, readOnly = false }: { taskId: string; revision: string; readOnly?: boolean }) {
   const confirm = useConfirm();
   const fileInput = useRef<HTMLInputElement>(null);
   const base = `/api/task-board/tasks/${encodeURIComponent(taskId)}`;
@@ -60,18 +60,18 @@ export function TaskActivity({ taskId, revision }: { taskId: string; revision: s
   }
   return <div className="task-activity" aria-label="Task documents and history">
     {error && <p role="alert">{error} <button type="button" disabled={busy || loading} onClick={() => void refresh()}>Retry</button></p>}
-    <section aria-labelledby="task-documents-heading"><header className="task-activity-heading"><h3 id="task-documents-heading">Documents</h3><button className="task-attach-button" type="button" disabled={busy || loading} onClick={() => fileInput.current?.click()}><span aria-hidden="true">＋</span>Attach document</button></header>
-      <input ref={fileInput} hidden aria-label="Attach document" type="file" disabled={busy || loading} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void upload(file); }} />
+    <section aria-labelledby="task-documents-heading"><header className="task-activity-heading"><h3 id="task-documents-heading">Documents</h3>{!readOnly && <button className="task-attach-button" type="button" disabled={busy || loading} onClick={() => fileInput.current?.click()}><span aria-hidden="true">＋</span>Attach document</button>}</header>
+      {!readOnly && <input ref={fileInput} hidden aria-label="Attach document" type="file" disabled={busy || loading} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void upload(file); }} />}
       {loading ? <p role="status">Loading documents and history…</p> : !attachments.length && !error && <p>No documents attached.</p>}
       <ul className="task-document-list">{attachments.map(file => <li key={file.id}><div><strong>{file.name}</strong><small>{new Intl.NumberFormat().format(file.size)} bytes · {who(file.createdBy)} · {date(file.createdAt)}</small></div><div><button type="button" disabled={busy} onClick={() => void perform(async () => {
         const response = await fetchApi(`${base}/attachments/${encodeURIComponent(file.id)}`);
         if (!response.ok) throw new Error(`Download failed (${response.status}).`);
         const url = URL.createObjectURL(await response.blob());
         const link = document.createElement('a'); link.href = url; link.download = file.name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-      })}>Download<span className="sr-only"> {file.name}</span></button><button type="button" disabled={busy} onClick={() => void perform(async () => {
+      })}>Download<span className="sr-only"> {file.name}</span></button>{!readOnly && <button type="button" disabled={busy} onClick={() => void perform(async () => {
         if (!await confirm({ title: 'Remove document?', message: `Remove “${file.name}” from this task?`, confirmLabel: 'Remove document', tone: 'danger' })) return;
         await api(`${base}/attachments/${encodeURIComponent(file.id)}`, { method: 'DELETE' }); if (mounted.current) await refresh();
-      })}>Remove<span className="sr-only"> {file.name}</span></button></div></li>)}</ul>
+      })}>Remove<span className="sr-only"> {file.name}</span></button>}</div></li>)}</ul>
     </section>
     <section aria-labelledby="task-history-heading"><header className="task-activity-heading"><h3 id="task-history-heading">History</h3><button type="button" disabled={busy || loading} onClick={() => void refresh()}>Refresh history</button></header>
 

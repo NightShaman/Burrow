@@ -74,7 +74,8 @@ it.each([false, true])('queues documents and retries upload failures without rec
   return response({ tasks: [] });
  }));
  render(<ConfirmProvider><Tasks agents={[]} /></ConfirmProvider>);
- fireEvent.click(await screen.findByRole('button', { name: /New task/ }));
+ await vi.waitFor(() => expect((screen.getByRole('button', { name: /New task/ }) as HTMLButtonElement).disabled).toBe(false));
+ fireEvent.click(screen.getByRole('button', { name: /New task/ }));
  fireEvent.change(screen.getByRole('textbox', { name: /Title/ }), { target: { value: 'Task A' } });
  fireEvent.change(screen.getByLabelText('Attach document'), { target: { files: [new File(['a'], 'first.txt'), new File(['b'], 'second.txt')] } });
  expect(screen.getByRole('button', { name: 'Remove first.txt' })).toBeTruthy();

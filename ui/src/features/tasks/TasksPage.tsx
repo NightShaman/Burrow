@@ -11,7 +11,7 @@ export type Project = { id: string; name: string; description?: string; notes?: 
 function normalizePathEntries(project: Project): ProjectPathEntry[] {
   return (project.pathEntries ?? []).map((entry, index) => ({ label: entry.label ?? '', path: entry.path ?? '', note: entry.note ?? '', sortOrder: Number.isFinite(entry.sortOrder) ? entry.sortOrder : index }));
 }
-type BoardTask = {
+export type BoardTask = {
   id: string;
   projectId: string;
   title: string;
@@ -23,6 +23,8 @@ type BoardTask = {
   execution?: { runId?: string; status?: string; ok?: boolean; error?: string | null; executedAt?: string | null; result?: { answerText?: string | null; blockers?: string[] } } | null;
   createdAt: string;
   updatedAt: string;
+  archived?: boolean;
+  archivedAt?: string | null;
 };
 
 type TaskDraft = Pick<BoardTask, 'title' | 'description' | 'status' | 'priority' | 'assignedAgentId' | 'projectId'>;
@@ -98,11 +100,21 @@ export function Tasks({ agents, onDispatch }: { agents: Agent[]; onDispatch?: (s
   }
 
   useEffect(() => { void loadBoard(); }, []);
+  // The archive boundary can pass while the board is open; the server owns it.
+  useEffect(() => {
+    const abort = new AbortController();
+    const timer = window.setInterval(() => {
+      void api<{ tasks: BoardTask[] }>('/api/task-board/tasks', { signal: abort.signal })
+        .then(result => { if (!abort.signal.aborted) setTasks(result.tasks); }).catch(() => {});
+    }, 60_000);
+    return () => { abort.abort(); window.clearInterval(timer); };
+  }, []);
 
 
   const visibleTasks = useMemo(() => {
     const query = search.trim().toLowerCase();
     return tasks.filter((task) => {
+      if (task.archived) return false;
       if (selectedProjectId && task.projectId !== selectedProjectId) return false;
       return !query || [task.title, task.description, task.priority, statusLabel(task.status)].some((value) => value.toLowerCase().includes(query));
     });

@@ -1,3 +1,4 @@
+import { taskArchiveState } from './task-archive-state.mjs';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { randomUUID } from "node:crypto";
 import { TASK_STATUSES, TASK_PRIORITIES } from "./task-board-store.mjs";
@@ -87,7 +88,7 @@ function pathRow(r) {
     }
   );
 }
-function taskRow(r) {
+function taskRow(r, at = new Date()) {
   if (!r) return null;
   const metadata = parseJson(r.metadata_json);
   return {
@@ -103,6 +104,7 @@ function taskRow(r) {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     terminalAt: metadata.terminalAt || null,
+    ...taskArchiveState({ status: r.status, terminalAt: metadata.terminalAt, updatedAt: r.updated_at, createdAt: r.created_at }, at),
   };
 }
 function taskInput(input = {}, partial = false) {
@@ -337,13 +339,13 @@ export class PostgresTaskBoardStore {
         assignedAgentId || null,
       ],
     );
-    return r.rows.map(taskRow);
+    return r.rows.map((row) => taskRow(row, this.clock()));
   }
   async getTask(taskId, client = this.pool) {
     const r = await client.query("SELECT * FROM task_board_tasks WHERE id=$1", [
       id(taskId, "task_id"),
     ]);
-    return taskRow(r.rows[0]);
+    return taskRow(r.rows[0], this.clock());
   }
   async createTask(input = {}, audit = {}) {
     const t = taskInput(input),
@@ -357,6 +359,7 @@ export class PostgresTaskBoardStore {
         audit.actor?.type === 'agent' ? audit.actor.id : null,
         stamp,
       );
+      if (["done", "cancelled"].includes(t.status)) metadata.terminalAt = stamp;
       await c.query(
         "INSERT INTO task_board_tasks(id,project_id,title,description,status,priority,assigned_agent_id,metadata_json,execution_json,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$10)",
         [
@@ -392,9 +395,10 @@ export class PostgresTaskBoardStore {
         metadata = { ...(t.metadata ?? current.metadata) };
       if (
         ["done", "cancelled"].includes(status) &&
-        !["done", "cancelled"].includes(current.status)
+        status !== current.status
       )
         metadata.terminalAt = stamp;
+      if (!["done", "cancelled"].includes(status)) delete metadata.terminalAt;
       const fields = [
         "projectId",
         "title",
@@ -537,6 +541,6 @@ export class PostgresTaskBoardStore {
       "SELECT * FROM task_board_tasks WHERE id=$1 FOR UPDATE",
       [id(taskId, "task_id")],
     );
-    return taskRow(r.rows[0]);
+    return taskRow(r.rows[0], this.clock());
   }
 }

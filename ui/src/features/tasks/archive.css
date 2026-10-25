@@ -824,3 +824,19 @@
     grid-template-columns:minmax(0,1fr) 64px
   }
 }
+
+.task-archive-reader {
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+  height:100%;
+}
+.task-archive-reader .archive-reader-toolbar { display:flex; justify-content:space-between; gap:16px; flex-shrink:0; }
+.task-archive-reader .archive-reader-toolbar > div { min-width:0; }
+.task-archive-reader .archive-reader-toolbar > button { flex-shrink:0; white-space:nowrap; }
+.task-archive-reader h2, .task-archive-reader p { overflow-wrap:anywhere; }
+.task-archive-reader .task-activity { padding:18px 0; }
+.task-archive-description > p { white-space:pre-wrap; }
+.task-archive-description dl { display:flex; flex-wrap:wrap; gap:12px 24px; font-size:12px; }
+.task-archive-description dt { color:var(--muted); }
+.task-archive-description dd { margin:4px 0 0; }

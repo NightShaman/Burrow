@@ -1,6 +1,6 @@
 import type { SessionTurn } from '../../app/api';
 
-export type ArchiveKind = 'chat' | 'dreams' | 'tiddle' | 'proof';
+export type ArchiveKind = 'chat' | 'dreams' | 'tiddle' | 'proof' | 'tasks';
 export type ContinuityCard = { id: string; kind: 'continuity'; agentId: string; agentName: string; project?: string; title: string; summary: string; firstSeen: string; lastSeen: string; recurrence: number; recentRefs?: string[]; evidence?: string; reason?: string; expiresAt?: string };
 export type ContinuityHistoryEntry = { id: string; at: string; runId?: string; agentId: string; scope: string | null; disposition: string; cardId?: string | null; recurrenceBefore?: number; recurrenceAfter?: number; titleBefore?: string | null; titleAfter?: string | null; summaryBefore?: string | null; summaryAfter?: string | null; reason: string };
 export type ArchiveSession = { agentId: string | null; agentName: string | null; sessionId: string; id: string; title: string; summary: string; turnCount: number; chatTurnCount: number | null; createdAt: string | null; updatedAt: string | null; archived: boolean; archivedAt: string | null; kind: string | null; lastRole: string | null; lastRunId: string | null; archiveSnapshot?: 'reset' | string | null; sourceSessionId?: string | null };
