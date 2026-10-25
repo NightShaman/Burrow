@@ -206,7 +206,14 @@ async function runAskChatUnserialized({
     : historySessionId;
   if (contextBoundary) {
     stores = { ...stores, conversations: withContextHistory(stores.conversations, { agentId: runtimeState.agentId, sessionId: resolvedSessionId, historySessionId }) };
-    await stores.conversations.updateMetadata({ agentId: runtimeState.agentId, sessionId: resolvedSessionId, update: metadata => ({ ...metadata, contextIsolation: { historySessionId } }) });
+    await stores.conversations.updateMetadata({ agentId: runtimeState.agentId, sessionId: resolvedSessionId, update: metadata => ({ ...metadata, contextIsolation: { ...metadata.contextIsolation, historySessionId } }) });
+    // Only the scheduler opts into visible-history rotation. Run after named
+    // session admission, before continuity claim, projection, or model work.
+    if (contextBoundary.resetHistory === true) {
+      if (turnSource !== 'scheduled' || incomingAgentMessage) throw new Error('context_history_reset_scheduler_required');
+      await historyStores.conversations.reset({ agentId: runtimeState.agentId, sessionId: historySessionId,
+        freshExecutionSessionId: resolvedSessionId });
+    }
     if (incomingAgentMessage?.inboundEntryId) {
       const entries = await conversationAuthority({ store: historyStores.conversations, agentId: runtimeState.agentId }).entriesAll(historySessionId);
       const inbound = entries.find(entry => entry.id === incomingAgentMessage.inboundEntryId);

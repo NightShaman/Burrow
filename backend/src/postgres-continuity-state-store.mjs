@@ -57,6 +57,11 @@ export function continuityStateStore(store, agentId, clock) {
     // Same lock as session metadata writers: retention stamps and continuity
     // transitions serialize without maintaining a second metadata authority.
     await client.query(`INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,'{}'::jsonb,$3,$3) ON CONFLICT DO NOTHING`,[agentId,sessionId,at]);
+    // Family transitions take the named row first, matching guarded fresh
+    // resets. This makes the overlap/recovery check atomic across processes.
+    const isolation=await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2',[agentId,sessionId]);
+    const historySessionId=isolation.rows[0]?.metadata?.contextIsolation?.historySessionId;
+    if(historySessionId) await client.query('SELECT session_id FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE',[agentId,historySessionId]);
     const session=await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE',[agentId,sessionId]);
     const { rows }=await client.query('SELECT head,manifest,queue FROM continuity_state WHERE agent_id=$1 AND session_id=$2',[agentId,sessionId]);
     const before={...session.rows[0].metadata,...stateMetadata(rows[0])};

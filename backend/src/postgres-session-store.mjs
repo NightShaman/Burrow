@@ -1339,13 +1339,31 @@ export class PostgresSessionStore {
     });
   }
 
-  async reset({ agentId: rawAgentId, sessionId: rawSessionId, metadata = {} } = {}) {
+  async reset({ agentId: rawAgentId, sessionId: rawSessionId, metadata = {}, freshExecutionSessionId = null } = {}) {
     const agentId = required(rawAgentId, 'agentId'); const sid = required(rawSessionId, 'sessionId'); const now = this.clock();
     return withPostgresTransaction(this.pool, async (client) => {
       await client.query('SELECT pg_advisory_xact_lock($1::bigint)', [migrationLockKey(`burrow-session-boundary:${JSON.stringify([agentId,sid])}`)]);
       await client.query(`INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,'{}'::jsonb,$3,$3) ON CONFLICT DO NOTHING`, [agentId, sid, now]);
       const session = await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sid]);
       const prior = session.rows[0]?.metadata || {};
+      if (freshExecutionSessionId) {
+        if (sid === 'default') throw new Error('context_boundary_named_session_required');
+        const execution = await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, freshExecutionSessionId]);
+        const executionMetadata = execution.rows[0]?.metadata;
+        if (executionMetadata?.contextIsolation?.historySessionId !== sid) throw new Error('context_history_reset_execution_required');
+        // Durable per-execution receipt: retrying any older run must not erase
+        // its own projected turns (or a newer run's visible history).
+        if (executionMetadata.contextIsolation.historyReset) return { ok: true, replay: true };
+        const busy = await client.query(`SELECT s.session_id FROM conversation_sessions s
+          LEFT JOIN continuity_state c USING(agent_id,session_id)
+          WHERE s.agent_id=$1 AND (s.session_id=$2 OR s.metadata->'contextIsolation'->>'historySessionId'=$2)
+          AND (c.head_state IN ('running','finalizing','interrupted') OR c.queue_status IN ('pending','running')
+            OR c.manifest->>'status'='interrupted'
+            OR (s.metadata->'contextIsolation'->>'historyReset'='true' AND c.head_state IS NULL)) LIMIT 1`, [agentId, sid]);
+        if (busy.rows.length) throw new Error('context_history_reset_busy');
+        await client.query(`UPDATE conversation_sessions SET metadata=jsonb_set(metadata,'{contextIsolation,historyReset}','true'::jsonb),updated_at=$3
+          WHERE agent_id=$1 AND session_id=$2`, [agentId, freshExecutionSessionId, now]);
+      }
       // Keep the head generation monotonic, but revoke all old ownership and recovery.
       await client.query(`UPDATE continuity_state SET head=(head::jsonb || jsonb_build_object('state','reset','ownerId',NULL))::json,
         head_state='reset',owner_id=NULL,manifest=NULL,queue=NULL,queue_status=NULL,auto_resume=false,queued_at=NULL,updated_at=$3
