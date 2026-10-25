@@ -42,7 +42,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
   const navigate = useUnsavedNavigation();
   const [settingsAgentId, setSettingsAgentId] = useState(selected.id);
   const [agentSection, setAgentSection] = useState<'details' | 'profile-documents' | 'mcp-tools' | 'cron-jobs' | 'dreams' | 'skills'>('details');
-  const [generalSection, setGeneralSection] = useState<'opentelemetry' | 'browser-tab' | 'operator-timezone' | 'operator-profile' | 'execution-boundaries' | 'trace-retention' | 'brain-memory' | 'global-documents' | 'export' | 'rail-panels' | 'tiddle-signal' | 'appearance'>('operator-profile');
+  const [generalSection, setGeneralSection] = useState<'opentelemetry' | 'browser-tab' | 'operator-profile' | 'execution-boundaries' | 'trace-retention' | 'brain-memory' | 'global-documents' | 'export' | 'rail-panels' | 'tiddle-signal' | 'appearance'>('operator-profile');
   const [connectionSection, setConnectionSection] = useState<'authentication' | 'browser-origin' | 'model-providers' | 'load-balancing' | 'mcp-servers' | 'api-tokens'>('authentication');
   const [skillsSection, setSkillsSection] = useState<'installed' | 'repo' | 'text'>('installed');
   const [modsSection, setModsSection] = useState<'installed' | 'sources' | 'automatic-checks'>('installed');
@@ -113,7 +113,6 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
         {tab === 'general' && <nav className="settings-prototype-section-items" aria-label="General settings sections">
           {([
             ['operator-profile', 'Operator profile'],
-            ['operator-timezone', 'Operator timezone'],
             ['browser-tab', 'Browser tab'],
             ['opentelemetry', 'OpenTelemetry'],
             ['execution-boundaries', 'Execution boundaries'],
@@ -158,8 +157,11 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
       <section className="settings-blank-column settings-prototype-configuration">
         {tab === 'general' && generalSection === 'opentelemetry' && <OpenTelemetrySettings />}
         {tab === 'general' && generalSection === 'browser-tab' && <BrowserTabSettings />}
-        {tab === 'general' && generalSection === 'operator-timezone' && <OperatorTimezone />}
-        {tab === 'general' && generalSection === 'operator-profile' && <OperatorProfile onSaved={onOperatorProfileChanged} />}
+        {tab === 'general' && generalSection === 'operator-profile' && <>
+          <OperatorProfile onSaved={onOperatorProfileChanged} />
+          <hr className="operator-profile-divider" />
+          <OperatorTimezone />
+        </>}
         {tab === 'general' && generalSection === 'execution-boundaries' && <ExecutionBoundaries overflowTarget={overflowColumn} />}
         {tab === 'general' && generalSection === 'trace-retention' && <RetentionSettings />}
         {tab === 'general' && generalSection === 'brain-memory' && <BrainEmbeddingSettings savedProviders={savedProviders} />}
