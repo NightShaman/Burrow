@@ -32,11 +32,13 @@ export function evaluatePoolUsage(result, { family, model = '', now = Date.now()
   if (!windows.length || windows.some((window) => window.usedPercent == null || !Number.isFinite(Number(window.usedPercent)))) return { eligible: false, reason: 'usage_missing' };
   // Pressure and independent exhaustion are intentionally separate predicates.
   const exhausted = Boolean(usage.blocked) || windows.some((window) => Number(window.usedPercent) >= 100);
-  const pressure = windows.some((window) => Number(window.usedPercent) > (window.key === 'five_hour' || (window.key === 'primary' && !(Number(window.windowSeconds) >= 86_400)) ? 95 : 100));
+  const pressureThreshold = window => window.key === 'five_hour' || (family === 'openai' && (Number(window.windowSeconds) > 0 ? Number(window.windowSeconds) < 86_400 : window.key === 'primary')) ? 95 : 100;
+  const pressure = windows.some(window => Number(window.usedPercent) > pressureThreshold(window));
   const used = Math.max(...windows.map((window) => Number(window.usedPercent)));
   const resets = windows.map((window) => time(window.resetAt)).filter((reset) => Number.isFinite(reset) && reset > now);
+  const blockingResets = windows.filter(window => Number(window.usedPercent) >= 100 || Number(window.usedPercent) > pressureThreshold(window)).map(window => time(window.resetAt)).filter(reset => Number.isFinite(reset) && reset > now);
   return { eligible: !exhausted && !pressure, reason: exhausted ? 'quota_exhausted' : pressure ? 'quota_pressure' : null,
-    exhausted, pressure, capacity, weight: capacity * Math.max(0, 1 - used / 100), resetAt: resets.length ? Math.min(...resets) : null };
+    exhausted, pressure, capacity, weight: capacity * Math.max(0, 1 - used / 100), resetAt: resets.length ? Math.min(...resets) : null, blockedUntil: blockingResets.length ? Math.max(...blockingResets) : null };
 }
 
 export class ProviderPoolEngine {
@@ -110,7 +112,7 @@ export class ProviderPoolEngine {
       if (owner !== selected.id) {
         substitute = selected.id;
         const ownerState = health.find((row) => row.member_id === owner);
-        const quotaReset = diagnostics.find((candidate) => candidate.id === owner)?.resetAt;
+        const quotaReset = diagnostics.find((candidate) => candidate.id === owner)?.blockedUntil;
         substituteUntil = affinity?.substitute_id === selected.id && time(affinity.substitute_until) > now
           ? new Date(affinity.substitute_until)
           : new Date(Math.max(now + 60_000, time(ownerState?.cooldown_until) || 0, quotaReset || 0));

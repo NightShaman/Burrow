@@ -69,7 +69,7 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
       for (const name of ['onTextDelta', 'onThoughtDelta', 'onContextUsage']) {
         if (typeof args[name] !== 'function') continue;
         callArgs[name] = async (...values) => {
-          callbackInvoked = true;
+          if (name !== 'onContextUsage') callbackInvoked = true;
           if (name !== 'onContextUsage') visible = true;
           try { return await args[name](...values); } catch (error) { callbackFailed = true; throw error; }
         };
