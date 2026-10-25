@@ -19,7 +19,7 @@ import { useRuntimeDashboard } from './app/useRuntimeDashboard';
 import { formatAgentActivity, useRuntimeAgents } from './app/useRuntimeAgents';
 import { useRuntimeSelection } from './app/useRuntimeSelection';
 import { AgentsPanel, SystemPanel, WorkspacePanel, WorkspaceRail } from './features/workspace/WorkspaceRail';
-import { CodexAccounts, RightRail } from './features/panels/RightRail';
+import { RightRail } from './features/panels/RightRail';
 import { AccountStatus } from './features/panels/AccountStatus';
 import { Chat, ChatModelSelector, Editor } from './features/chat/ChatPage';
 import { useChatRun } from './features/chat/useChatRun';
@@ -100,7 +100,7 @@ function AppContent() {
   // Settings must remain reachable when the first agent has not been created yet.
   // The placeholder is only used for the settings form; chat still waits for a real agent.
   const selected = loadedSelected ?? { id: '', name: '', avatar: '', activity: 'Disabled', context: null, provider: '', model: '', effort: '', temperature: 0.7, workspace: '', files: [], subagents: [] };
-  const { accounts, anthropicUsage, openAiUsage, operatorProfile, providerConnectionStatus, refreshModelConnections, reorderAccounts, savedProviders, setOperatorProfile } = useRuntimeDashboard({ selectedProvider: selected.provider, setAgents, runtimeProviders, reportError });
+  const { anthropicUsage, openAiUsage, operatorProfile, providerConnectionStatus, refreshModelConnections, savedProviders, setOperatorProfile } = useRuntimeDashboard({ selectedProvider: selected.provider, setAgents, runtimeProviders, reportError });
   const visibleTabs = tabs;
   const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0];
   const railAgents = availableAgents;
@@ -209,7 +209,6 @@ function AppContent() {
     if (panel === 'agents') return <AgentsPanel agents={railAgents} view={agentRailPreferences.view} order={agentRailPreferences.order} selectedStreamId={selectedStreamId} expandedAgents={expandedAgents} onToggleAgent={toggleAgentExpanded} onSelectAgent={selectAgent} onSelectSubagent={selectSubagent} />;
     if (panel === 'system') return <SystemPanel provider={selected.provider} providerConnectionStatus={providerConnectionStatus} />;
     if (panel === 'workspace') return <WorkspacePanel selected={{ ...selected, files: workspaceFiles }} onOpenFile={openFile} />;
-    if (panel === 'codex') return <CodexAccounts accounts={accounts} onReorder={reorderAccounts} />;
     if (panel === 'accounts') return <AccountStatus providers={savedProviders} />;
     return <div className="panel-body"><p className="hint">No panel selected.</p></div>;
   };

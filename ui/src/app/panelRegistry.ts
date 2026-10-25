@@ -6,7 +6,6 @@ export const panelRegistry: readonly PanelDefinition[] = [
   { id: 'none', label: 'None' },
   { id: 'agents', label: 'Agents' },
   { id: 'workspace', label: 'Workspace' },
-  { id: 'codex', label: 'Codex-LB', title: 'Account Status (Codex-LB)' },
   { id: 'accounts', label: 'Accounts', title: 'Account Status' },
   { id: 'system', label: 'System' },
 ];

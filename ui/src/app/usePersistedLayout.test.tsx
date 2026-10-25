@@ -79,3 +79,22 @@ it.each([24, 76, 99])('rejects out-of-range persisted split %s on both rails', (
  expect(hook.result.current.rightSplit).toBe(50);
  hook.unmount();
 });
+
+it.each(['codex', JSON.stringify({ version: 1, value: 'codex' })])('falls back for removed panel ID payload %s without losing native Accounts', (payload) => {
+ localStorage.setItem('hc.rightPanelDefaultsVersion', '3');
+ for (const slot of ['leftTopPanel', 'leftBottomPanel', 'leftSinglePanel', 'rightTopPanel', 'rightBottomPanel', 'rightSinglePanel']) {
+  localStorage.setItem(`hc.${slot}`, payload);
+ }
+ const hook = renderHook(() => usePersistedLayout());
+ expect(hook.result.current.leftTopPanel).toBe('agents');
+ expect(hook.result.current.leftBottomPanel).toBe('workspace');
+ expect(hook.result.current.leftSinglePanel).toBe('agents');
+ expect(hook.result.current.rightTopPanel).toBe('none');
+ expect(hook.result.current.rightBottomPanel).toBe('none');
+ expect(hook.result.current.rightSinglePanel).toBe('none');
+ act(() => hook.result.current.setRightTopPanel('accounts'));
+ hook.unmount();
+ const reload = renderHook(() => usePersistedLayout());
+ expect(reload.result.current.rightTopPanel).toBe('accounts');
+ reload.unmount();
+});

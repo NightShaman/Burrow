@@ -1,17 +1,11 @@
 import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { asCodexAccount } from '../../app/useRuntimeDashboard';
 import { AccountStatus } from './AccountStatus';
 import { SystemPanel } from '../workspace/WorkspaceRail';
 import { api } from '../../app/api';
 vi.mock('../../app/api', () => ({ api: vi.fn() }));
 afterEach(cleanup);
-it('preserves unknown quota and numeric zero', () => {
- expect(asCodexAccount({usagePercent:null,quotaWindows:{primary:{percent:null}}},0)).toMatchObject({used:null,meters:[{remainingPercent:null}]});
- expect(asCodexAccount({usagePercent:0},0).used).toBe(100);
- expect(asCodexAccount({usagePercent:75},0).used).toBe(25);
-});
 it('does not call pending account checks connected; distinguishes success and failure', async () => {
  vi.mocked(api).mockImplementation(() => new Promise(() => {}));
  const providers = [{id:'a',provider:'OpenAI',apiType:'openai-responses',oauthConfigured:true,models:[],apiKey:'',url:''}];

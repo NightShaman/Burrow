@@ -1,25 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type AnthropicUsage, type ModelConnection, type OpenAiUsage } from './api';
-import { readAccountOrder, writeAccountOrder } from './accountOrderStorage';
-import type { Account, AccountMeter, Agent, SavedProvider } from './types';
-import { mergeVisibleOrder } from './useAgentRailPreferences';
+import type { Agent, SavedProvider } from './types';
 import { usePolling } from './usePolling';
 
 export type OperatorProfile = { name: string; avatar: string };
 export type ProviderConnectionStatus = 'checking' | 'connected' | 'disconnected';
-
-type CodexLbQuotaWindow = { kind?: string; label?: string; percent?: number | null; resetAt?: string | null };
-type CodexLbAccount = {
-  id?: string;
-  name?: string;
-  type?: string;
-  status?: string;
-  usagePercent?: number | null;
-  resetAt?: string | null;
-  quotaWindows?: { primary?: CodexLbQuotaWindow; secondary?: CodexLbQuotaWindow };
-  availableResetCredits?: number | null;
-  resetCreditNearestExpiresAt?: string | null;
-};
 
 type RuntimeDashboardOptions = {
   selectedProvider?: string;
@@ -27,20 +12,6 @@ type RuntimeDashboardOptions = {
   runtimeProviders: React.MutableRefObject<SavedProvider[]>;
   reportError: (message: string) => void;
 };
-
-export const codexAccountOrderKey = 'hc.codexLbAccountOrder';
-
-function formatReset(resetAt?: string | null) {
-  if (!resetAt) return 'reset time unavailable';
-  const timestamp = new Date(resetAt).getTime();
-  if (!Number.isFinite(timestamp)) return `resets ${resetAt}`;
-  const minutes = Math.max(0, Math.ceil((timestamp - Date.now()) / 60_000));
-  const days = Math.floor(minutes / 1_440);
-  const hours = Math.floor((minutes % 1_440) / 60);
-  const remainingMinutes = minutes % 60;
-  const duration = days > 0 ? `${days}d ${hours}h` : hours > 0 ? `${hours}h ${remainingMinutes}m` : `${remainingMinutes}m`;
-  return `resets in ${duration}`;
-}
 
 export function formatUsageReset(resetAt?: string | null) {
   if (!resetAt) return '—';
@@ -51,33 +22,6 @@ export function formatUsageReset(resetAt?: string | null) {
   const hours = Math.floor((minutes % 1_440) / 60);
   const remainingMinutes = minutes % 60;
   return days > 0 ? `${days}d ${hours}h` : hours > 0 ? `${hours}h ${remainingMinutes}m` : `${remainingMinutes}m`;
-}
-
-function formatResetCredit(count?: number | null, nearestEndAt?: string | null) {
-  const available = Number(count);
-  if (!Number.isFinite(available) || available <= 0) return undefined;
-  const credits = Math.floor(available);
-  const creditLabel = `${credits} reset${credits === 1 ? '' : 's'}`;
-  if (!nearestEndAt) return creditLabel;
-  const timestamp = new Date(nearestEndAt).getTime();
-  if (!Number.isFinite(timestamp)) return creditLabel;
-  const days = Math.max(0, Math.ceil((timestamp - Date.now()) / 86_400_000));
-  return `${creditLabel} · ${days} day${days === 1 ? '' : 's'} left`;
-}
-
-function quotaMeter(window: CodexLbQuotaWindow | undefined, key: string): AccountMeter | null {
-  if (!window) return null;
-  const percent = window.percent;
-  // Codex-LB names this field RemainingPercent; it is already the amount left,
-  // unlike the OAuth usage APIs which report utilization/used percent.
-  return { key, label: window.label ?? key, remainingPercent: typeof percent === 'number' && Number.isFinite(percent) ? Math.max(0, Math.min(100, Math.round(percent))) : null, resetAt: window.resetAt ?? null };
-}
-
-export function asCodexAccount(account: CodexLbAccount, index: number): Account {
-  const usagePercent = account.usagePercent;
-  const remaining = typeof usagePercent === 'number' && Number.isFinite(usagePercent) ? Math.max(0, Math.min(100, Math.round(usagePercent))) : null;
-  const meters = [quotaMeter(account.quotaWindows?.primary, 'primary'), quotaMeter(account.quotaWindows?.secondary, 'secondary')].filter((meter): meter is NonNullable<typeof meter> => meter !== null);
-  return { id: account.id ?? `account-${index + 1}`, name: account.name ?? `Account ${index + 1}`, plan: account.type ?? 'Unknown plan', used: remaining === null ? null : 100 - remaining, reset: formatReset(account.resetAt), status: account.status ?? 'Unknown', resetCredit: formatResetCredit(account.availableResetCredits, account.resetCreditNearestExpiresAt), meters };
 }
 
 export const isOpenAiOAuthConnection = (provider?: Pick<SavedProvider, 'auth' | 'authSource' | 'oauthConfigured'>) =>
@@ -112,23 +56,9 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
   const [providerConnectionStatus, setProviderConnectionStatus] = useState<ProviderConnectionStatus>('checking');
   const [anthropicUsage, setAnthropicUsage] = useState<AnthropicUsage | null>(null);
   const [openAiUsage, setOpenAiUsage] = useState<OpenAiUsage | null>(null);
-  const [accounts, setAccounts] = useState<Account[]>([]);
   const [operatorProfile, setOperatorProfile] = useState<OperatorProfile>({ name: 'Operator', avatar: 'OP' });
-  const codexAccountOrder = useRef(readAccountOrder(codexAccountOrderKey));
   const scope = useRef({ generation: 0 });
   const generation = scope.current.generation;
-
-  const reorderAccounts = useCallback((draggedId: string, targetId: string) => {
-    setAccounts((current) => {
-      const sourceIndex = current.findIndex((account) => account.id === draggedId);
-      const targetIndex = current.findIndex((account) => account.id === targetId);
-      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return current;
-      const next = [...current]; const [dragged] = next.splice(sourceIndex, 1); next.splice(targetIndex, 0, dragged);
-      codexAccountOrder.current = mergeVisibleOrder(codexAccountOrder.current, next.map((account) => account.id));
-      writeAccountOrder(codexAccountOrderKey, codexAccountOrder.current);
-      return next;
-    });
-  }, []);
 
   const refreshModelConnections = useCallback(async () => {
     if (scope.current.generation !== generation) return;
@@ -158,19 +88,6 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
   }, [reportError, generation]);
   useEffect(() => { let cancelled = false; setModelConnectionsLoaded(false); setSavedProviders([]); runtimeProviders.current = []; refreshModelConnections().catch((error: Error) => !cancelled && reportError(`Could not load model connections: ${error.message}`)); return () => { cancelled = true; }; }, [refreshModelConnections, reportError]);
 
-  usePolling(async (isCancelled, signal) => {
-    try {
-      const { accounts: nextAccounts } = await api<{ accounts: CodexLbAccount[] }>( '/api/codex-lb/accounts', { signal });
-      if (isCancelled()) return;
-      setAccounts(() => {
-        const next = (nextAccounts ?? []).map(asCodexAccount);
-        const orderedIds = codexAccountOrder.current; const orderedIdSet = new Set(orderedIds);
-        codexAccountOrder.current = [...orderedIds, ...next.map((account) => account.id).filter((id) => !orderedIdSet.has(id))];
-        return next.sort((a, b) => codexAccountOrder.current.indexOf(a.id) - codexAccountOrder.current.indexOf(b.id));
-      });
-    } catch { if (!isCancelled()) setAccounts([]); }
-  }, 15_000, true, 'local');
-
   const selectedConnection = savedProviders.find((provider) => provider.provider === selectedProvider) ?? savedProviders[0];
   usePolling(async (isCancelled, signal) => {
     const provider = selectedConnection; const isAnthropicMessages = provider?.apiType === 'anthropic-messages';
@@ -192,5 +109,5 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
     catch { if (!isCancelled()) setProviderConnectionStatus('disconnected'); }
   }, 30_000, modelConnectionsLoaded, `${'local'}:${selectedConnection?.id ?? ''}`);
 
-  return { accounts, anthropicUsage, modelConnectionsLoaded, openAiUsage, operatorProfile, providerConnectionStatus, refreshModelConnections, reorderAccounts, runtimeProviders, savedProviders, setOperatorProfile };
+  return { anthropicUsage, modelConnectionsLoaded, openAiUsage, operatorProfile, providerConnectionStatus, refreshModelConnections, runtimeProviders, savedProviders, setOperatorProfile };
 }

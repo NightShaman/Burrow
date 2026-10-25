@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { api } from './api';
 import { useRuntimeDashboard } from './useRuntimeDashboard';
@@ -27,4 +27,21 @@ it('exposes automatic pool union catalogs alongside direct accounts to normal mo
   ['direct', ['gpt-5.5']], ['pool', ['gpt-5.5', 'gpt-5.6']], ['second-pool', ['claude-sonnet-4-6']],
  ]);
  unmount();
+});
+
+it('does not poll an external account inventory on mount or after the old refresh interval', async () => {
+ vi.mocked(api).mockClear();
+ vi.mocked(api).mockImplementation(async path => path === '/api/settings/model-connections' ? { connections: [] } : { operator: { name: 'Operator', avatar: 'OP' } });
+ const options = { runtimeProviders: { current: [] }, setAgents: vi.fn(), reportError: vi.fn() };
+ const hook = renderHook(() => useRuntimeDashboard(options));
+ await waitFor(() => expect(hook.result.current.modelConnectionsLoaded).toBe(true));
+ vi.mocked(api).mockClear();
+ hook.unmount();
+ vi.useFakeTimers();
+ try {
+  const mounted = renderHook(() => useRuntimeDashboard(options));
+  await act(async () => { await vi.advanceTimersByTimeAsync(31_000); });
+  expect(vi.mocked(api).mock.calls.map(([path]) => path).sort()).toEqual(['/api/settings/identities', '/api/settings/model-connections']);
+  mounted.unmount();
+ } finally { vi.useRealTimers(); }
 });

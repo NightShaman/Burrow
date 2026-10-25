@@ -201,7 +201,7 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
   };
 
   if (!cards.length) return <div className="panel-body"><p className="hint">No Anthropic or OpenAI OAuth connections yet.</p></div>;
-  return <section className="codex-content account-status">
+  return <section className="accounts-content account-status">
     {orderedCards.map((card) => {
       const isDragging = draggedId === card.id;
       const isDropTarget = dropTargetId === card.id && !isDragging;
