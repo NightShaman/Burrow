@@ -274,11 +274,11 @@ function retentionPolicyScheduler() {
         await runRetentionCleanup({ dataRoot: runtime.runtimeState.agentDataRoot, traceRoot: path.join(runtime.runtimeState.cacheRoot, 'traces'), retention: { traceMaxAgeDays: policy.operationalDays }, confirm: true });
       }
       for (const agent of await stores.agents.list({ includeDisabled: true })) {
-        const runtime = await resolveAgentRuntime(agent.id);
+        const runtime = await resolveAgentContext(agent.id);
         if (!runtime) continue;
         await runRetentionCleanup({ dataRoot: runtime.agentDataRoot, traceRoot: path.join(runtime.agentDataRoot, 'traces'), conversationStore: stores.conversations, taskStore: stores.tasks, agentId: agent.id, retention: { conversationDays: policy.conversationDays }, confirm: true });
       }
-      await cleanupAgentAttachments({ agentStore: stores.agents, retentionDays: policy.attachmentDays, resolveAgentWorkspaceRoot: async (id) => (await resolveAgentRuntime(id))?.agentWorkspaceRoot || null });
+      await cleanupAgentAttachments({ agentStore: stores.agents, retentionDays: policy.attachmentDays, resolveAgentWorkspaceRoot: async (id) => (await resolveAgentContext(id))?.agentWorkspaceRoot || null });
     },
     runCleanup: async (policy) => retentionCleanup({ policy, confirm: true, includeAttachments: true }),
   });
@@ -1031,7 +1031,7 @@ async function runtimeConfig(agentId = 'hatchet') {
   return loadRuntimeConfig({ rootDir: projectRoot, args: { agent_id: String(agentId || 'hatchet') }, stores: postgresApplication.stores, tolerateModelResolutionError: true });
 }
 
-// Settings management needs identity/context, not permission to execute a turn.
+// Settings and retention maintenance need identity/context, not permission to execute a turn.
 async function resolveAgentContext(agentId = null) {
   const runtime = await runtimeConfig();
   const id = String(agentId || runtime.runtimeState.agentId || 'hatchet').trim();
@@ -2379,7 +2379,7 @@ async function retentionCleanup(body = {}) {
   if (body.confirm === true && !policy.enabled && body.requireEnabled !== false) return { ok: false, status: 409, error: 'retention_policy_disabled', policy };
   try {
     const result = await runRetentionCleanup({ taskStore: postgresApplication.stores.tasks, conversationStore: postgresApplication.stores.conversations, agentId: runtime.runtimeState.agentId, dataRoot: runtime.runtimeState.agentDataRoot, traceRoot: path.join(runtime.runtimeState.cacheRoot, 'traces'), retention: policy, confirm: body.confirm === true });
-    const attachments = body.confirm === true && body.includeAttachments === true ? await cleanupAgentAttachments({ agentStore: postgresApplication.stores.agents, retentionDays: (await postgresApplication.stores.albdruck.readRetention()).attachmentDays, resolveAgentWorkspaceRoot: async (agentId) => (await resolveAgentRuntime(agentId))?.agentWorkspaceRoot || null }) : null;
+    const attachments = body.confirm === true && body.includeAttachments === true ? await cleanupAgentAttachments({ agentStore: postgresApplication.stores.agents, retentionDays: (await postgresApplication.stores.albdruck.readRetention()).attachmentDays, resolveAgentWorkspaceRoot: async (agentId) => (await resolveAgentContext(agentId))?.agentWorkspaceRoot || null }) : null;
     const state = body.confirm === true ? await writeRetentionPolicyState(retentionPolicySuccessState({ policy, result, previous: await readRetentionPolicyState({ store: postgresApplication.stores.retentionSettings }) }), { store: postgresApplication.stores.retentionSettings }) : await readRetentionPolicyState({ store: postgresApplication.stores.retentionSettings });
     return { ok: true, policy, state, ...result, attachments };
   } catch (error) {
