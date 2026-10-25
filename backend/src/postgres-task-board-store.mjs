@@ -393,6 +393,8 @@ export class PostgresTaskBoardStore {
       const stamp = this.clock(),
         status = t.status ?? current.status,
         metadata = { ...(t.metadata ?? current.metadata) };
+      if (status === current.status && ["done", "cancelled"].includes(status) && current.terminalAt)
+        metadata.terminalAt = current.terminalAt;
       if (
         ["done", "cancelled"].includes(status) &&
         status !== current.status
