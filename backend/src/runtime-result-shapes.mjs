@@ -208,6 +208,7 @@ export function summarizeToolResults(toolResults = []) {
       : undefined,
     // Skill discovery must preserve the bounded capability cards that informed
     // the agent. Full loaded instructions remain native-result-only.
+    skillId: toolResult.tool === 'load_skill' && typeof toolResult.skillId === 'string' ? compactText(toolResult.skillId, 160) : undefined,
     skills: compactSkillCards(toolResult.skills),
     skill: toolResult.skill ? compactSkillCard(toolResult.skill) : undefined,
     entries: Array.isArray(toolResult.entries) ? toolResult.entries.slice(0, RECEIPT_TEXT_LIMITS.list).map((item) => ({ path: item?.path || null, type: item?.type || null })) : undefined,

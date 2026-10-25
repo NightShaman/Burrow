@@ -11,6 +11,17 @@ function basename(value = '') {
 export function toolActivityPresentation(input = {}) {
   const payload = input.payload || input;
   const tool = String(payload.tool || '').trim();
+  // Identity only: never derive MCP/skill presentation from arguments or bodies.
+  if (tool === 'mcp_call') {
+    const provider = compactDetail(payload.provider || payload.mcpProvider);
+    const name = compactDetail(payload.mcpToolName);
+    return { label: name ? `MCP ${provider ? `${provider} / ` : ''}${name}` : 'MCP call' };
+  }
+  if (tool === 'load_skill') {
+    const id = compactDetail(payload.skillId || payload.skill?.id);
+    const name = compactDetail(payload.skillName || payload.skill?.name);
+    return { label: `Loading skill${name || id ? ` ${name || id}` : ''}`, ...(id && name && id !== name ? { detail: id } : {}) };
+  }
   const filePath = payload.filePath || payload.path || '';
   const dirPath = payload.dirPath || '';
   const query = payload.query || payload.pattern || '';

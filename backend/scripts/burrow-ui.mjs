@@ -1756,6 +1756,10 @@ function publicChatProgress(record = {}) {
       data: {
         tool: payload.tool || null,
         rawTool: payload.tool || null,
+        provider: payload.provider || null,
+        mcpToolName: payload.mcpToolName || null,
+        skillId: payload.skillId || null,
+        skillName: payload.skillName || null,
         activityId: payload.activityId || null,
         ok: payload.ok ?? null,
         status: payload.status || null,

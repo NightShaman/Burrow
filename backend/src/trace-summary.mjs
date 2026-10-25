@@ -199,6 +199,8 @@ function compactPayload(record) {
     executionTarget: payload.executionTarget || null,
     provider: payload.provider || null,
     mcpToolName: payload.mcpToolName || null,
+    skillId: payload.skillId || null,
+    skillName: payload.skillName || null,
     cwd: payload.cwd ? redactText(payload.cwd).slice(0, 1000) : null,
     exitCode: payload.exitCode ?? null,
     command: payload.command ? redactText(payload.command) : null,
