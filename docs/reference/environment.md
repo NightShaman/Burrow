@@ -2,7 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 
 This reference separates supported service settings from installer, test and compatibility names. The focused additions below are checked against public release 2026.10.19; the earlier-reference warning still applies to the full inventory. Installation scripts and containers can override them; inspect the actual service environment before diagnosing a mismatch. Never paste encryption keys, database passwords or provider credentials into a diagnostic report.
@@ -51,7 +51,7 @@ See [Authentication caveats](../security/authentication.md)
 | `BURROW_WORKSPACE_ROOT` | `<runtimeRoot>/workspace` |
 | `BURROW_AGENT_ID` | Resolver fallback `hatchet`; does not create that agent |
 | `BURROW_AGENT_WORKSPACE_ROOT` | `<workspaceRoot>/<agentId>`; suppressed by an explicit workspace-root argument |
-| `BURROW_SKILLS_ROOT` | `<agentWorkspaceRoot>/skills`; current managed skill catalog also has PostgreSQL authority |
+| `BURROW_SKILLS_ROOT` | `<agentWorkspaceRoot>/skills` fallback; current dedicated managed copies are filesystem-owned, separate from ordinary PostgreSQL skill/source records |
 | `BURROW_CACHE_ROOT` | `<runtimeRoot>/cache` |
 | `BURROW_ARCHIVE_ROOT` | `<runtimeRoot>/archive` |
 | `BURROW_SETTINGS_KEY` | Required external key material: Base64 encoding of exactly 32 bytes |

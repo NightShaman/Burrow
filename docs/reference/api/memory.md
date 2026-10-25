@@ -1,11 +1,11 @@
 # Memory and Dreams
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Source-reviewed API reference"
+    This reference was reconciled against current development source on **2026-10-25**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
-Brains stores explicit saved memories. Conversation originals, temporary continuity and Dream processing are separate surfaces. Read [memory](../../concepts/memory.md), [Dreams](../../concepts/dreams.md) and [conversation history](../../concepts/conversation-history.md) for lifecycle semantics. The focused corrections here were checked against public release 2026.10.19; the earlier-reference warning remains and no live deployment test is asserted.
+Brains stores explicit saved memories. Conversation originals, temporary continuity and Dream processing are separate surfaces. Read [memory](../../concepts/memory.md), [Dreams](../../concepts/dreams.md) and [conversation history](../../concepts/conversation-history.md) for lifecycle semantics. The route and store behavior here was checked against current source; no live deployment test is asserted.
 
 ## Brains CRUD
 
@@ -66,12 +66,14 @@ All these routes share the normal API authentication boundary. They are present 
 |---|---|---|
 | `GET`, `PUT` | `/api/agents/{agentId}/dream-settings` | Read/save settings, with effective model and resolution error |
 | `GET`, `POST` | `/api/agents/{agentId}/dream-diary` | List/render diary or append an entry |
-| `POST` | `/api/agents/{agentId}/dream-memory/consolidate` | Consolidate working memory into Dream-memory material |
+| `POST` | `/api/agents/{agentId}/dream-memory/consolidate` | Retained legacy route; current wiring returns the missing synthesized-items error described below |
 | `GET`, `POST` | `/api/agents/{agentId}/dream-cycle` | Read receipts or run a cycle |
 
 Dream settings include `enabled`, `quietDayDreams`, `cron`, `prompt`, optional `modelConnectionId` and `model`. The persisted default is enabled at `0 4 * * *`, with quiet-day Dreams enabled and operator timezone/model selection. Public migration 53 retires per-Dream timezone overrides; the retained `timezone` field is returned as null and the operator timezone governs scheduling. Explicit model overrides must supply a complete valid pair. A Dream prompt is at most 20,000 characters.
 
-Diary GET supports `date`, `phase`, `limit` (default 30) and `format`/`markdown`. Cycle receipt GET defaults to 20 entries. Consolidation/cycle POST accept `limit` and optional `generatedAt`; these are processing controls, not a separate scheduling API. A cycle result should be inspected for actual phase outcomes.
+Diary GET supports `date`, `phase`, `limit` (default 30) and `format`/`markdown`. Cycle receipt GET defaults to 20 entries. Cycle POST accepts `limit` and optional `generatedAt`; these are processing controls, not a separate scheduling API. Inspect the returned phase outcomes: current Dream cycles save individual Dream-generated Brain connections, not a mandatory DreamMemory preload.
+
+The legacy `/dream-memory/consolidate` route remains mounted, but its current handler supplies no synthesized `items` to a helper that requires them. Static source therefore shows a `400 dream_memory_synthesized_items_required` outcome, not a working standalone consolidation operation. Use the current Dream-cycle workflow; do not keep retrying this legacy route or treat its presence in OpenAPI as proof it works. No runtime fix or live call was performed in this documentation pass.
 ## Additional endpoint inventory
 
 Methods are significant. Braced segments are placeholders; URL-encode identifiers. See the [contract and conventions](../api.md) for artifact limitations. Brains and embedding endpoints are listed above.
@@ -86,7 +88,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d3601c821e787912d52b9044eaf649ec`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
 
 - [backend/scripts/ui/brain-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/brain-routes.mjs)
 - [backend/scripts/ui/dream-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/dream-routes.mjs)

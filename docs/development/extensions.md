@@ -30,13 +30,14 @@ Minimal manifest:
 {
   "id": "example-status",
   "name": "Example status",
+  "version": "2026.10.25",
   "server": "server.mjs"
 }
 ```
 
 A server module exports `activate(context)`, registers only its own routes/tools and returns cleanup when needed. Validate arguments in the handler and handle cancellation. Installation, enablement, ordinary tool grants and privileged system-mod capabilities are separate concerns; a manifest cannot grant itself Core authority.
 
-The current authoring material describes the newer reviewed contract. [Release status](../project/release-status.md) distinguishes that work from the latest public Core snapshot. The public Tutor release tag must come from coordinated promotion; do not invent a tag because a default branch exists.
+The current authoring material follows inspected development source. [Release status](../project/release-status.md) distinguishes that work from public snapshots and installed versions. Tutor’s [installation readiness](../../burrow-tutor/install.md#release-readiness) records a verified public tag; select an actual accepted tag with a matching manifest rather than inventing one from a default branch.
 
 ## Extend a model adapter
 

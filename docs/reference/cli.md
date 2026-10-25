@@ -1,7 +1,7 @@
 # Command-line reference
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 Burrow has two command layers: the installed shell launcher and the backend Node CLI. Use the installed launcher for a normal deployment; it loads the private environment and supplies the application root.
 
@@ -92,7 +92,7 @@ The private socket gains role-specific SCRAM rules. This does not isolate reader
 
 ## Dream controls
 
-`dream-memory` and `dream-cycle` are removed from the CLI help and accepted command list in this release. Use the UI/API Dream settings, consolidation and cycle controls described in [Dreams](../concepts/dreams.md) and the [memory API](api/memory.md). They are not supported shell commands.
+`dream-memory` and `dream-cycle` are removed from the CLI help and accepted command list in this release. Use the UI/API Dream settings and cycle controls described in [Dreams](../concepts/dreams.md) and the [memory API](api/memory.md). They are not supported shell commands.
 
 ## Chat slash commands
 

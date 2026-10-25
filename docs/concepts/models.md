@@ -1,7 +1,7 @@
 # Models and providers
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 Model selection is explicit configuration. A connection describes the provider endpoint and credential source; a model identifies the configured capability to use through that connection. The connection ID is durable identity. A display label is presentation.
 
@@ -19,6 +19,8 @@ Then select the agent in **Chat** and use the **Provider** and **Model** toolbar
 | OpenAI-compatible Chat Completions | Conversational model requests | Role-structured messages and native tool calls/results |
 | OpenAI Responses | Conversational model requests | Responses input items and replayed native continuation context |
 | Anthropic Messages | Conversational model requests | Content blocks, signed thinking preservation, tool-use/result pairing |
+| Google Gemini Developer API | Native chat/streaming and tool continuation | Uses the Google API contract, not an OpenAI-compatible endpoint |
+| OpenAI LB / Anthropic LB | Logical same-family OAuth account pools | Current text-model routing with eligibility, sticky ownership and bounded pre-output retry; see [account pools](../guide/models.md#native-oauth-account-pools) |
 | Generated-artifact adapter | Output-only image/audio generation | Current user generation instruction, without the full conversational prompt or tool loop |
 | Google Lyria | Forge music generation | Separate generation dispatch path, not a chat transport |
 

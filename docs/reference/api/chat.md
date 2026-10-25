@@ -1,7 +1,9 @@
 # Chat and streaming
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
+!!! note "Source-reviewed API reference"
+    This reference was reconciled against current development source on **2026-10-25**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+
 
 `POST /api/chat` submits one user-visible turn. Select an existing agent; its configured model and tools determine what the turn can do. A request can incur provider charges and execute granted tools.
 
@@ -19,7 +21,7 @@
 | `continuityScope` | Explicit continuity namespace; `workingProject` is a compatibility alias |
 | `noCallModel` | Literal `true` selects no-model behavior; not an authorization or sandbox control |
 
-Normal chat does not accept a workspace-selection/execution-target protocol. A continuity namespace or prose path does not change the tool cwd or execution target. Requests sharing an agent/session are serialized by the HTTP adapter.
+Normal chat does not accept a workspace-selection/execution-target protocol. A continuity namespace or prose path does not change the tool cwd or execution target. Ordinary requests sharing an agent/session are serialized by the HTTP adapter. `/stop`, `/new`, and `/status` bypass that wait so cancellation, reset and status can reach an active turn.
 
 ### Attachment and request budgets
 
@@ -65,7 +67,7 @@ sequenceDiagram
 
 ## Disconnect and cancellation
 
-Closing the browser or aborting the client fetch marks the turn detached; it does not automatically cancel execution. Send `POST /api/chat/{runId}/cancel` with the owning `agentId` and optional `reason` for explicit cancellation. Cancellation is a request to stop active work, not rollback of tools already executed.
+After admission, closing the browser or aborting the client fetch marks the turn detached; it does not automatically cancel execution. A disconnect while still waiting for session admission aborts that queued request instead. Send `POST /api/chat/{runId}/cancel` with the owning `agentId` and optional `reason` for explicit cancellation. Cancellation is a request to stop active work, not rollback of tools already executed.
 
 After a disconnect, query `GET /api/chat/runs/active` with `agentId`/`sessionId`, then reload [session history](sessions.md). Active-run state is in memory and is not a durable streaming replay cursor. There is no automatic resumption of the same event stream. Avoid blindly reposting a turn, which can run it twice.
 ## Steering an active turn
@@ -90,3 +92,8 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `POST` | `/api/chat/{runId}/cancel` | Cancel a chat run |
 | `POST` | `/api/chat/{runId}/steer` | Submit idempotent steering input |
 | `GET` | `/api/chat/{runId}/steering` | Read durable steering input/status |
+
+
+## Source review
+
+Reconciled on **2026-10-25** against Backend commit `3bf50374d3601c821e787912d52b9044eaf649ec`; static source inspection only, with no live API or provider calls.

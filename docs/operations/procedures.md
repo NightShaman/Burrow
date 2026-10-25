@@ -2,7 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 
 These retained recipes include targeted corrections against public **2026.10.19** and assume the default native user installation. For containers, use the corresponding [container commands](containers.md). Replace example agent/session IDs with real values and run as the installation owner.
@@ -66,11 +66,11 @@ If the intent is to correct work rather than stop it, send a follow-up while the
 
 1. Open **Tasks**, create a project if needed, and create or open a task.
 2. Fill in the description and **Assignee**, then save. **Execute** uses only the saved task and rejects unsaved edits.
-3. Choose **Execute** on a task that is neither Done nor cancelled. Expect a running execution receipt and the **Live execution** panel.
-4. Follow progress; the UI polls active runs and reloads the task after execution ends. The assigned agent runs the task in its **default** conversation, with project context scoped to this task run.
+3. Choose **Execute** on a task that is neither Done nor cancelled. Expect a dispatch receipt and navigation to the assigned agent's chat.
+4. Follow progress in chat and inspect the task's saved execution/history. The current board does not continuously poll task execution; use **Refresh history** or reopen the task for newer records. The assigned agent runs the task in its **default** conversation, with project context scoped to this task run.
 5. Inspect the default conversation and **Archive → Proof** for its final answer, blockers, and verification. Update the board status to reflect the reviewed outcome.
 
-The dispatch lookup is awaited in this release; the former unassigned-task warning is obsolete. Execution success does not automatically move a task to Done. A progress panel may remain visible during a transient status-poll failure. Check runtime activity and the task's persisted execution before retrying; a disconnected browser does not prove dispatch failed. Project paths supply context, not filesystem authorization. Sources: , , .
+The dispatch lookup is awaited in this release; the former unassigned-task warning is obsolete. Execution success does not automatically move a task to Done. An uncertain dispatch response requires checking the active chat and retained task receipt. Check runtime activity and the task's persisted execution before retrying; a disconnected browser does not prove dispatch failed. Project paths supply context, not filesystem authorization. Sources: , , .
 
 ## Recover a prior decision or saved memory
 

@@ -1,14 +1,16 @@
 # Skills and memory
 
-This guide follows the public **2026.10.19** release. Use **skills** for reusable instructions, **profile documents** for agent-specific guidance, and **Brains** for explicit saved memories.
+Current implementation reviewed **25 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
-Burrow automatically provisions its runtime skill and adopts its official update source by default. Bundled and Git-managed instructions are read-only; creating a text skill is for your own optional instructions. Meet Tinker and Trixie and inspect the public instructions in [Burrow Skills](https://burrow-docs.blissful-psychosis.com/burrow-skills/). The [managed-skills guide](https://burrow-docs.blissful-psychosis.com/burrow-skills/managed-skills/) distinguishes the current public runtime from the forthcoming automatic Core/mod-managed system.
+Use **skills** for reusable instructions, **profile documents** for agent-specific guidance, and **Brains** for explicit saved memories.
+
+Burrow automatically provisions its runtime skill and adopts its official update source by default. Bundled and Git-managed instructions are read-only; creating a text skill is for your own optional instructions. Meet Tinker and Trixie and inspect the public instructions in [Burrow Skills](https://burrow-docs.blissful-psychosis.com/burrow-skills/). The [managed-skills guide](https://burrow-docs.blissful-psychosis.com/burrow-skills/managed-skills/) distinguishes the historical 2026.10.19 runtime from the implemented Core/mod-managed catalog.
 
 ## Official managed skills
 
 Burrow's official operating skills have their own [repository and user guide](https://burrow-docs.blissful-psychosis.com/burrow-skills/). Read the source instructions and companion files before trusting them. Repository visibility helps inspection; it does not certify that a skill is safe.
 
-Public Core 2026.10.19 adopts the official `burrow-runtime` Git source automatically while preserving an existing operator-managed source. The newer managed-skill implementation supplies Core and loaded mods' declared skills automatically from a dedicated read-only catalog, synchronizes at startup and mod lifecycle changes, and checks again every six hours by default. These managed copies are not edited or individually assigned through the ordinary skill editor. Customize a separate operator-owned skill instead.
+The historical 2026.10.19 runtime adopted the official `burrow-runtime` Git source automatically. Current Core supplies Core and loaded mods' declared skills automatically from a dedicated read-only catalog, synchronizes at startup and mod lifecycle changes, and checks again every six hours by default. These managed copies are not edited or individually assigned through the ordinary skill editor. Customize a separate operator-owned skill instead.
 
 The manual and Git-import controls below describe ordinary operator-managed skills. See [release status](../project/release-status.md) before expecting the newer mod-managed catalog on an older Core.
 
@@ -57,7 +59,7 @@ Assignment makes the skill available for discovery. It does not inject the full 
 
 Open **Settings → Agents**, choose the agent, then **Profile documents**. Select **SOUL.md**, **RULES.md**, **ORIENTATION.md**, **PREFERENCES.md**, **TOOLS.md**, or **DreamMemory.md**. Edit the Markdown and click **Save profile documents**.
 
-In newer Core, **Settings → General → Global documents** also provides Global Rules and Global Orientation. Each agent independently opts in through **Include Global Rules** and **Include Global Orientation**; included global text comes first, followed by that agent's local text. Both are off by default for existing agents.
+In current Core, **Settings → General → Global documents** also provides Global Rules and Global Orientation. Each agent independently opts in through **Include Global Rules** and **Include Global Orientation**; included global text comes first, followed by that agent's local text. Both are off by default for existing agents.
 
 These are agent guidance documents. Writing a permission into a document does not create an operating-system sandbox or an MCP grant; configure actual access separately in [Tools and mods](tools-and-mods.md).
 
@@ -90,10 +92,14 @@ Enabling a remote embedding provider involves sending memory text to that provid
 
 [Source: embedding controls](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/BrainEmbeddingSettings.tsx#L48-L80) · [Source: supported providers and text requests](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/brain-embedding-provider.mjs#L15-L59)
 
+## Retrieve historical run proof
+
+When you need a past execution result rather than a saved fact, ask the agent to use `run_evidence_search` with a specific query. It searches that agent's retained run proof across sessions; it does not automatically preload history or grant cross-agent access. Retention can remove old records, and a past successful run does not verify today's filesystem or provider state. Use `session_search` when you need original conversation wording instead.
+
 ## Scheduled dreaming
 
 Open **Settings → Agents → [agent] → Dreams**. Enable scheduled dreaming, set the cron schedule, choose a model override or inherit the chat model, edit the prompt, and click **Save dream settings**. The schedule follows the operator timezone. **Dream on quiet days** controls whether a day with no new material still generates a diary from retained continuity; when off, such days skip model work.
 
-Check **Recent activity** for completed, partial, failed, or interrupted cycles and any phase errors. Browse retained dream entries in **Archive → Dreams**. In public Core 2026.10.19, DreamMemory/preloads and Brains are separate publication paths. Newer Core instead saves individual **Dream-generated** connections in Brains and excludes DreamMemory and Dream preloads from ordinary context. Those connections are searchable on demand, not injected into every turn. A cycle may legitimately save no new connection. See [Dream cycles](../concepts/dreams.md) for the version-specific behavior.
+Check **Recent activity** for completed, partial, failed, or interrupted cycles and any phase errors. Browse retained dream entries in **Archive → Dreams**. Current Core saves individual **Dream-generated** connections in Brains and excludes DreamMemory and Dream preloads from ordinary context. Those connections are searchable on demand, not injected into every turn. A cycle may legitimately save no new connection. See [Dream cycles](../concepts/dreams.md) for the version-specific behavior.
 
 [Source: dream settings and activity](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/AgentDreams.tsx#L87-L124)

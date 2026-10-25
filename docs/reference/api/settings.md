@@ -1,8 +1,8 @@
 # Settings and integrations
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Source-reviewed API reference"
+    This reference was reconciled against current development source on **2026-10-25**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
 These are privileged operator routes. They share the normal interactive authentication gate; `diagnostics:read` Bearer tokens do not authorize them. Stored settings, environment overrides and effective runtime behavior are explained in [configuration](../configuration.md).
@@ -18,7 +18,7 @@ In the UI, use **Settings → Connections → Model providers → Connect**, sel
 
 Connection save accepts `provider`, `apiType`, `baseUrl`, and `models`; include `id` to update an existing connection. Omit `apiKey` to preserve an existing credential, or supply a nonblank replacement. Discovery refreshes provider/catalog facts while preserving explicit operator capability overrides. Discovery, connection authentication, model enablement, and agent selection are separate state transitions.
 
-A per-agent selection uses `connectionId` and `model`, with optional `reasoningEffort` (default `off`) and `temperature` (0–2; omission preserves the prior value or defaults to 0.2). The backend rejects an unknown connection, a model not enabled in its catalog, absent authentication, or an advertised unsupported reasoning effort. Archive-summary selection is independent and can be cleared. Public 2026.10.19 also has a separate per-agent Minion selection at `/api/agents/{agentId}/minion-model-selection`, using the same connection/model, effort and temperature fields. Adapter compatibility rules can omit a saved temperature from the provider request.
+A per-agent selection uses `connectionId` and `model`, with optional `reasoningEffort` (default `off`) and `temperature` (0–2; omission preserves the prior value or defaults to 0.2). The backend rejects an unknown connection, a model not enabled in its catalog, absent authentication, or an advertised unsupported reasoning effort. Archive-summary selection is independent and can be cleared. There is also a separate per-agent Minion selection at `/api/agents/{agentId}/minion-model-selection`, using the same connection/model, effort and temperature fields. Adapter compatibility rules can omit a saved temperature from the provider request.
 
 Prompt-cache flags, arbitrary request extras and cache-retention controls are not exposed by the standard model-connection form. See [current cache semantics](../../concepts/models.md#what-caching-currently-means) before treating an adapter option as a supported settings field.
 
@@ -29,6 +29,12 @@ Provider login endpoints are distinct from UI OIDC authentication:
 - Claude CLI credential status/import: explicit integration with locally available credentials
 
 These flows can establish ongoing provider access. Handle credentials through the supported operator flow, never diagnostic tokens, and do not log raw callback content. Capability/provider-specific details are in [models](../../concepts/models.md).
+### Native OAuth provider pools
+
+Pools are saved through the existing model-connection POST route, not a separate pool API. Use `apiType: "openai-lb"` or `"anthropic-lb"` and a `pool` object with boolean `enabled`, nonempty `memberConnectionIds`, optional `sticky` (default true), and optional `preferEarlierReset` (default false). Member IDs are normalized and deduplicated. Pools use existing saved OAuth connections; they are not a credential upload or account-registration flow.
+
+Members must exist and belong to the matching provider family. OpenAI pools accept OpenAI OAuth connections using `openai-responses` or `openai-chat-completions`; Anthropic pools accept Anthropic/Claude OAuth with `anthropic-messages`. API-key-only members, self-membership, and nested pools are rejected. Discovery combines member model catalogs; inspect its `discovery.status` and `error`, because a manual-only fallback can still return `ok: true`. See [models](../../concepts/models.md) for runtime selection and fallback limits. The generated OpenAPI schema does not yet express this pool contract.
+
 ## MCP configuration and grants
 
 Connection save requires `name` (up to 120 characters) and `transport` (`http` or `stdio`). HTTP requires an HTTP(S) `baseUrl`; stdio requires `command` (up to 240 characters), with arguments up to 2,000 characters each. `lifecycle` is `ephemeral` or `keep_alive`, default ephemeral; `enabled` defaults true.
@@ -38,9 +44,9 @@ Discover/diagnose use `connectionId`; Diagnose may also receive `toolName` and a
 Agent grants use `{ "tools": [{ "connectionId": "…", "toolName": "…" }] }`; PUT replaces the full set. Read-modify-write deliberately. Secret update rules and the asynchronous delete-acknowledgement caveat are in [MCP](../../concepts/mcp.md).
 ## Skills, identities and policy
 
-Skills have central PostgreSQL records and per-agent assignments. Public 2026.10.19 also supports Git-backed filesystem packages, tracked package files and synchronization receipts. An assignment does not expand execution permission; importing a package can place executable support files on disk, so review its source before use. Git preview/import, source management, explicit sync, history and file-download endpoints are listed below. Identity/profile settings likewise differ from authentication principals.
+Skills have central PostgreSQL records and per-agent assignments. Current source also supports a managed official catalog alongside Git-backed filesystem packages, tracked package files and synchronization receipts. See the [Skills guide](../../guide/skills-and-memory.md) for managed-catalog and custom-source workflows. An assignment does not expand execution permission; importing a package can place executable support files on disk, so review its source before use. Git preview/import, source management, explicit sync, history and file-download endpoints are listed below. Identity/profile settings likewise differ from authentication principals.
 
-Timezone GET/PUT manages the operator's IANA timezone. Scheduled jobs, Dreams and Git-skill sync schedules all use that zone in public 2026.10.19; per-schedule timezone overrides are retired and reconciliation recalculates upcoming occurrences. Execution-boundary GET/PUT manages concrete configured blockers; see [enforcement limits](../../security/permissions.md).
+Timezone GET/PUT manages the operator's IANA timezone. Scheduled jobs, Dreams and Git-skill sync schedules all use that zone; per-schedule timezone overrides are retired and reconciliation recalculates upcoming occurrences. Execution-boundary GET/PUT manages concrete configured blockers; see [enforcement limits](../../security/permissions.md).
 
 Browser-origin settings read/save a boolean `checkOrigin`; the environment can override it. Keep checking enabled unless the deployment has an independent reason to disable it. OpenTelemetry settings read/save export enablement, collector endpoint and write-only exporter headers; enabling export shares telemetry with that collector.
 
@@ -118,7 +124,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d3601c821e787912d52b9044eaf649ec`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
 
 - [backend/scripts/ui/settings-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/settings-routes.mjs)
 - [backend/scripts/ui/general-settings-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/general-settings-routes.mjs)

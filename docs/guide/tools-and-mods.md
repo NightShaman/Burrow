@@ -1,6 +1,8 @@
 # Tools, mods, and execution
 
-The original guide follows public **2026.10.19**; explicitly dated updates below describe current implementation checked **24 October 2026**. Start here when an agent needs access to files, a service, or another execution machine.
+Current implementation reviewed **25 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+
+Start here when an agent needs access to files, a service, or another execution machine.
 
 ## Understand the three layers
 

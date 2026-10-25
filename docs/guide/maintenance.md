@@ -1,5 +1,7 @@
 # Maintenance and recovery
 
+Current implementation reviewed **25 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+
 Keep a restorable backup before updating or changing database configuration. The examples below assume a native install at `~/.burrow`; use your actual installation path if different.
 
 ## Check the running installation
@@ -38,7 +40,7 @@ Updates preserve durable state and operator settings, while reconciling installe
 
 ### Check the native update channel
 
-The public 2026.10.19 updater selects the public repository. Newer installer/launcher code also persists `BURROW_UPDATE_REPOSITORY` in `burrow.env` and retains the installation's selected repository when updating. A process-level override affects the requested operation; do not assume that it permanently rewrites an existing saved channel.
+Current installer/launcher code persists `BURROW_UPDATE_REPOSITORY` in `burrow.env` and retains the installation's selected repository when updating. A process-level override affects the requested operation; do not assume that it permanently rewrites an existing saved channel.
 
 For a public installation, the intended repository is `GoblinKing-Burrow/Burrow`. Check the installed version and configuration before changing anything. The native updater resolves assembled source; the absence of a GitHub Release alone does not prove it cannot update. Containers follow their configured image repository and tag instead. See [release status](../project/release-status.md).
 

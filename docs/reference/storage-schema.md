@@ -2,10 +2,10 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 
-This reference describes the public **2026.10.19** PostgreSQL schema through application migration **60**, plus runtime-owned filesystem data. Unpromoted development build **2026.10.21.2** appends migration **61**, `global-profile-documents`; that addition is not in the public release. It is an ownership and relationship guide, not a supported direct-write API. Use the application stores or [API](api.md) for mutation so validation, evidence checks, encryption and lifecycle rules remain intact.
+This reference retains the historical 2026.10.19 ownership map and now records the current migration ledger through **69**, checked against Core on **25 October 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
 
 See [Persistence architecture](../architecture/persistence.md) for the data flow and [Backup and recovery](../operations/backup-recovery.md) for recovery scope.
 
@@ -74,6 +74,15 @@ See [Persistence architecture](../architecture/persistence.md) for the data flow
 | 58 | `operator-owned-mod-authority` |
 | 59 | `task-audit-history-and-documents` |
 | 60 | `opentelemetry-operator-settings` |
+| 61 | `global-profile-documents` |
+| 62 | `global-profile-document-timestamps` |
+| 63 | `mod-external-agent-turns` |
+| 64 | `mod-text-generations` |
+| 65 | `native-compaction-projection-reuse` |
+| 66 | `owned-agent-message-deliveries` |
+| 67 | `mod-external-turn-display-message` |
+| 68 | `scheduled-model-context-mode` |
+| 69 | `provider-pool-connections-and-routing-state` |
 
 Early schema constants intentionally remain immutable. Read them together with later migrations: for example, the original `conversation_archives.entries` column is removed by version 19, and timezone columns introduced as non-null become nullable in versions 11 and 12.
 
@@ -250,3 +259,14 @@ Corrections on this page were checked against public **2026.10.19**; any newer d
 - [backend/src/postgres-task-audit-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-task-audit-schema.mjs)
 - [backend/src/postgres-otel-settings-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-otel-settings-store.mjs)
 - [backend/src/postgres-forge-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-forge-store.mjs)
+
+## Current additions after migration 60
+
+- Global profile documents and timestamps: shared Rules/Orientation remain opt-in per agent.
+- Durable mod-owned external turns and text generations: receipt ownership/idempotency is separate from ordinary conversation storage.
+- Native compaction projections and owned agent deliveries: retain their application-managed lifecycle rather than editing cached projections manually.
+- External turns can persist a human-visible `displayMessage` distinct from the model-facing message.
+- Scheduled jobs have `context_mode` (`continue` by default, or `fresh`); fresh mode requires a named non-default session. This does not imply a control exists in the current cron editor.
+- Model connections add `pool_json`; `provider_pool_affinity` and `provider_pool_health` retain logical-pool ownership and cooldown state. Pool connections do not own separate credentials. See [account pools](../guide/models.md#native-oauth-account-pools).
+
+Application migrations are not PostgreSQL major-version upgrades. Preserve the ledger and matching recovery backup; do not modify old checksums or assume an older binary can read the new schema.

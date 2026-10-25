@@ -18,14 +18,14 @@ Later Core implementation was also reviewed. This historical comparison is not a
 
 Reviewed on **22 October 2026**: ordinary mods can request asynchronous, potentially paid image jobs through Core’s saved Forge selection and read only their own image jobs. The [Tutor Forge lesson](https://burrow-docs.blissful-psychosis.com/burrow-tutor/forge-images/) covers consent, durable retries, and previews. This interface is absent from the older public snapshot above. Current guides follow implementation; the public snapshot follows the daily sync. Update Core alongside mods that use this capability.
 
-## Current implementation check: 24 October 2026
+## Current implementation check: 25 October 2026
 
 This nightly pass uses current development implementation as documentation truth; it does not wait for a public mirror or alter a release. Pins:
 
-- Assembled Burrow: `3fd3a55ef3aefa0ad3d24d71c6434510b869653a`.
-- Core: `e7cc546706f42bb4d5fdd10b3d8d8099b9ad5699`.
-- UI: `5f7b320a8a0993ba25f187b4fb72d06b70188265`.
-- Operating skills: `3a4e8dd1a63428cf2b535108a488c3bd41612d15`.
+- Assembled Burrow: `f9d1bc5b1b04e3d7f29c6b4f62e0feb935bff487`.
+- Core: `3bf50374d3601c821e787912d52b9044eaf649ec`.
+- UI: `0610bac85b2e636b79bbdf09fc3a95c3a519fa5a`.
+- Operating skills: `b81616ef9c8168d7fe9dcc8bd8e244149401fcc7`.
 
 Recent operator-facing changes include a **Browse stored credentials** picker and configured-credential state for HTTPS mod sources, plus a per-agent **A2A in default** routing toggle and readable external-chat session labels. See [tools and mods](../guide/tools-and-mods.md#private-source-credentials-in-current-core) and [everyday use](../guide/everyday-use.md#current-session-routing-controls).
 
@@ -33,11 +33,13 @@ The dedicated Core/mod-managed skill catalog is implemented, not merely planned.
 
 Current Core also exposes mod-owned external-turn cancellation and session create/model controls. Cancellation is cooperative and must be polled to terminal status; new-session creation does not delete an old conversation or cancel its work. These are Core capabilities, not proof that every transport mod exposes matching commands. Follow each mod's documentation and installed-version requirements.
 
-This was a source-grounded documentation check, not a live provider or full application test. Older reference pages remain explicitly historical; this ordinary pass does not recertify every earlier source link.
+The reviewed assembly identifies itself as **2026.10.25.9**. Native **OpenAI LB** and **Anthropic LB** connection types are now present in default-branch UI and Core, with same-family OAuth membership and bounded text-model routing. See [account-pool setup and limitations](../guide/models.md#native-oauth-account-pools). This is implemented source, not a claim of successful live provider validation. Current schema inventory reaches migration **69**. `run_evidence_search` adds explicit agent-owned historical proof retrieval; it does not add automatic prompt recall or a new HTTP API.
+
+This Sunday pass reconciled the full documentation surface, including historical-page scope. No live provider, OAuth, installation, database restore, runtime test, or unmerged branch was treated as successful verification. Historical examples remain historical; documentation publication does not establish runtime readiness.
 
 ## What to do now
 
-- If you run the public release, use the version-pinned [user guides](../guide/installation.md).
+- Start with the [current operator guide](../guide/installation.md) and compare its source coverage with your installed build.
 - If your installed build includes the newer behavior, use the clearly marked newer sections in [Skills and memory](../guide/skills-and-memory.md), [Dream cycles](../concepts/dreams.md), and [Conversation history](../concepts/conversation-history.md).
 - If a setting is missing, check Core's version before reinstalling a mod or changing authentication.
 - For remote execution, use [Node Goblin](https://burrow-docs.blissful-psychosis.com/node-goblin/) with [Backdoor](https://burrow-docs.blissful-psychosis.com/burrow-backdoor/) to retain an internal path to the agent's home Burrow.

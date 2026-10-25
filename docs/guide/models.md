@@ -1,5 +1,7 @@
 # Models and connections
 
+Current implementation reviewed **25 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+
 An agent needs a saved model connection and a selected model to answer. A connection tells Burrow which API to call and how to authenticate; the model selector chooses what that agent uses. A provider account, quota, and any model charges are separate from installing Burrow.
 
 ## Add an API connection
@@ -18,7 +20,7 @@ If discovery fails, read the displayed error. The editor allows adding model IDs
 
 ## Account sign-in options
 
-The public UI includes **OpenAI OAuth → Sign in with ChatGPT** and **Anthropic OAuth → Claude Code login**. These are distinct from entering a provider API key.
+The UI includes **OpenAI OAuth → Sign in with ChatGPT** and **Anthropic OAuth → Claude Code login**. These are distinct from entering a provider API key.
 
 - For ChatGPT, start the sign-in, open the authorization URL, and finish in your browser. If prompted, paste the callback code or redirect URL into Burrow's **Callback code or URL** field and choose **Submit callback**. Wait for **Signed in**, review the discovered models, and click **Save** to save the model selection.
 - For Anthropic, choose **Start Claude Code login**, finish the browser step, submit the callback code when requested, then use **Import Claude auth** when available. The flow can create its connection when needed; the dialog's older save-first note is not a prerequisite in this release.
@@ -27,6 +29,23 @@ The public UI includes **OpenAI OAuth → Sign in with ChatGPT** and **Anthropic
 Treat callback URLs, codes, and tokens as secrets. Enter them only into the sign-in flow you started, not into an agent conversation or bug report. Provider eligibility and policies can change; the presence of a sign-in button is not a promise of account access.
 
 [Source: sign-in dialogs and statuses](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/ModelConnectionOAuthDialog.tsx).
+
+## Native OAuth account pools
+
+Current Core/UI adds **OpenAI LB** and **Anthropic LB** as logical connection types. This is implemented in the reviewed source, not proof of provider acceptance or live account health.
+
+1. Connect and save each account through the matching OAuth flow first.
+2. In **Models**, choose **OpenAI LB** or **Anthropic LB** under **API type**, and give the pool a recognizable **Provider** name.
+3. Under **Account pool**, select compatible saved accounts and **Enable load balancing**. The pool has no separate URL, API key, or OAuth login.
+4. Choose **Connect**, review the combined model list, then **Save**. Select this logical provider and a model in Chat as usual.
+
+Only same-family OAuth connections are eligible members; ordinary API-key connections, other pools, and cross-family accounts are not. Remove unavailable members before saving. A member cannot be deleted while a pool still references it: edit the pool first.
+
+Routing uses enabled members with the requested model, known capacity, and fresh measured usage. Missing, stale, or unknown usage is not treated as spare quota. Default routing is sticky to a conversation/thread owner; a temporary substitute does not erase that ownership. The current UI saves sticky routing on and earlier-reset preference off; it has no manual account weights or account-selection control.
+
+One alternate attempt can occur only before user-visible output for eligible availability failures. Native continuations stay bound to their original serving account; a pool does not guarantee seamless continuation after that account becomes unavailable. Cancellation and already-produced output do not trigger a fresh-account replay. Media generation in Forge has a separate dispatch path and is not pooled by this text-model feature.
+
+If a pool cannot serve a request, check member enabled state, OAuth health, selected models, usage freshness, and cooldowns. A visible union model or saved pool does not establish that an eligible member can currently answer. Keep the actual error/run receipt before retrying.
 
 ## Capabilities and context size
 

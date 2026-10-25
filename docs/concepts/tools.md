@@ -2,7 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 
 Tools are structured capabilities supplied to a model request. The model chooses a tool and arguments; the runtime normalizes the call, reviews it, dispatches it, and returns an observed result. A tool's presence does not establish that a particular invocation will succeed.
@@ -17,6 +17,7 @@ The effective schema depends on runtime context and enabled integrations. The na
 | File mutation | `files_write`, `files_edit`, `files_patch` | Write complete content, exact replacement, or patch |
 | Process and Git | `shell_exec`, `git_status`, `git_diff` | Execute commands or collect repository evidence |
 | Conversation and continuity | `session_search`, `session_read_handoff`, `memory_working_search`, `memory_rolling_search` | Retrieve agent-scoped support evidence |
+| Historical run proof | `run_evidence_search` | Explicit read-only search of the active agent's retained run evidence across sessions; not current verification or authorization |
 | Saved memories | `brain_search`, `brain_read`, `brain_save`, `brain_update`, `brain_remove` | Explicit agent-owned saved memories |
 | Continuity updates | `memory_working_write`, `session_write_handoff` | Record explicitly structured operational context |
 | Coordination | `spawn_subagent`, `agent_send_message` | Child tasks or registered peer agents |

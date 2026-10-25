@@ -1,6 +1,6 @@
 # Everyday use
 
-The original guide follows public **2026.10.19**. Its source links remain pinned to that historical release; dated additions describe current implementation.
+Current implementation reviewed **25 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 ## Find your way around
 
@@ -48,7 +48,7 @@ Type `/help` to see chat commands. The composer also offers `/context`, `/contex
 
 Use **Stop response**, then check the run's terminal status and reload the persisted transcript before retrying the request. Reset preserves archives but changes the active conversation generation; avoid treating it as a routine retry button while an important write may still be running.
 
-Newer Core/UI code reviewed on 21 October adds cancellation deadlines, reset-generation fencing and terminal transcript reconciliation. These are not part of the inspected public 2026.10.19 snapshot. They do not undo an external side effect already completed before cancellation. See [release status](../project/release-status.md).
+Current Core/UI implements cancellation deadlines, reset-generation fencing and terminal transcript reconciliation. These were absent from the historical 2026.10.19 snapshot. They do not undo an external side effect already completed before cancellation. See [release status](../project/release-status.md).
 
 ## Read and edit workspace files
 

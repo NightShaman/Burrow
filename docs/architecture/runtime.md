@@ -2,7 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 
 A normal chat turn is coordinated by `runAskChat`. Its contract requires a root, a message, and composed PostgreSQL application stores. Transport adapters supply trusted agent context separately from serialized request arguments.
@@ -84,7 +84,7 @@ flowchart TB
     Receipt --> Run[Run evidence]
     Receipt --> Read[Retained read evidence]
     Digest --> Context[Selected later-turn context]
-    Run -->|Matching target or explicit scope| Context
+    Run -->|Explicit run_evidence_search| Tool[Agent-requested retrieval]
     Read -->|Freshness and capacity checks| Context
     Raw -->|Explicit inspection| Tool
 ```
@@ -92,7 +92,7 @@ flowchart TB
 These mechanisms solve different problems:
 
 - **Execution digest:** a bounded account of important tool outcomes for continuity
-- **Run evidence:** compact objective/outcome/target records selected by exact target or explicit continuity scope
+- **Run evidence:** compact objective/outcome/target records retrieved explicitly through `run_evidence_search`; current pre-turn support does not automatically inject historical run proof
 - **Read evidence:** retained excerpts with source range and freshness metadata
 - **Raw artifacts:** detailed output available for explicit inspection
 

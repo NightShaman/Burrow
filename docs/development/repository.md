@@ -1,28 +1,25 @@
 # Repository and source ownership
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
-
-Burrow's public repository is an assembled distribution. The backend and UI originate in separate source repositories; the assembly records the exact commits it used.
+Burrow is assembled from separate source repositories; public promotion publishes a curated snapshot of that distribution. The backend and UI originate in separate source repositories; the assembly records the exact commits it used.
 
 ## Reviewed snapshot
 
 | Artifact | Revision |
 |---|---|
-| Public Burrow | `aa5a30da683a3a8ea919025f107ff53f182ef8d6` |
-| Build | `2026.10.19` |
-| Backend source | `77f6da160ecae849aa83fc67d08ef4cc903d0b46` |
-| UI source | `eee912f1e55308c79695bc7a304224cc6a501eab` |
+| Development assembly | `f9d1bc5b1b04e3d7f29c6b4f62e0feb935bff487` |
+| Build | `2026.10.25.9` |
+| Backend source | `3bf50374d3601c821e787912d52b9044eaf649ec` |
+| UI source | `0610bac85b2e636b79bbdf09fc3a95c3a519fa5a` |
 
 These pins describe the documentation's evidence baseline, not a claim about every running installation. Read your installed `SOURCE_VERSIONS` and health version when investigating a deployment.
 
-## Public tree
+## Assembled tree
 
 ```text
 Burrow/
-├── PUBLIC_RELEASE.json      public release provenance
+├── PUBLIC_RELEASE.json      public promotion provenance (public snapshots)
 ├── backend/
 │   ├── bin/                 Node CLI
 │   ├── global-skills/       bundled runtime instruction skill
@@ -38,8 +35,10 @@ Burrow/
 ├── compose.yml
 ├── install.sh
 ├── SOURCE_VERSIONS
-└── docs/                    this documentation site
+└── docs/                    upstream MkDocs documentation
 ```
+
+The public promotion adds its release provenance; a development assembly need not contain `PUBLIC_RELEASE.json`. The consolidated Docusaurus website lives separately in Docs-Website.
 
 The repositories are combined by copying files, not Git submodules. The public payload omits backend tests and deployment-source directories, but includes `backend/docs/openapi.json`. UI source tests and `vitest.config.ts` are included. Do not assume the public payload contains the complete contributor test environment.
 
@@ -69,14 +68,6 @@ Generated bundles and dependency locks are inventory/build evidence, not preferr
 
 See [source map](../project/source-map.md), [architecture](../architecture/overview.md), and [release process](releases.md).
 
+## Source review
 
-
-
-## Targeted source review
-
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
-
-- [SOURCE_VERSIONS](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/SOURCE_VERSIONS)
-- [PUBLIC_RELEASE.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/PUBLIC_RELEASE.json)
-- [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
-- [ui/vitest.config.ts](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/ui/vitest.config.ts)
+Reviewed on 25 October 2026 against development assembly `f9d1bc5b1b04e3d7f29c6b4f62e0feb935bff487` (build2026.10.25.9), Backend `3bf50374d3601c821e787912d52b9044eaf649ec` and UI `0610bac85b2e636b79bbdf09fc3a95c3a519fa5a`. This is static source review, not a claim that tests, installation or provider calls were run. Public snapshots can lag development; these pins are provenance, not an installed-version compatibility promise.

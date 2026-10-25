@@ -1,8 +1,8 @@
 # Tasks, schedules and groups
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Source-reviewed API reference"
+    This reference was reconciled against current development source on **2026-10-25**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
 BURROW exposes several work surfaces with different state models. The task board, scheduled jobs, group channels and retained Workbench compatibility API are not interchangeable task queues.
@@ -20,7 +20,9 @@ See [Task semantics](../../concepts/workers-tasks.md)
 
 ## Scheduled jobs
 
-Create requires nonblank `agentId`, `name`, `prompt` and a five-field `cron` expression; model selection is a separate stored setting. Scheduling uses the operator timezone; legacy per-job timezone input is not authoritative in public 2026.10.19. List can filter `agentId` and `enabled`. Job detail, PATCH, DELETE and run history use the job ID; run history accepts `limit`.
+Create requires nonblank `agentId`, `name`, `prompt` and a five-field `cron` expression. Optional explicit model overrides use a complete `modelConnectionId`/`model` pair. New jobs are disabled unless `enabled: true` is supplied. Scheduling uses the operator timezone; legacy per-job timezone input is not authoritative. List can filter `agentId` and `enabled`. Job detail, PATCH, DELETE and run history use the job ID; run history accepts `limit`.
+
+The API accepts `contextMode: "continue"` (default) or `"fresh"`. Fresh mode requires an explicit named `sessionId`, not `default`; invalid values are rejected. This backend setting is not a promise of a matching control in the current cron editor.
 
 `POST /api/scheduled-jobs/{jobId}/trigger` returns 202 admission. Inspect run history for terminal outcome. To cancel an active run, POST its `/runs/{runId}/cancel` path with optional `reason`; a non-active run returns 404. Cancellation does not undo completed tools.
 
@@ -90,7 +92,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d3601c821e787912d52b9044eaf649ec`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
 
 - [backend/scripts/ui/task-board-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/task-board-routes.mjs)
 - [backend/src/postgres-task-audit-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-task-audit-schema.mjs)

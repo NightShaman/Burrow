@@ -2,7 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 
 These retained observations include targeted source checks against public **2026.10.19** and explicitly labeled newer development behavior. They are not an independently tested running installation or a claim that every historical statement has been revalidated. Recheck them when upgrading.
@@ -24,6 +24,10 @@ Sources: , , . See [CLI distinctions](../reference/cli.md).
 The public **2026.10.19** tree does not contain `backend/tests/`, although package scripts reference it. It does include `backend/docs/openapi.json`; `openapi:check` still cannot execute the missing test stage in this assembly. The old `runtime:restore:rehearsal` npm script has been removed.
 
 The Scalar explorer reads the packaged `backend/docs/openapi.json`. Its presence is not proof of current route/body/response parity; see the [API reference](../reference/api.md). The literal-route drift checker is not a complete method or schema comparison. Report blocked checks explicitly; an npm script's existence does not prove it is runnable.
+
+## Legacy Dream consolidation route
+
+The retained `POST /api/agents/{agentId}/dream-memory/consolidate` route does not implement the current Dream-to-Brains workflow. Current handler/helper signatures are incompatible: the handler omits the synthesized `items` array required by the helper and can return `400 dream_memory_synthesized_items_required`. Use the supported Dream cycle and inspect its terminal receipt for current Brain connections; do not repeatedly call the legacy route or treat its presence in a schema as success. See [memory API](../reference/api/memory.md). This is a documentation contract limitation, not a runtime repair.
 
 ## Installation, recovery, and retention
 

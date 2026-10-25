@@ -1,8 +1,8 @@
 # HTTP API
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Source-reviewed API reference"
+    This reference was reconciled against current development source on **2026-10-25**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
 The API serves BURROW's UI and external clients. It is an operator-level control surface: it can create agents, change credentials and grants, execute model/tool work, import data and delete retained content. Read [authentication](../security/authentication.md) and [trust boundaries](../security/trust-boundaries.md) before exposing it.
@@ -36,7 +36,7 @@ The API serves BURROW's UI and external clients. It is an operator-level control
 
 The public assembly includes `backend/docs/openapi.json`. Its contract includes Brains, Dream controls, Git-skill management, Minion model selection, task history/attachments and OpenTelemetry settings. Retired `/api/albdruck/*` routes are absent. The source-backed endpoint pages still need to be read alongside the schema: its inventory is not proof of request/response parity or live compatibility.
 
-Unpromoted development build **2026.10.21.2** has 177 paths and 234 operations because it adds shared profile-document settings. Do not treat that development contract as part of public 2026.10.19.
+The current development contract reviewed on **2026-10-25** has **177 paths, 234 operations and 123 component schemas**, including shared profile-document settings. Its SHA-256 is `a4ac82be735a01cac163b8b3b22c207cb96e8a6e96f0295db50e3cbef2ee906b`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
 
 
 !!! warning "The schema is incomplete"
@@ -50,6 +50,8 @@ Specific drift:
 - Music availability is catalog-dependent; it is not unconditionally false as the old schema states
 - Forge jobs can include bounded `errorDetails`; the old job schema omits them
 - Archive calendar uses the requested timezone, despite its old UTC-only summary
+- Current native OAuth provider pools use model-connection settings; the schema does not describe their `pool` configuration or member restrictions
+- The operator mod-access route is source-implemented but absent from this schema
 
 The source drift checker scans literal route comparisons. Passing it does not establish dynamic-route, HTTP-method, request or response parity. See [known limitations](../project/known-limitations.md).
 ## Runtime explorer
@@ -94,7 +96,7 @@ For Basic authentication, add `--user "$BURROW_USERNAME"` and let curl prompt fo
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d3601c821e787912d52b9044eaf649ec`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
 
 - [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
 - [backend/scripts/burrow-ui.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/burrow-ui.mjs)

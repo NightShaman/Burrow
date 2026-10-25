@@ -1,8 +1,8 @@
 # Mods
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Source-reviewed API reference"
+    This reference was reconciled against current development source on **2026-10-25**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
 Mods are trusted installed server/UI code. Distribution, activation, tool grants and application data are separate lifecycles. See [extension development](../../development/extensions.md) and [trust boundaries](../../security/trust-boundaries.md) before installing a source.
@@ -20,7 +20,7 @@ Uninstall refuses system mods and preserves mod settings, encrypted secrets and 
 
 `GET`/`PUT /api/operator/mods/{modId}/access` reads or replaces `grants`, `adminAgentIds` and `diagnosticAgentIds`. Supply all three arrays on replacement; grants must be declared by that mod and supported by Core. A manifest alone does not grant system capabilities. The response includes `declaredCapabilities` and reports `restartRequired` after a save.
 
-In public **2026.10.19**, this route requires an authenticated operator even when ordinary UI auth is `none`; diagnostics tokens are always rejected. Unpromoted development build **2026.10.21.2** changes that route to accept direct operator actions in `none` mode, while continuing to reject API tokens. This development behavior must not be assumed for the public release.
+Current source accepts authenticated operator requests when UI authentication is enabled and direct operator requests in `none` mode. API tokens remain rejected. Historical public 2026.10.19 required an authenticated operator even in `none` mode; do not apply that older exception to the current implementation.
 
 ## Mod-specific routes and assets
 
@@ -55,7 +55,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d3601c821e787912d52b9044eaf649ec`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
 
 - [backend/src/mod-authority.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-authority.mjs)
 - [backend/src/mod-distribution.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-distribution.mjs)

@@ -2,7 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 
 BURROW authenticates access to its operator UI and HTTP API through one configured mode: `none`, `trusted-proxy`, `basic`, or `oidc`. Diagnostics bearer tokens are a separate, restricted access path. Authentication identifies an operator-facing request; it does not create per-agent operating-system isolation.
@@ -37,7 +37,7 @@ These routes do not return filesystem roots, model settings, policy, or trace co
 
 ### None
 
-`none` admits requests without login. Its verified request context is `{ enabled: false, authenticated: false }`. Routes such as settings and API-token creation remain reachable to anyone who can reach the listener. Use this only inside an appropriately restricted trust boundary. One public-release exception is `GET`/`PUT /api/operator/mods/{modId}/access`: it requires an authenticated operator even in `none` mode and rejects diagnostics tokens. Unpromoted development build **2026.10.21.2** changes this particular route to accept direct operator requests in `none` mode; that change is not part of public 2026.10.19.
+`none` admits requests without login. Its verified request context is `{ enabled: false, authenticated: false }`. Routes such as settings and API-token creation remain reachable to anyone who can reach the listener. Use this only inside an appropriately restricted trust boundary. Historical public 2026.10.19 had an exception for `GET`/`PUT /api/operator/mods/{modId}/access`. Current Core accepts direct UI requests in `none` mode, requires operator login when authentication is enabled, and rejects API tokens for that route. Check the installed version; this contract comparison is not a live authentication test.
 
 ### Trusted proxy
 

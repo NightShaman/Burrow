@@ -2,7 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 
 BURROW uses PostgreSQL for application settings, conversation history, memory and execution metadata. File attachments, generated artifacts, traces and several worker records remain on disk. A recoverable installation therefore includes both database and filesystem state, plus the key that decrypts stored credentials.
@@ -56,7 +56,7 @@ Changing lifecycle mode does not migrate data between clusters. Plan a database 
 
 ## Migrations and transactions
 
-The public **2026.10.19** manifest contains **60 append-only migrations**. The inspected development build **2026.10.21.2** adds migration 61 for global profile documents; this is not part of the public release. Each applied version records its name and SQL checksum in `burrow_schema_migrations`. Startup holds a transaction-scoped advisory lock while validating the ledger and applying pending SQL. Unknown versions, gaps, renamed migrations or changed checksums stop migration rather than silently rewriting history.
+The historical **2026.10.19** manifest contained 60 migrations. Current reviewed Core contains **69 append-only migrations**, including global profiles, durable mod turns/generations, compaction/delivery state, scheduled context mode, and provider pools. See the [current migration inventory](../reference/storage-schema.md). Each applied version records its name and SQL checksum in `burrow_schema_migrations`. Startup holds a transaction-scoped advisory lock while validating the ledger and applying pending SQL. Unknown versions, gaps, renamed migrations or changed checksums stop migration rather than silently rewriting history.
 Nested transaction work uses savepoints. A nested operation cannot commit the outer transaction; rollback failure causes the client to be discarded. Per-domain locks add narrower guarantees: session appends lock the session row, Tiddle writes lock the agent, and scheduled occurrences have unique database identities.
 
 !!! warning "A reader command may apply migrations"

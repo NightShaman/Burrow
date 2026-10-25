@@ -2,7 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 
 Use a registered agent for a persistent identity and configuration. Use a minion for an explicit child task. Use peer messaging when one registered agent needs another agent's response in that recipient's own context.
@@ -96,7 +96,7 @@ Identical structural spawn requests within the same parent lineage can reuse an 
 | `request_reply` | Execute one recipient response and mirror the response back; the sender may deliberately message again |
 | `request_reply_complete` | Execute one recipient response, mirror it back, and remove peer messaging from the sender's continuation tool surface |
 
-The default mode is `request_reply`; the recipient session defaults to `default`. Self-send is rejected. Concurrent reply requests to the same recipient session are serialized, and wait-graph cycles are rejected before new transcript ingress. Reply-mode deliveries use durable claims to reuse terminal results on exact retries rather than wake the recipient twice; cancellation is checked before queued ingress and execution.
+The default mode is `request_reply`. Current Core routes new implicit deliveries to `default` when the recipient's **A2A in default** preference is on (the default), or to `a2a` when off. Explicit target sessions and runtime-attested reply routes take precedence; changing the preference does not redirect an exchange already in flight. Self-send is rejected. Concurrent reply requests to the same recipient session are serialized, and wait-graph cycles are rejected before new transcript ingress. Reply-mode deliveries use durable claims to reuse terminal results on exact retries rather than wake the recipient twice; cancellation is checked before queued ingress and execution.
 
 ```json
 {

@@ -2,7 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 
 The BURROW interface brings conversations, agent configuration, project tasks, retained evidence, and media generation into one operator console. This retained guide includes targeted source corrections against public **2026.10.19**; its older screenshots are not a complete inventory of current controls. Start by checking the agent and session: these determine which conversation and records you are viewing.
@@ -225,7 +225,7 @@ To run a task:
 
 1. Create or open a task, select its project and **Assignee**, then save it.
 2. Reopen its details if necessary and choose **Execute**. Unsaved changes must be saved first; unassigned, Done, and cancelled tasks cannot execute.
-3. Follow **Live execution** in the editor. The UI polls the active run and refreshes the saved task when that run ends.
+3. Follow the dispatched run in the assigned agent's chat. The current board does not poll task execution continuously; reopen the task or use **Refresh history** to inspect newer persisted activity.
 4. Inspect the assigned agent's **default** conversation and **Archive → Proof** for the final answer, blockers, and verification evidence.
 
 Dispatch awaits the stored task and project; the previous unawaited-lookup limitation no longer applies. A successful dispatch records a running execution with a run ID, then records its terminal result asynchronously. Execution receipt status is separate from the board column: dispatch and completion do not automatically move the card to In Progress or Done. Check the result and update task status deliberately. If progress remains visible after a connection failure, check the active run before clicking Execute again. Deleting a project also deletes its tasks. See [Workers and tasks](workers-tasks.md). Sources: , , .

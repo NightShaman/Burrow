@@ -2,7 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 
 Upgrade the deployment through its own distribution path: the native launcher for user installs, image replacement for containers. Preserve durable state and the settings encryption key.
@@ -39,9 +39,9 @@ Durable `burrow.env`, `config/`, `workspace/`, `cache/`, `reports/`, and integra
 
 The normal update command tracks current assembled `main`; it has no release-selection flag. To inspect or install a chosen historical assembly, use a separately obtained checkout and the documented `--source-dir` installer path, after checking database compatibility.
 
-### Newer development update-channel handling
+### Current update-channel handling
 
-The inspected development build **2026.10.21.2** adds a validated `BURROW_UPDATE_REPOSITORY` override and preserves the saved installation channel when no process override is supplied. This is newer than public **2026.10.19**. Do not change a live installation's channel based on development instructions or assume that its updater already implements this behavior.
+Current installer/launcher code implements a validated `BURROW_UPDATE_REPOSITORY` override and preserves the saved installation channel when no process override is supplied. This was absent from historical public **2026.10.19**. Do not change a live installation's channel based on development instructions or assume that its updater already implements this behavior.
 
 ## Verify activation
 

@@ -1,6 +1,8 @@
 # Tasks and schedules
 
-This guide follows the public **2026.10.19** release. The **tasks** page records work and dispatches saved tasks. **Cron jobs** run agent prompts on a schedule. Creating a board record does not itself start agent work.
+Current implementation reviewed **25 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+
+The **tasks** page records work and dispatches saved tasks. **Cron jobs** run agent prompts on a schedule. Creating a board record does not itself start agent work.
 
 ## Create a project
 

@@ -1,6 +1,8 @@
 # Install Burrow
 
-This guide follows the public **2026.10.19** release. Choose a native Linux installation or a container, then [create your first agent](first-agent.md).
+Current implementation reviewed **25 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+
+Choose a native Linux installation or a container, then [create your first agent](first-agent.md).
 
 Burrow starts with authentication set to **None**. Keep the first-run interface on localhost or behind an SSH tunnel. Before opening it to other computers, configure authentication, HTTPS, and network access controls.
 

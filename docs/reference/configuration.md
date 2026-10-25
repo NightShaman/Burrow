@@ -2,7 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 
 BURROW stores operator-managed configuration in PostgreSQL. The service environment supplies deployment paths, database connectivity, encryption keys and optional overrides. The retained `loadBurrowConfig()` function is inert: it does not read or write `burrow.json`.
@@ -19,7 +19,7 @@ BURROW stores operator-managed configuration in PostgreSQL. The service environm
 | Skills, Git sources and per-agent assignments | PostgreSQL skill/source records; installed package files on disk | Settings → Skills; per-agent assignments under Agents |
 | Browser Origin checking | Persisted `checkOrigin`, with environment override | Settings browser-origin control; `/api/settings/browser-origin` |
 | OpenTelemetry export | PostgreSQL endpoint/enabled state and encrypted headers, with environment overrides | `/api/settings/opentelemetry` |
-| System-mod authority | Core-owned capability and agent grants | `/api/operator/mods/{modId}/access`; authenticated operator required in public 2026.10.19 |
+| System-mod authority | Core-owned capability and agent grants | `/api/operator/mods/{modId}/access`; current Core allows direct UI use in `none` mode; enabled authentication requires operator login; API tokens do not authorize this route |
 | Dream schedule and model selection | PostgreSQL agent Dream settings | Agent Dreams settings |
 | Retention | Saved trace policy; separate CLI session-retention policy | Settings → General → Trace retention; deliberate CLI maintenance |
 | Brains | Agent-owned saved memories; optional embedding settings | Brains; Settings → General → Brain memory |
@@ -51,7 +51,7 @@ See [Installation](../getting-started/installation.md)
 
 ## Models and generation defaults
 
-Select an enabled connection and an enabled model within it. Agent defaults can supply the pair; explicit per-turn fields override the corresponding selection. A missing pair returns no model; an unknown connection or disabled model is an error. Provider credentials are resolved from the authoritative connection store. All model connections use the direct API runtime.
+Select an enabled connection and an enabled model within it. Agent defaults can supply the pair; explicit per-turn fields override the corresponding selection. A missing pair returns no model; an unknown connection or disabled model is an error. Provider credentials are resolved from the authoritative connection store. Logical OAuth pools resolve an eligible concrete member instead of owning credentials themselves. See [native account pools](../guide/models.md#native-oauth-account-pools). Model execution uses the native API runtime, not the login helper as an execution engine.
 
 | Parameter | Runtime behavior |
 |---|---|
@@ -71,9 +71,9 @@ Compression policy is runtime configuration, not a client-owned chat-body settin
 The operator timezone is the IANA zone used by agent context, scheduled jobs, Dreams and scheduled Git-skill synchronization in public 2026.10.19. Migration 53 removes prior per-job and Dream timezone overrides. Legacy job timezone input is accepted but is no longer authoritative; reconciliation recomputes the next occurrence when the operator zone changes. Saving the operator zone does not force browser-local display into that zone. Trace cleanup, original-conversation retention, working-memory expiration and rolling-continuity history are separate mechanisms. Do not use old session-age environment defaults as a substitute for the current operator policy.
 See [Dreams](../concepts/dreams.md) · [Memory retention](../concepts/memory.md)
 
-## Development-only profile additions
+## Current shared profile documents
 
-Unpromoted development build **2026.10.21.2** adds shared `RULES` and `ORIENTATION` documents with per-agent opt-in flags. These use migration 61 and `/api/settings/global-profile-documents`; neither is part of the public 2026.10.19 contract. The public release retains six agent-owned profile documents.
+Current Core implements shared `RULES` and `ORIENTATION` documents with per-agent opt-in flags, using `/api/settings/global-profile-documents`. Migrations 61–62 add the documents and timestamps. The six agent-owned documents remain; global prose precedes the corresponding local document only when opted in. This was absent from historical 2026.10.19. See [current source pins](../project/source-map.md).
 
 ## Portable agent context
 

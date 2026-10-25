@@ -2,7 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 
 The assembled repository supplies the canonical `Dockerfile`, `docker-entrypoint.sh`, and `compose.yml`. The public release image is `ghcr.io/goblinking-burrow/burrow`.
@@ -59,7 +59,7 @@ The image builds the UI in a separate stage and installs backend production depe
 
 The entrypoint reads or creates `/data/config/settings.key`, unless `BURROW_SETTINGS_KEY_FILE` changes the path. If a supplied `BURROW_SETTINGS_KEY` disagrees with the persisted file, startup stops. Restore the matching key/database pair instead of deleting the key file.
 
-The entrypoint also provisions runtime-owned CLI integrations below `/data/integrations`. mcporter is pinned to `0.13.7`; Claude Code uses the `latest` package tag in this snapshot. Startup can therefore require npm network access and can update that integration independently of the container image. Plan egress and reproducibility requirements accordingly.
+The entrypoint also provisions runtime-owned CLI integrations below `/data/integrations`. mcporter is pinned to `0.13.7`; current reviewed Core pins Claude Code to `2.1.283`. Startup can require npm network access to materialize these declared versions. Historical source snapshots may use different integration versions; check the installed integration manifest rather than assuming the current pin applies to an older image. Plan egress and reproducibility requirements accordingly.
 
 ## External database
 

@@ -2,7 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 A conversation is scoped by agent and session. PostgreSQL stores active entries, immutable archive snapshots and session metadata. Explicit session search and Dream can resolve evidence through these persisted originals. Brains stores saved memories separately.
 
@@ -59,6 +59,8 @@ BURROW has several related search boundaries:
 | Operator cross-agent search | Operator inspection; marked `entersPrompt: false` |
 
 PostgreSQL errors or empty results do not trigger a hidden fallback to workspace JSONL. Ordinary session search ranks exact phrases first, then ASCII token coverage; multi-term queries require at least two matching tokens. Results are bounded to 200 with excerpts up to 240 characters. Agent recall deduplicates original entry identities and can include recent handoffs.
+Historical run proof is also explicit: `run_evidence_search` requires a nonempty query and accepts a result limit of 1–100. Core binds the active agent; callers cannot select another owner or filesystem root. It searches retained dedicated and legacy evidence across that agent's sessions, including archived sessions. Existing retention still applies (32 records per session and 14 days); this is not lossless raw-receipt recall, a new HTTP API, or proof of current state.
+
 Historical retrieval is explicit. `session_search` searches the active agent's own sessions, including reset snapshots, with dates, original source references and neighboring dialogue. It accepts `since`/`until`; use a result's `sourceRef.entryId` as `sourceId` and `sourceRef.sessionId` as `sourceSessionId` to expand an original. The default neighbor radius is one, capped at three. The current compatibility recall helper returns `automatic_recall_disabled`; the pre-turn support builder supplies no automatic session-recall or run-evidence context. Saved Brain memories likewise require explicit tools.
 Original-history cursors bind the scope, agent and query as well as the position. The store scans candidate pages under a repeatable-read snapshot, so an early relevance cutoff does not silently omit later matches. SQL's conservative ASCII-run candidate indexes are an optimization; the JavaScript matcher is the final matching authority. Ambiguous or undecodable source fields retain a fallback search path.
 Original resolution prefers the live entry and then a retained archived occurrence. Dream's original-entry enumeration deduplicates repeated live/archive identities and returns chronological evidence. See [Dream cycles](dreams.md) and [Brains](memory.md#brains-explicit-saved-memories).

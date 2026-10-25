@@ -2,7 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 
 BURROW separates HTTP access, agent tool grants, concrete action checks, and operating-system access. These controls answer different questions. A successful UI login does not make a tool result safe, and an agent workspace is not a filesystem sandbox.
@@ -69,7 +69,7 @@ Saving a connection or discovering its catalog does not grant an agent permissio
 Catalog visibility and invocation permission are distinct: capability discovery can show `granted: false`. Follow [MCP connections and grants](../concepts/mcp.md) to configure the intended set; scope the provider's own credentials to the minimum required access. `mcporter` transports the request and is not the authority for BURROW agent grants.
 
 Mod-provided tools use the same catalog model with a live `mod` transport. A tool marked `mod-authorized` delegates record/agent authorization to its trusted handler; this exception does not apply to arbitrary HTTP or stdio MCP providers. For mod calls, execution re-reads current connection/grant state and checks the live host/tool identity, including when an action was queued earlier in the turn. Ordinary external MCP calls use the resolved execution-context connection/grant data. Do not promise the same database reread for every transport.
-Core system-mod capabilities also require operator-owned authority. `core_mod_authority` stores explicit capability grants, administrative agent IDs and diagnostic agent IDs; a mod manifest does not grant those powers. `GET`/`PUT /api/operator/mods/{modId}/access` manages the full replacement and reports restart requirements. In public 2026.10.19 this route requires an authenticated operator even when the ordinary auth mode is `none`; diagnostics tokens cannot use it.
+Core system-mod capabilities also require operator-owned authority. `core_mod_authority` stores explicit capability grants, administrative agent IDs and diagnostic agent IDs; a mod manifest does not grant those powers. `GET`/`PUT /api/operator/mods/{modId}/access` manages the full replacement and reports restart requirements. Historical public 2026.10.19 required an authenticated operator even in `none` mode. Current Core permits direct UI access in `none` mode and requires operator login when authentication is enabled; diagnostics/API tokens do not authorize this access-settings route. This is an ordinary contract update, not a security assessment of the deployment.
 
 Mod handlers receive untrusted arguments separately from trusted caller context and must implement their own argument and record-access checks. Installation is a code-trust decision; see [Extensions](../development/extensions.md) and [Trust boundaries](trust-boundaries.md#installed-mods-are-trusted-code).
 

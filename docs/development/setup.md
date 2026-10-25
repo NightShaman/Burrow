@@ -1,9 +1,6 @@
 # Development setup
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
-
 
 Keep development sources and test state separate from any installed Burrow runtime. Documentation builds do not require a running application, provider credentials, or database.
 
@@ -30,9 +27,9 @@ npm test
 
 `npm run check` also syntax-checks source/tests/bin/scripts and runs the suite. Inspect the exact scripts before selecting the aggregate check for your change. The public assembly includes the OpenAPI JSON artifact but not backend tests or the full upstream documentation, so these commands do not have the same meaning in its bundled `backend/` directory.
 
-The test runner creates private temporary runtime roots, clears selected runtime/key environment values, provides a test-only key, and enforces a whole-suite timeout (120 seconds locally by default; configurable through `BURROW_TEST_TIMEOUT_MS`). Do not point tests at a deployed database or live workspace.
+The test runner creates private temporary runtime roots, clears selected runtime/key environment values, provides a test-only key, and enforces a whole-suite timeout (120 seconds normally, or 900 seconds with `BURROW_TEST_DISPOSABLE_POSTGRES=1`; configurable through `BURROW_TEST_TIMEOUT_MS`). Do not point tests at a deployed database or live workspace.
 
-Some database integration tests are opt-in and need PostgreSQL17/pgvector or Docker. Passing pure tests, or skipping unavailable integration tests, is not equivalent to a full database lifecycle pass. The optional deployed-isolation verification mode reads deployed paths; do not use it without intentionally selecting that environment.
+Disposable PostgreSQL mode starts an isolated local database (PostgreSQL17 binaries by default) and defaults to one test worker rather than four. Some database integration tests are opt-in and need PostgreSQL17/pgvector or Docker. Passing pure tests, or skipping unavailable integration tests, is not equivalent to a full database lifecycle pass. The optional deployed-isolation verification mode reads deployed paths; do not use it without intentionally selecting that environment.
 
 ## Frontend contributor environment
 
@@ -83,13 +80,6 @@ The existing lifecycle rehearsal uses a disposable PostgreSQL17/pgvector Docker 
 
 Source pushes can trigger assembly through the upstream dispatch workflow. A source push and a running user's upgrade are distinct events; do not restart or update a live runtime as an unrequested development step.
 
+## Source review
 
-
-
-## Targeted source review
-
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
-
-- [backend/package.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/package.json)
-- [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
-- [ui/vitest.config.ts](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/ui/vitest.config.ts)
+Reviewed on 25 October 2026 against development assembly `f9d1bc5b1b04e3d7f29c6b4f62e0feb935bff487` (build2026.10.25.9), Backend `3bf50374d3601c821e787912d52b9044eaf649ec` and UI `0610bac85b2e636b79bbdf09fc3a95c3a519fa5a`. This is static source review, not a claim that tests, installation or provider calls were run. Public snapshots can lag development; these pins are provenance, not an installed-version compatibility promise.
