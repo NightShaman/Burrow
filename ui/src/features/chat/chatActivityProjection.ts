@@ -1,6 +1,6 @@
 import { minionOutcome } from '../../app/minionOutcome';
 import { projectLiveStage, type LiveStageProjection, type ChatLiveStage } from './chatLiveStage';
-import type { ActiveA2AActivity, ActiveChatRun, ActiveChatRunsResponse, ActiveSubagent, ProgressEntry, ToolActivity, ToolActivityItem } from '../../app/api';
+import type { ActiveA2AActivity, ActiveChatRun, ActiveChatRunsResponse, ActiveSubagent, SessionTurn, ProgressEntry, ToolActivity, ToolActivityItem } from '../../app/api';
 import { thoughtProgressFromEvents } from './chatThoughtProgress';
 
 export type RuntimeRunForSelection = {
@@ -10,6 +10,7 @@ export type RuntimeRunForSelection = {
   sessionId: string;
   steeringReady: boolean;
   latestUserMessage: string;
+  userMessageMetadata?: SessionTurn['metadata'];
   answerText?: string;
   progress: ProgressEntry[];
   stage?: ChatLiveStage;
@@ -96,7 +97,9 @@ function runtimeRunForSubagent(child: ActiveSubagent | undefined, targetId: stri
   const traceChildSessionId = child.trace && 'childSessionId' in child.trace && typeof child.trace.childSessionId === 'string' ? child.trace.childSessionId : '';
   const sessionId = child.sessionId || traceChildSessionId || '';
   if (!runId || !agentId || !sessionId) return null;
-  return { targetId, runId, agentId, sessionId, steeringReady: false, latestUserMessage: child.purpose || child.label || '', progress: [], toolActivity: subagentToolActivity(child, now), subagent: child };
+  // /chat/active serializes a subagent's owning agent as agentId; this
+  // provenance applies to its purpose, not arbitrary user turns in the session.
+  return { targetId, runId, agentId, sessionId, steeringReady: false, latestUserMessage: child.purpose || child.label || '', userMessageMetadata: { kind: 'subagent-delegated-task', parentAgentId: agentId, subagentId: child.id }, progress: [], toolActivity: subagentToolActivity(child, now), subagent: child };
 }
 
 /** Pure active-run projection. Selection and clock are inputs, never global state. */

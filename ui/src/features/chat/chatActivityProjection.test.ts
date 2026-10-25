@@ -43,3 +43,10 @@ it.each(['cancelled', 'completed', 'failed', 'superseded'])('never projects a %s
     expect(projectChatActivity({ ...response, runs: [terminal, { ...terminal, runId: 'new', status: liveStatus }] }, selection).runtimeRun?.runId).toBe('new');
   }
 });
+
+it.each(['hatchet', 'smatchet'])('carries %s delegation provenance from the active child, not provider role', (agentId) => {
+  const { runtimeRun } = projectChatActivity({ ok: true, runs: [], subagents: [{ id: 'child', runId: 'child-run', agentId, sessionId: 'child-session', parentSessionId: 'default', purpose: 'Review the interface', status: 'running' }] }, { ...selection, agentId, sessionId: 'child-session', isChildSession: true });
+  expect(runtimeRun).toMatchObject({ latestUserMessage: 'Review the interface', userMessageMetadata: { kind: 'subagent-delegated-task', parentAgentId: agentId, subagentId: 'child' } });
+  const operatorRun = projectChatActivity({ ok: true, runs: [{ agentId, sessionId: 'child-session', runId: 'operator-run', status: 'running', latestUserMessage: 'Actual operator followup' }] }, { ...selection, agentId, sessionId: 'child-session', isChildSession: true }).runtimeRun;
+  expect(operatorRun?.userMessageMetadata).toBeUndefined();
+});

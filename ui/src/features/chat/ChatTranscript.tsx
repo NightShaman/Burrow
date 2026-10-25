@@ -30,13 +30,25 @@ type ChatTranscriptProps = {
   liveStage?: ChatLiveStage;
   a2aActivities?: import('../../app/api').ActiveA2AActivity[];
   runtimeUserMessage?: string;
+  runtimeUserMessageMetadata?: SessionTurn['metadata'];
   runtimeChildActivities?: ToolActivity[];
   attachmentAgentId?: string;
 };
 
-export const ChatTranscript = memo(function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, liveStage, a2aActivities = [], runtimeUserMessage = '', runtimeChildActivities = [], attachmentAgentId }: ChatTranscriptProps) {
+export const ChatTranscript = memo(function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, liveStage, a2aActivities = [], runtimeUserMessage = '', runtimeUserMessageMetadata, runtimeChildActivities = [], attachmentAgentId }: ChatTranscriptProps) {
   const isSubagent = 'stream' in selected;
   const messages = turns.filter((turn) => (turn.type === 'message' || (turn.type === 'event' && turn.role === 'user' && turn.metadata?.visibility === 'chat')) && turn.metadata?.visibility !== 'debug' && turn.metadata?.kind !== 'subagent-runtime-context' && turn.metadata?.kind !== 'subagent-task' && (turn.content || turn.metadata?.attachments?.length || turn.metadata?.outputArtifacts?.length) && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && isChatCommand(textFromChatValue(turn.content))));
+  // Provider role=user is not speaker identity. Only delegation provenance
+  // (including legacy saved markers) changes a user message away from operator.
+  const userIdentity = (metadata?: SessionTurn['metadata']) => {
+    const delegated = metadata?.kind === 'subagent-delegated-task' || Boolean(metadata?.parentAgentId) || (isSubagent && Boolean(metadata?.workerProfile || metadata?.subagentId));
+    if (!delegated) return { name: operator.name, avatar: operator.avatar || operator.name.slice(0, 1).toUpperCase() };
+    const parentId = metadata?.parentAgentId;
+    const knownParent = parentId ? [parent.id, parent.resourceId].includes(parentId) : isSubagent;
+    const name = knownParent ? parent.name : parentId || 'Parent agent';
+    return { name, avatar: (knownParent && parent.avatar) || name.slice(0, 1).toUpperCase() };
+  };
+  const runtimeIdentity = userIdentity(runtimeUserMessageMetadata);
   const activityByRun = new Map<string, ToolActivity>();
   for (const turn of turns) {
     const activity = turn.metadata?.toolActivity;
@@ -47,7 +59,7 @@ export const ChatTranscript = memo(function ChatTranscript({ selected, parent, o
   // An externally started task run can reach this destination session before
   // its first durable turn. Keep the live run visible instead of replacing it
   // with the empty-session watermark.
-  const isEmptySession = !isLoading && !isSending && !a2aActivities.length && !visibleRuntimeChildActivities.length && (isNewSession || !messages.length);
+  const isEmptySession = !isLoading && !isSending && !runtimeUserMessage && !a2aActivities.length && !visibleRuntimeChildActivities.length && (isNewSession || !messages.length);
   const messagesRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const updateScrollIntent = () => {
@@ -63,14 +75,9 @@ export const ChatTranscript = memo(function ChatTranscript({ selected, parent, o
     {isEmptySession ? <div className="new-session-empty"><img src="/burrow-logo.png" alt="Burrow" /></div> : <>
       {isSubagent && <div className="stream-banner"><span>Minion stream</span><strong>{selected.name}</strong><small>Workspace remains attached to {parent.name}</small></div>}
       {isLoading && <p className="chat-state">{messages.length ? 'Refreshing conversation…' : 'Loading conversation…'}</p>}
-      {runtimeUserMessage && !messages.some((turn) => turn.role === 'user' && textFromChatValue(turn.content) === runtimeUserMessage) && <ChatMessage side="operator" name={operator.name} avatar={operator.avatar || operator.name.slice(0, 1).toUpperCase()} time="Now" text={runtimeUserMessage} />}
+      {runtimeUserMessage && !messages.some((turn) => turn.role === 'user' && (!activeRunId || turn.runId === activeRunId) && textFromChatValue(turn.content) === runtimeUserMessage) && <ChatMessage side="operator" name={runtimeIdentity.name} avatar={runtimeIdentity.avatar} time="Now" text={runtimeUserMessage} />}
       {messages.map((turn, index) => {
-        const isDelegatedTask = turn.role === 'user' && (turn.metadata?.kind === 'subagent-delegated-task' || (isSubagent && Boolean(turn.metadata?.workerProfile || turn.metadata?.subagentId)));
-        const parentId = turn.metadata?.parentAgentId;
-        const delegatedParent = parentId ? (parentId === parent.id ? parent : null) : isSubagent ? parent : null;
-        const delegatedName = delegatedParent?.name || parentId || 'Parent agent';
-        const userName = isDelegatedTask ? delegatedName : operator.name;
-        const userAvatar = isDelegatedTask ? delegatedParent?.avatar || delegatedName.slice(0, 1).toUpperCase() : operator.avatar || operator.name.slice(0, 1).toUpperCase();
+        const { name: userName, avatar: userAvatar } = userIdentity(turn.metadata);
         const isAgentMessage = turn.role === 'agent';
         const fromCurrentAgent = turn.metadata?.fromAgentId === selected.id;
         const senderName = turn.metadata?.fromAgentName ?? turn.metadata?.fromAgentId ?? 'Agent';
