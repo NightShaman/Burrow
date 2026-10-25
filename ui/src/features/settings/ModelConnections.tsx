@@ -14,7 +14,7 @@ type Props = {
 };
 
 export function ModelConnections({ savedProviders, onModelConnectionsChanged, mcpConnections, overflowTarget }: Props) {
-  const editor = useModelConnectionEditor({ onModelConnectionsChanged });
+  const editor = useModelConnectionEditor({ savedProviders, onModelConnectionsChanged });
   const selectedModel = editor.availableModels.find((model) => model.id === editor.selectedModelId) ?? null;
 
   const modelDetail = selectedModel ? <ModelCapabilityEditor
@@ -34,13 +34,20 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
           <Field label="Provider"><input value={editor.provider} onChange={(event) => editor.setProvider(event.target.value)} placeholder="OpenAI" /></Field>
           <Field label="API type"><select value={editor.apiType} onChange={(event) => editor.setApiType(event.target.value)}>{modelConnectionApiTypes.map((type) => <option value={type.value} key={type.value}>{type.label}</option>)}</select></Field>
         </div>
-        {editor.apiType !== 'google-generative-language' && <p className="settings-description">{editor.apiType === 'anthropic-messages'
+        {!editor.poolConnection && editor.apiType !== 'google-generative-language' && <p className="settings-description">{editor.apiType === 'anthropic-messages'
           ? 'Anthropic Messages uses Anthropic’s native API contract and provider authentication. Model discovery is handled by Burrow, not an OpenAI-compatible /models probe.'
           : 'OpenAI-compatible connections discover models through the provider’s /models endpoint.'}</p>}
-        <div className="oauth-shortcuts">
+        {!editor.poolConnection && <div className="oauth-shortcuts">
           <button className={`oauth-trigger${editor.apiType !== 'anthropic-messages' ? ' active' : ''}`} type="button" onClick={editor.openOpenAiOAuth}><span>OpenAI OAuth</span><small>Sign in with ChatGPT</small></button>
           <button className={`oauth-trigger${editor.apiType === 'anthropic-messages' ? ' active' : ''}`} type="button" onClick={editor.openAnthropicOAuth}><span>Anthropic OAuth</span><small>Claude Code login</small></button>
-        </div>
+        </div>}
+        {editor.poolConnection && <fieldset className="provider-pool"><legend>Account pool</legend>
+          <label className="pool-account"><input type="checkbox" checked={editor.poolEnabled} onChange={event => editor.setPoolEnabled(event.target.checked)} /><strong>Enable load balancing</strong></label>
+          <div className="pool-accounts">{editor.poolMembers.map(member => <label className="pool-account" key={member.id}><input type="checkbox" checked={editor.memberConnectionIds.includes(member.id)} onChange={() => editor.togglePoolMember(member.id)} /><span>{member.provider}</span></label>)}</div>
+          {!editor.poolMembers.length && <p className="settings-empty">Connect a compatible {editor.apiType === 'openai-lb' ? 'OpenAI' : 'Anthropic'} OAuth account first.</p>}
+          {editor.missingPoolMembers.map(id => <label className="pool-account" key={id}><input type="checkbox" checked onChange={() => editor.togglePoolMember(id)} /><span>Unavailable account: {id}</span></label>)}
+          {!!editor.missingPoolMembers.length && <p className="settings-request-error" role="alert">Remove unavailable accounts before saving.</p>}
+        </fieldset>}
         {editor.oauthModal && <ModelConnectionOAuthDialog
           kind={editor.oauthModal}
           editingId={editor.editingId}
@@ -54,14 +61,14 @@ export function ModelConnections({ savedProviders, onModelConnectionsChanged, mc
           <Field label="OpenAI access token"><input type="password" autoComplete="off" value={editor.oauthAccessToken} onChange={(event) => editor.setOauthAccessToken(event.target.value)} placeholder="Leave blank to keep current token" /></Field>
           <Field label="OpenAI refresh token"><input type="password" autoComplete="off" value={editor.oauthRefreshToken} onChange={(event) => editor.setOauthRefreshToken(event.target.value)} placeholder="Leave blank to keep current token" /></Field>
         </div>}
-        <div className="field-pair">
+        {!editor.poolConnection && <div className="field-pair">
           <Field label="URL"><input value={editor.url} onChange={(event) => editor.setUrl(event.target.value)} placeholder={editor.apiType === 'anthropic-messages' ? 'https://api.anthropic.com' : editor.apiType === 'google-generative-language' ? 'https://generativelanguage.googleapis.com/v1beta' : 'https://api.example.com/v1'} /></Field>
           <Field label="API key"><input type="password" value={editor.apiKey} onChange={(event) => editor.setApiKey(event.target.value)} placeholder={editor.apiKeyConfigured ? '•••••••• (configured — enter a new key to replace it)' : 'Enter API key'} /></Field>
-        </div>
+        </div>}
         <div className="model-actions">
-          {editor.editingId && <button className="secondary" onClick={editor.resetProvider}>Cancel</button>}
-          <button className="secondary" onClick={() => void editor.connect()} disabled={!editor.provider.trim() || !editor.url.trim() || editor.requestState !== 'idle'}>{editor.requestState === 'connecting' ? 'Connecting…' : 'Connect'}</button>
-          <button className="primary" onClick={() => void editor.saveProvider()} disabled={!editor.provider.trim() || !editor.url.trim() || !editor.availableModels.some((model) => model.selected !== false) || editor.requestState !== 'idle'}>{editor.requestState === 'saving' ? 'Saving…' : 'Save'}</button>
+          {(editor.editingId || editor.poolConnection) && <button className="secondary" onClick={editor.resetProvider}>Cancel</button>}
+          <button className="secondary" onClick={() => void editor.connect()} disabled={!editor.connectionReady || editor.requestState !== 'idle'}>{editor.requestState === 'connecting' ? 'Connecting…' : 'Connect'}</button>
+          <button className="primary" onClick={() => void editor.saveProvider()} disabled={!editor.connectionReady || !editor.availableModels.some((model) => model.selected !== false) || editor.requestState !== 'idle'}>{editor.requestState === 'saving' ? 'Saving…' : 'Save'}</button>
         </div>
         {editor.requestError && <p className="settings-request-error" role="alert">{editor.requestError}</p>}
         {(editor.connected || Boolean(editor.requestError)) && <ModelResults

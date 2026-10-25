@@ -366,7 +366,7 @@ export async function runPlainModelTurn({
         }
       : null;
     modelCall += 1;
-    model = await adapter.complete({ prompt: modelInput.prompt || (modelInput.vision ? undefined : prompt.text), messages: modelInput.messages || undefined, traceLogger, signal: abortSignal || undefined, ...(!outputOnlyArtifact && emitTextDelta ? { onTextDelta: emitTextDelta } : {}), ...(!outputOnlyArtifact && emitThoughtDelta ? { onThoughtDelta: emitThoughtDelta } : {}), ...(!outputOnlyArtifact && emitContextUsage ? { onContextUsage: emitContextUsage, modelCall } : {}), ...toolArgs });
+    model = await adapter.complete({ sessionId, conversationId, previousModel: model, prompt: modelInput.prompt || (modelInput.vision ? undefined : prompt.text), messages: modelInput.messages || undefined, traceLogger, signal: abortSignal || undefined, ...(!outputOnlyArtifact && emitTextDelta ? { onTextDelta: emitTextDelta } : {}), ...(!outputOnlyArtifact && emitThoughtDelta ? { onThoughtDelta: emitThoughtDelta } : {}), ...(!outputOnlyArtifact && emitContextUsage ? { onContextUsage: emitContextUsage, modelCall } : {}), ...toolArgs });
     nativeTranscript = modelInput.messages || [{ role: 'user', content: modelInput.prompt || prompt.text }];
     await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-after-model-response', {
       iteration: 0,
@@ -558,7 +558,7 @@ export async function runPlainModelTurn({
             ...(emitThoughtDelta ? { onThoughtDelta: emitThoughtDelta } : {}),
             ...(emitContextUsage ? { onContextUsage: emitContextUsage, modelCall } : {}),
           })
-        : await adapter.complete({
+        : await adapter.complete({ sessionId, conversationId, previousModel: model,
             prompt: followupInput.prompt || undefined,
             messages: followupInput.messages || undefined,
             ...(toolLoopNoProgress ? {} : { tools: continuationToolSchemas(), toolChoice: 'auto' }),
@@ -619,7 +619,7 @@ export async function runPlainModelTurn({
       const finalInput = modelInputForFollowupPrompt(finalPrompt, modelInput);
       if (abortSignal?.aborted) throw abortSignal.reason || new Error('agent_stopped');
       modelCall += 1;
-      model = await adapter.complete({
+      model = await adapter.complete({ sessionId, conversationId, previousModel: model,
         prompt: finalInput.prompt || undefined,
         messages: finalInput.messages || undefined,
         traceLogger,
@@ -640,7 +640,7 @@ export async function runPlainModelTurn({
     nativeTranscript = [...(preceding || []), ...(!assistantPresent ? [{ role: 'assistant', content: model.choice?.text || '' }] : []), ...finalSteering];
     modelInput = { ...modelInput, messages: nativeTranscript, prompt: null };
     modelCall += 1;
-    model = await adapter.complete({ messages: nativeTranscript, ...toolArgs, traceLogger, signal: abortSignal || undefined,
+    model = await adapter.complete({ sessionId, conversationId, previousModel: model, messages: nativeTranscript, ...toolArgs, traceLogger, signal: abortSignal || undefined,
       ...(emitTextDelta ? { onTextDelta: emitTextDelta } : {}), ...(emitThoughtDelta ? { onThoughtDelta: emitThoughtDelta } : {}),
       ...(emitContextUsage ? { onContextUsage: emitContextUsage, modelCall } : {}) });
     toolLoopNoProgress = false;

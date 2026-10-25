@@ -1,5 +1,36 @@
 // Reporting only: importing this module acquires no runtime resources.
-export function createProviderUsageService({ modelLookup, authSecretToken, fetchImpl = globalThis.fetch, clock = Date.now, anthropicUsageCache = new Map(), openaiOauthUsageCache = new Map(), openaiUsageUrl = 'https://chatgpt.com/backend-api/wham/usage' } = {}) {
+// Capacity is a relative plan weight, not remaining quota or a billing guarantee.
+export function openaiTierMetadata(planType) {
+  const metadata = { provider: 'openai', capacity: null, status: 'unknown' };
+  if (typeof planType === 'string') metadata.planType = planType;
+  const capacity = { plus: 1, team: 1, business: 1, prolite: 5, pro: 10, promax: 25 }[planType];
+  if (typeof capacity === 'number') Object.assign(metadata, { capacity, status: 'known' });
+  return metadata;
+}
+
+export function anthropicTierMetadata(profile, { unavailable = false } = {}) {
+  const metadata = { provider: 'anthropic', capacity: null, status: unavailable ? 'unavailable' : 'unknown' };
+  if (unavailable) return metadata;
+  const organization = profile?.organization && typeof profile.organization === 'object' ? profile.organization : profile;
+  for (const [raw, key] of [['organization_type', 'organizationType'], ['rate_limit_tier', 'rateLimitTier'], ['seat_tier', 'seatTier']]) {
+    const value = organization?.[raw] ?? profile?.[raw];
+    if (typeof value === 'string') metadata[key] = value;
+  }
+  let capacity = null;
+  if (metadata.organizationType === 'claude_pro') capacity = 1;
+  if (metadata.organizationType === 'claude_max') {
+    if (metadata.rateLimitTier === 'default_claude_max_5x') capacity = 5;
+    if (metadata.rateLimitTier === 'default_claude_max_20x') capacity = 20;
+  }
+  if (metadata.organizationType === 'claude_team') {
+    if (metadata.seatTier === 'team_standard') capacity = 1.25;
+    if (metadata.seatTier === 'team_tier_1') capacity = 6.25;
+  }
+  if (capacity !== null) Object.assign(metadata, { capacity, status: 'known' });
+  return metadata;
+}
+
+export function createProviderUsageService({ modelLookup, authSecretToken, fetchImpl = globalThis.fetch, clock = Date.now, anthropicUsageCache = new Map(), anthropicProfileCache = new Map(), openaiOauthUsageCache = new Map(), openaiUsageUrl = 'https://chatgpt.com/backend-api/wham/usage' } = {}) {
   const ANTHROPIC_USAGE_CACHE_MS = 60_000;
   const OPENAI_OAUTH_USAGE_CACHE_MS = 60_000;
   const OPENAI_OAUTH_USAGE_URL = openaiUsageUrl;
@@ -65,35 +96,49 @@ function anthropicConnectionCandidate(connection = {}) {
 
   function sanitizeAnthropicUsageWindow(key, raw = null) {
     if (!raw || typeof raw !== 'object') return null;
-    const utilization = Number(raw.utilization ?? raw.used_percentage ?? raw.usedPercent);
+    const utilization = usagePercent(raw.utilization ?? raw.used_percentage ?? raw.usedPercent);
     return {
       key,
       label: key.split('_').map((part) => part ? part[0].toUpperCase() + part.slice(1) : part).join(' '),
-      usedPercent: Number.isFinite(utilization) ? Math.max(0, Math.min(100, Math.round(utilization))) : null,
+      usedPercent: utilization,
+      exhausted: utilization === null ? null : utilization >= 100,
+      windowSeconds: key === 'five_hour' ? 18_000 : 604_800,
       resetAt: isoOrNull(raw.resets_at ?? raw.resetAt ?? raw.resetsAt),
     };
   }
 
   function sanitizeAnthropicUsage(data = {}) {
-    const windows = ['five_hour', 'seven_day', 'seven_day_sonnet', 'seven_day_opus']
+    const windows = ['five_hour', 'seven_day', 'seven_day_sonnet', 'seven_day_opus', 'seven_day_oauth_apps']
       .map((key) => sanitizeAnthropicUsageWindow(key, data?.[key]))
       .filter(Boolean);
     const extra = data?.extra_usage && typeof data.extra_usage === 'object' ? data.extra_usage : null;
     return {
       windows,
+      exhausted: exhaustedFromWindows(windows),
       extraUsage: extra ? {
         isEnabled: Boolean(extra.is_enabled ?? extra.isEnabled),
-        monthlyLimit: Number.isFinite(Number(extra.monthly_limit ?? extra.monthlyLimit)) ? Number(extra.monthly_limit ?? extra.monthlyLimit) : null,
-        usedCredits: Number.isFinite(Number(extra.used_credits ?? extra.usedCredits)) ? Number(extra.used_credits ?? extra.usedCredits) : null,
-        usedPercent: Number.isFinite(Number(extra.utilization ?? extra.used_percentage)) ? Math.max(0, Math.min(100, Math.round(Number(extra.utilization ?? extra.used_percentage)))) : null,
+        monthlyLimit: finiteNumber(extra.monthly_limit ?? extra.monthlyLimit),
+        usedCredits: finiteNumber(extra.used_credits ?? extra.usedCredits),
+        usedPercent: usagePercent(extra.utilization ?? extra.used_percentage),
       } : null,
     };
   }
 
 
-  function clampUsagePercent(value) {
+  function finiteNumber(value) {
+    if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null;
     const number = Number(value);
-    return Number.isFinite(number) ? Math.max(0, Math.min(100, Math.round(number))) : null;
+    return Number.isFinite(number) ? number : null;
+  }
+
+  function usagePercent(value) {
+    const number = finiteNumber(value);
+    return number === null ? null : Math.max(0, number);
+  }
+
+  function exhaustedFromWindows(windows) {
+    if (windows.some((window) => window.exhausted === true)) return true;
+    return windows.some((window) => window.exhausted === false) ? false : null;
   }
 
   function labelForWindowSeconds(seconds) {
@@ -109,14 +154,15 @@ function anthropicConnectionCandidate(connection = {}) {
 
   function sanitizeOpenAiUsageWindow(key, raw = null) {
     if (!raw || typeof raw !== 'object') return null;
-    const windowSeconds = Number(raw.limit_window_seconds ?? raw.limitWindowSeconds ?? raw.window_seconds ?? raw.windowSeconds);
-    const usedPercent = clampUsagePercent(raw.used_percent ?? raw.usedPercent ?? raw.utilization);
+    const windowSeconds = finiteNumber(raw.limit_window_seconds ?? raw.limitWindowSeconds ?? raw.window_seconds ?? raw.windowSeconds);
+    const usedPercent = usagePercent(raw.used_percent ?? raw.usedPercent ?? raw.utilization);
     const resetAt = isoOrNull(raw.reset_at ?? raw.resetAt ?? raw.resets_at ?? raw.resetsAt);
     if (usedPercent === null && !resetAt && !Number.isFinite(windowSeconds)) return null;
     return {
       key,
       label: labelForWindowSeconds(windowSeconds),
       usedPercent,
+      exhausted: usedPercent === null ? null : usedPercent >= 100,
       resetAt,
       windowSeconds: Number.isFinite(windowSeconds) ? windowSeconds : null,
     };
@@ -146,6 +192,8 @@ function anthropicConnectionCandidate(connection = {}) {
       ...sanitizeAdditionalOpenAiRateLimits(data?.additional_rate_limits ?? data?.additionalRateLimits),
     ].filter(Boolean);
     return {
+      tierMetadata: openaiTierMetadata(data.plan_type ?? data.planType),
+      exhausted: Boolean(rateLimit?.limit_reached ?? rateLimit?.limitReached ?? data.rate_limit_reached_type ?? data.rateLimitReachedType) || exhaustedFromWindows(windows),
       planType: typeof data.plan_type === 'string' ? data.plan_type : (typeof data.planType === 'string' ? data.planType : null),
       blocked: Boolean(rateLimit?.limit_reached ?? rateLimit?.limitReached ?? data.rate_limit_reached_type ?? data.rateLimitReachedType),
       reachedType: typeof data.rate_limit_reached_type === 'string' ? data.rate_limit_reached_type : (typeof data.rateLimitReachedType === 'string' ? data.rateLimitReachedType : null),
@@ -153,10 +201,28 @@ function anthropicConnectionCandidate(connection = {}) {
       credits: data?.credits && typeof data.credits === 'object' ? {
         hasCredits: typeof data.credits.has_credits === 'boolean' ? data.credits.has_credits : (typeof data.credits.hasCredits === 'boolean' ? data.credits.hasCredits : null),
         unlimited: typeof data.credits.unlimited === 'boolean' ? data.credits.unlimited : null,
-        balance: Number.isFinite(Number(data.credits.balance)) ? Number(data.credits.balance) : null,
+        balance: finiteNumber(data.credits.balance),
         overageLimitReached: Boolean(data.credits.overage_limit_reached ?? data.credits.overageLimitReached),
       } : null,
     };
+  }
+
+  // Cache only allowlisted metadata, never the raw OAuth profile or error details.
+  async function anthropicProfileMetadata(source, { force = false } = {}) {
+    const nowMs = clock();
+    const cached = anthropicProfileCache.get(source.connectionId);
+    if (!force && cached && nowMs - cached.fetchedAtMs < ANTHROPIC_USAGE_CACHE_MS) return cached.metadata;
+    let metadata = anthropicTierMetadata(null, { unavailable: true });
+    try {
+      const response = await fetchImpl(`${source.origin}/api/oauth/profile`, {
+        method: 'GET',
+        headers: { accept: 'application/json', authorization: `Bearer ${source.token}`, 'anthropic-beta': 'oauth-2025-04-20' },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (response.ok) metadata = anthropicTierMetadata(await response.json());
+    } catch { /* Profile failure must not hide successful usage. */ }
+    anthropicProfileCache.set(source.connectionId, { fetchedAtMs: nowMs, metadata });
+    return metadata;
   }
 
   async function anthropicOauthUsage({ connectionId = '', force = false } = {}) {
@@ -182,12 +248,12 @@ function anthropicConnectionCandidate(connection = {}) {
         cached: false,
         cacheTtlMs: ANTHROPIC_USAGE_CACHE_MS,
         fetchedAt: new Date(nowMs).toISOString(),
-        usage: sanitizeAnthropicUsage(data),
+        usage: { ...sanitizeAnthropicUsage(data), tierMetadata: await anthropicProfileMetadata(source, { force }) },
       };
       anthropicUsageCache.set(cacheKey, { fetchedAtMs: nowMs, result });
       return result;
     } catch (error) {
-      return { ok: false, status: 502, error: 'anthropic_oauth_usage_unavailable', detail: String(error?.message || error), usage: null };
+      return { ok: false, status: 502, error: 'anthropic_oauth_usage_unavailable', usage: null };
     }
   }
 
@@ -219,7 +285,7 @@ function anthropicConnectionCandidate(connection = {}) {
       openaiOauthUsageCache.set(cacheKey, { fetchedAtMs: nowMs, result });
       return result;
     } catch (error) {
-      return { ok: false, status: 502, error: 'openai_oauth_usage_unavailable', detail: String(error?.message || error), usage: null };
+      return { ok: false, status: 502, error: 'openai_oauth_usage_unavailable', usage: null };
     }
   }
 

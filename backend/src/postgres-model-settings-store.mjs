@@ -4,7 +4,7 @@ import { closePostgresPool, withPostgresTransaction } from './postgres-foundatio
 import {
   assertConnection, canonicalizeOauthConnection, decrypt, encrypt, normalizeAuth, mergeOpenAiOAuthTokens,
   publicConnection, secretPreview, normalizeModels, normalizeReasoningEffort, normalizeTemperature, assertIdentity,
-  refreshAnthropicOauth, discoverModels,
+  refreshAnthropicOauth, discoverModels, isProviderPool, assertProviderPoolMembers, providerPoolModels,
 } from './model-settings-store.mjs';
 import { refreshOpenAiOAuth } from './openai-oauth-login.mjs';
 
@@ -49,6 +49,17 @@ CREATE TABLE IF NOT EXISTS agent_minion_model_selections (
   updated_at TIMESTAMPTZ NOT NULL
 );
 `;
+export const POSTGRES_PROVIDER_POOL_SCHEMA_SQL = `
+ALTER TABLE model_connections ADD COLUMN pool_json JSONB;
+CREATE TABLE provider_pool_affinity (
+  pool_id TEXT, thread_key TEXT, owner_id TEXT, substitute_id TEXT,
+  substitute_until TIMESTAMPTZ, updated_at TIMESTAMPTZ, PRIMARY KEY(pool_id,thread_key)
+);
+CREATE TABLE provider_pool_health (
+  pool_id TEXT, member_id TEXT, cooldown_until TIMESTAMPTZ, last_reason TEXT,
+  updated_at TIMESTAMPTZ, PRIMARY KEY(pool_id,member_id)
+);
+`;
 const now = () => new Date().toISOString();
 const AUTH = 'providerAuth';
 const API_KEY = 'apiKey';
@@ -89,7 +100,7 @@ export class PostgresModelSettingsStore {
       return this.identitySnapshot(client);
     });
   }
-  selectSql(where = '') { return `SELECT c.*, c.accepted_input_json::text AS accepted_input_json, c.models_json::text AS models_json, legacy.id AS secret_id, auth.id AS auth_secret_id, p.value_json::text AS auth_preview_json FROM model_connections c LEFT JOIN model_connection_secrets legacy ON legacy.connection_id=c.id AND legacy.name='${API_KEY}' LEFT JOIN model_connection_secrets auth ON auth.connection_id=c.id AND auth.name='${AUTH}' LEFT JOIN model_auth_previews p ON p.connection_id=c.id ${where}`; }
+  selectSql(where = '') { return `SELECT c.*, c.pool_json::text AS pool_json, c.accepted_input_json::text AS accepted_input_json, c.models_json::text AS models_json, legacy.id AS secret_id, auth.id AS auth_secret_id, p.value_json::text AS auth_preview_json FROM model_connections c LEFT JOIN model_connection_secrets legacy ON legacy.connection_id=c.id AND legacy.name='${API_KEY}' LEFT JOIN model_connection_secrets auth ON auth.connection_id=c.id AND auth.name='${AUTH}' LEFT JOIN model_auth_previews p ON p.connection_id=c.id ${where}`; }
   async list({ agentId = null } = {}) { const r = await this.pool.query(`${this.selectSql()} ORDER BY c.updated_at DESC`); return Promise.all(r.rows.map(async row => { const connection = publicConnection(row); if (agentId) { const native = await this.pool.query('SELECT model_id FROM model_catalog WHERE connection_id=$1 AND available', [row.id]); const ids = new Set(native.rows.map(x => x.model_id)); connection.models = connection.models.filter(x => ids.has(x.id)); } return connection; })); }
   async get(id) { const r = await this.pool.query(`${this.selectSql('WHERE c.id=$1')}`, [id]); return publicConnection(r.rows[0]); }
   async secret(id, name) { const r = await this.pool.query('SELECT * FROM model_connection_secrets WHERE connection_id=$1 AND name=$2', [id, name]); return r.rows[0] ? decrypt(this.key, r.rows[0]) : null; }
@@ -104,7 +115,13 @@ export class PostgresModelSettingsStore {
     return value ?? {};
   }
   async auth(id) { const structured = await this.secret(id, AUTH); if (structured) return json(structured, null); const key = await this.apiKey(id); if (!key) return null; const c = await this.get(id); return { type: 'api_key', provider: c?.provider || null, source: 'legacy-api-key', apiKey: key }; }
-  async hasAuth(id) { return Boolean(await this.auth(id)); }
+  async hasAuth(id) {
+    const connection = await this.get(id);
+    if (!isProviderPool(connection || {})) return Boolean(await this.auth(id));
+    if (!connection.pool?.enabled) return false;
+    const members = await Promise.all(connection.pool.memberConnectionIds.map(memberId => this.get(memberId)));
+    try { assertProviderPoolMembers(connection, members.filter(Boolean)); return true; } catch { return false; }
+  }
   async authWithClient(client, id, provider = null) { const structured = await client.query('SELECT * FROM model_connection_secrets WHERE connection_id=$1 AND name=$2', [id, AUTH]); if (structured.rows[0]) return json(decrypt(this.key, structured.rows[0]), null); const legacy = await client.query('SELECT * FROM model_connection_secrets WHERE connection_id=$1 AND name=$2', [id, API_KEY]); if (!legacy.rows[0]) return null; return { type: 'api_key', provider, source: 'legacy-api-key', apiKey: decrypt(this.key, legacy.rows[0]) }; }
   async saveSecret(client, connectionId, name, value, timestamp) {
     const old = await client.query('SELECT id FROM model_connection_secrets WHERE connection_id=$1 AND name=$2 FOR UPDATE', [connectionId, name]);
@@ -127,6 +144,20 @@ export class PostgresModelSettingsStore {
         : normalizeAuth(input, input.provider);
       const auth = supplied || priorAuth;
       const connection = canonicalizeOauthConnection(assertConnection(input), auth);
+      let poolMembers = [];
+      if (isProviderPool(connection)) {
+        if (supplied || priorAuth) throw new Error('provider_pool_credentials_forbidden');
+        const memberRows = await client.query(this.selectSql('WHERE c.id=ANY($1::text[])'), [connection.pool.memberConnectionIds]);
+        poolMembers = connection.pool.memberConnectionIds.map(memberId => memberRows.rows.map(publicConnection).find(member => member.id === memberId)).filter(Boolean);
+        assertProviderPoolMembers({ ...connection, id }, poolMembers);
+      }
+      // Member credential/API changes must preserve every referencing pool.
+      const references = await client.query(this.selectSql("WHERE c.pool_json->'memberConnectionIds' ? $1 AND c.id<>$1"), [id]);
+      for (const row of references.rows) {
+        const parent = publicConnection(row);
+        const rows = await client.query(this.selectSql('WHERE c.id=ANY($1::text[])'), [parent.pool.memberConnectionIds]);
+        assertProviderPoolMembers(parent, rows.rows.map(publicConnection).map(member => member.id === id ? { ...connection, id, auth: auth ? secretPreview(auth, connection.provider) : null } : member));
+      }
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [connection.provider.toLowerCase()]);
       const duplicate = await client.query(`SELECT id FROM model_connections WHERE translate(provider,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')=translate($1,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') AND id<>$2 FOR UPDATE`, [connection.provider, id]);
       if (duplicate.rows[0]) throw new Error('provider_label_duplicate');
@@ -135,9 +166,22 @@ export class PostgresModelSettingsStore {
       const existingModels = normalizeModels(json(priorRow?.rows[0]?.models_json, []), { provider: connection.provider, apiType: connection.apiType });
       const submittedModels = normalizeModels(input.models, { provider: connection.provider, apiType: connection.apiType });
       const priorById = new Map(existingModels.map((model) => [model.id, model]));
-      const models = submittedModels.map((model) => { const prior = priorById.get(model.id); return (!prior || model.manual || prior.manual) ? model : normalizeModels([{ ...prior, ...model }], { provider: connection.provider, apiType: connection.apiType })[0]; });
+      let models = submittedModels.map((model) => { const prior = priorById.get(model.id); return (!prior || model.manual || prior.manual) ? model : normalizeModels([{ ...prior, ...model }], { provider: connection.provider, apiType: connection.apiType })[0]; });
+      if (isProviderPool(connection)) {
+        const selected = new Map(submittedModels.map(model => [model.id, model]));
+        models = providerPoolModels(poolMembers).map(model => ({ ...model, ...(selected.get(model.id) || {}) }));
+      }
       await client.query(`INSERT INTO model_connections (id,provider,api_type,base_url,accepted_input_json,models_json,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$7) ON CONFLICT (id) DO UPDATE SET provider=EXCLUDED.provider,api_type=EXCLUDED.api_type,base_url=EXCLUDED.base_url,accepted_input_json=EXCLUDED.accepted_input_json,models_json=EXCLUDED.models_json,updated_at=EXCLUDED.updated_at`, [id, connection.provider, connection.apiType, connection.baseUrl, JSON.stringify(connection.acceptedInput), JSON.stringify(models), stamp]);
+      await client.query('UPDATE model_connections SET pool_json=$2 WHERE id=$1', [id, connection.pool ? JSON.stringify(connection.pool) : null]);
       if (supplied) await this.writeAuth(client, id, supplied, connection.provider, stamp, input.auth === undefined);
+      for (const reference of references.rows) {
+        const parent = publicConnection(reference);
+        const rows = await client.query(this.selectSql('WHERE c.id=ANY($1::text[])'), [parent.pool.memberConnectionIds]);
+        const members = parent.pool.memberConnectionIds.map(memberId => rows.rows.map(publicConnection).find(member => member.id === memberId)).filter(Boolean);
+        const prior = new Map(parent.models.map(model => [model.id, model]));
+        const union = providerPoolModels(members).map(model => ({ ...model, ...(prior.has(model.id) ? { selected: prior.get(model.id).selected } : {}) }));
+        await client.query('UPDATE model_connections SET models_json=$2,updated_at=$3 WHERE id=$1', [parent.id, JSON.stringify(union), stamp]);
+      }
       const row = await client.query(this.selectSql('WHERE c.id=$1'), [id]); return publicConnection(row.rows[0]);
     });
   }
@@ -176,7 +220,9 @@ export class PostgresModelSettingsStore {
       const native = await client.query('SELECT metadata FROM model_catalog WHERE connection_id=$1 AND model_id=$2 AND available FOR SHARE', [id, modelId]);
       const enabled = native.rows[0]?.metadata?.selected !== false ? native.rows[0]?.metadata : null;
       if (!enabled) throw new Error('model_not_enabled_for_connection');
-      if (!await this.authWithClient(client, id, connection.provider)) throw new Error('model_connection_auth_required');
+      if (isProviderPool(connection)) {
+        if (!connection.pool?.enabled) throw new Error('provider_pool_disabled');
+      } else if (!await this.authWithClient(client, id, connection.provider)) throw new Error('model_connection_auth_required');
       const effort = normalizeReasoningEffort(reasoningEffort);
       if (enabled.reasoningEfforts?.length && effort !== 'off' && !enabled.reasoningEfforts.includes(effort)) throw new Error('model_reasoning_effort_not_supported');
       const table = minion ? 'agent_minion_model_selections' : 'agent_model_selections';
@@ -258,6 +304,12 @@ export class PostgresModelSettingsStore {
   async discoverModels(options = {}) {
     const connection = await this.get(options.id || options.connectionId);
     if (!connection) throw new Error('model_connection_not_found');
+    if (isProviderPool(connection)) {
+      const members = await Promise.all(connection.pool.memberConnectionIds.map(id => this.get(id)));
+      assertProviderPoolMembers(connection, members.filter(Boolean));
+      const catalogs = await Promise.all(members.map(async member => ({ ...member, models: await this.discoverModels({ ...options, id: member.id, connectionId: member.id, apiType: member.apiType, baseUrl: member.baseUrl }) })));
+      return providerPoolModels(catalogs);
+    }
     const auth = options.auth || await this.auth(connection.id) || {};
     const token = options.apiKey || auth.apiKey || auth.accessToken || auth.token;
     return discoverModels({ ...options, baseUrl: options.baseUrl || connection.baseUrl, provider: options.provider || connection.provider, apiType: options.apiType || connection.apiType, auth, apiKey: token, fetchImpl: options.fetchImpl || fetch, catalogFetchImpl: options.catalogFetchImpl || options.fetchImpl || fetch, store: options.store || this });
@@ -281,9 +333,15 @@ export class PostgresModelSettingsStore {
   }
   async remove(id) { return withPostgresTransaction(this.pool, async (client) => {
     const connectionId = String(id ?? '').trim();
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [CONNECTION_WRITE_LOCK]);
+    const refs = await client.query("SELECT id FROM model_connections WHERE pool_json->'memberConnectionIds' ? $1 AND id<>$1", [connectionId]);
+    if (refs.rows.length) throw new Error('provider_pool_member_in_use');
     const locked = await client.query('SELECT id FROM model_connections WHERE id=$1 FOR UPDATE', [connectionId]);
     if (!locked.rows[0]) return false;
     await client.query('DELETE FROM agent_model_selections WHERE connection_id=$1', [connectionId]);
+    await client.query('DELETE FROM agent_minion_model_selections WHERE connection_id=$1', [connectionId]);
+    await client.query('DELETE FROM provider_pool_affinity WHERE pool_id=$1', [connectionId]);
+    await client.query('DELETE FROM provider_pool_health WHERE pool_id=$1', [connectionId]);
     return (await client.query('DELETE FROM model_connections WHERE id=$1', [connectionId])).rowCount > 0;
   }); }
 }

@@ -427,6 +427,6 @@ export function buildOutcome({ decision = null, sessionId = null, session = null
       handoff: memoryIntent.handoff,
       writeback: memoryIntent.writeback,
     } : null,
-    model: model ? { ok: model.ok ?? null, usage: model.usage || null } : null,
+    model: model ? { ok: model.ok ?? null, usage: model.usage || null, ...(model.providerPool ? { providerPool: model.providerPool } : {}) } : null,
   };
 }

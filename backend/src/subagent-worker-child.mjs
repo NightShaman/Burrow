@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { resolveModelConfig } from './config.mjs';
+import { PostgresModelSettingsStore } from './postgres-model-settings-store.mjs';
+import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
 import { readFile } from 'node:fs/promises';
 import { runSpawnSubagentChild } from './subagent-worker-runner.mjs';
 import { createPostgresPool } from './postgres-foundation.mjs';
@@ -14,6 +17,15 @@ async function main() {
   const childArgs = payload.args || payload;
   const pool = createPostgresPool();
   const conversationStore = new PostgresSessionStore({ pool });
+  if (['openai-lb', 'anthropic-lb'].includes(childArgs.modelConfig?.api)) {
+    const selected = childArgs.modelConfig;
+    childArgs.modelConfig = await resolveModelConfig({
+      modelSettings: new PostgresModelSettingsStore({ pool, key: settingsKeyFromEnvironment() }),
+      modelConnectionId: selected.connectionId, model: selected.model,
+      temperature: selected.temperature, maxTokens: selected.maxTokens,
+      reasoning_effort: selected.extra?.reasoning?.effort || 'off',
+    });
+  }
   const otelConfiguration = childArgs.otelConfiguration || null;
   const telemetry = childArgs.traceContext && otelConfiguration?.enabled && otelConfiguration?.endpoint ? createOtelRuntime({ env: {
     OTEL_EXPORTER_OTLP_ENDPOINT: otelConfiguration.endpoint,

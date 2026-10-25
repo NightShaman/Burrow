@@ -35,3 +35,19 @@ it('FE010 API key authentication is not OAuth', async () => {
  expect(isOpenAiOAuthConnection({})).toBe(false);
  hook.unmount();
 });
+it('preserves pool flags and compatible OAuth accounts with empty catalogs through refresh', async () => {
+ const pool = {enabled:false,memberConnectionIds:['oauth'],sticky:true,preferEarlierReset:false};
+ const connections = [
+  {id:'oauth',provider:'Personal',apiType:'openai-responses',baseUrl:'https://example.test',auth:{type:'oauth',provider:'OpenAI'},models:[]},
+  {id:'lb',provider:'OpenAI LB',apiType:'openai-lb',pool,baseUrl:'https://pool.invalid',models:[{id:'shared',selected:true}]},
+ ];
+ vi.mocked(api).mockImplementation(async path => path === '/api/settings/model-connections' ? {connections} : {} as any);
+ const options = {setAgents:vi.fn(),reportError:vi.fn(),runtimeProviders:{current:[]}};
+ const hook = renderHook(() => useRuntimeDashboard(options));
+ await act(async()=>{await hook.result.current.refreshModelConnections();});
+ expect(hook.result.current.savedProviders.map(p=>p.id)).toEqual(['oauth','lb']);
+ expect(hook.result.current.savedProviders[1].pool).toEqual(pool);
+ const {compatiblePoolMembers} = await import('./providerPools');
+ expect(compatiblePoolMembers('openai-lb',hook.result.current.savedProviders).map(p=>p.id)).toEqual(['oauth']);
+ hook.unmount();
+});

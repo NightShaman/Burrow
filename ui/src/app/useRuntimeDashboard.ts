@@ -92,6 +92,7 @@ export const isOpenAiOAuthConnection = (provider?: Pick<SavedProvider, 'auth' | 
 const asSavedProvider = (connection: ModelConnection): SavedProvider => ({
   id: connection.id, provider: connection.provider, apiType: connection.apiType, url: connection.baseUrl, apiKey: '', apiKeyConfigured: connection.apiKeyConfigured,
   auth: connection.auth, oauthConfigured: connection.auth?.type === 'oauth' || connection.auth?.source === 'oauth' || connection.auth?.source === 'openai-oauth', authSource: connection.auth?.source, expiresAt: connection.auth?.expiresAt,
+  pool: connection.pool,
   connectionModels: connection.models,
   models: connection.models.filter((model) => model.selected !== false).map((model) => model.id),
   manualModels: Object.fromEntries(connection.models.map((model) => [model.id, model.manual === true])),
@@ -133,9 +134,10 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
     if (scope.current.generation !== generation) return;
     const { connections } = await api<{ connections: ModelConnection[] }>( '/api/settings/model-connections');
     if (scope.current.generation !== generation) return;
-    const providers = connections.map(asSavedProvider).filter((provider) => provider.models.length);
+    const saved = connections.map(asSavedProvider);
+    const providers = saved.filter((provider) => provider.models.length);
     runtimeProviders.current = providers;
-    setSavedProviders(providers); setModelConnectionsLoaded(true);
+    setSavedProviders(saved); setModelConnectionsLoaded(true);
     if (!providers.length) return;
     const fallbackProvider = providers[0];
     setAgents((all) => all.map((agent) => {
@@ -185,8 +187,8 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
 
   usePolling(async (isCancelled, signal) => {
     const provider = selectedConnection;
-    if (!provider?.apiKeyConfigured) { if (!isCancelled()) setProviderConnectionStatus('disconnected'); return; }
-    try { await api( '/api/settings/model-connections/discover', { signal, method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: provider.id, apiType: provider.apiType, baseUrl: provider.url }) }); if (!isCancelled()) setProviderConnectionStatus('connected'); }
+    if (!(provider?.pool ? provider.pool.enabled : provider?.apiKeyConfigured)) { if (!isCancelled()) setProviderConnectionStatus('disconnected'); return; }
+    try { await api( '/api/settings/model-connections/discover', { signal, method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: provider.id, apiType: provider.apiType, ...(provider.pool ? { provider: provider.provider, pool: provider.pool } : { baseUrl: provider.url }) }) }); if (!isCancelled()) setProviderConnectionStatus('connected'); }
     catch { if (!isCancelled()) setProviderConnectionStatus('disconnected'); }
   }, 30_000, modelConnectionsLoaded, `${'local'}:${selectedConnection?.id ?? ''}`);
 

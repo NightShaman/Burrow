@@ -14,5 +14,5 @@ export function anthropicSupportsTemperature(modelId = '') {
 }
 
 export function isAnthropicMessagesConnection({ provider = '', apiType = '', api = '' } = {}) {
-  return normalize(provider).includes('anthropic') || normalize(apiType || api) === 'anthropic-messages';
+  return normalize(provider).includes('anthropic') || ['anthropic-messages', 'anthropic-lb'].includes(normalize(apiType || api));
 }

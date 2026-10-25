@@ -20,7 +20,9 @@ async function writePayload(payload, tempDir = os.tmpdir()) {
   const dir = await fs.mkdtemp(path.join(tempDir, 'burrow-subagent-'));
   await fs.chmod(dir, 0o700);
   const payloadPath = path.join(dir, `payload-${randomUUID()}.json`);
-  await fs.writeFile(payloadPath, `${JSON.stringify(payload, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  // Runtime pool resolvers contain functions and a live SQL pool; rebuild them
+  // inside the child from the authoritative logical connection/model pair.
+  await fs.writeFile(payloadPath, `${JSON.stringify({ ...payload, args: { ...payload.args, modelConfig: payload.args?.modelConfig ? { ...payload.args.modelConfig, providerPool: undefined } : undefined } }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
   return { dir, payloadPath };
 }
 

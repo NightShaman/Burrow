@@ -1,4 +1,4 @@
-import { api, jsonMutation, type RuntimeModel } from '../../app/api';
+import { api, jsonMutation, type RuntimeModel, type ProviderPool } from '../../app/api';
 
 export type ClaudeCodeLogin = {
   id: string;
@@ -37,7 +37,7 @@ const jsonPost = (body: unknown) => ({
 });
 
 export const modelConnectionsApi = {
-  discover: (connection: { id?: string; provider: string; apiType: string; baseUrl: string; apiKey: string; models: RuntimeModel[] }) =>
+  discover: (connection: { id?: string; provider: string; apiType: string; baseUrl?: string; apiKey?: string; pool?: ProviderPool; models: RuntimeModel[] }) =>
     api<{ models: RuntimeModel[]; discovery?: { status?: string; error?: string } }>('/api/settings/model-connections/discover', jsonPost(connection)),
 
   startOpenAiOAuth: (connectionId?: string) =>

@@ -293,7 +293,7 @@ export async function finalizePlainChatRuntimeResult({
       content: finalAnswerText,
       runId: logger.runId,
       traceDir: logger.traceDir,
-      metadata: assistantTurnMetadata({ subjectScope, decision, proposal, outputArtifacts, compactLoop, acceptanceChecklist, integrityViolation: terminalIntegrity.integrityViolation }),
+      metadata: { ...assistantTurnMetadata({ subjectScope, decision, proposal, outputArtifacts, compactLoop, acceptanceChecklist, integrityViolation: terminalIntegrity.integrityViolation }), ...(model?.providerPool ? { providerPool: model.providerPool } : {}) },
     });
   }
   if (model && !model.ok) {

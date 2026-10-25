@@ -71,7 +71,7 @@ import { createExecutionProviderRegistry } from '../src/process-execution-router
 import { buildChatSupportStatus, buildWorkbenchStatus } from '../src/workbench-status.mjs';
 import { allowedNextSteps, appendWorkItemStep, archiveWorkItem, createWorkItem, listWorkItems, readWorkItem, workItemEligibility } from '../src/work-item-store.mjs';
 import { searchBurrowSessionEvidence, searchSessionEvidence } from '../src/session-search.mjs';
-import { CODEX_CLIENT_VERSION_CACHE_TTL_MS, discoverModels, refreshCodexClientVersionCache } from '../src/model-settings-store.mjs';
+import { CODEX_CLIENT_VERSION_CACHE_TTL_MS, isProviderPool, assertConnection, assertProviderPoolMembers, providerPoolModels, discoverModels, refreshCodexClientVersionCache } from '../src/model-settings-store.mjs';
 import { claudeCredentialAuthPayload, detectClaudeCliCredential } from '../src/claude-cli-credentials.mjs';
 import { cancelClaudeCodeLogin, getClaudeCodeLogin, importClaudeCodeLoginCredential, startClaudeCodeLogin, submitClaudeCodeLoginCode } from '../src/claude-code-login.mjs';
 import { cancelOpenAiOAuthLogin, getOpenAiOAuthLogin, startOpenAiOAuthLogin, submitOpenAiOAuthCode } from '../src/openai-oauth-login.mjs';
@@ -957,6 +957,14 @@ async function discoverModelConnection(body = {}) {
   const apiType = body.apiType || existing?.apiType;
   const priorModels = body.models || existing?.models || [];
   try {
+    if (isProviderPool({ apiType })) {
+      const connection = { ...assertConnection({ ...existing, ...body, apiType }), id: existing?.id };
+      const members = await Promise.all(connection.pool.memberConnectionIds.map(id => store.get(id)));
+      assertProviderPoolMembers(connection, members.filter(Boolean));
+      const catalogs = await Promise.all(members.map(async member => ({ ...member, models: await store.discoverModels({ id: member.id, useModelsDev: true, signal: AbortSignal.timeout(15_000) }) })));
+      const discovered = providerPoolModels(catalogs);
+      return { ok: true, models: mergeDiscoveredModels(discovered, priorModels), discovery: { status: discovered.length ? 'discovered' : 'manual_only', count: discovered.length } };
+    }
     if (existing && auth?.type === 'oauth' && /openai/i.test(String(auth.provider || existing.provider || '')) && /chatgpt\.com\/backend-api/i.test(String(baseUrl || ''))) auth = { ...auth, ...(await store.resolveAuth(existing.id)) };
     const apiKey = String(body.apiKey || '').trim() || (auth?.token ? String(auth.token).trim() : '') || (auth?.apiKey ? String(auth.apiKey).trim() : '') || (auth?.accessToken ? String(auth.accessToken).trim() : '') || (existing ? await store.apiKey(existing.id) : null);
     const hasCredential = Boolean(apiKey || auth?.token || auth?.apiKey || auth?.accessToken);

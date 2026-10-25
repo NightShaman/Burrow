@@ -564,7 +564,7 @@ export async function runSpawnSubagentChild({
   const messages = normalizeProviderMessages([{ role: 'system', content: 'Internal subagent task. This isolated child request is not parent conversation history.' }, { role: 'user', content: prompt }]);
   await progress?.({ type: 'subagent-progress', phase: 'model-request', id });
   await recordLiveActivity({ kind: 'model', phase: 'model-request', label: 'Waiting for model response', model: modelConfig?.model || null }, 'model_request');
-  const first = await adapter.complete({ messages, tools: subagentToolSchemas(), traceLogger: modelTrace, signal });
+  const first = await adapter.complete({ sessionId: childSessionId, messages, tools: subagentToolSchemas(), traceLogger: modelTrace, signal });
   await progress?.({ type: 'subagent-progress', phase: 'model-response', id });
   await recordLiveActivity({ kind: 'model', phase: 'model-response', label: first.ok ? 'Model response received' : 'Model response failed', status: first.ok ? 'completed' : 'error', model: modelConfig?.model || null, error: first.ok ? null : (first.error || first.status) }, first.ok ? 'model_response' : 'model_error');
   if (!first.ok) {
@@ -642,7 +642,7 @@ export async function runSpawnSubagentChild({
             traceLogger: modelTrace,
             signal,
           })
-        : await adapter.complete({
+        : await adapter.complete({ sessionId: childSessionId, previousModel: current,
             messages: normalizeProviderMessages([
               ...messages,
               { role: 'user', content: followupPromptWithEvidence({ prompt, toolResults, latestResults: batch.results, allowMoreTools }) },
@@ -697,7 +697,7 @@ export async function runSpawnSubagentChild({
 
   await progress?.({ type: 'subagent-progress', phase: 'terminal-request', id });
   await recordLiveActivity({ kind: 'model', phase: 'terminal-request', label: 'Waiting for terminal summary', model: modelConfig?.model || null }, 'terminal_request');
-  const synthesis = await adapter.complete({
+  const synthesis = await adapter.complete({ sessionId: childSessionId, previousModel: current,
     messages: normalizeProviderMessages([
       ...messages,
       { role: 'user', content: finalSynthesisPrompt({ prompt, toolResults }) },

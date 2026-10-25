@@ -6,6 +6,8 @@ import type { SavedProvider } from '../../app/types';
 export const modelConnectionApiTypes = [
   { value: 'openai-chat-completions', label: 'OpenAI Chat Completions' },
   { value: 'openai-responses', label: 'OpenAI Responses' },
+  { value: 'openai-lb', label: 'OpenAI LB' },
+  { value: 'anthropic-lb', label: 'Anthropic LB' },
   { value: 'anthropic-messages', label: 'Anthropic Messages' },
   { value: 'google-generative-language', label: 'Google Gemini (Developer API)' },
 ];
@@ -88,7 +90,7 @@ function capabilityProvenanceLabel(provenance: RuntimeModel['capabilityProvenanc
 
 type SavedProvidersProps = { providers: SavedProvider[]; open: boolean; onOpenChange: (open: boolean) => void; onEdit: (provider: SavedProvider) => void; onDelete: (provider: SavedProvider) => void; expanded?: boolean; selectedId?: string | null };
 export function SavedProviders({ providers, open, onOpenChange, onEdit, onDelete, expanded = false, selectedId }: SavedProvidersProps) {
-  const contents = providers.length === 0 ? <p className="settings-empty">No providers saved yet.</p> : <div className="provider-list">{providers.map((item) => <article className="provider-card" key={item.id}><button className="provider-card-select" type="button" onClick={() => onEdit(item)} aria-pressed={selectedId === item.id}><strong>{item.provider}</strong><small>{modelConnectionApiTypes.find((type) => type.value === item.apiType)?.label ?? item.apiType} · {item.models.length} {item.models.length === 1 ? 'model' : 'models'}</small>{(item.oauthConfigured || item.auth?.type === 'oauth') && <small>OAuth configured</small>}</button><button className="danger" type="button" onClick={() => onDelete(item)} aria-label={`Delete ${item.provider}`}>Delete</button></article>)}</div>;
+  const contents = providers.length === 0 ? <p className="settings-empty">No providers saved yet.</p> : <div className="provider-list">{providers.map((item) => <article className="provider-card" key={item.id}><button className="provider-card-select" type="button" onClick={() => onEdit(item)} aria-pressed={selectedId === item.id}><strong>{item.provider}</strong><small>{modelConnectionApiTypes.find((type) => type.value === item.apiType)?.label ?? item.apiType} · {item.models.length} {item.models.length === 1 ? 'model' : 'models'}</small>{item.pool && <small>{item.pool.enabled ? 'Enabled' : 'Disabled'} · {item.pool.memberConnectionIds.length} accounts</small>}{(item.oauthConfigured || item.auth?.type === 'oauth') && <small>OAuth configured</small>}</button><button className="danger" type="button" onClick={() => onDelete(item)} aria-label={`Delete ${item.provider}`}>Delete</button></article>)}</div>;
   if (expanded) return <div className="settings-overflow-content model-saved">{contents}</div>;
   return <details className="model-saved saved-accordion" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}><summary><h3>Saved providers</h3><span>{providers.length}</span></summary>{contents}</details>;
 }

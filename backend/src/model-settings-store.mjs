@@ -73,15 +73,53 @@ export function settingsKeyFromEnvironment(env = process.env) {
   return key;
 }
 
+export function isProviderPool(connection = {}) { return ['openai-lb', 'anthropic-lb'].includes(connection.apiType); }
+
+export function normalizeProviderPool(value = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('provider_pool_invalid');
+  if (typeof value.enabled !== 'boolean') throw new Error('provider_pool_enabled_required');
+  if (!Array.isArray(value.memberConnectionIds) || value.memberConnectionIds.some(id => typeof id !== 'string' || !id.trim())) throw new Error('provider_pool_members_invalid');
+  if (value.sticky !== undefined && typeof value.sticky !== 'boolean') throw new Error('provider_pool_sticky_invalid');
+  if (value.preferEarlierReset !== undefined && typeof value.preferEarlierReset !== 'boolean') throw new Error('provider_pool_prefer_earlier_reset_invalid');
+  const memberConnectionIds = [...new Set(value.memberConnectionIds.map(normalize))];
+  if (!memberConnectionIds.length) throw new Error('provider_pool_members_required');
+  return { enabled: value.enabled, memberConnectionIds, sticky: value.sticky ?? true, preferEarlierReset: value.preferEarlierReset ?? false };
+}
+
+export function assertProviderPoolMembers(connection, members = []) {
+  const family = connection.apiType === 'openai-lb' ? 'openai' : 'anthropic';
+  for (const id of connection.pool.memberConnectionIds) {
+    const member = members.find(item => item.id === id);
+    if (!member) throw new Error('provider_pool_member_not_found');
+    if (id === connection.id || isProviderPool(member)) throw new Error('provider_pool_nested');
+    if (member.auth?.type !== 'oauth') throw new Error('provider_pool_member_oauth_required');
+    const provider = String(member.auth.provider || '').toLowerCase();
+    const matching = family === 'openai'
+      ? provider === 'openai' && ['openai-responses', 'openai-chat-completions'].includes(member.apiType)
+      : ['anthropic', 'claude'].includes(provider) && member.apiType === 'anthropic-messages';
+    if (!matching) throw new Error('provider_pool_member_family_mismatch');
+  }
+}
+
+export function providerPoolModels(members = []) {
+  const models = new Map();
+  for (const member of members) for (const model of member.models || []) {
+    const prior = models.get(model.id);
+    if (!prior) models.set(model.id, { ...model });
+    else if (model.selected !== false) prior.selected = true;
+  }
+  return [...models.values()];
+}
+
 export function assertConnection(input = {}) {
   const provider = normalize(input.provider);
   const apiType = normalize(input.apiType);
-  const baseUrl = normalize(input.baseUrl).replace(/\/+$/, '');
+  const baseUrl = normalize(input.baseUrl || (isProviderPool(input) ? 'https://pool.invalid' : '')).replace(/\/+$/, '');
   if (!provider) throw new Error('provider_required');
   if (!apiType) throw new Error('api_type_required');
   if (!/^https?:\/\//i.test(baseUrl)) throw new Error('base_url_invalid');
   const acceptedInput = [...new Set((Array.isArray(input.acceptedInput) ? input.acceptedInput : []).map(normalize).filter((type) => ['text', 'image'].includes(type)))];
-  return { provider, apiType, baseUrl, acceptedInput };
+  return { provider, apiType, baseUrl, acceptedInput, ...(isProviderPool(input) ? { pool: normalizeProviderPool(input.pool) } : {}) };
 }
 
 const MODEL_INPUT_CAPABILITIES = Object.freeze(['text', 'image', 'audio', 'video', 'file']);
@@ -258,6 +296,7 @@ export function publicConnection(row) {
   const canonical = canonicalizeOauthConnection({ provider: row.provider, apiType: row.api_type, baseUrl: row.base_url }, authPreview);
   return {
     id: row.id, provider: row.provider, apiType: canonical.apiType, baseUrl: row.base_url,
+    ...(isProviderPool({ apiType: canonical.apiType }) ? { pool: parseJson(row.pool_json, null) } : {}),
     acceptedInput: parseJson(row.accepted_input_json, ['text', 'image']),
     models: normalizeModels(parseJson(row.models_json, []), { provider: row.provider, apiType: canonical.apiType }),
     apiKeyConfigured: Boolean(row.secret_id || row.auth_secret_id),
@@ -380,7 +419,7 @@ function observedMinimumClientVersion(body = {}) {
 }
 
 export function canonicalizeOauthConnection(connection, auth) {
-  if (auth?.type !== 'oauth' || !openAiLikeProvider(auth.provider || connection.provider) || !isChatGptBackendUrl(connection.baseUrl)) return connection;
+  if (isProviderPool(connection) || auth?.type !== 'oauth' || !openAiLikeProvider(auth.provider || connection.provider) || !isChatGptBackendUrl(connection.baseUrl)) return connection;
   return { ...connection, apiType: 'openai-responses' };
 }
 

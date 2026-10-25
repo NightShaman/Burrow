@@ -1,3 +1,4 @@
+import { createProviderPoolModelAdapter } from './model-adapters/provider-pool.mjs';
 import { googleNativeApi } from './model-adapters/google-native-catalog.mjs';
 import { createGoogleNativeModelAdapter } from './model-adapters/google.mjs';
 import { normalizeChoice, normalizeResponseChoice, responseApiTool, messagesToResponsesInput, toolNames, readResponseSseBounded, compactResponseCompletion, mergeStreamToolCall } from './model-adapters/openai-transport.mjs';
@@ -23,6 +24,7 @@ export { createOpenAIGeneratedArtifactAdapter } from './model-adapters/openai-ge
 
 export function createModelAdapter(options = {}) {
   const config = options.config || {};
+  if (config.providerPool || ['openai-lb', 'anthropic-lb'].includes(config.api || config.apiType)) return createProviderPoolModelAdapter(options, createModelAdapter);
   if (googleNativeApi(config)) return createGoogleNativeModelAdapter(options);
   const mode = apiMode(config);
   if (mode === 'anthropic-messages') return createAnthropicMessagesModelAdapter(options);

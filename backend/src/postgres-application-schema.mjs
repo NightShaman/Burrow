@@ -31,7 +31,7 @@ import { POSTGRES_MOD_DISTRIBUTION_SCHEMA_SQL, POSTGRES_MOD_MANAGEMENT_SCHEMA_SQ
 import { POSTGRES_MOD_SCHEMA_SQL } from './postgres-mod-store.mjs';
 import { POSTGRES_AGENT_REGISTRY_SCHEMA_SQL } from './postgres-agent-registry.mjs';
 import { POSTGRES_AGENT_PROFILE_SCHEMA_SQL } from './postgres-agent-profile-store.mjs';
-import { POSTGRES_MODEL_SETTINGS_SCHEMA_SQL, POSTGRES_MINION_MODEL_SETTINGS_SCHEMA_SQL } from './postgres-model-settings-store.mjs';
+import { POSTGRES_MODEL_SETTINGS_SCHEMA_SQL, POSTGRES_MINION_MODEL_SETTINGS_SCHEMA_SQL, POSTGRES_PROVIDER_POOL_SCHEMA_SQL } from './postgres-model-settings-store.mjs';
 import { POSTGRES_MCP_SETTINGS_SCHEMA_SQL } from './postgres-mcp-settings-store.mjs';
 import { POSTGRES_TASK_BOARD_SCHEMA_SQL } from './postgres-task-board-store.mjs';
 import { POSTGRES_TASK_AUDIT_SCHEMA_SQL } from './postgres-task-audit-schema.mjs';
@@ -170,4 +170,5 @@ ALTER TABLE mod_external_turns ALTER COLUMN display_message SET NOT NULL;
   { version: 68, name: 'scheduled-model-context-mode', sql: `
 ALTER TABLE scheduled_jobs ADD COLUMN context_mode TEXT NOT NULL DEFAULT 'continue' CHECK (context_mode IN ('continue','fresh'));
 ` },
+  { version: 69, name: 'provider-pool-connections-and-routing-state', sql: POSTGRES_PROVIDER_POOL_SCHEMA_SQL },
 ]);

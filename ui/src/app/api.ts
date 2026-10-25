@@ -141,6 +141,8 @@ export type OpenAiUsage = {
   credits?: { hasCredits?: boolean | null; unlimited?: boolean | null; balance?: number | null; overageLimitReached?: boolean } | null;
 };
 
+export type ProviderPool = { enabled: boolean; memberConnectionIds: string[]; sticky?: true; preferEarlierReset?: false };
+
 export type ModelConnection = {
   id: string;
   provider: string;
@@ -149,7 +151,8 @@ export type ModelConnection = {
   models: RuntimeModel[];
   apiKeyConfigured: boolean;
   authConfigured?: boolean;
-  auth?: { type?: string | null; source?: string | null; expiresAt?: string | null };
+  pool?: ProviderPool;
+  auth?: { type?: string | null; provider?: string | null; source?: string | null; expiresAt?: string | null };
 };
 
 export type MemoryConnection = {

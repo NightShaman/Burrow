@@ -121,7 +121,7 @@ export async function completeCurator({ selection, stores = null, root = curator
     if (!stores?.models) throw new Error('curator_model_store_required');
     const config = await resolveModelConfig({ modelConnectionId: selection.connectionId, model: selection.model, stores });
     if (!config) throw new Error('curator_external_model_unavailable');
-    const result = await createModelAdapter({ config: { ...config, reasoningEffort: 'off', temperature: temperature(selection.temperature) } }).complete({ messages: [{ role: 'user', content: prompt }], traceLogger, abortSignal: signal });
+    const result = await createModelAdapter({ config: { ...config, reasoningEffort: 'off', temperature: temperature(selection.temperature) } }).complete({ messages: [{ role: 'user', content: prompt }], traceLogger, signal });
     if (!result?.ok) throw new Error(result?.error || 'curator_external_completion_failed');
     return { ...result, implementation: 'model-connection' };
   }

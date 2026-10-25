@@ -799,3 +799,5 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .system-rail-summary>.system-rail-build{display:flex;align-items:baseline;justify-content:space-between;gap:9px;min-width:0}
 .system-rail-build strong{font-size:10px;font-weight:700;text-transform:none}
 .system-rail-build>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;color:var(--muted);font-family:var(--mono,monospace);font-size:10px;font-weight:400}
+
+.provider-pool{min-width:0;margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:8px}.provider-pool legend{padding:0 6px;color:var(--text-strong);font-weight:700}.pool-accounts{display:grid;gap:6px;max-height:240px;overflow:auto;margin-top:10px}.pool-account{display:flex;align-items:center;gap:10px;min-width:0;min-height:34px;color:var(--text-strong);cursor:pointer}.pool-account input{flex:none;accent-color:var(--accent)}.pool-account span{min-width:0;overflow-wrap:anywhere}

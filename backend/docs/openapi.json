@@ -1937,7 +1937,14 @@
         "operationId": "saveModelConnection",
         "parameters": [],
         "requestBody": {
-          "$ref": "#/components/requestBodies/JsonBody"
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelConnectionWrite"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
@@ -12843,6 +12850,70 @@
           }
         },
         "additionalProperties": false
+      },
+      "ProviderPoolConfig": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "enabled",
+          "memberConnectionIds"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "memberConnectionIds": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Ordered existing same-family OAuth connection IDs. Nested pools are forbidden."
+          },
+          "sticky": {
+            "type": "boolean",
+            "default": true
+          },
+          "preferEarlierReset": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "ModelConnectionWrite": {
+        "type": "object",
+        "required": [
+          "provider",
+          "apiType"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "apiType": {
+            "type": "string",
+            "description": "Provider protocol, including openai-lb and anthropic-lb for logical OAuth pools."
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "pool": {
+            "$ref": "#/components/schemas/ProviderPoolConfig"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "description": "Pool connections require pool, forbid credentials, and expose the union of matching OAuth member models. Non-pool connections require an HTTP(S) baseUrl."
       }
     }
   },
