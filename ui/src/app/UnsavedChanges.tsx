@@ -11,24 +11,24 @@ const Context = createContext<{ register: (draft: Registration) => () => void; n
 // Explicit navigation boundaries call this shared guard; ordinary controls and
 // immediate actions are not intercepted. Drafts remain memory-only in the form.
 export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
-  const active = useRef<Registration | null>(null);
+  const active = useRef(new Set<Registration>());
   const pending = useRef<(() => void) | null>(null);
   const saving = useRef(false);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const register = useCallback((draft: Registration) => {
-    active.current = draft;
-    return () => { if (active.current === draft) active.current = null; };
+    active.current.add(draft);
+    return () => { active.current.delete(draft); };
   }, []);
   const navigate = useCallback<Navigation>(proceed => {
-    if (pending.current || active.current?.current.busy) return;
-    if (!active.current?.current.dirty) { proceed(); return; }
+    if (pending.current || [...active.current].some(draft => draft.current.busy)) return;
+    if (![...active.current].some(draft => draft.current.dirty)) { proceed(); return; }
     pending.current = proceed;
     setOpen(true);
   }, []);
   useLayoutEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (active.current?.current.dirty || active.current?.current.busy) { event.preventDefault(); event.returnValue = ''; }
+      if ([...active.current].some(draft => draft.current.dirty || draft.current.busy)) { event.preventDefault(); event.returnValue = ''; }
     };
     window.addEventListener('beforeunload', beforeUnload);
     return () => window.removeEventListener('beforeunload', beforeUnload);
@@ -36,16 +36,20 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
   const stay = () => { if (saving.current) return; pending.current = null; setOpen(false); };
   const finish = async (save: boolean) => {
     if (saving.current) return;
-    const draft = active.current;
+    const drafts = [...active.current].filter(draft => draft.current.dirty);
     const proceed = pending.current;
-    if (!draft || !proceed) { stay(); return; }
+    if (!proceed) { stay(); return; }
     if (save) {
       saving.current = true; setBusy(true);
-      let succeeded = false;
-      try { succeeded = await draft.current.save(); } catch { /* Form owns the actionable error. */ }
+      let succeeded = true;
+      for (const draft of drafts) {
+        if (!active.current.has(draft)) { succeeded = false; break; }
+        try { if (!await draft.current.save()) { succeeded = false; break; } }
+        catch { succeeded = false; break; } // The form owns the actionable error.
+      }
       saving.current = false; setBusy(false);
-      if (!succeeded || active.current !== draft) { stay(); return; }
-    } else draft.current.discard();
+      if (!succeeded) { stay(); return; }
+    } else drafts.forEach(draft => draft.current.discard());
     pending.current = null; setOpen(false); proceed();
   };
   return <Context.Provider value={{ register, navigate }}>{children}{open && <AccessibleModal className="confirm-dialog" role="alertdialog" aria-labelledby="unsaved-title" aria-describedby="unsaved-message" onClose={stay}>

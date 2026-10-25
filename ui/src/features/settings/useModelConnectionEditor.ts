@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, type RuntimeModel } from '../../app/api';
 import { useConfirm } from '../../app/ConfirmDialog';
+import { useUnsavedChanges, useUnsavedNavigation } from '../../app/UnsavedChanges';
 import type { SavedProvider } from '../../app/types';
 import { isOpenAiOAuthConnection } from '../../app/useRuntimeDashboard';
 import { modelConnectionsApi, type OpenAiOAuthConnection } from './modelConnectionsApi';
@@ -21,6 +22,7 @@ type Options = {
 
 export function useModelConnectionEditor({ savedProviders = [], onModelConnectionsChanged, loadBalancing = false }: Options) {
   const confirm = useConfirm();
+  const navigate = useUnsavedNavigation();
   const editorGeneration = useRef(0);
   const isEditorCurrent = (generation: number) => generation === editorGeneration.current;
   useEffect(() => () => { editorGeneration.current += 1; }, []);
@@ -49,9 +51,17 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
   const [requestState, setRequestState] = useState<'idle' | 'connecting' | 'saving'>('idle');
   const [requestError, setRequestError] = useState('');
   const [oauthModal, setOauthModal] = useState<'openai' | 'anthropic' | null>(null);
+  const draft = JSON.stringify([editingId, provider, apiType, poolEnabled, memberConnectionIds, url, apiKey, oauthIdToken, oauthAccessToken, oauthRefreshToken, availableModels]);
+  const latestDraft = useRef(draft);
+  latestDraft.current = draft;
+  const writePending = useRef(false);
+  const savedFingerprint = useRef<string | null>(null);
+  const [baseline, setBaseline] = useState(() => JSON.stringify([null, loadBalancing ? 'OpenAI LB' : '', loadBalancing ? 'openai-lb' : 'openai-chat-completions', true, [], '', '', '', '', '', []]));
 
   const resetProvider = () => {
     editorGeneration.current += 1;
+    savedFingerprint.current = null;
+    writePending.current = false;
     setEditingId(null);
     setPoolEnabled(true);
     setMemberConnectionIds([]);
@@ -70,6 +80,7 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
     setConnected(false);
     setRequestState('idle');
     setRequestError('');
+    setBaseline(JSON.stringify([null, loadBalancing ? 'OpenAI LB' : '', loadBalancing ? 'openai-lb' : 'openai-chat-completions', true, [], '', '', '', '', '', []]));
     resetClaudeLogin();
     resetOpenAiOAuth();
   };
@@ -111,7 +122,10 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
 
   const saveProvider = async (modelsOverride?: RuntimeModel[], onSaved?: () => void) => {
     const models = modelsOverride ?? availableModels;
-    if (!connectionReady || (!poolConnection && !models.some((model) => model.selected !== false))) return;
+    if (writePending.current || requestState !== 'idle' || !connectionReady || (!poolConnection && !models.some((model) => model.selected !== false))) return false;
+    if (savedFingerprint.current === draft) { setRequestError('Provider already saved. Refresh the connection list before editing again.'); return false; }
+    writePending.current = true;
+    const snapshot = draft;
     const generation = ++editorGeneration.current;
     setRequestState('saving');
     setRequestError('');
@@ -140,20 +154,32 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
         setOauthAccessToken('');
         setOauthRefreshToken('');
       }
-      await onModelConnectionsChanged();
-      if (!isEditorCurrent(generation)) return;
+      // The write succeeded even if the subsequent inventory refresh fails. Do not
+      // retry a POST with consumed credentials or discard edits made while saving.
+      const accepted = JSON.stringify(JSON.parse(snapshot).map((value: unknown, index: number) => index >= 6 && index <= 9 ? '' : value));
+      if (isEditorCurrent(generation)) { savedFingerprint.current = accepted; setBaseline(accepted); }
+      try { await onModelConnectionsChanged(); } catch (error) {
+        if (isEditorCurrent(generation)) setRequestError(error instanceof Error ? `Provider saved, but refresh failed: ${error.message}` : 'Provider saved, but refresh failed.');
+        return false;
+      }
+      if (!isEditorCurrent(generation)) return false;
+      if (JSON.stringify(JSON.parse(latestDraft.current).map((value: unknown, index: number) => index >= 6 && index <= 9 ? '' : value)) !== JSON.stringify(JSON.parse(snapshot).map((value: unknown, index: number) => index >= 6 && index <= 9 ? '' : value))) return false;
       setSavedProvidersOpen(true);
       resetProvider();
       onSaved?.();
+      return true;
     } catch (error) {
       if (isEditorCurrent(generation)) setRequestError(error instanceof Error ? `Could not save provider: ${error.message}` : 'Could not save provider.');
+      return false;
     } finally {
-      if (isEditorCurrent(generation)) setRequestState('idle');
+      if (isEditorCurrent(generation)) { writePending.current = false; setRequestState('idle'); }
     }
   };
 
   const applyOAuthConnection = (connection: OpenAiOAuthConnection) => {
     editorGeneration.current += 1;
+    savedFingerprint.current = null;
+    writePending.current = false;
     setEditingId(connection.id);
     setProvider(connection.provider ?? 'OpenAI');
     setApiType(connection.apiType ?? 'openai-responses');
@@ -165,6 +191,7 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
     setAvailableModels(models);
     setSelectedModelId(models[0]?.id ?? null);
     setConnected(Boolean(connection.authConfigured || connection.apiKeyConfigured));
+    setBaseline(JSON.stringify([connection.id, connection.provider ?? 'OpenAI', connection.apiType ?? 'openai-responses', true, [], connection.baseUrl ?? 'https://chatgpt.com/backend-api', '', '', '', '', models]));
   };
 
   const openAiFlow = useOpenAiOAuthConnectionFlow({
@@ -254,6 +281,8 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
 
   const editProvider = (item: SavedProvider) => {
     editorGeneration.current += 1;
+    savedFingerprint.current = null;
+    writePending.current = false;
     setRequestState('idle');
     setEditingId(item.id);
     setProvider(item.provider);
@@ -291,6 +320,7 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
     setAvailableModels(models);
     setSelectedModelId(models[0]?.id ?? null);
     setConnected(true);
+    setBaseline(JSON.stringify([item.id, item.provider, item.apiType, item.pool?.enabled ?? true, item.pool?.memberConnectionIds ?? [], item.url, '', '', '', '', models]));
     setRequestError('');
     resetClaudeLogin();
     resetOpenAiOAuth();
@@ -314,11 +344,17 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
     }
   };
 
-  const openOpenAiOAuth = () => {
+  useUnsavedChanges({ dirty: draft !== baseline, busy: requestState !== 'idle', save: () => saveProvider(), discard: () => {
+    const [id, name, type, enabled, members, baseUrl, , , , , models] = JSON.parse(baseline) as [string | null, string, string, boolean, string[], string, string, string, string, string, RuntimeModel[]];
+    editorGeneration.current += 1; setEditingId(id); setProvider(name); setApiType(type); setPoolEnabled(enabled); setMemberConnectionIds(members); setUrl(baseUrl); setAvailableModels(models);
+    setApiKey(''); setOauthIdToken(''); setOauthAccessToken(''); setOauthRefreshToken(''); setSelectedModelId(models[0]?.id ?? null); setConnected(Boolean(id)); setManualModel(''); setRequestError('');
+  } });
+
+  const openOpenAiOAuth = () => navigate(() => {
     if (editingId) resetOpenAiOAuth();
     else resetProvider();
     setOauthModal('openai');
-  };
+  });
   const openAnthropicOAuth = () => {
     setApiType('anthropic-messages');
     setOauthModal('anthropic');
@@ -382,9 +418,9 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
     setOauthModal,
     openAiFlow,
     claudeFlow,
-    resetProvider,
+    resetProvider: () => navigate(resetProvider),
     connect,
-    saveProvider,
+    saveProvider: async (modelsOverride?: RuntimeModel[], onSaved?: () => void) => { await saveProvider(modelsOverride, onSaved); },
     toggleModel,
     toggleModelInput,
     setModelInputAuto,
@@ -396,7 +432,7 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
     deleteManualModel,
     selectedModelId,
     setSelectedModelId,
-    editProvider,
+    editProvider: (item: SavedProvider) => { if (item.id !== editingId) navigate(() => editProvider(item)); },
     deleteProvider,
     openOpenAiOAuth,
     openAnthropicOAuth,

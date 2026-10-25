@@ -1,3 +1,4 @@
+import { useUnsavedChanges } from '../../app/UnsavedChanges';
 import { useEffect, useState } from 'react';
 import { api, jsonMutation } from '../../app/api';
 import { Field, SettingSection } from './SettingsPrimitives';
@@ -197,12 +198,12 @@ export function OpenTelemetrySettings() {
   }
 
   async function save() {
-    if (!saved) return;
+    if (!saved || busy) return false;
     setError('');
     setNotice('');
 
     const update = candidate();
-    if (!update) return;
+    if (!update) return false;
 
     setBusy('save');
     try {
@@ -210,12 +211,16 @@ export function OpenTelemetrySettings() {
       accept(result);
       const overridden = result.effective.source === 'environment' || result.effective.endpointSource === 'environment' || result.effective.headersSource === 'environment';
       setNotice(overridden ? 'OpenTelemetry settings saved. Active environment overrides remain in effect.' : 'OpenTelemetry settings saved and applied live.');
+      return true;
     } catch {
       setError('Could not save OpenTelemetry settings. Your changes have not been confirmed. Try again.');
+      return false;
     } finally {
       setBusy(null);
     }
   }
+
+  useUnsavedChanges({ dirty, busy: busy !== null, save, discard: () => { if (saved) accept(saved); setError(''); setNotice(''); } });
 
   const overriddenSettings = saved ? [
     saved.effective.source === 'environment' ? 'telemetry preference' : '',

@@ -1,3 +1,4 @@
+import { useUnsavedChanges } from '../../app/UnsavedChanges';
 import { DefaultMinionModel } from './DefaultMinionModel';
 import { useEffect, useRef, useState } from 'react';
 import type { Agent, SavedProvider } from '../../app/types';
@@ -23,8 +24,9 @@ export function AgentSettings({ selected, savedProviders, onAgentsChanged, secti
   const avatarInput = useRef<HTMLInputElement>(null);
   const [state, setState] = useState<'idle' | 'saving' | 'deleting'>('idle');
   const [error, setError] = useState('');
+  const [baseline, setBaseline] = useState(() => JSON.stringify([selected.name, selected.avatar.startsWith('data:image/') ? selected.avatar : '', selected.activity !== 'Disabled']));
 
-  useEffect(() => { setName(selected.name); setAvatar(selected.avatar.startsWith('data:image/') ? selected.avatar : ''); setAvatarFileName(''); setEnabled(selected.activity !== 'Disabled'); setError(''); }, [selected.id, resourceId]);
+  useEffect(() => { setName(selected.name); setAvatar(selected.avatar.startsWith('data:image/') ? selected.avatar : ''); setAvatarFileName(''); setEnabled(selected.activity !== 'Disabled'); setError(''); setBaseline(JSON.stringify([selected.name, selected.avatar.startsWith('data:image/') ? selected.avatar : '', selected.activity !== 'Disabled'])); }, [selected.id, resourceId]);
   const chooseAvatar = async (file?: File) => {
     if (!file) return;
     try { setAvatar(await optimizeAvatar(file)); setAvatarFileName(file.name || 'Pasted image'); setError(''); }
@@ -40,15 +42,19 @@ export function AgentSettings({ selected, savedProviders, onAgentsChanged, secti
   const removeAvatar = () => { setAvatar(''); setAvatarFileName(''); setError(''); if (avatarInput.current) avatarInput.current.value = ''; };
   const save = async () => {
     const nextName = name.trim();
-    if (!nextName) { setError('An agent needs a display name.'); return; }
+    if (state !== 'idle') return false;
+    if (!nextName) { setError('An agent needs a display name.'); return false; }
     setState('saving'); setError('');
     try {
       await Promise.all([
         api( `/api/agents/${encodeURIComponent(resourceId)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: nextName, enabled }) }),
         api( '/api/settings/identities', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'agent', id: resourceId, name: nextName, avatar }) }),
       ]);
+      setBaseline(JSON.stringify([nextName, avatar, enabled]));
       await onAgentsChanged();
+      return true;
     } catch (cause) { setError(cause instanceof Error ? `Could not save agent: ${cause.message}` : 'Could not save agent.'); } finally { setState('idle'); }
+    return false;
   };
   const remove = async () => {
     if (!await confirm({ title: 'Delete agent?', message: `Delete ${selected.name}? This removes the agent registration, not its workspace files.`, confirmLabel: 'Delete agent', tone: 'danger' })) return;
@@ -56,6 +62,7 @@ export function AgentSettings({ selected, savedProviders, onAgentsChanged, secti
     try { await api( `/api/agents/${encodeURIComponent(resourceId)}`, { method: 'DELETE' }); await onAgentsChanged(); }
     catch (cause) { setError(cause instanceof Error ? `Could not delete agent: ${cause.message}` : 'Could not delete agent.'); } finally { setState('idle'); }
   };
+  useUnsavedChanges({ dirty: (section === undefined || section === 'details') && JSON.stringify([name, avatar, enabled]) !== baseline, busy: state !== 'idle', save, discard: () => { const [savedName, savedAvatar, savedEnabled] = JSON.parse(baseline) as [string, string, boolean]; setName(savedName); setAvatar(savedAvatar); setEnabled(savedEnabled); setAvatarFileName(''); setError(''); } });
   const details = <SettingSection title="Agent details"><div className="operator-profile agent-profile"><div className="agent-avatar-preview" aria-label={`${name || selected.name} avatar`}>{avatar ? <img src={avatar} alt="" /> : (name || selected.name).slice(0, 1).toUpperCase()}</div><div className="operator-profile-details"><div className="avatar-file-control" onPaste={pasteAvatar}><label className="avatar-file-name">Paste or choose image<input value={avatarFileName} placeholder="Paste an image or choose a file" readOnly aria-label="Agent avatar image" /></label><button className="secondary" type="button" onClick={() => avatarInput.current?.click()}>Change</button><input ref={avatarInput} className="avatar-file-input" type="file" accept="image/*" onChange={(event) => { chooseAvatar(event.target.files?.[0]); event.currentTarget.value = ''; }} /></div>{avatar && <button className="avatar-remove" type="button" onClick={removeAvatar}>Remove image</button>}</div></div><div className="operator-profile-actions agent-profile-actions"><Field label="Displayed name"><input value={name} onChange={(event) => setName(event.target.value)} maxLength={64} /></Field><label className="agent-enabled"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /><span>Enabled</span></label><button className="primary" onClick={() => void save()} disabled={state !== 'idle'}>{state === 'saving' ? 'Saving…' : 'Save changes'}</button></div>{error && <p className="settings-request-error" role="alert">{error}</p>}<DefaultMinionModel key={JSON.stringify([selected.id, resourceId])} resourceId={resourceId} savedProviders={savedProviders} /><div className="agent-detail-footer"><span>{selected.id}</span><button className="danger" onClick={() => void remove()} disabled={state !== 'idle'}>Delete agent</button></div></SettingSection>;
   if (section === 'details') return details;
   if (section === 'profile-documents') return <AgentProfileDocuments agentId={selected.id} overflowTarget={overflowTarget} />;

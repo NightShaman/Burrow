@@ -1,3 +1,4 @@
+import { useUnsavedChanges } from '../../app/UnsavedChanges';
 import { ProviderModelFields } from './ProviderModelFields';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -32,6 +33,7 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
   const request = <T,>(path: string, init?: RequestInit) => api<T>(path, init);
   const dreamModels = savedProviders.flatMap((provider) => provider.models.map((model) => ({ connectionId: provider.id, model, label: `${provider.provider} · ${provider.modelLabels?.[model] ?? model}` })));
   const [settings, setSettings] = useState<DreamSettings>({ enabled: false, quietDayDreams: true, promoteToMemory: true, cron: '0 4 * * *', timezone: null, prompt: '', modelConnectionId: null, model: null });
+  const [baseline, setBaseline] = useState('');
   const [state, setState] = useState<'loading' | 'idle' | 'saving' | 'error'>('loading');
   const [retry, setRetry] = useState(0);
   const [error, setError] = useState('');
@@ -54,6 +56,7 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
     ]).then(([dreamSettings, dreamCycles]) => {
       if (controller.signal.aborted || version !== requestVersion.current) return;
       setSettings({ ...dreamSettings.settings, quietDayDreams: dreamSettings.settings.quietDayDreams ?? true, promoteToMemory: dreamSettings.settings.promoteToMemory ?? true });
+      setBaseline(JSON.stringify([dreamSettings.settings.enabled, dreamSettings.settings.quietDayDreams ?? true, dreamSettings.settings.promoteToMemory ?? true, dreamSettings.settings.cron, dreamSettings.settings.prompt, dreamSettings.settings.modelConnectionId ?? null, dreamSettings.settings.model ?? null]));
       setEffectiveModel(dreamSettings.effectiveModel ?? null);
       setModelResolutionError(dreamSettings.modelResolutionError ?? null);
       setReceipts(Array.isArray(dreamCycles.receipts) ? dreamCycles.receipts : []);
@@ -66,23 +69,27 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
     return () => controller.abort();
   }, [agentId, retry]);
   const save = async () => {
-    if (state !== 'idle') return;
-    if (settings.modelConnectionId && !settings.model) { setError('Choose a model for the selected provider or use the agent chat model.'); return; }
+    if (state !== 'idle') return false;
+    if (settings.modelConnectionId && !settings.model) { setError('Choose a model for the selected provider or use the agent chat model.'); return false; }
     const version = requestVersion.current;
     setState('saving'); setError('');
     try {
       const result = await request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-settings`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: settings.enabled, quietDayDreams: settings.quietDayDreams, promoteToMemory: settings.promoteToMemory, cron: settings.cron, prompt: settings.prompt, modelConnectionId: settings.modelConnectionId ?? null, model: settings.model ?? null }) });
-      if (version !== requestVersion.current) return;
+      if (version !== requestVersion.current) return false;
+      setBaseline(JSON.stringify([result.settings.enabled, result.settings.quietDayDreams ?? true, result.settings.promoteToMemory ?? true, result.settings.cron, result.settings.prompt, result.settings.modelConnectionId ?? null, result.settings.model ?? null]));
       setSettings({ ...result.settings, quietDayDreams: result.settings.quietDayDreams ?? true, promoteToMemory: result.settings.promoteToMemory ?? true });
       setEffectiveModel(result.effectiveModel ?? null);
       setModelResolutionError(result.modelResolutionError ?? null);
+      return true;
     } catch (cause) {
-      if (version !== requestVersion.current) return;
+      if (version !== requestVersion.current) return false;
       setError(cause instanceof Error ? `Could not save dream settings: ${cause.message}` : 'Could not save dream settings.');
     } finally {
       if (version === requestVersion.current) setState('idle');
     }
+    return false;
   };
+  useUnsavedChanges({ dirty: state !== 'loading' && state !== 'error' && baseline !== '' && JSON.stringify([settings.enabled, settings.quietDayDreams, settings.promoteToMemory, settings.cron, settings.prompt, settings.modelConnectionId ?? null, settings.model ?? null]) !== baseline, busy: state === 'saving', save, discard: () => { const [enabled, quietDayDreams, promoteToMemory, cron, prompt, modelConnectionId, model] = JSON.parse(baseline) as [boolean, boolean, boolean, string, string, string | null, string | null]; setSettings(current => ({ ...current, enabled, quietDayDreams, promoteToMemory, cron, prompt, modelConnectionId, model })); setError(''); } });
   const disabled = state !== 'idle';
   const activity = <div className="dream-cycle-activity" aria-label="Recent dream activity">
       {!overflowTarget && <h3>Recent activity</h3>}

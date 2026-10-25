@@ -109,7 +109,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
       {tab === 'agents' && <div className="settings-prototype-agent-selector"><AgentToolbar agents={agents} selectedId={settingsSelected.id} onSelect={setSettingsAgentId} onAgentsChanged={onAgentsChanged} onModelConnectionsChanged={onModelConnectionsChanged} onOperatorProfileChanged={onOperatorProfileChanged} onFirstRunComplete={onFirstRunComplete} onSetupComplete={completeFirstRun} firstRun={previewFirstRun || setupStatus?.wizardStep === 'fresh' || setupStatus?.wizardStep === 'incomplete'} /></div>}
 
       <section className="settings-blank-column settings-prototype-sections">
-        {tab === 'skills' && <nav className="settings-prototype-section-items" aria-label="Skills settings sections">{([['installed', 'Installed skills'], ['repo', 'Import from repository'], ['text', 'New text skill']] as const).map(([id,label]) => <button type="button" key={id} className={skillsSection === id ? 'active' : ''} aria-current={skillsSection === id ? 'page' : undefined} onClick={() => setSkillsSection(id)}>{label}</button>)}</nav>}
+        {tab === 'skills' && <nav className="settings-prototype-section-items" aria-label="Skills settings sections">{([['installed', 'Installed skills'], ['repo', 'Import from repository'], ['text', 'New text skill']] as const).map(([id,label]) => <button type="button" key={id} className={skillsSection === id ? 'active' : ''} aria-current={skillsSection === id ? 'page' : undefined} onClick={() => { if (skillsSection !== id) navigate(() => setSkillsSection(id)); }}>{label}</button>)}</nav>}
         {tab === 'general' && <nav className="settings-prototype-section-items" aria-label="General settings sections">
           {([
             ['operator-profile', 'Operator profile'],
@@ -133,7 +133,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
             ['cron-jobs', 'Cron jobs'],
             ['dreams', 'Dreams'],
             ['skills', 'Skills'],
-          ] as const).map(([id, label]) => <button type="button" className={agentSection === id ? 'active' : ''} aria-current={agentSection === id ? 'page' : undefined} onClick={() => setAgentSection(id)} key={id}>{label}</button>)}
+          ] as const).map(([id, label]) => <button type="button" className={agentSection === id ? 'active' : ''} aria-current={agentSection === id ? 'page' : undefined} onClick={() => { if (agentSection !== id) navigate(() => setAgentSection(id)); }} key={id}>{label}</button>)}
         </nav>}
         {tab === 'connections' && <nav className="settings-prototype-section-items" aria-label="Connection settings sections">
           {([

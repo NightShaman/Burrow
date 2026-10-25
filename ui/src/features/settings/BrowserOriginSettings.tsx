@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { SettingSection } from './SettingsPrimitives';
 import { api } from '../../app/api';
+import { useUnsavedChanges } from '../../app/UnsavedChanges';
 
 type OriginSettings = {
   ok: true;
@@ -32,20 +33,23 @@ export function BrowserOriginSettings() {
     return () => { owner.current = null; controller.abort(); };
   }, [retry]);
   const save = async () => {
-    if (state !== 'idle' || !result) return;
+    if (state !== 'idle' || !result) return false;
     const ticket = owner.current;
     setState('saving'); setError(''); setNotice('');
     try {
       const next = await api<OriginSettings>(path, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ checkOrigin }) });
-      if (ticket === null || owner.current !== ticket) return;
+      if (ticket === null || owner.current !== ticket) return false;
       setResult(next); setCheckOrigin(next.settings.checkOrigin);
       setNotice(next.effective.source === 'environment' ? 'Preference saved. Environment override remains active.' : 'Browser origin setting saved and applied.');
+      return true;
     } catch {
       if (ticket !== null && owner.current === ticket) setError('Could not save browser origin settings. Try saving again.');
+      return false;
     } finally {
       if (ticket !== null && owner.current === ticket) setState('idle');
     }
   };
+  useUnsavedChanges({ dirty: !!result && checkOrigin !== result.settings.checkOrigin, busy: state === 'saving', save, discard: () => { if (result) setCheckOrigin(result.settings.checkOrigin); setError(''); setNotice(''); } });
   return <SettingSection title="Browser origin">
     <label className="agent-enabled"><input type="checkbox" checked={checkOrigin} disabled={state !== 'idle' || !result} onChange={event => { setCheckOrigin(event.target.checked); setNotice(''); setError(''); }} /><span>Check browser origin</span></label>
     <p className="settings-description">Reject requests from unapproved browser origins. This check is independent of authentication and is saved separately.</p>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, jsonMutation } from '../../app/api';
+import { useUnsavedChanges } from '../../app/UnsavedChanges';
 import type { GitSkillSource, SkillRecord } from './SkillSourceSettings';
 import { Field, SettingSection } from './SettingsPrimitives';
 
@@ -16,24 +17,27 @@ export function SkillRepositoryImport({ onInstalled }: { onInstalled: (skill: Sk
   const [busy, setBusy] = useState<'preview' | 'install' | null>(null);
   const [error, setError] = useState('');
   const request = useRef<AbortController | null>(null);
+  const installed = useRef(false);
+  const initialFingerprint = JSON.stringify([initial, '', false, 'available']);
+  const dirty = !installed.current && JSON.stringify([draft, id, global, lifecycle]) !== initialFingerprint;
   useEffect(() => () => request.current?.abort(), []);
   const valid = draft.repository.trim() && draft.path.trim() && draft.ref.trim() && (!draft.enabled || draft.cron.trim()) && Number.isInteger(draft.fetchTimeoutMs) && draft.fetchTimeoutMs > 0 && draft.fetchTimeoutMs <= 2147483647;
   const change = (updates: Partial<typeof initial>) => { setDraft(value => ({ ...value, ...updates })); setPreview(null); setError(''); };
-  const run = async (install: boolean) => {
-    if (request.current || !valid || (install && (!preview || !id.trim()))) return;
+  const run = async (install: boolean): Promise<boolean> => {
+    if (request.current || !valid || (install && (!preview || !id.trim()))) { if (install) setError('Preview a valid repository and enter an install ID first.'); return false; }
     const controller = new AbortController(); request.current = controller;
     setBusy(install ? 'install' : 'preview'); setError('');
     try {
       if (install && preview) {
         const { repository, ref, path, enabled, cron, fetchTimeoutMs } = preview.source;
         const result = await api<{ skill: SkillRecord }>('/api/settings/skills/git/import', jsonMutation('POST', { repository, ref, path, enabled, cron, fetchTimeoutMs, id: id.trim(), global, lifecycle, expectedRevision: preview.revision }, { signal: controller.signal }));
-        if (!controller.signal.aborted) onInstalled(result.skill);
+        if (!controller.signal.aborted) { installed.current = true; onInstalled(result.skill); return true; }
       } else {
         const result = await api<{ preview: SkillPreview }>('/api/settings/skills/git/preview', jsonMutation('POST', { ...draft, repository: draft.repository.trim(), path: draft.path.trim(), cron: draft.enabled ? draft.cron : null }, { signal: controller.signal }));
         if (!controller.signal.aborted) { setPreview(result.preview); setId(result.preview.suggestedId); }
       }
     } catch (cause) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return false;
       const message = (cause instanceof Error || cause instanceof DOMException) ? cause.message : 'Repository request failed.';
       if (message === 'skill_revision_changed') { setPreview(null); setError('The repository changed since your preview. Preview again before installing. Nothing was installed by this request.'); }
       else if (message === 'skill_already_exists') setError('A skill with this ID already exists. It has not been overwritten. Choose a different ID or select the installed skill in the library.');
@@ -43,7 +47,9 @@ export function SkillRepositoryImport({ onInstalled }: { onInstalled: (skill: Sk
       request.current = null;
       if (!controller.signal.aborted) setBusy(null);
     }
+    return false;
   };
+  useUnsavedChanges({ dirty, busy: Boolean(busy), save: () => run(true), discard: () => { request.current?.abort(); request.current = null; setDraft(initial); setPreview(null); setId(''); setGlobal(false); setLifecycle('available'); setError(''); } });
   return <SettingSection title="Repository import">
     <p className="hint">Choose a repository and a skill directory. Preview the real instructions and files before installing; no placeholder skill is created.</p>
     <fieldset className="skill-source-fields" disabled={Boolean(busy)}>

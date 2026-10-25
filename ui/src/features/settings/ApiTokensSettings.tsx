@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../../app/api';
 import { useConfirm } from '../../app/ConfirmDialog';
+import { useUnsavedChanges } from '../../app/UnsavedChanges';
 import { Field, SettingSection } from './SettingsPrimitives';
 import './apiTokensSettings.css';
 
@@ -24,6 +25,7 @@ export function ApiTokensSettings({ overflowTarget }: { overflowTarget?: HTMLEle
   const [revealed, setRevealed] = useState<{ id: string; value: string } | null>(null);
   const [busy, setBusy] = useState<'idle' | 'loading' | 'creating' | 'revoking'>('loading');
   const [error, setError] = useState('');
+  const draftDirty = name !== '' || expiresAt !== '';
   const load = async () => {
     setBusy('loading'); setError('');
     try { const result = await api<ApiTokensResponse>('/api/settings/api-tokens'); setTokens((result.tokens ?? []).filter(token => !token.revokedAt)); setSupportedScopes(result.supportedScopes ?? []); }
@@ -32,14 +34,15 @@ export function ApiTokensSettings({ overflowTarget }: { overflowTarget?: HTMLEle
   };
   useEffect(() => { void load(); }, []);
   const create = async () => {
-    if (!name.trim() || !supportedScopes.includes('diagnostics:read')) return;
+    if (busy !== 'idle' || !name.trim() || !supportedScopes.includes('diagnostics:read')) { if (!name.trim()) setError('Enter a token name before creating a token.'); return false; }
     setBusy('creating'); setError(''); setRevealed(null);
     try {
       const result = await api<CreatedTokenResponse>('/api/settings/api-tokens', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: name.trim(), scopes: ['diagnostics:read'], ...(expiresAt ? { expiresAt: new Date(`${expiresAt}T23:59:59`).toISOString() } : {}) }) });
-      setTokens(items => [result.token, ...items]); setRevealed({ id: result.token.id, value: result.token.token }); setName(''); setExpiresAt('');
-    } catch (cause) { setError(cause instanceof Error ? `Could not create API token: ${cause.message}` : 'Could not create API token.'); }
+      setTokens(items => [result.token, ...items]); setRevealed({ id: result.token.id, value: result.token.token }); setName(''); setExpiresAt(''); return true;
+    } catch (cause) { setError(cause instanceof Error ? `Could not create API token: ${cause.message}` : 'Could not create API token.'); return false; }
     finally { setBusy('idle'); }
   };
+  useUnsavedChanges({ dirty: draftDirty, busy: busy !== 'idle', save: async () => { await create(); return false; }, discard: () => { setName(''); setExpiresAt(''); setError(''); } });
   const revoke = async (token: ApiTokenMetadata) => {
     if (token.revokedAt || !await confirm({ title: 'Revoke API token?', message: `Revoke ${token.name}? Any clients using it will stop working.`, confirmLabel: 'Revoke token', tone: 'danger' })) return;
     setBusy('revoking'); setError('');
@@ -55,7 +58,7 @@ export function ApiTokensSettings({ overflowTarget }: { overflowTarget?: HTMLEle
     ? <div className="settings-overflow-content memory-saved" aria-label="Existing API tokens">{inventoryContents}</div>
     : <details className="memory-saved saved-accordion"><summary><h3>Existing API tokens</h3><span>{tokens.length}</span></summary>{inventoryContents}</details>;
   return <><SettingSection title="API tokens"><p className="settings-description">Create a Core API token for a trusted integration.</p>
-    <div className="field-pair"><Field label="Token name"><input value={name} onChange={event => setName(event.target.value)} placeholder="Diagnostics dashboard" /></Field><Field label="Expires (optional)"><input type="date" value={expiresAt} onChange={event => setExpiresAt(event.target.value)} /></Field></div>
+    <div className="field-pair"><Field label="Token name"><input value={name} disabled={busy !== 'idle'} onChange={event => setName(event.target.value)} placeholder="Diagnostics dashboard" /></Field><Field label="Expires (optional)"><input type="date" value={expiresAt} disabled={busy !== 'idle'} onChange={event => setExpiresAt(event.target.value)} /></Field></div>
     <p className="settings-description api-token-scope">Scope: <code>diagnostics:read</code></p>
     {revealed && <div className="api-token-reveal" role="status"><div className="api-token-reveal-message"><strong>Copy this token now</strong><span>The plaintext will not be shown again or saved by Burrow UI.</span></div><div className="api-token-reveal-row"><input readOnly value={revealed.value} aria-label="New API token plaintext"/><button className="secondary" type="button" onClick={() => void copy()}>Copy</button></div></div>}
     <div className="model-actions"><button className="primary" type="button" onClick={() => void create()} disabled={busy !== 'idle' || !name.trim() || !supportedScopes.includes('diagnostics:read')}>{busy === 'creating' ? 'Creating…' : 'Create API token'}</button></div>

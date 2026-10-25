@@ -471,3 +471,33 @@ it.each(['edit', 'cancel'])('FE029 ignores ordinary discovery after %s for succe
   unmount();vi.restoreAllMocks();
  }
 });
+
+describe('unsaved provider write ownership', () => {
+  it('does not repeat a successful POST when inventory refresh fails', async () => {
+    apiMock.mockResolvedValue({});
+    const { result } = renderEditor(vi.fn().mockRejectedValue(new Error('inventory offline')));
+    act(() => result.current.editProvider(savedProvider));
+    act(() => result.current.setProvider('Renamed'));
+    await act(async () => { await result.current.saveProvider(); });
+    expect(result.current.requestError).toContain('refresh failed');
+    await act(async () => { await result.current.saveProvider(); });
+    expect(apiMock.mock.calls.filter(([path, init]) => path === '/api/settings/model-connections' && init?.method === 'POST')).toHaveLength(1);
+    expect(result.current.provider).toBe('Renamed');
+  });
+
+  it('retains a newer draft instead of resetting it after a slow refresh', async () => {
+    let finishRefresh!: () => void;
+    apiMock.mockResolvedValue({});
+    const { result } = renderEditor(vi.fn(() => new Promise<void>(resolve => { finishRefresh = resolve; })));
+    act(() => result.current.editProvider(savedProvider));
+    act(() => result.current.setProvider('First edit'));
+    let saving!: Promise<void>;
+    await act(async () => { saving = result.current.saveProvider(); await Promise.resolve(); });
+    act(() => result.current.setProvider('Later edit'));
+    await act(async () => { finishRefresh(); await saving; });
+    expect(result.current.provider).toBe('Later edit');
+    expect(result.current.editingId).toBe(savedProvider.id);
+    expect(result.current.savedProvidersOpen).toBe(false);
+    expect(apiMock.mock.calls.filter(([path, init]) => path === '/api/settings/model-connections' && init?.method === 'POST')).toHaveLength(1);
+  });
+});

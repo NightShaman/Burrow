@@ -1,3 +1,4 @@
+import { useUnsavedChanges } from '../../app/UnsavedChanges';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../app/api';
 
@@ -26,18 +27,20 @@ export function DreamPromotionSettings() {
   const mounted = useRef<() => boolean>(() => false);
   useEffect(() => { let active = true; mounted.current = () => active; return () => { active = false; }; }, []);
   const save = async () => {
-    if (state !== 'idle') return;
+    if (state !== 'idle') return false;
     const active = mounted.current;
     setState('saving'); setError('');
     try {
       const result = await api<PromotionSettings>(path, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ promoteDreamsToMemory: value }) });
-      if (!active()) return;
+      if (!active()) return false;
       const accepted = result.promoteDreamsToMemory ?? true;
-      setValue(accepted); setSaved(accepted);
+      setValue(accepted); setSaved(accepted); return true;
     } catch {
       if (active()) setError('Could not save Dream promotion settings. Your change is still here; retry saving.');
     } finally { if (active()) setState('idle'); }
+    return false;
   };
+  useUnsavedChanges({ dirty: state !== 'loading' && state !== 'error' && value !== saved, busy: state === 'saving', save, discard: () => { setValue(saved); setError(''); } });
   return <div className="curator-card dream-promotion-settings">
     <label className="agent-enabled"><input type="checkbox" checked={value} disabled={state !== 'idle'} aria-describedby="global-dream-promotion-help" onChange={event => { setValue(event.target.checked); setError(''); }} /><span>Promote Dreams to memory</span></label>
     <p id="global-dream-promotion-help" className="settings-description">Requires promotion in the agent’s Dreams settings too. Off keeps Dreams and their archive; existing memories and explicit saves are unchanged. Re-enabling does not catch up skipped promotions.</p>

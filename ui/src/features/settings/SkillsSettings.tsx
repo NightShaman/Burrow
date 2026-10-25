@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConfirm } from '../../app/ConfirmDialog';
+import { useUnsavedChanges, useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { api } from '../../app/api';
 import type { Agent } from '../../app/types';
 import { SkillSourceSettings, type SkillRecord } from './SkillSourceSettings';
@@ -15,6 +16,7 @@ const body = (value: unknown, method = 'PUT'): RequestInit => ({ method, headers
 
 export function SkillsSettings({ agents, agentId, configurationTarget, overflowTarget, agentView = false, section = 'text', onSectionChange }: { agents: Agent[]; agentId: string; configurationTarget?: HTMLElement | null; overflowTarget?: HTMLElement | null; agentView?: boolean; section?: 'installed' | 'repo' | 'text'; onSectionChange?: (section: 'installed' | 'repo' | 'text') => void }) {
   const confirm = useConfirm();
+  const navigate = useUnsavedNavigation();
   const deleting = useRef(false);
   const deletionOwner = useRef<object | null>(null);
   useEffect(() => { const owner = {}; deletionOwner.current = owner; return () => { deletionOwner.current = null; }; }, [agentId]);
@@ -51,7 +53,8 @@ export function SkillsSettings({ agents, agentId, configurationTarget, overflowT
     ]).then(([catalog, rows]) => {
       if (controller.signal.aborted) return;
       setSkills(catalog.skills); setAssignments(Object.fromEntries(rows)); setLoaded(true);
-      setSelectedId(current => current && catalog.skills.some(skill => skill.id === current) ? current : null);
+      setSelectedId(current => current && (catalog.skills.some(skill => skill.id === current) || pendingCreatedId.current === current) ? current : null);
+      if (pendingCreatedId.current && catalog.skills.some(skill => skill.id === pendingCreatedId.current)) pendingCreatedId.current = null;
     }).catch(cause => { if (!controller.signal.aborted) { setError(cause instanceof Error ? cause.message : 'Could not load skills.'); setLoaded(true); } });
     return () => controller.abort();
   }, [agentId, resourceId, registryKey, revision]);
@@ -60,21 +63,43 @@ export function SkillsSettings({ agents, agentId, configurationTarget, overflowT
   const draftBaseline = useRef<{ owner: string; value: Draft } | null>(null);
   const draftOwner = JSON.stringify(['local', resourceId]);
   useEffect(() => {
+    // A newly created item is selected before the refreshed inventory arrives.
+    // Keep its editor draft until that inventory resolves.
+    if (selectedId && !selected) return;
     const next: Draft = selected ? { id: selected.id, name: selected.name, description: selected.description, content: selected.content, lifecycle: selected.lifecycle, global: selected.global } : empty;
     const previous = draftBaseline.current;
     setDraft(current => previous?.owner === draftOwner && previous.value.id === next.id
       ? Object.fromEntries(Object.entries(next).map(([key, value]) => [key, current[key as keyof Draft] !== previous.value[key as keyof Draft] ? current[key as keyof Draft] : value])) as Draft
       : next);
     draftBaseline.current = { owner: draftOwner, value: next };
-  }, [selected, draftOwner]);
+    if (previous?.value.id !== next.id) savedDraft.current = null;
+  }, [selected, selectedId, draftOwner]);
+  const savedDraft = useRef<string | null>(null);
+  const saving = useRef(false);
+  const pendingCreatedId = useRef<string | null>(null);
   const act = async (operation: () => Promise<unknown>) => { setBusy(true); setError(''); try { await operation(); setRevision(value => value + 1); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save skills.'); } finally { setBusy(false); } };
-  const save = () => act(async () => {
-    const url = selected ? `/api/settings/skills/${encodeURIComponent(selected.id)}` : '/api/settings/skills';
-    const { id, ...updates } = draft;
-    await request(url, body(selected ? (selected.gitSource || (selected.contentOwner && selected.contentOwner !== 'operator') ? { lifecycle: draft.lifecycle, global: draft.global } : updates) : draft, selected ? 'PATCH' : 'POST'));
-    if (!selected) setSelectedId(id);
-    onSectionChange?.('installed');
-  });
+  const save = async (): Promise<boolean> => {
+    if (saving.current || busy) return false;
+    const snapshot = { ...draft };
+    if (!snapshot.id.trim() || !snapshot.name.trim()) { setError('Skill ID and name are required.'); return false; }
+    const fingerprint = JSON.stringify(snapshot);
+    if (savedDraft.current === fingerprint) { setError('Skill already saved. Reload skills before editing it again.'); return false; }
+    saving.current = true; setBusy(true); setError('');
+    try {
+      const targetId = selected?.id ?? pendingCreatedId.current;
+      const url = targetId ? `/api/settings/skills/${encodeURIComponent(targetId)}` : '/api/settings/skills';
+      const { id, ...updates } = snapshot;
+      await request(url, body(selected ? (selected.gitSource || (selected.contentOwner && selected.contentOwner !== 'operator') ? { lifecycle: snapshot.lifecycle, global: snapshot.global } : updates) : snapshot, targetId ? 'PATCH' : 'POST'));
+      savedDraft.current = fingerprint;
+      draftBaseline.current = { owner: draftOwner, value: snapshot };
+      if (!selected) { pendingCreatedId.current = id; setSelectedId(id); onSectionChange?.('installed'); }
+      refreshSkills();
+      return true;
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save skills.'); return false; }
+    finally { saving.current = false; setBusy(false); }
+  };
+  const dirty = (section === 'text' || section === 'installed' && Boolean(selected) || agentView && Boolean(selected)) && JSON.stringify(draft) !== JSON.stringify(draftBaseline.current?.value ?? empty) && savedDraft.current !== JSON.stringify(draft);
+  useUnsavedChanges({ dirty, busy, save, discard: () => { setDraft(draftBaseline.current?.value ?? empty); setImportedFileName(''); setError(''); } });
   const toggleAssignment = (agent: Agent, skillId: string) => act(async () => {
     const grants = assignments[agent.id]; if (!grants) return;
     const next = new Set(grants.assignedSkillIds); next.has(skillId) ? next.delete(skillId) : next.add(skillId);
@@ -94,7 +119,9 @@ export function SkillsSettings({ agents, agentId, configurationTarget, overflowT
       const baseName = file.name.replace(/\.(?:md|markdown|txt)$/i, '');
       const id = baseName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       const name = baseName.replace(/[-_]+/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+      pendingCreatedId.current = null;
       setSelectedId(null);
+      draftBaseline.current = { owner: draftOwner, value: empty };
       setDraft({ ...empty, id, name, content });
       setImportedFileName(file.name);
     } catch {
@@ -124,7 +151,7 @@ export function SkillsSettings({ agents, agentId, configurationTarget, overflowT
       </>}<Field label="Lifecycle"><select value={draft.lifecycle} disabled={busy} onChange={event => setDraft({ ...draft, lifecycle: event.target.value })}>{['available', 'experimental', 'deprecated', 'disabled'].map(value => <option key={value}>{value}</option>)}</select></Field>
       {!upstreamManaged && <Field label="Content"><textarea className="mcp-arguments" rows={12} value={draft.content} readOnly={upstreamManaged} disabled={busy} onChange={event => setDraft({ ...draft, content: event.target.value })} /></Field>}
       <label className="skill-check"><input type="checkbox" checked={draft.global} disabled={busy} onChange={event => setDraft({ ...draft, global: event.target.checked })} /> Assign globally</label>
-      <div className="model-actions"><button type="button" disabled={busy || !draft.id.trim() || !draft.name.trim()} onClick={save}>{selected ? 'Save skill' : 'Create skill'}</button>{selected && <button type="button" className="danger" disabled={busy} onClick={() => void removeSkill()}>Delete skill</button>}</div>
+      <div className="model-actions"><button type="button" disabled={busy || !draft.id.trim() || !draft.name.trim()} onClick={() => void save()}>{selected ? 'Save skill' : 'Create skill'}</button>{selected && <button type="button" className="danger" disabled={busy} onClick={() => void removeSkill()}>Delete skill</button>}</div>
     </div>
   </SettingSection>;
 
@@ -140,7 +167,7 @@ export function SkillsSettings({ agents, agentId, configurationTarget, overflowT
   const inventory = <div className="settings-overflow-content memory-saved">
     <Field label="Search skills"><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Name, ID, description" /></Field>
     <div className="field-pair"><Field label="Lifecycle filter"><select value={lifecycleFilter} onChange={event => setLifecycleFilter(event.target.value)}><option value="all">All lifecycles</option>{['available', 'experimental', 'deprecated', 'disabled'].map(value => <option key={value}>{value}</option>)}</select></Field><Field label="Assignment filter"><select value={assignmentFilter} onChange={event => setAssignmentFilter(event.target.value)}><option value="all">All assignments</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option></select></Field></div>
-    {!loaded ? <p className="settings-empty" role="status">Loading skills…</p> : <div className="memory-connection-list">{visibleSkills.map(skill => <article className="memory-connection" key={skill.id}><button type="button" className="memory-connection-select" disabled={busy} aria-pressed={selectedId === skill.id} onClick={() => { setSelectedId(skill.id); onSectionChange?.('installed'); }}><strong>{skill.name}</strong><small>{skill.id} · {skill.lifecycle}{skill.global ? ' · global' : ''}</small></button></article>)}</div>}
+    {!loaded ? <p className="settings-empty" role="status">Loading skills…</p> : <div className="memory-connection-list">{visibleSkills.map(skill => <article className="memory-connection" key={skill.id}><button type="button" className="memory-connection-select" disabled={busy} aria-pressed={selectedId === skill.id} onClick={() => { if (selectedId !== skill.id) navigate(() => { setSelectedId(skill.id); onSectionChange?.('installed'); }); }}><strong>{skill.name}</strong><small>{skill.id} · {skill.lifecycle}{skill.global ? ' · global' : ''}</small></button></article>)}</div>}
     {loaded && !error && !visibleSkills.length && <p className="settings-empty">{skills.length ? 'No skills match these filters.' : 'No installed skills.'}</p>}
   </div>;
   const primary = <>

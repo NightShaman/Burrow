@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../app/api';
+import { useUnsavedChanges } from '../../app/UnsavedChanges';
 import { Field, SettingSection } from './SettingsPrimitives';
 
 type UiAuthMode = 'none' | 'trusted-proxy' | 'basic' | 'oidc';
@@ -21,19 +22,27 @@ export function AuthenticationSettings() {
   const [state, setState] = useState<'loading' | 'idle' | 'saving' | 'error'>('loading'); const [error, setError] = useState('');
   const lines = (value: string) => value.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean);
   const [retry, setRetry] = useState(0);
+  const [baseline, setBaseline] = useState('');
+  const snapshot = JSON.stringify([mode, allowedProxies, userHeader, username, password, confirmPassword, basicTtlHours, issuer, clientId, clientSecret, redirectUri, scopes, allowedEmails, allowedDomains]);
+  const restore = (next: UiAuthSettings) => {
+    setMode(next.mode ?? 'none'); setAllowedProxies(next.trustedProxy?.allowedProxies?.join('\n') ?? ''); setUserHeader(next.trustedProxy?.userHeader || 'x-forwarded-user');
+    setUsername(next.basic?.username ?? ''); setPassword(''); setConfirmPassword(''); setBasicTtlHours(next.basic?.sessionTtlSeconds ? String(next.basic.sessionTtlSeconds / 3600) : '');
+    setIssuer(next.oidc?.issuer ?? ''); setClientId(next.oidc?.clientId ?? ''); setClientSecret(''); setRedirectUri(next.oidc?.redirectUri ?? '');
+    setScopes(next.oidc?.scopes?.join(' ') || 'openid email profile'); setAllowedEmails(next.oidc?.allowedEmails?.join('\n') ?? ''); setAllowedDomains(next.oidc?.allowedDomains?.join('\n') ?? '');
+    setBaseline(JSON.stringify([next.mode ?? 'none', next.trustedProxy?.allowedProxies?.join('\n') ?? '', next.trustedProxy?.userHeader || 'x-forwarded-user', next.basic?.username ?? '', '', '', next.basic?.sessionTtlSeconds ? String(next.basic.sessionTtlSeconds / 3600) : '', next.oidc?.issuer ?? '', next.oidc?.clientId ?? '', '', next.oidc?.redirectUri ?? '', next.oidc?.scopes?.join(' ') || 'openid email profile', next.oidc?.allowedEmails?.join('\n') ?? '', next.oidc?.allowedDomains?.join('\n') ?? '']));
+  };
   useEffect(() => { setState('loading'); setError(''); let cancelled = false; void api<{ auth: UiAuthSettings; effective?: UiAuthSettings['effective'] }>('/api/settings/ui-auth').then((result) => {
-    if (cancelled) return; const next = { ...result.auth, effective: result.effective }; setAuth(next); setMode(next.mode ?? 'none');
-    setAllowedProxies(next.trustedProxy?.allowedProxies?.join('\n') ?? ''); setUserHeader(next.trustedProxy?.userHeader || 'x-forwarded-user'); setUsername(next.basic?.username ?? ''); setBasicTtlHours(next.basic?.sessionTtlSeconds ? String(next.basic.sessionTtlSeconds / 3600) : '');
-    setIssuer(next.oidc?.issuer ?? ''); setClientId(next.oidc?.clientId ?? ''); setRedirectUri(next.oidc?.redirectUri ?? ''); setScopes(next.oidc?.scopes?.join(' ') || 'openid email profile'); setAllowedEmails(next.oidc?.allowedEmails?.join('\n') ?? ''); setAllowedDomains(next.oidc?.allowedDomains?.join('\n') ?? '');
+    if (cancelled) return; const next = { ...result.auth, effective: result.effective }; setAuth(next); restore(next);
     setState('idle');
   }).catch((cause) => { if (!cancelled) { setState('error'); setError(cause instanceof Error ? `Could not load authentication settings: ${cause.message}` : 'Could not load authentication settings.'); } }); return () => { cancelled = true; }; }, [retry]);
-  const save = async () => { if (state !== 'idle') return; setError(''); const proxies = lines(allowedProxies); if (mode === 'trusted-proxy' && proxies.length === 0) { setError('Add at least one allowed proxy IP.'); return; } if (mode === 'basic' && password && password !== confirmPassword) { setError('Passwords do not match.'); return; }
+  const save = async () => { if (state !== 'idle') return false; setError(''); const proxies = lines(allowedProxies); if (mode === 'trusted-proxy' && proxies.length === 0) { setError('Add at least one allowed proxy IP.'); return false; } if (mode === 'basic' && password && password !== confirmPassword) { setError('Passwords do not match.'); return false; }
     const ttlHours = basicTtlHours.trim();
     const sessionTtlSeconds = ttlHours ? Math.max(1, Number(ttlHours)) * 3600 : null;
-    if (mode === 'basic' && ttlHours && !Number.isFinite(sessionTtlSeconds)) { setError('Session TTL must be a number of hours.'); return; } if (mode === 'oidc' && (!issuer.trim() || !clientId.trim() || (!auth?.oidc?.clientSecretConfigured && !clientSecret.trim()))) { setError('Issuer, client ID, and client secret are required for OIDC.'); return; } setState('saving');
+    if (mode === 'basic' && ttlHours && !Number.isFinite(sessionTtlSeconds)) { setError('Session TTL must be a number of hours.'); return false; } if (mode === 'oidc' && (!issuer.trim() || !clientId.trim() || (!auth?.oidc?.clientSecretConfigured && !clientSecret.trim()))) { setError('Issuer, client ID, and client secret are required for OIDC.'); return false; } setState('saving');
     const body = mode === 'trusted-proxy' ? { mode, trustedProxy: { allowedProxies: proxies, userHeader: userHeader.trim() || 'x-forwarded-user' } } : mode === 'basic' ? { mode, basic: { username: username.trim(), sessionTtlSeconds, ...(password ? { password } : {}) } } : mode === 'oidc' ? { mode, oidc: { issuer: issuer.trim(), clientId: clientId.trim(), ...(clientSecret ? { clientSecret } : {}), redirectUri: redirectUri.trim(), scopes: lines(scopes), allowedEmails: lines(allowedEmails), allowedDomains: lines(allowedDomains) } } : { mode };
-    try { const result = await api<{ auth: UiAuthSettings; effective?: UiAuthSettings['effective'] }>('/api/settings/ui-auth', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); setAuth({ ...result.auth, effective: result.effective }); setBasicTtlHours(result.auth.basic?.sessionTtlSeconds ? String(result.auth.basic.sessionTtlSeconds / 3600) : ''); setPassword(''); setConfirmPassword(''); setClientSecret(''); } catch (cause) { setError(cause instanceof Error ? `Could not save authentication settings: ${cause.message}` : 'Could not save authentication settings.'); } finally { setState('idle'); }
+    try { const result = await api<{ auth: UiAuthSettings; effective?: UiAuthSettings['effective'] }>('/api/settings/ui-auth', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); const next = { ...result.auth, effective: result.effective }; setAuth(next); restore(next); return true; } catch (cause) { setError(cause instanceof Error ? `Could not save authentication settings: ${cause.message}` : 'Could not save authentication settings.'); return false; } finally { setState('idle'); }
   };
+  useUnsavedChanges({ dirty: !!auth && snapshot !== baseline, busy: state === 'saving', save, discard: () => { if (auth) restore(auth); setError(''); } });
   const source = auth?.effective?.source;
   const modeLabels: Record<UiAuthMode, string> = { none: 'None', 'trusted-proxy': 'Trusted Proxy', basic: 'Basic Username/Password', oidc: 'OIDC' };
   const disabled = state !== 'idle';

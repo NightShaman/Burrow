@@ -1,3 +1,4 @@
+import { useUnsavedChanges } from '../../app/UnsavedChanges';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../app/api';
 import type { SavedProvider } from '../../app/types';
@@ -10,6 +11,7 @@ type Selection = { connectionId: string; model: string; reasoningEffort: string;
 // Keyed by the full UI identity at the mount boundary, not just the resource ID.
 export function DefaultMinionModel({ resourceId, savedProviders }: { resourceId: string; savedProviders: SavedProvider[] }) {
   const [selection, setSelection] = useState<Selection>(null);
+  const [baseline, setBaseline] = useState<Selection>(null);
   const [state, setState] = useState<'loading' | 'idle' | 'saving' | 'error'>('loading');
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
@@ -23,7 +25,7 @@ export function DefaultMinionModel({ resourceId, savedProviders }: { resourceId:
     setState('loading'); setError(''); setSaved(false);
     api<{ selection: Selection }>(path, { signal: controller.signal }).then(result => {
       if (owner.current !== token) return;
-      setSelection(result.selection); setState('idle');
+      setSelection(result.selection); setBaseline(result.selection); setState('idle');
     }).catch(cause => {
       if (owner.current !== token) return;
       setError(`Could not load default minion model: ${cause instanceof Error ? cause.message : 'Unknown error'}`); setState('error');
@@ -35,20 +37,22 @@ export function DefaultMinionModel({ resourceId, savedProviders }: { resourceId:
   const efforts = reasoningEffortsForModel(provider, selection?.model ?? '');
   const change = (next: Selection) => { setSelection(next); setSaved(false); setError(''); };
   const save = async () => {
-    if (state !== 'idle' || busy.current || !available) return;
+    if (state !== 'idle' || busy.current || !available) return false;
     busy.current = true;
     const token = owner.current;
     setState('saving'); setError(''); setSaved(false);
     try {
       const result = await api<{ selection: Selection }>(path, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(selection ?? { connectionId: null, model: null }) });
-      if (owner.current === token) { setSelection(result.selection); setSaved(true); }
+      if (owner.current === token) { setSelection(result.selection); setBaseline(result.selection); setSaved(true); return true; }
     } catch (cause) {
       if (owner.current === token) setError(`Could not save default minion model: ${cause instanceof Error ? cause.message : 'Unknown error'}`);
     } finally {
       busy.current = false;
       if (owner.current === token) setState('idle');
     }
+    return false;
   };
+  useUnsavedChanges({ dirty: state !== 'loading' && state !== 'error' && JSON.stringify(selection) !== JSON.stringify(baseline), busy: state === 'saving', save, discard: () => { setSelection(baseline); setError(''); setSaved(false); } });
   const disabled = state !== 'idle';
   return <>
     <ProviderModelFields providers={savedProviders} connectionId={selection?.connectionId} model={selection?.model} inheritLabel="Inherit current parent turn" disabled={disabled} providerLabel="Default minion provider" modelLabel="Default minion model" onChange={(connectionId, model) => {
