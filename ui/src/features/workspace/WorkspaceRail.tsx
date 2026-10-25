@@ -1,3 +1,4 @@
+import { enabledAgents } from '../../app/agentCatalog';
 import { useEffect, useState, type PointerEvent, type ReactNode } from 'react';
 import type { Agent, FileNode, PanelId } from '../../app/types';
 import type { RailLayout } from '../../app/usePersistedLayout';
@@ -20,7 +21,7 @@ export function WorkspaceRail({ collapsed, topPanel, bottomPanel, singlePanel, l
 }
 
 export function AgentsPanel({ agents, view = 'regular', order = [], selectedStreamId, expandedAgents, onToggleAgent, onSelectAgent, onSelectSubagent }: Pick<WorkspacePanelContext, 'agents' | 'selectedStreamId' | 'expandedAgents' | 'onToggleAgent' | 'onSelectAgent' | 'onSelectSubagent'> & { view?: AgentRailView; order?: string[] }) {
- const orderedAgents = orderAgents(agents, order);
+ const orderedAgents = orderAgents(enabledAgents(agents), order);
  return <section className={`agent-pane ${view === 'compact' ? 'compact' : ''}`}>
    {orderedAgents.map((agent) => <AgentCard key={agent.id} agent={agent} selectedStreamId={selectedStreamId} expanded={expandedAgents.has(agent.id)} compact={view === 'compact'} onToggle={() => onToggleAgent(agent.id)} onSelect={() => onSelectAgent(agent)} onSelectSubagent={(subagentId) => onSelectSubagent(agent.id, subagentId)} />)}
  </section>;

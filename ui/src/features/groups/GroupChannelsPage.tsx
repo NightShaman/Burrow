@@ -1,3 +1,4 @@
+import { isAgentEnabled } from '../../app/agentCatalog';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { api, attachmentDisplayName, jsonMutation } from '../../app/api';
@@ -124,7 +125,7 @@ export function GroupChannelsPage({ channelId, agents, operator }: { channelId: 
     const query = mentionQuery.toLowerCase();
     return channel.participantAgentIds
       .map((id) => agentById.get(id))
-      .filter((agent): agent is Agent => Boolean(agent && agent.name.toLowerCase().includes(query)))
+      .filter((agent): agent is Agent => Boolean(agent && isAgentEnabled(agent) && agent.name.toLowerCase().includes(query)))
       .slice(0, 6);
   }, [agentById, channel, mentionQuery]);
   function updateMessage(value: string) {
@@ -203,7 +204,7 @@ export function GroupChannelsPage({ channelId, agents, operator }: { channelId: 
   return <div className="group-page">
     <main className="group-transcript">
       <div className="group-agent-overlay" aria-label="Group members">
-        {channel.participantAgentIds.map((id) => {
+        {channel.participantAgentIds.filter(id => { const agent = agentById.get(id); return agent && isAgentEnabled(agent); }).map((id) => {
           const agent = agentById.get(id); const run = channel.runs.find((item) => item.agentId === id); const image = avatarImage(identityAvatars[id] || agent?.avatar);
           return <div className="group-agent" key={id} title={`${agent?.name || id}${run ? ` · ${run.status || 'Working'}` : ''}`}>
             <span className="group-avatar">{image ? <img src={image} alt="" /> : agent?.name.slice(0, 1) || '?'}</span>

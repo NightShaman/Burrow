@@ -1,11 +1,13 @@
+import { enabledAgents } from '../../app/agentCatalog';
 import { secureUuid } from '../../app/secureUuid';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { api, type SessionSummary } from '../../app/api';
 import { retainedOperation, completeOperation } from '../../app/durableOperation';
-import type { Tab } from '../../app/types';
+import type { Agent, Tab } from '../../app/types';
 
 type ChatComposerOptions = {
+  agents?: Agent[];
   selectedAgentId: string;
   sessionId?: string;
   activeRunId: string | null;
@@ -19,7 +21,7 @@ type ChatComposerOptions = {
   setActiveTabId: Dispatch<SetStateAction<string>>;
 };
 
-export function useChatComposers({ sessionId = '', selectedAgentId, activeRunId, sessions, refreshSessions, selectSession, reportError, clearError, tabs, setTabs, setActiveTabId }: ChatComposerOptions) {
+export function useChatComposers({ agents, sessionId = '', selectedAgentId, activeRunId, sessions, refreshSessions, selectSession, reportError, clearError, tabs, setTabs, setActiveTabId }: ChatComposerOptions) {
   const scopeKey = JSON.stringify([selectedAgentId, sessionId]);
   const scopeRef = useRef({ key: scopeKey });
   if (scopeRef.current.key !== scopeKey) scopeRef.current = { key: scopeKey };
@@ -139,14 +141,15 @@ export function useChatComposers({ sessionId = '', selectedAgentId, activeRunId,
   const createGroup = useCallback(async () => {
     const name = groupName.trim();
     if (!name) return setGroupError('Give the group chat a name.');
-    if (groupAgentIds.length < 2) return setGroupError('Select at least two agents.');
+    const participantAgentIds = agents ? groupAgentIds.filter(id => enabledAgents(agents).some(agent => agent.id === id)) : groupAgentIds;
+    if (participantAgentIds.length < 2) return setGroupError('Select at least two agents.');
     setIsCreatingGroup(true);
     setGroupError('');
     try {
       const response = await api<{ channel?: { id?: string; name?: string } } | { id?: string; name?: string }>('/api/group-channels', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name, participantAgentIds: groupAgentIds }),
+        body: JSON.stringify({ name, participantAgentIds }),
       });
       const channel = ('channel' in response ? response.channel : response) as { id?: string; name?: string } | undefined;
       if (!channel?.id) throw new Error('The server did not return a group chat id.');
@@ -162,7 +165,7 @@ export function useChatComposers({ sessionId = '', selectedAgentId, activeRunId,
     } finally {
       setIsCreatingGroup(false);
     }
-  }, [groupAgentIds, groupName, setActiveTabId, setTabs, tabs]);
+  }, [agents, groupAgentIds, groupName, setActiveTabId, setTabs, tabs]);
 
   return {
     session: { isOpen: isSessionOpen, isCreating: isCreatingSession, name: sessionName, error: sessionError, open: openSession, close: closeSession, setName: changeSessionName, create: createSession },

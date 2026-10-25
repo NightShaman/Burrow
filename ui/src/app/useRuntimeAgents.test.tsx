@@ -17,9 +17,9 @@ const setSelectedStreamId = vi.fn();
 const onNoAgents = vi.fn();
 const reportError = vi.fn();
 
-function renderRuntimeAgents() {
+function renderRuntimeAgents(selectedAgentId = '') {
   return renderHook(() => useRuntimeAgents({
-    selectedAgentId: '',
+    selectedAgentId,
         setSelectedAgentId,
     parentSessionIdForAgent: () => 'default',
     runtimeProviders,
@@ -127,4 +127,23 @@ describe('useRuntimeAgents registry state', () => {
     expect(result.current.agents[0].subagents[1]).toMatchObject({ activity: 'Incomplete', outcomeReason: 'Audit stopped · subagent_incomplete' });
     expect(result.current.agents[0].subagents[2]).toMatchObject({ activity: 'Error' });
   });
+});
+
+
+it.each([true, false])('retains disabled identities for management but selects only enabled agents (%s)', async hasEnabled => {
+  const registry = [
+    { id: 'disabled', name: 'Disabled agent', enabled: false },
+    ...(hasEnabled ? [{ id: 'enabled', name: 'Enabled agent', enabled: true }] : []),
+  ];
+  apiMock.mockImplementation(async path => {
+    if (path === '/api/agents') return { agents: registry };
+    if (path === '/api/agents/overview') return { agents: registry.map(agent => ({ agent, sessionId: 'default', selection: null, status: { agents: [] }, contexts: {} })) };
+    throw new Error(`Unexpected path: ${path}`);
+  });
+  const { result } = renderRuntimeAgents('disabled');
+  await waitFor(() => expect(result.current.registryState).toBe('ready'));
+  expect(result.current.agents[0]).toMatchObject({ id: 'disabled', enabled: false, name: 'Disabled agent' });
+  expect(setSelectedAgentId).toHaveBeenLastCalledWith(hasEnabled ? 'enabled' : '');
+  const reconcileStream = setSelectedStreamId.mock.lastCall?.[0];
+  expect(reconcileStream('disabled-child')).toBe(hasEnabled ? 'enabled' : '');
 });

@@ -123,7 +123,7 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
     return null;
   }
 
-  async function archiveSessionRows({ includeArchived = true, agentId = null, includeDisabled = false } = {}) {
+  async function archiveSessionRows({ includeArchived = true, agentId = null, includeDisabled = true } = {}) {
     const agents = (await agentsStore().list({ includeDisabled: Boolean(includeDisabled) })).filter((agent) => !agentId || agent.id === agentId);
     const store = stores().conversations;
     return (await Promise.all(agents.map(async (agent) => {
@@ -140,7 +140,7 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
     const parsedMonth = archiveUtcMonth(month);
     if (!['sessions', 'dreams'].includes(kind)) throw new Error('archive_kind_invalid');
     if (kind === 'sessions' && typeof stores().conversations.listArchiveCalendarDates === 'function') {
-      const agents = (await agentsStore().list({ includeDisabled: false })).filter((agent) => !agentId || agent.id === agentId);
+      const agents = (await agentsStore().list({ includeDisabled: true })).filter((agent) => !agentId || agent.id === agentId);
       const dates = [...new Set((await Promise.all(agents.map((agent) => stores().conversations.listArchiveCalendarDates({ agentId: agent.id, month: parsedMonth, timezone })))).flat())].sort();
       return { ok: true, kind, month: parsedMonth, dates };
     }
@@ -161,7 +161,7 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
     return { ok: true, kind, month: parsedMonth, dates };
   }
 
-  async function archiveSessions({ timezone = 'UTC', includeArchived = true, query = '', agentId = null, date = null, limit = 200, includeDisabled = false, cursor = null } = {}) {
+  async function archiveSessions({ timezone = 'UTC', includeArchived = true, query = '', agentId = null, date = null, limit = 200, includeDisabled = true, cursor = null } = {}) {
     timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
     if (date) archiveUtcDay(date);
     const store = stores().conversations;

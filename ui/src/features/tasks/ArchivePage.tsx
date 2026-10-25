@@ -1,3 +1,4 @@
+import { enabledAgents } from '../../app/agentCatalog';
 import { loadModArchives, modsChangedEvent, type ModArchive } from '../../app/modPanels';
 import { ModArchiveHost } from '../mods/ModArchiveHost';
 import { useEffect, useMemo, useState } from 'react';
@@ -37,6 +38,9 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
   }, []);
   const [kind, setKind] = useState<ArchiveKind>('chat');
   const [selectedAgent, setSelectedAgent] = useState('');
+  useEffect(() => {
+    if (selectedAgent && !enabledAgents(agents).some(agent => agent.id === selectedAgent)) setSelectedAgent('');
+  }, [agents, selectedAgent]);
   const [selectedDate, setSelectedDate] = useState('');
   const [search, setSearch] = useState('');
   const queryKey = archiveQueryCacheKey({ target: cacheOwner, agent: selectedAgent, query: search, date: selectedDate, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, kind });
@@ -73,7 +77,7 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
     <div className="page-view archive-page">
       <header className="archive-heading">
         <div><h1>Archive</h1><p>Conversations and small remembered things, organized for later.</p></div>
-        <div className="archive-heading-tools" hidden={Boolean(activeMod)}><label className="archive-search"><span className="sr-only">Search archive</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={kind === 'chat' ? 'Search conversations' : kind === 'tasks' ? 'Search tasks' : kind === 'proof' ? 'Search proof runs' : 'Search dreams'} /></label><label className="archive-agent-filter"><span className="sr-only">Filter by agent</span><select value={selectedAgent} onChange={(event) => { setSelectedAgent(event.target.value); setSelectedDate(''); }}><option value="">All agents</option>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label></div>
+        <div className="archive-heading-tools" hidden={Boolean(activeMod)}><label className="archive-search"><span className="sr-only">Search archive</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={kind === 'chat' ? 'Search conversations' : kind === 'tasks' ? 'Search tasks' : kind === 'proof' ? 'Search proof runs' : 'Search dreams'} /></label><label className="archive-agent-filter"><span className="sr-only">Filter by agent</span><select value={selectedAgent} onChange={(event) => { setSelectedAgent(event.target.value); setSelectedDate(''); }}><option value="">All agents</option>{enabledAgents(agents).map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label></div>
       </header>
       <div className="archive-layout">
         <aside className="archive-sidebar" aria-label="Archive navigation">

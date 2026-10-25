@@ -1,3 +1,4 @@
+import { enabledAgents } from './agentCatalog';
 import { minionOutcome } from './minionOutcome';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type AgentStatus, type ContextStatus, type RuntimeAgent } from './api';
@@ -31,6 +32,7 @@ const avatarFor = (agent: RuntimeAgent) => agent.avatar || agent.name.slice(0, 1
 const workspacePathFor = (agentId: string) => `/workspace/${agentId}`;
 
 const asAgent = (entry: AgentOverviewEntry): Agent => ({
+  enabled: entry.agent.enabled,
   id: entry.agent.id,
   resourceId: entry.agent.id,
   targetId: 'local',
@@ -151,10 +153,10 @@ export function useRuntimeAgents({ selectedAgentId, setSelectedAgentId, parentSe
       if (agentsRef.current.length > 0) { setRegistryStale(true); setRegistryError(loadError.message); return; }
       setRegistryState('unavailable'); setRegistryError(loadError.message); reportError(`Could not load agents: ${loadError.message}`); return;
     }
-    const enabled = hydrated.filter((agent) => agent.activity !== 'Disabled');
-    const fallbackAgentId = enabled[0]?.id ?? hydrated[0]?.id ?? '';
+    const enabled = enabledAgents(hydrated);
+    const fallbackAgentId = enabled[0]?.id ?? '';
     const latestSelectedAgentId = selectedAgentIdRef.current;
-    const nextAgentId = hydrated.some((agent) => agent.id === latestSelectedAgentId) ? latestSelectedAgentId : fallbackAgentId;
+    const nextAgentId = enabled.some((agent) => agent.id === latestSelectedAgentId) ? latestSelectedAgentId : fallbackAgentId;
     setAgents(hydrated);
     setRegistryState(hydrated.length === 0 ? 'empty' : 'ready');
     setRegistryStale(false);

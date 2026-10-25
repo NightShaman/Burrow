@@ -1,3 +1,4 @@
+import { isAgentEnabled } from '../../app/agentCatalog';
 import { useUnsavedChanges } from '../../app/UnsavedChanges';
 import { DefaultMinionModel } from './DefaultMinionModel';
 import { useEffect, useRef, useState } from 'react';
@@ -20,13 +21,13 @@ export function AgentSettings({ selected, savedProviders, onAgentsChanged, secti
   const [name, setName] = useState(selected.name);
   const [avatar, setAvatar] = useState(selected.avatar.startsWith('data:image/') ? selected.avatar : '');
   const [avatarFileName, setAvatarFileName] = useState('');
-  const [enabled, setEnabled] = useState(selected.activity !== 'Disabled');
+  const [enabled, setEnabled] = useState(isAgentEnabled(selected));
   const avatarInput = useRef<HTMLInputElement>(null);
   const [state, setState] = useState<'idle' | 'saving' | 'deleting'>('idle');
   const [error, setError] = useState('');
-  const [baseline, setBaseline] = useState(() => JSON.stringify([selected.name, selected.avatar.startsWith('data:image/') ? selected.avatar : '', selected.activity !== 'Disabled']));
+  const [baseline, setBaseline] = useState(() => JSON.stringify([selected.name, selected.avatar.startsWith('data:image/') ? selected.avatar : '', isAgentEnabled(selected)]));
 
-  useEffect(() => { setName(selected.name); setAvatar(selected.avatar.startsWith('data:image/') ? selected.avatar : ''); setAvatarFileName(''); setEnabled(selected.activity !== 'Disabled'); setError(''); setBaseline(JSON.stringify([selected.name, selected.avatar.startsWith('data:image/') ? selected.avatar : '', selected.activity !== 'Disabled'])); }, [selected.id, resourceId]);
+  useEffect(() => { setName(selected.name); setAvatar(selected.avatar.startsWith('data:image/') ? selected.avatar : ''); setAvatarFileName(''); setEnabled(isAgentEnabled(selected)); setError(''); setBaseline(JSON.stringify([selected.name, selected.avatar.startsWith('data:image/') ? selected.avatar : '', isAgentEnabled(selected)])); }, [selected.id, resourceId]);
   const chooseAvatar = async (file?: File) => {
     if (!file) return;
     try { setAvatar(await optimizeAvatar(file)); setAvatarFileName(file.name || 'Pasted image'); setError(''); }

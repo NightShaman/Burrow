@@ -164,3 +164,24 @@ it.each([false, true])('submits attachment-only files and clears only with persi
   });
   if (!confirmed) expect(screen.getByRole('button', { name: 'Remove input.txt' })).toBeTruthy();
 });
+
+it('excludes disabled group members and mentions without removing their historical messages', async () => {
+  const base = { avatar: '', activity: 'Idle', context: null, provider: '', model: '', effort: '', temperature: 0, workspace: '', files: [], subagents: [] };
+  vi.mocked(api).mockImplementation(async path => path === '/api/settings/identities' ? {} : {
+    channel: { id: 'room-1', name: 'Group room', participantAgentIds: ['off', 'on'] },
+    turns: [{ id: 'old', type: 'message', role: 'agent', content: 'Historical disabled message', metadata: { fromAgentId: 'off', fromAgentName: 'Disabled colleague' } }], runs: [],
+  });
+  render(<GroupChannelsPage channelId="room-1" agents={[
+    { ...base, id:'off', name:'Disabled colleague', enabled:false },
+    { ...base, id:'on', name:'Available colleague', enabled:true },
+  ]} />);
+  await screen.findByText('Historical disabled message');
+  const members = screen.getByLabelText('Group members');
+  expect(members.querySelectorAll('.group-agent')).toHaveLength(1);
+  expect(members.querySelector('[title="Available colleague"]')).toBeTruthy();
+  fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: '@' } });
+  const mentions = screen.getByRole('listbox', { name: 'Mention an agent' });
+  expect(within(mentions).queryByText('@Disabled colleague')).toBeNull();
+  expect(within(mentions).getByText('@Available colleague')).toBeTruthy();
+  expect(screen.getByText('Historical disabled message')).toBeTruthy();
+});

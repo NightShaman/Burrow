@@ -90,3 +90,23 @@ it.each([false, true])('queues documents and retries upload failures without rec
  expect(creates).toBe(1);
  expect(uploads).toEqual(fail ? ['first.txt', 'second.txt', 'second.txt'] : ['first.txt', 'second.txt']);
 });
+
+
+it('hides disabled assignee choices without losing existing task attribution or assignment on save', async () => {
+ const agent = { id: 'agent', name: 'Disabled colleague', enabled: false, activity: 'Working', avatar: '', context: null, provider: '', model: '', effort: '', temperature: 0, workspace: '', files: [], subagents: [] };
+ const writes: unknown[] = [];
+ vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = String(input);
+  if (init?.method === 'PATCH') { writes.push(JSON.parse(String(init.body))); return response({task:a}); }
+  if (url.endsWith('/projects')) return response({projects:[{id:'p',name:'Project'}]});
+  if (url.includes('/tasks/a/')) return response({activities:[],attachments:[]});
+  return response({tasks:[a]});
+ }));
+ render(<ConfirmProvider><Tasks agents={[agent, {...agent, id:'enabled', name:'Available colleague', enabled:true}]} /></ConfirmProvider>);
+ fireEvent.click(await screen.findByText('Task A'));
+ expect(screen.getAllByText('Owner · Disabled colleague').length).toBeGreaterThan(0);
+ expect(screen.queryByRole('option', { name: 'Disabled colleague' })).toBeNull();
+ expect(screen.getByRole('option', { name: 'Available colleague' })).toBeTruthy();
+ fireEvent.click(screen.getByRole('button', {name:'Save changes'}));
+ await vi.waitFor(() => expect(writes).toEqual([expect.objectContaining({assignedAgentId:'agent'})]));
+});

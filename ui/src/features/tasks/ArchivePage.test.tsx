@@ -306,3 +306,19 @@ it.each(['dreams', 'tiddle'] as const)('aborts %s pagination on filter-owner rep
   await act(async () => pending.resolve(collectionPage(kind === 'dreams' ? [{ ...dream, id: 'intruder', agentName: 'Intruder' }] : [card('intruder', 'Intruder card')])));
   expect(screen.queryByRole('button', { name: /Intruder/ })).toBeNull();
 });
+
+it('filters agent choices without filtering archive records or attribution', async () => {
+  const base = { avatar: '', activity: 'Idle', context: null, provider: '', model: '', effort: '', temperature: 0, workspace: '', files: [], subagents: [] };
+  vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([{ agentId:'off', agentName:'Disabled colleague', sessionId:'history', title:'Disabled history', turnCount:1, updatedAt:'2026-10-11T00:00:00Z' } as ArchiveSession]));
+  vi.spyOn(archiveRepository, 'listCalendarAvailability').mockResolvedValue({ ok:true, kind:'sessions', month:'2026-10', dates:[] });
+  const { rerender } = render(<Archive repository={archiveRepository} agents={[
+    { ...base, id:'off', name:'Disabled colleague', enabled:false },
+    { ...base, id:'on', name:'Available colleague', enabled:true },
+  ]} />);
+  expect(screen.queryByRole('option', { name:'Disabled colleague' })).toBeNull();
+  expect(screen.getByRole('option', { name:'Available colleague' })).toBeTruthy();
+  expect(await screen.findByRole('button', { name:/Disabled colleague.*Disabled history/ })).toBeTruthy();
+  fireEvent.change(screen.getByRole('combobox', { name:'Filter by agent' }), { target:{ value:'on' } });
+  rerender(<Archive repository={archiveRepository} agents={[{ ...base, id:'on', name:'Available colleague', enabled:false }]} />);
+  await waitFor(() => expect((screen.getByRole('combobox', { name:'Filter by agent' }) as HTMLSelectElement).value).toBe(''));
+});

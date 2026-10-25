@@ -1,3 +1,4 @@
+import { enabledAgents } from '../../app/agentCatalog';
 import { useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { OpenTelemetrySettings } from './OpenTelemetrySettings';
 import { BrowserTabSettings } from './BrowserTabSettings';
@@ -61,10 +62,10 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
     validate: isBoolean,
     decodeLegacy: (raw) => raw === 'true' ? true : raw === 'false' ? false : undefined,
   }));
-  const settingsSelected = agents.find((agent) => agent.id === settingsAgentId) ?? selected;
+  const settingsSelected = agents.find((agent) => agent.id === settingsAgentId) ?? agents[0] ?? selected;
 
   useEffect(() => {
-    if (!agents.some((agent) => agent.id === settingsAgentId)) setSettingsAgentId(selected.id);
+    if (!agents.some((agent) => agent.id === settingsAgentId)) setSettingsAgentId(agents[0]?.id ?? selected.id);
   }, [agents, selected.id, settingsAgentId]);
   useEffect(() => {
     let cancelled = false;
@@ -171,7 +172,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
         {tab === 'general' && generalSection === 'tiddle-signal' && <CuratorSettings savedProviders={savedProviders} />}
         {tab === 'general' && generalSection === 'appearance' && <SettingSection title="Appearance"><fieldset className="theme-picker"><legend>Theme</legend><div>{themes.map((option) => <button type="button" className={theme === option ? 'active' : ''} onClick={() => setTheme(option)} aria-pressed={theme === option} key={option}><i className={`theme-swatch ${option}`} aria-hidden="true" /><span><b>{themeDetails[option].label}</b><small>{themeDetails[option].description}</small></span></button>)}</div></fieldset></SettingSection>}
         {tab === 'agents' && (agents.length === 0 ? <SettingSection title="Agent setup"><p className="hint">No agents configured yet. Create your first agent to unlock the rest of the agent settings.</p></SettingSection> : agentSection === 'skills' ? <SkillsSettings agentView agents={agents} agentId={settingsSelected.id} overflowTarget={overflowColumn} /> : agentSection === 'mcp-tools' ? <AgentMcpTools agentId={settingsSelected.id} overflowTarget={overflowColumn} /> : <AgentSettings selected={settingsSelected} savedProviders={savedProviders} onAgentsChanged={onAgentsChanged} section={agentSection} overflowTarget={overflowColumn} />)}
-        {tab === 'skills' && <SkillsSettings agents={agents} agentId={settingsSelected.id} section={skillsSection} onSectionChange={setSkillsSection} overflowTarget={overflowColumn} />}
+        {tab === 'skills' && <SkillsSettings agents={enabledAgents(agents)} agentId={settingsSelected.id} section={skillsSection} onSectionChange={setSkillsSection} overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'authentication' && <AuthenticationSettings />}
         {tab === 'connections' && connectionSection === 'browser-origin' && <BrowserOriginSettings />}
         {tab === 'connections' && connectionSection === 'model-providers' && <ModelConnections key="models" savedProviders={savedProviders} onModelConnectionsChanged={onModelConnectionsChanged} mcpConnections={null} overflowTarget={overflowColumn} />}
@@ -179,10 +180,10 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
         {tab === 'connections' && connectionSection === 'mcp-servers' && <McpConnections overflowTarget={overflowColumn} />}
         {tab === 'connections' && connectionSection === 'api-tokens' && <ApiTokensSettings overflowTarget={overflowColumn} />}
         {tab === 'mods' && <ModsSettings section={modsSection} overflowTarget={overflowColumn} />}
-        {selectedContribution?.settingsUrl && <ModSettingsHost key={`${selectedContribution.modId}:${selectedContribution.version ?? ''}`} modId={selectedContribution.modId} settingsUrl={`${selectedContribution.settingsUrl}${selectedContribution.version ? `?v=${encodeURIComponent(selectedContribution.version)}` : ''}`} agents={agents} onAgentsChanged={onAgentsChanged} navigationTarget={modNavigationColumn} overflowTarget={overflowColumn} selectedSectionId={selectedModSettings?.id} onSectionChange={selectedContribution.settings?.length ? (sectionId) => setTab(modSettingsTab(selectedContribution.modId, sectionId)) : undefined} />}
+        {selectedContribution?.settingsUrl && <ModSettingsHost key={`${selectedContribution.modId}:${selectedContribution.version ?? ''}`} modId={selectedContribution.modId} settingsUrl={`${selectedContribution.settingsUrl}${selectedContribution.version ? `?v=${encodeURIComponent(selectedContribution.version)}` : ''}`} agents={enabledAgents(agents)} onAgentsChanged={onAgentsChanged} navigationTarget={modNavigationColumn} overflowTarget={overflowColumn} selectedSectionId={selectedModSettings?.id} onSectionChange={selectedContribution.settings?.length ? (sectionId) => setTab(modSettingsTab(selectedContribution.modId, sectionId)) : undefined} />}
       </section>
       <section className="settings-blank-column settings-prototype-overflow" ref={setOverflowColumn} aria-label="Additional settings">
-        {tab === 'general' && generalSection === 'rail-panels' && hasAgentsPanel && <div className="settings-overflow-content"><AgentSidebarSettings agents={agents} preferences={agentRailPreferences} setPreferences={setAgentRailPreferences} /></div>}
+        {tab === 'general' && generalSection === 'rail-panels' && hasAgentsPanel && <div className="settings-overflow-content"><AgentSidebarSettings agents={enabledAgents(agents)} preferences={agentRailPreferences} setPreferences={setAgentRailPreferences} /></div>}
       </section>
       <aside className="settings-utility-panel" aria-label="System statistics" aria-hidden={!utilityPanelOpen}>
         <header><span>System statistics</span><button type="button" onClick={() => setUtilityPanelOpen(false)} aria-label="Collapse system statistics"><Chevron direction="right" /></button></header>

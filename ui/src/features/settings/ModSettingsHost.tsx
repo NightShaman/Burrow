@@ -1,3 +1,4 @@
+import { enabledAgents } from '../../app/agentCatalog';
 import { useConfirm } from '../../app/ConfirmDialog';
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
@@ -239,7 +240,7 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
         if (module?.createSettingsContribution) {
           try {
             const { agents: currentAgents } = await apiLocal<{ agents: Agent[] }>('/api/agents');
-            const refreshed = validateSettingsContribution(await module.createSettingsContribution(settingsFactoryContext(modId, currentAgents)));
+            const refreshed = validateSettingsContribution(await module.createSettingsContribution(settingsFactoryContext(modId, enabledAgents(currentAgents))));
             void onAgentsChangedRef.current();
             if (!refreshed) throw new Error("Invalid settings response.");
             setContribution(refreshed); setError('');
