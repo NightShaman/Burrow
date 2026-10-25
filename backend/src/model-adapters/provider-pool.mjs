@@ -1,3 +1,4 @@
+import { portablePoolReplay } from './pool-replay.mjs';
 import { ProviderPoolEngine, poolThreadKey, AFFINITY_CACHE_TTL_MS } from '../provider-pool-engine.mjs';
 
 export function createProviderPoolModelAdapter(options, createMemberAdapter) {
@@ -12,13 +13,13 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
     api: family === 'anthropic' ? 'anthropic-messages' : 'openai-responses', apiType: family === 'anthropic' ? 'anthropic-messages' : 'openai-responses' } });
   const adapters = new Map();
   const now = pool.clock || Date.now;
-  const getAdapter = async (memberId, threadKey) => {
+  const getAdapter = async (memberId, threadKey, fresh = false) => {
     const key = JSON.stringify([threadKey, memberId]);
     const cached = adapters.get(key);
     const resolved = await pool.resolveMember(memberId);
     const memberConfig = resolved?.model && typeof resolved.model === 'object' ? resolved.model : resolved;
     if (!memberConfig || memberConfig.providerPool || /-lb$/.test(memberConfig.api || memberConfig.apiType || '')) throw new Error('provider_pool_invalid_member_config');
-    if (cached && cached.authToken === memberConfig.apiKey && now() - cached.usedAt < AFFINITY_CACHE_TTL_MS) { cached.usedAt = now(); return cached.adapter; }
+    if (!fresh && cached && cached.authToken === memberConfig.apiKey && now() - cached.usedAt < AFFINITY_CACHE_TTL_MS) { cached.usedAt = now(); return cached.adapter; }
     const adapter = createMemberAdapter({ ...options, providerPool: null, config: { ...memberConfig, model: config.model, temperature: config.temperature, maxTokens: config.maxTokens, extra: config.extra, reasoningEffort: config.reasoningEffort, codexSessionId: threadKey, codexThreadId: threadKey, providerPool: null } });
     // Native turn-state is isolated by both thread AND account, never copied.
     for (const [oldKey, value] of adapters) if (now() - value.usedAt >= AFFINITY_CACHE_TTL_MS) adapters.delete(oldKey);
@@ -37,10 +38,27 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
     const nativeHistory = signedHistory || history.some(message => ['function_call', 'function_call_output'].includes(message?.type));
     if (nativeHistory && !previousRoute?.servingConnectionId) throw new Error('provider_pool_signed_history_owner_missing');
     if (nativeHistory) continuation = true;
+    // A successful initial response proves only its submitted request, not
+    // historical protocol rounds supplied by the caller or a resumed turn.
+    const initialRequest = Array.isArray(args.messages) ? args.messages :
+      args.prompt != null ? [{ role: 'user', content: args.prompt }] : [];
+    const protocolHistory = initialRequest.some(message => message?.role === 'tool' ||
+      ['function_call', 'function_call_output'].includes(message?.type) ||
+      Array.isArray(message?.tool_calls) && message.tool_calls.length ||
+      Array.isArray(message?.content) && message.content.some(part =>
+        ['tool_use', 'tool_result', 'thinking', 'redacted_thinking'].includes(part?.type)));
+    const freshRequest = method === 'complete' && !continuation && !previousRoute && !protocolHistory;
     // A continuation without provenance cannot safely infer its native owner.
     if (continuation && (!previousRoute?.servingConnectionId || previousRoute.logicalConnectionId !== pool.connection.id)) {
       throw new Error('provider_pool_continuation_owner_missing');
     }
+    const replay = continuation && method === 'continueWithToolResults' ? (() => {
+      try { return portablePoolReplay(args, family); } catch (error) {
+        // Ordinary owner-pinned continuation remains available. Portability
+        // failures only veto switching; the original account may still serve.
+        return { error };
+      }
+    })() : null;
     const threadKey = previousRoute?.threadKey || poolThreadKey(args);
     const excluded = [];
     let originalFailure;
@@ -49,23 +67,23 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
       args.signal?.throwIfAborted();
       let selection;
       try { selection = await engine.select({ threadKey, model: config.model, exclude: excluded,
-        requiredMemberId: continuation ? previousRoute.servingConnectionId : null }); }
+        requiredMemberId: continuation && !(attempt && replay && !replay.error) ? previousRoute.servingConnectionId : null }); }
       catch (error) {
         if (!originalFailure) throw error;
         if (originalFailure instanceof Error) throw originalFailure;
-        return { ...originalFailure, providerPool: originalRoute };
+        return { ...originalFailure, providerPool: originalRoute, nativeTranscriptComplete: false };
       }
       let adapter;
-      try { adapter = await getAdapter(selection.memberId, threadKey); }
+      try { adapter = await getAdapter(selection.memberId, threadKey, attempt > 0); }
       catch (error) {
         if (!originalFailure) throw error;
         if (originalFailure instanceof Error) throw originalFailure;
-        return { ...originalFailure, providerPool: originalRoute };
+        return { ...originalFailure, providerPool: originalRoute, nativeTranscriptComplete: false };
       }
       let visible = false;
       let callbackFailed = false;
       let callbackInvoked = false;
-      const callArgs = { ...args };
+      const callArgs = { ...(attempt && replay && !replay.error ? replay : args) };
       for (const name of ['onTextDelta', 'onThoughtDelta', 'onContextUsage']) {
         if (typeof args[name] !== 'function') continue;
         callArgs[name] = async (...values) => {
@@ -83,7 +101,7 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
       catch (error) {
         // Unknown exceptions can represent callback, serialization or policy
         // failures. Only transport TypeErrors are retryable, never cancellation.
-        if (callbackFailed || callbackInvoked || visible || continuation || args.signal?.aborted || error?.name !== 'TypeError' || attempt > 0) throw error;
+        if (callbackFailed || callbackInvoked || visible || (continuation && (!replay || replay.error)) || args.signal?.aborted || error?.name !== 'TypeError' || attempt > 0) throw error;
         originalFailure = error; originalRoute = route;
         await engine.cooldown(selection.memberId, 'transport_unavailable');
         excluded.push(selection.memberId);
@@ -91,13 +109,21 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
       }
       const retryable = !result.ok && ([401, 403, 429].includes(Number(result.status)) || (Number(result.status) >= 500 && Number(result.status) <= 599));
       if (retryable) await engine.cooldown(selection.memberId, `http_${result.status}`);
-      if (retryable && !callbackInvoked && !visible && !continuation && !args.signal?.aborted && attempt === 0
+      if (retryable && continuation && replay?.error && !callbackInvoked && !visible && !args.signal?.aborted && attempt === 0 && !result.choice?.text && !result.choice?.toolCalls?.length) throw replay.error;
+      if (retryable && !callbackInvoked && !visible && (!continuation || (replay && !replay.error)) && !args.signal?.aborted && attempt === 0
         && !result.choice?.text && !result.choice?.toolCalls?.length) {
         originalFailure = result; originalRoute = route;
         excluded.push(selection.memberId);
         continue;
       }
-      return { ...result, providerPool: route };
+      if (result.ok && attempt && replay && !replay.error && typeof engine.promote === 'function') {
+        const promoted = await engine.promote({ threadKey, memberId: selection.memberId, previousOwnerId: originalRoute?.ownerConnectionId });
+        if (promoted) { route.ownerConnectionId = selection.memberId; route.substitute = false; }
+      }
+      // Request-scoped proof: normal pre-request compaction is irrelevant;
+      // mid-loop changes are rejected by portablePoolReplay equality.
+      return { ...result, providerPool: route, nativeTranscriptComplete: result.ok === true &&
+        (continuation ? Boolean(replay && !replay.error) : freshRequest) };
     }
     throw new Error('provider_pool_retry_exhausted');
   };

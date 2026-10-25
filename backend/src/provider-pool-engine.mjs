@@ -151,6 +151,28 @@ export class ProviderPoolEngine {
     } finally { client.release(); }
   }
 
+  // Promote only after the alternate has successfully replayed the complete
+  // request. The lock and compare-and-swap prevent a concurrent reroute from
+  // being silently overwritten by a late replay response.
+  async promote({ threadKey, memberId, previousOwnerId = null }) {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [JSON.stringify(['provider-pool', this.connection.id, threadKey])]);
+      const result = await client.query(`UPDATE provider_pool_affinity
+        SET owner_id=$3, substitute_id=NULL, substitute_until=NULL, updated_at=$4
+        WHERE pool_id=$1 AND thread_key=$2 AND substitute_id=$3
+        AND ($5::text IS NULL OR owner_id=$5)`,
+      [this.connection.id, threadKey, memberId, new Date(this.clock()), previousOwnerId]);
+      await client.query('COMMIT');
+      if (result.rowCount) this.affinityCache.set(threadKey,
+        { ownerId: memberId, expiresAt: this.clock() + AFFINITY_CACHE_TTL_MS });
+      return result.rowCount === 1;
+    } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
+    finally { client.release(); }
+  }
+
   async cooldown(memberId, reason, durationMs = 60_000) {
     const now = this.clock();
     await this.db.query(`INSERT INTO provider_pool_health(pool_id,member_id,cooldown_until,last_reason,updated_at)

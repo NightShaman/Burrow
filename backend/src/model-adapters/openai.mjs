@@ -119,7 +119,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       ? textPromptCharsFor(providerMessages)
       : String(providerMessages || '').length;
     const serializedBody = JSON.stringify(body);
-    return { body, providerMessages, providerMessageCount, providerMessageManifest, providerPromptChars, serializedBody, resolvedTools, resolvedToolNames, stablePrefixHash: serializedMessageHash(stablePrefixMessage), continuation: isToolContinuation, nativeTranscript: continuationMessages || providerContinuationMessages };
+    return { body, providerMessages, providerMessageCount, providerMessageManifest, providerPromptChars, serializedBody, resolvedTools, resolvedToolNames, stablePrefixHash: serializedMessageHash(stablePrefixMessage), continuation: isToolContinuation, nativeTranscript: continuationMessages || providerContinuationMessages || (mode === 'openai-responses' ? resolvedMessages : null) };
   };
 
   const estimateRequest = (options = {}) => {
