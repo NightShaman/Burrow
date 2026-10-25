@@ -167,4 +167,7 @@ ALTER TABLE mod_external_turns ADD COLUMN display_message TEXT;
 UPDATE mod_external_turns SET display_message=message WHERE display_message IS NULL;
 ALTER TABLE mod_external_turns ALTER COLUMN display_message SET NOT NULL;
 ` },
+  { version: 68, name: 'scheduled-model-context-mode', sql: `
+ALTER TABLE scheduled_jobs ADD COLUMN context_mode TEXT NOT NULL DEFAULT 'continue' CHECK (context_mode IN ('continue','fresh'));
+` },
 ]);

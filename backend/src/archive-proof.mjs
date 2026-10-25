@@ -1,3 +1,4 @@
+import { isInternalContextSession } from './model-context-boundary.mjs';
 import { evidenceTranscript } from './session-search.mjs';
 import { readRunEvidence } from './run-evidence.mjs';
 import { listSubagentRecords, subagentVisibilitySummary } from './subagent-store.mjs';
@@ -492,7 +493,7 @@ function proofSummary({ agentId, agentName, sessionId, runId, entries, evidence,
 async function recordsFor(conversationStore, agentId, sessionId = null) {
   if (!conversationStore) throw new Error('conversation_store_required');
   if (sessionId) return [{ id: sessionId }];
-  return (await conversationStore.listSessions({agentId,includeArchived:true})).map(record=>({...record,id:record.sessionId}));
+  return (await conversationStore.listSessions({agentId,includeArchived:true})).filter(record => !isInternalContextSession(record)).map(record=>({...record,id:record.sessionId}));
 }
 
 function traceRootFor({ traceRoot = null, resolveTraceRoot = null, sessionId } = {}) {

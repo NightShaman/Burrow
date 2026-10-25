@@ -104,8 +104,13 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
   const implicitReplySession = replyTo?.recipientAgentId === recipient ? replyTo.sessionId : null;
   const incomingSession = recipientRuntime.agent?.contextConfig?.a2aInDefault === false ? 'a2a' : 'default';
   const session = sessionId(text(targetSessionId) || implicitReplySession || incomingSession);
-  const source = sessionId(sourceSessionId || 'default');
+  const sourceMetadata = await conversationStore.getMetadata({ agentId: sender, sessionId: sourceSessionId || 'default' });
+  const source = sessionId(sourceMetadata?.contextIsolation?.historySessionId || sourceSessionId || 'default');
   const deliveryId = createHash('sha256').update(JSON.stringify([sender, recipient, source, session, runId || null, resolvedMode, body])).digest('hex');
+  // A runtime-attested return is part of the original conversation, not a
+  // new independent A2A ingress (even when that agent has a dedicated inbox).
+  const contextBoundary = session !== implicitReplySession && session !== 'default' && recipientRuntime.agent?.contextConfig?.a2aInDefault === false
+    ? { key: `a2a:${sender}:${source}:${runId || deliveryId}` } : null;
   const deliveryRequest = { sender, recipient, sourceSessionId: source, targetSessionId: session, runId: runId || null, messageMode: resolvedMode, content: body };
 
   const deliver = async () => {
@@ -175,7 +180,7 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
           const delivery = await deliver();
           abortSignal?.throwIfAborted();
           await assertOwner();
-          const response = await runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, messageMode: resolvedMode, inboundEntryId: delivery.recipientEntry.id, parentSignal: abortSignal });
+          const response = await runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, messageMode: resolvedMode, inboundEntryId: delivery.recipientEntry.id, contextBoundary, parentSignal: abortSignal });
           return { ...delivery, reply: response };
         },
       });

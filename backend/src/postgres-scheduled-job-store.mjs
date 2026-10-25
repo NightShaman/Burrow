@@ -53,6 +53,7 @@ function jobRow(row) {
       cron: row.cron_expression,
       timezone: null,
       sessionId: row.session_id,
+      contextMode: row.context_mode || 'continue',
       modelConnectionId: row.model_connection_id || null,
       model: row.model || null,
       enabled: Boolean(row.enabled),
@@ -108,6 +109,10 @@ function modelOverride(input) {
 }
 function jobInput(input, { partial = false } = {}) {
   const result = modelOverride(input);
+  if (!partial || input.contextMode !== undefined) {
+    result.contextMode = input.contextMode ?? 'continue';
+    if (!['continue', 'fresh'].includes(result.contextMode)) throw new Error('scheduled_job_context_mode_invalid');
+  }
   if (!partial || input.agentId !== undefined)
     result.agentId = id(input.agentId, "scheduled_job_agent_id");
   if (!partial || input.name !== undefined) {
@@ -129,6 +134,7 @@ function jobInput(input, { partial = false } = {}) {
     if (!/^[A-Za-z0-9._-]{1,96}$/.test(result.sessionId))
       throw new Error("scheduled_job_session_id_invalid");
   }
+  if (result.contextMode === 'fresh' && result.sessionId === 'default') throw new Error('context_boundary_named_session_required');
   if (input.enabled !== undefined) {
     if (typeof input.enabled !== "boolean")
       throw new Error("scheduled_job_enabled_invalid");
@@ -238,6 +244,7 @@ export class PostgresScheduledJobStore {
   }
   async createJob(input = {}, { ownerModId = null } = {}) {
     const job = jobInput({ ...input, timezone: input.timezone ?? null });
+    if (job.contextMode === 'fresh' && (!job.sessionId || job.sessionId === 'default')) throw new Error('context_boundary_named_session_required');
     await this.validateModel(job);
     const enabled = job.enabled === true;
     const stamp = timestamp(this.clock);
@@ -247,7 +254,7 @@ export class PostgresScheduledJobStore {
       ? nextCronOccurrence(job.cron, effectiveTimezone, new Date(stamp))
       : null;
     await this.pool.query(
-      "INSERT INTO scheduled_jobs (id,owner_mod_id,agent_id,name,prompt,cron_expression,timezone,session_id,enabled,next_run_at,last_run_at,created_at,updated_at,model_connection_id,model) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12,$13,$14)",
+      "INSERT INTO scheduled_jobs (id,owner_mod_id,agent_id,name,prompt,cron_expression,timezone,session_id,enabled,next_run_at,last_run_at,created_at,updated_at,model_connection_id,model,context_mode) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12,$13,$14,$15)",
       [
         jobId,
         ownerModId ? id(ownerModId, "scheduled_job_owner_mod_id") : null,
@@ -263,6 +270,7 @@ export class PostgresScheduledJobStore {
         stamp,
         job.modelConnectionId || null,
         job.model || null,
+        job.contextMode,
       ],
     );
     await this.pool.query("UPDATE scheduled_jobs SET effective_timezone=$1 WHERE id=$2", [effectiveTimezone, jobId]);
@@ -285,6 +293,7 @@ export class PostgresScheduledJobStore {
       if (!current) return null;
       const patch = jobInput(input, { partial: true });
       const next = { ...current, ...patch };
+      if (next.contextMode === 'fresh' && next.sessionId === 'default') throw new Error('context_boundary_named_session_required');
       if (patch.modelConnectionId !== undefined)
         await this.validateModel(next, client);
       const stamp = timestamp(this.clock);
@@ -298,7 +307,7 @@ export class PostgresScheduledJobStore {
           ? nextCronOccurrence(next.cron, await this.effective(next.timezone, client), new Date(stamp))
           : current.nextRunAt;
       await client.query(
-        "UPDATE scheduled_jobs SET agent_id=$1,name=$2,prompt=$3,cron_expression=$4,timezone=$5,session_id=$6,enabled=$7,next_run_at=$8,updated_at=$9,model_connection_id=$10,model=$11 WHERE id=$12",
+        "UPDATE scheduled_jobs SET agent_id=$1,name=$2,prompt=$3,cron_expression=$4,timezone=$5,session_id=$6,enabled=$7,next_run_at=$8,updated_at=$9,model_connection_id=$10,model=$11,context_mode=$13 WHERE id=$12",
         [
           next.agentId,
           next.name,
@@ -312,6 +321,7 @@ export class PostgresScheduledJobStore {
           next.modelConnectionId || null,
           next.model || null,
           current.id,
+          next.contextMode,
         ],
       );
       if (recompute) await client.query("UPDATE scheduled_jobs SET effective_timezone=$1 WHERE id=$2", [await this.effective(next.timezone, client), current.id]);

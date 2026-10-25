@@ -7,7 +7,7 @@ async function owned(store, agentId, jobId) {
 
 function input(action, { sessionId, create = false } = {}) {
   const value = {};
-  for (const [from, to = from] of [['jobName','name'], ['jobPrompt','prompt'], ['cron'], ['timezone']]) if (action[from] !== null && action[from] !== undefined) value[to] = action[from];
+  for (const [from, to = from] of [['jobName','name'], ['jobPrompt','prompt'], ['cron'], ['timezone'], ['contextMode']]) if (action[from] !== null && action[from] !== undefined) value[to] = action[from];
   if (action.scheduledSessionId) value.sessionId = action.scheduledSessionId;
   else if (create) value.sessionId = sessionId || 'default';
   if (action.enabled !== null) value.enabled = action.enabled;

@@ -1,3 +1,4 @@
+import { isInternalContextSession } from './model-context-boundary.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { readModConversationPage } from './mod-conversation-pager.mjs';
 import { MODEL_REASONING_EFFORT_VALUES, modelSupportsTemperature, normalizeModelReasoningEffort, resolveModelConfig } from './config.mjs';
@@ -314,8 +315,8 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
         inventories.set(id, snapshot);
         try {
           // Read the whole inventory only at traversal creation, never per page.
-          const sessions = await conversationStore.listSessions({ agentId, includeArchived });
-          const resets = !includeArchived ? [] : (await conversationStore.listArchives({ agentId, limit: null })).filter((archive) => archive.kind === 'reset');
+          const sessions = (await conversationStore.listSessions({ agentId, includeArchived })).filter(record => !isInternalContextSession(record));
+          const resets = !includeArchived ? [] : (await conversationStore.listArchives({ agentId, limit: null })).filter((archive) => archive.kind === 'reset' && !isInternalContextSession(archive));
           const entryKey = (entry) => entry.archiveId ? `archive:${entry.archiveId}` : `session:${entry.id}`;
           const entries = [...sessions.map((record) => {
               const id = record.sessionId || record.id;

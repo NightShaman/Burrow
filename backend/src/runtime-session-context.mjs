@@ -33,7 +33,7 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
   };
   const conversationId = priorSession.metadata?.conversationId || null;
   const isFreshConversation = !(priorSession?.turnCount > 0);
-  const continuityHandoffs = isFreshConversation
+  const continuityHandoffs = isFreshConversation && !metadata?.contextIsolation
     ? await stores.continuity.list({ agentId: agentId, limit: 1 })
     : [];
   // Execution assignments select the host's working directory, not the

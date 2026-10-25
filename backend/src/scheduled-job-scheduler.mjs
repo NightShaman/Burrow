@@ -62,6 +62,7 @@ export function createScheduledJobScheduler({ storeFactory, closeStore: closeSto
       if (!ownerAvailable(job)) throw new Error('scheduled_job_owner_inactive');
       const result = await executeTurn({
         body: { message: job.prompt, sessionId: job.sessionId, runId, abortSignal: controller.signal, ...(job.modelConnectionId ? { modelConnectionId: job.modelConnectionId, model: job.model } : {}) },
+        contextBoundary: job.contextMode === 'fresh' ? { key: `scheduled:${run.id}` } : null,
         rootDir,
         stores,
         agentRuntime,

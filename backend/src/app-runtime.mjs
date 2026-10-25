@@ -1,3 +1,5 @@
+import { conversationAuthority } from './conversation-authority.mjs';
+import { contextSessionId, withContextHistory } from './model-context-boundary.mjs';
 import { createHash } from 'node:crypto';
 import { visibleUserMessage } from './runtime-turn-input.mjs';
 import { performance } from 'node:perf_hooks';
@@ -123,6 +125,7 @@ async function runAskChatUnserialized({
   // Trusted internal provenance for one bounded recipient response. It is never
   // accepted from serialized request args.
   incomingAgentMessage = null,
+  contextBoundary = null,
   // Internal ingress provenance; never taken from request body.
   turnSource = null,
   // Core-attested external ingress metadata; never taken from request body.
@@ -196,7 +199,25 @@ async function runAskChatUnserialized({
   // A trace run id identifies one turn. A fixed fallback silently merges
   // unrelated CLI/test turns into one apparent runaway trace.
   const resolvedRunId = runId || normalizedArgs.run_id || defaults.runId || createFallbackRunId();
-  const resolvedSessionId = sessionId || normalizedArgs.session_id || normalizedArgs.run_id || 'default';
+  const historyStores = stores;
+  const historySessionId = sessionId || normalizedArgs.session_id || normalizedArgs.run_id || 'default';
+  const resolvedSessionId = contextBoundary
+    ? contextSessionId({ agentId: runtimeState.agentId, historySessionId, key: contextBoundary.key })
+    : historySessionId;
+  if (contextBoundary) {
+    stores = { ...stores, conversations: withContextHistory(stores.conversations, { agentId: runtimeState.agentId, sessionId: resolvedSessionId, historySessionId }) };
+    await stores.conversations.updateMetadata({ agentId: runtimeState.agentId, sessionId: resolvedSessionId, update: metadata => ({ ...metadata, contextIsolation: { historySessionId } }) });
+    if (incomingAgentMessage?.inboundEntryId) {
+      const entries = await conversationAuthority({ store: historyStores.conversations, agentId: runtimeState.agentId }).entriesAll(historySessionId);
+      const inbound = entries.find(entry => entry.id === incomingAgentMessage.inboundEntryId);
+      if (!inbound) throw new Error('context_boundary_inbound_missing');
+      await historyStores.conversations.appendIfAbsent({ agentId: runtimeState.agentId, sessionId: resolvedSessionId, entry: { ...inbound, sessionId: resolvedSessionId }, idempotencyKey: `context-inbound:${inbound.id}` });
+    }
+  }
+  if (!contextBoundary) {
+    const isolation = (await stores.conversations.getMetadata({ agentId: runtimeState.agentId, sessionId: resolvedSessionId }))?.contextIsolation;
+    if (isolation?.historySessionId) stores = { ...stores, conversations: withContextHistory(stores.conversations, { agentId: runtimeState.agentId, sessionId: resolvedSessionId, historySessionId: isolation.historySessionId }) };
+  }
   const steeringIdentity = { agentId: runtimeState.agentId, sessionId: resolvedSessionId, runId: resolvedRunId };
   if (stores.steering) {
     await stores.steering.open(steeringIdentity);
@@ -264,7 +285,7 @@ async function runAskChatUnserialized({
   const logger = createTraceLogger({ rootDir: traceRoot, runId: resolvedRunId, sessionId: resolvedSessionId, conversationId, onRecord: observeTrace });
   if (latencyTiming) await logger.event('chat-admission-timing', { ...latencyTiming, clockDomain: 'server-process' });
   const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, logger, onTerminal: telemetryRun ? (result) => telemetry.endRun?.(resolvedRunId, result) : null, testHooks });
-  const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, messageMode = 'request_reply', inboundEntryId, parentSignal = null }) => {
+  const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, messageMode = 'request_reply', inboundEntryId, contextBoundary = null, parentSignal = null }) => {
     // Ingress is already durable/idempotent before this callback. Each distinct
     // exchange needs a distinct run, while replays retain the same identity.
     if (!inboundEntryId) throw new Error('agent_message_inbound_identity_required');
@@ -288,9 +309,10 @@ async function runAskChatUnserialized({
         json: true,
         agentRuntime: recipientRuntime,
         resolveAgentRuntime,
+        contextBoundary,
         incomingAgentMessage: { senderAgentId, sourceSessionId, sourceRunId, messageMode, inboundEntryId },
         registerNestedAgentRun,
-        stores,
+        stores: historyStores,
         onTraceRecord: lifecycle?.onTraceRecord || null,
         telemetry,
         parentTraceContext: telemetryRun ? telemetry.traceContextForRun?.(resolvedRunId) : null,
@@ -448,7 +470,7 @@ async function runAskChatUnserialized({
       fromAgentId: incomingAgentMessage.senderAgentId,
       toAgentId: runtimeState.agentId,
       sourceSessionId: incomingAgentMessage.sourceSessionId,
-      targetSessionId: resolvedSessionId,
+      targetSessionId: historySessionId,
       messageMode: incomingAgentMessage.messageMode || 'request_reply',
     } }).content
     : message;

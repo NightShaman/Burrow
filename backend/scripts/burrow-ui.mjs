@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { isInternalContextSession } from '../src/model-context-boundary.mjs';
 import { createModGenerationDispatcher } from '../src/mod-generations.mjs';
 import { createModTextGenerator } from '../src/mod-capabilities.mjs';
 import { migrateLegacyExecutionProviderApproval } from '../src/execution-provider-approval.mjs';
@@ -1987,7 +1988,7 @@ async function listSessions({ rootDir, rootDirs = null, agentId = null, includeA
   agentId ||= (await resolveAgentRuntime()).agentId;
   const rows = await postgresApplication.stores.conversations.listSessions({ agentId, includeArchived });
   const since = updatedSince && !Number.isNaN(Date.parse(updatedSince)) ? String(updatedSince) : null;
-  return rows.filter((item) => !query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase())).filter((item) => !since || String(item.updatedAt || "") > since).slice(0, resolvedLimit ?? undefined).map((item) => ({ ...item, id: item.sessionId }));
+  return rows.filter((item) => !isInternalContextSession(item)).filter((item) => !query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase())).filter((item) => !since || String(item.updatedAt || "") > since).slice(0, resolvedLimit ?? undefined).map((item) => ({ ...item, id: item.sessionId }));
 }
 
 function activityItemFromTraceCard(card = {}) {

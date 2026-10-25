@@ -7753,6 +7753,15 @@
                     "string",
                     "null"
                   ]
+                },
+                "contextMode": {
+                  "type": "string",
+                  "enum": [
+                    "continue",
+                    "fresh"
+                  ],
+                  "default": "continue",
+                  "description": "Fresh creates an isolated execution context per run while preserving named history; requires a non-default sessionId."
                 }
               },
               "additionalProperties": false

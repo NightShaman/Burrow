@@ -1547,6 +1547,7 @@ export class PostgresSessionStore {
       FROM conversation_archive_runs r LEFT JOIN conversation_sessions s ON s.agent_id=r.agent_id AND s.session_id=r.session_id
       LEFT JOIN LATERAL (SELECT item FROM jsonb_array_elements(COALESCE(s.metadata->'runEvidence','[]'::jsonb)) item WHERE item->>'runId'=r.run_id LIMIT 1) evidence ON true
       WHERE r.agent_id=$1 AND ($2::text IS NULL OR r.session_id=$2)
+      AND ($2::text IS NOT NULL OR NULLIF(s.metadata->'contextIsolation'->>'historySessionId','') IS NULL)
       AND ($3::text IS NULL OR (r.sort_timestamp,r.agent_id || ':' || r.run_id)<($3,$4))
       ORDER BY r.sort_timestamp DESC,r.agent_id || ':' || r.run_id DESC LIMIT $5`,
     [agentId, sessionId, boundary?.t || null, boundary?.i || null, size + 1]);
@@ -1632,21 +1633,22 @@ export class PostgresSessionStore {
       SELECT s.agent_id,s.session_id AS id,s.session_id,NULL::text AS source_session_id,
         false AS archive_snapshot,s.metadata,s.created_at,s.updated_at
       FROM conversation_sessions s
-      WHERE s.agent_id=$1 AND ($2::boolean OR COALESCE((s.metadata->>'archived')::boolean,false)=false)
-        AND ($10::timestamptz IS NULL OR s.updated_at>=$10::timestamptz)
-        AND ($11::timestamptz IS NULL OR s.updated_at<$11::timestamptz)
+      WHERE s.agent_id=$1 AND NULLIF(s.metadata->'contextIsolation'->>'historySessionId','') IS NULL AND ($2::boolean OR COALESCE((s.metadata->>'archived')::boolean,false)=false)
+        AND ($10::timestamptz IS NULL OR burrow_legacy_instant(s.updated_at::text)>=$10::timestamptz)
+        AND ($11::timestamptz IS NULL OR burrow_legacy_instant(s.updated_at::text)<$11::timestamptz)
       UNION ALL
       SELECT a.agent_id,a.archive_id AS id,a.session_id,a.session_id AS source_session_id,
         true AS archive_snapshot,a.metadata,a.created_at,a.created_at AS updated_at
       FROM conversation_archives a WHERE a.agent_id=$1 AND a.kind='reset'
-        AND ($10::timestamptz IS NULL OR a.created_at>=$10::timestamptz)
-        AND ($11::timestamptz IS NULL OR a.created_at<$11::timestamptz)
+        AND NULLIF(a.metadata->'contextIsolation'->>'historySessionId','') IS NULL
+        AND ($10::timestamptz IS NULL OR burrow_legacy_instant(a.created_at::text)>=$10::timestamptz)
+        AND ($11::timestamptz IS NULL OR burrow_legacy_instant(a.created_at::text)<$11::timestamptz)
     ), bounded AS (
       SELECT *,agent_id || ':' || id AS identity FROM archive_rows
       WHERE ($3::text='' OR lower(concat_ws(' ',id,session_id,source_session_id,metadata::text)) LIKE '%' || $3 || '%')
-      AND ($4::text IS NULL OR to_char(updated_at AT TIME ZONE $6,'YYYY-MM-DD')=$4)
-      AND ($5::text IS NULL OR to_char(updated_at AT TIME ZONE $6,'YYYY-MM')=$5)
-      AND ($7::timestamptz IS NULL OR (updated_at,agent_id || ':' || id)<($7::timestamptz,$8::text))
+      AND ($4::text IS NULL OR to_char(burrow_legacy_instant(updated_at::text) AT TIME ZONE $6,'YYYY-MM-DD')=$4)
+      AND ($5::text IS NULL OR to_char(burrow_legacy_instant(updated_at::text) AT TIME ZONE $6,'YYYY-MM')=$5)
+      AND ($7::timestamptz IS NULL OR (burrow_legacy_instant(updated_at::text),agent_id || ':' || id)<($7::timestamptz,$8::text))
       ORDER BY updated_at DESC,agent_id || ':' || id DESC LIMIT $9
     ) SELECT bounded.*,
       CASE WHEN archive_snapshot THEN (SELECT count(*) FROM (
@@ -1683,11 +1685,11 @@ export class PostgresSessionStore {
     const safeStart = new Date(monthStart); safeStart.setUTCDate(safeStart.getUTCDate() - 1);
     const safeEnd = new Date(monthStart); safeEnd.setUTCMonth(safeEnd.getUTCMonth() + 1, 2);
     const { rows } = await this.pool.query(`SELECT DISTINCT day FROM (
-      SELECT to_char(updated_at AT TIME ZONE $3,'YYYY-MM-DD') AS day
-      FROM conversation_sessions WHERE agent_id=$1 AND updated_at>=$4 AND updated_at<$5
+      SELECT to_char(burrow_legacy_instant(updated_at::text) AT TIME ZONE $3,'YYYY-MM-DD') AS day
+      FROM conversation_sessions WHERE agent_id=$1 AND NULLIF(metadata->'contextIsolation'->>'historySessionId','') IS NULL AND updated_at>=$4 AND updated_at<$5
       UNION ALL
-      SELECT to_char(created_at AT TIME ZONE $3,'YYYY-MM-DD') AS day
-      FROM conversation_archives WHERE agent_id=$1 AND kind='reset' AND created_at>=$4 AND created_at<$5
+      SELECT to_char(burrow_legacy_instant(created_at::text) AT TIME ZONE $3,'YYYY-MM-DD') AS day
+      FROM conversation_archives WHERE agent_id=$1 AND kind='reset' AND NULLIF(metadata->'contextIsolation'->>'historySessionId','') IS NULL AND created_at>=$4 AND created_at<$5
     ) archive_days WHERE day LIKE $2 || '-%' ORDER BY day`, [agentId, month, timezone, safeStart.toISOString(), safeEnd.toISOString()]);
     return rows.map(row => row.day);
   }
@@ -1695,6 +1697,7 @@ export class PostgresSessionStore {
   async listArchives({ agentId: rawAgentId, sessionId: rawSessionId, limit = 100 } = {}) {
     const agentId = required(rawAgentId, 'agentId'); const params = [agentId]; let where = 'agent_id=$1';
     if (rawSessionId != null) { params.push(required(rawSessionId, 'sessionId')); where += ` AND session_id=$${params.length}`; }
+    if (rawSessionId == null) where += ` AND NULLIF(metadata->'contextIsolation'->>'historySessionId','') IS NULL`;
     const unbounded = limit === null;
     if (!unbounded) params.push(limitValue(limit));
     const result = await this.pool.query(`SELECT archive_id,session_id,generation,kind,COALESCE((SELECT json_agg(e.entry ORDER BY e.ordinal) FROM conversation_archive_entries e WHERE e.agent_id=conversation_archives.agent_id AND e.session_id=conversation_archives.session_id AND e.source_id=conversation_archives.archive_id),'[]'::json) AS entries,metadata,created_at FROM conversation_archives WHERE ${where} ORDER BY generation DESC, created_at DESC, archive_id DESC${unbounded ? '' : ` LIMIT $${params.length}`}`, params);

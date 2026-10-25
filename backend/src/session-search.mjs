@@ -1,3 +1,4 @@
+import { isInternalContextSession, canonicalHistorySessionId } from './model-context-boundary.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 import { compressionSummariesFromTranscript } from './session-compression.mjs';
 
@@ -29,7 +30,7 @@ export async function evidenceTranscript({ conversationStore, agentId, rootDir, 
 
 async function evidenceSessions({ conversationStore, agentId, rootDir, includeArchived = true }) {
   if (!conversationStore) throw new Error('conversation_store_required');
-  return (await conversationStore.listSessions({ agentId, includeArchived })).map((record) => ({ ...record, id: record.sessionId }));
+  return (await conversationStore.listSessions({ agentId, includeArchived })).filter(record => !isInternalContextSession(record)).map((record) => ({ ...record, id: record.sessionId }));
 }
 
 function normalized(value) {
@@ -269,7 +270,8 @@ export async function searchAgentSessionEvidence({ conversationStore = null, con
   const max = parseLimit(limit, 12);
   if (!conversationStore) throw new Error('conversation_store_required');
   const roots = [null];
-  const currentSessionId = String(sessionId || 'default');
+  const currentSessionId = await canonicalHistorySessionId(conversationStore, { agentId, sessionId: String(sessionId || 'default') });
+  if (sourceSessionId) sourceSessionId = await canonicalHistorySessionId(conversationStore, { agentId, sessionId: sourceSessionId });
   const sessionRecords = (await Promise.all(roots.map(async (candidateRoot) => (await evidenceSessions({ conversationStore, agentId, rootDir: candidateRoot, includeArchived: true })).map((record) => ({ rootDir: candidateRoot, sessionId: record.id }))))).flat();
   const orderedSessions = [
     ...roots.map((candidateRoot) => ({ rootDir: candidateRoot, sessionId: currentSessionId })),
