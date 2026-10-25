@@ -290,7 +290,7 @@ function installerStagingScheduler() {
 
 function taskExecutionMessage(task, project) {
   return [
-    'Task-board execution request. Work this task now and report concise evidence, blockers, and any changed files. Before changing this board task’s status, fields, assignment, or metadata, confirm the intended board update with Rob; do not infer it from work completion alone.',
+    'Task-board execution request. Work this task now and report concise evidence, blockers, and any changed files. Keep this task’s status aligned with your work: move it to `in_progress` when you begin execution and to `review` when the work is complete and ready for operator review. These transitions do not require confirmation. The operator owns the final move to `done`; do not mark tasks done yourself. Confirm other changes to task fields, assignment, or metadata with the operator unless already authorized.',
     `Task ID: ${task.id}`,
     `Task execution project: ${project.name} (${project.id})`,
     project.description ? `Project description: ${project.description}` : null,
