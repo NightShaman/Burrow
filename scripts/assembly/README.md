@@ -50,3 +50,12 @@ Run all contracts: `node --test scripts/assembly/*.test.mjs`.
 Run smoke: `node scripts/assembly/packaged-smoke.mjs IMAGE ASSEMBLED_ROOT`.
 For sudo-only Docker, supply `BURROW_SMOKE_DOCKER` pointing to an executable wrapper
 that runs `sudo docker "$@"`. No host PostgreSQL or registry credentials are needed.
+
+### NightShaman Releases
+
+Successful assemblies publish a normal GitHub release marked Latest in the
+NightShaman repository after packaged smoke checks and container publication.
+The existing UTC build version identifies the release. Assets contain the exact
+committed installable assembly, SOURCE_VERSIONS and SHA256SUMS; notes link the
+workflow, source revisions and immutable image. This is independent of public
+promotion/releases under GoblinKing-Burrow (no prerelease flag or manual pinning).

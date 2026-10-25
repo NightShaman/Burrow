@@ -18,7 +18,7 @@ test('development assembly publishes a smoke-tested dev image while complete val
  const promotion = readFileSync(new URL('../../.github/workflows/daily-public-promotion.yml',import.meta.url),'utf8');
  assert.match(workflow,/component-gate\.mjs NightShaman\/Burrow-Backend/);
  assert.match(workflow,/component-gate\.mjs NightShaman\/Burrow-UI/);
- assert.doesNotMatch(workflow,/npm test|apt-get|DISPOSABLE_POSTGRES|gh release create/);
+ assert.doesNotMatch(workflow,/npm test|apt-get|DISPOSABLE_POSTGRES/);
  assert.match(workflow,/docker\/build-push-action/);
  assert.match(workflow,/packaged-smoke\.mjs burrow-development:tested/);
  assert.match(workflow,/for tag in latest dev/);

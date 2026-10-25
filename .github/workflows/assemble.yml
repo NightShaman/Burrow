@@ -182,3 +182,31 @@ jobs:
             docker tag burrow-development:tested "ghcr.io/nightshaman/burrow:$tag"
             docker push "ghcr.io/nightshaman/burrow:$tag"
           done
+      - name: Publish NightShaman release for tested assembly
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_VERSION: ${{ steps.build.outputs.version }}
+          ASSEMBLY_COMMIT: ${{ steps.publish.outputs.commit }}
+          BACKEND_SHA: ${{ steps.revisions.outputs.backend }}
+          UI_SHA: ${{ steps.revisions.outputs.ui }}
+        run: |
+          set -eu
+          mkdir -p release-assets
+          # Archive the exact committed payload, never a moving branch.
+          git -C assembled archive --format=tar.gz --prefix=burrow/ "$ASSEMBLY_COMMIT" > "release-assets/burrow-$BUILD_VERSION.tar.gz"
+          cp assembled/SOURCE_VERSIONS release-assets/SOURCE_VERSIONS
+          (cd release-assets && sha256sum "burrow-$BUILD_VERSION.tar.gz" SOURCE_VERSIONS > SHA256SUMS)
+          cat > release-assets/notes.md <<NOTES
+          Installable NightShaman development assembly **$BUILD_VERSION**.
+
+          - Assembly: $ASSEMBLY_COMMIT
+          - Backend: $BACKEND_SHA
+          - UI: $UI_SHA
+          - Validated workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          - Container: ghcr.io/nightshaman/burrow:sha-$ASSEMBLY_COMMIT
+
+          Download the assembled payload and verify it with SHA256SUMS. Public promotion in GoblinKing-Burrow is independent of this release.
+          NOTES
+          gh release create "v$BUILD_VERSION" release-assets/burrow-*.tar.gz release-assets/SOURCE_VERSIONS release-assets/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --target "$ASSEMBLY_COMMIT" \
+            --title "Burrow $BUILD_VERSION" --notes-file release-assets/notes.md --latest
