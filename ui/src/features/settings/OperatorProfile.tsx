@@ -1,3 +1,4 @@
+import { useUnsavedChanges } from '../../app/UnsavedChanges';
 import { useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from 'react';
 import { api } from '../../app/api';
 
@@ -48,6 +49,8 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 export function OperatorProfile({ onSaved }: { onSaved: (profile: { name: string; avatar: string }) => void }) {
   const [name, setName] = useState('');
   const [avatar, setAvatar] = useState('');
+  const [baseline, setBaseline] = useState({ name: '', avatar: '' });
+  const saving = useRef(false);
   const [avatarFileName, setAvatarFileName] = useState('');
   const [status, setStatus] = useState<'loading' | 'idle' | 'saving' | 'error'>('loading');
   const [error, setError] = useState('');
@@ -61,7 +64,8 @@ export function OperatorProfile({ onSaved }: { onSaved: (profile: { name: string
     setStatus('loading'); setError('');
     api<{ operator: { name: string; avatar: string } }>('/api/settings/identities', { signal: controller.signal }).then(result => {
       if (owner.current !== ticket) return;
-      setName(result.operator.name); setAvatar(result.operator.avatar); setAvatarFileName(''); setStatus('idle');
+      if (!result.operator || typeof result.operator.name !== 'string' || typeof result.operator.avatar !== 'string') throw new Error('Invalid operator profile response.');
+      setBaseline(result.operator); setName(result.operator.name); setAvatar(result.operator.avatar); setAvatarFileName(''); setStatus('idle');
     }).catch(cause => {
       if (owner.current !== ticket) return;
       setError(cause instanceof Error ? `Could not load operator profile: ${cause.message}` : 'Could not load operator profile.');
@@ -85,14 +89,16 @@ export function OperatorProfile({ onSaved }: { onSaved: (profile: { name: string
   };
   const removeAvatar = () => { if (status !== 'idle') return; setAvatar(''); setAvatarFileName(''); setError(''); if (fileInput.current) fileInput.current.value = ''; };
   const save = async () => {
-    if (status !== 'idle' || !owner.current) return;
+    if (status !== 'idle' || !owner.current || saving.current) return false;
     const ticket = owner.current;
     const nextName = name.trim();
-    if (!nextName) { setError('Your displayed name cannot be empty.'); return; }
-    setStatus('saving'); setError('');
-    try { await api('/api/settings/identities', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'operator', id: 'default', name: nextName, avatar }) }); if (owner.current === ticket) onSaved({ name: nextName, avatar }); }
+    if (!nextName) { setError('Your displayed name cannot be empty.'); return false; }
+    saving.current = true; setStatus('saving'); setError('');
+    try { await api('/api/settings/identities', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'operator', id: 'default', name: nextName, avatar }) }); if (owner.current !== ticket) return false; setName(nextName); setBaseline({ name: nextName, avatar }); onSaved({ name: nextName, avatar }); return true; }
     catch (cause) { if (owner.current === ticket) setError(cause instanceof Error ? `Could not save operator profile: ${cause.message}` : 'Could not save operator profile.'); }
-    finally { if (owner.current === ticket) setStatus('idle'); }
+    finally { saving.current = false; if (owner.current === ticket) setStatus('idle'); }
+    return false;
   };
+  useUnsavedChanges({ dirty: status !== 'loading' && (name !== baseline.name || avatar !== baseline.avatar), busy: status === 'saving', save, discard: () => { setName(baseline.name); setAvatar(baseline.avatar); setAvatarFileName(''); setError(''); } });
   return <SettingSection title="Operator profile"><div className="operator-profile"><div className="agent-avatar-preview">{avatar ? <img src={avatar} alt="" /> : (name.trim()[0] || '?').toUpperCase()}</div><div className="operator-profile-details"><div className="avatar-file-control" onPaste={pasteAvatar}><label className="avatar-file-name">Paste or choose image<input value={avatarFileName} placeholder="Paste an image or choose a file" disabled={status !== 'idle'} readOnly aria-label="Avatar image" /></label><button className="secondary" type="button" onClick={() => fileInput.current?.click()} disabled={status !== 'idle'}>Change</button><input ref={fileInput} className="avatar-file-input" type="file" accept="image/*" disabled={status !== 'idle'} onChange={(event) => { void chooseAvatar(event.target.files?.[0]); event.currentTarget.value = ''; }} /></div>{avatar && <button className="avatar-remove" type="button" onClick={removeAvatar} disabled={status !== 'idle'}>Remove image</button>}</div></div><div className="operator-profile-actions"><Field label="Displayed name"><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" disabled={status !== 'idle'} /></Field><button className="primary" type="button" onClick={() => { void save(); }} disabled={status !== 'idle'}>{status === 'saving' ? 'Saving…' : 'Save profile'}</button></div>{status === 'error' && <button type="button" onClick={() => setRetry(value => value + 1)}>Retry operator profile</button>}{error && <p className="settings-request-error" role="alert">{error}</p>}</SettingSection>;
 }

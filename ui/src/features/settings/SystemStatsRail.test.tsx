@@ -12,14 +12,17 @@ it('shows UI identity and backend provenance in the Burrow summary in system sta
     ? { ok: true, version: '2026.10.11.11', releaseProvenance: { ui: 'different-packaged-ui', backend: 'abcdef0123456789', assembly: '2026.10.11.11' } }
     : { ok: true, filesystem: {}, process: { cpu: {} }, load: {} });
   render(<SystemStatsRail active />);
-  await screen.findByText('abcdef0123456789');
-  expect(screen.getByText('1234567890abcdef').getAttribute('title')).toBe('1234567890abcdef');
+  await screen.findByText('abcdef0');
+  expect(screen.getByText('1234567').getAttribute('title')).toBe('1234567890abcdef');
+  expect(screen.getByText('abcdef0').getAttribute('title')).toBe('abcdef0123456789');
+  expect(screen.getByText('UI').tagName).toBe('STRONG');
+  expect(screen.getByText('Backend').tagName).toBe('STRONG');
   expect(screen.queryByText('different-packaged-ui')).toBeNull();
-  const summary = screen.getByText('1234567890abcdef').closest('section');
+  const summary = screen.getByText('1234567').closest('section');
   expect(summary?.className).toBe('system-rail-summary');
   expect(summary?.textContent).toContain('Burrow');
   expect(summary?.textContent).toContain('2026.10.11.11');
-  expect(summary?.textContent).toContain('abcdef0123456789');
+  expect(summary?.textContent).toContain('abcdef0');
   expect(screen.queryByText('Build information')).toBeNull();
   expect(screen.queryByText('Assembly')).toBeNull();
   expect(screen.queryByText('Storage')).toBeNull();

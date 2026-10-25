@@ -50,6 +50,11 @@ function Stat({ label, value, detail, meter, warning = false }: { label: string;
   return <div className="system-rail-stat"><div><span>{label}</span><b title={value}>{value}</b></div>{detail && <small>{detail}</small>}{meter !== undefined && <Meter value={meter} tone={warning ? 'warning' : 'accent'} />}</div>;
 }
 
+function BuildStat({ label, value }: { label: string; value: string }) {
+  const shortValue = /^[a-f0-9]{12,40}$/i.test(value) ? value.slice(0, 7) : value;
+  return <div className="system-rail-build"><strong>{label}</strong><span title={value}>{shortValue}</span></div>;
+}
+
 export function SystemStatsRail({ active }: { active: boolean }) {
   const [health, setHealth] = useState<DetailedRuntimeHealth | null>(null);
   const [metrics, setMetrics] = useState<RuntimeMetrics | null>(null);
@@ -86,8 +91,8 @@ export function SystemStatsRail({ active }: { active: boolean }) {
       <div><span className={`system-rail-status ${error ? 'error' : health?.ok ? 'healthy' : 'loading'}`}><i />{status}</span><small>Updated {updated}</small></div>
       <strong>{health?.runtime ?? 'Burrow'} <span>{health?.version ?? '—'}</span></strong>
 
-      <Stat label="UI" value={__BURROW_UI_BUILD_IDENTITY__ || 'Unavailable'} />
-      <Stat label="Backend" value={health?.releaseProvenance?.backend ?? 'Unavailable'} />
+      <BuildStat label="UI" value={__BURROW_UI_BUILD_IDENTITY__ || 'Unavailable'} />
+      <BuildStat label="Backend" value={health?.releaseProvenance?.backend ?? 'Unavailable'} />
     </section>
 
     <section className="system-rail-group">

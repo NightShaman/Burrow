@@ -1,3 +1,4 @@
+import { useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { OpenTelemetrySettings } from './OpenTelemetrySettings';
 import { BrowserTabSettings } from './BrowserTabSettings';
 import { GlobalProfileDocuments } from './GlobalProfileDocuments';
@@ -38,6 +39,7 @@ const settingsUtilityPanelStorageKey = 'hc.settingsUtilityPanelOpen';
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
 
 export function Settings({ navigationTarget, tab, setTab, agents, selected, savedProviders, onModelConnectionsChanged, onAgentsChanged, onOperatorProfileChanged, onFirstRunComplete, leftTopPanel, setLeftTopPanel, leftBottomPanel, setLeftBottomPanel, rightTopPanel, setRightTopPanel, rightBottomPanel, setRightBottomPanel, leftSinglePanel, setLeftSinglePanel, rightSinglePanel, setRightSinglePanel, leftRailLayout, setLeftRailLayout, rightRailLayout, setRightRailLayout, theme, setTheme, agentRailPreferences, setAgentRailPreferences, previewFirstRun = false }: { navigationTarget?: HTMLElement | null; tab: SettingsTab; setTab: (t: SettingsTab) => void; agents: Agent[]; selected: Agent; savedProviders: SavedProvider[]; onModelConnectionsChanged: () => Promise<void>; onAgentsChanged: () => Promise<void>; onOperatorProfileChanged: (profile: { name: string; avatar: string }) => void; onFirstRunComplete: () => void; leftTopPanel: PanelId; setLeftTopPanel: (id: PanelId) => void; leftBottomPanel: PanelId; setLeftBottomPanel: (id: PanelId) => void; rightTopPanel: PanelId; setRightTopPanel: (id: PanelId) => void; rightBottomPanel: PanelId; setRightBottomPanel: (id: PanelId) => void; leftSinglePanel: PanelId; setLeftSinglePanel: (id: PanelId) => void; rightSinglePanel: PanelId; setRightSinglePanel: (id: PanelId) => void; leftRailLayout: typeof railLayouts[number]; setLeftRailLayout: (layout: typeof railLayouts[number]) => void; rightRailLayout: typeof railLayouts[number]; setRightRailLayout: (layout: typeof railLayouts[number]) => void; theme: Theme; setTheme: (theme: Theme) => void; agentRailPreferences: AgentRailPreferences; setAgentRailPreferences: (next: AgentRailPreferences | ((current: AgentRailPreferences) => AgentRailPreferences)) => void; previewFirstRun?: boolean }) {
+  const navigate = useUnsavedNavigation();
   const [settingsAgentId, setSettingsAgentId] = useState(selected.id);
   const [agentSection, setAgentSection] = useState<'details' | 'profile-documents' | 'mcp-tools' | 'cron-jobs' | 'dreams' | 'skills'>('details');
   const [generalSection, setGeneralSection] = useState<'opentelemetry' | 'browser-tab' | 'operator-timezone' | 'operator-profile' | 'execution-boundaries' | 'trace-retention' | 'brain-memory' | 'global-documents' | 'export' | 'rail-panels' | 'tiddle-signal' | 'appearance'>('operator-profile');
@@ -91,12 +93,12 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
   const modSettingsTab = (modId: string, settingId: string) => `mod-settings:${modId}:${settingId}` as SettingsTab;
   const settingsNavigation = <nav className="settings-blank-column settings-prototype-menu" aria-label="Settings sections">
         <div className="settings-prototype-menu-items">
-          {builtInTabs.map((item) => <button type="button" className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => setTab(item)} key={item}>{item === 'connections' ? 'Connections' : item[0].toUpperCase() + item.slice(1)}</button>)}
+          {builtInTabs.map((item) => <button type="button" className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => { if (tab !== item) navigate(() => setTab(item)); }} key={item}>{item === 'connections' ? 'Connections' : item[0].toUpperCase() + item.slice(1)}</button>)}
           {targetContributions.length > 0 && <div className="settings-prototype-menu-divider" role="separator" aria-label="Installed mods" />}
           {targetContributions.map((item) => {
             const active = selectedModId === item.modId;
             const settingId = active ? nativeSettingMatch?.[2] ?? item.settings?.[0]?.id ?? '__default__' : item.settings?.[0]?.id ?? '__default__';
-            return <button type="button" className={active ? 'active' : ''} aria-current={active ? 'page' : undefined} onClick={() => setTab(modSettingsTab(item.modId, settingId))} key={item.modId}>{item.name}</button>;
+            return <button type="button" className={active ? 'active' : ''} aria-current={active ? 'page' : undefined} onClick={() => navigate(() => setTab(modSettingsTab(item.modId, settingId)))} key={item.modId}>{item.name}</button>;
           })}
         </div>
       </nav>;
@@ -122,7 +124,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
             ['rail-panels', 'Rail panels'],
             ['tiddle-signal', 'Tiddle Signal'],
             ['appearance', 'Appearance'],
-          ] as const).map(([id, label]) => <button type="button" className={generalSection === id ? 'active' : ''} aria-current={generalSection === id ? 'page' : undefined} onClick={() => setGeneralSection(id)} key={id}>{label}</button>)}
+          ] as const).map(([id, label]) => <button type="button" className={generalSection === id ? 'active' : ''} aria-current={generalSection === id ? 'page' : undefined} onClick={() => { if (generalSection !== id) navigate(() => setGeneralSection(id)); }} key={id}>{label}</button>)}
         </nav>}
         {tab === 'agents' && <nav className="settings-prototype-section-items" aria-label={`${settingsSelected.name} settings sections`}>
           {([
@@ -141,7 +143,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
             ['model-providers', 'Model providers'],
             ['mcp-servers', 'MCP servers'],
             ['api-tokens', 'API tokens'],
-          ] as const).map(([id, label]) => <button type="button" className={connectionSection === id ? 'active' : ''} aria-current={connectionSection === id ? 'page' : undefined} onClick={() => setConnectionSection(id)} key={id}>{label}</button>)}
+          ] as const).map(([id, label]) => <button type="button" className={connectionSection === id ? 'active' : ''} aria-current={connectionSection === id ? 'page' : undefined} onClick={() => { if (connectionSection !== id) navigate(() => setConnectionSection(id)); }} key={id}>{label}</button>)}
         </nav>}
         {tab === 'mods' && <nav className="settings-prototype-section-items" aria-label="Mod management sections">
           {([

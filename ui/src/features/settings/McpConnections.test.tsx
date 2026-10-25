@@ -122,3 +122,50 @@ describe('MCP inventory failures', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 });
+
+describe('MCP save lifecycle audit', () => {
+  const connection = { id: 'reference', name: 'Reference MCP', transport: 'http', lifecycle: 'ephemeral', baseUrl: 'https://reference.invalid/mcp', args: [], apiKeyConfigured: false, environmentVariables: [], tools: [] };
+  async function editReference() {
+    render(<ConfirmProvider><McpConnections /></ConfirmProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Reference MCP' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Changed MCP' } });
+  }
+
+  it('retains the selected editor and draft after a failed mutation', async () => {
+    vi.mocked(api).mockResolvedValueOnce({ connections: [connection] }).mockRejectedValueOnce(new Error('offline'));
+    await editReference();
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Could not save MCP connection: offline');
+    expect(screen.getByDisplayValue('Changed MCP')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Edit Reference MCP' }).getAttribute('aria-pressed')).toBe('true');
+    expect((screen.getByRole('button', { name: 'Save changes' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('locks editor and selection during save, prevents repeat submit, and resets only after refresh', async () => {
+    let resolve!: (value: unknown) => void;
+    const pending = new Promise<unknown>(done => { resolve = done; });
+    vi.mocked(api).mockResolvedValueOnce({ connections: [connection] }).mockReturnValueOnce(pending).mockResolvedValue({ connections: [{ ...connection, name: 'Changed MCP' }] });
+    await editReference();
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    const saving = screen.getByRole('button', { name: 'Saving…' }) as HTMLButtonElement;
+    expect(saving.disabled).toBe(true);
+    expect((screen.getByLabelText('Name') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Edit Reference MCP' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(saving);
+    expect(vi.mocked(api)).toHaveBeenCalledTimes(2);
+    resolve({ ok: true });
+    await waitFor(() => expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe(''));
+    expect(screen.getByRole('button', { name: 'Edit Changed MCP' })).toBeTruthy();
+  });
+
+  it('discovery uses the saved id, not the editor draft, and preserves that draft', async () => {
+    vi.mocked(api).mockResolvedValue({ connections: [connection] });
+    await editReference();
+    fireEvent.click(screen.getByRole('button', { name: 'Discover tools' }));
+    await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledTimes(3));
+    const mutation = vi.mocked(api).mock.calls.find(([path]) => path.endsWith('/discover'));
+    expect(JSON.parse(String(mutation?.[1]?.body))).toEqual({ connectionId: 'reference' });
+    expect(screen.getByDisplayValue('Changed MCP')).toBeTruthy();
+    expect(vi.mocked(api).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  });
+});
