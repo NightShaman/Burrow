@@ -210,19 +210,23 @@ function anthropicConnectionCandidate(connection = {}) {
     const blocked = allowed === false || limitReached === true || exhausted === true || Boolean(reachedType);
     const checkedAt = new Date(clock()).toISOString();
     const status = (status, label, reason, scope = 'account', resetAt = null) => ({ status, label, reason, scope, resetAt, checkedAt });
+    // Subscription windows describe the actionable restriction first. WHAM may
+    // also report depleted overage credits when an included window is exhausted.
+    const long = mainWindows.find(window => window.exhausted && (window.windowSeconds >= 86400 || (window.windowSeconds === null && window.key === 'secondary')));
+    const short = mainWindows.find(window => window.exhausted && window !== long);
     let accountStatus;
     if (spendControl?.limitReached === true || credits?.overageLimitReached === true || /spend.*(cap|limit)|spend_control|workspace_(owner|member)_usage_limit_reached/.test(reachedType || '')) {
       accountStatus = status('spend_cap', 'Spend Cap Reached', 'spend_cap_reached');
     } else if (/entitlement|subscription|not_entitled|usage_not_included/.test(reachedType || '')) {
       accountStatus = status('entitlement', 'Entitlement Required', 'entitlement_required');
+    } else if (long) {
+      accountStatus = status('limit_exceeded', 'Limit Exceeded', 'long_window_exhausted', 'account', long.resetAt);
+    } else if (short) {
+      accountStatus = status('rate_limited', 'Rate Limited', 'short_window_exhausted', 'account', short.resetAt);
     } else if (/^workspace_(owner|member)_credits_depleted$/.test(reachedType || '')) {
       accountStatus = status('credits_depleted', 'Credits Depleted', 'credits_depleted');
     } else {
-      const long = mainWindows.find(window => window.exhausted && (window.windowSeconds >= 86400 || (window.windowSeconds === null && window.key === 'secondary')));
-      const short = mainWindows.find(window => window.exhausted && window !== long);
-      if (long) accountStatus = status('limit_exceeded', 'Limit Exceeded', 'long_window_exhausted', 'account', long.resetAt);
-      else if (short) accountStatus = status('rate_limited', 'Rate Limited', 'short_window_exhausted', 'account', short.resetAt);
-      else if (/weekly|secondary|long/.test(reachedType || '')) accountStatus = status('limit_exceeded', 'Limit Exceeded', 'long_window_exhausted');
+      if (/weekly|secondary|long/.test(reachedType || '')) accountStatus = status('limit_exceeded', 'Limit Exceeded', 'long_window_exhausted');
       else if (/primary|short|rate_limit/.test(reachedType || '')) accountStatus = status('rate_limited', 'Rate Limited', 'short_window_exhausted');
       else if (allowed === true || (!blocked && exhausted === false)) accountStatus = status('available', 'Active', 'usage_available');
       else accountStatus = status('unknown', 'Unknown', blocked ? 'restriction_unspecified' : 'usage_missing');
