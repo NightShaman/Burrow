@@ -139,12 +139,12 @@ async function main() {
   const fixture = JSON.parse(await readFile(fixturePath, 'utf8'));
   const repetitions = integerArgument('--repetitions', 3);
   const compositions = listArgument('--compositions', 'legacy');
-  const baseUrl = argument('--base-url', process.env.CODEX_LB_BASE_URL || '');
-  if (!baseUrl) throw new Error('--base-url or CODEX_LB_BASE_URL is required');
-  const apiKey = requiredEnvironment('CODEX_LB_TOKEN');
+  const baseUrl = argument('--base-url', process.env.OPENAI_BASE_URL || '');
+  if (!baseUrl) throw new Error('--base-url or OPENAI_BASE_URL is required');
+  const apiKey = requiredEnvironment('OPENAI_API_KEY');
   const model = argument('--model', fixture.model || 'gpt-5.6-sol');
   const reasoning = argument('--reasoning', fixture.reasoning || 'low');
-  const adapter = createOpenAICompatibleModelAdapter({ config: { api: 'openai-responses', provider: 'Codex-LB', baseUrl, apiKey, model, extra: { reasoning: { effort: reasoning } } } });
+  const adapter = createOpenAICompatibleModelAdapter({ config: { api: 'openai-responses', provider: 'OpenAI-compatible', baseUrl, apiKey, model, extra: { reasoning: { effort: reasoning } } } });
   const report = await evaluatePromptBehavior({ fixture: { ...fixture, model, reasoning }, adapter, repetitions, compositions, rootDir: process.cwd() });
   const output = argument('--output');
   const rendered = `${JSON.stringify(report, null, 2)}\n`;

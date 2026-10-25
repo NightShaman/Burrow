@@ -1171,142 +1171,11 @@ async function agentDreamCycle(agentId, body = null, query = {}) {
   }
 }
 
-function codexLbOriginFromModelConfig(modelConfig = {}) {
-  if (!modelConfig?.baseUrl) return null;
-  try {
-    return new URL(modelConfig.baseUrl).origin;
-  } catch {
-    return null;
-  }
-}
-
 function authSecretToken(auth = {}) {
   if (auth.type === 'oauth') return auth.accessToken || auth.token || '';
   if (auth.type === 'token' || auth.type === 'bearer_token') return auth.token || '';
   if (auth.type === 'api_key') return auth.apiKey || auth.token || '';
   return '';
-}
-
-function codexLbConnectionCandidate(connection = {}) {
-  const provider = String(connection.provider || '').toLowerCase();
-  const baseUrl = String(connection.baseUrl || '').toLowerCase();
-  return provider.includes('codex-lb') || provider.includes('codex lb') || baseUrl.includes('codex-lb') || baseUrl.includes(':2455/');
-}
-
-async function resolveCodexLbAccountSource() {
-  const store = modelsStore();
-  const connection = (await store.list()).find(codexLbConnectionCandidate);
-  if (connection) {
-    const origin = codexLbOriginFromModelConfig(connection);
-    const token = authSecretToken(await store.resolveAuth(connection.id));
-    if (origin && token) return { origin, token, source: 'model-connection', connectionId: connection.id };
-  }
-  // Legacy fallback only: older deployments used the active runtime model config.
-  // The Codex-LB account panel must not disappear just because chat is currently
-  // routed through a different model adapter.
-  const runtime = await runtimeConfig();
-  const model = runtime.modelConfig || {};
-  if (codexLbConnectionCandidate({ provider: model.provider || model.providerName, baseUrl: model.baseUrl })) {
-    const origin = codexLbOriginFromModelConfig(model);
-    if (origin && model.apiKey) return { origin, token: model.apiKey, source: 'active-model-config', connectionId: model.connectionId || null };
-  }
-  return null;
-}
-
-function finitePercent(value) {
-  if (value === null || value === undefined || value === '') return null;
-  const n = Number(value);
-  if (!Number.isFinite(n)) return null;
-  return Math.max(0, Math.min(100, Math.round(n)));
-}
-
-function accountPlanLabel(planType = '') {
-  const normalized = String(planType || '').trim().toLowerCase();
-  if (normalized === 'prolite') return 'Prolite';
-  if (normalized === 'team') return 'Team';
-  if (normalized === 'plus') return 'Plus';
-  if (normalized === 'pro') return 'Pro';
-  return normalized ? normalized.replace(/\b\w/g, (letter) => letter.toUpperCase()) : 'Unknown';
-}
-
-function statusLabel(status = '') {
-  const normalized = String(status || '').trim().toLowerCase().replace(/[_-]+/g, ' ');
-  if (!normalized) return 'Unknown';
-  return normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function finiteQuotaNumber(value) {
-  if (value === null || value === undefined || value === '') return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
-function quotaWindow(account = {}, usage = {}, kind = 'secondary') {
-  const suffix = kind === 'monthly' ? 'Monthly' : kind === 'primary' ? 'Primary' : 'Secondary';
-  const windowMinutes = finiteQuotaNumber(account[`windowMinutes${suffix}`]);
-  return {
-    kind,
-    label: kind === 'monthly' || (windowMinutes !== null && windowMinutes >= 40000) ? 'Monthly' : windowMinutes === 10080 ? 'Weekly' : windowMinutes === 300 ? '5-hour' : suffix,
-    percent: finitePercent(usage[`${kind}RemainingPercent`]),
-    resetAt: account[`resetAt${suffix}`] || null,
-    windowMinutes,
-    capacityCredits: finiteQuotaNumber(account[`capacityCredits${suffix}`]),
-    remainingCredits: finiteQuotaNumber(account[`remainingCredits${suffix}`]),
-  };
-}
-
-function usableQuotaWindow(window = {}) {
-  return window.percent !== null || window.resetAt || window.windowMinutes !== null || window.remainingCredits !== null;
-}
-
-function selectedAccountWindow(account = {}) {
-  const usage = account.usage || {};
-  const windows = ['monthly', 'primary', 'secondary'].map((kind) => quotaWindow(account, usage, kind));
-  return windows.find(usableQuotaWindow) || windows[2];
-}
-
-function sanitizeCodexLbAccount(account = {}, index = 0) {
-  const selectedWindow = selectedAccountWindow(account);
-  const quotaWindows = {
-    primary: quotaWindow(account, account.usage || {}, 'primary'),
-    secondary: quotaWindow(account, account.usage || {}, 'secondary'),
-  };
-  return {
-    id: `account-${index + 1}`,
-    name: account.alias || account.displayName || `Account ${index + 1}`,
-    type: accountPlanLabel(account.planType || account.accountType || account.type),
-    status: statusLabel(account.status),
-    usagePercent: selectedWindow.percent,
-    resetAt: selectedWindow.resetAt,
-    window: selectedWindow,
-    quotaWindows,
-    availableResetCredits: Number.isFinite(Number(account.availableResetCredits)) ? Number(account.availableResetCredits) : null,
-    resetCreditNearestExpiresAt: account.resetCreditNearestExpiresAt || null,
-  };
-}
-
-async function codexLbAccounts() {
-  const source = await resolveCodexLbAccountSource();
-  if (!source?.origin || !source?.token) return { ok: false, status: 503, error: 'codex_lb_model_config_missing', accounts: [] };
-  try {
-    const response = await fetch(`${source.origin}/api/accounts`, {
-      headers: { accept: 'application/json', authorization: `Bearer ${source.token}` },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) return { ok: false, status: response.status, error: `codex_lb_accounts_failed:${response.status}`, accounts: [] };
-    const data = await response.json();
-    const rawAccounts = Array.isArray(data) ? data : data?.accounts;
-    if (!Array.isArray(rawAccounts)) return { ok: false, status: 502, error: 'codex_lb_accounts_invalid_response', accounts: [] };
-    return {
-      ok: true,
-      source: 'codex-lb',
-      connectionSource: source.source,
-      connectionId: source.connectionId || null,
-      accounts: rawAccounts.map(sanitizeCodexLbAccount),
-    };
-  } catch (error) {
-    return { ok: false, status: 502, error: 'codex_lb_accounts_unavailable', detail: String(error?.message || error), accounts: [] };
-  }
 }
 
 async function runtimeDataRoot() {
@@ -3038,7 +2907,7 @@ const { archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, arc
 const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, supersedeSessionRuns, beginSessionAdmissionsReset, finishSessionAdmissionsReset, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
 const brainRoute = createBrainRoutes({ store: postgresApplication.stores.brains, metadata: metadataStore(), embeddings: postgresApplication.stores.brainEmbeddings, readJsonBody, sendJson });
 const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, browserOriginSettings: () => browserOriginSettings({ metadata: metadataStore() }), saveBrowserOriginSettings: body => saveBrowserOriginSettings(body, { metadata: metadataStore() }), browserTabSettings: () => browserTabSettings({ metadata: metadataStore() }), saveBrowserTabSettings: body => saveBrowserTabSettings(body, { metadata: metadataStore() }), otelSettings: () => otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }), saveOtelSettings: async body => { let result = await saveOtelSettings(body, { store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); if (result.ok) { try { await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore() })); await applyOtelConfigurationToNodeGoblins(); } catch (error) { serverLogger.event('otel_configuration_apply_failed', { error: String(error?.message || 'configuration_failed') }); return { ok: false, status: 500, error: 'opentelemetry_configuration_apply_failed' }; } result = await otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); } return result; }, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
-const observabilityRoute = createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, codexLbAccounts, anthropicOauthUsage, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore: postgresApplication.stores.conversations, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
+const observabilityRoute = createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, anthropicOauthUsage, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore: postgresApplication.stores.conversations, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
 const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJson, validateBoundaryBody, withScheduledJobs, scheduler, listGroupChannels, createGroupChannel, readGroupChannelTurns, groupChannelRuns, startGroupChannelMessage, cancelGroupChannelRun, runtimeDataRoot, conversationStore: postgresApplication.stores.conversations });
 const authRoute = createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
 const chatRoute = createChatRoutes({ handleChat, readJsonBody, sendJson, selectedAgentRuntime, cancelChatRun, steerChatRun, listChatSteering });

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-// Native WHAM contract, referenced from codex-lb's rate_limit_reset_credits.py.
+// Native OpenAI WHAM banked rate-limit reset contract.
 // No proxy dependency; never retry the non-idempotent consume request.
 const activeAccounts = new Set();
 const attempts = new Map(); // Process-lifetime replay protection, including ambiguous outcomes.

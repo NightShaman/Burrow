@@ -2392,26 +2392,6 @@
         }
       }
     },
-    "/api/codex-lb/accounts": {
-      "get": {
-        "tags": [
-          "Status"
-        ],
-        "summary": "List Codex-LB accounts",
-        "operationId": "listCodexLbAccounts",
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/JsonResponse"
-          },
-          "400": {
-            "$ref": "#/components/responses/ErrorResponse"
-          },
-          "404": {
-            "$ref": "#/components/responses/ErrorResponse"
-          }
-        }
-      }
-    },
     "/api/anthropic/oauth/usage": {
       "get": {
         "tags": [
