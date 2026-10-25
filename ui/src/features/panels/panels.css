@@ -8,7 +8,7 @@
 .account-meters{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:10px}.account-meters.two-up{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:12px}.account-meter{display:grid;grid-template-columns:minmax(0,1fr) 32px;align-items:center;column-gap:8px;row-gap:3px;padding:0;border:0;border-radius:0;background:none;box-shadow:none}
 .account-status .account-meter .usage{grid-column:1;height:6px;min-width:0;padding:0;border:0;border-radius:99px;background:color-mix(in srgb,var(--line) 72%,transparent);box-shadow:none}
 .account-status .account-meter .usage i{border-radius:inherit}
-.account-status .account-meter.secondary{padding:0;border:0;border-radius:0;background:none;box-shadow:none}
+.account-status .account-meter.secondary{min-height:0;padding:0;border:0;border-radius:0;background:none;box-shadow:none}
 .account-meter .usage-percent{grid-column:2;justify-self:end;width:32px;font-size:12px;text-align:right}
 .account-reset-time{grid-column:1;color:var(--muted);font-size:10px;line-height:1}
 .account-meter.secondary .usage i{background:linear-gradient(90deg,var(--accent-strong),var(--accent))}
@@ -18,7 +18,7 @@
 /* Share the available pane height between cards instead of scrolling the list. */
 .rail-panel:has(> .account-status){display:flex;flex-direction:column}
 .rail-panel:has(> .account-status) > .rail-head{flex:none}
-.rail-panel > .account-status{flex:1;min-height:0;overflow:visible;display:flex;flex-direction:column;gap:6px;container-type:size}
+.rail-panel > .account-status{flex:1;min-height:0;overflow:visible;display:flex;flex-direction:column;gap:6px;container-type:size;container-name:account-pane}
 .account-status > .account-card{flex:0 1 120px;min-height:0;margin:0;display:flex;flex-direction:column;justify-content:space-between;gap:2px;padding:clamp(3px,2cqh,12px);container-type:size}
 .account-status .account-top{gap:6px;min-width:0;font-size:clamp(10px,15cqh,13px);line-height:1.15}
 .account-status .account-top > span:first-child{min-width:0}
@@ -40,15 +40,26 @@
 .account-status .account-meter .usage-percent{line-height:1}
 
 /* Native reset controls stay in normal card flow, including compressed rails. */
-.account-status > .account-card:has(.account-resets){min-height:96px;flex-basis:140px}
+.account-status > .account-card:has(.account-resets){min-height:66px}
 .account-status:has(.account-resets){overflow:auto}
-.account-status .account-resets{flex:none;min-width:0;font-size:11px}
+.account-status .account-resets{flex:none;min-width:0;font-size:clamp(10px,12cqh,11px);line-height:1.2}
 .account-status .account-resets-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .account-status .account-resets-summary{display:flex;flex-wrap:wrap;gap:2px 6px;min-width:0;color:var(--text)}
-.account-status .account-resets-summary small{color:var(--muted);font-size:10px}
-.account-status .account-resets button{flex:none;padding:3px 7px;font-size:11px;line-height:1.3;cursor:pointer}
+.account-status .account-resets-summary small{color:var(--muted);font-size:inherit}
+.account-status .account-resets button{flex:none;min-height:24px;height:clamp(24px,30cqh,28px);padding:0 6px;font-size:inherit;line-height:1.2;white-space:nowrap;cursor:pointer}
 .account-status .account-resets button:disabled{cursor:default;opacity:.5}
 .account-status .account-reset-message{display:block;margin-top:4px;color:var(--warn);font-size:11px;line-height:1.35;overflow-wrap:anywhere}
-.account-status > .account-card:has(.account-reset-message){min-height:190px;flex-shrink:0}
+.account-status > .account-card:has(.account-reset-message){min-height:140px;flex-shrink:0}
 .account-status .account-connection-status{max-width:55%;text-align:right}
 .account-status .account-connection-status.quota-exceeded{background:none}
+
+/* Pane height, not viewport width, determines the nine-account laptop density. */
+@container account-pane (height < 800px){
+ .account-status > .account-card{padding:4px;min-height:44px}
+ .account-status > .account-card:has(.account-resets){min-height:66px}
+ .account-status > .account-card:has(.account-reset-message){min-height:140px}
+}
+@media (pointer:coarse){
+ .account-status .account-resets button{min-height:32px;height:32px}
+ .account-status > .account-card:has(.account-resets){min-height:78px}
+}

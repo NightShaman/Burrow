@@ -215,7 +215,7 @@ function anthropicConnectionCandidate(connection = {}) {
       accountStatus = status('spend_cap', 'Spend Cap Reached', 'spend_cap_reached');
     } else if (/entitlement|subscription|not_entitled|usage_not_included/.test(reachedType || '')) {
       accountStatus = status('entitlement', 'Entitlement Required', 'entitlement_required');
-    } else if (/credit/.test(reachedType || '') || (credits?.hasCredits === false && credits?.unlimited !== true && blocked && exhausted !== true)) {
+    } else if (/^workspace_(owner|member)_credits_depleted$/.test(reachedType || '')) {
       accountStatus = status('credits_depleted', 'Credits Depleted', 'credits_depleted');
     } else {
       const long = mainWindows.find(window => window.exhausted && (window.windowSeconds >= 86400 || (window.windowSeconds === null && window.key === 'secondary')));
