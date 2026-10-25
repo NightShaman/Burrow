@@ -102,11 +102,11 @@ export function assertProviderPoolMembers(connection, members = []) {
 }
 
 export function providerPoolModels(members = []) {
-  const models = new Map();
-  for (const member of members) for (const model of member.models || []) {
-    if (!models.has(model.id)) models.set(model.id, { ...model, selected: true });
-  }
-  return [...models.values()];
+  if (!members.length) return [];
+  const catalogs = members.map(member => new Map((member.models || [])
+    .filter(model => !model.manual).map(model => [model.id, model])));
+  return [...catalogs[0].values()].filter(model => catalogs.every(catalog => catalog.has(model.id)))
+    .map(model => ({ ...model, selected: true }));
 }
 
 export function assertConnection(input = {}) {
@@ -409,7 +409,7 @@ function normalizeCodexCatalogModels(body = {}) {
   const data = Array.isArray(body.models) ? body.models : Array.isArray(body.data) ? body.data : [];
   return normalizeModels(data
     .filter((model) => model && typeof model === 'object' && model.supported_in_api !== false && normalize(model.visibility) !== 'hide' && normalize(model.slug || model.id) !== 'codex-auto-review')
-    .map((model) => ({ ...model, id: model.slug || model.id, selected: false, manual: false })));
+    .map((model) => ({ ...model, id: model.slug || model.id, selected: true, manual: false })));
 }
 function observedMinimumClientVersion(body = {}) {
   const data = Array.isArray(body.models) ? body.models : Array.isArray(body.data) ? body.data : [];
@@ -628,6 +628,7 @@ export async function discoverModels({ baseUrl, provider = '', useModelsDev = fa
       const response = await fetchImpl(chatGptCodexModelsUrl(baseUrl, version), { headers, signal });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) { lastError = new Error(`model_discovery_failed:${response.status}`); continue; }
+      if (!Array.isArray(body.models)) throw new Error('model_discovery_invalid');
       const models = normalizeCodexCatalogModels(body);
       const minimumObservedModelVersion = observedMinimumClientVersion(body);
       if (target) await writeCodexClientVersionCacheAsync(target, { lastGoodCatalogVersion: version, minimumObservedModelVersion, lastCatalogAt: new Date(nowMs).toISOString(), lastCatalogCount: models.length }, { nowMs });
@@ -641,7 +642,8 @@ export async function discoverModels({ baseUrl, provider = '', useModelsDev = fa
     .then(async (response) => {
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(`model_discovery_failed:${response.status}`);
-      const data = Array.isArray(body.data) ? body.data : Array.isArray(body.models) ? body.models : [];
-      return enrich(normalizeModels(data.map((model) => ({ ...model, id: model?.id, selected: false, manual: false }))));
+      if (!Array.isArray(body.data) && !Array.isArray(body.models)) throw new Error('model_discovery_invalid');
+      const data = Array.isArray(body.data) ? body.data : body.models;
+      return enrich(normalizeModels(data.map((model) => ({ ...model, id: model?.id, selected: true, manual: false }))));
     });
 }

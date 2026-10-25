@@ -139,7 +139,6 @@ export class PostgresModelSettingsStore {
       for (const member of members) if (!member.models.length) {
         const models = await this.discoverModels({ ...discoveryOptions, id: member.id, signal: discoveryOptions.signal || AbortSignal.timeout(15_000) });
         if (!models.length) throw new Error('provider_pool_member_catalog_empty');
-        await this.persistDiscoveredModels(member.id, models, { onlyIfEmpty: true });
       }
     }
     const id = String(input.id ?? '').trim() || randomUUID();
@@ -180,6 +179,9 @@ export class PostgresModelSettingsStore {
       const submittedModels = normalizeModels(input.models, { provider: connection.provider, apiType: connection.apiType });
       const priorById = new Map(existingModels.map((model) => [model.id, model]));
       let models = submittedModels.map((model) => { const prior = priorById.get(model.id); return (!prior || model.manual || prior.manual) ? model : normalizeModels([{ ...prior, ...model }], { provider: connection.provider, apiType: connection.apiType })[0]; });
+      // Saves patch catalog entries; omitted/empty lists never erase discovery or
+      // models added by a concurrent refresh. Explicit selected:false disables.
+      models.push(...existingModels.filter(model => !models.some(item => item.id === model.id)));
       if (isProviderPool(connection)) {
         models = providerPoolModels(poolMembers);
       }
@@ -312,7 +314,7 @@ export class PostgresModelSettingsStore {
     if (!token) throw new Error('model_connection_auth_required');
     return { type: auth.type || 'api_key', provider: auth.provider || connection.provider, source: auth.source || null, token, expiresAt: auth.expiresAt || null };
   }
-  async persistDiscoveredModels(id, discovered, { onlyIfEmpty = false } = {}) {
+  async persistDiscoveredModels(id, discovered, { onlyIfEmpty = false, ticket = null, connection = null } = {}) {
     return withPostgresTransaction(this.pool, async client => {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [CONNECTION_WRITE_LOCK]);
       const result = await client.query(this.selectSql('WHERE c.id=$1'), [id]);
@@ -320,10 +322,19 @@ export class PostgresModelSettingsStore {
       if (!member) throw new Error('model_connection_not_found');
       assertProviderPoolMembers({ apiType: member.auth?.provider === 'openai' ? 'openai-lb' : 'anthropic-lb', pool: { memberConnectionIds: [id] } }, [member]);
       if (onlyIfEmpty && member.models.length) return;
+      const cacheKey = `model_catalog:${id}`;
+      const cached = await client.query('SELECT value_json::text AS value_json FROM model_settings_cache WHERE cache_key=$1', [cacheKey]);
+      const state = json(cached.rows[0]?.value_json, {});
+      if (ticket && state.ticket !== ticket) return;
+      if (connection && (connection.baseUrl !== member.baseUrl || connection.apiType !== member.apiType)) return;
+      // Keep explicit choices even while an upstream ID is temporarily absent.
+      const choices = { ...state.choices, ...Object.fromEntries(member.models.map(model => [model.id, model.selected])) };
       const prior = new Map(member.models.map(model => [model.id, model]));
-      const models = normalizeModels(discovered.map(model => ({ ...prior.get(model.id), ...model, selected: prior.get(model.id)?.selected ?? false })), { provider: member.provider, apiType: member.apiType });
+      const models = normalizeModels(discovered.map(model => ({ ...prior.get(model.id), ...model, ...(prior.get(model.id)?.manual ? { manual: true } : {}), selected: choices[model.id] ?? true })), { provider: member.provider, apiType: member.apiType });
       for (const model of member.models) if (model.manual && !models.some(item => item.id === model.id)) models.push(model);
       const stamp = this.clock();
+      await client.query(`INSERT INTO model_settings_cache(cache_key,value_json,updated_at) VALUES($1,$2,$3)
+        ON CONFLICT(cache_key) DO UPDATE SET value_json=EXCLUDED.value_json,updated_at=EXCLUDED.updated_at`, [cacheKey, JSON.stringify({ ...state, choices }), stamp]);
       await client.query('UPDATE model_connections SET models_json=$2,updated_at=$3 WHERE id=$1', [id, JSON.stringify(models), stamp]);
       const refs = await client.query(this.selectSql("WHERE c.pool_json->'memberConnectionIds' ? $1"), [id]);
       for (const row of refs.rows) {
@@ -342,7 +353,6 @@ export class PostgresModelSettingsStore {
       assertProviderPoolMembers(connection, members.filter(Boolean));
       const catalogs = await Promise.all(members.map(async member => {
         const models = await this.discoverModels({ ...options, id: member.id, connectionId: member.id, apiType: member.apiType, baseUrl: member.baseUrl });
-        await this.persistDiscoveredModels(member.id, models);
         return { ...member, models };
       }));
       return providerPoolModels(catalogs);
@@ -351,7 +361,34 @@ export class PostgresModelSettingsStore {
     const resolved = !options.auth && auth.type === 'oauth' ? await this.resolveAuth(connection.id, options) : null;
     if (resolved) auth = await this.auth(connection.id) || auth;
     const token = options.apiKey || resolved?.token || auth.apiKey || auth.accessToken || auth.token;
-    return discoverModels({ ...options, baseUrl: options.baseUrl || connection.baseUrl, provider: options.provider || connection.provider, apiType: options.apiType || connection.apiType, auth, apiKey: token, fetchImpl: options.fetchImpl || fetch, catalogFetchImpl: options.catalogFetchImpl || options.fetchImpl || fetch, store: options.store || this });
+    const ticket = randomUUID();
+    if (auth.type === 'oauth') await withPostgresTransaction(this.pool, async client => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [CONNECTION_WRITE_LOCK]);
+      await client.query(`INSERT INTO model_settings_cache(cache_key,value_json,updated_at) VALUES($1,$2,$3)
+        ON CONFLICT(cache_key) DO UPDATE SET value_json=model_settings_cache.value_json::jsonb || EXCLUDED.value_json::jsonb,updated_at=EXCLUDED.updated_at`, [`model_catalog:${connection.id}`, JSON.stringify({ ticket }), this.clock()]);
+    });
+    const models = await discoverModels({ ...options, baseUrl: options.baseUrl || connection.baseUrl, provider: options.provider || connection.provider, apiType: options.apiType || connection.apiType, auth, apiKey: token, fetchImpl: options.fetchImpl || fetch, catalogFetchImpl: options.catalogFetchImpl || options.fetchImpl || fetch, store: options.store || this });
+    if (auth.type === 'oauth') await this.persistDiscoveredModels(connection.id, models, { ticket, connection });
+    return models;
+  }
+
+  async refreshOAuthCatalogs(options = {}) {
+    if (this.catalogRefresh) return this.catalogRefresh;
+    const run = async () => {
+      const results = [];
+      for (const connection of await this.list()) {
+        options.signal?.throwIfAborted();
+        if (isProviderPool(connection) || connection.auth?.type !== 'oauth') continue;
+        try {
+          await this.discoverModels({ ...options, id: connection.id,
+            signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000) });
+          results.push({ id: connection.id, ok: true });
+        } catch { results.push({ id: connection.id, ok: false }); }
+      }
+      return results;
+    };
+    this.catalogRefresh = run().finally(() => { this.catalogRefresh = null; });
+    return this.catalogRefresh;
   }
 
   async persistAuthOnClient(client, id, auth, timestamp = this.clock(), expectedRefreshToken = undefined, expectedAuth = undefined) {

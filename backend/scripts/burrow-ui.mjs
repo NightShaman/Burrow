@@ -471,7 +471,8 @@ function refreshCodexClientVersionNow() {
   if (versionRefreshLifecycle.stopped) return;
   void versionRefreshLifecycle.track(async () => {
     versionRefreshLifecycle.signal.throwIfAborted();
-    await refreshCodexClientVersionCache({ store: modelsStore(), signal: AbortSignal.any([versionRefreshLifecycle.signal, AbortSignal.timeout(15_000)]) });
+    await refreshCodexClientVersionCache({ store: modelsStore(), signal: AbortSignal.any([versionRefreshLifecycle.signal, AbortSignal.timeout(15_000)]) }).catch(() => {});
+    await modelsStore().refreshOAuthCatalogs({ useModelsDev: true, signal: versionRefreshLifecycle.signal });
   }).catch(() => {});
 }
 function startCodexClientVersionRefresh() {
@@ -557,7 +558,7 @@ function mergeDiscoveredModels(discovered = [], existing = []) {
       ...(Array.isArray(priorModel.acceptedOutputOverride) ? { acceptedOutputOverride: priorModel.acceptedOutputOverride } : {}),
       ...(priorModel.contextWindowOverride !== undefined ? { contextWindowOverride: priorModel.contextWindowOverride } : {}),
     } : {};
-    merged.push({ ...model, ...operatorOverrides, selected: priorModel?.selected === true, manual: false });
+    merged.push({ ...model, ...operatorOverrides, selected: priorModel?.selected !== false, manual: false });
     prior.delete(model.id);
   }
   for (const model of prior.values()) merged.push({ ...model, selected: model.selected !== false, manual: Boolean(model.manual) });
@@ -965,7 +966,7 @@ async function discoverModelConnection(body = {}) {
       assertProviderPoolMembers(connection, members.filter(Boolean));
       const catalogs = await Promise.all(members.map(async member => {
         const models = await store.discoverModels({ id: member.id, useModelsDev: true, signal: AbortSignal.timeout(15_000) });
-        await store.persistDiscoveredModels(member.id, models);
+
         return { ...member, models };
       }));
       const discovered = providerPoolModels(catalogs);
@@ -975,7 +976,9 @@ async function discoverModelConnection(body = {}) {
     const apiKey = String(body.apiKey || '').trim() || (auth?.token ? String(auth.token).trim() : '') || (auth?.apiKey ? String(auth.apiKey).trim() : '') || (auth?.accessToken ? String(auth.accessToken).trim() : '') || (existing ? await store.apiKey(existing.id) : null);
     const hasCredential = Boolean(apiKey || auth?.token || auth?.apiKey || auth?.accessToken);
     if (!hasCredential) return { ok: false, status: 400, error: 'api_key_required' };
-    const discovered = await discoverModels({ baseUrl, provider: body.provider || existing?.provider || auth?.provider, useModelsDev: true, apiType, apiKey, auth, store, signal: AbortSignal.timeout(15_000) });
+    const discovered = existing && auth.type === 'oauth' && !body.auth && !body.apiKey && baseUrl === existing.baseUrl && apiType === existing.apiType
+      ? await store.discoverModels({ id: existing.id, useModelsDev: true, signal: AbortSignal.timeout(15_000) })
+      : await discoverModels({ baseUrl, provider: body.provider || existing?.provider || auth?.provider, useModelsDev: true, apiType, apiKey, auth, store, signal: AbortSignal.timeout(15_000) });
     return { ok: true, models: mergeDiscoveredModels(discovered, priorModels), discovery: { status: discovered.length ? 'discovered' : 'manual_only', count: discovered.length } };
   } catch (error) {
     return { ok: true, models: mergeDiscoveredModels([], priorModels), discovery: { status: 'manual_only', count: 0, error: String(error?.message || error) } };
