@@ -60,7 +60,7 @@ export class ProviderPoolEngine {
     const connection = this.connection;
     const flags = connection.pool || {};
     if (!flags.enabled) throw new Error('provider_pool_disabled');
-    if (refreshed && !connection.models?.some(item => item.id === model && item.selected !== false)) throw new Error('model_not_enabled_for_connection');
+    if (refreshed && !requiredMemberId && !connection.models?.some(item => item.id === model && item.selected !== false)) throw new Error('model_not_enabled_for_connection');
     const ids = [...new Set(flags.memberConnectionIds || [])];
     const family = connection.apiType === 'anthropic-lb' ? 'anthropic' : 'openai';
     const now = this.clock();
@@ -84,6 +84,25 @@ export class ProviderPoolEngine {
         const state = health.find((row) => row.member_id === candidate.id);
         if (state && time(state.cooldown_until) > now) { candidate.eligible = false; candidate.reason = state.last_reason || 'cooldown'; }
       }
+      // A continuation is not new work: usage and health are advisory, not
+      // permission to strand an already executed tool result or signed turn.
+      // Explicit pool disable, removal and failed member resolution remain hard.
+      if (requiredMemberId) {
+        const candidate = diagnostics.find(row => row.id === requiredMemberId);
+        if (!candidate) throw Object.assign(new Error('provider_pool_continuation_owner_unavailable'), {
+          diagnostics: [{ id: requiredMemberId, eligible: false, reason: 'member_removed' }, ...diagnostics],
+          rejection: { memberId: requiredMemberId, reason: 'member_removed', hard: true },
+        });
+        if (refreshed && !refreshed.members.find(member => member.id === requiredMemberId)) throw Object.assign(new Error('provider_pool_continuation_owner_unavailable'), {
+          diagnostics, rejection: { memberId: requiredMemberId, reason: 'member_removed', hard: true },
+        });
+        if (exclude.includes(requiredMemberId)) throw Object.assign(new Error('provider_pool_continuation_owner_unavailable'), {
+          diagnostics, rejection: { memberId: requiredMemberId, reason: 'attempt_failed', hard: true },
+        });
+        candidate.continuationOverride = candidate.eligible ? [] : [candidate.reason];
+        candidate.eligible = true;
+        candidate.reason = null;
+      }
       const available = diagnostics.filter((candidate) => candidate.eligible);
       const eligible = (id) => available.find((candidate) => candidate.id === id);
       let selected;
@@ -93,7 +112,7 @@ export class ProviderPoolEngine {
       if (requiredMemberId) {
         // Native IDs and signed blocks may only return to the account that made them.
         selected = eligible(requiredMemberId);
-        if (!selected) throw Object.assign(new Error('provider_pool_continuation_owner_unavailable'), { diagnostics });
+        if (!selected) throw Object.assign(new Error('provider_pool_continuation_owner_unavailable'), { diagnostics, rejection: { memberId: requiredMemberId, reason: diagnostics.find(row => row.id === requiredMemberId)?.reason || 'member_unavailable', hard: true } });
       } else if (flags.sticky !== false && owner && ids.includes(owner)) {
         if (affinity.substitute_id && time(affinity.substitute_until) > now) selected = eligible(affinity.substitute_id);
         if (!selected) selected = eligible(owner);
