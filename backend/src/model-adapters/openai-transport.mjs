@@ -281,10 +281,15 @@ function compactResponseCompletion(response = {}) {
 }
 
 async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_RESPONSE_BYTES, onTextDelta = null, onThoughtDelta = null } = {}) {
+  // A provider terminal owns the result; transport teardown is best effort and
+  // must not keep a completed/failed generation waiting for the peer's EOF.
+  const cancelStream = (stream) => {
+    try { Promise.resolve(stream?.cancel?.()).catch(() => {}); } catch {}
+  };
   const limit = Math.max(1, Math.floor(Number(maxBytes) || DEFAULT_MAX_RESPONSE_BYTES));
   const contentLength = Number(response?.headers?.get?.('content-length') || 0);
   if (Number.isFinite(contentLength) && contentLength > limit) {
-    await response?.body?.cancel?.();
+    cancelStream(response?.body);
     return { ok: false, bytes: contentLength, error: `model_response_too_large:${contentLength}>${limit}`, data: null, streamedTextChars: 0 };
   }
   const reader = response?.body?.getReader?.();
@@ -299,6 +304,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   let streamErrorDetails = null;
   let finishReason = null;
   let terminalSeen = false;
+  let terminalEventSeen = false;
   let usage = null;
   const toolCalls = [];
   const responseToolCalls = [];
@@ -328,7 +334,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
     dataChars = 0;
     if (!raw) return;
     if (raw === '[DONE]') {
-      if (mode !== 'openai-responses') terminalSeen = true;
+      if (mode !== 'openai-responses') terminalSeen = terminalEventSeen = true;
       return;
     }
     let event;
@@ -348,6 +354,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
         recordToolCallFailure(responseFunctionCallFailure(responseToolCalls, event));
         if (!toolCallFailure && !mergeResponseFunctionCall(responseToolCalls, event)) recordToolCallFailure('model_tool_call_conflict');
       }
+      if (event?.type === 'response.completed') terminalEventSeen = true;
       if (event?.type === 'response.completed' && event.response && typeof event.response === 'object') {
         terminalSeen = event.response.status === 'completed';
         finalData = compactResponseCompletion(event.response);
@@ -360,7 +367,17 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
           } else if (!mergeResponseFunctionCall(responseToolCalls, { ...call, output_index: responseToolCalls.length })) recordToolCallFailure('model_tool_call_conflict');
         }
       }
+      if (event?.type === 'response.incomplete') {
+        terminalEventSeen = true;
+        streamError = 'model_response_incomplete';
+        streamErrorDetails = {
+          eventType: 'response.incomplete',
+          responseStatus: boundedText(event.response?.status || 'incomplete', 128),
+          ...(event.response?.incomplete_details?.reason ? { reason: boundedText(event.response.incomplete_details.reason, 128) } : {}),
+        };
+      }
       if (event?.type === 'response.failed' || event?.type === 'error') {
+        terminalEventSeen = true;
         const responseError = event.response?.error && typeof event.response.error === 'object' ? event.response.error : {};
         const eventError = event.error && typeof event.error === 'object' ? event.error : {};
         const providerError = Object.keys(eventError).length ? eventError : responseError;
@@ -400,7 +417,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
       if (done) break;
       bytes += value?.byteLength ?? value?.length ?? 0;
       if (bytes > limit) {
-        await reader.cancel();
+        cancelStream(reader);
         return { ok: false, bytes, error: `model_response_too_large:${bytes}>${limit}`, data: null, streamedTextChars: text.length };
       }
       buffer += decoder.decode(value, { stream: true });
@@ -409,37 +426,48 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
         if (!match || match.index === undefined) break;
         const line = buffer.slice(0, match.index);
         buffer = buffer.slice(match.index + match[0].length);
-        if (!line) await consumeEvent();
+        if (!line) {
+          await consumeEvent();
+          if (terminalEventSeen || streamError) break;
+        }
         else if (line.startsWith('data:')) {
           const dataLine = line.slice(5).trimStart();
           dataChars += dataLine.length;
           if (dataChars > MAX_SSE_EVENT_CHARS) {
-            await reader.cancel();
+            cancelStream(reader);
             return { ok: false, bytes, error: `model_stream_event_too_large:${dataChars}>${MAX_SSE_EVENT_CHARS}`, data: null, streamedTextChars: text.length };
           }
           dataLines.push(dataLine);
         }
       }
       if (toolCallFailure) {
-        await reader.cancel();
+        cancelStream(reader);
         return { ok: false, bytes, error: toolCallFailure, data: null, streamedTextChars: text.length };
+      }
+      if (terminalEventSeen || streamError) {
+        cancelStream(reader);
+        break;
       }
       // A missing newline must not turn buffer concatenation into an unbounded
       // rope. This protects against malformed SSE without storing raw output.
       if (buffer.length > MAX_SSE_CARRY_CHARS) {
-        await reader.cancel();
+        cancelStream(reader);
         return { ok: false, bytes, error: `model_stream_line_too_large:${buffer.length}>${MAX_SSE_CARRY_CHARS}`, data: null, streamedTextChars: text.length };
       }
     }
-    buffer += decoder.decode();
-    if (buffer.length > MAX_SSE_CARRY_CHARS) return { ok: false, bytes, error: `model_stream_line_too_large:${buffer.length}>${MAX_SSE_CARRY_CHARS}`, data: null, streamedTextChars: text.length };
-    if (buffer.startsWith('data:')) {
-      const dataLine = buffer.slice(5).trimStart();
-      dataChars += dataLine.length;
-      if (dataChars > MAX_SSE_EVENT_CHARS) return { ok: false, bytes, error: `model_stream_event_too_large:${dataChars}>${MAX_SSE_EVENT_CHARS}`, data: null, streamedTextChars: text.length };
-      dataLines.push(dataLine);
+    // Only EOF may finalize an unterminated SSE event. Bytes after a semantic
+    // terminal do not belong to this generation and must not replace its result.
+    if (!terminalEventSeen && !streamError) {
+      buffer += decoder.decode();
+      if (buffer.length > MAX_SSE_CARRY_CHARS) return { ok: false, bytes, error: `model_stream_line_too_large:${buffer.length}>${MAX_SSE_CARRY_CHARS}`, data: null, streamedTextChars: text.length };
+      if (buffer.startsWith('data:')) {
+        const dataLine = buffer.slice(5).trimStart();
+        dataChars += dataLine.length;
+        if (dataChars > MAX_SSE_EVENT_CHARS) return { ok: false, bytes, error: `model_stream_event_too_large:${dataChars}>${MAX_SSE_EVENT_CHARS}`, data: null, streamedTextChars: text.length };
+        dataLines.push(dataLine);
+      }
+      await consumeEvent();
     }
-    await consumeEvent();
     if (toolCallFailure) return { ok: false, bytes, error: toolCallFailure, data: null, streamedTextChars: text.length };
   } finally {
     reader.releaseLock?.();
