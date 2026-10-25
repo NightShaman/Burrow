@@ -561,14 +561,35 @@ export async function runSpawnSubagentChild({
     },
   };
   const adapter = createModelAdapter({ config: modelConfig });
+  const recordModelFailure = async (error) => {
+    const cause = String(boundedRedactedValue(String(error || 'model failed'), { maxChars: 2000, maxStringChars: 2000 }));
+    await authority.appendTurn({ sessionId: childSessionId, role: 'assistant',
+      visibility: 'chat', entersPrompt: false, content: `[model_error: ${cause}]`,
+      runId: id, traceDir, metadata: { kind: 'subagent-model-error', decision: 'model_failed', error: cause } });
+    await conversationStore.updateMetadata({ agentId, sessionId: childSessionId,
+      update: old => ({ ...old, subagentStatus: 'failed', subagentOk: false }) });
+    return cause;
+  };
+  // All model stages share the same error projection, including thrown
+  // adapter failures. Persist it in the child's chat, not just its activity.
+  const callModel = async (method, request) => {
+    let response;
+    try { response = await adapter[method](request); }
+    catch (error) { response = { ok: false, error: error?.message || String(error) }; }
+    // Empty output has a separate terminal-synthesis recovery path.
+    if (!response.ok && response.error !== 'model_response_empty') {
+      response = { ...response, error: await recordModelFailure(response.error || response.status) };
+    }
+    return response;
+  };
   const messages = normalizeProviderMessages([{ role: 'system', content: 'Internal subagent task. This isolated child request is not parent conversation history.' }, { role: 'user', content: prompt }]);
   await progress?.({ type: 'subagent-progress', phase: 'model-request', id });
   await recordLiveActivity({ kind: 'model', phase: 'model-request', label: 'Waiting for model response', model: modelConfig?.model || null }, 'model_request');
-  const first = await adapter.complete({ sessionId: childSessionId, messages, tools: subagentToolSchemas(), traceLogger: modelTrace, signal });
+  const first = await callModel('complete', { sessionId: childSessionId, messages, tools: subagentToolSchemas(), traceLogger: modelTrace, signal });
   await progress?.({ type: 'subagent-progress', phase: 'model-response', id });
   await recordLiveActivity({ kind: 'model', phase: 'model-response', label: first.ok ? 'Model response received' : 'Model response failed', status: first.ok ? 'completed' : 'error', model: modelConfig?.model || null, error: first.ok ? null : (first.error || first.status) }, first.ok ? 'model_response' : 'model_error');
   if (!first.ok) {
-    const result = { ok: false, summary: 'Minion model call failed.', blockers: [`subagent_model_failed:${first.error || first.status}`], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
+    const result = { ok: false, summary: `Minion model call failed: ${first.error || first.status}`, blockers: [`subagent_model_failed:${first.error || first.status}`], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
     await updateSubagentStatus({ dataRoot, id, status: 'failed', phase: 'idle', result, activity: subagentLiveActivity({ kind: 'terminal', phase: 'idle', status: 'error', label: 'Subagent failed', completedAt: nowIso(), error: result.blockers?.[0] || null }), provenance: { source: 'spawn-subagent-child', reason: 'model_failed' } });
     return result;
   }
@@ -632,7 +653,7 @@ export async function runSpawnSubagentChild({
         : null;
       if (preparedContinuation) applyFinalProviderDelivery({ toolCalls, toolResults: batch.results, messages: preparedContinuation.messages });
       next = nativeContinuation
-        ? await adapter.continueWithToolResults({
+        ? await callModel('continueWithToolResults', {
             previousModel: current,
             baseMessages: messages,
             toolCalls,
@@ -642,7 +663,7 @@ export async function runSpawnSubagentChild({
             traceLogger: modelTrace,
             signal,
           })
-        : await adapter.complete({ sessionId: childSessionId, previousModel: current,
+        : await callModel('complete', { sessionId: childSessionId, previousModel: current,
             messages: normalizeProviderMessages([
               ...messages,
               { role: 'user', content: followupPromptWithEvidence({ prompt, toolResults, latestResults: batch.results, allowMoreTools }) },
@@ -676,7 +697,7 @@ export async function runSpawnSubagentChild({
     // incomplete/provider failures remain fatal.
     if (!next.ok && next.error === 'model_response_empty') break;
     if (!next.ok) {
-      const result = subagentResult({ ok: false, summary: 'Minion follow-up model call failed.', blockers: [`subagent_model_failed:${next.error || next.status}`], toolResults, target });
+      const result = subagentResult({ ok: false, summary: `Minion follow-up model call failed: ${next.error || next.status}`, blockers: [`subagent_model_failed:${next.error || next.status}`], toolResults, target });
       await updateSubagentStatus({ dataRoot, id, status: 'failed', phase: 'idle', result, activity: subagentLiveActivity({ kind: 'terminal', phase: 'idle', status: 'error', label: 'Subagent failed', completedAt: nowIso(), error: result.blockers?.[0] || null }), provenance: { source: 'spawn-subagent-child', reason: 'model_failed_after_tools' } });
       return result;
     }
@@ -697,7 +718,7 @@ export async function runSpawnSubagentChild({
 
   await progress?.({ type: 'subagent-progress', phase: 'terminal-request', id });
   await recordLiveActivity({ kind: 'model', phase: 'terminal-request', label: 'Waiting for terminal summary', model: modelConfig?.model || null }, 'terminal_request');
-  const synthesis = await adapter.complete({ sessionId: childSessionId, previousModel: current,
+  const synthesis = await callModel('complete', { sessionId: childSessionId, previousModel: current,
     messages: normalizeProviderMessages([
       ...messages,
       { role: 'user', content: finalSynthesisPrompt({ prompt, toolResults }) },
@@ -710,7 +731,7 @@ export async function runSpawnSubagentChild({
   await progress?.({ type: 'subagent-progress', phase: 'terminal-response', id });
   await recordLiveActivity({ kind: 'model', phase: 'terminal-response', label: synthesis.ok ? 'Terminal summary received' : 'Terminal summary failed', status: synthesis.ok ? 'completed' : 'error', model: modelConfig?.model || null, error: synthesis.ok ? null : (synthesis.error || synthesis.status) }, synthesis.ok ? 'terminal_response' : 'terminal_error');
   if (!synthesis.ok && synthesis.error !== 'model_response_empty') {
-    const result = subagentResult({ ok: false, summary: 'Minion final synthesis model call failed.', blockers: [`subagent_model_failed:${synthesis.error || synthesis.status}`], toolResults, target });
+    const result = subagentResult({ ok: false, summary: `Minion final synthesis model call failed: ${synthesis.error || synthesis.status}`, blockers: [`subagent_model_failed:${synthesis.error || synthesis.status}`], toolResults, target });
     await updateSubagentStatus({ dataRoot, id, status: 'failed', phase: 'idle', result, activity: subagentLiveActivity({ kind: 'terminal', phase: 'idle', status: 'error', label: 'Subagent failed', completedAt: nowIso(), error: result.blockers?.[0] || null }), provenance: { source: 'spawn-subagent-child', reason: 'final_synthesis_failed' } });
     await conversationStore.updateMetadata({ agentId, sessionId: childSessionId, update: old => ({ ...old, sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: 'failed', subagentOk: false, workerProfile: 'spawn_subagent' }) });
     return result;

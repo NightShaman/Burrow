@@ -286,12 +286,8 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   const cancelStream = (stream) => {
     try { Promise.resolve(stream?.cancel?.()).catch(() => {}); } catch {}
   };
-  const limit = Math.max(1, Math.floor(Number(maxBytes) || DEFAULT_MAX_RESPONSE_BYTES));
-  const contentLength = Number(response?.headers?.get?.('content-length') || 0);
-  if (Number.isFinite(contentLength) && contentLength > limit) {
-    cancelStream(response?.body);
-    return { ok: false, bytes: contentLength, error: `model_response_too_large:${contentLength}>${limit}`, data: null, streamedTextChars: 0 };
-  }
+  // SSE is consumed incrementally. Cumulative wire traffic is not retained
+  // memory; event, carry, text and tool-argument bounds apply below instead.
   const reader = response?.body?.getReader?.();
   if (!reader) return { ok: false, bytes: 0, error: 'model_stream_unavailable', data: null, streamedTextChars: 0 };
   const decoder = new TextDecoder();
@@ -416,10 +412,6 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
       const { done, value } = await reader.read();
       if (done) break;
       bytes += value?.byteLength ?? value?.length ?? 0;
-      if (bytes > limit) {
-        cancelStream(reader);
-        return { ok: false, bytes, error: `model_response_too_large:${bytes}>${limit}`, data: null, streamedTextChars: text.length };
-      }
       buffer += decoder.decode(value, { stream: true });
       while (true) {
         const match = buffer.match(/\r?\n/);
