@@ -275,9 +275,8 @@ function toolOutputText(result = {}) {
   return toolOutputContent(result);
 }
 
-function attachmentViewUserMessage(result = {}, call = {}, index = 0) {
-  const attachment = result?.attachment;
-  if (result?.tool !== 'attachment_view' || !result?.ok || attachment?.kind !== 'image' || !attachment?.dataUrl) return null;
+function attachmentViewUserMessage(result = {}, call = {}, index = 0, attachment = result?.attachment) {
+  if (attachment?.kind !== 'image' || !attachment?.dataUrl) return null;
   const callId = String(call?.id || call?.call_id || `tool-call-${index}`).slice(0, 256);
   const name = typeof attachment.name === 'string' ? attachment.name : 'attachment';
   const type = typeof attachment.type === 'string' ? attachment.type : 'image';
@@ -285,7 +284,7 @@ function attachmentViewUserMessage(result = {}, call = {}, index = 0) {
   return {
     role: 'user',
     content: [
-      { type: 'text', text: `Attachment image from attachment_view result for tool_call_id ${callId}: ${name}${id ? ` (${id})` : ''}, ${type}. Use this image with the preceding tool receipt.` },
+      { type: 'text', text: `Attachment image from ${result.tool} result for tool_call_id ${callId}: ${name}${id ? ` (${id})` : ''}, ${type}. Use this image with the preceding tool receipt.` },
       { type: 'image_url', image_url: { url: String(attachment.dataUrl) } },
     ],
     metadata: { providerMessageSource: 'attachment-view-image' },
@@ -323,9 +322,14 @@ function nativeToolRound({ toolCalls = [], toolResults = [] } = {}) {
   for (const message of round) {
     expanded.push(message);
     if (message?.role !== 'tool') continue;
-    const imageMessage = attachmentViewUserMessage((toolResults || [])[toolIndex], calls[toolIndex], toolIndex);
+    const result = (toolResults || [])[toolIndex];
+    const attachments = result?.tool === 'mcp_call' ? result.attachments || []
+      : result?.tool === 'attachment_view' && result.ok ? [result.attachment] : [];
+    for (const attachment of attachments) {
+      const imageMessage = attachmentViewUserMessage(result, calls[toolIndex], toolIndex, attachment);
+      if (imageMessage) expanded.push(imageMessage);
+    }
     toolIndex += 1;
-    if (imageMessage) expanded.push(imageMessage);
   }
   return normalizeProviderMessages(expanded);
 }

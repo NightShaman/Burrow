@@ -16,6 +16,7 @@ import { executeContinuityHandoffWriteTool, executeRollingContinuitySearchTool, 
 import { searchAgentSessionEvidence } from './session-search.mjs';
 import { executeTaskBoardCreateTool, executeTaskBoardDeleteTool, executeTaskBoardListTool, executeTaskBoardReassignTool, executeTaskBoardUpdateTool } from './task-board-tool-executor.mjs';
 import { compactToolReceipts } from './runtime-result-shapes.mjs';
+import { persistMcpImages } from './mcp-image-content.mjs';
 import { readAttachmentArtifact } from './attachment-store.mjs';
 import { reviewProposalActions } from './action-safety.mjs';
 import { invokeMcpTool, publicMcpError, publicMcpFailureDetail } from './mcporter-adapter.mjs';
@@ -329,7 +330,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
         }
         const output = selected.connection.transport === 'mod'
           ? await selected.connection.invoke(action.mcpToolName, action.mcpArguments, { context: { agentId, sessionId, conversationId, runId: executionContext?.parentRunId || null }, abortSignal })
-          : await invokeMcp(selected.connection, { apiKey: selected.connection.apiKey, environmentVariables: selected.connection.environmentVariables, toolName: action.mcpToolName, arguments: action.mcpArguments });
+          : await invokeMcp(selected.connection, { apiKey: selected.connection.apiKey, environmentVariables: selected.connection.environmentVariables, toolName: action.mcpToolName, arguments: action.mcpArguments, preserveContentResults: true });
         const protectedOutput = selected.connection.transport === 'mod'
           ? protectToolOutput(output, { registry: executionContext?.protectedValues,
             managedIssuer: (declaration) => {
@@ -342,9 +343,16 @@ export async function executeReviewedProposalActions({ conversationStore = null,
             } })
           : protectMcpOutput(output, { provider: selected.connection.name, toolName: action.mcpToolName, mcpArguments: action.mcpArguments, registry: executionContext?.protectedValues });
         const withheld = protectedOutput.protection.status === 'withheld';
+        const imageResult = await persistMcpImages(protectedOutput.safeOutput, {
+          agentWorkspaceRoot: executionContext?.agentWorkspaceRoot || workspaceRoot || rootDir,
+          retentionDays: executionContext?.stores?.albdruck ? (await executionContext.stores.albdruck.readRetention()).attachmentDays : 30,
+        });
+        const isError = imageResult.output?.isError === true;
         result = {
-          tool: 'mcp_call', ok: !withheld, provider: selected.connection.name, mcpToolName: action.mcpToolName, connectionId: selected.connection.id,
-          output: protectedOutput.safeOutput,
+          tool: 'mcp_call', ok: !withheld && !isError, provider: selected.connection.name, mcpToolName: action.mcpToolName, connectionId: selected.connection.id,
+          output: imageResult.output,
+          ...(imageResult.attachments.length ? { attachments: imageResult.attachments } : {}),
+          ...(isError ? { error: 'mcp_tool_failed' } : {}),
           protection: protectedOutput.protection,
           ...(withheld ? { error: 'mcp_sensitive_response_withheld' } : {}),
           ...(protectedOutput.protectedValues.length ? { protectedValues: protectedOutput.protectedValues } : {}),

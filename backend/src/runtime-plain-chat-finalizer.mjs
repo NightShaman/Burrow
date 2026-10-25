@@ -176,6 +176,9 @@ export async function appendChatToolLoopEntries({ stores = null, agentId = 'hatc
     });
     for (const result of iteration.proposalExecution?.toolResults || []) {
       const normalizedResult = summarizeToolResults([result])[0] || result;
+      // Manifest readers use metadata.attachments. Copy the byte-free records:
+      // metadata redaction intentionally truncates repeated object identities.
+      const attachments = normalizedResult.attachments?.map(item => ({ ...item })) || [];
       await appendRuntimeSessionEntry({
         stores, agentId, sessionRoot,
         dataRoot,
@@ -187,7 +190,7 @@ export async function appendChatToolLoopEntries({ stores = null, agentId = 'hatc
         traceDir: logger.traceDir,
         visibility: 'debug',
         entersPrompt: false,
-        metadata: { decision: 'chat_tool_result', canonicalExecution: true, iteration: iteration.iteration, tool: result.tool || null, callId: result.activityId || null, ok: result.ok ?? null, normalizedResult },
+        metadata: { decision: 'chat_tool_result', canonicalExecution: true, iteration: iteration.iteration, tool: result.tool || null, callId: result.activityId || null, ok: result.ok ?? null, normalizedResult, ...(attachments.length ? { attachments } : {}) },
       });
     }
   }

@@ -1,6 +1,7 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { redactProtectedText } from './redaction.mjs';
 
 function runtimeRootOrThrow(runtimeRoot = null) {
@@ -274,7 +275,7 @@ export async function discoverMcpTools(connection, { apiKey, environmentVariable
   } catch (error) { if (error instanceof SyntaxError) throw new Error('mcp_discovery_invalid_response'); throw error; }
 }
 
-export async function invokeMcpTool(connection, { apiKey, environmentVariables = {}, toolName, arguments: toolArguments = {}, binary = null, runtimeRoot = null, runCommand = run } = {}) {
+export async function invokeMcpTool(connection, { apiKey, environmentVariables = {}, toolName, arguments: toolArguments = {}, preserveContentResults = false, binary = null, runtimeRoot = null, runCommand = run } = {}) {
   if (!connection?.enabled) throw new Error('mcp_connection_disabled');
   if (!['http', 'stdio'].includes(connection.transport)) throw new Error('mcp_transport_invalid');
   if (!text(toolName)) throw new Error('mcp_tool_name_invalid');
@@ -282,7 +283,11 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
     let output;
     let launcherFailure = null;
     try {
-      output = await runCommand(runtime.binary, ['call', `connection.${toolName}`, '--config', configPath, '--args', JSON.stringify(toolArguments), '--output', 'json'], { cwd: runtime.runtimeRoot, timeoutMs: 30_000, protectedValues: [apiKey, ...Object.values(environmentVariables || {})] });
+      const command = preserveContentResults ? process.execPath : runtime.binary;
+      const args = preserveContentResults
+        ? [fileURLToPath(new URL('./mcporter-content-launcher.mjs', import.meta.url)), runtime.binary, configPath, toolName, JSON.stringify(toolArguments), connection.lifecycle || 'ephemeral']
+        : ['call', `connection.${toolName}`, '--config', configPath, '--args', JSON.stringify(toolArguments), '--output', 'json'];
+      output = await runCommand(command, args, { cwd: runtime.runtimeRoot, timeoutMs: 30_000, ...(preserveContentResults ? { maxStreamCaptureBytes: 32 * 1024 * 1024 } : {}), protectedValues: [apiKey, ...Object.values(environmentVariables || {})] });
     } catch (error) {
       // mcporter deliberately exits non-zero for a valid MCP `{ isError:
       // true }` result, while writing that result to stdout. Parse it before
@@ -291,10 +296,13 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
       launcherFailure = error;
       output = error.stdout;
     }
+    // Never turn a truncated image JSON tail into model-visible plain text.
+    if (preserveContentResults && /^\[\d+ earlier bytes omitted\]/.test(output)) throw new Error('mcp_response_too_large');
     try {
       const parsed = JSON.parse(output);
       const structuredFailure = parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed.isError === true || parsed.error || parsed.ok === false || parsed.success === false);
       if (launcherFailure && !structuredFailure) throw launcherFailure;
+      if (preserveContentResults && parsed?.isError === true && Array.isArray(parsed.content)) return parsed;
       if (structuredFailure) {
         const providerFailure = providerFailureDetail(parsed);
         throw runtimeFailure('mcp_tool_failed', { stdout: boundedJson(parsed), protectedValues: [apiKey, ...Object.values(environmentVariables || {})], toolErrorCode: providerFailure.toolErrorCode, httpStatus: providerFailure.httpStatus, detail: providerFailure.detail });
