@@ -2988,7 +2988,8 @@ async function currentActiveChatRunSummaries({ agentId = null, sessionId = null 
     catch (error) { if (error.statusCode !== 404) throw error; run.steering = []; }
   }
   const childRecords = [];
-  const runtimes = agentId ? [await resolveAgentRuntime(agentId)] : await Promise.all((await agentsStore().list()).map((agent) => resolveAgentRuntime(agent.id)));
+  // Observability reads stored identity/data, not permission to execute a turn.
+  const runtimes = agentId ? [await resolveAgentContext(agentId)] : await Promise.all((await agentsStore().list({ includeDisabled: true })).map((agent) => resolveAgentContext(agent.id)));
   for (const agentRuntime of runtimes) {
     const records = await listSubagentRecords({ dataRoot: agentRuntime.agentDataRoot, includeFinal: false, limit: 100 });
     for (const record of records) {
