@@ -6,7 +6,7 @@ import { api } from '../../app/api';
 import { Field, SettingSection } from './SettingsPrimitives';
 
 type DreamModel = { modelConnectionId?: string | null; model?: string | null };
-type DreamSettings = { enabled: boolean; quietDayDreams: boolean; cron: string; timezone: string | null; effectiveTimezone?: string; prompt: string } & DreamModel;
+type DreamSettings = { enabled: boolean; quietDayDreams: boolean; promoteToMemory: boolean; cron: string; timezone: string | null; effectiveTimezone?: string; prompt: string } & DreamModel;
 type DreamSettingsResponse = { settings: DreamSettings; effectiveModel?: DreamModel | null; modelResolutionError?: string | null };
 type DreamCycleReceipt = {
   runId: string;
@@ -31,7 +31,7 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
   const resourceId = agentId.includes('::') ? agentId.slice(agentId.indexOf('::') + 2) : agentId;
   const request = <T,>(path: string, init?: RequestInit) => api<T>(path, init);
   const dreamModels = savedProviders.flatMap((provider) => provider.models.map((model) => ({ connectionId: provider.id, model, label: `${provider.provider} · ${provider.modelLabels?.[model] ?? model}` })));
-  const [settings, setSettings] = useState<DreamSettings>({ enabled: false, quietDayDreams: true, cron: '0 4 * * *', timezone: null, prompt: '', modelConnectionId: null, model: null });
+  const [settings, setSettings] = useState<DreamSettings>({ enabled: false, quietDayDreams: true, promoteToMemory: true, cron: '0 4 * * *', timezone: null, prompt: '', modelConnectionId: null, model: null });
   const [state, setState] = useState<'loading' | 'idle' | 'saving' | 'error'>('loading');
   const [retry, setRetry] = useState(0);
   const [error, setError] = useState('');
@@ -44,7 +44,7 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
   useEffect(() => {
     const version = ++requestVersion.current;
     const controller = new AbortController();
-    setState('loading'); setError(''); setSettings({ enabled: false, quietDayDreams: true, cron: '0 4 * * *', timezone: null, prompt: '', modelConnectionId: null, model: null }); setEffectiveModel(null); setModelResolutionError(null); setReceiptError(''); setReceipts([]);
+    setState('loading'); setError(''); setSettings({ enabled: false, quietDayDreams: true, promoteToMemory: true, cron: '0 4 * * *', timezone: null, prompt: '', modelConnectionId: null, model: null }); setEffectiveModel(null); setModelResolutionError(null); setReceiptError(''); setReceipts([]);
     Promise.all([
       request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-settings`, { signal: controller.signal }),
       request<DreamCycleResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-cycle?limit=5`, { signal: controller.signal }).catch((cause) => {
@@ -53,7 +53,7 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
       }),
     ]).then(([dreamSettings, dreamCycles]) => {
       if (controller.signal.aborted || version !== requestVersion.current) return;
-      setSettings({ ...dreamSettings.settings, quietDayDreams: dreamSettings.settings.quietDayDreams ?? true });
+      setSettings({ ...dreamSettings.settings, quietDayDreams: dreamSettings.settings.quietDayDreams ?? true, promoteToMemory: dreamSettings.settings.promoteToMemory ?? true });
       setEffectiveModel(dreamSettings.effectiveModel ?? null);
       setModelResolutionError(dreamSettings.modelResolutionError ?? null);
       setReceipts(Array.isArray(dreamCycles.receipts) ? dreamCycles.receipts : []);
@@ -71,9 +71,9 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
     const version = requestVersion.current;
     setState('saving'); setError('');
     try {
-      const result = await request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-settings`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: settings.enabled, quietDayDreams: settings.quietDayDreams, cron: settings.cron, prompt: settings.prompt, modelConnectionId: settings.modelConnectionId ?? null, model: settings.model ?? null }) });
+      const result = await request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-settings`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: settings.enabled, quietDayDreams: settings.quietDayDreams, promoteToMemory: settings.promoteToMemory, cron: settings.cron, prompt: settings.prompt, modelConnectionId: settings.modelConnectionId ?? null, model: settings.model ?? null }) });
       if (version !== requestVersion.current) return;
-      setSettings({ ...result.settings, quietDayDreams: result.settings.quietDayDreams ?? true });
+      setSettings({ ...result.settings, quietDayDreams: result.settings.quietDayDreams ?? true, promoteToMemory: result.settings.promoteToMemory ?? true });
       setEffectiveModel(result.effectiveModel ?? null);
       setModelResolutionError(result.modelResolutionError ?? null);
     } catch (cause) {
@@ -111,6 +111,8 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
       <label className="agent-enabled"><input type="checkbox" checked={settings.enabled} disabled={disabled} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} /><span>Enable scheduled dreaming</span></label>
       <label className="agent-enabled"><input type="checkbox" checked={settings.quietDayDreams} disabled={disabled} aria-describedby="quiet-day-dreams-help" onChange={(event) => setSettings({ ...settings, quietDayDreams: event.target.checked })} /><span>Dream on quiet days</span></label>
       <p id="quiet-day-dreams-help" className="settings-description">When enabled, quiet days generate a diary from retained continuity without re-extraction. When disabled, days with no new material skip model work.</p>
+      <label className="agent-enabled"><input type="checkbox" checked={settings.promoteToMemory} disabled={disabled} aria-describedby="agent-dream-promotion-help" onChange={(event) => setSettings({ ...settings, promoteToMemory: event.target.checked })} /><span>Promote Dreams to memory</span></label>
+      <p id="agent-dream-promotion-help" className="settings-description">Requires global promotion in Brain memory too. Off keeps Dreams and their archive; existing memories and explicit saves are unchanged. Re-enabling does not catch up skipped promotions.</p>
       <div className="dream-schedule-fields"><div className="skill-compact-field"><Field label="Cron"><input value={settings.cron} disabled={disabled} onChange={(event) => setSettings({ ...settings, cron: event.target.value })} /></Field><small className="field-hint">Uses the operator timezone{settings.effectiveTimezone ? ` (${settings.effectiveTimezone})` : ''}. Follows operator timezone changes.</small></div><ProviderModelFields providers={savedProviders} connectionId={settings.modelConnectionId} model={settings.model} inheritLabel="Use agent chat model" disabled={disabled} onChange={(modelConnectionId, model) => setSettings({ ...settings, modelConnectionId, model })} /></div>
       <p className="settings-description">Effective model: {effectiveModel?.modelConnectionId && effectiveModel.model ? modelLabel(effectiveModel, [{ value: '', label: 'Use agent chat model' }, ...dreamModels.map((option) => ({ value: dreamModelValue(option.connectionId, option.model), label: option.label }))]) : 'Unconfigured'}</p>
       {modelResolutionError && <p className="settings-request-error" role="alert">Model resolution error: {modelResolutionError}</p>}

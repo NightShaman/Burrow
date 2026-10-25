@@ -55,7 +55,7 @@ describe('Brain embedding settings', () => {
   });
   it('fences a deferred poll against save and the returned generation', async () => {
     const old = deferred<typeof status>(); let reads = 0;
-    mocked.mockImplementation(async (_path, options) => options?.method === 'PUT' ? { ...status, generation: 'new', indexed: '7' } : ++reads === 2 ? old.promise : { ...status, generation: reads > 2 ? 'new' : status.generation, indexed: reads > 2 ? '7' : '2' });
+    mocked.mockImplementation(async (_path, options) => _path === '/api/settings/brain-memory' ? { promoteDreamsToMemory: true } : options?.method === 'PUT' ? { ...status, generation: 'new', indexed: '7' } : ++reads === 2 ? old.promise : { ...status, generation: reads > 2 ? 'new' : status.generation, indexed: reads > 2 ? '7' : '2' });
     await mount(); await waitFor(() => expect(reads).toBe(2));
     fireEvent.click(screen.getByText('Save embedding settings')); await screen.findByText(/Generation new/);
     await act(async () => old.resolve(status));

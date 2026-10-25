@@ -1,6 +1,13 @@
+import { readDreamPromotion, saveDreamPromotion } from '../../src/dream-promotion-settings.mjs';
 /** Mounted only behind the existing UI authentication and browser-origin policy. */
-export function createBrainRoutes({store,embeddings,readJsonBody,sendJson}) {
+export function createBrainRoutes({store,embeddings,metadata,readJsonBody,sendJson}) {
  return async ({req,res,url}) => {
+  if (url.pathname === '/api/settings/brain-memory') {
+   if (!['GET','PUT'].includes(req.method)) return false;
+   try { sendJson(res,200,await (req.method==='GET' ? readDreamPromotion(metadata) : saveDreamPromotion(metadata,await readJsonBody(req)))); }
+   catch { sendJson(res,400,{error:'promote_dreams_to_memory_invalid'}); }
+   return true;
+  }
   if (url.pathname.startsWith('/api/settings/brain-embeddings')) {
    const action=url.pathname.slice('/api/settings/brain-embeddings'.length);
    try {

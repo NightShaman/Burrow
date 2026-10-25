@@ -60,3 +60,39 @@ it('keeps quiet-day settings owned by the selected agent across delayed saves an
   await waitFor(() => expect((screen.getByRole('checkbox', { name: 'Dream on quiet days' }) as HTMLInputElement).disabled).toBe(false));
   expect((screen.getByRole('checkbox', { name: 'Dream on quiet days' }) as HTMLInputElement).checked).toBe(false);
 });
+
+it('defaults legacy settings to promotion dreaming and persists explicit opt-out and opt-in', async () => {
+  const settings = { enabled: true, cron: '0 4 * * *', timezone: null, prompt: '' };
+  vi.mocked(api).mockImplementation(async (path, init) => path.includes('dream-settings') ? { settings: init?.body ? JSON.parse(init.body as string) : settings } : { receipts: [] });
+  render(<AgentDreams agentId="nigel" savedProviders={[]} />);
+  const toggle = screen.getByRole('checkbox', { name: 'Promote Dreams to memory' }) as HTMLInputElement;
+  await waitFor(() => expect(toggle.disabled).toBe(false));
+  expect(toggle.checked).toBe(true);
+  for (const value of [false, true]) {
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('button', { name: 'Save dream settings' }));
+    await waitFor(() => expect(toggle.disabled).toBe(false));
+    expect(toggle.checked).toBe(value);
+    const save = vi.mocked(api).mock.calls.filter(([, init]) => init?.method === 'PUT').at(-1)!;
+    expect(JSON.parse(save[1]!.body as string).promoteToMemory).toBe(value);
+  }
+});
+it('keeps promotion settings owned by the selected agent across delayed saves and reload', async () => {
+  let resolveSave!: (value: unknown) => void;
+  const settings = (promoteToMemory: boolean) => ({ enabled: true, promoteToMemory, cron: '0 4 * * *', timezone: null, prompt: '' });
+  vi.mocked(api).mockImplementation(async (path, init) => {
+    if (init?.method === 'PUT') return new Promise(resolve => { resolveSave = resolve; });
+    return path.includes('dream-settings') ? { settings: settings(!path.includes('/b/')) } : { receipts: [] };
+  });
+  const view = render(<AgentDreams agentId="a" savedProviders={[]} />);
+  await waitFor(() => expect((screen.getByRole('checkbox', { name: 'Promote Dreams to memory' }) as HTMLInputElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: 'Save dream settings' }));
+  view.rerender(<AgentDreams agentId="b" savedProviders={[]} />);
+  await waitFor(() => expect((screen.getByRole('checkbox', { name: 'Promote Dreams to memory' }) as HTMLInputElement).checked).toBe(false));
+  await act(async () => resolveSave({ settings: settings(true) }));
+  expect((screen.getByRole('checkbox', { name: 'Promote Dreams to memory' }) as HTMLInputElement).checked).toBe(false);
+  view.unmount();
+  render(<AgentDreams agentId="b" savedProviders={[]} />);
+  await waitFor(() => expect((screen.getByRole('checkbox', { name: 'Promote Dreams to memory' }) as HTMLInputElement).disabled).toBe(false));
+  expect((screen.getByRole('checkbox', { name: 'Promote Dreams to memory' }) as HTMLInputElement).checked).toBe(false);
+});

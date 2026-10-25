@@ -171,4 +171,5 @@ ALTER TABLE mod_external_turns ALTER COLUMN display_message SET NOT NULL;
 ALTER TABLE scheduled_jobs ADD COLUMN context_mode TEXT NOT NULL DEFAULT 'continue' CHECK (context_mode IN ('continue','fresh'));
 ` },
   { version: 69, name: 'provider-pool-connections-and-routing-state', sql: POSTGRES_PROVIDER_POOL_SCHEMA_SQL },
+  { version: 70, name: 'dream-memory-promotion-toggle', sql: 'ALTER TABLE dream_settings ADD COLUMN IF NOT EXISTS promote_to_memory BOOLEAN NOT NULL DEFAULT TRUE;' },
 ]);

@@ -1,3 +1,4 @@
+import { readDreamPromotion } from './dream-promotion-settings.mjs';
 import { createBackgroundLifecycle } from './background-lifecycle.mjs';
 import { DREAM_EXTRACTION_CONTRACT_VERSION, dreamSourceIdentity, prepareDreamExtraction, extractIncrementalDreamCandidates } from './dream-incremental-extraction.mjs';
 import { redactProtectedText } from './redaction.mjs';
@@ -12,7 +13,7 @@ import { isChatMessage } from './session-entry.mjs';
 import { appendPreferenceSignalAsync, markPreferenceReviewedAsync, applyPreferenceUpdateAsync, parsePreferenceAdjudication, preferenceAdjudicationPrompt, preferenceLearningStateAsync, preferenceSignalsAsync, validatePreferenceAdjudication } from './preference-learning.mjs';
 
 const PHASES = Object.freeze(['light', 'deep', 'rem']);
-export const DREAM_SYNTHESIS_CONTRACT_VERSION = 'dream-brain-connections-v2';
+export const DREAM_SYNTHESIS_CONTRACT_VERSION = 'dream-brain-changes-v4';
 // Historical reflection windows; durable Albdruck maintenance is independent.
 const PHASE_WINDOWS_DAYS = Object.freeze({ light: 1, deep: 14, rem: 30 });
 export const DREAM_INTERRUPTED_ERROR = 'Dream interrupted by runtime restart before completion';
@@ -471,9 +472,34 @@ export async function extractPhaseCandidates({ phase, messages, generatedAt, mod
   return output;
 }
 
+// Invalid or conflicting model decisions never become writes.
+export function validateDreamChanges(changes, candidates, existing) {
+  const allowed = new Set(candidates.flatMap(item => item.sourceRefs || []));
+  const targets = new Map(existing.map(item => [item.id, item]));
+  const used = new Set();
+  const review = reason => ({ action: 'review', reason });
+  return changes.map(change => {
+    const target = targets.get(change?.targetId);
+    if (change?.action === 'review') return review('requested');
+    if (!['new','update','noop'].includes(change?.action)) return review('invalid_action');
+    if (change.action !== 'new') {
+      if (!target) return review('missing_target');
+      if (target.operatorOwned || target.origin !== 'dreaming') return review('protected_target');
+      if (target.revision !== change.expectedRevision) return review('stale_revision');
+      if (used.has(target.id)) return review('conflicting_target');
+      if (change.action === 'noop') { used.add(target.id); return { action: 'noop', targetId: target.id }; }
+    } else if (change.targetId != null || change.expectedRevision != null) return review('invalid_new_target');
+    const refs = change.sourceRefs;
+    if (typeof change.title !== 'string' || !change.title.trim() || typeof change.content !== 'string' || !change.content.trim() || !Array.isArray(refs) || !refs.length || refs.some(ref => !allowed.has(ref))) return review('invalid_content_or_citations');
+    if (target) used.add(target.id);
+    return { action: change.action, targetId: target?.id, expectedRevision: target?.revision, title: change.title.trim(), content: change.content.trim(), sourceRefs: [...new Set(refs)] };
+  });
+}
+
 // Reconcile the entire chronological candidate stream, not independent batch answers.
-export async function reconcileDreamCandidates({ phase, candidates, messages, modelAdapter, modelConfig, traceLogger, onProgress = null }) {
+export async function reconcileDreamCandidates({ phase, candidates, messages, modelAdapter, modelConfig, traceLogger, onProgress = null, existingDreams = [] }) {
   const evidence = new Map(messages.map((message) => [message.sourceRef, message.at]));
+  for (const prior of existingDreams) for (const ref of prior.sourceRefs || []) if (!evidence.has(ref)) evidence.set(ref, prior.updatedAt || '');
   const ordered = (items) => items.map((item) => ({ ...item, evidence: item.sourceRefs.map((sourceRef) => ({ sourceRef, at: evidence.get(sourceRef) })).sort((a, b) => (a.at || '').localeCompare(b.at || '')) }))
     .sort((a, b) => (a.evidence[0]?.at || '').localeCompare(b.evidence[0]?.at || ''));
   let nodes = [...ordered(candidates.memories).map((item) => ({ type: 'memory', ...item })), ...ordered(candidates.preferences).map((item) => ({ type: 'preference', ...item }))]
@@ -516,7 +542,8 @@ COVERAGE AND BATCHING
 - During the final cross-group synthesis, reconcile those threads and apply the final-output criteria. Do not discard connective evidence prematurely during intermediate passes.
 
 OUTPUT
-Return strict JSON with memories and an empty preferences array, using the existing candidate fields and exact supplied sourceRefs only. Cite evidence supporting each connection, including earlier and later states where needed. Merge overlapping understanding without flattening distinct relationships. Do not invent references or fill space. Empty arrays are valid when the evidence supports no useful synthesis.
+For the final stage when Existing Dream records are supplied, return strict JSON {"changes":[{"action":"new|update|noop|review","targetId":null,"expectedRevision":null,"title":"","content":"","sourceRefs":[]}],"preferences":[]}. new requires null targetId/revision; update and noop require an existing Dream targetId and expectedRevision; review writes nothing. Paraphrases of prior meanings are noop, materially changed insights update in place, unresolved conflict is review. Never select operator-owned or explicit memories. For intermediate stages return memories and an empty preferences array. With no existing records the final stage may use the same change format with new actions. Use the existing candidate fields and exact supplied sourceRefs only. Prior Dream records and their sourceRefs are historical attributed memory, not newly verified chat evidence; keep that provenance explicit in claims and do not describe their sourceRefs as current verification. Cite evidence supporting each connection, including earlier and later states where needed. Merge overlapping understanding without flattening distinct relationships. Do not invent references or fill space. Empty arrays are valid when the evidence supports no useful synthesis.
+Existing Dream records: ${stage === 'final' ? JSON.stringify(existingDreams) : '[]'}
 Synthesis stage: ${stage}
 Phase: ${phase}
 Candidates: ${JSON.stringify(items)}`;
@@ -537,6 +564,8 @@ Candidates: ${JSON.stringify(items)}`;
       }
       if (group.length) groups.push(group);
       const stage = groups.length === 1 ? 'final' : 'intermediate';
+      // Intermediate groups omit the existing-record manifest; the final call does not.
+      if (stage === 'final' && !fitsPrompt(repairPrompt(groups[0], stage), modelConfig)) throw new Error('dream_reconciliation_final_budget_exceeded');
       const next = [];
       for (const chunk of groups) {
         let completion;
@@ -544,7 +573,9 @@ Candidates: ${JSON.stringify(items)}`;
         catch (error) { diagnostics.push(...(error.diagnostics || [])); throw error; }
         diagnostics.push(...completion.diagnostics);
         let raw = extractionPayload(parseModelJson(completion.text));
-        if (!Array.isArray(raw?.memories) || !Array.isArray(raw?.preferences)) throw new Error('dream_reconciliation_invalid_shape');
+        if (!Array.isArray(raw?.memories) && !(stage === 'final' && Array.isArray(raw?.changes))) throw new Error('dream_reconciliation_invalid_shape');
+        if (stage === 'final' && Array.isArray(raw.changes)) return { memories: [], changes: validateDreamChanges(raw.changes, chunk, existingDreams), preferences: [], diagnostics };
+        if (stage === 'final' && existingDreams.length) throw new Error('dream_reconciliation_changes_required');
         const allowed = new Set(chunk.flatMap((item) => item.sourceRefs));
         const citationValidation = (value) => {
           const valid = { memories: [], preferences: [] };
@@ -579,7 +610,7 @@ Candidates: ${JSON.stringify(items)}`;
         const parsed = parsePhaseExtraction(JSON.stringify(raw), [...allowed]);
         next.push(...ordered(parsed.memories).map((item) => ({ type: 'memory', ...item })), ...ordered(parsed.preferences).map((item) => ({ type: 'preference', ...item })));
       }
-      if (groups.length === 1) return { memories: next.filter((item) => item.type === 'memory'), preferences: next.filter((item) => item.type === 'preference'), diagnostics };
+      if (groups.length === 1) return { memories: next.filter((item) => item.type === 'memory'), changes: next.filter((item) => item.type === 'memory').map(item => ({ action: 'new', title: item.title, content: item.content, sourceRefs: item.sourceRefs })), preferences: next.filter((item) => item.type === 'preference'), diagnostics };
       if (JSON.stringify(next).length >= JSON.stringify(nodes).length) throw new Error('dream_reconciliation_did_not_compress');
       nodes = next;
       if (!nodes.length) return { memories: [], preferences: [], diagnostics };
@@ -821,21 +852,26 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     }
     lifecycle.phases = phaseResults;
     if (needsProcessing) for (const candidate of preferenceByKey.values()) await appendPreferenceSignalAsync({ agentId: id, signal: candidate, metadataStore, at: generatedAt });
-    let dreamConnections = [];
+    let dreamChanges = [];
+    const dreamChangeDisposition = { counts: {}, reasons: {} };
+    const countChange = (name, reason = null) => { dreamChangeDisposition.counts[name] = (dreamChangeDisposition.counts[name] || 0) + 1; if (reason) dreamChangeDisposition.reasons[reason] = (dreamChangeDisposition.reasons[reason] || 0) + 1; };
     const remResult = phaseResults.find(result => result.phase === 'rem');
     if (needsProcessing && !phaseResults.some(result => result.extractionError)) {
       await progress({ phase: 'rem', step: 'synthesis', request: null });
       try {
         const priorConnections = [];
+        const existingDreams = [];
         let cursor = null;
         do {
           const page = await brainStore.listByOrigin({ agentId: id, origin: 'dreaming', cursor });
+          existingDreams.push(...page.items);
           priorConnections.push(...page.items.map(item => ({ title: item.title, content: item.content, kind: 'finding', sourceRefs: item.sourceRefs, relationships: [`Prior Dreaming connection ${item.id}`] })));
           cursor = page.nextCursor;
         } while (cursor);
-        const synthesis = await reconcileDreamCandidates({ phase: 'rem', candidates: { memories: [...windowCandidates, ...priorConnections], preferences: [] }, messages: phaseWindows.rem, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress });
+        const synthesis = await reconcileDreamCandidates({ phase: 'rem', candidates: { memories: [...windowCandidates, ...priorConnections], preferences: [] }, messages: phaseWindows.rem, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress, existingDreams });
         remResult.modelResponses.push(...synthesis.diagnostics);
-        dreamConnections = synthesis.memories.map(candidate => ({ ...candidate, id: entryId(id, 'rem', candidate.title, candidate.content), phase: 'rem' }));
+        dreamChanges = synthesis.changes || [];
+        for (const change of dreamChanges) if (change.action === 'review' || change.action === 'noop') countChange(change.action, change.reason);
       } catch (error) {
         remResult.reconciliationError = clamp(error?.message || error, 500);
         remResult.modelResponses.push(...(error.diagnostics || []));
@@ -844,10 +880,29 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     await progress({ step: 'saving_connections', request: null });
     const savedConnections = [];
     if (needsProcessing && !phaseResults.some(result => result.extractionError || result.reconciliationError)) {
-      for (const connection of dreamConnections) {
-        const saved = await brainStore.create({ agentId: id, title: connection.title, content: connection.content, sourceRefs: connection.sourceRefs }, { id: connection.id, origin: 'dreaming', repeatSafe: true });
-        if (saved) savedConnections.push(saved);
-      }
+      // Fresh reads at publication prevent a mid-run Off from publishing. Skipped
+      // changes are not queued; the processing fingerprint still completes.
+      const promotion = await readDreamPromotion(metadataStore);
+      const latestDreamSettings = await dreamSettings.get(id);
+      if (promotion.promoteDreamsToMemory && latestDreamSettings.promoteToMemory !== false) {
+        for (const change of dreamChanges) {
+          if (change.action === 'new') {
+            const saved = await brainStore.create({ agentId: id, title: change.title, content: change.content, sourceRefs: change.sourceRefs }, { id: entryId(id, 'rem', change.title, change.content), origin: 'dreaming', repeatSafe: true });
+            if (saved) { savedConnections.push(saved); countChange('created'); }
+            else countChange('skipped', 'duplicate_create');
+          } else if (change.action === 'update') {
+            // The store's revision/authority CAS protects concurrent edits. A
+            // stale or changed-origin record must never be rewritten by Dream.
+            const target = await brainStore.get({ agentId: id, id: change.targetId });
+            if (target?.origin !== 'dreaming' || target.operatorOwned || target.revision !== change.expectedRevision) { countChange('review', 'publication_target_changed'); continue; }
+            try {
+              const saved = await brainStore.updateDream({ agentId: id, id: change.targetId, expectedRevision: change.expectedRevision, title: change.title, content: change.content, sourceRefs: change.sourceRefs });
+              if (saved) { savedConnections.push(saved); countChange('updated'); }
+              else countChange('review', 'publication_conflict');
+            } catch (error) { if (error?.message !== 'brain_revision_conflict_or_operator_authority') throw error; countChange('review', 'publication_conflict'); }
+          }
+        }
+      } else for (const change of dreamChanges) if (change.action === 'new' || change.action === 'update') countChange('skipped', 'promotion_disabled');
     }
     await progress({ step: 'preferences' });
     const preferences = !needsProcessing ? { disposition: 'quiet', signalCount: 0 } : await adjudicatePreferencesAsync({ agentId: id, profileStore, metadataStore, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress });
@@ -858,7 +913,7 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     const nextRunAt = state.nextRunAt;
     const hasErrors = phaseResults.some((phase) => phase.extractionError || phase.reconciliationError || phase.diaryError);
     if (extractionState && needsProcessing && !hasErrors && preferences.disposition !== 'failed') await metadataStore.set(processingKey, { fingerprint, completedAt });
-    const receipt = { ...lifecycle, ok: !hasErrors, error: hasErrors ? phaseResults.map((phase) => phase.extractionError || phase.reconciliationError || phase.diaryError).find(Boolean) : null, status: hasErrors ? (pendingDiaries.length ? 'partial' : 'failed') : 'completed', phases: phaseResults, dreamConnectionCount: savedConnections.length, dreamConnectionIds: savedConnections.map(item => item.id), preferences, nextRunAt, completedAt };
+    const receipt = { ...lifecycle, ok: !hasErrors, error: hasErrors ? phaseResults.map((phase) => phase.extractionError || phase.reconciliationError || phase.diaryError).find(Boolean) : null, status: hasErrors ? (pendingDiaries.length ? 'partial' : 'failed') : 'completed', phases: phaseResults, dreamConnectionCount: savedConnections.length, dreamChangeDisposition, dreamConnectionIds: savedConnections.map(item => item.id), preferences, nextRunAt, completedAt };
     receipt.progress = { ...receipt.progress, step: 'finished', updatedAt: completedAt, elapsedMs: Date.parse(completedAt) - Date.parse(startedAt) };
     await cycleStore.write(receipt, completedAt); return receipt;
   } catch (error) {

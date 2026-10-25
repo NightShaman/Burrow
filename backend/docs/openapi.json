@@ -5430,6 +5430,10 @@
                     "quietDayDreams": {
                       "type": "boolean",
                       "default": true
+                    },
+                    "promoteToMemory": {
+                      "type": "boolean",
+                      "default": true
                     }
                   },
                   "additionalProperties": true
@@ -5487,6 +5491,10 @@
                 "type": "object",
                 "properties": {
                   "quietDayDreams": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "promoteToMemory": {
                     "type": "boolean",
                     "default": true
                   }
@@ -7283,6 +7291,88 @@
           }
         },
         "summary": "Replace global profile documents"
+      }
+    },
+    "/api/settings/brain-memory": {
+      "get": {
+        "tags": [
+          "Brains"
+        ],
+        "operationId": "getBrainMemorySettings",
+        "summary": "Read or set global Dream promotion",
+        "responses": {
+          "200": {
+            "description": "Current Brain Memory settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "promoteDreamsToMemory"
+                  ],
+                  "properties": {
+                    "promoteDreamsToMemory": {
+                      "type": "boolean",
+                      "default": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid boolean"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Brains"
+        ],
+        "operationId": "putBrainMemorySettings",
+        "summary": "Read or set global Dream promotion",
+        "responses": {
+          "200": {
+            "description": "Current Brain Memory settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "promoteDreamsToMemory"
+                  ],
+                  "properties": {
+                    "promoteDreamsToMemory": {
+                      "type": "boolean",
+                      "default": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid boolean"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "promoteDreamsToMemory"
+                ],
+                "properties": {
+                  "promoteDreamsToMemory": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   },

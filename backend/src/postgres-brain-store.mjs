@@ -64,6 +64,16 @@ export class PostgresBrainStore {
   return {items,nextCursor:rows.length>n ? Buffer.from(JSON.stringify({v:1,agentId,origin,id:items.at(-1).id})).toString('base64url') : null};
  }
  async update(input,{operator=false}={}) { fields(input); return this.mutate(input,operator,false); }
+ // Dream-only atomic ownership + revision guard, including origin changes since synthesis.
+ async updateDream(input) {
+  scope(input.agentId); fields(input);
+  if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) fail('revision_required');
+  const result = await this.pool.query(`UPDATE brain_memories SET revision=revision+1,updated_at=now(),title=$4,content=$5,source_refs=$6::json
+   WHERE agent_id=$1 AND id=$2 AND revision=$3 AND origin='dreaming' AND operator_owned=FALSE AND deleted_at IS NULL RETURNING *`,
+   [input.agentId,input.id,input.expectedRevision,input.title,input.content,JSON.stringify(input.sourceRefs || [])]);
+  if (!result.rows.length) fail('revision_conflict_or_operator_authority');
+  return record(result.rows[0]);
+ }
  async remove(input,{operator=false}={}) { return this.mutate(input,operator,true); }
  async mutate(input,operator,remove) {
   scope(input.agentId); if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) fail('revision_required');
