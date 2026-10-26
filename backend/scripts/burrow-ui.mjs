@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createDreamMemoryPreviewService } from '../src/dream-memory-preview.mjs';
 import { readDreamPromotion, saveDreamPromotion } from '../src/dream-promotion-settings.mjs';
 import { isInternalContextSession } from '../src/model-context-boundary.mjs';
 import { createModGenerationDispatcher } from '../src/mod-generations.mjs';
@@ -44,7 +45,7 @@ import { fileURLToPath } from 'node:url';
 import { inspectSessionContext, inspectSessionContextStatus } from '../src/context-engine.mjs';
 import { activeConversationLimits } from '../src/context-preparation.mjs';
 import { beginRuntimeSessionExecutionSupersession, chatTurnInputFromBody, createChatTurnRunId, finishRuntimeSessionExecutionSupersession, runChatTurnFromBody, runChatTurnFromWorkbenchContinuation, chatTurnResponse, chatTurnProgressResponse, chatTurnErrorResponse, loadRuntimeConfig } from '../src/chat-turn-controller.mjs';
-import { resolveModelConfig, resolveRuntimeTracePath } from '../src/config.mjs';
+import { resolveModelConfig, resolveRuntimeTracePath, resolveRuntimeTraceRoot } from '../src/config.mjs';
 import { API_TOKEN_SCOPES } from '../src/api-token-store.mjs';
 import { loadEffectiveSkillCatalog, skillManifest } from '../src/skill-catalog.mjs';
 import { collectTraceObservability } from '../src/trace-observability.mjs';
@@ -1149,6 +1150,18 @@ async function agentDreamDiary(agentId, body = null, query = {}) {
     const message = String(error?.message || error);
     return { ok: false, status: message === 'agent_not_found' ? 404 : 400, error: message };
   } finally { await store.close(); }
+}
+
+let memoryPreviewService;
+async function agentDreamMemoryPreview(agentId, body = {}) {
+  try {
+    memoryPreviewService ||= createDreamMemoryPreviewService({ stores: postgresApplication.stores,
+      traceRoot: agentId => resolveRuntimeTraceRoot(projectRoot, { agent_id: agentId }) });
+    return await memoryPreviewService(agentId, body);
+  } catch (error) {
+    const message = String(error?.message || error);
+    return { ok: false, status: message === 'agent_not_found' ? 404 : 400, error: message };
+  }
 }
 
 async function agentDreamMemoryConsolidate(agentId, body = {}) {
@@ -2888,7 +2901,7 @@ const workbenchRoute = createWorkbenchRoutes({ readJsonBody, sendJson, selectedA
 const forgeStoreFactory = () => postgresApplication.stores.forge;
 configureForgeStoreFactory(forgeStoreFactory);
 const forgeRoute = createForgeRoutes({ store: forgeStoreFactory, readJsonBody, sendJson, sendStaticFile });
-const dreamRoute = createDreamRoutes({ readJsonBody, sendJson, agentDreamSettings, agentDreamDiary, agentDreamMemoryConsolidate, agentDreamCycle });
+const dreamRoute = createDreamRoutes({ readJsonBody, sendJson, agentDreamSettings, agentDreamDiary, agentDreamMemoryConsolidate, agentDreamMemoryPreview, agentDreamCycle });
 const skillGitSync = new SkillGitSync({ pool: postgresApplication.pool, skills: postgresApplication.stores.skills, sources: postgresApplication.stores.skillSources, packageRoot: path.join(runtimeRoot,'skill-packages'), onError: error => { void serverLogger.event('skill_sync_error',{error: error.statusCode ? error.message : 'skill_sync_failed'}); } });
 const skillSourceRoute = createSkillSourceRoutes({ sources: postgresApplication.stores.skillSources, skills: postgresApplication.stores.skills, sync: skillGitSync, pool: postgresApplication.pool, readJsonBody, sendJson });
 const skillStoreCall = async (operation) => operation(postgresApplication.stores.skills);

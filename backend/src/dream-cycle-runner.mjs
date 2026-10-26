@@ -1,3 +1,4 @@
+import { memoryExpressionPrompt, memoryExpressionSettings } from './dream-memory-prompt.mjs';
 import { readDreamPromotion } from './dream-promotion-settings.mjs';
 import { createBackgroundLifecycle } from './background-lifecycle.mjs';
 import { DREAM_EXTRACTION_CONTRACT_VERSION, dreamSourceIdentity, prepareDreamExtraction, extractIncrementalDreamCandidates } from './dream-incremental-extraction.mjs';
@@ -13,7 +14,7 @@ import { isChatMessage } from './session-entry.mjs';
 import { appendPreferenceSignalAsync, markPreferenceReviewedAsync, applyPreferenceUpdateAsync, parsePreferenceAdjudication, preferenceAdjudicationPrompt, preferenceLearningStateAsync, preferenceSignalsAsync, validatePreferenceAdjudication } from './preference-learning.mjs';
 
 const PHASES = Object.freeze(['light', 'deep', 'rem']);
-export const DREAM_SYNTHESIS_CONTRACT_VERSION = 'dream-brain-changes-v4';
+export const DREAM_SYNTHESIS_CONTRACT_VERSION = 'dream-brain-changes-v5-expression';
 // Historical reflection windows; durable Albdruck maintenance is independent.
 const PHASE_WINDOWS_DAYS = Object.freeze({ light: 1, deep: 14, rem: 30 });
 export const DREAM_INTERRUPTED_ERROR = 'Dream interrupted by runtime restart before completion';
@@ -497,7 +498,7 @@ export function validateDreamChanges(changes, candidates, existing) {
 }
 
 // Reconcile the entire chronological candidate stream, not independent batch answers.
-export async function reconcileDreamCandidates({ phase, candidates, messages, modelAdapter, modelConfig, traceLogger, onProgress = null, existingDreams = [] }) {
+export async function reconcileDreamCandidates({ phase, candidates, messages, modelAdapter, modelConfig, traceLogger, onProgress = null, existingDreams = [], settings = {}, soul = '' }) {
   const evidence = new Map(messages.map((message) => [message.sourceRef, message.at]));
   for (const prior of existingDreams) for (const ref of prior.sourceRefs || []) if (!evidence.has(ref)) evidence.set(ref, prior.updatedAt || '');
   const ordered = (items) => items.map((item) => ({ ...item, evidence: item.sourceRefs.map((sourceRef) => ({ sourceRef, at: evidence.get(sourceRef) })).sort((a, b) => (a.at || '').localeCompare(b.at || '')) }))
@@ -543,6 +544,7 @@ COVERAGE AND BATCHING
 
 OUTPUT
 For the final stage when Existing Dream records are supplied, return strict JSON {"changes":[{"action":"new|update|noop|review","targetId":null,"expectedRevision":null,"title":"","content":"","sourceRefs":[]}],"preferences":[]}. new requires null targetId/revision; update and noop require an existing Dream targetId and expectedRevision; review writes nothing. Paraphrases of prior meanings are noop, materially changed insights update in place, unresolved conflict is review. Never select operator-owned or explicit memories. For intermediate stages return memories and an empty preferences array. With no existing records the final stage may use the same change format with new actions. Use the existing candidate fields and exact supplied sourceRefs only. Prior Dream records and their sourceRefs are historical attributed memory, not newly verified chat evidence; keep that provenance explicit in claims and do not describe their sourceRefs as current verification. Cite evidence supporting each connection, including earlier and later states where needed. Merge overlapping understanding without flattening distinct relationships. Do not invent references or fill space. Empty arrays are valid when the evidence supports no useful synthesis.
+${stage === 'final' ? memoryExpressionPrompt(settings, soul) : ''}
 Existing Dream records: ${stage === 'final' ? JSON.stringify(existingDreams) : '[]'}
 Synthesis stage: ${stage}
 Phase: ${phase}
@@ -822,7 +824,7 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     // Extraction coverage is not proof that downstream work completed. Commit
     // this evidence fingerprint only after memory, preferences and diaries succeed.
     const processingKey = `dream-processing:${id}`;
-    const fingerprint = createHash('sha256').update(JSON.stringify([DREAM_EXTRACTION_CONTRACT_VERSION, DREAM_SYNTHESIS_CONTRACT_VERSION, PHASES.map(phase => [phase, phaseWindows[phase].map(dreamSourceIdentity)])])).digest('hex');
+    const fingerprint = createHash('sha256').update(JSON.stringify([DREAM_EXTRACTION_CONTRACT_VERSION, DREAM_SYNTHESIS_CONTRACT_VERSION, memoryExpressionSettings(settings), soul, PHASES.map(phase => [phase, phaseWindows[phase].map(dreamSourceIdentity)])])).digest('hex');
     const processed = extractionState ? await metadataStore.get(processingKey) : null;
     const needsProcessing = !extractionState || (processed?.fingerprint !== fingerprint && (Boolean(processed) || phaseWindows.rem.length > 0));
     for (const phase of PHASES) {
@@ -868,7 +870,7 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
           priorConnections.push(...page.items.map(item => ({ title: item.title, content: item.content, kind: 'finding', sourceRefs: item.sourceRefs, relationships: [`Prior Dreaming connection ${item.id}`] })));
           cursor = page.nextCursor;
         } while (cursor);
-        const synthesis = await reconcileDreamCandidates({ phase: 'rem', candidates: { memories: [...windowCandidates, ...priorConnections], preferences: [] }, messages: phaseWindows.rem, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress, existingDreams });
+        const synthesis = await reconcileDreamCandidates({ phase: 'rem', candidates: { memories: [...windowCandidates, ...priorConnections], preferences: [] }, messages: phaseWindows.rem, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress, existingDreams, settings, soul });
         remResult.modelResponses.push(...synthesis.diagnostics);
         dreamChanges = synthesis.changes || [];
         for (const change of dreamChanges) if (change.action === 'review' || change.action === 'noop') countChange(change.action, change.reason);

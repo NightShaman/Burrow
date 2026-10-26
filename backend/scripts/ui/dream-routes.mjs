@@ -1,4 +1,4 @@
-export function createDreamRoutes({ readJsonBody, sendJson, agentDreamSettings, agentDreamDiary, agentDreamMemoryConsolidate, agentDreamCycle } = {}) {
+export function createDreamRoutes({ readJsonBody, sendJson, agentDreamSettings, agentDreamDiary, agentDreamMemoryConsolidate, agentDreamMemoryPreview, agentDreamCycle } = {}) {
   return async function handleDreamRoute({ req, res, url } = {}) {
     if (url.pathname.startsWith('/api/agents/') && url.pathname.endsWith('/dream-settings')) {
       const agentId = decodeURIComponent(url.pathname.slice('/api/agents/'.length, -'/dream-settings'.length));
@@ -9,6 +9,12 @@ export function createDreamRoutes({ readJsonBody, sendJson, agentDreamSettings, 
       const agentId = decodeURIComponent(url.pathname.slice('/api/agents/'.length, -'/dream-diary'.length));
       if (req.method === 'GET') { const result = await agentDreamDiary(agentId, null, Object.fromEntries(url.searchParams.entries())); sendJson(res, result.ok ? 200 : (result.status || 500), result); return true; }
       if (req.method === 'POST') { const result = await agentDreamDiary(agentId, await readJsonBody(req)); sendJson(res, result.ok ? 201 : (result.status || 500), result); return true; }
+    }
+    if (req.method === 'POST' && url.pathname.startsWith('/api/agents/') && url.pathname.endsWith('/dream-memory/preview')) {
+      const agentId = decodeURIComponent(url.pathname.slice('/api/agents/'.length, -'/dream-memory/preview'.length));
+      const result = await agentDreamMemoryPreview(agentId, await readJsonBody(req));
+      sendJson(res, result.ok ? 200 : (result.status || 500), result);
+      return true;
     }
     if (req.method === 'POST' && url.pathname.startsWith('/api/agents/') && url.pathname.endsWith('/dream-memory/consolidate')) {
       const agentId = decodeURIComponent(url.pathname.slice('/api/agents/'.length, -'/dream-memory/consolidate'.length));

@@ -176,4 +176,8 @@ ALTER TABLE scheduled_jobs ADD COLUMN context_mode TEXT NOT NULL DEFAULT 'contin
   { version: 70, name: 'dream-memory-promotion-toggle', sql: 'ALTER TABLE dream_settings ADD COLUMN IF NOT EXISTS promote_to_memory BOOLEAN NOT NULL DEFAULT TRUE;' },
   { version: 71, name: 'retained-forge-execution-history', sql: POSTGRES_FORGE_ARCHIVE_SQL },
   { version: 72, name: 'native-openai-pool-metrics', sql: POSTGRES_PROVIDER_POOL_METRICS_SQL },
+  { version: 73, name: 'dream-memory-expression-controls', sql: `
+ALTER TABLE dream_settings ADD COLUMN memory_emphasis INTEGER NOT NULL DEFAULT 50 CHECK (memory_emphasis BETWEEN 0 AND 100);
+ALTER TABLE dream_settings ADD COLUMN memory_prompt_override TEXT CHECK (char_length(memory_prompt_override) <= 20000);
+` },
 ]);

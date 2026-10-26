@@ -5445,7 +5445,7 @@
         "tags": [
           "Dream"
         ],
-        "summary": "getAgentDreamSettings",
+        "summary": "Read Dream settings and effective memory prompt",
         "parameters": [
           {
             "name": "agentId",
@@ -5458,31 +5458,20 @@
         ],
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "Dream settings and resolved model",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "quietDayDreams": {
-                      "type": "boolean",
-                      "default": true
-                    },
-                    "promoteToMemory": {
-                      "type": "boolean",
-                      "default": true
-                    }
-                  },
-                  "additionalProperties": true
+                  "$ref": "#/components/schemas/DreamSettingsResponse"
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid request"
+            "$ref": "#/components/responses/ErrorResponse"
           },
           "404": {
-            "description": "Agent not found"
+            "$ref": "#/components/responses/ErrorResponse"
           }
         }
       },
@@ -5491,7 +5480,7 @@
         "tags": [
           "Dream"
         ],
-        "summary": "updateAgentDreamSettings",
+        "summary": "Update Dream settings and memory synthesis controls",
         "parameters": [
           {
             "name": "agentId",
@@ -5504,20 +5493,20 @@
         ],
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "Dream settings and resolved model",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/JsonObject"
+                  "$ref": "#/components/schemas/DreamSettingsResponse"
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid request"
+            "$ref": "#/components/responses/ErrorResponse"
           },
           "404": {
-            "description": "Agent not found"
+            "$ref": "#/components/responses/ErrorResponse"
           }
         },
         "requestBody": {
@@ -5525,18 +5514,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "quietDayDreams": {
-                    "type": "boolean",
-                    "default": true
-                  },
-                  "promoteToMemory": {
-                    "type": "boolean",
-                    "default": true
-                  }
-                },
-                "additionalProperties": true
+                "$ref": "#/components/schemas/DreamSettingsUpdate"
               }
             }
           }
@@ -7618,6 +7596,72 @@
           },
           "403": {
             "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/api/agents/{agentId}/dream-memory/preview": {
+      "post": {
+        "operationId": "previewAgentDreamMemory",
+        "tags": [
+          "Dream"
+        ],
+        "summary": "Preview final DreamMemory synthesis without persistence",
+        "description": "Explicit POST only. Uses recent validated extracted candidates from existing Dream extraction checkpoints, revalidated against current eligible REM-window source identities; not all history and not new extraction. No writes to memories, settings, preferences, extraction coverage, diary entries, or cycles. Empty candidates return empty memories without a model call. The bounded server-side source snapshot is agent-bound, expires after 15 minutes, and is invalidated by restart. Repeating a sourceToken preserves candidate sources, but model output can vary. Citation validation, model resolution, and prompt budgeting reuse final synthesis.",
+        "parameters": [
+          {
+            "name": "agentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DreamMemoryPreviewRequest"
+              },
+              "example": {
+                "memoryEmphasis": 50,
+                "memoryPromptOverride": null
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transient preview; persisted is always false",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DreamMemoryPreviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation, invalid token, model resolution, or prompt budget error. Invalid, expired, or wrong-agent sourceToken returns dream_memory_preview_source_token_invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "agent_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }
@@ -13492,6 +13536,324 @@
             }
           }
         }
+      },
+      "DreamSettingsUpdate": {
+        "type": "object",
+        "description": "Partial Dream settings update; omitted fields retain saved values. Read-only default/effective memory prompts are not writable controls.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "quietDayDreams": {
+            "type": "boolean",
+            "default": true
+          },
+          "promoteToMemory": {
+            "type": "boolean",
+            "default": true
+          },
+          "cron": {
+            "type": "string",
+            "default": "0 4 * * *"
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Legacy input accepted but ignored; the operator timezone is authoritative."
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000,
+            "description": "Dream diary prompt, independent of final DreamMemory synthesis controls."
+          },
+          "modelConnectionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 256
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 256
+          },
+          "memoryEmphasis": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "default": 50,
+            "description": "Final DreamMemory synthesis emphasis. This does not change raw extraction or diary generation."
+          },
+          "memoryPromptOverride": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 20000,
+            "default": null,
+            "description": "Optional final DreamMemory synthesis prompt override; null selects the built-in default. Independent of the diary prompt."
+          }
+        },
+        "additionalProperties": true
+      },
+      "DreamSettings": {
+        "type": "object",
+        "description": "Per-agent Dream settings with resolved, read-only memory prompt and operator timezone.",
+        "required": [
+          "agentId",
+          "enabled",
+          "quietDayDreams",
+          "promoteToMemory",
+          "cron",
+          "prompt",
+          "memoryEmphasis",
+          "memoryPromptOverride",
+          "defaultMemoryPrompt",
+          "effectiveMemoryPrompt"
+        ],
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "readOnly": true
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "quietDayDreams": {
+            "type": "boolean",
+            "default": true
+          },
+          "promoteToMemory": {
+            "type": "boolean",
+            "default": true
+          },
+          "cron": {
+            "type": "string",
+            "default": "0 4 * * *"
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Legacy input accepted but ignored; the operator timezone is authoritative."
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000,
+            "description": "Dream diary prompt, independent of final DreamMemory synthesis controls."
+          },
+          "modelConnectionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 256
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 256
+          },
+          "memoryEmphasis": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "default": 50,
+            "description": "Final DreamMemory synthesis emphasis. This does not change raw extraction or diary generation."
+          },
+          "memoryPromptOverride": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 20000,
+            "default": null,
+            "description": "Optional final DreamMemory synthesis prompt override; null selects the built-in default. Independent of the diary prompt."
+          },
+          "defaultMemoryPrompt": {
+            "type": "string",
+            "readOnly": true,
+            "description": "Built-in final DreamMemory synthesis prompt."
+          },
+          "effectiveMemoryPrompt": {
+            "type": "string",
+            "readOnly": true,
+            "description": "Saved memoryPromptOverride when set; otherwise defaultMemoryPrompt."
+          },
+          "effectiveTimezone": {
+            "type": "string",
+            "readOnly": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "DreamSettingsResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "settings",
+          "effectiveModel",
+          "modelResolutionError"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "settings": {
+            "$ref": "#/components/schemas/DreamSettings"
+          },
+          "effectiveModel": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "modelConnectionId": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "modelConnectionId",
+                  "model"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Resolved Dream model without persisting inherited selection."
+          },
+          "modelResolutionError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": true
+      },
+      "DreamMemoryPreviewRequest": {
+        "type": "object",
+        "description": "Transient overrides only; omitted fields use saved settings. An empty object previews saved settings.",
+        "properties": {
+          "memoryEmphasis": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Omitted uses the saved emphasis (whose default is 50)."
+          },
+          "memoryPromptOverride": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 20000,
+            "description": "Omitted uses the saved override; null selects the built-in default for this preview only."
+          },
+          "sourceToken": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Opaque token returned by an earlier preview for this agent. Reuses its candidate source snapshot; expires after 15 minutes and is invalidated by restart."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DreamMemoryPreviewMemory": {
+        "type": "object",
+        "required": [
+          "title",
+          "content",
+          "sourceRefs"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "sourceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "DreamMemoryPreviewResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "memories",
+          "sourceToken",
+          "sourceCount",
+          "generatedAt",
+          "evidenceScope",
+          "persisted"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "memories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DreamMemoryPreviewMemory"
+            },
+            "description": "Generated, citation-validated memories; empty candidates return an empty array without a model call."
+          },
+          "sourceToken": {
+            "type": "string",
+            "description": "Opaque agent-bound server-side snapshot token. Repeat previews preserve candidate sources, not model output."
+          },
+          "sourceCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of distinct cited source messages in the snapshot."
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidenceScope": {
+            "type": "string",
+            "description": "Recent validated extracted candidates from existing Dream extraction checkpoints, revalidated against current eligible REM-window source identities; not all history and not new extraction.",
+            "example": "Recent validated extracted candidates from existing Dream extraction checkpoints, revalidated against current eligible REM-window source identities; not all history and not new extraction."
+          },
+          "persisted": {
+            "type": "boolean",
+            "const": false,
+            "description": "Preview never persists memory, settings, preferences, extraction coverage, diary entries, or cycles."
+          }
+        },
+        "additionalProperties": false
       }
     }
   },

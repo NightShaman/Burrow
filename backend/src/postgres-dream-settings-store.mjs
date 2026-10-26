@@ -3,6 +3,7 @@ import { operatorTimezone } from './timezone.mjs';
 import { PostgresSettingsMetadataStore } from './postgres-settings-metadata-store.mjs';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 import { parseCron } from './scheduled-job-store.mjs';
+import { memoryExpressionSettings } from './dream-memory-prompt.mjs';
 import { DEFAULT_DREAM_PROMPT } from './dream-prompt-defaults.mjs';
 
 export const POSTGRES_DREAM_SETTINGS_SCHEMA_SQL = `
@@ -30,12 +31,19 @@ function cron(value) { const result = text(value || '0 4 * * *'); try { return p
 function prompt(value) { const result = value === undefined || value === null ? DEFAULT_DREAM_PROMPT : String(value); if (!result.trim() || result.length > 20_000) throw new Error('dream_settings_prompt_invalid'); return result; }
 function modelId(value) { const result = text(value); if (!result) return null; if (result.length > 256) throw new Error('dream_settings_model_invalid'); return result; }
 function parseModels(value) { if (Array.isArray(value)) return value; try { return JSON.parse(value || '[]'); } catch { return []; } }
-function publicRow(row) { return row && { agentId: row.agent_id, enabled: Boolean(row.enabled), quietDayDreams: row.quiet_day_dreams !== false, promoteToMemory: row.promote_to_memory !== false, cron: row.cron_expression, timezone: null, prompt: row.prompt, modelConnectionId: row.model_connection_id || null, model: row.model || null, createdAt: timestamp(row.created_at), updatedAt: timestamp(row.updated_at) }; }
+function publicRow(row) { return row && { agentId: row.agent_id, ...memoryExpressionSettings({ memoryEmphasis: row.memory_emphasis ?? 50, memoryPromptOverride: row.memory_prompt_override ?? null }), enabled: Boolean(row.enabled), quietDayDreams: row.quiet_day_dreams !== false, promoteToMemory: row.promote_to_memory !== false, cron: row.cron_expression, timezone: null, prompt: row.prompt, modelConnectionId: row.model_connection_id || null, model: row.model || null, createdAt: timestamp(row.created_at), updatedAt: timestamp(row.updated_at) }; }
 
 export class PostgresDreamSettingsStore {
   constructor({ pool, ownsPool = false } = {}) { if (!pool?.query || !pool?.connect) throw new Error('dream_settings_postgres_pool_required'); this.pool = normalizePostgresPool(pool); this.ownsPool = ownsPool; }
   async resolved(row, client = this.pool) { const value = publicRow(row); return value && { ...value, effectiveTimezone: await operatorTimezone(new PostgresSettingsMetadataStore({ pool: client })) }; }
   async close() { if (this.ownsPool) await closePostgresPool(this.pool); }
+  // Preview must not use get(): get lazily persists defaults.
+  async getReadOnly(agent) {
+    const id = agentId(agent);
+    if (!(await this.pool.query('SELECT id FROM agents WHERE id=$1', [id])).rows[0]) throw new Error('agent_not_found');
+    const row = (await this.pool.query('SELECT * FROM dream_settings WHERE agent_id=$1', [id])).rows[0];
+    return this.resolved(row || { agent_id: id, enabled: true, cron_expression: '0 4 * * *', prompt: DEFAULT_DREAM_PROMPT });
+  }
   async get(agent) {
     const id = agentId(agent);
     return withPostgresTransaction(this.pool, async (client) => {
@@ -55,14 +63,14 @@ export class PostgresDreamSettingsStore {
       if (!agentResult.rows[0]) throw new Error('agent_not_found');
       const currentResult = await client.query('SELECT * FROM dream_settings WHERE agent_id=$1', [id]);
       const current = publicRow(currentResult.rows[0]);
-      const next = { enabled: bool(input.enabled, current?.enabled ?? true), quietDayDreams: quietBoolean(input.quietDayDreams, current?.quietDayDreams ?? true), promoteToMemory: promoteBoolean(input.promoteToMemory, current?.promoteToMemory ?? true), cron: cron(input.cron ?? current?.cron ?? '0 4 * * *'), timezone: null, prompt: prompt(input.prompt ?? current?.prompt ?? DEFAULT_DREAM_PROMPT), modelConnectionId: input.modelConnectionId === undefined && input.connectionId === undefined ? (current?.modelConnectionId ?? null) : modelId(input.modelConnectionId ?? input.connectionId), model: input.model === undefined && input.modelId === undefined ? (current?.model ?? null) : modelId(input.model ?? input.modelId) };
+      const next = { ...memoryExpressionSettings({ memoryEmphasis: input.memoryEmphasis === undefined ? current?.memoryEmphasis : input.memoryEmphasis, memoryPromptOverride: input.memoryPromptOverride === undefined ? current?.memoryPromptOverride : input.memoryPromptOverride }), enabled: bool(input.enabled, current?.enabled ?? true), quietDayDreams: quietBoolean(input.quietDayDreams, current?.quietDayDreams ?? true), promoteToMemory: promoteBoolean(input.promoteToMemory, current?.promoteToMemory ?? true), cron: cron(input.cron ?? current?.cron ?? '0 4 * * *'), timezone: null, prompt: prompt(input.prompt ?? current?.prompt ?? DEFAULT_DREAM_PROMPT), modelConnectionId: input.modelConnectionId === undefined && input.connectionId === undefined ? (current?.modelConnectionId ?? null) : modelId(input.modelConnectionId ?? input.connectionId), model: input.model === undefined && input.modelId === undefined ? (current?.model ?? null) : modelId(input.model ?? input.modelId) };
       if (next.modelConnectionId || next.model) {
         if (!next.modelConnectionId || !next.model) throw new Error('dream_settings_model_selection_incomplete');
         const connection = await client.query('SELECT models_json::text AS models_json FROM model_connections WHERE id=$1', [next.modelConnectionId]);
         if (!connection.rows[0] || !parseModels(connection.rows[0].models_json).some((model) => model && model.selected !== false && text(model.id) === next.model)) throw new Error('dream_settings_model_selection_invalid');
       }
       const at = new Date().toISOString();
-      const result = await client.query(`INSERT INTO dream_settings (agent_id,enabled,cron_expression,timezone,prompt,model_connection_id,model,quiet_day_dreams,promote_to_memory,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10) ON CONFLICT (agent_id) DO UPDATE SET enabled=EXCLUDED.enabled,cron_expression=EXCLUDED.cron_expression,timezone=EXCLUDED.timezone,prompt=EXCLUDED.prompt,model_connection_id=EXCLUDED.model_connection_id,model=EXCLUDED.model,quiet_day_dreams=EXCLUDED.quiet_day_dreams,promote_to_memory=EXCLUDED.promote_to_memory,updated_at=EXCLUDED.updated_at RETURNING *`, [id, next.enabled, next.cron, next.timezone, next.prompt, next.modelConnectionId, next.model, next.quietDayDreams, next.promoteToMemory, at]);
+      const result = await client.query(`INSERT INTO dream_settings (agent_id,enabled,cron_expression,timezone,prompt,model_connection_id,model,quiet_day_dreams,promote_to_memory,memory_emphasis,memory_prompt_override,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12) ON CONFLICT (agent_id) DO UPDATE SET enabled=EXCLUDED.enabled,cron_expression=EXCLUDED.cron_expression,timezone=EXCLUDED.timezone,prompt=EXCLUDED.prompt,model_connection_id=EXCLUDED.model_connection_id,model=EXCLUDED.model,quiet_day_dreams=EXCLUDED.quiet_day_dreams,promote_to_memory=EXCLUDED.promote_to_memory,memory_emphasis=EXCLUDED.memory_emphasis,memory_prompt_override=EXCLUDED.memory_prompt_override,updated_at=EXCLUDED.updated_at RETURNING *`, [id, next.enabled, next.cron, next.timezone, next.prompt, next.modelConnectionId, next.model, next.quietDayDreams, next.promoteToMemory, next.memoryEmphasis, next.memoryPromptOverride, at]);
       return this.resolved(result.rows[0], client);
     });
   }
