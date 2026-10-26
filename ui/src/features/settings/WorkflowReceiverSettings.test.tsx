@@ -59,7 +59,7 @@ it('shows unavailable encryption state without pretending receiver is ready', as
 });
 it('rejects invalid URLs without mutation', async () => {
   await show();
-  for (const value of ['https://burrow.example/wrong', 'javascript:alert(1)', 'https://user:pass@burrow.example/api/events/github', 'https://burrow.example/api/events/github?q=1']) {
+  for (const value of ['https://burrow.example/wrong', 'javascript:alert(1)', 'https://user:pass@burrow.example/api/events/github', 'https://burrow.example/api/events/github?q=1', 'https://burrow.example/api/events/github#fragment', 'https://burrow.example/api/events/github?', 'https://burrow.example/api/events/github#']) {
     fireEvent.change(screen.getByLabelText(/Delivery URL/), { target: { value } }); fireEvent.click(screen.getByRole('button', { name: 'Save receiver' }));
     expect(screen.getByRole('alert').textContent).toContain('absolute HTTP(S)');
   }

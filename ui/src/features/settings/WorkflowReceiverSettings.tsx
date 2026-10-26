@@ -43,7 +43,7 @@ export function WorkflowReceiverSettings() {
     if (url) {
       try {
         const parsed = new URL(url);
-        if (!['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== settings.webhookPath) throw new Error();
+        if (!['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password || url.includes('?') || url.includes('#') || parsed.pathname !== settings.webhookPath) throw new Error();
       } catch { setError(`Use an absolute HTTP(S) delivery URL ending in ${settings.webhookPath}, without credentials, query, or fragment.`); return false; }
     }
     lock.current = true; setBusy(true); setError(''); setNotice('');
