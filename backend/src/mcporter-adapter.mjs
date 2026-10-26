@@ -62,7 +62,7 @@ const boundedJson = (value, maxChars = 1_000) => { try { const rendered = typeof
 // classifications, never launcher stderr or remote server payloads.
 export function publicMcpError(error, fallback = 'mcp_runtime_failed') {
   const message = String(error?.message || error || '');
-  if (/^mcp_(?:connection_disabled|transport_invalid|tool_name_invalid|discovery_invalid_response|runtime_timeout)$/.test(message)) return message;
+  if (/^mcp_(?:connection_disabled|transport_invalid|tool_name_invalid|discovery_invalid_response|runtime_timeout|runtime_failed|tool_failed)$/.test(message)) return message;
   if (message.startsWith('mcp_tool_failed:')) return 'mcp_tool_failed';
   if (message.startsWith('mcp_runtime_failed:')) return 'mcp_runtime_failed';
   return fallback;
