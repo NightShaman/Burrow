@@ -232,6 +232,18 @@ export type ActiveSubagent = {
   purpose?: string | null;
   result?: import('./minionOutcome').MinionResult & { warnings?: number } | null;
 };
+/** GitHub workflow completion provenance, shared by saved turns and live runs. */
+export type WorkflowCompletionEvent = {
+  id?: string;
+  repository?: string;
+  workflow?: string;
+  runId?: string | number;
+  runAttempt?: number;
+  headSha?: string;
+  conclusion?: string | null;
+  url?: string;
+};
+
 export type ActiveChatRun = {
   answerText?: string;
   steeringReady?: boolean;
@@ -243,6 +255,7 @@ export type ActiveChatRun = {
   latestUserMessage?: string | null;
   progress?: Array<{ type?: string; runId?: string; sessionId?: string; data?: Record<string, unknown>; ts?: string }>;
   source?: string | null;
+  completionEvent?: WorkflowCompletionEvent | null;
   a2a?: { parentAgentId?: string; parentRunId?: string; messageMode?: string } | null;
   a2aActivities?: ActiveA2AActivity[];
 };
@@ -281,6 +294,8 @@ export type SessionTurn = {
   ts?: string;
   runId?: string | null;
   metadata?: {
+    source?: 'workflow-event';
+    completionEvent?: WorkflowCompletionEvent | null;
     steering?: { id: string; status: string; createdAt?: string };
     toolActivity?: ToolActivity;
     attachments?: SessionAttachment[];

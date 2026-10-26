@@ -1,0 +1,22 @@
+.workflow-watch, .workflow-event-card { overflow-wrap: anywhere; min-width: 0; }
+.workflow-event-list { display: grid; gap: 12px; }
+.workflow-event-card { display: grid; gap: 7px; padding: 14px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--surface-raised, transparent); }
+.workflow-event-card > span, .workflow-event-card > small { color: var(--muted); }
+.workflow-event-status { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; }
+.workflow-event-card a { color: var(--accent); }
+.workflow-event-card dl { font-size: 12px; margin-bottom: 0; }
+.workflow-event-card dt { color: var(--muted); margin-top: 8px; }
+.workflow-event-card dd { margin: 3px 0 0; white-space: pre-wrap; }
+.workflow-event-card pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.workflow-event-card summary, .workflow-setup summary { cursor: pointer; font-size: 12px; }
+.workflow-setup { margin-top: 16px; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.workflow-setup code { overflow-wrap: anywhere; }
+@media (max-width: 600px) { .workflow-watch { flex-wrap: wrap; } .workflow-watch .schedule-card-actions { flex-wrap: wrap; } }
+/* Keep this new editor usable on narrow screens without changing other Settings sections. */
+@media (max-width: 700px) {
+  .settings-blank-slate:has(.workflow-setup) { display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; }
+  .settings-blank-slate:has(.workflow-setup) > .settings-prototype-agent-selector { flex: 0 0 auto; }
+  .settings-blank-slate:has(.workflow-setup) > .settings-blank-column { flex: 0 0 auto; width: 100%; box-sizing: border-box; overflow: visible; }
+  .settings-blank-slate:has(.workflow-setup) .settings-prototype-section-items { display: flex; flex-wrap: wrap; gap: 4px; }
+  .settings-blank-slate:has(.workflow-setup) .settings-prototype-section-items button { width: auto; }
+}

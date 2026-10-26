@@ -77,3 +77,16 @@ it('FE-025 renders attachment-only and generated-artifact turns instead of dropp
   expect(archiveTurnText(turns[0], 'Smatchet', names, 'Rob')).toContain('Attachment: photo.png');
   expect(archiveTurnText(turns[1], 'Smatchet', names, 'Rob')).toContain('Generated image: generated.png');
 });
+
+it('renders and copies workflow-event speakers with a fallback, preserving ordinary operator attribution', () => {
+  const session = { agentId: 'smatchet', agentName: 'Smatchet', sessionId: 'workflow', id: 'workflow', title: 'Workflow', summary: '', turnCount: 3, chatTurnCount: 3, createdAt: null, updatedAt: null, archived: true, archivedAt: null, kind: null, lastRole: null, lastRunId: null } as ArchiveSession;
+  const turns: import('../../app/api').SessionTurn[] = [
+    { role: 'user', content: 'CI finished', metadata: { source: 'workflow-event', completionEvent: { workflow: 'CI' }, parentAgentId: 'hatchet' } },
+    { role: 'user', content: 'Unknown workflow finished', metadata: { source: 'workflow-event' } },
+    { role: 'user', content: 'Operator followup' },
+  ];
+  const { container } = render(<ChatArchiveReader session={session} detail={{ turns }} loading={false} error="" earlierLoading={false} earlierError="" historyUnavailable={false} onLoadEarlier={() => {}} onRestart={() => {}} agentNames={names} operatorName="Rob" />);
+  const speakers = ['GitHub · CI', 'GitHub · workflow event', 'Rob'];
+  expect([...container.querySelectorAll('.archive-turn-meta strong')].map(node => node.textContent)).toEqual(speakers);
+  turns.forEach((turn, index) => expect(archiveTurnText(turn, 'Smatchet', names, 'Rob')).toBe(`## ${speakers[index]}\n\n${turn.content}`));
+});

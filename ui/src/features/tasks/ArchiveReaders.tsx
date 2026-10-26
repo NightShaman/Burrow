@@ -49,6 +49,7 @@ async function copyText(text: string) {
 function archiveTurnSpeaker(turn: SessionTurn, sessionAgentName: string, agentNames: ReadonlyMap<string, string>, operatorName: string) {
   const role = (turn.role || '').toLowerCase();
   if (['user', 'operator', 'human'].includes(role)) {
+    if (turn.metadata?.source === 'workflow-event') return `GitHub · ${turn.metadata.completionEvent?.workflow?.trim() || 'workflow event'}`;
     const delegatedParentId = turn.metadata?.parentAgentId;
     return delegatedParentId ? agentNames.get(delegatedParentId) || delegatedParentId : operatorName || 'Operator';
   }

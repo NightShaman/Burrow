@@ -39,9 +39,10 @@ type ChatTranscriptProps = {
 export const ChatTranscript = memo(function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, liveStage, a2aActivities = [], runtimeUserMessage = '', runtimeUserMessageMetadata, runtimeChildActivities = [], attachmentAgentId }: ChatTranscriptProps) {
   const isSubagent = 'stream' in selected;
   const messages = turns.filter((turn) => (turn.type === 'message' || (turn.type === 'event' && turn.role === 'user' && turn.metadata?.visibility === 'chat')) && turn.metadata?.visibility !== 'debug' && turn.metadata?.kind !== 'subagent-runtime-context' && turn.metadata?.kind !== 'subagent-task' && (turn.content || turn.metadata?.attachments?.length || turn.metadata?.outputArtifacts?.length) && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && isChatCommand(textFromChatValue(turn.content))));
-  // Provider role=user is not speaker identity. Only delegation provenance
-  // (including legacy saved markers) changes a user message away from operator.
+  // Provider role=user is not speaker identity. Workflow and delegation
+  // provenance (including legacy saved markers) identify non-operator input.
   const userIdentity = (metadata?: SessionTurn['metadata']) => {
+    if (metadata?.source === 'workflow-event') return { name: `GitHub · ${metadata.completionEvent?.workflow?.trim() || 'workflow event'}`, avatar: 'G' };
     const delegated = metadata?.kind === 'subagent-delegated-task' || Boolean(metadata?.parentAgentId) || (isSubagent && Boolean(metadata?.workerProfile || metadata?.subagentId));
     if (!delegated) return { name: operator.name, avatar: operator.avatar || operator.name.slice(0, 1).toUpperCase() };
     const parentId = metadata?.parentAgentId;

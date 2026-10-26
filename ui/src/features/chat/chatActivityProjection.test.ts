@@ -64,3 +64,14 @@ it('preserves exact MCP and skill identity across start/completion without copyi
   ]);
   expect(JSON.stringify(activity)).not.toContain('secret');
 });
+
+it('projects workflow-event provenance intact for live input without attributing ordinary runs to GitHub', () => {
+  const completionEvent = { id: 'event-1', repository: 'owner/repo', workflow: 'CI', runId: 123, runAttempt: 2, headSha: 'abc', conclusion: 'success', url: 'https://github.com/owner/repo/actions/runs/123' };
+  const run = { agentId: 'a', sessionId: 'parent', runId: 'workflow-run', status: 'running', latestUserMessage: 'Workflow completed', source: 'workflow-event', completionEvent };
+  const response = { ok: true, runs: [run] };
+  const before = JSON.stringify(response);
+  expect(projectChatActivity(response, selection).runtimeRun).toMatchObject({ latestUserMessage: 'Workflow completed', userMessageMetadata: { source: 'workflow-event', completionEvent } });
+  expect(JSON.stringify(response)).toBe(before);
+  expect(projectChatActivity({ ok: true, runs: [{ ...run, source: 'operator' }] }, selection).runtimeRun?.userMessageMetadata).toBeUndefined();
+  expect(projectChatActivity({ ok: true, runs: [{ ...run, completionEvent: undefined }] }, selection).runtimeRun?.userMessageMetadata?.source).toBe('workflow-event');
+});

@@ -10,10 +10,11 @@ import { Field, SettingSection } from './SettingsPrimitives';
 import { AgentMcpTools } from './AgentMcpTools';
 import { AgentProfileDocuments } from './AgentProfileDocuments';
 import { AgentDreams } from './AgentDreams';
+import { AgentWorkflowEvents } from './AgentWorkflowEvents';
 import { AgentSchedules } from './AgentSchedules';
 
 
-export type AgentSettingsProps = { selected: Agent; savedProviders: SavedProvider[]; onAgentsChanged: () => Promise<void>; section?: 'details' | 'profile-documents' | 'mcp-tools' | 'cron-jobs' | 'dreams'; overflowTarget?: HTMLElement | null };
+export type AgentSettingsProps = { selected: Agent; savedProviders: SavedProvider[]; onAgentsChanged: () => Promise<void>; section?: 'details' | 'profile-documents' | 'mcp-tools' | 'cron-jobs' | 'workflow-events' | 'dreams'; overflowTarget?: HTMLElement | null };
 
 export function AgentSettings({ selected, savedProviders, onAgentsChanged, section, overflowTarget }: AgentSettingsProps) {
   const resourceId = selected.resourceId ?? selected.id;
@@ -68,6 +69,7 @@ export function AgentSettings({ selected, savedProviders, onAgentsChanged, secti
   if (section === 'details') return details;
   if (section === 'profile-documents') return <AgentProfileDocuments agentId={selected.id} overflowTarget={overflowTarget} />;
   if (section === 'mcp-tools') return <AgentMcpTools agentId={selected.id} />;
+  if (section === 'workflow-events') return <AgentWorkflowEvents agentId={selected.id} overflowTarget={overflowTarget} />;
   if (section === 'cron-jobs') return <AgentSchedules agentId={selected.id} savedProviders={savedProviders} overflowTarget={overflowTarget} />;
   if (section === 'dreams') return <AgentDreams agentId={selected.id} savedProviders={savedProviders} overflowTarget={overflowTarget} />;
   return <div className="agent-settings-grid">
