@@ -4,7 +4,7 @@ import type { Agent, SavedProvider } from './types';
 import { usePolling } from './usePolling';
 
 export type OperatorProfile = { name: string; avatar: string };
-export type ProviderConnectionStatus = 'checking' | 'connected' | 'disconnected';
+export type ProviderConnectionStatus = 'unknown' | 'checking' | 'connected' | 'disconnected';
 
 type RuntimeDashboardOptions = {
   selectedProvider?: string;
@@ -53,7 +53,8 @@ const asSavedProvider = (connection: ModelConnection): SavedProvider => ({
 export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProviders, reportError }: RuntimeDashboardOptions) {
   const [savedProviders, setSavedProviders] = useState<SavedProvider[]>([]);
   const [modelConnectionsLoaded, setModelConnectionsLoaded] = useState(false);
-  const [providerConnectionStatus, setProviderConnectionStatus] = useState<ProviderConnectionStatus>('checking');
+  // Catalog discovery writes models; it is not a connection-health probe.
+  const providerConnectionStatus: ProviderConnectionStatus = 'unknown';
   const [anthropicUsage, setAnthropicUsage] = useState<AnthropicUsage | null>(null);
   const [openAiUsage, setOpenAiUsage] = useState<OpenAiUsage | null>(null);
   const [operatorProfile, setOperatorProfile] = useState<OperatorProfile>({ name: 'Operator', avatar: 'OP' });
@@ -102,12 +103,6 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
     } catch { if (!isCancelled()) { setAnthropicUsage(null); setOpenAiUsage(null); } }
   }, 300_000, true, `${'local'}:${selectedConnection?.id ?? ''}`);
 
-  usePolling(async (isCancelled, signal) => {
-    const provider = selectedConnection;
-    if (!(provider?.pool ? provider.pool.enabled : provider?.apiKeyConfigured)) { if (!isCancelled()) setProviderConnectionStatus('disconnected'); return; }
-    try { await api( '/api/settings/model-connections/discover', { signal, method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: provider.id, apiType: provider.apiType, ...(provider.pool ? { provider: provider.provider, pool: provider.pool } : { baseUrl: provider.url }) }) }); if (!isCancelled()) setProviderConnectionStatus('connected'); }
-    catch { if (!isCancelled()) setProviderConnectionStatus('disconnected'); }
-  }, 30_000, modelConnectionsLoaded, `${'local'}:${selectedConnection?.id ?? ''}`);
 
   return { anthropicUsage, modelConnectionsLoaded, openAiUsage, operatorProfile, providerConnectionStatus, refreshModelConnections, runtimeProviders, savedProviders, setOperatorProfile };
 }

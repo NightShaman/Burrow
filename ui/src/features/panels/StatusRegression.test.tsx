@@ -30,3 +30,11 @@ it('runtime dot is not green while pending or failed and is green only on succes
  const failed = render(<SystemPanel provider="p" providerConnectionStatus="connected"/>);
  await waitFor(() => expect(failed.container.querySelector('.system-status.disconnected')).toBeTruthy());
 });
+it('renders unverified provider status neutrally without implying a check or outage', () => {
+ vi.mocked(api).mockImplementation(() => new Promise(() => {}));
+ const view = render(<SystemPanel provider="Personal" providerConnectionStatus="unknown" />);
+ const status = screen.getByTitle('Personal connection unverified');
+ expect(status.className).toBe('system-provider-status unknown');
+ expect(status.textContent?.trim()).toBe('Personal');
+ expect(view.container.querySelector('.system-provider-status.connected, .system-provider-status.disconnected, .system-provider-status.checking')).toBeNull();
+});
