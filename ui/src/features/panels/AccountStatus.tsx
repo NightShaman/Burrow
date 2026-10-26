@@ -201,12 +201,12 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
   };
 
   if (!cards.length) return <div className="panel-body"><p className="hint">No Anthropic or OpenAI OAuth connections yet.</p></div>;
-  return <section className="accounts-content account-status">
+  return <section className="accounts-content account-status"><div className="account-stack">
     {orderedCards.map((card) => {
       const isDragging = draggedId === card.id;
       const isDropTarget = dropTargetId === card.id && !isDragging;
       const status = accountUsageStatus(card, now);
-      return <AccountCard key={card.id} name={card.name} subtitle={card.vendor} status={<span title={status.detail}>{status.label}</span>} statusTone={status.tone} className={`${isDragging ? 'dragging' : ''} ${isDropTarget ? 'drop-target' : ''}`} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', card.id); setDraggedId(card.id); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTargetId(card.id); }} onDragLeave={() => setDropTargetId((current) => current === card.id ? null : current)} onDrop={(event) => handleDrop(event, card.id)} onDragEnd={clearDrag}>
+      return <AccountCard key={card.id} name={card.name} subtitle={card.vendor === 'Anthropic' ? card.vendor : undefined} status={<span title={status.detail}>{status.label}</span>} statusTone={status.tone} className={`${isDragging ? 'dragging' : ''} ${isDropTarget ? 'drop-target' : ''}`} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', card.id); setDraggedId(card.id); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTargetId(card.id); }} onDragLeave={() => setDropTargetId((current) => current === card.id ? null : current)} onDrop={(event) => handleDrop(event, card.id)} onDragEnd={clearDrag}>
         {card.state === 'loading' && <small className="hint">Loading usage</small>}
         {card.state === 'error' && <small className="hint">{card.error ?? 'Usage unavailable'}</small>}
         {card.state === 'ready' && !card.bars.length && <small className="hint">No usage windows reported.</small>}
@@ -216,5 +216,5 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
         {card.vendor === 'OpenAI' && <OpenAiResets connectionId={card.id} name={card.name} onUsageRefresh={() => setRevision(value => value + 1)} />}
       </AccountCard>;
     })}
-  </section>;
+  </div></section>;
 }

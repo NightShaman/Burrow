@@ -51,3 +51,17 @@ it('uses the same successful status label for both vendors and preserves unknown
  expect(accountUsageStatus({...base,bars:[]})).toEqual({label:'Unknown',tone:'paused'});
  expect(accountUsageStatus({...base,bars:[{...base.bars[0],remainingPercent:0}]})).toEqual({label:'Limit Exceeded',tone:'quota-exceeded'});
 });
+
+it('keeps only the Anthropic subtitle while retaining OpenAI reset controls', async () => {
+ vi.mocked(api).mockResolvedValue({usage:{windows:[]}});
+ const providers: SavedProvider[] = [
+  {id:'subtitle-anthropic',provider:'Ant-Goblin',apiType:'anthropic-messages',url:'',apiKey:'',models:[],oauthConfigured:true},
+  {id:'subtitle-openai',provider:'Rob Pro',apiType:'openai-responses',url:'https://openai.com',apiKey:'',models:[],oauthConfigured:true},
+ ];
+ const {container} = render(<ConfirmProvider><AccountStatus providers={providers}/></ConfirmProvider>);
+ await waitFor(() => expect(screen.getAllByText('Unknown')).toHaveLength(2));
+ expect(container.querySelectorAll('.account-top small')).toHaveLength(1);
+ expect(container.querySelector('.account-top small')?.textContent).toBe('Anthropic');
+ expect(screen.getByRole('button', {name:'Use reset'})).toBeTruthy();
+ expect(container.querySelectorAll('.account-stack > .account-card')).toHaveLength(2);
+});

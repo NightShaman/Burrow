@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { AccountStatus } from '../../src/features/panels/AccountStatus';
 import { ConfirmProvider } from '../../src/app/ConfirmDialog';
 import '../../src/app.css';
-const providers = ['Anthropic Personal','OpenAI Personal','Anthropic Studio','OpenAI Research long account name','OpenAI Development','OpenAI Operations','OpenAI Testing','OpenAI Spare','OpenAI Studio'].map((provider,index) => ({id:`fixture-${index}`,provider,url:'',apiKey:'',models:[],oauthConfigured:true}));
+const providers = ['Anthropic Personal','OpenAI Personal','Anthropic Studio','OpenAI Research','OpenAI Development','OpenAI Operations','OpenAI Testing','OpenAI Spare','OpenAI Studio'].map((provider,index) => ({id:`fixture-${index}`,provider,url:'',apiKey:'',models:[],oauthConfigured:true}));
 const expiry = () => new Date(Date.now()+3*86400_000).toISOString();
 let scenario = 'Normal';
 window.fetch = async (input, init) => {
