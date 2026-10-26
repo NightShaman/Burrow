@@ -107,6 +107,10 @@ The default mode is `request_reply`. Current Core routes new implicit deliveries
 }
 ```
 
+### Dedicated inbox history
+
+When **A2A in default** is off, current Core can rotate a named inbox's visible history before a new safely admitted reply exchange. It waits when another exchange or family recovery is open; followups and retries do not rotate again. Originals remain archived. Default history, runtime-attested returns and FYI-only deliveries are not rotated. This is lazy exchange lifecycle, not a TTL; unresolved exchanges can retain visible history indefinitely. See [operator guidance](../guide/everyday-use.md#dedicated-a2a-visible-history).
+
 ## Group conversations
 
 A group room is a shared operator transcript over separate registered-agent runs. Each selected participant executes in its own agent-scoped `group-<channelId>` session, retaining that agent's identity, tools, memory scope, and continuity owner. A room does not combine participant grants or replace their individual contexts.

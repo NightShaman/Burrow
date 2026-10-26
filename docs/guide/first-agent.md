@@ -69,7 +69,7 @@ Under **Settings → Agents**, select the agent you intend to edit.
 - **Profile documents** holds its instructions and personality documents. Keep credentials out of reusable prose.
 - **Default minion model** sets the model for delegated work. Leaving it on inheritance uses the current parent turn's model.
 
-Set **Settings → General → Operator timezone** before relying on scheduled jobs. Add tools, schedules, and execution permissions deliberately as you begin using them; they are not needed to prove the first chat works.
+Set **Settings → General → Operator profile → Operator timezone** before relying on scheduled jobs. Add tools, schedules, and execution permissions deliberately as you begin using them; they are not needed to prove the first chat works.
 
 Next: [maintenance, backups, and troubleshooting](maintenance.md).
 

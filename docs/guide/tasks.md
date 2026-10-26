@@ -1,6 +1,6 @@
 # Tasks and schedules
 
-Current implementation reviewed **25 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation reviewed **26 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 The **tasks** page records work and dispatches saved tasks. **Cron jobs** run agent prompts on a schedule. Creating a board record does not itself start agent work.
 
@@ -48,6 +48,10 @@ The **History** section lists recorded changes, actors, times, and execution eve
 
 [Source: task documents and history](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/tasks/TaskActivity.tsx#L27-L88) · [Source: board loading](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/tasks/TasksPage.tsx#L67-L84) · [Source: project deletion](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/tasks/TasksPage.tsx#L179-L188)
 
+## Completed tasks move to Archive
+
+A **Done** task leaves the active board after 48 hours and appears under **Archive → Tasks**. This is a reversible view, not deletion or a new task status. Editing its title, description, priority, or assignee does not restart the completion clock. **Reopen task** changes it to To Do and returns it to the board. Archived task details keep history and documents available read-only. Cancelled tasks do not enter this Done-only archive automatically.
+
 ## Add project context to a chat
 
 In a chat session, type `$project` to open the project picker and select a project. The selection is stored for that agent/session. Type `$project` again and choose **Clear active project** to remove it; `$project clear` also clears it. This supplies project context without executing a board task.
@@ -56,7 +60,7 @@ In a chat session, type `$project` to open the project picker and select a proje
 
 ## Schedule a recurring prompt
 
-1. Check **Settings → General → Operator timezone** first.
+1. Check **Settings → General → Operator profile → Operator timezone** first.
 2. Open **Settings → Agents**, select an agent, and choose **Cron jobs**.
 3. Enter **Name**, **Prompt**, and a five-field **Cron** expression in the order `minute hour day month weekday`. For example, `0 9 * * *` means daily at 09:00 in the operator timezone.
 4. Keep **Use agent chat model**, or choose a model override for this job only.

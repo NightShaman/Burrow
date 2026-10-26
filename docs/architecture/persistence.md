@@ -56,7 +56,7 @@ Changing lifecycle mode does not migrate data between clusters. Plan a database 
 
 ## Migrations and transactions
 
-The historical **2026.10.19** manifest contained 60 migrations. Current reviewed Core contains **69 append-only migrations**, including global profiles, durable mod turns/generations, compaction/delivery state, scheduled context mode, and provider pools. See the [current migration inventory](../reference/storage-schema.md). Each applied version records its name and SQL checksum in `burrow_schema_migrations`. Startup holds a transaction-scoped advisory lock while validating the ledger and applying pending SQL. Unknown versions, gaps, renamed migrations or changed checksums stop migration rather than silently rewriting history.
+The historical **2026.10.19** manifest contained 60 migrations. Current reviewed Core contains **72 append-only migrations**, including global profiles, durable mod turns/generations, compaction/delivery state, scheduled context mode, and provider pools. See the [current migration inventory](../reference/storage-schema.md). Each applied version records its name and SQL checksum in `burrow_schema_migrations`. Startup holds a transaction-scoped advisory lock while validating the ledger and applying pending SQL. Unknown versions, gaps, renamed migrations or changed checksums stop migration rather than silently rewriting history.
 Nested transaction work uses savepoints. A nested operation cannot commit the outer transaction; rollback failure causes the client to be discarded. Per-domain locks add narrower guarantees: session appends lock the session row, Tiddle writes lock the agent, and scheduled occurrences have unique database identities.
 
 !!! warning "A reader command may apply migrations"

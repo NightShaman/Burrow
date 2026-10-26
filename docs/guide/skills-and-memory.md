@@ -1,6 +1,6 @@
 # Skills and memory
 
-Current implementation reviewed **25 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation reviewed **26 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 Use **skills** for reusable instructions, **profile documents** for agent-specific guidance, and **Brains** for explicit saved memories.
 
@@ -95,6 +95,10 @@ Enabling a remote embedding provider involves sending memory text to that provid
 ## Retrieve historical run proof
 
 When you need a past execution result rather than a saved fact, ask the agent to use `run_evidence_search` with a specific query. It searches that agent's retained run proof across sessions; it does not automatically preload history or grant cross-agent access. Retention can remove old records, and a past successful run does not verify today's filesystem or provider state. Use `session_search` when you need original conversation wording instead.
+
+### Dream promotion controls
+
+Automatic Dream-to-Brains publication requires **Promote Dreams to memory** in both **Settings → General → Brain memory** and the agent's **Dreams** settings. Both default on. Save changes in each section. Off preserves Dream diaries, reflection, existing memories and explicit saves; re-enabling does not backfill skipped promotions. Current synthesis can update an existing Dream-owned record by ID/revision, or record a no-op/review instead; it does not overwrite operator-owned memories. See [Dream cycles](../concepts/dreams.md#control-automatic-promotion).
 
 ## Scheduled dreaming
 

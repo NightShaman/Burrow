@@ -21,3 +21,6 @@ Before updating, back up the database, runtime files, and matching encryption ke
 ## Development and documentation provenance
 
 Development assembly builds use a date with an optional same-day counter (for example `2026.10.25.9`), independently of the public daily promotion version. A documented current-source feature is not proof that a public tag or installed runtime already contains it. Consult the source/coverage record and the exact release artifact before relying on it.
+
+Development assembly now also publishes a versioned source archive of the exact assembled commit, its `SOURCE_VERSIONS`, and `SHA256SUMS`. Verify the downloaded archive against those checksums and its recorded source revisions. This development release is independent of public daily promotion; artifact publication does not update a running installation.
+

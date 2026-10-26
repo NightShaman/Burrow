@@ -1,6 +1,6 @@
 # Models and connections
 
-Current implementation reviewed **25 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation reviewed **26 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 An agent needs a saved model connection and a selected model to answer. A connection tells Burrow which API to call and how to authenticate; the model selector chooses what that agent uses. A provider account, quota, and any model charges are separate from installing Burrow.
 
@@ -32,20 +32,37 @@ Treat callback URLs, codes, and tokens as secrets. Enter them only into the sign
 
 ## Native OAuth account pools
 
-Current Core/UI adds **OpenAI LB** and **Anthropic LB** as logical connection types. This is implemented in the reviewed source, not proof of provider acceptance or live account health.
+Use **Settings → Connections → Load Balancing**, separate from **Model providers**, to create a logical OpenAI or Anthropic OAuth pool.
 
-1. Connect and save each account through the matching OAuth flow first.
-2. In **Models**, choose **OpenAI LB** or **Anthropic LB** under **API type**, and give the pool a recognizable **Provider** name.
-3. Under **Account pool**, select compatible saved accounts and **Enable load balancing**. The pool has no separate URL, API key, or OAuth login.
-4. Choose **Connect**, review the combined model list, then **Save**. Select this logical provider and a model in Chat as usual.
+1. Connect and save the individual same-family OAuth accounts under **Model providers** first.
+2. Open **Load Balancing**, enter **Name**, and choose **Adapter → OpenAI** or **Anthropic**.
+3. Select **Member accounts**, leave **Enabled** on when intended, and choose **Save**. The pool editor has no separate API key, URL, login, Connect button, or model checklist.
+4. Select the saved logical provider and a model in Chat. Pool models are the **intersection** of the members' discovered catalogs; manual member models do not contribute. Direct-account selection checkboxes do not disable a model for pool routing.
 
-Only same-family OAuth connections are eligible members; ordinary API-key connections, other pools, and cross-family accounts are not. Remove unavailable members before saving. A member cannot be deleted while a pool still references it: edit the pool first.
+Only matching OAuth accounts can be members: not API-key connections, cross-family accounts, or nested pools. Remove unavailable members before saving. A member cannot be deleted while referenced by a pool. Changing membership does not recreate the pool ID or agent selection.
 
-Routing uses enabled members with the requested model, known capacity, and fresh measured usage. Missing, stale, or unknown usage is not treated as spare quota. Default routing is sticky to a conversation/thread owner; a temporary substitute does not erase that ownership. The current UI saves sticky routing on and earlier-reset preference off; it has no manual account weights or account-selection control.
+Saving a pool discovers members whose catalogs are empty. Discovery or catalog failure can reject the pool save; credentials/catalogs refreshed earlier in that operation may already be persisted. Individual OAuth catalogs also refresh at startup and periodically (24 hours). Failed or empty upstream discovery preserves the last good catalog; it is not evidence that all models disappeared. Ordinary connection saves patch their catalog rather than deleting omitted models.
 
-One alternate attempt can occur only before user-visible output for eligible availability failures. Native continuations stay bound to their original serving account; a pool does not guarantee seamless continuation after that account becomes unavailable. Cancellation and already-produced output do not trigger a fresh-account replay. Media generation in Forge has a separate dispatch path and is not pooled by this text-model feature.
+### Routing and continuation limits
 
-If a pool cannot serve a request, check member enabled state, OAuth health, selected models, usage freshness, and cooldowns. A visible union model or saved pool does not establish that an eligible member can currently answer. Keep the actual error/run receipt before retrying.
+New-request routing checks family, enabled state, model presence, usage freshness, capacity and cooldowns. Unknown usage is not invented spare quota. A proven continuation can remain with its required owner through advisory telemetry/cooldown failures; removal, explicit disablement and failed credential/member resolution still prevent service. Sticky ownership can yield to a healthier eligible account on a new/unpinned turn: a 25-percentage-point headroom advantage, or 10 points when the sticky account has at most 20% remaining. Successful alternate service promotes the new owner; a failed attempt does not. The UI exposes no manual weights or account selector.
+
+There is at most one alternate pre-output attempt for eligible availability failures. A native tool continuation can switch only when Core proves the complete submitted text/tool history is portable and unchanged. Signed thinking, account-bound images/files, missing replay proof, cancellation, or prior visible output prevent this replay. Account-bound continuation state is never copied between accounts. A pool therefore does not guarantee seamless failover. Forge media uses a separate dispatch path and is not pooled by this text-model feature.
+
+### Read the bottom-row OpenAI LB statistics
+
+The footer shows **OpenAI LB** with rolling **24h** and **7d** windows, refreshed about every 30 seconds. These statistics cover native OpenAI pools only—not Anthropic pools, direct accounts, or the retired external Codex-LB integration.
+
+- **Requests:** logical completed adapter requests. A retry adds an attempt, not another request; continuation calls count as their own logical requests.
+- **Tokens:** known input plus output across all attempts, including retries. Cached tokens are already included in input; do not add them again. The tooltip identifies partial token reporting.
+- **Prompt cached:** cached/input percentage only for attempts reporting both counts. Hover or focus for coverage; missing usage is not zero.
+- **Errors:** final failed requests divided by completed requests. Successful failover is success; cancellations enter the denominator but not the failure numerator.
+
+A dash means unavailable/unknown, not zero. Requests interrupted by process death before durable finalization remain unfinished and are excluded from completed windows. Metrics survive restart/account deletion and are not a billing statement. [Observability](../operations/observability.md#native-openai-pool-metrics) explains API/OTel scope.
+
+### Native OpenAI reset credits
+
+The **Accounts** panel can display provider-reported banked resets for an individual OpenAI OAuth account. **Use reset** refreshes availability and asks for confirmation before consuming one; it is not automatic pool balancing. A reset is irreversible and provider-dependent. If the outcome is unknown, do not repeatedly retry or bypass the locked control: verify account usage/reset history first. A successful reset and a failed subsequent usage refresh are different results. Missing status is unknown, not proof of exhaustion or available credit.
 
 ## Capabilities and context size
 

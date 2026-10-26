@@ -67,6 +67,14 @@ A receipt can show that a command ran without proving the user's overall objecti
 
 Public **2026.10.19** includes an OpenTelemetry settings surface under **Settings → General**. Saved operator settings and active environment overrides are shown separately; saving does not override an environment-enforced value. Review the effective endpoint and exported data before enabling collection. This source review did not verify delivery to a live collector.
 
+## Native OpenAI pool metrics
+
+The footer and `GET /api/metrics/provider-pools` report rolling 24-hour/7-day **native OpenAI LB** completed-request windows. Anthropic pools and direct model calls are excluded. Token totals include reported usage from every attempt; missing fields remain unknown and coverage exposes partial reporting. Cached tokens are part of input, not additional tokens. Errors count final failures, not successful failover; cancellations remain in the denominator. [Footer instructions](../guide/models.md#read-the-bottom-row-openai-lb-statistics) explain the display.
+
+When tracing and OTel export are active, `burrow.provider_pool.requests` and `burrow.provider_pool.duration` describe logical calls. `burrow.provider_pool.tokens` attributes reported input/output/cached usage to pool/account/model/outcome. It is separate from existing transport `burrow.model.tokens`; do not add both series as independent usage. Unknown token counts are omitted. This source review does not verify delivery to a collector.
+
+Current OTel runtime exposes bounded exporter diagnostics through its runtime status projection; the settings UI shows whether telemetry is active and whether overrides apply. A saved endpoint or active runtime does not prove collector delivery. Inspect available diagnostics without sharing authentication headers.
+
 ## Diagnostic API access
 
 A `diagnostics:read` token is limited to the server's allowed GET routes. It is not a general chat/settings API credential. Token creation/revocation belongs to an authenticated operator, and some read surfaces remain outside the token allowlist. See [authentication](../security/authentication.md) and [API reference](../reference/api.md).

@@ -38,7 +38,11 @@ The newer implementation reviewed on 21 October replaces that publication path:
 
 The Brains interface labels these records **Dream-generated**. Operator edits make records operator-owned, and ordinary agent mutation cannot overwrite those records. The old DreamMemory document can still be visible as legacy stored data; editing it does not restore automatic prompt injection in this newer path.
 
-Publication uses stable IDs and conflict-safe insertion for repeat publication. That is retry safety, not semantic deduplication of every similar connection. The inspected publisher creates individual records; it does not implement a general automatic edit/split/supersede workflow for older connections. Review and correct records using the existing Brains editor. Uncertainty can be expressed in a connection's prose; this review does not establish a separate confidence or epistemic-status schema.
+Current final synthesis reconciles prior active Dream-origin records using `new`, `update`, `noop`, or `review`. A material improvement can update the same ID only when Dream ownership and the expected revision still match. Paraphrases can be no-ops; review is non-destructive. Operator-owned, explicit, stale, invalid, or conflicting targets are not overwritten. This is bounded reconciliation, not automatic deletion/splitting of every similar memory.
+
+### Control automatic promotion
+
+Both **Settings → General → Brain memory → Promote Dreams to memory** and the selected agent's **Dreams → Promote Dreams to memory** must be enabled at publication. Both default on for existing installations. Save each changed setting. Turning either off preserves diaries/reflection, explicit saves, and existing memories; it stops automatic publication, not Dream scheduling. Re-enabling does not queue skipped promotions for catch-up.
 
 ### Preferences and diary remain separate
 

@@ -57,7 +57,7 @@ Set an explicit agent identity and useful instructions. Avoid copying private ho
 
 ## Set operating preferences
 
-- **Settings → General → Operator timezone:** choose the intended IANA timezone; scheduled jobs use it, including jobs with retired legacy timezone overrides
+- **Settings → General → Operator profile → Operator timezone:** choose the intended IANA timezone; scheduled jobs use it, including jobs with retired legacy timezone overrides
 - **Settings → Connections → Authentication:** configure the chosen authentication mode before remote access
 - **Settings → Connections → MCP servers:** add only required integrations; assign permitted tools to the intended agent
 - **Settings → General → Trace retention:** review retention and preview cleanup before destructive maintenance

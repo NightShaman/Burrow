@@ -34,6 +34,14 @@ Only those five fields are accepted. `attachments`, `sourceAttachments` and gene
 Poll job detail for a terminal result and inspect `errorDetails` when present. Artifact GET supports `download=1`. There is no general Forge cancellation endpoint in this reference. A successful generation does not prove attachment delivery.
 
 Attach with exactly `agentId`, `sessionId` and `artifactId` to an existing destination session after job success. Delivery has an idempotency path; verify destination records and bytes separately from generation. The previously missing path import in attachment cleanup is present in this build.
+## Forge deletion and retained Archive
+
+`DELETE /api/forge/jobs/{id}` takes no body and returns `{ok: true}`. Only succeeded, failed or interrupted jobs can be deleted. Queued/running jobs return409 `forge_job_active`; missing/deleted jobs return404. A committed Archive receipt is required before removal. This is not a cancellation endpoint.
+
+`GET /api/archive/forge` returns `{records: [...]}`, newest first, across the operator's Forge history. It includes prompt, provider/model IDs, status, timestamps, bounded call summaries and outcome; deleted jobs retain `deletedAt`. It is a **metadata-only** archive, not media storage, but prompts can still be sensitive. Both routes require operator access; diagnostics-only API tokens cannot use them.
+
+Delete removes the live job and eligible generated files, not separate chat attachment copies or files shared by another job. Idempotency claims survive deletion: reusing the old key returns 409 `idempotency_conflict`, never another paid dispatch. Filesystem cleanup and SQL are not one atomic transaction; a failure can leave the terminal job visible with some media already removed. Preserve its Archive evidence, inspect the result, and reconcile before retrying cleanup.
+
 ## Selective export/import
 
 Read `/api/export/catalog` to discover categories. POST export with the selected categories and format/security options returns a downloadable bundle, not the ordinary JSON envelope. Treat exports as sensitive, especially when including identities, conversations, provider configuration or credentials.
@@ -43,6 +51,8 @@ Import is preview-first: submit the encoded bundle to `/api/export/import/previe
 Categories can span stores; do not assume a full installation image or a single all-or-nothing cross-category transaction. The public assembly includes `backend/docs/openapi.json`; the earlier missing-contract-asset claim no longer applies. API-contract export still needs live verification for the installed release. Follow [backup and recovery](../../operations/backup-recovery.md) for disaster recovery rather than relying on selective export alone.
 
 ## Endpoint inventory
+
+Additional current routes: `DELETE /api/forge/jobs/{id}` and `GET /api/archive/forge`, with the lifecycle and access semantics above.
 
 Methods are significant. Braced segments are placeholders; URL-encode identifiers. See the [contract and conventions](../api.md) for artifact limitations.
 
@@ -75,3 +85,7 @@ The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d
 - [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
 - [backend/scripts/ui/export-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/export-routes.mjs)
 - [backend/src/postgres-forge-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-forge-store.mjs)
+
+## 26 October delta review
+
+Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-26**. This is a focused source comparison since the full review above, not a new application or provider test pass.

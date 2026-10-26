@@ -9,7 +9,7 @@ Burrow is a self-hosted, chat-first AI agent application. Connect a model, give 
 [Install Burrow](guide/installation.md){ .md-button .md-button--primary }
 [Create your first agent](guide/first-agent.md){ .md-button }
 
-Operator guide · **current implementation reviewed 25 October 2026**
+Operator guide · **current implementation reviewed 26 October 2026**
 
 </div>
 
@@ -51,7 +51,7 @@ You run Burrow on your own host and open its web interface in a browser. Model p
 
 ## A guide to current implementation
 
-These user guides follow inspected current Core implementation, without waiting for the daily public-source sync. The reviewed assembly is **2026.10.25.9**; [source coverage](project/source-map.md) records exact revisions and historical boundaries. Features depend on your installed version, provider, and enabled mods. A documentation update does not upgrade your installation.
+These user guides follow inspected current Core implementation, without waiting for the daily public-source sync. The reviewed assembly is **2026.10.26.6**; [source coverage](project/source-map.md) records exact revisions and historical boundaries. Features depend on your installed version, provider, and enabled mods. A documentation update does not upgrade your installation.
 
 Older architectural and API material remains under **Earlier technical reference**, with historical warnings where applicable. It is not a second set of current installation instructions. [Read the source and verification scope](project/source-map.md).
 

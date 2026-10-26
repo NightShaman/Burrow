@@ -5,7 +5,7 @@
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 
-This reference retains the historical 2026.10.19 ownership map and now records the current migration ledger through **69**, checked against Core on **25 October 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
+This reference retains the historical 2026.10.19 ownership map and now records the current migration ledger through **72**, checked against Core on **26 October 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
 
 See [Persistence architecture](../architecture/persistence.md) for the data flow and [Backup and recovery](../operations/backup-recovery.md) for recovery scope.
 
@@ -83,6 +83,9 @@ See [Persistence architecture](../architecture/persistence.md) for the data flow
 | 67 | `mod-external-turn-display-message` |
 | 68 | `scheduled-model-context-mode` |
 | 69 | `provider-pool-connections-and-routing-state` |
+| 70 | `dream-memory-promotion-toggle` |
+| 71 | `retained-forge-execution-history` |
+| 72 | `native-openai-pool-metrics` |
 
 Early schema constants intentionally remain immutable. Read them together with later migrations: for example, the original `conversation_archives.entries` column is removed by version 19, and timezone columns introduced as non-null become nullable in versions 11 and 12.
 
@@ -270,3 +273,7 @@ Corrections on this page were checked against public **2026.10.19**; any newer d
 - Model connections add `pool_json`; `provider_pool_affinity` and `provider_pool_health` retain logical-pool ownership and cooldown state. Pool connections do not own separate credentials. See [account pools](../guide/models.md#native-oauth-account-pools).
 
 Application migrations are not PostgreSQL major-version upgrades. Preserve the ledger and matching recovery backup; do not modify old checksums or assume an older binary can read the new schema.
+
+## Additions after migration 69
+
+Migration 70 adds default-true per-agent Dream promotion; the global promotion flag uses settings metadata. Migration 71 adds transactionally maintained `forge_archive` metadata receipts, retained when live jobs/media are deleted. Migration 72 adds `provider_pool_requests` and `provider_pool_attempts` for durable native OpenAI LB logical results and measured attempt usage. Unfinished requests are not completed-window outcomes; unknown usage is not zero. These are application-schema changes, not PostgreSQL-major upgrades or automatic retention rules.

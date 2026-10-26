@@ -1,6 +1,6 @@
 # Tools, mods, and execution
 
-Current implementation reviewed **25 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation reviewed **26 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 Start here when an agent needs access to files, a service, or another execution machine.
 
@@ -26,6 +26,12 @@ Saved credentials are not shown again. Existing configured secret fields can rem
 Mod-managed MCP servers are read-only in Connections. Tools marked as mod-authorized do not need ordinary agent grants and are omitted from the grant picker; manage them through the owning mod.
 
 [Source: connection form and discovery](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/McpConnections.tsx#L60-L77) · [Source: agent grants](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/AgentMcpTools.tsx#L46-L81)
+
+### HTTP MCP headers and returned images
+
+HTTP connections now have **HTTP headers → Add header**. Enter the header name and secret value, then save the connection. Existing values are masked: use **Replace** for a new value, or remove the row and save to remove it. Headers apply to HTTP, not stdio. A configured `Authorization` header takes precedence over the API-key-generated Bearer header; do not unintentionally configure conflicting authentication.
+
+Supported image blocks returned by an authorized MCP call are persisted as attachments and can enter a vision-capable model's native continuation. This is typed MCP image content, not arbitrary base64 text extraction; unsupported/invalid/oversized images report a content error. Loading a tool or receiving an image does not change its grants or a model's capabilities. Chat activity now identifies the actual MCP provider/tool and loaded skill rather than only the generic dispatch name.
 
 ## Install and enable a mod
 

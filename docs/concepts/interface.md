@@ -102,7 +102,7 @@ Choose **Group Chat** to create or reopen a room. A new room needs a name and at
 The **Workspace** panel shows the selected parent agent's files, including while a Minion conversation is displayed. Open a file to create a document tab, choose **Edit**, then **Save**. The tab retains its owning agent for the save request. The editor provides text editing, not a terminal or a file creation, rename, deletion, or upload workflow.
 The file tree uses `GET /api/workspace/files?agentId=…&scope=agent`; reads and saves use `/api/workspace/file`. Automatic tree refresh runs while Workspace is visible in the left rail and keeps the last tree on a transient failure. The backend remains responsible for file access checks.
 
-Use **Settings → General → Rail panels** to choose **None**, **Agents**, **Workspace**, **Codex-LB**, **Accounts**, or **System** for each rail. A rail can show a single panel or divided panels. Defaults put Agents above Workspace on the left and no panels on the right. **Appearance** offers Smatchet Dark, Nexus, Hatchet, Chaos, Paper, Terminal, and High Contrast. These layout preferences are stored in the browser.
+Use **Settings → General → Rail panels** to choose **None**, **Agents**, **Workspace**, **Accounts**, or **System** for each rail. A rail can show a single panel or divided panels. Defaults put Agents above Workspace on the left and no panels on the right. **Appearance** offers Smatchet Dark, Nexus, Hatchet, Chaos, Paper, Terminal, and High Contrast. These layout preferences are stored in the browser.
 On viewports at or below 600 pixels wide, controls reflow into a stacked layout, rails remain available, and page tabs can scroll horizontally. Scroll the page or expand a collapsed rail to reach its controls.
 
 ## Settings map
@@ -111,10 +111,10 @@ Settings separates category navigation, subsection navigation, the main editor, 
 
 | Category | Built-in sections |
 | --- | --- |
-| **General** | Operator profile, Operator timezone, Execution boundaries, Trace retention, OpenTelemetry, Brain memory, Export, Rail panels, Tiddle Signal, Appearance |
+| **General** | Operator profile (including Operator timezone), Execution boundaries, Trace retention, OpenTelemetry, Brain memory, Export, Rail panels, Tiddle Signal, Appearance |
 | **Agents** | Agent details, Profile documents, MCP tools, Cron jobs, Dreams, Skills |
 | **Skills** | Text skills, managed Git sources, lifecycle, global use, and assignments |
-| **Connections** | Authentication, Model providers, MCP servers, API tokens |
+| **Connections** | Authentication, Model providers, Load Balancing, MCP servers, API tokens |
 | **Mods** | Installed mods, Mod sources, Automatic source checks |
 
 - **Model providers:** configure connections, discover or enter models, and select the models exposed to agents. See [Models and providers](models.md).
@@ -229,6 +229,8 @@ To run a task:
 4. Inspect the assigned agent's **default** conversation and **Archive → Proof** for the final answer, blockers, and verification evidence.
 
 Dispatch awaits the stored task and project; the previous unawaited-lookup limitation no longer applies. A successful dispatch records a running execution with a run ID, then records its terminal result asynchronously. Execution receipt status is separate from the board column: dispatch and completion do not automatically move the card to In Progress or Done. Check the result and update task status deliberately. If progress remains visible after a connection failure, check the active run before clicking Execute again. Deleting a project also deletes its tasks. See [Workers and tasks](workers-tasks.md). Sources: , , .
+
+Current UI adds **Archive → Tasks** for Done tasks aged 48 hours, and **Archive → Forge** for retained creation evidence. See [tasks](../guide/tasks.md#completed-tasks-move-to-archive) and [Forge deletion](../guide/everyday-use.md#delete-a-forge-creation-retain-its-execution-record). The retired external Codex-LB rail/polling is removed; native OpenAI LB statistics live in the footer and account usage/reset controls live in **Accounts**.
 
 ### Archive
 

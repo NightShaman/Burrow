@@ -6,10 +6,10 @@ The operator guide follows inspected current development implementation, without
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.10.25.9` | `f9d1bc5b1b04e3d7f29c6b4f62e0feb935bff487` |
-| Core / Backend | `3bf50374d3601c821e787912d52b9044eaf649ec` |
-| UI | `0610bac85b2e636b79bbdf09fc3a95c3a519fa5a` |
-| Skills | `b81616ef9c8168d7fe9dcc8bd8e244149401fcc7` |
+| Assembled Burrow, build `2026.10.26.6` | `1137306c669aafa7ebc53446b803a7288e0f2c50` |
+| Core / Backend | `4df4b424e2b2856cb2c25c8464da7f806eb661e0` |
+| UI | `4d5dcd253dfc58dcd032b14e22020ceaad478a52` |
+| Skills | `2d120d42020eb13bc4ff0b613ea8badc46bdef1b` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
 
@@ -55,3 +55,7 @@ Public release versions use `YYYY.MM.DD`, such as `2026.10.19`. Use the public r
 The shared Docusaurus site lives in Docs-Website, with this project’s guides in `docs/burrow/`, navigation in `sidebars.json`, and settings in `docusaurus.config.js`. The original Burrow repository retains its separate MkDocs source and tooling. Keep behavior claims grounded in inspected current implementation and verify source citations when updating the guide.
 
 See [Build this documentation](../development/documentation.md) for preview and validation commands.
+
+## Ordinary update: 26 October 2026
+
+Compared source changes since the full 25 October baseline. This pass reconciles native pool settings/catalogs/metrics, HTTP MCP headers and images, task/Forge archives, Dream promotion/reconciliation, A2A history and affected API/configuration instructions. It is not another full-page recertification or a live application/provider test. Skills implementation is unchanged; its newer repository revision contains the prior documentation update only. Approved site artwork is preserved independently of runtime-source documentation changes.

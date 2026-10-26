@@ -15,7 +15,7 @@ BURROW separates a provider connection, its discovered tool catalog and each age
 4. Open the agent's MCP tool settings and grant specific tools from the catalog.
 5. Make a test request through that agent and inspect the execution result. Discovery alone is not a successful invocation test.
 
-HTTP credentials become a Bearer authorization header. A stdio provider runs as a subprocess with the service PATH and configured provider environment values. Use trusted executables and narrowly scoped provider credentials.
+HTTP API-key credentials become a Bearer authorization header unless an explicit custom `Authorization` header is configured. HTTP-only custom secret headers can be added/replaced/removed in the connection editor; existing values are not returned in metadata reads. A stdio provider runs as a subprocess with the service PATH and configured provider environment values. Use trusted executables and narrowly scoped provider credentials.
 ```mermaid
 flowchart LR
     O[Operator] --> C[Saved connection and encrypted secrets]
@@ -77,6 +77,10 @@ This is an explicit producer/consumer contract. It does not identify every secre
 An enabled server mod can register tools under a provider ID `mod.<mod-id>`. This reuses the MCP catalog and grants without creating a network MCP server. A disabled or failed mod loses live tool availability but retains catalog/grant records; uninstall removes its tool catalog and associated grants. Standalone CLI turns do not automatically host these server mods.
 
 Installed mods are trusted code. A mod's special `mod-authorized` tool availability is accepted only for live mod transport, and its handler must enforce its own record/agent authorization. Read [extension development](../development/extensions.md) before installing or authoring one.
+
+## Image results and activity identity
+
+Current Core persists supported typed MCP image blocks and passes them through native multimodal continuation when the selected model supports vision. It does not decode arbitrary base64-looking text. Invalid or unsupported images produce bounded content errors rather than invented visual evidence. Live and saved activity identifies the underlying provider/tool; `load_skill` activity also retains the selected skill identity. See [operator instructions](../guide/tools-and-mods.md#http-mcp-headers-and-returned-images).
 
 ## Diagnose a connection
 

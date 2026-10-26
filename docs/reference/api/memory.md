@@ -69,11 +69,17 @@ All these routes share the normal API authentication boundary. They are present 
 | `POST` | `/api/agents/{agentId}/dream-memory/consolidate` | Retained legacy route; current wiring returns the missing synthesized-items error described below |
 | `GET`, `POST` | `/api/agents/{agentId}/dream-cycle` | Read receipts or run a cycle |
 
-Dream settings include `enabled`, `quietDayDreams`, `cron`, `prompt`, optional `modelConnectionId` and `model`. The persisted default is enabled at `0 4 * * *`, with quiet-day Dreams enabled and operator timezone/model selection. Public migration 53 retires per-Dream timezone overrides; the retained `timezone` field is returned as null and the operator timezone governs scheduling. Explicit model overrides must supply a complete valid pair. A Dream prompt is at most 20,000 characters.
+Dream settings include `enabled`, `quietDayDreams`, `promoteToMemory`, `cron`, `prompt`, optional `modelConnectionId` and `model`. The persisted default is enabled at `0 4 * * *`, with quiet-day Dreams enabled and operator timezone/model selection. Public migration 53 retires per-Dream timezone overrides; the retained `timezone` field is returned as null and the operator timezone governs scheduling. Explicit model overrides must supply a complete valid pair. A Dream prompt is at most 20,000 characters.
 
 Diary GET supports `date`, `phase`, `limit` (default 30) and `format`/`markdown`. Cycle receipt GET defaults to 20 entries. Cycle POST accepts `limit` and optional `generatedAt`; these are processing controls, not a separate scheduling API. Inspect the returned phase outcomes: current Dream cycles save individual Dream-generated Brain connections, not a mandatory DreamMemory preload.
 
 The legacy `/dream-memory/consolidate` route remains mounted, but its current handler supplies no synthesized `items` to a helper that requires them. Static source therefore shows a `400 dream_memory_synthesized_items_required` outcome, not a working standalone consolidation operation. Use the current Dream-cycle workflow; do not keep retrying this legacy route or treat its presence in OpenAPI as proof it works. No runtime fix or live call was performed in this documentation pass.
+### Dream publication controls
+
+`GET`/`PUT /api/settings/brain-memory` reads/saves the global boolean `promoteDreamsToMemory` (default true). PUT requires a boolean and rejects invalid input with 400 `promote_dreams_to_memory_invalid`. Each agent also has `promoteToMemory` in Dream settings, default true; both controls must permit publication.
+
+These switches gate saving new or updated Dream-generated Brain connections, not running the Dream cycle. Publication rereads both settings, so switching off during a run prevents later publication. Skipped changes are not queued for automatic catch-up when re-enabled, and existing memories are not deleted. Reconciliation only updates eligible Dream-origin, non-operator-owned records whose expected revision still matches; conflicts are retained for review rather than overwriting operator edits. Inspect actual cycle receipts rather than treating an enabled switch as proof a memory was saved.
+
 ## Additional endpoint inventory
 
 Methods are significant. Braced segments are placeholders; URL-encode identifiers. See the [contract and conventions](../api.md) for artifact limitations. Brains and embedding endpoints are listed above.
@@ -82,6 +88,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 |---|---|---|
 | `GET` | `/api/memory/brain-promotion-candidates` | List Brain promotion candidates |
 | `PATCH` | `/api/memory/brain-promotion-candidates` | Update Brain promotion candidate |
+| `GET`, `PUT` | `/api/settings/brain-memory` | Global Dream-to-Brains publication setting |
 | `GET` | `/api/settings/tiddle` | Read Tiddle rolling-continuity status |
 | `GET` | `/api/tiddle/cards` | List current Tiddle warm cards |
 | `GET` | `/api/tiddle/history` | Read append-only Tiddle Signal history |
@@ -94,3 +101,7 @@ The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d
 - [backend/scripts/ui/dream-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/dream-routes.mjs)
 - [backend/src/postgres-dream-settings-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-dream-settings-store.mjs)
 - [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
+
+## 26 October delta review
+
+Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-26**. This is a focused source comparison since the full review above, not a new application or provider test pass.

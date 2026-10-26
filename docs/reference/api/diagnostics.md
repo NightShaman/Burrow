@@ -39,6 +39,20 @@ Do not describe the whole token scope as content-free merely because inventory a
 ## Provider usage helpers
 
 Codex-LB accounts and Anthropic/OpenAI OAuth usage are integration-specific interactive-auth endpoints. OAuth usage accepts `connectionId` and `force=true`; its ordinary cache interval is 60 seconds. These helpers depend on provider compatibility and available credentials and are not granted by a diagnostics Bearer token. Failure is not proof that ordinary chat is broken.
+## Native OpenAI LB metrics
+
+`GET /api/metrics/provider-pools` returns `{ok: true, windows: {"24h": window, "7d": window}}` for rolling database-time windows, attributed by logical completion. It uses normal authentication and is also in the `diagnostics:read` GET allowlist. Only native **OpenAI LB** contributes these receipts; Anthropic pools and direct model traffic do not.
+
+Each window reports logical requests/successes/failures/cancellations, provider attempts/retries, summed duration, token totals, cache/error percentages and coverage counts. A retry is another attempt, not another logical request; successful failover is success. Error percentage is final failures divided by all completed requests, including cancellations in the denominator. Zero requests gives null. Unfinished requests are excluded from completed-window denominators.
+
+Known token counts are summed over all attempts, including failures. Unknown usage remains null, not zero. Cache percentage uses only attempts with both input and cached counts; a zero or unknown denominator yields null. Inspect `coverage.inputAttempts`, `outputAttempts`, `cachedAttempts`, `cacheAttempts` and `cacheInputTokens` before treating partial data as complete measurement. See [observability](../../operations/observability.md) for the separate OpenTelemetry series.
+
+## OpenAI rate-limit reset credits
+
+`GET /api/openai/oauth/reset-credits?connectionId=...` reads provider-reported credit availability. `POST /api/openai/oauth/reset-credits/consume` takes `connectionId`, `creditId` and a stable `requestId`; it is an explicit operator action that can consume a provider credit, not a diagnostic health check or automatic LB action. These routes require normal interactive authentication, not a diagnostics Bearer token.
+
+The service refreshes eligibility before dispatch and guards concurrent redemption for the same account. It does not retry the non-idempotent provider POST. Reusing a request ID with a different credit returns 409; repeat identity can replay the recorded result only within this process lifetime. An `ambiguous` result means the outcome is unknown: do not submit a fresh ID merely to retry. Check provider credit/usage state first; this is not a restart-durable redemption ledger. A successful redemption can carry failed `usageRefresh` or `creditsRefresh`; refresh failure does not mean redemption failed. Provider availability/entitlement is not guaranteed by route existence.
+
 ## Auth flow endpoints
 
 The contract includes `GET /api/auth/session`. Source also implements:
@@ -63,6 +77,9 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `GET` | `/api/health` | Public minimal build identity |
 | `GET` | `/api/status` | Runtime status |
 | `GET` | `/api/metrics` | Bounded operational metrics |
+| `GET` | `/api/metrics/provider-pools` | Durable native OpenAI LB window metrics |
+| `GET` | `/api/openai/oauth/reset-credits` | Read selected account reset credits |
+| `POST` | `/api/openai/oauth/reset-credits/consume` | Explicitly redeem a selected reset credit |
 | `GET` | `/api/diagnostics/inventory` | Safe diagnostics inventory counts |
 | `GET` | `/api/traces` | List traces |
 | `GET` | `/api/traces/{runId}` | Read a trace |
@@ -89,3 +106,7 @@ The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d
 
 - [backend/scripts/burrow-ui.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/burrow-ui.mjs)
 - [backend/src/brain-diagnostic-summary.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/brain-diagnostic-summary.mjs)
+
+## 26 October delta review
+
+Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-26**. This is a focused source comparison since the full review above, not a new application or provider test pass.

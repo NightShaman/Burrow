@@ -31,6 +31,17 @@ The test runner creates private temporary runtime roots, clears selected runtime
 
 Disposable PostgreSQL mode starts an isolated local database (PostgreSQL17 binaries by default) and defaults to one test worker rather than four. Some database integration tests are opt-in and need PostgreSQL17/pgvector or Docker. Passing pure tests, or skipping unavailable integration tests, is not equivalent to a full database lifecycle pass. The optional deployed-isolation verification mode reads deployed paths; do not use it without intentionally selecting that environment.
 
+
+Use a clean contributor shell: the runner rejects inherited `DATABASE_URL`, `BURROW_POSTGRES_*`, `BURROW_ACCESS_TEST_SOCKET` and `PG*` connection variables rather than accepting a deployed database target. Remove those values from the test process environment; do not pass production credentials or a deployment environment file.
+
+For the runner-owned database integration mode, install the PostgreSQL17 binaries required by the checkout and run:
+
+```sh
+BURROW_TEST_DISPOSABLE_POSTGRES=1 npm test
+```
+
+This creates its own temporary cluster and Unix socket, supplies fixture-only connection settings to child tests, and stops the cluster during cleanup. The separate Docker lifecycle rehearsal below is a different check, not a prerequisite for the isolated suite. A plain `npm test` does not opt into this disposable database mode; report any skipped database cases rather than treating them as verified.
+
 ## Frontend contributor environment
 
 In an authorized UI checkout:
@@ -41,7 +52,7 @@ npm test
 npm run build
 ```
 
-The source UI uses React/TypeScript/Vite and Vitest. `npm run build` performs TypeScript checking and creates `dist/`. `npm run dev` starts Vite; `npm run body` selects the source workflow's standard UI port. Inspect `package.json` and `vite.config.ts` before exposing the development server or connecting it to a runtime.
+The source UI uses React/TypeScript/Vite and Vitest. `npm test` uses `scripts/test-isolated.mjs`: it runs Vitest with a temporary home/temp directory, a minimal environment and the bundled network-denial preload. Directly invoking Vitest bypasses that wrapper; use the package script for the documented isolated test path. `npm run build` performs TypeScript checking and creates `dist/`. `npm run dev` starts Vite; `npm run body` selects the source workflow's standard UI port. Inspect `package.json` and `vite.config.ts` before exposing the development server or connecting it to a runtime.
 
 Use an isolated development API target. A local frontend can still issue real mutations to whichever backend is selected. Browser origin and backend execution host are different concepts.
 
@@ -83,3 +94,5 @@ Source pushes can trigger assembly through the upstream dispatch workflow. A sou
 ## Source review
 
 Reviewed on 25 October 2026 against development assembly `f9d1bc5b1b04e3d7f29c6b4f62e0feb935bff487` (build2026.10.25.9), Backend `3bf50374d3601c821e787912d52b9044eaf649ec` and UI `0610bac85b2e636b79bbdf09fc3a95c3a519fa5a`. This is static source review, not a claim that tests, installation or provider calls were run. Public snapshots can lag development; these pins are provenance, not an installed-version compatibility promise.
+
+Delta review on 26 October 2026: contributor commands and isolation behavior checked against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` and UI `4d5dcd253dfc58dcd032b14e22020ceaad478a52`. Commands are instructions, not checks executed by this documentation pass.

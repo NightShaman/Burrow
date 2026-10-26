@@ -1,6 +1,6 @@
 # Everyday use
 
-Current implementation reviewed **25 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation reviewed **26 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 ## Find your way around
 
@@ -50,6 +50,10 @@ Use **Stop response**, then check the run's terminal status and reload the persi
 
 Current Core/UI implements cancellation deadlines, reset-generation fencing and terminal transcript reconciliation. These were absent from the historical 2026.10.19 snapshot. They do not undo an external side effect already completed before cancellation. See [release status](../project/release-status.md).
 
+### Dedicated A2A visible history
+
+When **A2A in default** is off, a new reply-request exchange can archive/reset the visible named inbox before ingress only when no other exchange or family recovery is open. Followups reuse their namespace and do not rotate it again. Originals remain in Archive. Unfinished/uncertain exchanges can defer rotation indefinitely; this is not a TTL or immediate deletion after a reply. Default operator history and FYI-only deliveries are not rotated by this mechanism.
+
 ## Read and edit workspace files
 
 In chat, open a file from the **Workspace** panel. It opens in a document tab. Click **Edit**, make your changes, then **Save**. Closing a modified file tab asks whether to discard unsaved edits. Saving writes to that tab's agent workspace; changing the selected agent does not retarget an already-open file tab.
@@ -74,3 +78,11 @@ Model availability depends on your connections. This release has no video provid
 [Source: Forge workflow and limitations](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/forge/ForgePage.tsx#L240-L266) · [Source: generation contract](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/forge-agent-tools.mjs#L26-L30)
 
 Next: [Tools and mods](tools-and-mods.md), [Skills and memory](skills-and-memory.md), or [Tasks and schedules](tasks.md).
+
+## Delete a Forge creation, retain its execution record
+
+Terminal Forge jobs (**succeeded**, **failed**, **interrupted**) have a confirmed **Delete** action; queued/running jobs cannot be deleted. Deletion removes the live job and eligible generated media, while **Archive → Forge** retains metadata such as prompt, model, status, observed calls and outcome. It is not a media backup or an erasure of the prompt. Previously attached session copies remain separate. A deleted idempotency key cannot be reused to start another paid job.
+
+If cleanup fails, inspect the job and Archive before retrying: filesystem cleanup and database changes are not one atomic transaction, so some media may already be gone. Legacy records may lack call evidence that was never stored.
+
+Disabled agents disappear from new-work selectors but their retained history remains accessible through Archive. Disabling an agent does not delete its conversations.

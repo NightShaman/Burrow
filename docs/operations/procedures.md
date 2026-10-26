@@ -96,7 +96,7 @@ These controls delete immediately without a separate UI confirmation. Memory del
 Use **Settings → General → Trace retention** for managed trace cleanup:
 
 1. Take a recovery backup if traces may be needed for incident review.
-2. Choose the maximum age and/or storage limit and a cadence between 15 minutes and 7 days. Enable managed cleanup only when those limits are intended.
+2. Choose the maximum age and/or storage limit and a cadence between 15 minutes and 7 days. **Maximum storage** now uses an explicit MiB/GiB selector; changing units preserves the underlying byte limit. Enable managed cleanup only when those limits are intended.
 3. Choose **Save policy**. Expect confirmation that the policy was saved.
 4. Choose **Preview cleanup** and inspect the trace count and reclaimable bytes. The UI summarizes the plan; it does not display individual paths.
 5. If the saved, previewed policy is still the intended one, choose **Run now**. Any form edit requires saving and previewing again.

@@ -33,13 +33,17 @@ These flows can establish ongoing provider access. Handle credentials through th
 
 Pools are saved through the existing model-connection POST route, not a separate pool API. Use `apiType: "openai-lb"` or `"anthropic-lb"` and a `pool` object with boolean `enabled`, nonempty `memberConnectionIds`, optional `sticky` (default true), and optional `preferEarlierReset` (default false). Member IDs are normalized and deduplicated. Pools use existing saved OAuth connections; they are not a credential upload or account-registration flow.
 
-Members must exist and belong to the matching provider family. OpenAI pools accept OpenAI OAuth connections using `openai-responses` or `openai-chat-completions`; Anthropic pools accept Anthropic/Claude OAuth with `anthropic-messages`. API-key-only members, self-membership, and nested pools are rejected. Discovery combines member model catalogs; inspect its `discovery.status` and `error`, because a manual-only fallback can still return `ok: true`. See [models](../../concepts/models.md) for runtime selection and fallback limits. The generated OpenAPI schema does not yet express this pool contract.
+Members must exist and belong to the matching provider family. OpenAI pools accept OpenAI OAuth connections using `openai-responses` or `openai-chat-completions`; Anthropic pools accept Anthropic/Claude OAuth with `anthropic-messages`. API-key-only members, self-membership, and nested pools are rejected. Discovery now exposes the **intersection** of non-manual model IDs present in every member catalog, selected by default—not the earlier union. Inspect `discovery.status` and `error`, because a manual-only fallback can still return `ok: true`. See [models](../../concepts/models.md) for runtime selection and fallback limits. The generated OpenAPI schema now includes pool settings, but its model-connection description still says union; current source uses the intersection.
 
 ## MCP configuration and grants
 
 Connection save requires `name` (up to 120 characters) and `transport` (`http` or `stdio`). HTTP requires an HTTP(S) `baseUrl`; stdio requires `command` (up to 240 characters), with arguments up to 2,000 characters each. `lifecycle` is `ephemeral` or `keep_alive`, default ephemeral; `enabled` defaults true.
 
 Discover/diagnose use `connectionId`; Diagnose may also receive `toolName` and an object `arguments`, so a diagnostic tool invocation can have provider-side effects. Do not assume every Diagnose operation is a passive health read.
+
+HTTP connection writes can include a `headers` object. Names are case-insensitive, canonicalized to lowercase, at most 128 characters, and duplicate names differing only by case are rejected. At most 64 entries are accepted; each string value is at most 8192 UTF-8 bytes and cannot contain CR, LF or NUL. Values are not trimmed.
+
+Omitting `headers` preserves all existing headers. A supplied map defines the complete retained name set: `null` preserves an already-configured name, a string replaces it, omitted names are removed, and `{}` clears all. A null value for an unknown name fails. Reads expose only `headerNames`, never values. These headers are encrypted with connection secrets; explicit Authorization overrides the legacy Bearer API key, and headers are not sent to stdio providers. See [MCP](../../concepts/mcp.md) for discovery and returned-image behavior.
 
 Agent grants use `{ "tools": [{ "connectionId": "…", "toolName": "…" }] }`; PUT replaces the full set. Read-modify-write deliberately. Secret update rules and the asynchronous delete-acknowledgement caveat are in [MCP](../../concepts/mcp.md).
 ## Skills, identities and policy
@@ -130,3 +134,7 @@ The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d
 - [backend/scripts/ui/general-settings-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/general-settings-routes.mjs)
 - [backend/scripts/ui/skill-source-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/skill-source-routes.mjs)
 - [backend/src/postgres-scheduled-job-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-scheduled-job-store.mjs)
+
+## 26 October delta review
+
+Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-26**. This is a focused source comparison since the full review above, not a new application or provider test pass.

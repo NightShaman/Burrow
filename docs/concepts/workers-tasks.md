@@ -41,6 +41,8 @@ The UI also offers an explicit **Execute** action. Its dispatch uses the assigne
 
 See the [API reference](../reference/api.md) for project/task administration and [Persistence](../architecture/persistence.md) for ownership.
 
+Current completed tasks are projected into **Archive → Tasks** after 48 hours in Done; metadata edits preserve the completion time. Reopening changes status to To Do. Archive is not deletion. See [task instructions](../guide/tasks.md#completed-tasks-move-to-archive).
+
 ## Scheduled jobs
 
 A scheduled job stores a name, prompt, five-field cron expression, owner agent, and session. Scheduling uses the operator timezone. Optional model selection can override the model for that job. Agent tools operate only on the active agent's non-mod-owned jobs; they cannot edit another agent's or a mod's jobs.
@@ -61,6 +63,8 @@ Example preparation of a disabled weekday job:
 ```
 
 Review the job before enabling it. A scheduled prompt executes as the configured agent and can select that agent's available tools; scheduling is not inherently read-only.
+
+For current `contextMode: fresh` jobs, a named non-default session is required. Dispatch archives/resets that session through the safe admission boundary before the scheduled turn. This preserves originals in Archive; it is not retention deletion. The ordinary cron editor does not expose a context-mode control. Existing continue-mode jobs retain their conversation behavior.
 
 ### Scheduler lifecycle
 

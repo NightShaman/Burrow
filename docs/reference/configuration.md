@@ -15,7 +15,7 @@ BURROW stores operator-managed configuration in PostgreSQL. The service environm
 | MCP connections, discovered catalog and per-agent tool grants | PostgreSQL MCP settings | Settings → Connections → MCP servers; agent MCP tools |
 | UI authentication | PostgreSQL settings and secret store, with explicit environment overrides | Settings → Connections → Authentication |
 | Execution hard boundaries | PostgreSQL metadata | Settings → General |
-| Operator timezone | PostgreSQL metadata | Settings → General |
+| Operator timezone | PostgreSQL metadata | Settings → General → Operator profile |
 | Skills, Git sources and per-agent assignments | PostgreSQL skill/source records; installed package files on disk | Settings → Skills; per-agent assignments under Agents |
 | Browser Origin checking | Persisted `checkOrigin`, with environment override | Settings browser-origin control; `/api/settings/browser-origin` |
 | OpenTelemetry export | PostgreSQL endpoint/enabled state and encrypted headers, with environment overrides | `/api/settings/opentelemetry` |

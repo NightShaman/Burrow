@@ -13,6 +13,8 @@ Create a project with `{name}`. Create a task with at least `projectId` and `tit
 
 `POST /api/task-board/tasks/{id}/execute` launches work through the assigned agent after awaiting the task/project lookups and execution record. Verify the returned outcome and then inspect the terminal execution receipt. Its response is not final task completion, and execution does not automatically move the task through board columns. The current UI shows five columns and creates tasks in To Do; the API/store default is Backlog.
 
+Task responses also expose derived `archived` and `archivedAt`. A task in `done` becomes archived after 48 hours from its terminal timestamp (with updated/created fallback for old records). This is a reversible completion projection, not a new status, deletion or expiry of history. Changing out of Done clears that projection; unchanged Done edits preserve the completion boundary. List responses still carry these fields so clients can separate active and archived work.
+
 Task history is available through `GET /api/task-board/tasks/{taskId}/history` with `limit` and `before`. Task document attachments have separate list/upload/download/delete endpoints; their bytes and audit metadata are stored in PostgreSQL. These are distinct from chat attachment artifacts.
 
 A conversation can bind an active project. GET/DELETE use `agentId` and optional `sessionId` (default `default`); PUT additionally requires `projectId`. The binding supports continuity and task context, not filesystem confinement.
@@ -97,3 +99,7 @@ The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d
 - [backend/scripts/ui/task-board-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/task-board-routes.mjs)
 - [backend/src/postgres-task-audit-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-task-audit-schema.mjs)
 - [backend/src/postgres-scheduled-job-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-scheduled-job-store.mjs)
+
+## 26 October delta review
+
+Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-26**. This is a focused source comparison since the full review above, not a new application or provider test pass.

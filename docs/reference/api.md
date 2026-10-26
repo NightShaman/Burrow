@@ -36,7 +36,7 @@ The API serves BURROW's UI and external clients. It is an operator-level control
 
 The public assembly includes `backend/docs/openapi.json`. Its contract includes Brains, Dream controls, Git-skill management, Minion model selection, task history/attachments and OpenTelemetry settings. Retired `/api/albdruck/*` routes are absent. The source-backed endpoint pages still need to be read alongside the schema: its inventory is not proof of request/response parity or live compatibility.
 
-The current development contract reviewed on **2026-10-25** has **177 paths, 234 operations and 123 component schemas**, including shared profile-document settings. Its SHA-256 is `a4ac82be735a01cac163b8b3b22c207cb96e8a6e96f0295db50e3cbef2ee906b`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
+The current development contract reviewed on **2026-10-26** has **181 paths, 240 operations and 125 component schemas**, including pool metrics, reset-credit and Dream publication settings. Its SHA-256 is `434a895f56f70f5ca5bb878e77a37de1bc0c05830c1704d0e387ba1d8b822e03`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
 
 
 !!! warning "The schema is incomplete"
@@ -50,7 +50,7 @@ Specific drift:
 - Music availability is catalog-dependent; it is not unconditionally false as the old schema states
 - Forge jobs can include bounded `errorDetails`; the old job schema omits them
 - Archive calendar uses the requested timezone, despite its old UTC-only summary
-- Current native OAuth provider pools use model-connection settings; the schema does not describe their `pool` configuration or member restrictions
+- Native OAuth pool settings and metrics now have schema coverage, but the model-connection description still says union while current runtime catalogs use the intersection of non-manual member models
 - The operator mod-access route is source-implemented but absent from this schema
 
 The source drift checker scans literal route comparisons. Passing it does not establish dynamic-route, HTTP-method, request or response parity. See [known limitations](../project/known-limitations.md).
@@ -100,3 +100,7 @@ The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d
 
 - [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
 - [backend/scripts/burrow-ui.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/burrow-ui.mjs)
+
+## 26 October delta review
+
+Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-26**. This is a focused source comparison since the full review above, not a new application or provider test pass.

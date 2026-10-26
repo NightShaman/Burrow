@@ -18,14 +18,14 @@ Later Core implementation was also reviewed. This historical comparison is not a
 
 Reviewed on **22 October 2026**: ordinary mods can request asynchronous, potentially paid image jobs through Core’s saved Forge selection and read only their own image jobs. The [Tutor Forge lesson](https://burrow-docs.blissful-psychosis.com/burrow-tutor/forge-images/) covers consent, durable retries, and previews. This interface is absent from the older public snapshot above. Current guides follow implementation; the public snapshot follows the daily sync. Update Core alongside mods that use this capability.
 
-## Current implementation check: 25 October 2026
+## Current implementation check: 26 October 2026
 
 This nightly pass uses current development implementation as documentation truth; it does not wait for a public mirror or alter a release. Pins:
 
-- Assembled Burrow: `f9d1bc5b1b04e3d7f29c6b4f62e0feb935bff487`.
-- Core: `3bf50374d3601c821e787912d52b9044eaf649ec`.
-- UI: `0610bac85b2e636b79bbdf09fc3a95c3a519fa5a`.
-- Operating skills: `b81616ef9c8168d7fe9dcc8bd8e244149401fcc7`.
+- Assembled Burrow: `1137306c669aafa7ebc53446b803a7288e0f2c50`.
+- Core: `4df4b424e2b2856cb2c25c8464da7f806eb661e0`.
+- UI: `4d5dcd253dfc58dcd032b14e22020ceaad478a52`.
+- Operating skills: `2d120d42020eb13bc4ff0b613ea8badc46bdef1b`.
 
 Recent operator-facing changes include a **Browse stored credentials** picker and configured-credential state for HTTPS mod sources, plus a per-agent **A2A in default** routing toggle and readable external-chat session labels. See [tools and mods](../guide/tools-and-mods.md#private-source-credentials-in-current-core) and [everyday use](../guide/everyday-use.md#current-session-routing-controls).
 
@@ -33,7 +33,7 @@ The dedicated Core/mod-managed skill catalog is implemented, not merely planned.
 
 Current Core also exposes mod-owned external-turn cancellation and session create/model controls. Cancellation is cooperative and must be polled to terminal status; new-session creation does not delete an old conversation or cancel its work. These are Core capabilities, not proof that every transport mod exposes matching commands. Follow each mod's documentation and installed-version requirements.
 
-The reviewed assembly identifies itself as **2026.10.25.9**. Native **OpenAI LB** and **Anthropic LB** connection types are now present in default-branch UI and Core, with same-family OAuth membership and bounded text-model routing. See [account-pool setup and limitations](../guide/models.md#native-oauth-account-pools). This is implemented source, not a claim of successful live provider validation. Current schema inventory reaches migration **69**. `run_evidence_search` adds explicit agent-owned historical proof retrieval; it does not add automatic prompt recall or a new HTTP API.
+The reviewed assembly identifies itself as **2026.10.26.6**. Native **OpenAI LB** and **Anthropic LB** connection types are now present in default-branch UI and Core, with same-family OAuth membership and bounded text-model routing. See [account-pool setup and limitations](../guide/models.md#native-oauth-account-pools). This is implemented source, not a claim of successful live provider validation. Current schema inventory reaches migration **72**. `run_evidence_search` adds explicit agent-owned historical proof retrieval; it does not add automatic prompt recall or a new HTTP API.
 
 This Sunday pass reconciled the full documentation surface, including historical-page scope. No live provider, OAuth, installation, database restore, runtime test, or unmerged branch was treated as successful verification. Historical examples remain historical; documentation publication does not establish runtime readiness.
 
@@ -45,4 +45,8 @@ This Sunday pass reconciled the full documentation surface, including historical
 - For remote execution, use [Node Goblin](https://burrow-docs.blissful-psychosis.com/node-goblin/) with [Backdoor](https://burrow-docs.blissful-psychosis.com/burrow-backdoor/) to retain an internal path to the agent's home Burrow.
 
 Public calendar tags are created by coordinated promotion. This review did not create a release or advance a tag. Future release dates are not promised here.
+
+## Ordinary update: 26 October 2026
+
+Compared source changes since the full 25 October baseline. This pass reconciles native pool settings/catalogs/metrics, HTTP MCP headers and images, task/Forge archives, Dream promotion/reconciliation, A2A history and affected API/configuration instructions. It is not another full-page recertification or a live application/provider test. Skills implementation is unchanged; its newer repository revision contains the prior documentation update only. Approved site artwork is preserved independently of runtime-source documentation changes.
 
