@@ -839,7 +839,7 @@ function normalizeUiAuthRecord(record = {}) {
       insecureCookies: basic.insecureCookies === true,
     },
     oidc: {
-      issuer: String(record.oidc?.issuer || '').trim().replace(/\/+$/, ''),
+      issuer: String(record.oidc?.issuer || '').trim(),
       clientId: String(record.oidc?.clientId || '').trim(),
       clientSecret: String(record.oidc?.clientSecret || '').trim(),
       clientSecretConfigured: Boolean(record.oidc?.clientSecretConfigured),
