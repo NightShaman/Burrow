@@ -1,3 +1,4 @@
+import { PostgresCompletionEventSettingsStore } from './postgres-completion-event-settings-store.mjs';
 import { attemptResourceClosers } from './background-lifecycle.mjs';
 import { PostgresCompletionEventStore } from './postgres-completion-event-store.mjs';
 import { PostgresSkillSources } from './postgres-skill-sources.mjs';
@@ -92,6 +93,7 @@ export async function createPostgresApplication({
     opentelemetry: new PostgresOtelSettingsStore({ ...common, key: encryptionKey, ...(clock ? { clock } : {}) }),
     metadata: new PostgresSettingsMetadataStore({ ...common, ...(clock ? { clock } : {}) }),
     completionEvents: new PostgresCompletionEventStore(common),
+    completionEventSettings: new PostgresCompletionEventSettingsStore({ ...common, key: encryptionKey, ...(clock ? { clock } : {}) }),
     conversations: new PostgresSessionStore({ ...common, ...(clock ? { clock } : {}) }),
     };
     stores.brainEmbeddings = new PostgresBrainEmbeddings({ pool: sharedPool, models: stores.models });

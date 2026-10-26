@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createCompletionEventSettings } from '../src/completion-event-settings.mjs';
 import { createCompletionEventRunner } from '../src/completion-event-runner.mjs';
 import { createCompletionEventRoutes } from './ui/completion-event-routes.mjs';
 import { createDreamMemoryPreviewService } from '../src/dream-memory-preview.mjs';
@@ -2899,7 +2900,8 @@ async function currentActiveChatRunSummaries({ agentId = null, sessionId = null 
 }
 
 const exportRoute = createExportRoutes({ readJsonBody, sendJson, exportCatalog, normalizeImportRequest, decodeExport, buildExport, exportSnapshot, importPreview, applyImport });
-const completionEventRoute = createCompletionEventRoutes({ store: postgresApplication.stores.completionEvents, readJsonBody, sendJson, resolveAgentRuntime, wake: () => completionEventRunner.wake(), getWebhookSecret: () => process.env.BURROW_GITHUB_WEBHOOK_SECRET });
+const completionEventReceiverSettings = createCompletionEventSettings({ store: postgresApplication.stores.completionEventSettings });
+const completionEventRoute = createCompletionEventRoutes({ store: postgresApplication.stores.completionEvents, readJsonBody, sendJson, resolveAgentRuntime, wake: () => completionEventRunner.wake(), getWebhookSecret: () => completionEventReceiverSettings.secret(), receiverSettings: completionEventReceiverSettings });
 const taskBoardRoute = createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundaryBody, withTaskBoard, taskStatuses: TASK_STATUSES, taskPriorities: TASK_PRIORITIES, executeBoardTask });
 const workbenchRoute = createWorkbenchRoutes({ readJsonBody, sendJson, selectedAgentRuntime, dataRootForAgent, listWorkItemSummaries, createWorkbenchItem, readWorkItem, runWorkbenchItemStep, continueWorkbenchItem, archiveWorkbenchItem, workbenchPlan, workbenchRun });
 const forgeStoreFactory = () => postgresApplication.stores.forge;

@@ -61,6 +61,7 @@ async function readRaw(req) {
   return Buffer.concat(chunks, size);
 }
 function errorResponse(error) {
+  if (error?.message === 'completion_event_secret_unavailable') return [503, 'completion_event_webhook_unavailable'];
   if (error?.statusCode === 413 || error?.message === 'completion_event_too_large') return [413, 'completion_event_too_large'];
   if (error?.message === 'completion_event_conflict') return [409, 'completion_event_conflict'];
   if (error?.message === 'agent_disabled') return [409, 'agent_disabled'];
@@ -84,13 +85,13 @@ function watchBody(value) {
 
 // The parent must call handle({ webhookOnly: true }) before UI authorization, and
 // handle() without that flag only after UI authorization. No other route bypasses it.
-export function createCompletionEventRoutes({ store, readJsonBody, sendJson, resolveAgentRuntime, wake, getWebhookSecret } = {}) {
+export function createCompletionEventRoutes({ store, readJsonBody, sendJson, resolveAgentRuntime, wake, getWebhookSecret, receiverSettings } = {}) {
   return async function handle({ req, res, url, webhookOnly = false } = {}) {
     const path = url.pathname;
     const webhook = req.method === 'POST' && path === '/api/events/github';
     if (webhookOnly && !webhook) return false;
     if (!webhookOnly && webhook) return false;
-    if (!webhook && !(path === '/api/events/watches' && ['GET', 'POST'].includes(req.method)) &&
+    if (!webhook && !(path === '/api/events/settings' && ['GET', 'POST'].includes(req.method)) && !(path === '/api/events/watches' && ['GET', 'POST'].includes(req.method)) &&
       !(req.method === 'DELETE' && /^\/api\/events\/watches\/[^/]+$/.test(path)) &&
       !(req.method === 'GET' && path === '/api/events')) return false;
     try {
@@ -111,6 +112,11 @@ export function createCompletionEventRoutes({ store, readJsonBody, sendJson, res
           try { Promise.resolve(wake()).catch(() => {}); } catch { /* polling can still claim durable events */ }
         }
         sendJson(res, 202, { ok: true, events: events.map(({ id, accepted }) => ({ id, accepted })), accepted, duplicates: events.length - accepted });
+        return true;
+      }
+      if (path === '/api/events/settings') {
+        const settings = req.method === 'POST' ? await receiverSettings.save(await readJsonBody(req)) : await receiverSettings.read();
+        sendJson(res, 200, { ok: true, settings });
         return true;
       }
       if (path === '/api/events/watches') {

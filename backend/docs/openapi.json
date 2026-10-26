@@ -7677,7 +7677,7 @@
         ],
         "summary": "Receive signed GitHub workflow completion webhook",
         "operationId": "receiveGithubCompletionWebhook",
-        "description": "Independent of normal UI auth. Requires a configured BURROW_GITHUB_WEBHOOK_SECRET and HMAC-SHA256 of the exact raw body in X-Hub-Signature-256; 256 KiB maximum raw body. X-GitHub-Event: ping returns 200 after signature and JSON validation; non-workflow_run or non-completed actions return 202 with zero events. Completed workflow_run requires the fields in GithubWorkflowCompletedPayload, including consistent repository/workflow identities, exact GitHub URL and valid timestamp. Matching is by enabled watch repository + exact workflow name; each run ID + attempt + watch is stored once. A 202 returns only per-watch {id, accepted} receipts plus accepted/duplicates counts: durable acceptance, not execution success. Full retained event rows are available only from normally UI-authorized GET /api/events. See docs/event-triggered-work.md.",
+        "description": "Independent of normal UI auth. Requires an effective secret configured in Settings or through the optional higher-priority BURROW_GITHUB_WEBHOOK_SECRET environment override and HMAC-SHA256 of the exact raw body in X-Hub-Signature-256; 256 KiB maximum raw body. X-GitHub-Event: ping returns 200 after signature and JSON validation; non-workflow_run or non-completed actions return 202 with zero events. Completed workflow_run requires the fields in GithubWorkflowCompletedPayload, including consistent repository/workflow identities, exact GitHub URL and valid timestamp. Matching is by enabled watch repository + exact workflow name; each run ID + attempt + watch is stored once. A 202 returns only per-watch {id, accepted} receipts plus accepted/duplicates counts: durable acceptance, not execution success. Full retained event rows are available only from normally UI-authorized GET /api/events. See docs/event-triggered-work.md.",
         "security": [
           {
             "GithubWebhookSignature": []
@@ -7867,6 +7867,53 @@
         "responses": {
           "200": {
             "$ref": "#/components/responses/CompletionEventListResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/api/events/settings": {
+      "get": {
+        "tags": [
+          "Completion events"
+        ],
+        "summary": "Read webhook receiver settings",
+        "operationId": "getCompletionEventSettings",
+        "description": "Normally UI-authorized. Settings apply to signature verification on each request without a restart. The optional environment secret overrides the stored secret; changing the service environment still requires a process restart. Readiness is local signature-verification readiness, not proof of public connectivity or agent handling. No plaintext secret is returned.",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/CompletionEventSettingsResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Completion events"
+        ],
+        "summary": "Patch webhook receiver settings",
+        "operationId": "saveCompletionEventSettings",
+        "description": "Normally UI-authorized. Settings apply to signature verification on each request without a restart. The optional environment secret overrides the stored secret; changing the service environment still requires a process restart. Readiness is local signature-verification readiness, not proof of public connectivity or agent handling. No plaintext secret is returned. Omitted fields are preserved. Invalid patches return completion_event_invalid_settings.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompletionEventSettingsPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/CompletionEventSettingsResponse"
           },
           "400": {
             "$ref": "#/components/responses/ErrorResponse"
@@ -9133,6 +9180,16 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/CompletionOkResponse"
+            }
+          }
+        }
+      },
+      "CompletionEventSettingsResponse": {
+        "description": "Receiver settings without secret plaintext.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/CompletionEventSettingsResponse"
             }
           }
         }
@@ -14592,6 +14649,100 @@
             "const": true
           }
         }
+      },
+      "CompletionEventSettingsPatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Partial update. No plaintext secret readback. Nonblank secret with clearSecret=true is invalid.",
+        "properties": {
+          "deliveryUrl": {
+            "type": "string",
+            "maxLength": 4096,
+            "description": "Optional delivery URL metadata, trimmed on save; empty clears it. If nonempty, absolute http(s) URL with path exactly /api/events/github, without username, password, query or fragment. Does not change routing or prove reachability."
+          },
+          "secret": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "At most 8192 UTF-8 bytes; no CR, LF or NUL. Blank or whitespace-only preserves the existing stored secret exactly; nonblank stores the exact provided bytes encrypted using the managed credentials key. Nonblank and clearSecret=true are rejected."
+          },
+          "clearSecret": {
+            "type": "boolean",
+            "description": "True explicitly clears only the stored secret, not any environment override."
+          }
+        }
+      },
+      "CompletionEventSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deliveryUrl",
+          "webhookPath",
+          "secretConfigured",
+          "storedSecretConfigured",
+          "secretSource",
+          "environmentOverride",
+          "ready",
+          "readiness"
+        ],
+        "properties": {
+          "deliveryUrl": {
+            "type": "string",
+            "description": "Optional configured delivery URL metadata; empty when unset."
+          },
+          "webhookPath": {
+            "type": "string",
+            "const": "/api/events/github"
+          },
+          "secretConfigured": {
+            "type": "boolean",
+            "description": "Whether an effective secret is configured, including an unavailable stored secret."
+          },
+          "storedSecretConfigured": {
+            "type": "boolean",
+            "description": "Whether a stored secret is configured, even if unavailable."
+          },
+          "secretSource": {
+            "type": "string",
+            "enum": [
+              "settings",
+              "environment",
+              "none"
+            ]
+          },
+          "environmentOverride": {
+            "type": "boolean",
+            "description": "True when the optional nonempty environment secret takes precedence."
+          },
+          "ready": {
+            "type": "boolean",
+            "description": "Local signature verification readiness only; not public reachability or agent-handling proof."
+          },
+          "readiness": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "secret_missing",
+              "secret_unavailable"
+            ],
+            "description": "secret_unavailable means the stored secret cannot be decrypted (for example corrupt data or wrong key), unless an environment override is active. The webhook returns 503 when the effective secret is missing or unavailable."
+          }
+        }
+      },
+      "CompletionEventSettingsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "settings"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "settings": {
+            "$ref": "#/components/schemas/CompletionEventSettings"
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -14599,7 +14750,7 @@
         "type": "apiKey",
         "in": "header",
         "name": "X-Hub-Signature-256",
-        "description": "sha256=<64 hexadecimal digits>: HMAC-SHA256 over the exact raw request bytes using BURROW_GITHUB_WEBHOOK_SECRET. Not a UI session, bearer token, or literal API key. Recompute for each delivery; do not paste the secret here."
+        "description": "sha256=<64 hexadecimal digits>: HMAC-SHA256 over the exact raw request bytes using the effective Settings secret or optional BURROW_GITHUB_WEBHOOK_SECRET environment override. Not a UI session, bearer token, or literal API key. Recompute for each delivery; do not paste the secret here."
       }
     }
   },

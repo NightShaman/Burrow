@@ -1,3 +1,5 @@
+import { POSTGRES_EVENT_OPERATOR_PROJECTION_SQL } from './postgres-event-operator-projection.mjs';
+import { POSTGRES_COMPLETION_EVENT_SETTINGS_SQL } from './postgres-completion-event-settings-store.mjs';
 import { POSTGRES_COMPLETION_EVENT_SCHEMA_SQL } from './postgres-completion-event-store.mjs';
 import { POSTGRES_PROVIDER_POOL_METRICS_SQL } from './postgres-provider-pool-metrics.mjs';
 import { POSTGRES_FORGE_ARCHIVE_SQL } from './postgres-forge-archive.mjs';
@@ -182,4 +184,6 @@ ALTER TABLE dream_settings ADD COLUMN memory_emphasis INTEGER NOT NULL DEFAULT 5
 ALTER TABLE dream_settings ADD COLUMN memory_prompt_override TEXT CHECK (char_length(memory_prompt_override) <= 20000);
 ` },
   { version: 74, name: 'durable-github-completion-events', sql: POSTGRES_COMPLETION_EVENT_SCHEMA_SQL },
+  { version: 75, name: 'settings-first-completion-webhook', sql: POSTGRES_COMPLETION_EVENT_SETTINGS_SQL },
+  { version: 76, name: 'event-operator-projection-copies', sql: POSTGRES_EVENT_OPERATOR_PROJECTION_SQL },
 ]);
