@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { createCompletionEventRunner } from '../src/completion-event-runner.mjs';
+import { createCompletionEventRoutes } from './ui/completion-event-routes.mjs';
 import { createDreamMemoryPreviewService } from '../src/dream-memory-preview.mjs';
 import { readDreamPromotion, saveDreamPromotion } from '../src/dream-promotion-settings.mjs';
 import { isInternalContextSession } from '../src/model-context-boundary.mjs';
@@ -211,6 +213,7 @@ const otelRuntime = createReconfigurableOtelRuntime({ serviceVersion: releaseVer
 await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: postgresApplication.stores.metadata }));
 await runtimeOwnership.reconcileModJobs(postgresApplication.stores);
 const generationDispatcher = createModGenerationDispatcher({ store: postgresApplication.stores.generations, generateText: createModTextGenerator({ models: postgresApplication.stores.models }) });
+const completionEventRunner = createCompletionEventRunner({ store: postgresApplication.stores.completionEvents, stores: postgresApplication.stores, resolveAgentRuntime, rootDir: projectRoot, registerActiveRun: registerRuntimeActiveRun, telemetry: otelRuntime });
 const externalTurnDispatcher = createModExternalTurnDispatcher({ store: postgresApplication.stores.externalTurns, stores: postgresApplication.stores, resolveAgentRuntime, rootDir: projectRoot, registerActiveRun: registerRuntimeActiveRun, telemetry: otelRuntime });
 async function applyOtelConfigurationToNodeGoblins() {
   const configuration = otelRuntime.remoteConfiguration();
@@ -2896,6 +2899,7 @@ async function currentActiveChatRunSummaries({ agentId = null, sessionId = null 
 }
 
 const exportRoute = createExportRoutes({ readJsonBody, sendJson, exportCatalog, normalizeImportRequest, decodeExport, buildExport, exportSnapshot, importPreview, applyImport });
+const completionEventRoute = createCompletionEventRoutes({ store: postgresApplication.stores.completionEvents, readJsonBody, sendJson, resolveAgentRuntime, wake: () => completionEventRunner.wake(), getWebhookSecret: () => process.env.BURROW_GITHUB_WEBHOOK_SECRET });
 const taskBoardRoute = createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundaryBody, withTaskBoard, taskStatuses: TASK_STATUSES, taskPriorities: TASK_PRIORITIES, executeBoardTask });
 const workbenchRoute = createWorkbenchRoutes({ readJsonBody, sendJson, selectedAgentRuntime, dataRootForAgent, listWorkItemSummaries, createWorkbenchItem, readWorkItem, runWorkbenchItemStep, continueWorkbenchItem, archiveWorkbenchItem, workbenchPlan, workbenchRun });
 const forgeStoreFactory = () => postgresApplication.stores.forge;
@@ -3141,7 +3145,9 @@ async function handleRequest(req, res) {
     if (await applyApiCors(req, res, url)) return;
     if (await authRoute({ req, res, url, origin })) return;
     if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/api/health')) return sendJson(res, 200, { ok: true, runtime: 'burrow', version: releaseVersion, buildIdentity: healthBuildIdentity, ...(healthReleaseProvenance ? { releaseProvenance: healthReleaseProvenance } : {}), ...(process.env.BURROW_SMOKE_TOKEN && req.headers['x-burrow-smoke-token'] === process.env.BURROW_SMOKE_TOKEN ? { smokeToken: process.env.BURROW_SMOKE_TOKEN } : {}) });
+    if (await completionEventRoute({ req, res, url, webhookOnly: true })) return;
     if (!(await authorizeRequest(req, res, url))) return;
+    if (await completionEventRoute({ req, res, url })) return;
     if (req.method === 'GET' && url.pathname === '/api/auth/validate') {
       const runtime = await runtimeConfig();
       const mode = runtime?.ui?.authMode || 'none';
@@ -3318,7 +3324,7 @@ const closeRuntimeResources = createCoordinatedShutdown({
     httpClosePromise = new Promise(resolve => server.close(() => resolve()));
     server.closeIdleConnections?.();
   },
-  producers: () => [skillSyncProducer, managedSkillSynchronizer, modDistributionProducer, externalTurnDispatcher, generationDispatcher, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
+  producers: () => [skillSyncProducer, managedSkillSynchronizer, modDistributionProducer, completionEventRunner, externalTurnDispatcher, generationDispatcher, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
   beforeDrain: async () => {
     try {
       await recordActiveRunInterruptions({ stores: postgresApplication.stores, activeRuns: activeChatRuns, resolveAgentRuntime, reason: shutdownReason });
@@ -3385,6 +3391,8 @@ server.listen(port, host, () => {
     void skillGitSync.start().catch(error => serverLogger.event('skill_sync_startup_failed',{error:'skill_sync_failed'}));
     const store = postgresApplication.stores.scheduledJobs;
     try { await store.markMissedRuns(); await store.markMissedSchedules({ activeOwnerModIds: loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id) }); } finally { /* Shared application store remains open. */ }
+    if (shuttingDown) return;
+    await completionEventRunner.start();
     if (shuttingDown) return;
     await scheduler().start();
     if (shuttingDown) return;

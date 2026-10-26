@@ -48,6 +48,7 @@ const collection = {
     { key: 'projectId', value: 'project-id' },
     { key: 'jobId', value: 'scheduled-job-id' },
     { key: 'jobRunId', value: 'scheduled-run-id' },
+    { key: 'completionWatchId', value: '00000000-0000-4000-8000-000000000000' },
     { key: 'channelId', value: 'group-channel-id' },
     { key: 'groupRunId', value: 'group-run-id' },
     { key: 'workItemId', value: 'work-item-id' },
@@ -200,6 +201,13 @@ const collection = {
       req('Retention dry run', 'GET', '/api/retention'),
       req('Run retention cleanup', 'POST', '/api/retention/cleanup', { body: { confirm: false } }),
     ]),
+    folder('GitHub Completion Events', [
+      req('List watches', 'GET', '/api/events/watches', { description: 'Normally UI-authorized.' }),
+      req('Save watch', 'POST', '/api/events/watches', { description: 'Normally UI-authorized; omit id to create or provide UUID id to update.', body: { repository: 'NightShaman/Burrow', workflow: 'Backend CI', agentId: '{{agentId}}', sessionId: 'ci-releases', instruction: 'Review completed CI evidence and report verified findings; do not mutate GitHub without explicit operator approval.', enabled: true } }),
+      req('Delete watch', 'DELETE', '/api/events/watches/{{completionWatchId}}', { description: 'Normally UI-authorized. Previous event snapshots remain.' }),
+      req('List retained events', 'GET', '/api/events', { description: 'Normally UI-authorized; accepted is not handled. An interrupted event is not blindly replayed.', query: [['agentId', '{{agentId}}'], ['limit', '50']] }),
+      req('Receive signed workflow_run completed', 'POST', '/api/events/github', { description: 'External GitHub webhook, not UI-authenticated. Sign exact raw request bytes with BURROW_GITHUB_WEBHOOK_SECRET using HMAC-SHA256 for each delivery; do not send UI credentials. A 202 means durable acceptance, not agent execution. See docs/event-triggered-work.md.', body: { action: 'completed', repository: { full_name: 'NightShaman/Burrow' }, workflow_run: { id: 1234567, name: 'Backend CI', status: 'completed', run_attempt: 1, head_sha: '0123456789abcdef0123456789abcdef01234567', conclusion: 'success', html_url: 'https://github.com/NightShaman/Burrow/actions/runs/1234567', updated_at: '2026-10-26T12:00:00Z' } } }),
+    ]),
     folder('Scheduled Jobs', [
       req('List scheduled jobs', 'GET', '/api/scheduled-jobs', { query: [['agentId', '{{agentId}}'], ['enabled', 'true']] }),
       req('Create scheduled job', 'POST', '/api/scheduled-jobs', { body: { agentId: '{{agentId}}', name: 'Daily check', prompt: 'Run a daily check.', schedule: '0 8 * * *', timezone: 'America/Chicago', enabled: false } }),
@@ -265,6 +273,16 @@ const collection = {
     ]),
   ],
 };
+
+// The private secret belongs in the operator's Postman environment, never in the collection.
+const webhook = collection.item.find((entry) => entry.name === 'GitHub Completion Events').item.at(-1);
+webhook.request.header.push({ key: 'X-GitHub-Event', value: 'workflow_run' }, { key: 'X-Hub-Signature-256', value: '{{githubSignature256}}' });
+webhook.event = [{ listen: 'prerequest', script: { type: 'text/javascript', exec: [
+  '// Set githubWebhookSecret in a private Postman environment (never in this collection).',
+  'const secret = pm.environment.get("githubWebhookSecret");',
+  'if (!secret) throw new Error("Private githubWebhookSecret environment value required");',
+  'pm.variables.set("githubSignature256", "sha256=" + CryptoJS.HmacSHA256(pm.request.body.raw, secret).toString(CryptoJS.enc.Hex));',
+] } }];
 
 const generated = `${JSON.stringify(collection, null, 2)}\n`;
 if (checkOnly) {

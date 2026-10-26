@@ -130,6 +130,7 @@ async function runAskChatUnserialized({
   turnSource = null,
   // Core-attested external ingress metadata; never taken from request body.
   externalTurnMetadata = null,
+  completionEvent = null,
   // Trusted server-side context for a participant in an operator group room.
   // The room transcript is prompt context, not the participant's private session.
   groupChannelContext = null,
@@ -461,6 +462,7 @@ async function runAskChatUnserialized({
       metadata: {
         ...userTurnMetadata({ command, session, intent, attachments: turnAttachments, turnPlan, subjectScope: verifiedSubjectScope }),
         ...(turnSource ? { source: turnSource } : {}),
+        ...(completionEvent ? { completionEvent } : {}),
         ...(externalTurnMetadata ? { externalTurn: { ownerModId: externalTurnMetadata.ownerModId, externalTurnId: externalTurnMetadata.externalTurnId } } : {}),
         ...(earlyContinuationPlan ? { continuationPlan: earlyContinuationPlan } : {}),
       },

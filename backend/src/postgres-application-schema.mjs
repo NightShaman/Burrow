@@ -1,3 +1,4 @@
+import { POSTGRES_COMPLETION_EVENT_SCHEMA_SQL } from './postgres-completion-event-store.mjs';
 import { POSTGRES_PROVIDER_POOL_METRICS_SQL } from './postgres-provider-pool-metrics.mjs';
 import { POSTGRES_FORGE_ARCHIVE_SQL } from './postgres-forge-archive.mjs';
 import { POSTGRES_COMPACTION_PROJECTIONS_SQL } from './postgres-compaction-projections.mjs';
@@ -180,4 +181,5 @@ ALTER TABLE scheduled_jobs ADD COLUMN context_mode TEXT NOT NULL DEFAULT 'contin
 ALTER TABLE dream_settings ADD COLUMN memory_emphasis INTEGER NOT NULL DEFAULT 50 CHECK (memory_emphasis BETWEEN 0 AND 100);
 ALTER TABLE dream_settings ADD COLUMN memory_prompt_override TEXT CHECK (char_length(memory_prompt_override) <= 20000);
 ` },
+  { version: 74, name: 'durable-github-completion-events', sql: POSTGRES_COMPLETION_EVENT_SCHEMA_SQL },
 ]);

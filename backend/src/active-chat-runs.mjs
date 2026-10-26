@@ -20,6 +20,7 @@ export function activeChatRunSummary(record = {}) {
     detached: record.detached === true,
     steeringReady: !cancelling && record.steeringReady === true,
     source: record.source || null,
+    ...(record.completionEvent ? { completionEvent: record.completionEvent, latestUserMessageMetadata: { source: 'workflow-event', completionEvent: record.completionEvent } } : {}),
     a2a: record.a2a || null,
     a2aActivities: Array.isArray(record.a2aActivities) ? record.a2aActivities.slice(-12) : [],
   };
@@ -32,7 +33,7 @@ export function activeChatRunSummaries(activeChatRuns, { agentId = null, session
     .map(activeChatRunSummary);
 }
 
-export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'default', runId, message = '', objective = null, source = 'internal', a2a = null, parentSignal = null } = {}) {
+export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'default', runId, message = '', objective = null, source = 'internal', a2a = null, completionEvent = null, parentSignal = null } = {}) {
   if (!agentId || !runId) throw new Error('active_agent_run_identity_required');
   if (activeChatRuns.has(activeChatRunKey(agentId, runId))) throw Object.assign(new Error('chat_run_id_already_used'), { statusCode: 409 });
   const controller = new AbortController();
@@ -40,7 +41,7 @@ export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'd
     agentId: String(agentId), runId: String(runId), sessionId: String(sessionId || 'default'), controller,
     startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: String(message || '').slice(0, 16_000),
     objective: objective == null ? null : String(objective).slice(0, 16_000),
-    progress: [], contextUsage: null, cancelled: false, reason: null, detached: true, steeringReady: false, source, a2a, a2aActivities: [],
+    progress: [], contextUsage: null, cancelled: false, reason: null, detached: true, steeringReady: false, source, a2a, completionEvent, a2aActivities: [],
   };
   const key = activeChatRunKey(record.agentId, record.runId);
   activeChatRuns.set(key, record);
