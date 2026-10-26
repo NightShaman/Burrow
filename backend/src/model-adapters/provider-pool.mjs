@@ -94,7 +94,7 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
       }
       const route = { logicalConnectionId: pool.connection.id, servingConnectionId: selection.memberId,
         ownerConnectionId: selection.ownerId, threadKey, substitute: selection.substitute, attempt: attempt + 1,
-        diagnostics: selection.diagnostics };
+        diagnostics: selection.diagnostics, rebalanceReason: selection.rebalanceReason || null };
       await args.traceLogger?.model?.({ stage: 'provider-pool-selection', ...route, model: config.model });
       let result;
       try { result = await adapter[method](callArgs); }
@@ -116,8 +116,8 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
         excluded.push(selection.memberId);
         continue;
       }
-      if (result.ok && attempt && replay && !replay.error && typeof engine.promote === 'function') {
-        const promoted = await engine.promote({ threadKey, memberId: selection.memberId, previousOwnerId: originalRoute?.ownerConnectionId });
+      if (result.ok && (selection.rebalanceReason || (attempt && replay && !replay.error)) && typeof engine.promote === 'function') {
+        const promoted = await engine.promote({ threadKey, memberId: selection.memberId, previousOwnerId: selection.rebalanceReason ? selection.ownerId : originalRoute?.ownerConnectionId });
         if (promoted) { route.ownerConnectionId = selection.memberId; route.substitute = false; }
       }
       // Request-scoped proof: normal pre-request compaction is irrelevant;

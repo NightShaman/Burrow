@@ -3,6 +3,11 @@ import { randomUUID } from 'node:crypto';
 
 export const AFFINITY_CACHE_TTL_MS = 1_800_000;
 export const USAGE_STALE_MS = 120_000;
+// Percentage-point hysteresis: normal imbalance needs 25 points; low allowance
+// needs a real 10-point improvement. Never compare raw tier-weighted capacity.
+export const STICKY_REMAINING_FLOOR = 20;
+export const STICKY_IMBALANCE_GAP = 25;
+export const STICKY_MIN_IMPROVEMENT = 10;
 const CAPACITIES = { openai: [1, 5, 10, 25], anthropic: [1, 5, 20, 1.25, 6.25] };
 const time = (value) => typeof value === 'number' ? value : Date.parse(value);
 
@@ -38,7 +43,7 @@ export function evaluatePoolUsage(result, { family, model = '', now = Date.now()
   const resets = windows.map((window) => time(window.resetAt)).filter((reset) => Number.isFinite(reset) && reset > now);
   const blockingResets = windows.filter(window => Number(window.usedPercent) >= 100 || Number(window.usedPercent) > pressureThreshold(window)).map(window => time(window.resetAt)).filter(reset => Number.isFinite(reset) && reset > now);
   return { eligible: !exhausted && !pressure, reason: exhausted ? 'quota_exhausted' : pressure ? 'quota_pressure' : null,
-    exhausted, pressure, capacity, weight: capacity * Math.max(0, 1 - used / 100), resetAt: resets.length ? Math.min(...resets) : null, blockedUntil: blockingResets.length ? Math.max(...blockingResets) : null };
+    exhausted, pressure, capacity, remainingPercent: Math.max(0, 100 - used), weight: capacity * Math.max(0, 1 - used / 100), resetAt: resets.length ? Math.min(...resets) : null, blockedUntil: blockingResets.length ? Math.max(...blockingResets) : null };
 }
 
 export class ProviderPoolEngine {
@@ -106,6 +111,7 @@ export class ProviderPoolEngine {
       const available = diagnostics.filter((candidate) => candidate.eligible);
       const eligible = (id) => available.find((candidate) => candidate.id === id);
       let selected;
+      let rebalanceReason = null;
       let owner = affinity?.owner_id;
       let substitute = null;
       let substituteUntil = null;
@@ -116,6 +122,17 @@ export class ProviderPoolEngine {
       } else if (flags.sticky !== false && owner && ids.includes(owner)) {
         if (affinity.substitute_id && time(affinity.substitute_until) > now) selected = eligible(affinity.substitute_id);
         if (!selected) selected = eligible(owner);
+      }
+      // Only unpinned requests may rebalance. Keep durable ownership until the
+      // alternate actually succeeds; the adapter promotes with compare-and-swap.
+      if (!requiredMemberId && flags.sticky !== false && selected) {
+        const best = [...available].sort((a, b) => b.remainingPercent - a.remainingPercent)[0];
+        const improvement = best.remainingPercent - selected.remainingPercent;
+        if (best.id !== selected.id && (improvement >= STICKY_IMBALANCE_GAP ||
+          selected.remainingPercent <= STICKY_REMAINING_FLOOR && improvement >= STICKY_MIN_IMPROVEMENT)) {
+          rebalanceReason = improvement >= STICKY_IMBALANCE_GAP ? 'sticky_imbalance' : 'sticky_allowance_floor';
+          selected = best;
+        }
       }
       if (!selected && available.length) {
         if (flags.preferEarlierReset === true) selected = [...available].sort((a, b) => (a.resetAt ?? Infinity) - (b.resetAt ?? Infinity))[0];
@@ -144,7 +161,7 @@ export class ProviderPoolEngine {
       for (const [key, cached] of this.affinityCache) if (cached.expiresAt <= now) this.affinityCache.delete(key);
       if (this.affinityCache.size >= 1000) this.affinityCache.delete(this.affinityCache.keys().next().value);
       this.affinityCache.set(threadKey, { ownerId: owner, expiresAt: now + AFFINITY_CACHE_TTL_MS });
-      return { memberId: selected.id, ownerId: owner, logicalConnectionId: connection.id, diagnostics, substitute: owner !== selected.id };
+      return { memberId: selected.id, ownerId: owner, logicalConnectionId: connection.id, diagnostics, substitute: owner !== selected.id, rebalanceReason };
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {});
       throw error;
