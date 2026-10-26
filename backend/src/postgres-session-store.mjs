@@ -1339,7 +1339,19 @@ export class PostgresSessionStore {
     });
   }
 
-  async reset({ agentId: rawAgentId, sessionId: rawSessionId, metadata = {}, freshExecutionSessionId = null } = {}) {
+  // The named history row is the cross-process family lock. Reservations are
+  // durable even before a continuity head exists; an unfinished exchange is not
+  // inferred closed merely because its most recent reply returned.
+  async prepareA2AHistory({ agentId, sessionId, executionSessionId, sourceAgentId, sourceSessionId, sourceRunId }) {
+    if (sessionId === 'default') throw new Error('context_boundary_named_session_required');
+    await this.updateMetadata({ agentId, sessionId: executionSessionId, update: metadata => ({
+      ...metadata, contextIsolation: { ...metadata.contextIsolation, historySessionId: sessionId },
+      a2aExchange: metadata.a2aExchange || { state: 'open', sourceAgentId, sourceSessionId, sourceRunId },
+    }) });
+    return this.reset({ agentId, sessionId, freshExecutionSessionId: executionSessionId, a2aReservation: true });
+  }
+
+  async reset({ agentId: rawAgentId, sessionId: rawSessionId, metadata = {}, freshExecutionSessionId = null, a2aReservation = false } = {}) {
     const agentId = required(rawAgentId, 'agentId'); const sid = required(rawSessionId, 'sessionId'); const now = this.clock();
     return withPostgresTransaction(this.pool, async (client) => {
       await client.query('SELECT pg_advisory_xact_lock($1::bigint)', [migrationLockKey(`burrow-session-boundary:${JSON.stringify([agentId,sid])}`)]);
@@ -1354,13 +1366,35 @@ export class PostgresSessionStore {
         // Durable per-execution receipt: retrying any older run must not erase
         // its own projected turns (or a newer run's visible history).
         if (executionMetadata.contextIsolation.historyReset) return { ok: true, replay: true };
+        if (a2aReservation) {
+          const open = await client.query(`SELECT s.session_id FROM conversation_sessions s
+            WHERE s.agent_id=$1 AND s.session_id<>$3 AND s.metadata->'contextIsolation'->>'historySessionId'=$2
+            AND s.metadata->'a2aExchange'->>'state'='open'
+            AND NOT EXISTS (SELECT 1 FROM continuity_log parent
+              WHERE parent.agent_id=s.metadata->'a2aExchange'->>'sourceAgentId'
+              AND parent.session_id=s.metadata->'a2aExchange'->>'sourceSessionId'
+              AND parent.head->>'runId'=s.metadata->'a2aExchange'->>'sourceRunId'
+              AND parent.head->>'state'='completed') LIMIT 1`, [agentId, sid, freshExecutionSessionId]);
+          await client.query(`UPDATE conversation_sessions SET metadata=metadata ||
+            jsonb_build_object('a2aExchange',metadata->'a2aExchange' || jsonb_build_object('state','open')) WHERE agent_id=$1 AND session_id=$2`, [agentId, freshExecutionSessionId]);
+          if (open.rows.length) {
+            await client.query(`UPDATE conversation_sessions SET metadata=jsonb_set(metadata,'{contextIsolation,historyReset}','true'::jsonb)
+              WHERE agent_id=$1 AND session_id=$2`, [agentId, freshExecutionSessionId]);
+            return { ok: true, deferred: true };
+          }
+        }
         const busy = await client.query(`SELECT s.session_id FROM conversation_sessions s
           LEFT JOIN continuity_state c USING(agent_id,session_id)
           WHERE s.agent_id=$1 AND (s.session_id=$2 OR s.metadata->'contextIsolation'->>'historySessionId'=$2)
           AND (c.head_state IN ('running','finalizing','interrupted') OR c.queue_status IN ('pending','running')
             OR c.manifest->>'status'='interrupted'
             OR (s.metadata->'contextIsolation'->>'historyReset'='true' AND c.head_state IS NULL)) LIMIT 1`, [agentId, sid]);
-        if (busy.rows.length) throw new Error('context_history_reset_busy');
+        if (busy.rows.length) {
+          if (!a2aReservation) throw new Error('context_history_reset_busy');
+          await client.query(`UPDATE conversation_sessions SET metadata=jsonb_set(metadata,'{contextIsolation,historyReset}','true'::jsonb)
+            WHERE agent_id=$1 AND session_id=$2`, [agentId, freshExecutionSessionId]);
+          return { ok: true, deferred: true };
+        }
         await client.query(`UPDATE conversation_sessions SET metadata=jsonb_set(metadata,'{contextIsolation,historyReset}','true'::jsonb),updated_at=$3
           WHERE agent_id=$1 AND session_id=$2`, [agentId, freshExecutionSessionId, now]);
       }

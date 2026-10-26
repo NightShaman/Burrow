@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { contextSessionId } from './model-context-boundary.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 
 const ID = /^[a-zA-Z0-9._-]{1,96}$/;
@@ -111,6 +112,7 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
   // new independent A2A ingress (even when that agent has a dedicated inbox).
   const contextBoundary = session !== implicitReplySession && session !== 'default' && recipientRuntime.agent?.contextConfig?.a2aInDefault === false
     ? { key: `a2a:${sender}:${source}:${runId || deliveryId}` } : null;
+  const executionSession = contextBoundary ? contextSessionId({ agentId: recipient, historySessionId: session, key: contextBoundary.key }) : null;
   const deliveryRequest = { sender, recipient, sourceSessionId: source, targetSessionId: session, runId: runId || null, messageMode: resolvedMode, content: body };
 
   const deliver = async () => {
@@ -177,6 +179,10 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
         operation: async () => {
           abortSignal?.throwIfAborted();
           await assertOwner();
+          // Reserve/rotate before ingress, never after the new inbound exists.
+          if (executionSession && typeof conversationStore.prepareA2AHistory === 'function') {
+            await conversationStore.prepareA2AHistory({ agentId: recipient, sessionId: session, executionSessionId: executionSession, sourceAgentId: sender, sourceSessionId: sourceSessionId || 'default', sourceRunId: runId });
+          }
           const delivery = await deliver();
           abortSignal?.throwIfAborted();
           await assertOwner();
@@ -212,7 +218,12 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
           content: replyText,
         },
       };
-      return await complete(result);
+      const completed = await complete(result);
+      if (executionSession && resolvedMode === 'request_reply_complete' && completed.ok && completed.reply?.ok) {
+        await conversationStore.updateMetadata({ agentId: recipient, sessionId: executionSession,
+          update: metadata => ({ ...metadata, a2aExchange: { ...metadata.a2aExchange, state: 'closed' } }) });
+      }
+      return completed;
     } catch (error) {
       const reply = exchange?.reply;
       const failed = {
