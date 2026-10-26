@@ -21,6 +21,12 @@ describe('ProviderPoolMetrics', () => {
     expect(screen.getByText('0%')).toBeTruthy();
     expect(api).toHaveBeenCalledTimes(1);
   });
+  it('identifies partial token totals without inventing missing usage', async () => {
+    vi.mocked(api).mockResolvedValue({ ...response, windows: { ...response.windows, '24h': { ...day, coverage: { ...day.coverage, inputAttempts: 80, outputAttempts: 70 } } } });
+    render(<ProviderPoolMetrics />); await flush();
+    expect(screen.getByText('1.2K')).toBeTruthy();
+    expect(screen.getByTitle(/Partial token coverage: totals include reported usage only/)).toBeTruthy();
+  });
   it('shows unknown while loading and on failures, then recovers on the next poll', async () => {
     vi.useFakeTimers(); vi.mocked(api).mockRejectedValueOnce(new Error('offline')).mockResolvedValue(response);
     render(<ProviderPoolMetrics />);
