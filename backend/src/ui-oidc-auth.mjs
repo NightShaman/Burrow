@@ -71,7 +71,7 @@ export function oidcAuthorizationRevision(runtime) {
   const oidc = runtime?.ui?.oidc || {};
   return createHash('sha256').update(JSON.stringify({
     mode: runtime?.ui?.authMode || 'oidc',
-    issuer: text(oidc.issuer).replace(/\/+$/, ''), clientId: text(oidc.clientId),
+    issuer: text(oidc.issuer), clientId: text(oidc.clientId),
     redirectUri: text(oidc.redirectUri),
     allowedEmails: (oidc.allowedEmails || []).map(value => text(value).toLowerCase()).sort(),
     allowedDomains: (oidc.allowedDomains || []).map(value => text(value).toLowerCase()).sort(),
@@ -103,22 +103,24 @@ export function sendOidcSessionCookie(res, session, runtime) {
 }
 
 export async function oidcDiscovery(issuer) {
-  const normalized = text(issuer).replace(/\/+$/, '');
-  if (!normalized) throw new Error('oidc_issuer_required');
-  const cached = discoveryCache.get(normalized);
+  const expectedIssuer = text(issuer);
+  if (!expectedIssuer) throw new Error('oidc_issuer_required');
+  const cached = discoveryCache.get(expectedIssuer);
   if (cached && cached.expiresAt > Date.now()) {
     if (cached.error) throw new Error(cached.error);
     return cached.value;
   }
   try {
-    const response = await fetch(`${normalized}/.well-known/openid-configuration`);
+    // Only the discovery URL strips trailing slashes; issuer identity is exact.
+    const response = await fetch(`${expectedIssuer.replace(/\/+$/, '')}/.well-known/openid-configuration`);
     if (!response.ok) throw new Error(`oidc_discovery_failed:${response.status}`);
     const value = await response.json();
-    discoveryCache.set(normalized, { value, expiresAt: Date.now() + DISCOVERY_SUCCESS_CACHE_MS });
+    if (value.issuer !== expectedIssuer) throw new Error('oidc_discovery_issuer_mismatch');
+    discoveryCache.set(expectedIssuer, { value, expiresAt: Date.now() + DISCOVERY_SUCCESS_CACHE_MS });
     return value;
   } catch (error) {
     const message = String(error?.message || error);
-    discoveryCache.set(normalized, { error: message, expiresAt: Date.now() + DISCOVERY_FAILURE_CACHE_MS });
+    discoveryCache.set(expectedIssuer, { error: message, expiresAt: Date.now() + DISCOVERY_FAILURE_CACHE_MS });
     throw new Error(message);
   }
 }
@@ -170,7 +172,7 @@ export async function completeOidcCallback(req, url, runtime, origin) {
   const tokens = await tokenResponse.json();
   if (!tokens.id_token) throw new Error('oidc_id_token_missing');
   const jwks = createRemoteJWKSet(new URL(discovery.jwks_uri));
-  const verified = await jwtVerify(tokens.id_token, jwks, { issuer: text(oidc.issuer).replace(/\/+$/, ''), audience: oidc.clientId });
+  const verified = await jwtVerify(tokens.id_token, jwks, { issuer: text(oidc.issuer), audience: oidc.clientId });
   if (verified.payload.nonce !== saved.nonce) throw new Error('oidc_nonce_invalid');
   const email = text(verified.payload.email).toLowerCase();
   assertOidcEmailAuthorization(verified.payload, oidc);
@@ -179,3 +181,4 @@ export async function completeOidcCallback(req, url, runtime, origin) {
 }
 
 export const OIDC_COOKIE_NAME = COOKIE_NAME;
+
