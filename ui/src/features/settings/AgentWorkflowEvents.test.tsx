@@ -9,6 +9,7 @@ const watch: WorkflowWatch = { id: 'watch-1', repository: 'kingdom/burrow', work
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 beforeEach(() => {
   mock.mockImplementation(async (path, init) => {
+    if (path === '/api/events/settings') return { ok: true, settings: { deliveryUrl: '', webhookPath: '/api/events/github', secretConfigured: false, storedSecretConfigured: false, secretSource: 'none', environmentOverride: false, ready: false, readiness: 'secret_missing' } } as never;
     if (init?.method === 'DELETE') return { ok: true } as never;
     if (init?.method === 'POST') return { ok: true, watch: { ...JSON.parse(String(init.body)), id: 'watch-1' } } as never;
     if (path === '/api/events/watches') return { ok: true, watches: [watch, { ...watch, id: 'other', agentId: 'smatchet', workflow: 'Other agent watch' }] } as never;

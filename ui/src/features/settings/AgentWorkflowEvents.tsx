@@ -4,6 +4,7 @@ import { api, jsonMutation } from '../../app/api';
 import { useConfirm } from '../../app/ConfirmDialog';
 import { useUnsavedChanges, useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { Field, SettingSection } from './SettingsPrimitives';
+import { WorkflowReceiverSettings } from './WorkflowReceiverSettings';
 import './workflowEvents.css';
 
 export type WorkflowWatch = { id: string; repository: string; workflow: string; agentId: string; sessionId: string; instruction: string; enabled: boolean; createdAt?: string; updatedAt?: string };
@@ -128,11 +129,11 @@ function WorkflowEditor({ agentId, overflowTarget }: { agentId: string; overflow
       </article>)}</div>}
     </SettingSection>
   </>;
-  return <><SettingSection title="Workflow events">
+  return <><WorkflowReceiverSettings /><SettingSection title="Workflow events">
     <p className="settings-description">Run an instruction when a GitHub workflow completes. Watches belong to this agent and use its chat model.</p>
     <div className="schedule-form"><Field label="Repository"><input ref={firstInput} value={draft.repository} onChange={event => update('repository', event.target.value)} placeholder="owner/repo" disabled={busy} /></Field><Field label="Workflow name"><input value={draft.workflow} onChange={event => update('workflow', event.target.value)} placeholder="CI" disabled={busy} /><small className="field-hint">Exact workflow name from GitHub, not the YAML filename.</small></Field><Field label="Destination session"><input value={draft.sessionId} onChange={event => update('sessionId', event.target.value)} disabled={busy} /></Field><Field label="Instruction"><textarea rows={4} value={draft.instruction} onChange={event => update('instruction', event.target.value)} placeholder="Inspect the completed run and report the result…" disabled={busy} /></Field>
     <div className="schedule-footer"><label className="schedule-enabled"><input type="checkbox" checked={draft.enabled} onChange={event => update('enabled', event.target.checked)} disabled={busy} /><span>Enabled</span></label><div className="setting-actions"><button type="button" className="secondary" onClick={() => navigate(() => choose())} disabled={busy}>{editingId ? 'New watch' : 'Clear'}</button><button type="button" className="primary" onClick={() => void save()} disabled={busy || loading || Boolean(watchError)}>{busy ? 'Saving…' : editingId ? 'Save watch' : 'Add watch'}</button></div></div></div>
     {error && <p className="settings-request-error" role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    <details className="workflow-setup"><summary>GitHub webhook setup</summary><p>Point a GitHub repository webhook at <code>/api/events/github</code>, select <code>workflow_run</code> events, and use JSON payloads. Set the same secret in GitHub and the server environment <code>BURROW_GITHUB_WEBHOOK_SECRET</code>. Burrow verifies the signature; no secret is stored in this form.</p><p>GitHub conclusion describes the workflow. Burrow handling describes the agent work it triggered. Open the destination session for existing live activity and conversation history.</p></details>
+    <details className="workflow-setup"><summary>GitHub webhook setup</summary><p>Point a GitHub repository webhook at <code>/api/events/github</code>, select <code>workflow_run</code> events, and use JSON payloads. Use the same secret configured in the global receiver above. Burrow verifies each delivery signature; the secret is never returned to this form.</p><p>GitHub conclusion describes the workflow. Burrow handling describes the agent work it triggered. Open the destination session for existing live activity and conversation history.</p></details>
     </SettingSection>{overflowTarget ? createPortal(<div className="settings-overflow-content">{inventory}</div>, overflowTarget) : inventory}</>;
 }
