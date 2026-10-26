@@ -96,3 +96,105 @@ it('keeps promotion settings owned by the selected agent across delayed saves an
   await waitFor(() => expect((screen.getByRole('checkbox', { name: 'Promote Dreams to memory' }) as HTMLInputElement).disabled).toBe(false));
   expect((screen.getByRole('checkbox', { name: 'Promote Dreams to memory' }) as HTMLInputElement).checked).toBe(false);
 });
+
+it('defaults memory emphasis to Balanced and saves overrides without changing the diary prompt', async () => {
+  const settings = { enabled: true, cron: '0 4 * * *', timezone: null, prompt: 'Diary stays unchanged', defaultMemoryPrompt: 'Balanced memory instructions' };
+  vi.mocked(api).mockImplementation(async (path, init) => path.includes('dream-settings') ? { settings: { ...settings, ...(init?.body ? JSON.parse(init.body as string) : {}) } } : { receipts: [] });
+  render(<AgentDreams agentId="nigel" savedProviders={[]} />);
+  const slider = screen.getByRole('slider', { name: 'Memory emphasis' }) as HTMLInputElement;
+  await waitFor(() => expect(slider.disabled).toBe(false));
+  expect(slider.value).toBe('50');
+  const prompt = screen.getByRole('textbox', { name: 'Memory prompt override' }) as HTMLTextAreaElement;
+  expect(prompt.value).toBe('Balanced memory instructions');
+  fireEvent.change(slider, { target: { value: '100' } });
+  fireEvent.change(prompt, { target: { value: 'Custom grounded expression' } });
+  expect(screen.getByText('Custom override active')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Save dream settings' }));
+  await waitFor(() => expect(slider.disabled).toBe(false));
+  const save = vi.mocked(api).mock.calls.find(([, init]) => init?.method === 'PUT')!;
+  expect(JSON.parse(save[1]!.body as string)).toMatchObject({ memoryEmphasis: 100, memoryPromptOverride: 'Custom grounded expression', prompt: 'Diary stays unchanged' });
+  fireEvent.click(screen.getByRole('button', { name: 'Revert to default' }));
+  expect(prompt.value).toBe('Balanced memory instructions');
+  expect(screen.getByText('Default prompt')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Save dream settings' }));
+  await waitFor(() => expect(slider.disabled).toBe(false));
+  expect(JSON.parse(vi.mocked(api).mock.calls.filter(([, init]) => init?.method === 'PUT').at(-1)![1]!.body as string).memoryPromptOverride).toBeNull();
+});
+
+const memorySettings = { enabled: true, cron: '0 4 * * *', timezone: null, prompt: 'Unchanged diary', memoryEmphasis: 50, memoryPromptOverride: null, defaultMemoryPrompt: 'Balanced memory instructions' };
+const sample = { ok: true, memories: [{ title: 'Grounded memory', content: '<script>Not HTML</script>\nSecond line', sourceRefs: ['session:real-source:1'] }], sourceToken: 'same-sample', sourceCount: 2, generatedAt: '2026-10-26T13:00:00Z', evidenceScope: 'Recent validated extraction checkpoints', persisted: false };
+function memoryApi(preview: (init?: RequestInit) => unknown = () => sample) {
+  vi.mocked(api).mockImplementation(async (path, init) => {
+    if (path.includes('/dream-memory/preview')) return preview(init);
+    return path.includes('dream-settings') ? { settings: { ...memorySettings, ...(init?.method === 'PUT' ? JSON.parse(init.body as string) : {}) } } : { receipts: [] };
+  });
+}
+const previewCalls = () => vi.mocked(api).mock.calls.filter(([path]) => path.includes('/dream-memory/preview'));
+async function readyMemory() {
+  const slider = screen.getByRole('slider', { name: 'Memory emphasis' }) as HTMLInputElement;
+  await waitFor(() => expect(slider.disabled).toBe(false));
+  return slider;
+}
+it('previews only explicitly, never saves, reuses sources across edits, and clears stale results', async () => {
+  memoryApi();
+  render(<AgentDreams agentId="nigel" savedProviders={[]} />);
+  const slider = await readyMemory();
+  fireEvent.change(slider, { target: { value: '75' } });
+  expect(previewCalls()).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: 'Preview memories' }));
+  expect(await screen.findByText('Grounded memory')).toBeTruthy();
+  expect(document.querySelector('script')).toBeNull();
+  expect(JSON.parse(previewCalls()[0][1]!.body as string)).toEqual({ memoryEmphasis: 75, memoryPromptOverride: null });
+  fireEvent.change(screen.getByRole('textbox', { name: 'Memory prompt override' }), { target: { value: '' } });
+  expect(screen.queryByText('Grounded memory')).toBeNull();
+  expect(screen.getByText('Custom override active')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Preview memories' }));
+  await screen.findByText('Grounded memory');
+  expect(JSON.parse(previewCalls()[1][1]!.body as string)).toEqual({ memoryEmphasis: 75, memoryPromptOverride: '', sourceToken: 'same-sample' });
+  expect(vi.mocked(api).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
+});
+it('requires explicit new sample after token expiry, and keeps Save independent', async () => {
+  let count = 0;
+  memoryApi(() => { if (++count === 2) throw new Error('dream_memory_preview_source_token_invalid'); return sample; });
+  render(<AgentDreams agentId="nigel" savedProviders={[]} />);
+  await readyMemory();
+  fireEvent.click(screen.getByRole('button', { name: 'Preview memories' }));
+  await screen.findByText('Grounded memory');
+  fireEvent.click(screen.getByRole('button', { name: 'Preview memories' }));
+  await screen.findByRole('alert');
+  expect((screen.getByRole('button', { name: 'Preview memories' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(previewCalls()).toHaveLength(2);
+  fireEvent.click(screen.getByRole('button', { name: 'Save dream settings' }));
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Save dream settings' }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: 'Preview new sample' }));
+  await screen.findByText('Grounded memory');
+  expect(JSON.parse(previewCalls()[2][1]!.body as string).sourceToken).toBeUndefined();
+});
+it('ignores delayed previews after an edit or agent switch and resets source identity', async () => {
+  let resolve!: (value: unknown) => void;
+  memoryApi(() => new Promise(r => { resolve = r; }));
+  const view = render(<AgentDreams agentId="a" savedProviders={[]} />);
+  const slider = await readyMemory();
+  fireEvent.click(screen.getByRole('button', { name: 'Preview memories' }));
+  fireEvent.change(slider, { target: { value: '0' } });
+  await act(async () => resolve(sample));
+  expect(screen.queryByText('Grounded memory')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Preview memories' }));
+  view.rerender(<AgentDreams agentId="b" savedProviders={[]} />);
+  await readyMemory();
+  await act(async () => resolve(sample));
+  expect(screen.queryByText('Grounded memory')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Preview new sample' })).toBeNull();
+});
+it('shows empty sources and model errors without regenerating', async () => {
+  let fail = false;
+  memoryApi(() => { if (fail) throw new Error('dream_model_not_configured'); return { ...sample, sourceCount: 0, memories: [] }; });
+  render(<AgentDreams agentId="a" savedProviders={[]} />);
+  await readyMemory();
+  fireEvent.click(screen.getByRole('button', { name: 'Preview memories' }));
+  await screen.findByText('No eligible extracted source material is available. No model request was made.');
+  fail = true;
+  fireEvent.click(screen.getByRole('button', { name: 'Preview memories' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('dream_model_not_configured');
+  expect(previewCalls()).toHaveLength(2);
+});
