@@ -1,3 +1,4 @@
+import { PostgresProviderPoolMetrics } from './postgres-provider-pool-metrics.mjs';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { randomUUID } from 'node:crypto';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
@@ -73,6 +74,7 @@ export class PostgresModelSettingsStore {
     if (!pool?.query || !pool?.connect) throw new Error('model_settings_postgres_pool_required');
     if (!Buffer.isBuffer(key) || key.length !== 32) throw new Error('settings_encryption_key_invalid');
     this.pool = normalizePostgresPool(pool); this.key = key; this.ownsPool = ownsPool; this.clock = clock;
+    this.providerPoolMetrics = new PostgresProviderPoolMetrics(this.pool);
     this.bootstrapSampleIdentities = ["1", "true", "yes", "on"].includes(String(bootstrapSampleIdentities ?? "0").trim().toLowerCase());
   }
   async close() { if (this.ownsPool) await closePostgresPool(this.pool); }

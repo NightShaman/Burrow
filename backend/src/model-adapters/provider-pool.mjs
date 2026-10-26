@@ -1,3 +1,4 @@
+import { poolAttemptUsage } from '../postgres-provider-pool-metrics.mjs';
 import { portablePoolReplay } from './pool-replay.mjs';
 import { ProviderPoolEngine, poolThreadKey, AFFINITY_CACHE_TTL_MS } from '../provider-pool-engine.mjs';
 
@@ -27,7 +28,8 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
     adapters.set(key, { adapter, authToken: memberConfig.apiKey, usedAt: now() });
     return adapter;
   };
-  const invoke = async (method, args = {}) => {
+  const metrics = family === 'openai' ? pool.store?.providerPoolMetrics : null;
+  const invokeInner = async (method, args = {}) => {
     const previousRoute = args.previousModel?.providerPool;
     let continuation = method !== 'complete' || Boolean(args.toolContinuation);
     // Complete() can also be given opaque signed Anthropic history. Without
@@ -97,8 +99,21 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
         diagnostics: selection.diagnostics, rebalanceReason: selection.rebalanceReason || null };
       await args.traceLogger?.model?.({ stage: 'provider-pool-selection', ...route, model: config.model });
       let result;
+      const attemptStarted = now();
+      const capture = async (result, error = null) => {
+        if (!args.poolMetricId) return;
+        const measurement = { attempt: attempt + 1, memberId: selection.memberId,
+          providerRequestId: result?.requestId, durationMs: Math.max(0, now()-attemptStarted),
+          outcome: args.signal?.aborted || error?.name === 'AbortError' ? 'cancelled' : result?.ok ? 'success' : 'failed',
+          status: result?.status, errorKind: error ? (args.signal?.aborted ? 'cancelled' : 'exception') : result?.ok ? null : 'provider_failure',
+          ...poolAttemptUsage(result?.usage) };
+        await metrics.attempt(args.poolMetricId, measurement);
+        await args.traceLogger?.model?.({stage:'provider-pool-attempt',requestId:args.poolMetricId,
+          poolId:pool.connection.id,model:config.model,...measurement});
+      };
       try { result = await adapter[method](callArgs); }
       catch (error) {
+        await capture(null, error);
         // Unknown exceptions can represent callback, serialization or policy
         // failures. Only transport TypeErrors are retryable, never cancellation.
         if (callbackFailed || callbackInvoked || visible || (continuation && (!replay || replay.error)) || args.signal?.aborted || error?.name !== 'TypeError' || attempt > 0) throw error;
@@ -107,6 +122,7 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
         excluded.push(selection.memberId);
         continue;
       }
+      await capture(result);
       const retryable = !result.ok && ([401, 403, 429].includes(Number(result.status)) || (Number(result.status) >= 500 && Number(result.status) <= 599));
       if (retryable) await engine.cooldown(selection.memberId, `http_${result.status}`);
       if (retryable && continuation && replay?.error && !callbackInvoked && !visible && !args.signal?.aborted && attempt === 0 && !result.choice?.text && !result.choice?.toolCalls?.length) throw replay.error;
@@ -126,6 +142,28 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
         (continuation ? Boolean(replay && !replay.error) : freshRequest) };
     }
     throw new Error('provider_pool_retry_exhausted');
+  };
+  // One measurement per public pool invocation, never on member/wrapper calls.
+  const invoke = async (method, args = {}) => {
+    if (!metrics) return invokeInner(method, args);
+    const started = now();
+    const id = await metrics.start({poolId:pool.connection.id,model:config.model,runId:args.runId || args.traceLogger?.runId});
+    let outcome = 'failed';
+    let errorKind = null;
+    try {
+      const result = await invokeInner(method, {...args,poolMetricId:id});
+      outcome = result.ok ? 'success' : args.signal?.aborted ? 'cancelled' : 'failed';
+      errorKind = result.ok ? null : 'provider_failure';
+      return result;
+    } catch (error) {
+      outcome = args.signal?.aborted || error?.name === 'AbortError' ? 'cancelled' : 'failed';
+      errorKind = outcome === 'cancelled' ? 'cancelled' : 'exception';
+      throw error;
+    } finally {
+      const durationMs = Math.max(0,now()-started);
+      await metrics.finish(id,{outcome,durationMs,errorKind});
+      await args.traceLogger?.model?.({stage:'provider-pool-outcome',requestId:id,poolId:pool.connection.id,model:config.model,outcome,durationMs});
+    }
   };
   return { ...logical, provider: family, api: pool.connection.apiType, logicalConnectionId: pool.connection.id,
     complete: (args) => invoke('complete', args),

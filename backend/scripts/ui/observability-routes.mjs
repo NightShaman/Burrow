@@ -1,6 +1,6 @@
 import { validTraceRunId } from '../../src/trace-summary.mjs';
 
-export function createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, anthropicOauthUsage, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot } = {}) {
+export function createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, providerPoolMetrics, anthropicOauthUsage, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot } = {}) {
   return async function handleObservabilityRoute({ req, res, url } = {}) {
     if (req.method === 'GET' && url.pathname === '/api/anthropic/oauth/usage') { const result = await anthropicOauthUsage({ connectionId: url.searchParams.get('connectionId') || '', force: url.searchParams.get('force') === 'true' }); sendJson(res, result.ok ? 200 : (result.status || 500), result); return true; }
     if (req.method === 'GET' && url.pathname === '/api/openai/oauth/usage') { const result = await openaiOauthUsage({ connectionId: url.searchParams.get('connectionId') || '', force: url.searchParams.get('force') === 'true' }); sendJson(res, result.ok ? 200 : (result.status || 500), result); return true; }
@@ -14,6 +14,7 @@ export function createObservabilityRoutes({ readJsonBody, sendJson, validateBoun
       sendJson(res, result.ok ? 200 : (result.status || 500), result); return true;
     }
     if (req.method === 'GET' && (url.pathname === '/api/health' || url.pathname === '/api/status')) { sendJson(res, 200, await runtimeStatus(url.searchParams.get('agentId'))); return true; }
+    if (req.method === 'GET' && url.pathname === '/api/metrics/provider-pools') { sendJson(res, 200, await providerPoolMetrics()); return true; }
     if (req.method === 'GET' && url.pathname === '/api/metrics') { sendJson(res, 200, await runtimeMetrics()); return true; }
     if (req.method === 'GET' && url.pathname === '/api/chat/runs/active') { sendJson(res, 200, { ok: true, ...(await currentActiveChatRunSummaries({ agentId: url.searchParams.get('agentId'), sessionId: url.searchParams.get('sessionId') })) }); return true; }
     if (req.method === 'GET' && url.pathname === '/api/workspace/files') { const agentRuntime = await selectedAgentRuntime(url.searchParams.get('agentId')); sendJson(res, 200, await listWorkspaceFiles({ scope: url.searchParams.get('scope') || 'workspaces', agentRuntime })); return true; }

@@ -59,6 +59,7 @@ const collection = {
       req('Health alias', 'GET', '/health'),
       req('Status', 'GET', '/api/status', { query: [['agentId', '{{agentId}}']] }),
       req('Metrics', 'GET', '/api/metrics'),
+      req('Provider pool metrics', 'GET', '/api/metrics/provider-pools'),
       req('PostgreSQL diagnostics', 'GET', '/api/diagnostics/postgres'),
       req('Forge diagnostic jobs', 'GET', '/api/diagnostics/forge/jobs'),
       req('Forge diagnostic job', 'GET', '/api/diagnostics/forge/jobs/{{forgeJobId}}'),

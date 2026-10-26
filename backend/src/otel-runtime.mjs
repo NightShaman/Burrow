@@ -161,6 +161,9 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
       instruments = {
         runs: meter.createCounter('burrow.runs'),
         runDuration: meter.createHistogram('burrow.run.duration', { unit: 'ms' }),
+        poolRequests: meter.createCounter('burrow.provider_pool.requests'),
+        poolTokens: meter.createCounter('burrow.provider_pool.tokens'),
+        poolDuration: meter.createHistogram('burrow.provider_pool.duration', { unit: 'ms' }),
         models: meter.createCounter('burrow.model.requests'),
         modelDuration: meter.createHistogram('burrow.model.duration', { unit: 'ms' }),
         tokens: meter.createCounter('burrow.model.tokens'),
@@ -233,6 +236,24 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
       const state = activeRuns.get(String(record.runId || ''));
       if (!state) return;
       const payload = record.payload || {};
+      if (record.type === 'model' && payload.stage === 'provider-pool-attempt') {
+        const attributes = {'burrow.pool.id':bounded(payload.poolId,160), 'burrow.account.id':bounded(payload.memberId,160),
+          'gen_ai.request.model':bounded(payload.model,160), 'burrow.outcome':payload.outcome};
+        // Dedicated LB series, not a second emission into the generic transport counter.
+        // IDs for individual requests remain in trace records, never metric labels.
+        for (const [kind,key] of [['input','inputTokens'],['output','outputTokens'],['cached','cachedTokens']]) {
+          const value = payload[key];
+          if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
+            instruments.poolTokens.add(value,{...attributes,'burrow.token.kind':kind});
+        }
+        return;
+      }
+      if (record.type === 'model' && payload.stage === 'provider-pool-outcome') {
+        const attributes = {'burrow.pool.id':bounded(payload.poolId,160), 'gen_ai.request.model':bounded(payload.model,160), 'burrow.outcome':payload.outcome};
+        instruments.poolRequests.add(1,attributes);
+        instruments.poolDuration.record(Math.max(0,Number(payload.durationMs)||0),attributes);
+        return;
+      }
       if (record.type === 'model' && payload.stage === 'model-request' && payload.requestId) {
         const attributes = {
           ...(bounded(payload.provider, 80) ? { 'gen_ai.provider.name': bounded(payload.provider, 80) } : {}),

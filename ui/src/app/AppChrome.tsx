@@ -1,3 +1,4 @@
+import { ProviderPoolMetrics } from './ProviderPoolMetrics';
 import { rovingKeys } from './keyboardWidgets';
 import type { AnthropicUsage, OpenAiUsage } from './api';
 import type { Tab } from './types';
@@ -49,6 +50,7 @@ export function AppStatusBar({ anthropicUsage, openAiUsage, runtimeVersion, regi
     {openAiUsage?.windows
       .filter((window) => window.usedPercent != null)
       .map((window) => <UsageMeter key={`openai-${window.key}`} label={window.label} usedPercent={window.usedPercent!} resetAt={window.resetAt} />)}
+    <ProviderPoolMetrics />
     <span className="status-version">v. {runtimeVersion ?? '—'}</span>
   </footer>;
 }

@@ -13,3 +13,4 @@
 @import './features/workspace/workspace-rail.css';
 @import './features/settings/settings.css';
 @import './features/groups/group-channels.css';
+@import './app/provider-pool-metrics.css';

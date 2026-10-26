@@ -7567,6 +7567,60 @@
         },
         "description": "Refreshes native credits, validates the selected credit, then sends exactly one redemption POST. Reuse requestId when reconciling an uncertain result; do not blindly retry using a new ID. Process-local account guard and request ledger prevent concurrent/replayed redemption. Success includes usageRefresh and creditsRefresh; their failures do not mean redemption failed. Ambiguous failures return ambiguous:true and require refresh/reconciliation."
       }
+    },
+    "/api/metrics/provider-pools": {
+      "get": {
+        "tags": [
+          "Status"
+        ],
+        "operationId": "getProviderPoolMetrics",
+        "summary": "Rolling native OpenAI LB request and attempt metrics",
+        "description": "Completed logical native openai-lb requests over rolling 24h and 7d windows. Failover success is one success. Cancellations count in requests but not failures. errorPercent = 100 * failures / requests (null when empty). Token sums include all attempts with reported usage; unknown totals are null, not zero. cachePercent = 100 * sum(cached) / sum(input) only on attempts where both are known; null for no positive known denominator. coverage reports known attempt counts and that denominator. Unfinished/interrupted requests are excluded. No provider payloads or credentials. Requires diagnostics:read for API tokens.",
+        "responses": {
+          "200": {
+            "description": "Rolling durable PostgreSQL summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ok",
+                    "windows"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "const": true
+                    },
+                    "windows": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "24h",
+                        "7d"
+                      ],
+                      "properties": {
+                        "24h": {
+                          "$ref": "#/components/schemas/ProviderPoolMetricsWindow"
+                        },
+                        "7d": {
+                          "$ref": "#/components/schemas/ProviderPoolMetricsWindow"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -13318,6 +13372,126 @@
           }
         },
         "additionalProperties": false
+      },
+      "ProviderPoolMetricsWindow": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requests",
+          "successes",
+          "failures",
+          "cancellations",
+          "attempts",
+          "retries",
+          "inputTokens",
+          "outputTokens",
+          "cachedTokens",
+          "cachePercent",
+          "errorPercent",
+          "durationMs",
+          "coverage"
+        ],
+        "properties": {
+          "requests": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "successes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failures": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cancellations": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "retries": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "inputTokens": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "outputTokens": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "cachedTokens": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "cachePercent": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "errorPercent": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "durationMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "coverage": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "inputAttempts",
+              "outputAttempts",
+              "cachedAttempts",
+              "cacheAttempts",
+              "cacheInputTokens"
+            ],
+            "properties": {
+              "inputAttempts": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "outputAttempts": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cachedAttempts": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cacheAttempts": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cacheInputTokens": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0
+              }
+            }
+          }
+        }
       }
     }
   },
