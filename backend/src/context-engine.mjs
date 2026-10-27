@@ -130,6 +130,35 @@ function activeTranscriptAfterReset(transcript = [], resetAt = null) {
   });
 }
 
+// Rotation prepends the summary *before* retained tail/telemetry and assigns
+// fresh storage cursors. Neither summary position nor sequence is a freshness
+// boundary. Use the planner's last retained chat identity first; clocks are only
+// a fallback for telemetry emitted later in that same run (or legacy summaries).
+function currentContextMeasurements(transcript = []) {
+  const entries = Array.isArray(transcript) ? transcript : [];
+  const summary = compressionSummariesFromTranscript(entries).at(-1);
+  if (!summary) return { entries, acceptsLive: () => true, compacted: false };
+  const boundary = summary.latestEntryId
+    ? entries.findIndex(entry => entry?.id === summary.latestEntryId) : -1;
+  const successorRuns = new Set(entries.slice(boundary + 1)
+    .filter(entry => entry?.type === 'message' && ['user', 'agent'].includes(entry.role) && entry.runId)
+    .map(entry => entry.runId));
+  const compactedAt = entryInstant({ ts: summary.createdAt });
+  const fresh = (entry, index = null) => {
+    if (boundary >= 0 && index !== null && index <= boundary) return false;
+    if (boundary >= 0 && entry?.runId && successorRuns.has(entry.runId)) return true;
+    const instant = entryInstant(entry);
+    // Ambiguous/missing clocks cannot prove a successor measurement. In
+    // particular, a retained old live high-water must not resurrect the meter.
+    return instant !== null && compactedAt !== null && instant > compactedAt;
+  };
+  return {
+    entries: entries.filter((entry, index) => fresh(entry, index)),
+    acceptsLive: live => fresh({ runId: live?.runId, ts: live?.updatedAt }),
+    compacted: true,
+  };
+}
+
 function latestRuntimeReceiptFromTranscript(transcript = []) {
   const entries = Array.isArray(transcript) ? transcript : [];
   for (let index = entries.length - 1; index >= 0; index -= 1) {
@@ -257,7 +286,8 @@ export function inspectContextEngineResult({ sessionId = 'default', context, tra
   // A fresh turn records the exact assembled-prompt budget. Prefer it over
   // reconstructed dialogue-only inspection so the UI meter reflects what the
   // model actually received: profile files, skills, memory, and support packs.
-  const latestReceipt = latestContextBuildReceiptFromTranscript(transcript);
+  const measurements = currentContextMeasurements(transcript);
+  const latestReceipt = latestContextBuildReceiptFromTranscript(measurements.entries);
   const receiptBudget = latestReceipt?.budget;
   const receiptEstimatedTokens = Number(receiptBudget?.estimatedTokens);
   const receiptUsageRatio = Number(receiptBudget?.usageRatio);
@@ -281,7 +311,7 @@ export function inspectContextEngineResult({ sessionId = 'default', context, tra
         source: 'latest-runtime-receipt',
       };
     })()
-    : reconstructedBudget;
+    : { ...reconstructedBudget, ...(measurements.compacted ? { source: 'reconstructed', provenance: 'post-compaction-estimate' } : {}) };
   return {
     sessionId: String(sessionId || 'default'),
     promptSectionOrder: resolvedContext.promptSectionOrder || [],
@@ -376,8 +406,10 @@ export async function inspectSessionContextStatus({ rootDir, dataRoot = rootDir,
   // Missing provider metadata is unknown capacity, not a zero-token model.
   // Never turn that absence into a fake 100% blocked meter.
   const capacityTokens = rawCapacityTokens !== null && rawCapacityTokens > 0 ? rawCapacityTokens : null;
+  const measurements = currentContextMeasurements(transcript);
+  if (!measurements.acceptsLive(liveContext)) liveContext = null;
   const liveEstimatedTokens = finiteNumber(liveContext?.estimatedTokens);
-  const persistedMeter = latestCanonicalContextMeterFromTranscript(transcript);
+  const persistedMeter = latestCanonicalContextMeterFromTranscript(measurements.entries);
   const liveIsContinuation = liveContext?.continuation === true;
   const liveCanonicalTokens = liveEstimatedTokens;
   // The active meter is a run-scoped high-water mark. Continuation payloads
@@ -412,7 +444,7 @@ export async function inspectSessionContextStatus({ rootDir, dataRoot = rootDir,
       percent: displayedRatio === null ? null : Math.round(Math.max(0, Math.min(1, displayedRatio)) * 100),
       pressure: displayedPressure,
       source: meterKind === 'live' ? (liveContext.source || 'live-provider-request') : ((meterKind === 'persisted') ? (persistedMeter?.source || 'provider-request-estimate') : (budget.source || 'reconstructed')),
-      provenance: meterKind === 'live' ? (liveContext.provenance || (liveIsContinuation ? 'run-high-water-continuation' : 'run-high-water-initial')) : (meterKind === 'persisted' ? persistedMeter?.provenance || null : null),
+      provenance: meterKind === 'live' ? (liveContext.provenance || (liveIsContinuation ? 'run-high-water-continuation' : 'run-high-water-initial')) : (meterKind === 'persisted' ? persistedMeter?.provenance || null : budget.provenance || null),
       lastTurnAt: meterKind === 'live' ? (liveContext.updatedAt || null) : ((meterKind === 'persisted') ? persistedMeter?.updatedAt || null : (inspection.contextBuildReceipt?.entryId ? transcript.find((entry) => entry.id === inspection.contextBuildReceipt.entryId)?.ts || null : null)),
       ...(liveEstimatedTokens !== null ? { active: true, modelCall: finiteNumber(liveContext.modelCall), continuation: liveIsContinuation, providerInputTokens: finiteNumber(liveContext.providerInputTokens) } : {}),
       ...((meterKind === 'persisted' || meterKind === 'continuation-baseline') ? { modelCall: persistedMeter?.modelCall || null, continuation: meterKind === 'continuation-baseline' ? true : Boolean(persistedMeter?.continuation), providerInputTokens: persistedMeter?.providerInputTokens || null, runId: persistedMeter?.runId || null } : {}),

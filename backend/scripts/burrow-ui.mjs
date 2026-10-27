@@ -49,6 +49,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectSessionContext, inspectSessionContextStatus } from '../src/context-engine.mjs';
 import { runSessionCompression } from '../src/session-compression.mjs';
+import { conversationAuthority } from '../src/conversation-authority.mjs';
 import { createTraceLogger } from '../src/trace-logger.mjs';
 import { activeConversationLimits } from '../src/context-preparation.mjs';
 import { beginRuntimeSessionExecutionSupersession, chatTurnInputFromBody, createChatTurnRunId, finishRuntimeSessionExecutionSupersession, runChatTurnFromBody, runChatTurnFromWorkbenchContinuation, chatTurnResponse, chatTurnProgressResponse, chatTurnErrorResponse, loadRuntimeConfig } from '../src/chat-turn-controller.mjs';
@@ -2667,24 +2668,41 @@ async function handleChatCommand({ parsed, sessionId, agentRuntime, runId = null
     return { status: 200, response: chatCommandResponse({ command: 'stop', sessionId, text: `Stopped active run ${active.runId}.`, receipt: cancelled }) };
   }
   if (parsed.command === 'compact') {
+    runId ||= createChatTurnRunId({ sessionId, prefix: 'compact' });
     const lifecycle = { reason: 'manual', compressed: false };
     await onProgress?.({ type: 'context.compaction.started', data: lifecycle });
     let logger;
+    let receipt;
+    let text;
+    let ok = true;
     try {
       const runtime = await runtimeConfig(agentRuntime.agentId);
       const traceRoot = resolveRuntimeTracePath({ ...runtime.runtimeState, agentId: agentRuntime.agentId, sessionId });
-      logger = createTraceLogger({ rootDir: traceRoot, runId: runId || createChatTurnRunId({ sessionId, prefix: 'compact' }), sessionId });
+      logger = createTraceLogger({ rootDir: traceRoot, runId, sessionId });
       const result = await runSessionCompression({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId, config: runtime.contextConfig, force: true, stores: postgresApplication.stores, agentId: agentRuntime.agentId, logger });
-      const receipt = { reason: result.reason, compressed: Boolean(result.compressed) };
-      await onProgress?.({ type: 'context.compaction.completed', data: receipt });
-      return { status: 200, response: chatCommandResponse({ command: 'compact', sessionId, text: result.compressed ? 'Conversation context compacted. Original history remains archived.' : `No compaction performed: ${result.reason}.`, receipt }) };
+      receipt = { reason: result.reason, compressed: Boolean(result.compressed) };
+      text = result.compressed ? 'Conversation context compacted. Original history remains archived.' : `No compaction performed: ${result.reason}.`;
     } catch (error) {
-      const receipt = { ...lifecycle, error: error?.message || String(error) };
-      await onProgress?.({ type: 'context.compaction.failed', data: receipt });
-      return { status: 500, response: chatCommandResponse({ command: 'compact', sessionId, text: `Compaction failed: ${receipt.error}`, receipt, ok: false }) };
+      receipt = { ...lifecycle, error: error?.message || String(error) };
+      text = `Compaction failed: ${receipt.error}`;
+      ok = false;
     } finally {
       await logger?.terminal?.();
     }
+    // Append to the successor transcript after compaction, not the generation
+    // it may archive. Command feedback is visible history, never model input.
+    // Keep persistence outside the compression catch: a storage failure must
+    // not publish a terminal receipt claiming feedback was saved.
+    const authority = conversationAuthority({ store: postgresApplication.stores.conversations, agentId: agentRuntime.agentId });
+    for (const [role, content] of [['user', '/compact'], ['assistant', text]]) {
+      await authority.appendTurn({ sessionId, runId, role, content, visibility: 'chat', entersPrompt: false,
+        metadata: { command: 'compact', commandReceipt: receipt, ok } },
+      { idempotencyKey: `command:compact:${runId}:${role}` });
+    }
+    const response = chatCommandResponse({ command: 'compact', sessionId, text, receipt, ok });
+    response.result.runId = runId;
+    await onProgress?.({ type: ok ? 'context.compaction.completed' : 'context.compaction.failed', data: receipt });
+    return { status: ok ? 200 : 500, response };
   }
   const runtime = await runtimeConfig(agentRuntime.agentId);
   const limits = activeConversationLimits({ modelConfig: runtime.modelConfig, contextConfig: runtime.contextConfig });
