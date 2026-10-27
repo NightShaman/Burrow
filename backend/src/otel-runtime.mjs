@@ -33,10 +33,16 @@ function safeOutcome(result = {}) {
   return 'failure';
 }
 
+function tokenCount(value) {
+  if (value === null || value === undefined || typeof value === 'boolean' || (typeof value === 'string' && !value.trim())) return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
+}
+
 function usageValues(usage = {}) {
-  const input = finite(usage.input_tokens ?? usage.prompt_tokens ?? usage.inputTokens ?? usage.promptTokens);
-  const output = finite(usage.output_tokens ?? usage.completion_tokens ?? usage.outputTokens ?? usage.completionTokens);
-  const total = finite(usage.total_tokens ?? usage.totalTokens) ?? (input !== null && output !== null ? input + output : null);
+  const input = tokenCount(usage.input_tokens ?? usage.prompt_tokens ?? usage.inputTokens ?? usage.promptTokens);
+  const output = tokenCount(usage.output_tokens ?? usage.completion_tokens ?? usage.outputTokens ?? usage.completionTokens);
+  const total = tokenCount(usage.total_tokens ?? usage.totalTokens) ?? (input !== null && output !== null ? input + output : null);
   return { input, output, total };
 }
 
@@ -272,13 +278,17 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
         const status = finite(payload.status);
         if (status !== null) entry.span.setAttribute('http.response.status_code', status);
         entry.span.setStatus({ code: payload.ok === true ? SpanStatusCode.OK : SpanStatusCode.ERROR, ...(payload.ok === true ? {} : { message: bounded(payload.error, 160) || 'model_request_failed' }) });
+        const usage = usageValues(payload.usage || {});
+        const cached = tokenCount(payload.cachedTokens);
+        for (const [kind, value] of Object.entries(usage)) {
+          if (value !== null) entry.span.setAttribute(`gen_ai.usage.${kind}_tokens`, value);
+        }
+        if (cached !== null) entry.span.setAttribute('gen_ai.usage.cache_read.input_tokens', cached);
         entry.span.end();
         state.modelSpans.delete(String(payload.requestId));
         instruments.models.add(1, metricAttributes);
         instruments.modelDuration.record(Math.max(0, clock() - entry.startedAt), metricAttributes);
-        const usage = usageValues(payload.usage || {});
         for (const [kind, value] of Object.entries(usage)) if (value !== null) instruments.tokens.add(value, { ...metricAttributes, 'burrow.token.kind': kind });
-        const cached = finite(payload.cachedTokens);
         if (cached !== null) instruments.tokens.add(cached, { ...metricAttributes, 'burrow.token.kind': 'cached' });
         return;
       }
