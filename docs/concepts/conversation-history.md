@@ -31,7 +31,7 @@ Compaction and reset update generation counters transactionally. Fork defaults t
 
 ## Compression and prompt context
 
-Compression manages a model's working context, while archives preserve conversation history. The default trigger is 75% of known context capacity, with a preferred recent tail of 48 entries capped at 24,000 estimated tokens. Leaf and summary targets are 20,000 and 6,000 tokens, with at most four sweeps and a 120-second deadline. This module estimates tokens at four characters per token.
+Compression manages a model's working context, while archives preserve conversation history. The default trigger is 75% of known context capacity, with a preferred recent tail of 48 entries capped at 24,000 estimated tokens. Leaf and summary targets are 20,000 and 6,000 tokens. The older sweep/deadline knobs do not enable additional summarization: current Core rejects non-default unsupported overrides, as described in [configuration](../reference/configuration.md). This module estimates tokens at four characters per token.
 
 The preferred tail alone does not trigger compression when capacity is known. Under pressure the tail can shrink, but the newest entry is preserved. Deterministic summaries are explicitly lossy, non-authoritative navigation recaps. They disclose that older prose may be omitted and direct the agent to `session_search` for exact history; explicit lifecycle state is rendered separately. Canonical tool calls/results and context-state records are preserved in active material even when surrounding chat is condensed.
 
@@ -46,6 +46,16 @@ This remains a lossy navigation recap. A single item larger than the available b
 Covered IDs support rebuilding on a subsequent compression cycle when originals are available. This is not a background repair of every malformed stored summary. Missing originals cannot be reconstructed from a source ID alone. Keep archives when exact historical recovery matters.
 
 [Release status](../project/release-status.md) distinguishes this path from the public 2026.10.19 implementation.
+
+## Manual compaction and provider-heavy history
+
+Current Core adds `/compact`: it invokes the existing planner through serialized session command admission, with no main-agent model inference. It retains authoritative originals transactionally, reports no-op for empty/irreducible history, and is not `/new`. Started/completed/failed progress is retained for operator inspection; successful rotation refreshes the context meter. A completion with `compressed:false` is an honest skipped rotation, not a fabricated summary.
+
+Historical provider snapshots are budgeted by provider-visible text, support material and image-token estimates rather than encoded image/data-URI byte length. A small visible chat message can therefore still carry a large replayed request. Uncovered history displaced by preparation can trigger compaction even if an older request receipt was below threshold. The planner refreshes authority before rotation; below-window screenshots are not compacted just for large encoded bytes. Required/current material that still cannot fit fails the final assembled-request budget guard. Summaries remain lossy navigation, never original proof.
+
+## Side-question history is a separate lane
+
+A side question captures one active main run and makes an independent tool-free answer. Its visible entries and receipts are excluded from main prompt context, summaries and continuity. Only an operator's explicit edited promotion into Queue next or Steer supplies new main-lane instructions; a side answer is not fresh verification. Queue items/holds survive a browser disconnect, and reset generations fence old queued/running actions. See [explicit chat delivery](../guide/everyday-use.md#send-queue-next-steer-or-side-question).
 
 ## Search and recall
 

@@ -24,14 +24,24 @@ Authentication settings resolve as explicit runtime arguments â†’ environment â†
 | `BURROW_UI_AUTH_BASIC_PASSWORD_HASH` | Unset; stored scrypt hash, not a plaintext password |
 | `BURROW_UI_AUTH_BASIC_SESSION_TTL_SECONDS` | `43200`; minimum 60 seconds |
 | `BURROW_UI_AUTH_BASIC_INSECURE_COOKIES` | Case-insensitive `true` disables Basic Secure cookies; HTTP development only |
-| `BURROW_UI_AUTH_OIDC_ISSUER` | Unset; required for OIDC |
+| `BURROW_UI_AUTH_OIDC_ISSUER` | Unset; full exact provider issuer, including path/trailing slash; must match discovery `issuer` and token `iss` |
 | `BURROW_UI_AUTH_OIDC_CLIENT_ID` | Unset; required for OIDC |
 | `BURROW_UI_AUTH_OIDC_CLIENT_SECRET` | Unset; alternatively encrypted PostgreSQL secret |
-| `BURROW_UI_AUTH_OIDC_REDIRECT_URI` | Unset; configure the provider callback deliberately |
+| `BURROW_UI_AUTH_OIDC_REDIRECT_URI` | Unset; explicit public HTTPS URI recommended behind a proxy, with exact path `/auth/oidc/callback`; must match provider registration |
 | `BURROW_UI_AUTH_OIDC_SCOPES` | `openid,email,profile` |
 | `BURROW_UI_AUTH_OIDC_ALLOWED_EMAILS` | Empty; optional comma-separated allowlist |
 | `BURROW_UI_AUTH_OIDC_ALLOWED_DOMAINS` | Empty; optional comma-separated allowlist |
 | `BURROW_UI_AUTH_OIDC_INSECURE_COOKIES` | Case-insensitive `true` disables OIDC Secure cookies; HTTP development only |
+
+OIDC has no configurable session-TTL environment variable in the reviewed implementation. Its signed session expires at the earlier of ID-token expiry and eight hours; the Basic session-TTL variable does not apply. See [Authentik setup](../security/authentication.md#authentik-setup-and-exact-issuer-identity) for exact issuer/callback examples.
+
+### GitHub workflow-completion receiver
+
+| Variable | Default / meaning |
+|---|---|
+| `BURROW_GITHUB_WEBHOOK_SECRET` | Optional nonempty override for the global `/api/events/github` receiver; takes precedence over the encrypted secret saved in Settings |
+
+Settings-first configuration does not require this override. Changing a deployment environment override requires restarting/recreating its process; saving the supported receiver settings applies without a restart. Clearing a saved secret does not clear an active environment override. See [task workflows](../guide/tasks.md).
 | `BURROW_UI_ORIGIN_CHECK` | `true` by default; `true`/`false` overrides saved browser `checkOrigin`; keep enabled for browser-facing deployments |
 | `BURROW_UI_ALLOWED_ORIGINS` | Empty; comma-separated exact additional origins |
 | `BURROW_UI_ALLOWED_HOSTS` | Empty disables Host allowlist enforcement; otherwise exact host/port authorities, no wildcards |

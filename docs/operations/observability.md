@@ -104,3 +104,9 @@ Corrections on this page were checked against public **2026.10.19**; any newer d
 - [backend/scripts/burrow-ui.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/burrow-ui.mjs)
 - [backend/src/cli-postgres.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/cli-postgres.mjs)
 - [ui/src/features/settings/OpenTelemetrySettings.tsx](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/ui/src/features/settings/OpenTelemetrySettings.tsx)
+
+## Queued inputs, side questions, previews and events
+
+Active-run summaries distinguish main and side-question lanes; correlate by agent/session/run identity rather than mixing their activity. Inspect explicit chat input status and terminal result after acceptance. A side-question result is a frozen historical view, not a fresh inspection. Compaction progress reports started/completed/failed; a no-op can complete with `compressed:false`. Retained compaction receipts and context-meter refresh show rotation outcome rather than implying a model answered.
+
+Workflow event views separate GitHub conclusion from Burrow handling status; accepted or interrupted work requires its actual run evidence. A ready webhook receiver proves local signature setup only. Dream previews do not save memories/settings, but nonempty previews retain filesystem request/response/lifecycle diagnostics under normal evidence retention. Do not publish those artifacts without reviewing their contents.

@@ -60,7 +60,7 @@ Use an explicit run ID for incident investigation. `--latest` is useful for expl
 3. Wait for active-run state to settle, then inspect the recorded tool activity and final/cancelled outcome.
 4. Before retrying, verify any external changes already made. If **Could not stop run** appears, recheck the active run rather than assuming the request succeeded.
 
-If the intent is to correct work rather than stop it, send a follow-up while the run is active. Confirm whether it is pending, delivered to the run, or retained as an undelivered follow-up. A pending steering message waits for a model boundary. Sources: , .
+Stop also holds all current and future main queue inputs; **Resume queue** releases all held items in FIFO order and does not restart cancelled work. Cancelling a side question leaves the main queue alone. If the intent is to correct current work, explicitly choose **Steer**; **Queue next** means a later new turn, and **Side question** answers from a frozen snapshot without changing the run. Inspect the selected action’s outcome rather than treating every follow-up as steering. See [chat delivery choices](../guide/everyday-use.md#send-queue-next-steer-or-side-question).
 
 ## Execute and verify a board task
 

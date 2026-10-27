@@ -277,3 +277,7 @@ Application migrations are not PostgreSQL major-version upgrades. Preserve the l
 ## Additions after migration 69
 
 Migration 70 adds default-true per-agent Dream promotion; the global promotion flag uses settings metadata. Migration 71 adds transactionally maintained `forge_archive` metadata receipts, retained when live jobs/media are deleted. Migration 72 adds `provider_pool_requests` and `provider_pool_attempts` for durable native OpenAI LB logical results and measured attempt usage. Unfinished requests are not completed-window outcomes; unknown usage is not zero. These are application-schema changes, not PostgreSQL-major upgrades or automatic retention rules.
+
+## Additions after migration 72
+
+Current Core reaches migration **77**: **73** adds per-agent Dream memory emphasis/override; **74** durable GitHub completion watches/events; **75** settings-managed encrypted webhook receiver; **76** retained operator event projections; **77** durable chat inputs, session holds and generation fencing. Side-question snapshots/results are owned by the chat-input store, not automatically injected main-lane memory. Preview source tokens remain bounded in-process state; preview execution traces are filesystem evidence, not saved Dream memories. These are application migrations, not instructions to edit the migration ledger or perform a PostgreSQL-major upgrade.

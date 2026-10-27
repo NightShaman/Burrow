@@ -330,3 +330,7 @@ Corrections on this page were checked against public **2026.10.19**; any newer d
 
 - [ui/src/features/settings/OpenTelemetrySettings.tsx](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/ui/src/features/settings/OpenTelemetrySettings.tsx)
 - [ui/src/features/settings/SkillSourceSettings.tsx](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/ui/src/features/settings/SkillSourceSettings.tsx)
+
+## Current chat and appearance additions
+
+The chat composer distinguishes Send, Queue next, Steer and Side question; [everyday use](../guide/everyday-use.md#send-queue-next-steer-or-side-question) explains their different effects and held queues. Compaction has visible started/completed/failed feedback and retained completion receipts. **Settings → General → Appearance** also offers **Midnight**, a black theme with blue outlines and magenta accents. Theme changes do not alter model or runtime policy.

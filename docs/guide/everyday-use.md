@@ -1,6 +1,6 @@
 # Everyday use
 
-Current implementation reviewed **26 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation delta reviewed **27 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 ## Find your way around
 
@@ -13,11 +13,31 @@ The main navigation contains **chat**, **tasks**, **archive**, **Brains**, **For
 1. Open **chat** and select the agent in the **Agents** panel.
 2. Check the **Provider**, **Model**, and **Effort** controls above the conversation. These use your saved model connections. The toolbar is locked while the displayed run is active.
 3. Type a message and press **Enter** or click **Send message**. Use **Shift+Enter** for a new line.
-4. Watch the response and tool activity. Use **Stop response** to request cancellation. When the active run accepts steering, you can send a further instruction while it works; otherwise sending is temporarily disabled.
+4. Watch the response and tool activity. Use **Stop response** to request cancellation. Choose Queue next, Steer, or Side question explicitly while a main run is busy; see the delivery choices below.
 
 A useful first request is specific about the result and location: “Inspect /srv/projects/example and summarize its test setup. Do not change files.” The agent's workspace is on the machine running Burrow or its assigned execution provider, not automatically on the computer displaying the web page.
 
 [Source: chat controls and steering](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/chat/ChatPage.tsx#L17-L131) · [Source: composer keys and buttons](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/chat/ChatComposer.tsx#L211-L221)
+
+### Send, Queue next, Steer, or Side question
+
+The composer now makes delivery intent explicit. Idle **Send** starts a normal turn. While the main run is busy, or queued/held main inputs remain, **Queue next** is the default. Choose deliberately:
+
+| Action | What it does |
+|---|---|
+| Queue next | Accepts a durable FIFO main-session turn; the server dispatches it when eligible, even if the browser closes |
+| Steer | Delivers an instruction at a model boundary of the exact selected active run, when steering is ready; it is not a new queued turn |
+| Side question | Makes a separate tool-free model call against a frozen snapshot of the selected active main run; it does not interrupt or steer that run |
+
+Acceptance is not completion. Inspect each input's status/result; a queue item can fail or be interrupted. A failed steer is not silently retried as Send. Steer and Side question become unavailable if their selected run ends or changes; make a new explicit choice. Rejected submissions preserve the draft and attachments.
+
+Side-question cards show snapshot time and source run/phase. Their answer is historical context, **not fresh verification**: no commands, tools, or new inspection run. Historical attachments are not replayed; newly attached material uses normal current-turn handling. Side question/answer records remain visible but do not automatically enter the main agent's prompt, summary, or continuity. **Use in main conversation** adds editable answer text to the existing draft without submitting it. Review/edit it, then explicitly Send/Queue next or Steer to introduce that instruction into the main lane.
+
+**Stop response** stops the main lane and holds current and future queued main inputs. `/stop` sets the hold even if no main run is active. **Resume queue** releases all held inputs in order, not only the selected item, and does not restart cancelled work. Cancelling a side question does not hold the main queue. Reset/`/new` fences old-generation queued/running work; refresh rather than resubmitting stale actions. After interruption, inspect receipts before creating replacement work.
+
+### Compact working context without resetting history
+
+Send `/compact` to run the existing deterministic context-compression planner without main-agent inference. It is a serialized conversation command, not a reset or deletion: originals remain archived. Empty or irreducible history can produce a no-op. Compaction progress/completion/failure appears in chat; completed feedback remains in retained history and context usage is refreshed after rotation. Automatic context-pressure compaction uses the same lifecycle feedback. A failed store operation or irreducible over-budget request is reported rather than silently dropping required material. See [conversation history](../concepts/conversation-history.md#manual-compaction-and-provider-heavy-history).
 
 ### Attach material
 

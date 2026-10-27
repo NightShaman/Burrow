@@ -36,11 +36,11 @@ The API serves BURROW's UI and external clients. It is an operator-level control
 
 The public assembly includes `backend/docs/openapi.json`. Its contract includes Brains, Dream controls, Git-skill management, Minion model selection, task history/attachments and OpenTelemetry settings. Retired `/api/albdruck/*` routes are absent. The source-backed endpoint pages still need to be read alongside the schema: its inventory is not proof of request/response parity or live compatibility.
 
-The current development contract reviewed on **2026-10-26** has **181 paths, 240 operations and 125 component schemas**, including pool metrics, reset-credit and Dream publication settings. Its SHA-256 is `434a895f56f70f5ca5bb878e77a37de1bc0c05830c1704d0e387ba1d8b822e03`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
+The current development contract reviewed on **2026-10-27** has **190 paths, 252 operations and 153 component schemas**, including durable chat inputs, workflow events and Dream memory preview. Its SHA-256 is `0248d7096350b0d035b99af2ec6041955a6dccd091c24c634fbbda8625f01285`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
 
 
 !!! warning "The schema is incomplete"
-    It has no authentication security schemes, omits non-API OIDC/logout routes, and contains broad open-object schemas. Its Forge request/catalog and mod-catalog shapes lag implementation. Do not infer anonymous access, unsupported features or complete client compatibility from generated types alone.
+    The current schema declares the GitHub webhook signature scheme, but not the ordinary interactive UI authentication modes. It omits non-API OIDC/logout routes and contains broad open-object schemas. Its Forge request/catalog and mod-catalog shapes lag implementation. Do not infer anonymous access, unsupported features or complete client compatibility from generated types alone.
 
 
 Specific drift:
@@ -104,3 +104,7 @@ The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d
 ## 26 October delta review
 
 Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-26**. This is a focused source comparison since the full review above, not a new application or provider test pass.
+
+## 27 October delta review
+
+Changed contracts checked statically against Backend `32ff99dfc0317635f5c7aa53b4c9ec18266d4c09` on **2026-10-27**. This does not recertify unchanged historical sections or report live API/provider tests.

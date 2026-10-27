@@ -80,6 +80,14 @@ The legacy `/dream-memory/consolidate` route remains mounted, but its current ha
 
 These switches gate saving new or updated Dream-generated Brain connections, not running the Dream cycle. Publication rereads both settings, so switching off during a run prevents later publication. Skipped changes are not queued for automatic catch-up when re-enabled, and existing memories are not deleted. Reconciliation only updates eligible Dream-origin, non-operator-owned records whose expected revision still matches; conflicts are retained for review rather than overwriting operator edits. Inspect actual cycle receipts rather than treating an enabled switch as proof a memory was saved.
 
+### Dream memory expression and preview
+
+Dream settings additionally expose `memoryEmphasis` (integer 0–100, default 50), `memoryPromptOverride` (null or string up to 20,000 characters), and read-only `defaultMemoryPrompt`/`effectiveMemoryPrompt`. Omission on save preserves the current value; null restores the default prompt, while an explicit empty string is a valid override. These affect final expression, not evidence selection, provenance, truth or permission to publish memories.
+
+`POST /api/agents/{agentId}/dream-memory/preview` accepts only optional `memoryEmphasis`, `memoryPromptOverride`, and `sourceToken`. It previews recent validated extraction candidates whose source identities still match the current REM window: not all history and not new extraction. It can invoke the selected model and incur cost, but does not save settings, publish Brains, or write Dream diary/extraction state. Execution traces may still be retained.
+
+The response includes `memories`, `sourceToken`, `sourceCount`, `generatedAt`, `evidenceScope`, and `persisted: false`. Reuse the agent-bound token to compare expression settings against the same snapshot; tokens are ephemeral, expire after 15 minutes, and can be evicted or invalidated when source evidence changes. An invalid token requires a fresh preview, not a claim that the old snapshot remains valid. An empty eligible source set returns no memories without a model call. Preview results do not establish what a later Dream cycle will publish.
+
 ## Additional endpoint inventory
 
 Methods are significant. Braced segments are placeholders; URL-encode identifiers. See the [contract and conventions](../api.md) for artifact limitations. Brains and embedding endpoints are listed above.
@@ -105,3 +113,7 @@ The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d
 ## 26 October delta review
 
 Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-26**. This is a focused source comparison since the full review above, not a new application or provider test pass.
+
+## 27 October delta review
+
+Changed contracts checked statically against Backend `32ff99dfc0317635f5c7aa53b4c9ec18266d4c09` on **2026-10-27**. This does not recertify unchanged historical sections or report live API/provider tests.

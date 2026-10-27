@@ -22,12 +22,15 @@ The server processes requests in this order:
 1. Apply the configured Host authority policy, then browser-origin and JSON content-type checks for `/api/` and `/auth/`; accepted preflight completes with HTTP 204
 2. Handle OIDC login/callback, logout, `/api/auth/discovery`, and `/api/auth/session`
 3. Serve public `GET /health` and `GET /api/health`
-4. Attempt diagnostics bearer-token authentication
-5. If a nonempty bearer token was presented but not accepted, return HTTP 403 `api_token_forbidden`
-6. Otherwise apply the configured interactive auth mode
-7. Dispatch protected static UI, API, diagnostics, settings, Forge, and mod routes
+4. Handle `POST /api/events/github` through its separate HMAC-signed webhook receiver
+5. Attempt diagnostics bearer-token authentication
+6. If a nonempty bearer token was presented but not accepted, return HTTP 403 `api_token_forbidden`
+7. Otherwise apply the configured interactive auth mode
+8. Dispatch protected static UI, API, diagnostics, settings, Forge, and mod routes
 
 A rejected bearer token does **not** fall back to a valid Basic/OIDC cookie, trusted proxy identity, or `none` mode. Routes handled before the gate do not enter that bearer decision. An `OPTIONS` success is not proof that the following API request is authorized.
+The workflow-completion webhook is mounted before interactive UI authentication, but is not anonymous ingestion: it verifies `x-hub-signature-256` against the configured receiver secret. Its settings, watch management and event reads remain behind the normal operator gate. Host/browser checks still precede the webhook. This ordering was checked against current Backend `32ff99dfc0317635f5c7aa53b4c9ec18266d4c09`; see [task workflows](../guide/tasks.md) for setup.
+
 ### Public health metadata
 
 `GET /health` and `GET /api/health` intentionally precede authentication. Both return a minimal build-identity projection: `ok: true`, `runtime: "burrow"`, `version`, `buildIdentity`, and optional `releaseProvenance` (`assembly`, `backend`, `ui`). Optional mods such as Node Goblin have independent release identities and are not part of Burrow's assembly provenance. A configured smoke token is echoed only when the request supplies the matching `x-burrow-smoke-token` header. The build identity is a content hash, not an installation path.
@@ -84,6 +87,57 @@ Optional email and domain allowlists compare lowercased values. When both lists 
 Keep secure cookies enabled for deployments. The login-state cookie's ten-minute lifetime is a browser attribute; the callback does not separately reject its stored `createdAt` by age. Session cookies are signed rather than encrypted and should not be treated as secret storage.
 
 `GET /api/auth/session` reports OIDC-session presence and auth configuration. It is not a general Basic/proxy session introspector. `GET /api/auth/discovery` exposes only mode and enabled status before authentication. `GET /api/auth/validate` is behind the main gate and returns HTTP 401 when authentication is disabled. `POST /auth/logout` clears the two OIDC cookies and the Basic cookie; it does not call the identity provider's logout endpoint.
+### Authentik setup and exact issuer identity
+
+This subsection was checked on 27 October 2026 against Backend `32ff99dfc0317635f5c7aa53b4c9ec18266d4c09`, including the full issuer-preservation fix. It is current-source guidance, not verification of an operator’s live login or a claim about an older installed release.
+
+1. In Authentik’s administration interface, create an application/provider pair using **OAuth2/OIDC**. See the official [provider creation instructions](https://docs.goauthentik.io/add-secure-apps/providers/oauth2/create-oauth2-provider/).
+2. Use a confidential authorization-code client with a client secret and an asymmetric signing key published in the provider’s JWKS. Burrow exchanges the code using HTTP Basic client authentication and validates the signed ID token; it is not a public browser-only client.
+3. Register this exact callback, substituting your public Burrow origin:
+
+   ```text
+   https://burrow.example.com/auth/oidc/callback
+   ```
+
+   Use an exact/strict redirect entry rather than a wildcard. Set Burrow’s redirect URI to the same value. `/auth/callback`, the Authentik application URL, and a callback with an added trailing slash are not this route.
+4. Keep Authentik’s per-provider issuer mode. Its default issuer is `https://auth.example.com/application/o/burrow/`, including the final slash; the application slug must match your provider. The discovery document is beneath that path at `.well-known/openid-configuration`. Authentik’s global issuer mode instead identifies the root while leaving discovery under the application path. Burrow derives discovery from its issuer and has no separate discovery-URL setting, so do not substitute that global mode. See [Authentik’s issuer and endpoint reference](https://docs.goauthentik.io/add-secure-apps/providers/oauth2/#issuer-mode).
+5. In **Settings → Connections → Authentication**, select OIDC and enter the issuer, client ID, client secret and public redirect URI. Request `openid,email,profile` and enable the corresponding provider scope mappings. Apply the intended provider access policy and Burrow email/domain allowlists deliberately; empty Burrow allowlists do not restrict provider-authenticated identities.
+
+The complete issuer-preservation fix first shipped in development build **2026.10.26.13**; **2026.10.26.12** contained only a partial fix. Older settings may already have lost the final slash. Upgrading does not reconstruct that stored value: re-enter and save the provider’s exact issuer after upgrading, then start a new login. This historical build receipt is not a claim that every public mirror or installed version contains the fix.
+
+Copy the discovery document’s `issuer` value exactly into Burrow, including any path and trailing slash. Current Core preserves it through settings save/read, runtime configuration, discovery validation, token `iss` validation and the session authorization revision. Only construction of the discovery request URL strips trailing slashes. Changing only the issuer’s final slash is an identity change, not cosmetic normalization, and invalidates old Burrow sessions.
+
+The same configuration can be supplied through the documented environment variables; deployment environment values override saved settings. The non-secret example is:
+
+```dotenv
+BURROW_UI_AUTH_MODE=oidc
+BURROW_UI_AUTH_OIDC_ISSUER=https://auth.example.com/application/o/burrow/
+BURROW_UI_AUTH_OIDC_CLIENT_ID=burrow
+BURROW_UI_AUTH_OIDC_REDIRECT_URI=https://burrow.example.com/auth/oidc/callback
+BURROW_UI_AUTH_OIDC_SCOPES=openid,email,profile
+```
+
+Supply the actual client secret through your protected configuration mechanism or the write-only Settings field; do not put it in documentation, screenshots or copied troubleshooting logs. Keep Secure cookies enabled for HTTPS deployments. Changing a deployment environment value requires restarting/recreating the process; saving supported UI settings is a separate path.
+
+### Session lifetime and login troubleshooting
+
+- **Login expires earlier than eight hours:** Burrow’s signed session ends at the earlier of the ID token’s `exp` and eight hours after callback. The eight-hour browser cookie does not extend that signed expiry. Inspect the provider-issued ID-token lifetime; an Authentik login-session lifetime is a different setting. Burrow does not refresh tokens or implement sliding OIDC sessions, and adding `offline_access` does not add that behavior.
+- **Issuer mismatch:** compare the saved issuer, discovery `issuer`, and ID-token `iss` exactly, including the slash. `oidc_discovery_issuer_mismatch` identifies a discovery mismatch. Do not remove the slash to work around an older Burrow normalization bug; update to a build containing the fix and retain the provider’s actual issuer.
+- **Redirect mismatch:** compare the provider’s registered callback with Burrow’s public redirect URI, including HTTPS, host, port and `/auth/oidc/callback`. Behind a proxy, configure the explicit browser-facing URI rather than relying on a derived origin.
+- **Discovery/token/JWKS failure:** check that the Burrow server can reach the configured provider endpoints with valid TLS. Browser reachability alone does not establish server reachability. Fix the specific endpoint/network error rather than disabling authentication or cookie protections.
+- **Email rejected:** an email/domain rule requires `email_verified: true`; when both lists are populated, both must match. Check the provider’s claims and intended access policy, not just successful provider login.
+- **Repeated login after configuration change:** issuer, client ID, callback, mode or allowlist changes can invalidate the saved authorization revision. Start a new login. Burrow logout clears its local cookies, not the provider session.
+
+The checked-in tests cover exact issuers both with and without a trailing slash, signed-token callback validation, and settings save/read using controlled fixtures. No identity-provider login or application test was performed during this documentation pass.
+
+### Operator recovery without disabling authentication
+
+Before enabling OIDC, arrange deployment-controlled rollback with known working credentials. Keeping an old Basic-authenticated tab open is not a fallback after the mode changes. OIDC mode does **not** fall back to saved Basic credentials. A Basic login cookie or Authorization header is not an alternate login while the selected mode remains OIDC.
+
+If an operator with deployment access needs temporary recovery, use a restricted HTTPS/administrative access path and only switch to Basic when a working, known username/password and its valid stored scrypt hash already exist. A temporary `BURROW_UI_AUTH_MODE=basic` deployment override selects that mode; restart/recreate the process to apply it. The Basic username/hash must resolve from saved settings or protected `BURROW_UI_AUTH_BASIC_USERNAME` / `BURROW_UI_AUTH_BASIC_PASSWORD_HASH` configuration. Do not put a plaintext password in the hash field, invent credentials, or publish them in support output. Missing Basic configuration returns `auth_not_configured`, not access.
+
+Repair and save OIDC settings while authenticated through that deliberate recovery mode. Remove the temporary mode override, restart/recreate, and verify OIDC in a separate browser session; the override otherwise continues to win over saved settings. Do **not** use `none`, database deletion or an encryption-key reset as the recovery shortcut. If no known working Basic credentials exist, keep access restricted and use an explicitly planned administrator recovery procedure rather than guessing credentials or disabling the gate. These are recovery instructions, not changes performed by this documentation task.
+
 ## Diagnostics bearer tokens
 
 The only supported scope is `diagnostics:read`. Tokens contain the `brw_` prefix and 32 random bytes encoded as base64url. PostgreSQL stores a SHA-256 hash and a 12-character prefix, not the complete token. The full value is returned on creation. Tokens support optional future expiry, revocation, and last-use tracking; omitted expiry means no configured expiration. Unsupported or duplicate scopes are rejected.

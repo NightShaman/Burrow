@@ -21,7 +21,7 @@
 | `continuityScope` | Explicit continuity namespace; `workingProject` is a compatibility alias |
 | `noCallModel` | Literal `true` selects no-model behavior; not an authorization or sandbox control |
 
-Normal chat does not accept a workspace-selection/execution-target protocol. A continuity namespace or prose path does not change the tool cwd or execution target. Ordinary requests sharing an agent/session are serialized by the HTTP adapter. `/stop`, `/new`, and `/status` bypass that wait so cancellation, reset and status can reach an active turn.
+Normal chat does not accept a workspace-selection/execution-target protocol. A continuity namespace or prose path does not change the tool cwd or execution target. Ordinary main-turn admission is serialized, but busy submissions are rejected rather than implicitly accepted as queued turns; use the explicit inputs below. `/stop`, `/new`, and `/status` bypass that wait so cancellation, reset and status can reach an active turn.
 
 ### Attachment and request budgets
 
@@ -44,6 +44,7 @@ Each event has `type`, `runId`, `sessionId`, `ts` and `data`. Buffer partial net
 | `tool.started`, `tool.completed` | Tool activity/status and selected presentation fields |
 | `verification.completed` | Verification observation |
 | `runtime.notice` | Runtime loop warning/block notice |
+| `context.compaction.started`, `.completed`, `.failed` | Bounded compaction lifecycle/receipt; a safe no-op completes with `compressed: false` |
 | `run.completed` | Terminal `data.response`; inspect its application outcome |
 | `run.failed`, `run.cancelled`, `run.superseded` | Other terminal outcomes with `data.response` |
 
@@ -65,6 +66,10 @@ sequenceDiagram
     C->>H: Read session to reconcile
 ```
 
+## Manual compaction
+
+Send `/compact` as the ordinary chat message to run the existing compression planner without main-agent inference. It uses normal session admission, so it is not a bypass of busy-session rejection. Originals remain archived; empty or irreducible history produces a reported no-op, not a reset. Manual NDJSON begins before the work; its feedback is retained in visible history but excluded from model input. Inspect the terminal receipt and `compressed`/`reason`, not merely a started event. Compression does not guarantee that oversized immutable/current input will fit.
+
 ## Disconnect and cancellation
 
 After admission, closing the browser or aborting the client fetch marks the turn detached; it does not automatically cancel execution. A disconnect while still waiting for session admission aborts that queued request instead. Send `POST /api/chat/{runId}/cancel` with the owning `agentId` and optional `reason` for explicit cancellation. Cancellation is a request to stop active work, not rollback of tools already executed.
@@ -81,6 +86,27 @@ After a disconnect, query `GET /api/chat/runs/active` with `agentId`/`sessionId`
 | `follow_up` | Run stopped accepting input before delivery; not automatically sent as a new turn |
 
 A successful POST confirms storage, not delivery or completion of the requested work. Poll steering status and inspect the resulting transcript. Inputs are delivered at runtime boundaries; steering does not undo a tool already executed. Reuse an idempotency key only for an identical retry: changed payloads return 409 `steering_idempotency_conflict`. A reset generation mismatch returns 409 `chat_run_session_reset`; an unknown run returns 404 `chat_run_not_found`. Stopping the run or recovering after the server no longer has it active can leave input marked `follow_up`; review it before explicitly sending a new turn to avoid duplicated work.
+## Explicit inputs while chat is busy
+
+Ordinary `POST /api/chat` now rejects a busy main session, or a session with queued/held/running main inputs, with **409 `chat_session_busy_use_explicit_intent`**. That is not acceptance. Choose explicitly between steering the existing run, queueing a new turn, or asking a side question.
+
+| Method | Path | Result |
+|---|---|---|
+| `GET` | `/api/chat/inputs?agentId=...&sessionId=...` | `{ok, generation, inputs}` for the current reset generation, in acceptance order |
+| `POST` | `/api/chat/inputs` | 202 `{ok, input}` for durable acceptance or an identical retry |
+| `POST` | `/api/chat/inputs/{inputId}/cancel` | Current input state; a running cancellation can remain `running` with `cancelRequested: true` |
+| `POST` | `/api/chat/inputs/{inputId}/resume` | Selected input plus all held main inputs changed to queued |
+
+Submission needs `intent: "queue_next"` or `"side_question"`, a nonblank `idempotencyKey`, and message or supported attachment input. Supply `agentId`, `sessionId`, and the current `generation` from GET. Actions use the input UUID, not its generated run ID. The key binds normalized payload and generation: identical retries return the original input/snapshot; changed payloads return `chat_input_idempotency_conflict`. A stale generation returns `chat_input_generation_conflict`; reread before acting rather than silently retrying after reset.
+
+- **Queue next:** durable FIFO new main turns, dispatched independently of the browser. Completion or failure allows the next eligible item; owner loss records interrupted work rather than automatically repeating side effects.
+- **Side question:** additionally requires the exact active main `targetRunId`. It answers from a frozen bounded snapshot in one tool-free model call; no commands, fresh inspection, or interruption of the main run. Historical attachment contents are not replayed. Snapshot context is not fresh verification. Side answers do not automatically enter main context/continuity.
+- **Promote deliberately:** edit the desired instruction and submit a new queue input or live steer with `promotedFrom` set to a succeeded side-question input UUID from the same agent/session/generation. This records provenance; it does not copy the answer automatically.
+
+Statuses are `queued`, `held`, `running`, `succeeded`, `failed`, `cancelled`, and `interrupted`. Acceptance is not completion: poll the retained result/error. Input responses include submitted message and attachment contents; protect them. Side snapshot responses expose only metadata, not the captured raw transcript/profile. Active-run projections distinguish `lane: main|side_question` and optional `inputId`.
+
+Stop of the main run, `/stop` even when idle, or cancellation of a running queue turn holds current **and future** main queue entries. Resuming a held item releases **all** held entries in FIFO order; it does not restart cancelled work. Cancelling a queued/held item cancels that item; cancelling a side question does not hold the main queue. `/new`/reset advances generation and fences old work/results.
+
 ## Endpoint inventory
 
 Methods are significant. Braced segments are placeholders; URL-encode identifiers. See the [contract and conventions](../api.md) for artifact limitations.
@@ -97,3 +123,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 ## Source review
 
 Reconciled on **2026-10-25** against Backend commit `3bf50374d3601c821e787912d52b9044eaf649ec`; static source inspection only, with no live API or provider calls.
+
+## 27 October delta review
+
+Changed contracts checked statically against Backend `32ff99dfc0317635f5c7aa53b4c9ec18266d4c09` on **2026-10-27**. This does not recertify unchanged historical sections or report live API/provider tests.

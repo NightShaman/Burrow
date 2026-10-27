@@ -6,9 +6,9 @@ The operator guide follows inspected current development implementation, without
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.10.26.6` | `1137306c669aafa7ebc53446b803a7288e0f2c50` |
-| Core / Backend | `4df4b424e2b2856cb2c25c8464da7f806eb661e0` |
-| UI | `4d5dcd253dfc58dcd032b14e22020ceaad478a52` |
+| Assembled Burrow, build `2026.10.27.7` | `bf4c46a19a1be3de1193ef948936620db8fa2358` |
+| Core / Backend | `32ff99dfc0317635f5c7aa53b4c9ec18266d4c09` |
+| UI | `2e723f5be7573b86074c91b045ae94998038f1d8` |
 | Skills | `2d120d42020eb13bc4ff0b613ea8badc46bdef1b` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
@@ -59,3 +59,7 @@ See [Build this documentation](../development/documentation.md) for preview and 
 ## Ordinary update: 26 October 2026
 
 Compared source changes since the full 25 October baseline. This pass reconciles native pool settings/catalogs/metrics, HTTP MCP headers and images, task/Forge archives, Dream promotion/reconciliation, A2A history and affected API/configuration instructions. It is not another full-page recertification or a live application/provider test. Skills implementation is unchanged; its newer repository revision contains the prior documentation update only. Approved site artwork is preserved independently of runtime-source documentation changes.
+
+## Ordinary update: 27 October 2026
+
+Compared changes since the 26 October source baseline: explicit busy-input queues and snapshot side questions, manual/pressure compaction feedback, per-agent Dream memory expression and no-save previews, GitHub workflow watches/receiver configuration, and Midnight appearance. OIDC setup/version guidance is maintained separately in [authentication](../security/authentication.md). Skills source is unchanged. This is bounded static delta reconciliation, not another full-page recertification or a live provider/database/webhook/login test. The Sunday full-review receipt remains dated 25 October; no runtime execution or public-release promotion is implied.

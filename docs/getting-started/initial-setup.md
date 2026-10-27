@@ -64,6 +64,12 @@ Set an explicit agent identity and useful instructions. Avoid copying private ho
 
 Dream cycles and other background work can call providers after setup. Review agent Dream settings and scheduled jobs, especially on metered model accounts. See [Dreams](../concepts/dreams.md) and [workers and tasks](../concepts/workers-tasks.md).
 
+## Configure OIDC before remote access
+
+For Authentik, follow the [OIDC setup and troubleshooting guide](../security/authentication.md#authentik-setup-and-exact-issuer-identity). Register the exact public callback `https://burrow.example.com/auth/oidc/callback` (replace the origin), preserve the provider’s full issuer including its trailing slash, and supply the matching client ID/secret. Burrow’s default scopes are `openid,email,profile`.
+
+Keep a deliberate recovery route while testing your own configuration, and verify login in a separate browser session before relying on remote access. The documentation review did not perform a live login. OIDC sessions expire at the earlier of the ID-token expiry and eight hours; an eight-hour cookie does not guarantee eight hours of access. See the guide before changing provider token lifetimes or access policies.
+
 ## Verify one conversation
 
 1. Open **Chat** and select the intended agent

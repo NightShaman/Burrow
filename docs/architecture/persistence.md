@@ -112,3 +112,7 @@ Corrections on this page were checked against public **2026.10.19**; any newer d
 - [backend/src/postgres-application-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-application-schema.mjs)
 - [backend/src/cli-postgres.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/cli-postgres.mjs)
 - [backend/src/postgres-continuity.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-continuity.mjs)
+
+## Durable workflow events and explicit chat inputs
+
+Current PostgreSQL stores retain GitHub workflow watches, accepted event snapshots and processing outcomes, plus encrypted receiver settings and operator-facing projections. Webhook acceptance does not establish agent completion. Explicit chat inputs persist FIFO main work, held queues, reset-generation ownership and isolated side-question snapshots/results; accepted work does not depend on a live browser. Owner-loss interruption is recorded rather than blindly replayed. Dream preview source samples are instead bounded in-process snapshots; no-save previews can still leave ordinary retained filesystem execution evidence. See [workflow setup](../guide/tasks.md#run-an-instruction-when-a-github-workflow-finishes) and [chat delivery](../guide/everyday-use.md#send-queue-next-steer-or-side-question).

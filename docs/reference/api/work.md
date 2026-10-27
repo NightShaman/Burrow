@@ -33,6 +33,28 @@ The API accepts `contextMode: "continue"` (default) or `"fresh"`. Fresh mode req
     The current scheduler receives the composed stores; the old missing-store wiring defect is resolved. Saving a cron job or receiving a trigger acknowledgement still does not establish successful unattended execution. Inspect terminal receipts and try a harmless job before relying on it.
 
 
+## GitHub workflow completion events
+
+This is a distinct durable inbound trigger for ordinary agent execution. The standing watch instruction and existing agent grants authorize the work; webhook text/logs/artifacts are evidence, not fresh authority. It is not an outbound GitHub credential or automatic permission to modify repositories.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`, `POST` | `/api/events/settings` | Read/patch receiver configuration through normal UI authentication |
+| `GET`, `POST` | `/api/events/watches` | List or create/update watches through normal UI authentication |
+| `DELETE` | `/api/events/watches/{id}` | Delete a watch; accepted event snapshots remain |
+| `GET` | `/api/events` | Retained event rows; optional agent filter and limit (default 50, maximum 500) |
+| `POST` | `/api/events/github` | HMAC-authenticated GitHub `workflow_run` receiver, not UI-token authentication |
+
+Receiver POST partially patches `deliveryUrl`, `secret`, and `clearSecret`. Omission preserves values; blank secret preserves stored bytes; `clearSecret: true` clears only the stored secret and cannot accompany a nonblank replacement. Secrets are encrypted/write-only, at most 8192 UTF-8 bytes with no CR/LF/NUL. Optional `BURROW_GITHUB_WEBHOOK_SECRET` overrides the stored value. Reads report source/override/configured/readiness flags, never plaintext. Readiness only establishes local signature-verification readiness, not public connectivity or a successful agent run.
+
+A delivery URL is optional metadata, not routing configuration: it must be HTTP(S), path exactly `/api/events/github`, with no credentials/query/fragment. Configure the actual GitHub webhook separately with `application/json`, the same secret and **Workflow runs** events. Stored settings take effect per request; changed process environment needs restart.
+
+Watch POST takes `repository: "owner/repo"`, exact case-sensitive workflow **name** (not YAML filename), enabled `agentId`, operator-written `instruction`, optional `sessionId` (default `ci-releases`) and `enabled` (default true). Omit `id` to create a UUID; provide it to update. Use a dedicated session when this work should not mix with ordinary chat.
+
+The receiver verifies `X-Hub-Signature-256` over exact raw bytes, with a 256 KiB ceiling. Missing effective secret returns 503; invalid signature 401; oversize body 413. Signed ping returns 200; irrelevant events/actions return 202 with no accepted entries. Completed workflow deliveries must match validated repository/run/workflow identities and enabled watches.
+
+A 202 receipt is durable acceptance, not agent success. It returns only accepted/duplicate counts and `{id, accepted}` per watch. Deduplication binds repository, run ID, attempt and watch ID; a distinct attempt is new work, conflicting snapshots return 409. States progress from pending to running and succeeded/failed; owner interruption remains inspectable rather than blindly rerunning side effects. Read retained events and terminal evidence to establish completion. Management responses can include operator instructions and execution details; keep them private.
+
 ## Group channels
 
 Create with `name` and a nonempty `participantAgentIds` array. The browser asks for at least two agents; the server boundary permits a nonempty participant list. Read channel detail for up to 500 turns plus active runs.
@@ -103,3 +125,7 @@ The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d
 ## 26 October delta review
 
 Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-26**. This is a focused source comparison since the full review above, not a new application or provider test pass.
+
+## 27 October delta review
+
+Changed contracts checked statically against Backend `32ff99dfc0317635f5c7aa53b4c9ec18266d4c09` on **2026-10-27**. This does not recertify unchanged historical sections or report live API/provider tests.

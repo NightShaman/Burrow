@@ -1,6 +1,6 @@
 # Tasks and schedules
 
-Current implementation reviewed **26 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation delta reviewed **27 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 The **tasks** page records work and dispatches saved tasks. **Cron jobs** run agent prompts on a schedule. Creating a board record does not itself start agent work.
 
@@ -71,6 +71,21 @@ Select a saved job to edit it; click **Save job** after changing its prompt, sch
 Mod-owned jobs show **Managed by [mod]**. Edit them through that mod. The scheduler page lets you run them or open their details to delete them, but the mod may recreate a deleted job.
 
 [Source: cron form, timezone, model override, and managed jobs](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/AgentSchedules.tsx#L57-L91)
+
+## Run an instruction when a GitHub workflow finishes
+
+This is an inbound trigger for normal agent work, not an outbound GitHub integration or a new grant of repository permissions.
+
+1. Open **Settings → Agents → [agent] → Workflow events**. In **Webhook receiver · global**, enter a high-entropy **Webhook secret** and choose **Save receiver**. The receiver is shared by every agent's watches. Optionally record a **Delivery URL** such as `https://burrow.example.test/api/events/github`; it must have that exact path and no query, fragment or embedded credentials. This field is metadata, not ingress configuration or a connectivity test.
+2. In the source GitHub repository's **Settings → Webhooks → Add webhook**, use the same full public HTTPS URL, `application/json`, and the same secret. Select **Workflow runs** (`workflow_run`) and enable the webhook. Repository webhook creation requires the appropriate owner/admin access; see [GitHub's webhook instructions](https://docs.github.com/en/webhooks/using-webhooks/creating-webhooks). Burrow consumes completed workflow runs, not every GitHub event.
+3. In the agent's watch form, enter **Repository** as `owner/repo`, the exact case-sensitive **Workflow name** (the displayed workflow name, not its YAML filename), **Destination session**, and an operator-written **Instruction**. A dedicated session such as the default `ci-releases` keeps this stream separate. Keep **Enabled** checked and choose **Add watch**. Watches require an enabled agent and use its ordinary chat model.
+4. Inspect **Recent workflow events**, using **Refresh events** as needed. **GitHub** conclusion describes CI; **Burrow handling** describes the triggered agent turn. Open the destination session and inspect actual run/trace evidence before calling the work complete.
+
+An example standing instruction is: “Review the completed run and report verified results and blockers; do not change the repository without separate authorization.” Write the scope you actually intend. Webhook payloads/logs are evidence to inspect, not new operator instructions or additional permissions. Existing tools and agent grants still govern execution.
+
+The global secret is encrypted and write-only: blank preserves it; **Clear stored secret on save** removes only the saved value. Optional `BURROW_GITHUB_WEBHOOK_SECRET` overrides it; the form shows that source. UI saves apply without restart, while an environment change requires a process restart. **Signature verification: Ready** means local receiver readiness only, not proven public delivery or agent completion. A missing/unavailable secret rejects deliveries; do not put a UI API token in the webhook secret field.
+
+Signed ping is acknowledged without creating work. Accepted completed events are durable; HTTP 202 is acceptance, not success. Matching requires an enabled repository/workflow watch. Duplicate deliveries for the same repository/run/attempt/watch do not start a second execution; a new attempt is distinct. The saved event retains its standing instruction snapshot. Disabling/deleting a watch does not erase already accepted events. Interrupted processing is recorded rather than blindly replayed; inspect it before authorizing replacement work. Management routes and event details use ordinary operator authentication; the inbound webhook uses its separate signature check. See [work APIs](../reference/api/work.md) for client contracts.
 
 ## Work delegated to minions
 

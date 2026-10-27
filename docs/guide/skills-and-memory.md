@@ -1,6 +1,6 @@
 # Skills and memory
 
-Current implementation reviewed **26 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation delta reviewed **27 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 Use **skills** for reusable instructions, **profile documents** for agent-specific guidance, and **Brains** for explicit saved memories.
 
@@ -99,6 +99,14 @@ When you need a past execution result rather than a saved fact, ask the agent to
 ### Dream promotion controls
 
 Automatic Dream-to-Brains publication requires **Promote Dreams to memory** in both **Settings → General → Brain memory** and the agent's **Dreams** settings. Both default on. Save changes in each section. Off preserves Dream diaries, reflection, existing memories and explicit saves; re-enabling does not backfill skipped promotions. Current synthesis can update an existing Dream-owned record by ID/revision, or record a no-op/review instead; it does not overwrite operator-owned memories. See [Dream cycles](../concepts/dreams.md#control-automatic-promotion).
+
+### Tune memory expression and preview without saving
+
+In **Settings → Agents → [agent] → Dreams**, **Memory emphasis** ranges from **0 Analytical** through **50 Balanced** (default) to **100 Meaning-focused**. It changes final memory expression, not source selection, evidence or citations. SOUL supplies voice, not invented facts. **Memory prompt override** replaces the built-in expression prompt (up to 20,000 characters); even an explicitly empty override is distinct from the default. **Revert to default** restores the default in the draft; use **Save dream settings** to persist changes. The separate **Dream prompt** still controls the diary.
+
+**Preview memories** is an explicit, potentially paid model request using the saved Dream model and the draft expression settings. It does not save memories/settings, publish promotion, or run a full Dream cycle. It reuses recent validated extraction checkpoints that still match eligible REM-window sources: not all history, new extraction, or the existing Brain corpus. No eligible material means no model request. Preview results show source count/references and **Not saved**.
+
+Repeat previews normally reuse the same source sample for up to 15 minutes, allowing expression comparisons without changing evidence; output can still vary. The process-wide cache is bounded and restart/eviction/source changes can invalidate a sample. **Preview new sample** explicitly captures different material. Saving expression changes affects a later authorized synthesis; it is not a bulk rewrite of existing memories. No-save means no Dream-store mutation, **not** no evidence: nonempty production previews retain ordinary filesystem execution traces and model diagnostics under normal retention.
 
 ## Scheduled dreaming
 
