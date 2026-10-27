@@ -107,7 +107,7 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
     try {
       const handleEvent = (event: unknown) => {
         if (streamAbortRef.current[targetKey] !== abortController || abortController.signal.aborted || !event || typeof event !== 'object') return;
-        const envelope = event as { type?: string; runId?: unknown; sessionId?: unknown; ts?: unknown; data?: { delta?: unknown; response?: unknown; message?: unknown; status?: unknown; modelCall?: unknown } & StreamToolEvent };
+        const envelope = event as { type?: string; runId?: unknown; sessionId?: unknown; ts?: unknown; data?: { delta?: unknown; response?: unknown; message?: unknown; status?: unknown; modelCall?: unknown; compressed?: unknown; reason?: unknown } & StreamToolEvent };
         if ((envelope.runId !== undefined && envelope.runId !== runId) || (envelope.sessionId !== undefined && envelope.sessionId !== target.sessionId)) return;
         const useful = ((envelope.type === 'assistant.delta' || envelope.type === 'assistant.thought') && typeof envelope.data?.delta === 'string' && envelope.data.delta.length > 0) || ((envelope.type === 'tool.started' || envelope.type === 'tool.completed') && typeof envelope.data?.tool === 'string' && Boolean(envelope.data.tool.trim()));
         if (useful && !firstUseful) { firstUseful = true; performance.mark(`chat:${runId}:first-useful`); performance.measure(`chat:${runId}:send-to-first-useful`, `chat:${runId}:send`, `chat:${runId}:first-useful`); }

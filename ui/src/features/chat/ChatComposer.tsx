@@ -8,6 +8,7 @@ import { intentLabels, type BusyIntent } from './chatInputs';
 type ProjectOption = { id: string; name: string; description?: string };
 
 const CHAT_COMMANDS = [
+  { name: 'compact', usage: '/compact', description: 'Compact session context.' },
   { name: 'help', usage: '/help', description: 'List available chat commands.' },
   { name: 'context', usage: '/context [full]', description: 'Show context capacity, or the full provider context.' },
   { name: 'status', usage: '/status', description: 'Show runtime and active-run status.' },

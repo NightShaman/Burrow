@@ -375,3 +375,9 @@ it.each(['Release', undefined])('attributes live workflow input (%s) to GitHub w
   expect(screen.getByLabelText(`GitHub · ${workflow || 'workflow event'} avatar`)).toBeTruthy();
   expect(screen.queryByLabelText('Rob avatar')).toBeNull();
 });
+
+it('shows compaction status even alongside existing activity', () => {
+  render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[]} isLoading={false} error="" isSending activeRunId="run" activeToolActivity={{ runId: 'run', items: [{ id: 'tool', label: 'Earlier action', status: 'ok' }] }} liveProgress={[]} liveAnswer="" liveStage="compacting" />);
+  expect(screen.getByRole('status').textContent).toBe('Compacting context…');
+  expect(screen.getAllByText('Earlier action').length).toBeGreaterThan(0);
+});

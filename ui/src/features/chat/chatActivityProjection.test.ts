@@ -83,3 +83,13 @@ it('side-question runs never own the main composer, readiness or Stop target', (
  const main = { ...side, runId:'main', lane:'main' as const };
  expect(projectChatActivity({ ok:true, runs:[side,main] }, options).runtimeRun?.runId).toBe('main');
 });
+
+it('recovers compaction status from the owning run progress', () => {
+  const run = { status: 'running', runId: 'r', agentId: 'a', sessionId: 'parent', progress: [
+    { type: 'context.compaction.started', runId: 'r', sessionId: 'parent' },
+    { type: 'context.compaction.failed', runId: 'other' },
+  ] };
+  expect(projectChatActivity({ ok: true, runs: [run] }, selection).runtimeRun?.stage).toBe('compacting');
+  run.progress.push({ type: 'context.compaction.completed', runId: 'r', sessionId: 'parent' });
+  expect(projectChatActivity({ ok: true, runs: [run] }, selection).runtimeRun?.stage).toBe('compaction-completed');
+});

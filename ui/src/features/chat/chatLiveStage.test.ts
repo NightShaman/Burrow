@@ -13,3 +13,14 @@ describe('dispatch projection', () => {
     expect(projectLiveStage(state, { type: 'model.dispatched' })).toBe(state);
   });
 });
+
+describe('context compaction lifecycle', () => {
+  it('projects live and recovered events, including no-op and failure', () => {
+    const project = (events: Array<{ type: string; data?: { compressed?: boolean; reason?: string } }>) => events.reduce(projectLiveStage, {});
+    expect(chatLiveStageLabel(project([{ type: 'context.compaction.started' }]).stage)).toBe('Compacting context…');
+    expect(chatLiveStageLabel(project([{ type: 'context.compaction.started' }, { type: 'context.compaction.completed', data: { compressed: true } }]).stage)).toBe('Context compaction complete.');
+    expect(chatLiveStageLabel(project([{ type: 'context.compaction.completed', data: { compressed: false, reason: 'no_eligible_messages' } }]).stage)).toBe('No context eligible for compaction.');
+    expect(chatLiveStageLabel(project([{ type: 'context.compaction.failed' }]).stage)).toBe('Context compaction failed.');
+    expect(project([{ type: 'context.compaction.completed' }, { type: 'model.started' }]).stage).toBe('request-intent');
+  });
+});
