@@ -62,4 +62,4 @@
 /* Quiet the repeated account meters without dimming the theme’s focus accents. */
 [data-theme="midnight"] .account-status .account-meter .usage i{background:#a05bac}
 
-[data-theme="blue-hour"] .account-status .account-meter .usage i{background:#8062a5}
+[data-theme="blue-hour"] .account-status .account-meter .usage i{background:var(--accent)}
