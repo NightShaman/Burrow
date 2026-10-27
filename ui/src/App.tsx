@@ -5,7 +5,7 @@ import { readAttachment } from './app/readAttachment';
 import { isWithinAttachmentBudget } from './features/chat/attachmentValidation';
 import { useModelSelectionWriter } from './app/useModelSelectionWriter';
 import { useConfirm } from './app/ConfirmDialog';
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PointerEvent } from 'react';
 import type { Agent, Page, PanelId, SettingsTab } from './app/types';
 import { api, attachmentDisplayName, type RuntimeHealth, type SetupStatus } from './app/api';
@@ -94,6 +94,10 @@ function AppContent() {
     reportError,
   });
   const [theme, setTheme] = usePersistedTheme();
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    return () => { delete document.documentElement.dataset.theme; };
+  }, [theme]);
   const [agentRailPreferences, setAgentRailPreferences] = useAgentRailPreferences();
   const availableAgents = enabledAgents(agents);
   const loadedSelected = availableAgents.find((agent) => agent.id === selectedAgentId) ?? availableAgents[0];

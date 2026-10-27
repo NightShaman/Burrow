@@ -823,3 +823,5 @@ button:disabled{cursor:not-allowed;opacity:.45}
 
 .theme-swatch.midnight{--swatch-surface:#000;--swatch-panel:#263d58;--swatch-accent:#d946ef}
 .theme-picker i.theme-swatch{background:radial-gradient(circle at 35% 30%,var(--swatch-panel) 0 32%,var(--swatch-accent) 33% 62%,var(--swatch-surface) 63% 100%)}
+
+.theme-swatch.blue-hour{--swatch-surface:#000;--swatch-panel:#315478;--swatch-accent:#925bd1}
