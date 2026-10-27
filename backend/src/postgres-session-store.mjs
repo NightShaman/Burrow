@@ -1,3 +1,4 @@
+import { projectPendingActions } from './session-entry.mjs';
 import { fenceChatInputsForReset } from './postgres-chat-input-store.mjs';
 import { matchCompactionOccurrences, COMPACTION_COPY_BATCH_SIZE } from './postgres-compaction.mjs';
 import { POSTGRES_COMPACTION_PROJECTIONS_SQL } from './postgres-compaction-projections.mjs';
@@ -714,8 +715,15 @@ export class PostgresSessionStore {
     // Callers already holding a transaction must use that checked-out client.
     // Querying the pool here self-deadlocks when its only connection is the
     // transaction waiting for this capability check to finish.
-    if (!this.proofProjection) this.proofProjection = client.query(`SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='conversation_entries' AND column_name='run_key') AS available`).then(result => result.rows[0]?.available === true);
-    return this.proofProjection;
+    // A pending probe belongs to its transaction: sharing it couples unrelated
+    // owners' cancellation and can keep a cancelled waiter holding its locks.
+    // Only cache a completed boolean; cold callers probe on their own client.
+    if (this.proofProjection !== null) return this.proofProjection;
+    const result = await client.query(`SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='conversation_entries' AND column_name='run_key') AS available`);
+    const available = result.rows[0]?.available === true;
+    // An older probe must not replace a result already installed by another.
+    if (this.proofProjection === null) this.proofProjection = available;
+    return available;
   }
   get agentDeliveries() { return this.deliveryStore ||= new PostgresAgentDeliveryStore(this.pool); }
   async claimAgentMessageDelivery({ deliveryId, request } = {}) {
@@ -947,13 +955,63 @@ export class PostgresSessionStore {
     });
   }
 
-  async listOriginalEntries({ agentId: rawAgentId, sessionId: rawSessionId } = {}) {
+  // Resolve each logical ID through the same indexed precedence as resolveOriginal.
+  // LATERAL keeps each probe parameterized, not a retained-history scan.
+  async listOriginalEntriesById({ agentId: rawAgentId, sessionId: rawSessionId, entryIds, signal } = {}) {
+    const agentId = required(rawAgentId, 'agentId');
+    const sessionId = required(rawSessionId, 'sessionId');
+    if (!Array.isArray(entryIds) || entryIds.some(id => typeof id !== 'string')) throw new TypeError('entry_ids_invalid');
+    signal?.throwIfAborted();
+    const ids = [...new Set(entryIds)];
+    if (!ids.length) return [];
+    return withPostgresTransaction(this.pool, async client => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const entries = [];
+      for (let offset = 0; offset < ids.length; offset += 256) {
+        signal?.throwIfAborted();
+        const { rows } = await client.query(`SELECT winner.entry,winner.ordinal,winner.created_at,winner.source_store,winner.source_id
+          FROM unnest($3::text[]) AS requested(entry_key)
+          CROSS JOIN LATERAL (SELECT entry,ordinal,created_at,source_store,source_id
+            FROM conversation_original_rows
+            WHERE agent_id=$1 AND session_id=$2 AND burrow_history_key(entry_key)=burrow_history_key(requested.entry_key)
+            ORDER BY CASE WHEN source_store='live' THEN 0 ELSE 1 END,
+              CASE WHEN source_store='live' THEN ordinal END DESC,generation DESC NULLS LAST,source_id DESC,ordinal LIMIT 1) winner`,
+        [agentId, sessionId, ids.slice(offset, offset + 256).map(id => JSON.stringify(id))]);
+        for (const row of rows) entries.push({ entry: row.entry, ordinal: BigInt(row.ordinal), createdAt: row.created_at, store: row.source_store, sourceId: row.source_id });
+      }
+      signal?.throwIfAborted();
+      return entries.sort((a,b) => String(a.entry.timestamp ?? a.entry.ts ?? a.createdAt).localeCompare(String(b.entry.timestamp ?? b.entry.ts ?? b.createdAt)) || (a.store === b.store ? (a.ordinal < b.ordinal ? -1 : a.ordinal > b.ordinal ? 1 : (a.sourceId < b.sourceId ? 1 : a.sourceId > b.sourceId ? -1 : 0)) : a.store === 'archive' ? -1 : 1)).map(row => row.entry);
+    }, { signal });
+  }
+
+  async sessionSnapshot({ agentId: rawAgentId, sessionId: rawSessionId, signal } = {}) {
+    const agentId = required(rawAgentId, 'agentId'); const sessionId = required(rawSessionId, 'sessionId');
+    return withPostgresTransaction(this.pool, async client => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const result = await client.query('SELECT metadata,created_at,updated_at FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [agentId, sessionId]);
+      const row = result.rows[0];
+      const metadata = row ? { ...row.metadata, createdAt: row.created_at, updatedAt: row.updated_at } : null;
+      const entries = []; let after = '0';
+      for (;;) {
+        signal?.throwIfAborted();
+        const page = await client.query('SELECT sequence,entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND sequence>$3::bigint ORDER BY sequence LIMIT 256', [agentId, sessionId, after]);
+        entries.push(...page.rows.map(rowEntry));
+        if (page.rows.length < 256) break;
+        after = String(page.rows.at(-1).sequence);
+      }
+      signal?.throwIfAborted();
+      return { entries, metadata, pendingActions: projectPendingActions(entries) };
+    }, { signal });
+  }
+
+  async listOriginalEntries({ agentId: rawAgentId, sessionId: rawSessionId, signal } = {}) {
     const agentId = required(rawAgentId, 'agentId');
     const sessionId = required(rawSessionId, 'sessionId');
     return withPostgresTransaction(this.pool, async client => {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const entries = []; const seen = new Set(); let position = null;
       for (;;) {
+        signal?.throwIfAborted();
         const { rows } = await client.query(`SELECT source_store,source_id,ordinal,entry,created_at
           FROM conversation_original_rows r WHERE agent_id=$1 AND session_id=$2
           AND NOT EXISTS (SELECT 1 FROM conversation_original_rows newer
@@ -976,7 +1034,7 @@ export class PostgresSessionStore {
         position = [last.source_store, last.source_id, String(last.ordinal)];
       }
       return entries.sort((a,b) => String(a.entry.timestamp ?? a.entry.ts ?? a.createdAt).localeCompare(String(b.entry.timestamp ?? b.entry.ts ?? b.createdAt)) || (a.store === b.store ? (a.ordinal < b.ordinal ? -1 : a.ordinal > b.ordinal ? 1 : 0) : a.store === 'archive' ? -1 : 1)).map(row => row.entry);
-    });
+    }, { signal });
   }
 
   async resolveOriginal({ agentId, sessionId, entryId }, client = this.pool) {
@@ -988,43 +1046,72 @@ export class PostgresSessionStore {
     return rows[0]?.entry || null;
   }
 
-  async append({ agentId: rawAgentId, sessionId: rawSessionId, entry, idempotencyKey = null } = {}) {
-    const agentId = required(rawAgentId, 'agentId'); const sid = required(rawSessionId, 'sessionId');
+  // Caller holds the authority row lock; shared with single append so replay,
+  // archive idempotency and run projection remain identical for batch writes.
+  async appendLocked(client, { agentId, sid, entry, idempotencyKey, now }) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('session_entry_required');
     const value = { ...entry };
     const entryId = text(value.id).trim() || randomUUID();
     const key = idempotencyKey == null ? (value.metadata?.idempotencyKey || null) : text(idempotencyKey);
+    const replay = await findSessionReplay(client, agentId, sid, entryId, key);
+    if (replay) return { ...rowEntry(replay), idempotent: true };
+    const hasProofProjection = await this.hasProofProjection(client);
+    const result = hasProofProjection
+      ? await client.query(`INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at,run_key) VALUES($1,$2,$3,$4,$5::json,$6,$7) ON CONFLICT DO NOTHING RETURNING sequence,entry`, [agentId, sid, entryId, key, JSON.stringify(value), now, proofRunKey(value)])
+      : await client.query(`INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at) VALUES($1,$2,$3,$4,$5::json,$6) ON CONFLICT DO NOTHING RETURNING sequence,entry`, [agentId, sid, entryId, key, JSON.stringify(value), now]);
+    if (result.rows[0]) {
+      await client.query('UPDATE conversation_sessions SET updated_at=$3 WHERE agent_id=$1 AND session_id=$2', [agentId, sid, now]);
+      if (hasProofProjection && typeof value.runId === 'string' && value.runId) {
+        const at = typeof value.ts === 'string' && value.ts ? value.ts : now;
+        const completedAt = value.type === 'message' && value.role === 'assistant' ? at : null;
+        await client.query(`INSERT INTO conversation_archive_runs(agent_id,session_id,run_key,run_id,started_at,completed_at,last_activity_at,sort_timestamp)
+          VALUES($1,$2,$3,$4,$5::timestamptz,$6::timestamptz,$5::timestamptz,COALESCE($6,$5))
+          ON CONFLICT(agent_id,session_id,run_key) DO UPDATE SET run_id=EXCLUDED.run_id,
+            started_at=LEAST(conversation_archive_runs.started_at,EXCLUDED.started_at),
+            completed_at=COALESCE(GREATEST(conversation_archive_runs.completed_at,EXCLUDED.completed_at),conversation_archive_runs.completed_at,EXCLUDED.completed_at),
+            last_activity_at=GREATEST(conversation_archive_runs.last_activity_at,EXCLUDED.last_activity_at),
+            sort_timestamp=COALESCE(GREATEST(conversation_archive_runs.completed_at,EXCLUDED.completed_at)::text,LEAST(conversation_archive_runs.started_at,EXCLUDED.started_at)::text,'')`,
+        [agentId, sid, proofRunKey(value), value.runId, at, completedAt]);
+      }
+      return { ...rowEntry(result.rows[0]), idempotent: false };
+    }
+    const existing = await client.query(`SELECT sequence,entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND (entry_id=$3 OR ($4::text IS NOT NULL AND idempotency_key=$4::text)) ORDER BY sequence LIMIT 1`, [agentId, sid, entryId, key]);
+    if (!existing.rows[0]) throw new Error('session_entry_conflict');
+    return { ...rowEntry(existing.rows[0]), idempotent: true };
+
+  }
+
+  async append({ agentId: rawAgentId, sessionId: rawSessionId, entry, idempotencyKey = null } = {}) {
+    const agentId = required(rawAgentId, 'agentId'); const sid = required(rawSessionId, 'sessionId');
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('session_entry_required');
     const now = this.clock();
-    return withPostgresTransaction(this.pool, async (client) => {
+    return withPostgresTransaction(this.pool, async client => {
       await client.query(`INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,'{}'::jsonb,$3,$3) ON CONFLICT(agent_id,session_id) DO NOTHING`, [agentId, sid, now]);
       // Row lock serializes appenders before identity allocation, making commit-order paging complete.
       await client.query('SELECT 1 FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sid]);
-      const replay = await findSessionReplay(client, agentId, sid, entryId, key);
-      if (replay) return { ...rowEntry(replay), idempotent: true };
-      const hasProofProjection = await this.hasProofProjection(client);
-      const result = hasProofProjection
-        ? await client.query(`INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at,run_key) VALUES($1,$2,$3,$4,$5::json,$6,$7) ON CONFLICT DO NOTHING RETURNING sequence,entry`, [agentId, sid, entryId, key, JSON.stringify(value), now, proofRunKey(value)])
-        : await client.query(`INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at) VALUES($1,$2,$3,$4,$5::json,$6) ON CONFLICT DO NOTHING RETURNING sequence,entry`, [agentId, sid, entryId, key, JSON.stringify(value), now]);
-      if (result.rows[0]) {
-        await client.query('UPDATE conversation_sessions SET updated_at=$3 WHERE agent_id=$1 AND session_id=$2', [agentId, sid, now]);
-        if (hasProofProjection && typeof value.runId === 'string' && value.runId) {
-          const at = typeof value.ts === 'string' && value.ts ? value.ts : now;
-          const completedAt = value.type === 'message' && value.role === 'assistant' ? at : null;
-          await client.query(`INSERT INTO conversation_archive_runs(agent_id,session_id,run_key,run_id,started_at,completed_at,last_activity_at,sort_timestamp)
-            VALUES($1,$2,$3,$4,$5::timestamptz,$6::timestamptz,$5::timestamptz,COALESCE($6,$5))
-            ON CONFLICT(agent_id,session_id,run_key) DO UPDATE SET run_id=EXCLUDED.run_id,
-              started_at=LEAST(conversation_archive_runs.started_at,EXCLUDED.started_at),
-              completed_at=COALESCE(GREATEST(conversation_archive_runs.completed_at,EXCLUDED.completed_at),conversation_archive_runs.completed_at,EXCLUDED.completed_at),
-              last_activity_at=GREATEST(conversation_archive_runs.last_activity_at,EXCLUDED.last_activity_at),
-              sort_timestamp=COALESCE(GREATEST(conversation_archive_runs.completed_at,EXCLUDED.completed_at)::text,LEAST(conversation_archive_runs.started_at,EXCLUDED.started_at)::text,'')`,
-          [agentId, sid, proofRunKey(value), value.runId, at, completedAt]);
-        }
-        return { ...rowEntry(result.rows[0]), idempotent: false };
-      }
-      const existing = await client.query(`SELECT sequence,entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND (entry_id=$3 OR ($4::text IS NOT NULL AND idempotency_key=$4::text)) ORDER BY sequence LIMIT 1`, [agentId, sid, entryId, key]);
-      if (!existing.rows[0]) throw new Error('session_entry_conflict');
-      return { ...rowEntry(existing.rows[0]), idempotent: true };
+      return this.appendLocked(client, { agentId, sid, entry, idempotencyKey, now });
     });
+  }
+
+  async appendBatchIfGeneration({ agentId: rawAgentId, sessionId: rawSessionId, expectedGeneration = 0, signal, entries } = {}) {
+    const agentId = required(rawAgentId, 'agentId'); const sid = required(rawSessionId, 'sessionId');
+    if (!Number.isSafeInteger(expectedGeneration) || expectedGeneration < 0) throw new Error('session_generation_invalid');
+    if (!Array.isArray(entries)) throw new Error('session_entries_required');
+    signal?.throwIfAborted();
+    const now = this.clock();
+    return withPostgresTransaction(this.pool, async client => {
+      await client.query(`INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,'{}'::jsonb,$3,$3) ON CONFLICT(agent_id,session_id) DO NOTHING`, [agentId, sid, now]);
+      const session = await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sid]);
+      const currentGeneration = Number(session.rows[0]?.metadata?.generation || 0);
+      if (currentGeneration !== expectedGeneration) throw new Error('session_generation_stale');
+      const results = [];
+      for (const item of entries) {
+        signal?.throwIfAborted();
+        results.push(await this.appendLocked(client, { agentId, sid, entry: item?.entry, idempotencyKey: item?.idempotencyKey, now }));
+      }
+      signal?.throwIfAborted();
+      return results;
+    }, { signal });
   }
   async appendIfAbsent(args = {}) { return this.append(args); }
 
@@ -1108,7 +1195,7 @@ export class PostgresSessionStore {
     return { rows, next: rows.length === limit ? [last.source_store,last.source_id,String(last.ordinal)] : null };
   }
 
-  async lastOperatorMessageAt({ agentId: rawAgentId } = {}) {
+  async lastOperatorMessageAt({ agentId: rawAgentId, signal } = {}) {
     const agentId = required(rawAgentId, 'agentId');
     return withPostgresTransaction(this.pool, async client => {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
@@ -1164,7 +1251,7 @@ export class PostgresSessionStore {
         }
       }
       return newest?.toISOString() || null;
-    });
+    }, { signal });
   }
 
   async listSessions({ agentId: rawAgentId, includeArchived = true } = {}) {
@@ -1232,8 +1319,12 @@ export class PostgresSessionStore {
       session: { id: row.archive_id, metadata: { ...row.metadata, createdAt: row.created_at, updatedAt: row.created_at } }, entries };
   }
 
-  async getMetadata({ agentId: rawAgentId, sessionId: rawSessionId } = {}) {
-    const result = await this.pool.query('SELECT metadata,created_at,updated_at FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [required(rawAgentId, 'agentId'), required(rawSessionId, 'sessionId')]);
+  async getMetadata({ agentId: rawAgentId, sessionId: rawSessionId, signal } = {}) {
+    const sql = 'SELECT metadata,created_at,updated_at FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2';
+    const args = [required(rawAgentId, 'agentId'), required(rawSessionId, 'sessionId')];
+    const result = signal
+      ? await withPostgresTransaction(this.pool, client => client.query(sql, args), { signal })
+      : await this.pool.query(sql, args);
     if (!result.rows[0]) return null;
     return { ...result.rows[0].metadata, createdAt: result.rows[0].created_at, updatedAt: result.rows[0].updated_at };
   }
@@ -1270,7 +1361,7 @@ export class PostgresSessionStore {
     return result.rows[0]?.metadata || null;
   }
 
-  async compact({ agentId: rawAgentId, sessionId: rawSessionId, summary, tailEntries = [], expectedEntries = null, expectedGeneration = null } = {}) {
+  async compact({ agentId: rawAgentId, sessionId: rawSessionId, summary, tailEntries = [], expectedEntries = null, expectedGeneration = null, signal } = {}) {
     const agentId = required(rawAgentId, 'agentId'); const sid = required(rawSessionId, 'sessionId');
     if (!summary || typeof summary !== 'object' || !String(summary.text || '').trim()) throw new Error('session_compaction_summary_required');
     const now = this.clock();
@@ -1299,6 +1390,7 @@ export class PostgresSessionStore {
       // Copy originals in bounded ordered ranges, including relational identity and
       // projections. Never reserialize payloads or recompute their candidate index.
       for (let offset = 0; offset < old.rows.length; offset += COMPACTION_COPY_BATCH_SIZE) {
+        signal?.throwIfAborted();
         const batch = old.rows.slice(offset, offset + COMPACTION_COPY_BATCH_SIZE);
         await client.query(`INSERT INTO conversation_archive_entries
           (agent_id,session_id,source_store,source_id,ordinal,entry,created_at,archive_kind,generation,entry_id,idempotency_key,${projections}${runColumn})
@@ -1317,6 +1409,7 @@ export class PostgresSessionStore {
       };
       await insertNew(summaryEntry);
       for (let offset = 0; offset < retained.length;) {
+        signal?.throwIfAborted();
         if (!originals[offset]) {
           await insertNew(retained[offset++]);
           continue;
@@ -1337,7 +1430,7 @@ export class PostgresSessionStore {
       const next = { ...prior, generation, archived: false, transcriptGeneration: randomUUID(), activeTranscript: 'postgres', archiveId, updatedAt: now, turnCount: 1 + retained.length, chatTurnCount: retained.filter((entry) => entry.type === 'message' && ['user','assistant','agent'].includes(entry.role)).length };
       await client.query('UPDATE conversation_sessions SET metadata=$3::jsonb,updated_at=$4 WHERE agent_id=$1 AND session_id=$2', [agentId, sid, JSON.stringify(next), now]);
       return { archiveId, generation, summaryEntry, retainedCount: retained.length, metadata: next };
-    });
+    }, { signal });
   }
 
   // The named history row is the cross-process family lock. Reservations are

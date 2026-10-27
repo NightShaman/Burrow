@@ -69,11 +69,15 @@ export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'd
     onTraceRecord(traceRecord) {
       if (traceRecord?.stream === 'model' || traceRecord?.type === 'model') record.phase = 'streaming';
       const payload = traceRecord?.payload || {};
-      const progress = traceRecord?.publicProgress || (traceRecord?.type === 'tool'
+      const progress = traceRecord?.publicProgress || (['context-compaction-started', 'context-compaction-completed', 'context-compaction-failed'].includes(traceRecord?.type)
+        ? { type: traceRecord.type.replace('context-compaction-', 'context.compaction.'), data: payload }
+        : traceRecord?.type === 'tool'
         ? { type: payload.phase === 'start' ? 'tool.started' : 'tool.completed', data: { tool: payload.tool || null, activityId: payload.activityId || null, ok: payload.ok ?? null, status: payload.status || null, label: payload.tool || 'Tool activity' } }
         : traceRecord?.type === 'model' && payload.stage === 'model-request' ? { type: 'model.started', data: { provider: payload.provider || null, model: payload.model || null } }
           : traceRecord?.type === 'model' && payload.stage === 'model-response' ? { type: 'model.completed', data: { ok: payload.ok === true, status: payload.status || null } } : null);
       if (progress) {
+        if (progress.type === 'context.compaction.started') record.phase = 'compacting';
+        if (['context.compaction.completed', 'context.compaction.failed'].includes(progress.type)) record.phase = 'thinking';
         const event = { ...progress, runId: record.runId, sessionId: record.sessionId, ts: traceRecord?.ts || new Date().toISOString() };
         record.progress = [...record.progress, event].slice(-50);
         updateActivity({ progress: [...(activity?.progress || []), event].slice(-50) });

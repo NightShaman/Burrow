@@ -60,14 +60,16 @@ function sessionExecutionKey({ rootDir, sessionId, args = {}, agentRuntime = nul
     || rootDir;
   return `${path.resolve(String(sessionRoot))}:${String(sessionId || args?.session_id || args?.sessionId || args?.run_id || args?.runId || 'default')}`;
 }
-async function serializeSessionExecution(options, operation) {
+export async function serializeSessionExecution(options, operation) {
   const key = sessionExecutionKey(options);
   return serializeSessionAdmission(
     sessionExecutionQueues,
     key,
     operation,
     options.args?.abort_signal || options.args?.abortSignal,
-    { cancellationGraceMs: options.cancellationGraceMs, onCancellationDeadline: options.onCancellationDeadline },
+    // Continuity retirement fences terminal commits, not every preparation or
+    // command write. Retain the runtime lane until the operation actually drains.
+    // Reset remains an explicit generation supersession, not a timeout shortcut.
   );
 }
 
@@ -84,7 +86,18 @@ export async function runAskChat(options = {}) {
   // continuity guard directly. Production callers always serialize here.
   if (options.testHooks?.bypassSessionExecutionQueue) return runAskChatUnserialized(options);
   const latencyTiming = { ...(options.latencyTiming || {}), runtimeQueuedMs: performance.now() };
-  return serializeSessionExecution(options, () => runAskChatUnserialized({ ...options, latencyTiming: { ...latencyTiming, runtimeAdmittedMs: performance.now() } }));
+  return serializeSessionExecution(options, async () => {
+    try {
+      return await runAskChatUnserialized({ ...options, latencyTiming: { ...latencyTiming, runtimeAdmittedMs: performance.now() } });
+    } catch (error) {
+      // Preserve interrupted-run evidence after execution unwinds but before a
+      // successor can claim continuity. Retirement never detaches live work.
+      if ((options.args?.abort_signal || options.args?.abortSignal)?.aborted) {
+        await options.onCancellationDeadline?.();
+      }
+      throw error;
+    }
+  });
 }
 
 async function subagentDebugSnapshot({ dataRoot, legacyDataRoot = null, sessionId, compatibilityObserver = null, limit = 20 } = {}) {
@@ -224,7 +237,7 @@ async function runAskChatUnserialized({
     }
   }
   if (!contextBoundary) {
-    const isolation = (await stores.conversations.getMetadata({ agentId: runtimeState.agentId, sessionId: resolvedSessionId }))?.contextIsolation;
+    const isolation = (await stores.conversations.getMetadata({ agentId: runtimeState.agentId, sessionId: resolvedSessionId, signal: normalizedArgs.abort_signal }))?.contextIsolation;
     if (isolation?.historySessionId) stores = { ...stores, conversations: withContextHistory(stores.conversations, { agentId: runtimeState.agentId, sessionId: resolvedSessionId, historySessionId: isolation.historySessionId }) };
   }
   const steeringIdentity = { agentId: runtimeState.agentId, sessionId: resolvedSessionId, runId: resolvedRunId };
@@ -444,6 +457,7 @@ async function runAskChatUnserialized({
     agentId: runtimeState.agentId,
     transcript: sessionSnapshot?.entries || [],
     transcriptSnapshotSupplied: true,
+    signal: normalizedArgs.abort_signal,
   });
   const { compressionResult, preCompressionInspection } = preparedContext;
   const executionPolicy = createExecutionPolicy({
@@ -508,7 +522,7 @@ async function runAskChatUnserialized({
     : message;
   let promptContext;
   try {
-    promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, temporalContext: { turnStartedAt, lastOperatorMessageAt, timezone: await operatorTimezone(stores.metadata) } });
+    promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, signal: normalizedArgs.abort_signal, temporalContext: { turnStartedAt, lastOperatorMessageAt, timezone: await operatorTimezone(stores.metadata) } });
   } catch (error) {
     // Context preparation can reject before returning its final inspection.
     // Route that exact budget failure through the same durable blocked owner,

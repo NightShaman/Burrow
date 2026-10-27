@@ -129,7 +129,8 @@ function tokenTargetToCharBudget(tokens, fallback = 6000) {
   return Number.isFinite(number) && number > 0 ? Math.ceil(number * 4) : fallback;
 }
 
-export async function appendCompressionSummary({ rootDir, sessionId = 'default', transcript = [], expectedGeneration = null, plan, text = null, maxChars = 6000, conversation = null } = {}) {
+export async function appendCompressionSummary({ rootDir, sessionId = 'default', transcript = [], expectedGeneration = null, plan, text = null, maxChars = 6000, conversation = null, signal = null } = {}) {
+  signal?.throwIfAborted();
   const sourceMessages = (plan.sourceEntryIds || []).length
     ? transcript.filter((entry) => (plan.sourceEntryIds || []).includes(entry?.id) && isCompressionEntry(entry))
     : [];
@@ -139,8 +140,11 @@ export async function appendCompressionSummary({ rootDir, sessionId = 'default',
   // Rebuild covered items from authoritative originals on every cycle. Persisted
   // summaries keep IDs and bounded rendered text, never a second unbounded copy.
   if (coveredIds.length && typeof conversation?.originalEntries === 'function') {
-    const wanted = new Set(coveredIds);
-    priorItems = summaryItems((await conversation.originalEntries(sessionId)).filter(entry => wanted.has(entry?.id)));
+    const entryIds = [...new Set(coveredIds)];
+    const wanted = new Set(entryIds);
+    const originals = await conversation.originalEntries(sessionId, { entryIds, signal });
+    signal?.throwIfAborted();
+    priorItems = summaryItems(originals.filter(entry => wanted.has(entry?.id)));
   } else {
     priorItems = previous.flatMap(item => Array.isArray(item.items) ? item.items : []);
   }
@@ -163,12 +167,15 @@ export async function appendCompressionSummary({ rootDir, sessionId = 'default',
   const tailEntries = transcript.filter((entry) => !entry?.metadata?.compressionSummary && (entry.type !== 'provider_history' || retainedUserRuns.has(entry.runId)) && (String(entry?.type || '') === 'context_state' || isCanonicalExecutionEntry(entry) || !sourceIds.has(entry?.id)));
   if (!conversation) throw new Error('conversation_store_required');
   const authority = conversation;
-  const rotation = await authority.compact(sessionId, { summary, tailEntries, expectedEntries: transcript, expectedGeneration });
+  signal?.throwIfAborted();
+  const rotation = await authority.compact(sessionId, { summary, tailEntries, expectedEntries: transcript, expectedGeneration, signal });
+  signal?.throwIfAborted();
   if (rotation?.stale) return { stale: true, summary, rotation };
   return { entry: rotation.summaryEntry, summary, rotation };
 }
 
-export async function runSessionCompression({ rootDir, sessionId = 'default', config = {}, contextBudget = null, force = false, maxChars = null, logger = null, stores = null, agentId = 'hatchet', conversation = null, transcriptSnapshot = null, transcriptGeneration = null } = {}) {
+export async function runSessionCompression({ rootDir, sessionId = 'default', config = {}, contextBudget = null, force = false, maxChars = null, logger = null, stores = null, agentId = 'hatchet', conversation = null, transcriptSnapshot = null, transcriptGeneration = null, expectedGeneration = null, signal = null } = {}) {
+  signal?.throwIfAborted();
   if (!conversation && !stores?.conversations) throw new Error('conversation_store_required');
   if (force) contextBudget = { ...contextBudget, pressure: 'compress', reason: 'manual' };
   const authority = conversation || conversationAuthority({ store: stores?.conversations || null, agentId });
@@ -177,11 +184,17 @@ export async function runSessionCompression({ rootDir, sessionId = 'default', co
   if (Array.isArray(transcriptSnapshot)) {
     transcript = transcriptSnapshot;
   } else if (typeof authority.sessionSnapshot === 'function') {
-    const snapshot = await authority.sessionSnapshot(sessionId);
+    const snapshot = await authority.sessionSnapshot(sessionId, { signal });
     transcript = snapshot.entries;
     resolvedGeneration = snapshot.metadata?.generation ?? null;
   } else {
-    transcript = await authority.entriesAll(sessionId);
+    transcript = await authority.entriesAll(sessionId, { signal });
+  }
+  signal?.throwIfAborted();
+  // A manual command owns its initial generation even if a non-HTTP producer
+  // resets the session without sharing its controller. Never adopt that reset.
+  if (expectedGeneration !== null && Number(resolvedGeneration ?? 0) !== expectedGeneration) {
+    throw Object.assign(new Error('session_generation_stale'), { statusCode: 409 });
   }
   const existingSummaries = compressionSummariesFromTranscript(transcript);
   // The active successor already contains the current semantic summary. Only
@@ -199,36 +212,48 @@ export async function runSessionCompression({ rootDir, sessionId = 'default', co
   };
   if (!plan.shouldCompress) {
     await logger?.event?.('context-compression-skip', result);
+    signal?.throwIfAborted();
     return result;
   }
   // A preparation snapshot is safe for assessment, not a mutation authority.
   // Refresh/replan before rotation so intervening durable entries survive.
-  if (Array.isArray(transcriptSnapshot)) return runSessionCompression({ rootDir, sessionId, config, contextBudget, force, maxChars, logger, stores, agentId, conversation: authority });
+  if (Array.isArray(transcriptSnapshot)) return runSessionCompression({ rootDir, sessionId, config, contextBudget, force, maxChars, logger, stores, agentId, conversation: authority, expectedGeneration, signal });
   const lifecycle = { sessionId, reason: plan.reason, compressed: false };
   await logger?.event?.('context-compaction-started', lifecycle);
+  signal?.throwIfAborted();
   let appended;
   try {
-    appended = await appendCompressionSummary({ rootDir, sessionId, transcript, expectedGeneration: resolvedGeneration, plan, maxChars: maxChars ?? tokenTargetToCharBudget(config.summaryTargetTokens, 6000), conversation: authority });
+    appended = await appendCompressionSummary({ rootDir, sessionId, transcript, expectedGeneration: resolvedGeneration, plan, maxChars: maxChars ?? tokenTargetToCharBudget(config.summaryTargetTokens, 6000), conversation: authority, signal });
+    signal?.throwIfAborted();
   } catch (error) {
+    signal?.throwIfAborted();
+    if (error?.name === 'AbortError') throw error;
     if (error.code !== 'compression_preservation_budget_exceeded') {
       await logger?.event?.('context-compaction-failed', { ...lifecycle, error: error?.message || String(error) });
+      signal?.throwIfAborted();
       throw error;
     }
     const skipped = { ...result, reason: error.code };
     await logger?.event?.('context-compaction-completed', { ...lifecycle, reason: skipped.reason });
+    signal?.throwIfAborted();
     await logger?.event?.('context-compression-skip', skipped);
+    signal?.throwIfAborted();
     return skipped;
   }
   if (appended.stale) {
     const skipped = { ...result, reason: 'stale_transcript', plan: appended.rotation?.currentEntries ? planContextCompression({ transcript: appended.rotation.currentEntries.filter((entry) => !entry?.metadata?.compressionSummary), config, contextBudget }) : plan };
     await logger?.event?.('context-compaction-completed', { ...lifecycle, reason: skipped.reason });
+    signal?.throwIfAborted();
     await logger?.event?.('context-compression-skip', skipped);
+    signal?.throwIfAborted();
     return skipped;
   }
   const { entry, summary, rotation } = appended;
   const completed = { ...result, compressed: true, entryId: entry.id, summary, rotation: { archiveName: rotation.archiveName, retainedCount: rotation.retainedCount } };
   await logger?.event?.('context-compaction-completed', { ...lifecycle, compressed: true });
+  signal?.throwIfAborted();
   await logger?.event?.('context-compression', { compressed: true, entryId: entry.id, summary: { ...summary, text: undefined } });
+  signal?.throwIfAborted();
   return completed;
 }
 

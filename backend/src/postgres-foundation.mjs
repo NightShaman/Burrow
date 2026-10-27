@@ -111,13 +111,50 @@ async function acquireTransactionClient(pool, { deadline, signal } = {}) {
   finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
 }
 
+// PostgreSQL may keep executing after a client socket closes (e.g. a lock
+// wait or pg_sleep). Send the driver's protocol CancelRequest to this exact
+// backend, then let its query reject and transaction rollback before release.
+// No pool checkout is needed, so cancellation also works with an exhausted pool.
+function cancelOwnedQuery(client) {
+  const query = client.activeQuery;
+  if (!query || !client.connectionParameters) return Promise.resolve();
+  return new Promise(resolve => {
+    const canceller = new pg.Client({ ...client.connectionParameters, ssl: false });
+    const connection = canceller.connection;
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true; clearTimeout(timer); connection.stream?.destroy(); resolve();
+    };
+    // Failure to deliver cancellation never detaches the original query. Its
+    // owner still waits for query settlement and cannot commit after abort.
+    const timer = setTimeout(finish, 10_000);
+    connection.once('error', finish); connection.once('end', finish);
+    try { canceller.cancel(client, query); } catch { finish(); }
+  });
+}
+
+function cancellableTransactionClient(client, signal) {
+  if (!signal) return client;
+  return new Proxy(client, { get(target, key) {
+    if (key === 'query') return (...args) => {
+      signal.throwIfAborted();
+      return target.query(...args);
+    };
+    const value = Reflect.get(target, key, target);
+    return typeof value === 'function' ? value.bind(target) : value;
+  } });
+}
+
 export async function withPostgresTransaction(pool, work, acquisition = {}) {
   if (transactionClients.has(pool)) {
     const client = transactionClients.get(pool);
+    acquisition.signal?.throwIfAborted();
     const name = `burrow_nested_${++savepointSequence}`;
     await client.query(`SAVEPOINT ${name}`);
     try {
-      const result = await work(client);
+      const result = await work(cancellableTransactionClient(client, acquisition.signal));
+      acquisition.signal?.throwIfAborted();
       await client.query(`RELEASE SAVEPOINT ${name}`);
       return result;
     } catch (error) {
@@ -126,19 +163,33 @@ export async function withPostgresTransaction(pool, work, acquisition = {}) {
     }
   }
   const client = await acquireTransactionClient(pool, acquisition);
+  const signal = acquisition.signal;
   let discard = false;
+  // Only the owner of a dedicated checkout may cancel its active query.
+  let cancellation = Promise.resolve();
+  const abort = () => { discard = true; cancellation = cancelOwnedQuery(client); };
+  signal?.addEventListener('abort', abort, { once: true });
   try {
+    signal?.throwIfAborted();
     await client.query('BEGIN');
     try {
-      const result = await work(client);
+      signal?.throwIfAborted();
+      const result = await work(cancellableTransactionClient(client, acquisition.signal));
+      signal?.throwIfAborted();
       await client.query('COMMIT');
       return result;
     } catch (error) {
+      await cancellation;
       try { await client.query('ROLLBACK'); } catch { discard = true; }
+      signal?.throwIfAborted();
       throw error;
     }
+  } catch (error) {
+    signal?.throwIfAborted();
+    throw error;
   } finally {
-    // Failed rollback makes session state unknowable; discard rather than reuse.
+    signal?.removeEventListener('abort', abort);
+    await cancellation;
     client.release(discard);
   }
 }

@@ -103,7 +103,9 @@ export async function prepareSessionTurnContext({
   compressionRunner = runSessionCompression,
   stores = null,
   agentId = agentRuntime?.agentId || 'hatchet',
+  signal = null,
 } = {}) {
+  signal?.throwIfAborted();
   const support = { memoryStage, selectedSkills };
   // Build and inspect against one resolved transcript. Otherwise the inspector
   // cannot see prior persisted assembled-prompt receipts when the caller lets
@@ -115,9 +117,11 @@ export async function prepareSessionTurnContext({
     && (transcript.length > 0 || !dataRoot || transcriptSnapshotSupplied);
   const resolvedTranscript = useSuppliedTranscript
     ? transcript
-    : await conversationAuthority({ store: stores?.conversations || null, agentId }).entriesAll(sessionId);
+    : (await conversationAuthority({ store: stores?.conversations || null, agentId }).sessionSnapshot(sessionId, { signal })).entries;
+  signal?.throwIfAborted();
   const options = turnContextOptions({ rootDir, dataRoot, agentRuntime, sessionId, contextConfig, modelConfig, support, transcript: resolvedTranscript, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId });
   let turnContext = await buildTurnContext(options);
+  signal?.throwIfAborted();
   const preCompressionInspection = inspectContextEngineResult({
     sessionId,
     context: turnContext,
@@ -134,18 +138,25 @@ export async function prepareSessionTurnContext({
     : preCompressionInspection.contextBudget;
   let compressionResult = null;
   try {
-    compressionResult = await compressionRunner({ rootDir: dataRoot, sessionId, config: contextConfig, contextBudget: compressionBudget, transcriptSnapshot: resolvedTranscript, logger, stores, agentId });
+    compressionResult = await compressionRunner({ rootDir: dataRoot, sessionId, config: contextConfig, contextBudget: compressionBudget, transcriptSnapshot: resolvedTranscript, logger, stores, agentId, signal });
+    signal?.throwIfAborted();
   } catch (error) {
+    signal?.throwIfAborted();
+    if (error?.name === 'AbortError') throw error;
     compressionResult = { ok: false, compressed: false, reason: 'compression_failed', error: error?.message || String(error) };
     await logger?.event?.('context-compression-failed', compressionResult);
+    signal?.throwIfAborted();
   }
   // Compression persists a successor transcript. Re-read it rather than
   // rebuilding from the pre-compression snapshot used for inspection.
   if (compressionResult.compressed) {
+    const refreshed = await conversationAuthority({ store: stores?.conversations || null, agentId }).sessionSnapshot(sessionId, { signal });
+    signal?.throwIfAborted();
     turnContext = await buildTurnContext(turnContextOptions({
       rootDir, dataRoot, agentRuntime, sessionId, contextConfig, modelConfig, support,
-      transcript: null, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId,
+      transcript: refreshed.entries, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId,
     }));
+    signal?.throwIfAborted();
   }
   throwCompressionUnavailable({ compressionResult, turnContext });
   assertNoLossyPriorTranscriptSummary(turnContext);
@@ -176,7 +187,9 @@ export async function compressContextForPromptPressure({
   cacheRoot = null,
   stores = null,
   agentId = agentRuntime?.agentId || 'hatchet',
+  signal = null,
 } = {}) {
+  signal?.throwIfAborted();
   const promptInspection = inspectAssembledPromptBudget({ prompt, modelConfig, tools });
   const compression = normalizeContextCompressionConfig(contextConfig);
   const usageRatio = Number(promptInspection.usageRatio);
@@ -185,11 +198,17 @@ export async function compressContextForPromptPressure({
   if (!shouldCompress) return { compressed: false, reason: 'prompt_pressure_ok', promptInspection };
   let compressionResult = null;
   try {
-    compressionResult = await runSessionCompression({ rootDir: dataRoot, sessionId, config: contextConfig, contextBudget: promptInspection, logger, stores, agentId });
+    compressionResult = await runSessionCompression({ rootDir: dataRoot, sessionId, config: contextConfig, contextBudget: promptInspection, logger, stores, agentId, signal });
+    signal?.throwIfAborted();
   } catch (error) {
+    signal?.throwIfAborted();
+    if (error?.name === 'AbortError') throw error;
     return { compressed: false, reason: 'compression_failed', error: error?.message || String(error), promptInspection };
   }
   if (!compressionResult.compressed) return { ...compressionResult, promptInspection };
-  const turnContext = await buildTurnContext(turnContextOptions({ rootDir, dataRoot, agentRuntime, sessionId, contextConfig, modelConfig, support, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId }));
+  const refreshed = await conversationAuthority({ store: stores?.conversations || null, agentId }).sessionSnapshot(sessionId, { signal });
+  signal?.throwIfAborted();
+  const turnContext = await buildTurnContext(turnContextOptions({ rootDir, dataRoot, agentRuntime, sessionId, contextConfig, modelConfig, support, transcript: refreshed.entries, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId }));
+  signal?.throwIfAborted();
   return { ...compressionResult, promptInspection, turnContext, conversationContext: conversationContextFromEngine(turnContext) };
 }

@@ -46,8 +46,11 @@ export async function runtimeHostContext(executionContext = {}) {
   return context;
 }
 
-export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores = null, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, temporalContext = null } = {}) {
+export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores = null, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, temporalContext = null, signal = null } = {}) {
+  signal?.throwIfAborted();
   const groupSupport = groupChannelContext?.channelId && Array.isArray(groupChannelContext.turns) ? { groupChannel: groupChannelContext } : {};
+  const hostContext = await runtimeHostContext(executionContext);
+  signal?.throwIfAborted();
   const contextBuild = await buildContextForTurn({
     rootDir,
     dataRoot: sessionRoot,
@@ -58,7 +61,7 @@ export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolv
     selectedSkills: route.promptPlan.selectedSkills,
     promptSkills: route.promptPlan.promptSkills,
     availableSkills: route.skills.catalog,
-    supportContext: { subagents: structuredSubagents, extraEyesReview, workingContext: ambientWorkingContext, runtimeHost: await runtimeHostContext(executionContext), temporalContext, uiTarget: agentRuntime?.contextConfig?.uiTarget || agentRuntime?.agent?.contextConfig?.uiTarget || null, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, ...groupSupport },
+    supportContext: { subagents: structuredSubagents, extraEyesReview, workingContext: ambientWorkingContext, runtimeHost: hostContext, temporalContext, uiTarget: agentRuntime?.contextConfig?.uiTarget || agentRuntime?.agent?.contextConfig?.uiTarget || null, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, ...groupSupport },
     modelProfile: null,
     task: modelTask,
     attachments: promptAttachments,
@@ -69,8 +72,9 @@ export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolv
     limits: { rawRecentChars: preparedContext.turnContext?.limits?.rawRecentChars, recentDialogueChars: preparedContext.turnContext?.limits?.rawRecentChars, priorSummaryChars: preparedContext.turnContext?.limits?.priorSummaryChars },
     modelConfig,
     tools: executionContext.toolSchemas,
-    promptPressure: { stores, agentId: runtimeState.agentId, rootDir: sessionRoot, dataRoot: sessionRoot, agentRuntime, contextConfig: runtimeConfig.contextConfig, support: { selectedSkills: route.promptPlan.promptSkills.map((skill) => skill.id), sessionRecall, runEvidence }, logger, agentWorkspaceRoot: runtimeState.agentWorkspaceRoot, agentDataRoot: runtimeState.agentDataRoot, cacheRoot: runtimeState.cacheRoot, tools: executionContext.toolSchemas },
+    promptPressure: { signal, stores, agentId: runtimeState.agentId, rootDir: sessionRoot, dataRoot: sessionRoot, agentRuntime, contextConfig: runtimeConfig.contextConfig, support: { selectedSkills: route.promptPlan.promptSkills.map((skill) => skill.id), sessionRecall, runEvidence }, logger, agentWorkspaceRoot: runtimeState.agentWorkspaceRoot, agentDataRoot: runtimeState.agentDataRoot, cacheRoot: runtimeState.cacheRoot, tools: executionContext.toolSchemas },
   });
+  signal?.throwIfAborted();
   const turnContext = contextBuild.turnContext;
   const conversationContext = contextBuild.conversationContext;
   const prompt = contextBuild.prompt;

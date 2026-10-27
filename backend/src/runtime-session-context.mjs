@@ -18,11 +18,12 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
   // identity/metadata, while pending actions are resolved from their explicit
   // work-item and turn contracts rather than an arbitrary transcript tail.
   const turnStartedAt = new Date().toISOString();
-  const lastOperatorMessageAt = await stores.conversations.lastOperatorMessageAt({ agentId });
-  const metadata = await authority.metadata(resolvedSessionId);
+  const lastOperatorMessageAt = await stores.conversations.lastOperatorMessageAt({ agentId, signal: normalizedArgs.abort_signal });
+  const metadata = await authority.metadata(resolvedSessionId, { signal: normalizedArgs.abort_signal });
   // Capture once before admission append. The same immutable snapshot is passed
   // into context preparation; compression paths deliberately re-read later.
-  const sessionSnapshot = await authority.sessionSnapshot(resolvedSessionId);
+  const sessionSnapshot = await authority.sessionSnapshot(resolvedSessionId, { signal: normalizedArgs.abort_signal });
+  normalizedArgs.abort_signal?.throwIfAborted();
   const pendingActions = sessionSnapshot.pendingActions;
   const priorSession = {
     sessionId: resolvedSessionId,

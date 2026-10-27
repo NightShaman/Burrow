@@ -50,6 +50,8 @@ import { fileURLToPath } from 'node:url';
 import { inspectSessionContext, inspectSessionContextStatus } from '../src/context-engine.mjs';
 import { runSessionCompression } from '../src/session-compression.mjs';
 import { conversationAuthority } from '../src/conversation-authority.mjs';
+import { buildSessionEntry } from '../src/session-entry.mjs';
+import { serializeSessionExecution } from '../src/app-runtime.mjs';
 import { createTraceLogger } from '../src/trace-logger.mjs';
 import { activeConversationLimits } from '../src/context-preparation.mjs';
 import { beginRuntimeSessionExecutionSupersession, chatTurnInputFromBody, createChatTurnRunId, finishRuntimeSessionExecutionSupersession, runChatTurnFromBody, runChatTurnFromWorkbenchContinuation, chatTurnResponse, chatTurnProgressResponse, chatTurnErrorResponse, loadRuntimeConfig } from '../src/chat-turn-controller.mjs';
@@ -461,6 +463,8 @@ async function executeBoardTask(taskId) {
       const progress = publicChatProgress(traceRecord);
       if (!progress) return;
       record.progress = [...record.progress, { ...progress, runId, sessionId, ts: traceRecord.ts || new Date().toISOString() }].slice(-50);
+      if (progress.type === 'context.compaction.started') record.phase = 'compacting';
+      if (['context.compaction.completed', 'context.compaction.failed'].includes(progress.type)) record.phase = 'thinking';
       if (progress.type === 'model.started') record.phase = 'thinking';
       if (progress.type === 'model.completed') record.phase = 'streaming';
     },
@@ -2762,7 +2766,7 @@ function renderContextInspection({ inspection = {}, status = {}, agentRuntime, m
   ].join('\n\n');
 }
 
-async function handleChatCommand({ parsed, sessionId, agentRuntime, runId = null, onProgress = null } = {}) {
+async function handleChatCommand({ parsed, sessionId, agentRuntime, runId = null, onProgress = null, signal = null } = {}) {
   if (parsed?.error) return { status: 400, response: chatCommandResponse({ command: null, sessionId, text: `Invalid command.\n\n${chatCommandHelpText()}`, receipt: { error: parsed.error }, ok: false }) };
   if (!parsed?.definition) return { status: 400, response: chatCommandResponse({ command: parsed?.command || null, sessionId, text: `Unknown command: /${parsed?.command || ''}\n\n${chatCommandHelpText()}`, receipt: { error: 'command_unknown' }, ok: false }) };
   if (parsed.args && !(parsed.command === 'context' && parsed.args === 'full')) return { status: 400, response: chatCommandResponse({ command: parsed.command, sessionId, text: `${parsed.definition.usage} does not accept arguments.`, receipt: { error: 'command_arguments_not_supported' }, ok: false }) };
@@ -2779,19 +2783,29 @@ async function handleChatCommand({ parsed, sessionId, agentRuntime, runId = null
     } finally { finishSessionAdmissionsReset(resetBarrier); }
   }
   if (parsed.command === 'stop') {
-    await postgresApplication.stores.chatInputs.holdSession({ agentId:agentRuntime.agentId, sessionId });
+    // Signal first. Compaction/feedback may own the very row lock (or last
+    // pool connection) needed by the durable queue hold below.
     chatInputRunner.cancelSession({ agentId:agentRuntime.agentId, sessionId, mainOnly:true });
     const matchingRuns = [...activeChatRuns.values()].filter((run) => run.agentId === agentRuntime.agentId && run.sessionId === sessionId && run.lane !== 'side_question');
     const active = matchingRuns.find((run) => !run.controller.signal.aborted) || matchingRuns.at(-1) || null;
+    if (active && !active.controller.signal.aborted) {
+      const cancelled = await cancelChatRun(active.runId, { reason: 'stopped by /stop' }, agentRuntime);
+      return { status: 200, response: chatCommandResponse({ command: 'stop', sessionId, text: `Stopped active run ${active.runId}.`, receipt: cancelled }) };
+    }
+    await postgresApplication.stores.chatInputs.holdSession({ agentId:agentRuntime.agentId, sessionId });
     if (!active) return { status: 200, response: chatCommandResponse({ command: 'stop', sessionId, text: 'No active run in this session.', receipt: { status: 'idle' } }) };
-    if (active.controller.signal.aborted) return { status: 200, response: chatCommandResponse({ command: 'stop', sessionId, text: `Run ${active.runId} is already cancelling.`, receipt: { status: 'cancelling', runId: active.runId, agentId: active.agentId, sessionId: active.sessionId, reason: active.reason || null } }) };
-    const cancelled = await cancelChatRun(active.runId, { reason: 'stopped by /stop' }, agentRuntime);
-    return { status: 200, response: chatCommandResponse({ command: 'stop', sessionId, text: `Stopped active run ${active.runId}.`, receipt: cancelled }) };
+    return { status: 200, response: chatCommandResponse({ command: 'stop', sessionId, text: `Run ${active.runId} is already cancelling.`, receipt: { status: 'cancelling', runId: active.runId, agentId: active.agentId, sessionId: active.sessionId, reason: active.reason || null } }) };
   }
   if (parsed.command === 'compact') {
     runId ||= createChatTurnRunId({ sessionId, prefix: 'compact' });
     const lifecycle = { reason: 'manual', compressed: false };
+    signal?.throwIfAborted();
     await onProgress?.({ type: 'context.compaction.started', data: lifecycle });
+    signal?.throwIfAborted();
+    const authority = conversationAuthority({ store: postgresApplication.stores.conversations, agentId: agentRuntime.agentId });
+    const metadata = await authority.metadata(sessionId, { signal });
+    signal?.throwIfAborted();
+    const expectedGeneration = Number(metadata?.generation || 0);
     let logger;
     let receipt;
     let text;
@@ -2800,10 +2814,12 @@ async function handleChatCommand({ parsed, sessionId, agentRuntime, runId = null
       const runtime = await runtimeConfig(agentRuntime.agentId);
       const traceRoot = resolveRuntimeTracePath({ ...runtime.runtimeState, agentId: agentRuntime.agentId, sessionId });
       logger = createTraceLogger({ rootDir: traceRoot, runId, sessionId });
-      const result = await runSessionCompression({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId, config: runtime.contextConfig, force: true, stores: postgresApplication.stores, agentId: agentRuntime.agentId, logger });
+      const result = await runSessionCompression({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId, config: runtime.contextConfig, force: true, stores: postgresApplication.stores, agentId: agentRuntime.agentId, logger, expectedGeneration, signal });
+      signal?.throwIfAborted();
       receipt = { reason: result.reason, compressed: Boolean(result.compressed) };
       text = result.compressed ? 'Conversation context compacted. Original history remains archived.' : `No compaction performed: ${result.reason}.`;
     } catch (error) {
+      signal?.throwIfAborted();
       receipt = { ...lifecycle, error: error?.message || String(error) };
       text = `Compaction failed: ${receipt.error}`;
       ok = false;
@@ -2814,12 +2830,19 @@ async function handleChatCommand({ parsed, sessionId, agentRuntime, runId = null
     // it may archive. Command feedback is visible history, never model input.
     // Keep persistence outside the compression catch: a storage failure must
     // not publish a terminal receipt claiming feedback was saved.
-    const authority = conversationAuthority({ store: postgresApplication.stores.conversations, agentId: agentRuntime.agentId });
-    for (const [role, content] of [['user', '/compact'], ['assistant', text]]) {
-      await authority.appendTurn({ sessionId, runId, role, content, visibility: 'chat', entersPrompt: false,
-        metadata: { command: 'compact', commandReceipt: receipt, ok } },
-      { idempotencyKey: `command:compact:${runId}:${role}` });
-    }
+    signal?.throwIfAborted();
+    // Both feedback turns share a single locked generation check and commit.
+    // Reading metadata after rotation would accidentally adopt a concurrent /new.
+    await postgresApplication.stores.conversations.appendBatchIfGeneration({
+      agentId: agentRuntime.agentId, sessionId,
+      expectedGeneration: expectedGeneration + (receipt.compressed ? 1 : 0), signal,
+      entries: [['user', '/compact'], ['assistant', text]].map(([role, content]) => ({
+        entry: buildSessionEntry({ sessionId, runId, role, content, type: 'message', visibility: 'chat', entersPrompt: false,
+          metadata: { command: 'compact', commandReceipt: receipt, ok } }),
+        idempotencyKey: `command:compact:${runId}:${role}`,
+      })),
+    });
+    signal?.throwIfAborted();
     const response = chatCommandResponse({ command: 'compact', sessionId, text, receipt, ok });
     response.result.runId = runId;
     await onProgress?.({ type: ok ? 'context.compaction.completed' : 'context.compaction.failed', data: receipt });
@@ -2897,24 +2920,41 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
   if (command) {
     const runId = body.runId ? String(body.runId) : createChatTurnRunId({ sessionId, prefix: 'command' });
     correlateHttpRun(res, { runId, sessionId, agentId: agentRuntime.agentId });
-    // Compaction can take time: open the command stream before doing any work.
-    if (streaming) beginNdjson(res);
-    const onProgress = streaming ? (event) => writeNdjson(res, { ...event, runId, sessionId, ts: new Date().toISOString() }) : null;
-    let result;
-    try { result = await handleChatCommand({ parsed: command, sessionId, agentRuntime, runId, onProgress }); }
-    catch (error) {
+    // Manual compaction is real session work, not an invisible command.
+    // Register before waiting for the shared runtime lane so Stop can cancel
+    // even a compact blocked behind another producer.
+    const manualCompact = command.command === 'compact' && command.definition && !command.args && !command.error;
+    const owner = manualCompact ? registerActiveAgentRun(activeChatRuns, {
+      agentId: agentRuntime.agentId, sessionId, runId, message: '/compact', source: 'operator-chat',
+    }) : null;
+    if (owner) { owner.record.phase = 'compacting'; owner.record.detached = false; }
+    const detached = () => { if (owner && !res.writableEnded) owner.record.detached = true; };
+    if (owner) req.on('close', detached);
+    try {
+      if (streaming) beginNdjson(res);
+      const onProgress = streaming ? (event) => writeNdjson(res, { ...event, runId, sessionId, ts: new Date().toISOString() }) : null;
+      const operation = () => handleChatCommand({ parsed: command, sessionId, agentRuntime, runId, onProgress, signal: owner?.signal });
+      const result = owner
+        ? await serializeSessionExecution({ rootDir: projectRoot, sessionId, agentRuntime, args: { abort_signal: owner.signal } }, operation)
+        : await operation();
+      owner?.signal.throwIfAborted();
+      if (streaming) {
+        writeNdjson(res, { type: result.response.ok ? 'run.completed' : 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: { ...result.response, result: { ...result.response.result, runId } } } }, { status: result.status });
+        return res.end();
+      }
+      return sendJson(res, result.status, result.response);
+    } catch (error) {
+      if (owner?.signal.aborted) {
+        const response = { ok: false, error: String(owner.record.reason || error?.message || 'agent_stopped'), runId };
+        if (streaming) { writeNdjson(res, { type: 'run.cancelled', runId, sessionId, ts: new Date().toISOString(), data: { response } }); return res.end(); }
+        return sendJson(res, 499, response);
+      }
       const expected = chatTurnErrorResponse(error);
       if (!expected) recordHttpFailure(res, { error, status: 500, event: 'run_failed', errorCode: 'chat_command_failed' });
-      // Preserve command failure ownership: storage/admission failures reject to
-      // the HTTP boundary, never publish a command terminal receipt that could
-      // be mistaken for durably saved feedback.
       throw error;
+    } finally {
+      if (owner) { req.removeListener('close', detached); owner.finish(); }
     }
-    if (streaming) {
-      writeNdjson(res, { type: result.response.ok ? 'run.completed' : 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: { ...result.response, result: { ...result.response.result, runId } } } }, { status: result.status });
-      return res.end();
-    }
-    return sendJson(res, result.status, result.response);
   }
   const runId = body.runId ? String(body.runId) : createChatTurnRunId({ sessionId, prefix: 'ui' });
   correlateHttpRun(res, { runId, sessionId, agentId: agentRuntime.agentId });
@@ -2952,6 +2992,8 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
         if (progress) {
           const event = { ...progress, runId, sessionId, ts: traceRecord.ts || new Date().toISOString() };
           record.progress = [...record.progress, event].slice(-50);
+          if (progress.type === 'context.compaction.started') record.phase = 'compacting';
+          if (['context.compaction.completed', 'context.compaction.failed'].includes(progress.type)) record.phase = 'thinking';
           if (streaming) writeNdjson(res, event);
         }
       },
@@ -3030,11 +3072,12 @@ async function cancelChatRun(runId, body = {}, agentRuntime = null) {
   const requestedAgentId = agentRuntime?.agentId || body.agentId;
   const matches = [...activeChatRuns.values()].filter(run => run.runId===runId);
   const record = requestedAgentId ? activeChatRuns.get(activeChatRunKey(requestedAgentId,runId)) : matches.length===1 ? matches[0] : null;
+  const cancelled = cancelActiveChatRun(activeChatRuns, runId, { body, agentId: agentRuntime?.agentId || null });
   if (record && record.lane !== 'side_question') {
-    await postgresApplication.stores.chatInputs.holdSession(record);
     chatInputRunner.cancelSession({ ...record, mainOnly: true });
+    await postgresApplication.stores.chatInputs.holdSession(record);
   }
-  return cancelActiveChatRun(activeChatRuns, runId, { body, agentId: agentRuntime?.agentId || null });
+  return cancelled;
 }
 
 async function supersedeSessionRuns({ agentId, sessionId, reason = 'superseded by session reset' } = {}) {
@@ -3043,7 +3086,7 @@ async function supersedeSessionRuns({ agentId, sessionId, reason = 'superseded b
   for (const run of matches) {
     sessionContinuityHeads.delete(sessionContinuityHeadKey(agentId, sessionId));
     const result = cancelActiveChatRun(activeChatRuns, run.runId, { body: { reason }, agentId });
-    if (result.ok) superseded.push(...result.cancelledRuns);
+    if (result.ok && result.cancelledRuns.length) superseded.push(...result.cancelledRuns);
     else if (run.controller.signal.aborted) superseded.push({ runId: run.runId, agentId: run.agentId, sessionId: run.sessionId });
     // Reset supersedes this display/dispatch identity. Durable reset fences its
     // old writes; an abort-ignoring provider must not block the fresh generation.
@@ -3058,8 +3101,15 @@ async function beginSessionAdmissionsReset({ agentId, sessionId } = {}) {
   try {
     const runtime = beginRuntimeSessionExecutionSupersession({ rootDir: projectRoot, sessionId, agentRuntime });
     try {
-      await postgresApplication.stores.chatInputs.cancelGeneration({ agentId, sessionId });
+      // The reset barriers already exclude successors. Signal current owners
+      // before waiting for durable queue/reset rows they may themselves hold.
+      for (const record of activeChatRuns.values()) {
+        if (record.agentId === agentId && record.sessionId === sessionId) {
+          cancelActiveChatRun(activeChatRuns, record.runId, { body: { reason: 'superseded by session reset' }, agentId });
+        }
+      }
       chatInputRunner.cancelSession({ agentId, sessionId });
+      await postgresApplication.stores.chatInputs.cancelGeneration({ agentId, sessionId });
       return { http, runtime };
     } catch(error) { finishRuntimeSessionExecutionSupersession(runtime); throw error; }
   } catch (error) {
