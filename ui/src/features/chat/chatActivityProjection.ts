@@ -106,7 +106,7 @@ export function projectChatActivity(response: ActiveChatRunsResponse, { agentId,
   // The active endpoint can retain terminal summaries; only live statuses own
   // the composer lock (and a terminal summary must not hide a newer live run).
   const liveRuns = (response.runs ?? []).filter((run) => run.status === 'running' || run.status === 'cancelling');
-  const selectedRuntimeRun = liveRuns.find((run) => run.agentId === agentId && run.sessionId === sessionId);
+  const selectedRuntimeRun = liveRuns.find((run) => run.lane !== 'side_question' && run.agentId === agentId && run.sessionId === sessionId);
   const matchingLiveSubagents = (response.subagents ?? []).filter((child) => {
     const traceChildSessionId = child.trace && 'childSessionId' in child.trace && typeof child.trace.childSessionId === 'string' ? child.trace.childSessionId : '';
     const childAgentId = child.agentId || '';

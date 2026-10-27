@@ -245,6 +245,8 @@ export type WorkflowCompletionEvent = {
 };
 
 export type ActiveChatRun = {
+  lane?: 'main' | 'side_question';
+  inputId?: string | null;
   answerText?: string;
   steeringReady?: boolean;
   runId: string;
@@ -296,6 +298,8 @@ export type SessionTurn = {
   metadata?: {
     source?: 'workflow-event';
     completionEvent?: WorkflowCompletionEvent | null;
+    lane?: 'main' | 'side_question';
+    chatInput?: import('../features/chat/chatInputs').ChatInputMetadata;
     steering?: { id: string; status: string; createdAt?: string };
     toolActivity?: ToolActivity;
     attachments?: SessionAttachment[];

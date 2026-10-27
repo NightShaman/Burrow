@@ -75,3 +75,11 @@ it('projects workflow-event provenance intact for live input without attributing
   expect(projectChatActivity({ ok: true, runs: [{ ...run, source: 'operator' }] }, selection).runtimeRun?.userMessageMetadata).toBeUndefined();
   expect(projectChatActivity({ ok: true, runs: [{ ...run, completionEvent: undefined }] }, selection).runtimeRun?.userMessageMetadata?.source).toBe('workflow-event');
 });
+
+it('side-question runs never own the main composer, readiness or Stop target', () => {
+ const side = { runId:'side', lane:'side_question' as const, agentId:'agent', sessionId:'default', status:'running', steeringReady:true };
+ const options = { agentId:'agent', sessionId:'default', isChildSession:false, hadRuns:false, now:0 };
+ expect(projectChatActivity({ ok:true, runs:[side] }, options).runtimeRun).toBeNull();
+ const main = { ...side, runId:'main', lane:'main' as const };
+ expect(projectChatActivity({ ok:true, runs:[side,main] }, options).runtimeRun?.runId).toBe('main');
+});

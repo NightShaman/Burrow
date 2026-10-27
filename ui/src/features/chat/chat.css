@@ -34,3 +34,14 @@
 .emoji-picker .EmojiPickerReact{--epr-dark-bg-color:var(--panel-2);--epr-dark-category-label-bg-color:var(--panel-2);--epr-dark-search-input-bg-color:var(--surface-input);--epr-dark-search-input-bg-color-active:var(--surface-input);--epr-dark-category-icon-active-color:var(--accent);--epr-dark-category-icon-inactive-color:var(--muted);--epr-dark-hover-bg-color:var(--accent-subtle);--epr-dark-focus-bg-color:var(--accent-subtle);--epr-dark-picker-border-color:var(--line);--epr-dark-text-color:var(--text);--epr-dark-highlight-color:var(--text);border:1px solid var(--line);box-shadow:0 12px 28px rgb(0 0 0 / 35%);font-family:inherit}
 .emoji-picker .EmojiPickerReact input{font:inherit;color:var(--text)}
 .message-attachment-card{display:flex;flex-direction:column;align-items:flex-start;gap:5px;min-width:0;max-width:100%}.message-attachment-card.image{width:min(320px,100%)}.message.operator .message-attachment-card{align-items:flex-end}.message-attachment-card>button{min-height:30px;padding:5px 9px;border:1px solid var(--accent-border);border-radius:6px;background:var(--accent-subtle);color:var(--accent);font-size:11px;font-weight:750;cursor:pointer}.message-attachment-card>button:hover:not(:disabled){background:var(--accent-glow)}.message-attachment-card>button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.message-attachment-card>button:disabled{opacity:.55;cursor:wait}.message-attachment-card>[role=status]{color:var(--danger);font-size:12px}
+
+/* Explicit delivery intent stays inside the established composer footer. */
+.compose-actions{flex-wrap:wrap;justify-content:flex-end;max-width:100%}
+.send.send-labelled{width:auto;gap:6px;padding:0 9px;font-size:12px;font-weight:750}
+.chat-intent{max-width:100%;min-height:28px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-raised);color:var(--text);font:inherit;font-size:12px}
+.chat-input-label{max-width:100%;margin:0 2px 6px;color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+.chat-input-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:inherit;gap:6px;max-width:100%;margin-top:5px;font-size:12px;color:var(--muted)}
+.chat-input-actions button,.chat-promote,.chat-promotion button{min-height:28px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface-raised);color:var(--text);font-size:12px;cursor:pointer}
+.chat-promote{margin-top:6px}.chat-input-actions details{max-width:100%;overflow-wrap:anywhere}.chat-input-actions summary{cursor:pointer}
+.chat-promotion{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;color:var(--muted);font-size:12px}
+.chat-intent:focus-visible,.chat-input-actions button:focus-visible,.chat-promote:focus-visible,.chat-promotion button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}

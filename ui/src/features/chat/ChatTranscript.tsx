@@ -1,3 +1,4 @@
+import { chatInputLabel, pendingChatInput, type ChatInput, type ChatInputMetadata } from './chatInputs';
 import { chatToolIdentity } from './chatToolIdentity';
 import { chatLiveStageLabel, type ChatLiveStage } from './chatLiveStage';
 import { ImagePreview } from '../../app/ImagePreview';
@@ -16,6 +17,10 @@ function isChatCommand(value: string) {
 }
 
 type ChatTranscriptProps = {
+  chatInputs?: ChatInput[];
+  onPromote?: (id: string, text: string) => void;
+  onInputAction?: (id: string, action: 'cancel' | 'resume') => void;
+  inputActionPending?: string;
   selected: Agent | Subagent;
   parent: Agent;
   operator: OperatorProfile;
@@ -36,9 +41,9 @@ type ChatTranscriptProps = {
   attachmentAgentId?: string;
 };
 
-export const ChatTranscript = memo(function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, liveStage, a2aActivities = [], runtimeUserMessage = '', runtimeUserMessageMetadata, runtimeChildActivities = [], attachmentAgentId }: ChatTranscriptProps) {
+export const ChatTranscript = memo(function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, liveStage, a2aActivities = [], runtimeUserMessage = '', runtimeUserMessageMetadata, runtimeChildActivities = [], attachmentAgentId, chatInputs = [], onPromote, onInputAction, inputActionPending }: ChatTranscriptProps) {
   const isSubagent = 'stream' in selected;
-  const messages = turns.filter((turn) => (turn.type === 'message' || (turn.type === 'event' && turn.role === 'user' && turn.metadata?.visibility === 'chat')) && turn.metadata?.visibility !== 'debug' && turn.metadata?.kind !== 'subagent-runtime-context' && turn.metadata?.kind !== 'subagent-task' && (turn.content || turn.metadata?.attachments?.length || turn.metadata?.outputArtifacts?.length) && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && isChatCommand(textFromChatValue(turn.content))));
+  const messages = turns.filter((turn) => (turn.type === 'message' || (turn.type === 'event' && turn.role === 'user' && (turn.metadata?.visibility === 'chat' || turn.metadata?.chatInput))) && turn.metadata?.visibility !== 'debug' && turn.metadata?.kind !== 'subagent-runtime-context' && turn.metadata?.kind !== 'subagent-task' && (turn.content || turn.metadata?.attachments?.length || turn.metadata?.outputArtifacts?.length) && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && !turn.metadata?.chatInput && isChatCommand(textFromChatValue(turn.content))));
   // Provider role=user is not speaker identity. Workflow and delegation
   // provenance (including legacy saved markers) identify non-operator input.
   const userIdentity = (metadata?: SessionTurn['metadata']) => {
@@ -51,6 +56,7 @@ export const ChatTranscript = memo(function ChatTranscript({ selected, parent, o
     return { name, avatar: (knownParent && parent.avatar) || name.slice(0, 1).toUpperCase() };
   };
   const runtimeIdentity = userIdentity(runtimeUserMessageMetadata);
+  const inputById = new Map(chatInputs.map(input => [input.id, input]));
   const activityByRun = new Map<string, ToolActivity>();
   for (const turn of turns) {
     const activity = turn.metadata?.toolActivity;
@@ -72,7 +78,7 @@ export const ChatTranscript = memo(function ChatTranscript({ selected, parent, o
   useLayoutEffect(() => {
     const container = messagesRef.current;
     if (container && !isLoading && stickToBottomRef.current) container.scrollTop = container.scrollHeight;
-  }, [isLoading, isNewSession, messages.length, isSending, liveProgress, liveAnswer, activeActivity]);
+  }, [isLoading, isNewSession, messages.length, isSending, liveProgress, liveAnswer, activeActivity, chatInputs]);
   return <div className={`chat-messages ${isEmptySession ? 'new-session-view' : ''}`} ref={messagesRef} onScroll={updateScrollIntent} aria-busy={isLoading || isSending}>
     {isEmptySession ? <div className="new-session-empty"><img src="/burrow-logo.png" alt="Burrow" /></div> : <>
       {isSubagent && <div className="stream-banner"><span>Minion stream</span><strong>{selected.name}</strong><small>Workspace remains attached to {parent.name}</small></div>}
@@ -87,7 +93,7 @@ export const ChatTranscript = memo(function ChatTranscript({ selected, parent, o
         const messageName = isAgentMessage ? `${senderName} → ${recipientName}` : selected.name;
         const persistedActivity = turn.metadata?.toolActivity;
         const isPersistedTerminalTurn = turn.role === 'assistant' && turn.runId === activeRunId && Boolean(turn.metadata?.progress || persistedActivity || turn.content);
-        return <ChatMessage key={`${turn.runId ?? 'turn'}-${index}`} side={turn.role === 'user' || (isAgentMessage && !fromCurrentAgent) ? 'operator' : 'agent'} name={turn.role === 'user' ? userName : isAgentMessage ? messageName : selected.name} avatar={turn.role === 'user' ? userAvatar : isAgentMessage && !fromCurrentAgent ? senderName.slice(0, 1).toUpperCase() : selected.avatar} time={turn.metadata?.steering ? `${formatTime(turn.ts)} · ${turn.metadata.steering.status === 'pending' ? 'Pending — next model boundary' : turn.metadata.steering.status === 'delivered' ? 'Delivered to run' : 'Not delivered — retained as follow-up'}` : formatTime(turn.ts)} text={textFromChatValue(turn.content)} activity={turn.role === 'assistant' ? (persistedActivity ?? (turn.runId === activeRunId ? activeActivity : activityByRun.get(turn.runId ?? ''))) : undefined} progress={turn.role === 'assistant' ? turn.metadata?.progress : undefined} streamedAnswer={turn.role === 'assistant' ? turn.metadata?.streamedAnswer : undefined} activityLive={turn.role === 'assistant' && turn.runId === activeRunId && !isPersistedTerminalTurn} attachments={turn.metadata?.attachments} outputArtifacts={turn.role === 'assistant' ? turn.metadata?.outputArtifacts : undefined} attachmentAgentId={attachmentAgentId ?? parent.id} />;
+        return <ChatMessage chatInput={turn.metadata?.chatInput} input={turn.metadata?.chatInput ? inputById.get(turn.metadata.chatInput.id) : undefined} onPromote={onPromote} onInputAction={onInputAction} inputActionPending={inputActionPending} key={`${turn.runId ?? 'turn'}-${index}`} side={turn.role === 'user' || (isAgentMessage && !fromCurrentAgent) ? 'operator' : 'agent'} name={turn.role === 'user' ? userName : isAgentMessage ? messageName : selected.name} avatar={turn.role === 'user' ? userAvatar : isAgentMessage && !fromCurrentAgent ? senderName.slice(0, 1).toUpperCase() : selected.avatar} time={turn.metadata?.steering ? `${formatTime(turn.ts)} · ${turn.metadata.steering.status === 'pending' ? 'Pending — next model boundary' : turn.metadata.steering.status === 'delivered' ? 'Delivered to run' : 'Not delivered — retained as follow-up'}` : formatTime(turn.ts)} text={textFromChatValue(turn.content)} activity={turn.role === 'assistant' ? (persistedActivity ?? (turn.runId === activeRunId ? activeActivity : activityByRun.get(turn.runId ?? ''))) : undefined} progress={turn.role === 'assistant' ? turn.metadata?.progress : undefined} streamedAnswer={turn.role === 'assistant' ? turn.metadata?.streamedAnswer : undefined} activityLive={turn.role === 'assistant' && turn.runId === activeRunId && !isPersistedTerminalTurn} attachments={turn.metadata?.attachments} outputArtifacts={turn.role === 'assistant' ? turn.metadata?.outputArtifacts : undefined} attachmentAgentId={attachmentAgentId ?? parent.id} />;
       })}
       {a2aActivities.length > 0 && <section className="a2a-activity-list" aria-label="Agent-to-agent activity">{a2aActivities.map((activity) => <A2AActivityCard key={activity.id} activity={activity} selectedName={selected.name} />)}</section>}
       {visibleRuntimeChildActivities.length > 0 && <section className="a2a-activity-list" aria-label="Minion activity">{visibleRuntimeChildActivities.map((activity) => <ToolActivityCard key={activity.runId} activity={activity} live={activity.status === 'running'} />)}</section>}
@@ -309,7 +315,7 @@ function GeneratedArtifactCard({ artifact, agentId }: { artifact: GeneratedArtif
   </article>;
 }
 
-export function ChatMessage({ side, name, avatar, time, text, activity, progress, streamedAnswer, activityLive, attachments = [], outputArtifacts = [], attachmentAgentId }: { side: 'agent' | 'operator'; name: string; avatar: string; time: string; text: string; activity?: ToolActivity; progress?: RunProgress; streamedAnswer?: string; activityLive?: boolean; attachments?: SessionAttachment[]; outputArtifacts?: GeneratedArtifact[]; attachmentAgentId?: string }) {
+export function ChatMessage({ side, name, avatar, time, text, activity, progress, streamedAnswer, activityLive, attachments = [], outputArtifacts = [], attachmentAgentId, chatInput, input, onPromote, onInputAction, inputActionPending }: { chatInput?: ChatInputMetadata; input?: ChatInput; onPromote?: (id: string, text: string) => void; onInputAction?: (id: string, action: 'cancel' | 'resume') => void; inputActionPending?: string; side: 'agent' | 'operator'; name: string; avatar: string; time: string; text: string; activity?: ToolActivity; progress?: RunProgress; streamedAnswer?: string; activityLive?: boolean; attachments?: SessionAttachment[]; outputArtifacts?: GeneratedArtifact[]; attachmentAgentId?: string }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const image = avatarSource(avatar);
   const modelError = side === 'agent' ? parseModelError(text) : null;
@@ -320,7 +326,14 @@ export function ChatMessage({ side, name, avatar, time, text, activity, progress
     window.setTimeout(() => setCopyState('idle'), 1500);
   };
   const copyLabel = copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : '';
-  return <article className={`message ${side}${modelError ? ' model-error-message' : ''}`}><div className="message-avatar" aria-label={`${name} avatar`}>{image ? <img src={image} alt="" /> : avatar}</div><div className="message-content"><small>{name.toUpperCase()} · {time.toUpperCase()}</small>{attachments.length ? <div className="message-attachments" aria-label={`${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`}>{attachments.map((attachment, index) => <MessageAttachment key={`${attachment.index ?? index}-${attachment.name}`} attachment={attachment} agentId={attachmentAgentId} />)}</div> : null}{outputArtifacts.length ? <section className="generated-artifacts" aria-label={`${outputArtifacts.length} generated artifact${outputArtifacts.length === 1 ? '' : 's'}`}>{outputArtifacts.map((artifact, index) => <GeneratedArtifactCard key={`${artifact.storageReference ?? artifact.name ?? artifact.kind}-${index}`} artifact={artifact} agentId={attachmentAgentId} />)}</section> : null}{streamedAnswer ? <StreamedAnswerCard text={streamedAnswer} /> : null}{activity && <ToolActivityCard activity={activity} live={activityLive} />}{progress?.items?.length ? <ProgressCard items={progress.items} status={progress.status} /> : null}{modelError ? <div className="message-bubble model-error-card" role="alert"><div className="model-error-sigil" aria-hidden="true">⚠</div><div><strong>{modelError.overloaded ? 'The model servers are throwing goblets' : modelErrorTitle}</strong><p>{modelError.message}</p><span>The chat is fine. The upstream model is being stupid.</span></div></div> : text && <div className="message-bubble final-answer"><Markdown>{text}</Markdown></div>}{text && <button className="copy-message" onClick={copy} aria-label={`Copy ${name} message as Markdown`} title={copyState === 'copied' ? 'Copied Markdown' : copyState === 'failed' ? 'Copy failed' : 'Copy Markdown'}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg><span aria-live="polite">{copyLabel}</span></button>}</div></article>;
+  return <article className={`message ${side}${modelError ? ' model-error-message' : ''}`}><div className="message-avatar" aria-label={`${name} avatar`}>{image ? <img src={image} alt="" /> : avatar}</div><div className="message-content"><small>{name.toUpperCase()} · {time.toUpperCase()}</small>{chatInput && <span className="chat-input-label">{chatInputLabel(chatInput)}</span>}{attachments.length ? <div className="message-attachments" aria-label={`${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`}>{attachments.map((attachment, index) => <MessageAttachment key={`${attachment.index ?? index}-${attachment.name}`} attachment={attachment} agentId={attachmentAgentId} />)}</div> : null}{outputArtifacts.length ? <section className="generated-artifacts" aria-label={`${outputArtifacts.length} generated artifact${outputArtifacts.length === 1 ? '' : 's'}`}>{outputArtifacts.map((artifact, index) => <GeneratedArtifactCard key={`${artifact.storageReference ?? artifact.name ?? artifact.kind}-${index}`} artifact={artifact} agentId={attachmentAgentId} />)}</section> : null}{streamedAnswer ? <StreamedAnswerCard text={streamedAnswer} /> : null}{activity && <ToolActivityCard activity={activity} live={activityLive} />}{progress?.items?.length ? <ProgressCard items={progress.items} status={progress.status} /> : null}{modelError ? <div className="message-bubble model-error-card" role="alert"><div className="model-error-sigil" aria-hidden="true">⚠</div><div><strong>{modelError.overloaded ? 'The model servers are throwing goblets' : modelErrorTitle}</strong><p>{modelError.message}</p><span>The chat is fine. The upstream model is being stupid.</span></div></div> : text && <div className="message-bubble final-answer"><Markdown>{text}</Markdown></div>}{chatInput && side === 'operator' && <div className="chat-input-actions">
+    {input && pendingChatInput(input) && onInputAction && <button disabled={Boolean(inputActionPending)} onClick={() => onInputAction(input.id, 'cancel')}>{input.status === 'running' ? 'Cancel this input' : 'Cancel input'}</button>}
+    {input?.status === 'held' && onInputAction && <button disabled={Boolean(inputActionPending)} onClick={() => onInputAction(input.id, 'resume')}>Resume queue</button>}
+    {input?.error && <p className="error" role="alert">{input.error}</p>}
+    {chatInput.snapshot && <details><summary>Snapshot details</summary><span>Run {chatInput.snapshot.originRunId ?? 'unknown'} · {chatInput.snapshot.phase ?? 'unknown phase'} · {chatInput.snapshot.entryCount ?? 'unknown'} entries</span></details>}
+  </div>}
+  {chatInput?.intent === 'side_question' && side === 'agent' && text && (input?.status ?? chatInput.status) === 'succeeded' && onPromote && <button className="chat-promote" onClick={() => onPromote(chatInput.id, text)}>Use in main conversation</button>}
+  {text && <button className="copy-message" onClick={copy} aria-label={`Copy ${name} message as Markdown`} title={copyState === 'copied' ? 'Copied Markdown' : copyState === 'failed' ? 'Copy failed' : 'Copy Markdown'}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg><span aria-live="polite">{copyLabel}</span></button>}</div></article>;
 }
 
 function agentDisplayName(value: string) {

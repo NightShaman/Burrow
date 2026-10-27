@@ -262,7 +262,8 @@ describe('FE-014 submission acceptance', () => {
     renderChat({ draft: 'Wait for durable steering', isSending: true, steeringReady: false, activeRunId: 'run' });
     const input = screen.getByRole('textbox', { name: 'Message' });
     expect((input as HTMLTextAreaElement).disabled).toBe(false);
-    expect(screen.getByRole('button', { name: 'Send message' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Queue next' })).toHaveProperty('disabled', true);
+    expect((screen.getByRole('option', { name: 'Steer' }) as HTMLOptionElement).disabled).toBe(true);
     expect(screen.getByRole('button', { name: 'Stop response' })).toBeTruthy();
     fireEvent.change(input, { target: { value: 'Still editable' } });
     expect(input).toHaveProperty('value', 'Still editable');

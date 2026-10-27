@@ -20,3 +20,16 @@ it('rejects EOF without a terminal envelope', async () => {
   vi.mocked(fetchApi).mockResolvedValue(new Response('{"type":"delta"}\n', { headers: { 'content-type': 'application/x-ndjson' } }));
   await expect(streamChat({ requestBody: {}, signal: new AbortController().signal, onEvent: vi.fn() })).rejects.toThrow('without a terminal');
 });
+
+it('does not accept rejected HTTP submissions (including busy409)', async () => {
+ vi.mocked(fetchApi).mockResolvedValue(new Response(JSON.stringify({ error: 'chat_session_busy_use_explicit_intent' }), { status:409 }));
+ const accepted = vi.fn();
+ await expect(streamChat({ requestBody:{}, signal:new AbortController().signal, onEvent:vi.fn(), onAccepted:accepted })).rejects.toThrow();
+ expect(accepted).not.toHaveBeenCalled();
+});
+it('accepts after HTTP success, before any stream output', async () => {
+ vi.mocked(fetchApi).mockResolvedValue(new Response('{"type":"run.completed","data":{"response":"ok"}}\n', { headers: { 'content-type':'application/x-ndjson' } }));
+ const order: string[] = [];
+ await streamChat({ requestBody:{}, signal:new AbortController().signal, onAccepted:() => order.push('accepted'), onEvent:() => order.push('event') });
+ expect(order).toEqual(['accepted','event']);
+});

@@ -3,6 +3,8 @@ import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent } from 'reac
 import { api, textFromChatValue, type ChatAttachment, type SessionTurn } from '../../app/api';
 const EmojiPicker = lazy(() => import('./EmojiPicker').then(({ EmojiPicker }) => ({ default: EmojiPicker })));
 
+import { intentLabels, type BusyIntent } from './chatInputs';
+
 type ProjectOption = { id: string; name: string; description?: string };
 
 const CHAT_COMMANDS = [
@@ -36,6 +38,11 @@ type ChatComposerProps = {
   disabled?: boolean;
   sendDisabled?: boolean;
   steeringActive?: boolean;
+  busyIntent?: BusyIntent;
+  onIntentChange?: (intent: BusyIntent) => void;
+  showIntent?: boolean;
+  canSteer?: boolean;
+  canAskSide?: boolean;
   onSend: () => void;
   onCancel?: () => void;
   placeholder: string;
@@ -58,6 +65,7 @@ export function ChatComposer({
   disabled = false,
   sendDisabled = false,
   steeringActive = false,
+  busyIntent = 'queue_next', onIntentChange, showIntent = false, canSteer = false, canAskSide = false,
   onSend,
   onCancel,
   placeholder,
@@ -70,6 +78,7 @@ export function ChatComposer({
   operatorName = 'You',
   agentNames = new Map(),
 }: ChatComposerProps) {
+  const sendLabel = showIntent ? intentLabels[busyIntent] : 'Send';
   const canSend = Boolean(draft.trim() || attached.length) && !disabled && !sendDisabled;
   const [projectContext, setProjectContext] = useState<ProjectOption | null>(null);
   const [projectBusy, setProjectBusy] = useState(false);
@@ -218,8 +227,11 @@ export function ChatComposer({
             {emojiOpen && <div id="chat-emoji-picker"><Suspense fallback={<div className="emoji-picker-loading" role="status">Loading emoji…</div>}><EmojiPicker onChoose={chooseEmoji} /></Suspense></div>}
           </div>
           <label className="attach" aria-label="Attach image or document" title="Attach image or document"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20.5 11.5-8.7 8.7a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7L9 17.4a2 2 0 0 1-2.8-2.8l8.2-8.2" /></svg><input id="chat-attachments" name="attachments" type="file" multiple accept="image/*,text/*,.txt,.md,.markdown,.json,.csv,.xml,.html,.css,.js,.ts,.tsx,.jsx,.py,.rb,.go,.rs,.java,.c,.cpp,.h,.yaml,.yml,.rtf" onChange={chooseFiles} /></label>
+          {showIntent && <select className="chat-intent" aria-label="Delivery intent" value={busyIntent} onChange={event => onIntentChange?.(event.target.value as BusyIntent)} disabled={disabled}>
+            <option value="queue_next">Queue next</option><option value="steer" disabled={!canSteer}>Steer</option><option value="side_question" disabled={!canAskSide}>Side question</option>
+          </select>}
           {steeringActive && onCancel && <button className="send stop" onClick={onCancel} aria-label="Stop response" title="Stop response">■</button>}
-          {disabled && onCancel ? <button className="send stop" onClick={onCancel} aria-label="Stop response" title="Stop response">■</button> : <button className="send" onMouseDown={(event) => event.preventDefault()} onClick={submit} disabled={!canSend} aria-label="Send message" title="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 9-18 9 4-9-4-9Z" /><path d="M7 12h14" /></svg></button>}
+          {disabled && onCancel ? <button className="send stop" onClick={onCancel} aria-label="Stop response" title="Stop response">■</button> : <button className="send send-labelled" onMouseDown={(event) => event.preventDefault()} onClick={submit} disabled={!canSend} aria-label={showIntent ? sendLabel : "Send message"} title={busyIntent === 'steer' && showIntent ? "Steer at the next model boundary" : sendLabel}><span>{sendLabel}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 9-18 9 4-9-4-9Z" /><path d="M7 12h14" /></svg></button>}
         </div></div>
       </div>
     </div>

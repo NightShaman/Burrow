@@ -1,0 +1,58 @@
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { api } from '../../app/api';
+import { useChatInputs } from './useChatInputs';
+import type { ChatInput } from './chatInputs';
+vi.mock('../../app/api', () => ({ api: vi.fn() }));
+const input = { id: 'one', intent: 'queue_next', status: 'queued', generation: 4 } as ChatInput;
+beforeEach(() => { vi.mocked(api).mockReset(); vi.mocked(api).mockResolvedValue({ generation: 4, inputs: [] }); });
+afterEach(cleanup);
+it('uses current server generation and retains retry identity, attachments, exact target and promotion', async () => {
+ const { result } = renderHook(() => useChatInputs('agent', 'default', 0));
+ await waitFor(() => expect(result.current.generation).toBe(4));
+ const attachment = { name: 'note.txt', size: 2, type: 'text/plain', content: 'data:text/plain;base64,aGk=', encoding: 'data-url' as const };
+ vi.mocked(api).mockRejectedValueOnce(new Error('response lost'));
+ await act(async () => { await expect(result.current.submit('queue_next','edited',[attachment],'main','side')).rejects.toThrow('lost'); });
+ const first = JSON.parse(vi.mocked(api).mock.calls.filter(([,r]) => r?.method === 'POST').at(-1)![1]!.body as string);
+ vi.mocked(api).mockResolvedValueOnce({ input });
+ await act(async () => { await result.current.submit('queue_next','edited',[attachment],'main','side'); });
+ const next = JSON.parse(vi.mocked(api).mock.calls.filter(([,r]) => r?.method === 'POST').at(-1)![1]!.body as string);
+ expect(next).toEqual(first); expect(next).toMatchObject({ generation: 4, attachments: [attachment], targetRunId: 'main', promotedFrom: 'side' });
+});
+it('resume merges all held inputs and running cancel stays running until signal settles', async () => {
+ vi.mocked(api).mockResolvedValue({ generation: 4, inputs: [{ ...input, status: 'held' }, { ...input, id: 'two', status: 'held' }] });
+ const { result } = renderHook(() => useChatInputs('agent','default',0));
+ await waitFor(() => expect(result.current.inputs).toHaveLength(2));
+ vi.mocked(api).mockResolvedValue({ generation: 4, inputs: [input, { ...input, id: 'two' }] }).mockResolvedValueOnce({ input, inputs: [input, { ...input, id: 'two' }] });
+ await act(async () => { await result.current.action('one','resume'); });
+ expect(result.current.inputs.every(i => i.status === 'queued')).toBe(true);
+ vi.mocked(api).mockResolvedValue({ generation:4, inputs:[{...input,status:'running'}, {...input,id:'two'}] }).mockResolvedValueOnce({ input: { ...input, status: 'running' } });
+ await act(async () => { await result.current.action('one','cancel'); });
+ expect(result.current.inputs[0].status).toBe('running');
+});
+it('rejects stale acceptance across session switch and same-session reset', async () => {
+ const { result, rerender } = renderHook(({ session, reset }) => useChatInputs('agent',session,reset), { initialProps: { session: 'one', reset: 0 } });
+ await waitFor(() => expect(result.current.generation).toBe(4));
+ let resolve!: (v: unknown) => void;
+ vi.mocked(api).mockImplementationOnce(() => new Promise(r => { resolve = r; }) as ReturnType<typeof api>);
+ let pending!: ReturnType<typeof result.current.submit>;
+ act(() => { pending = result.current.submit('queue_next','text',[],'main',null); });
+ rerender({ session:'one', reset:1 });
+ await act(async () => { resolve({ input }); expect(await pending).toBeNull(); });
+ expect(result.current.inputs).toEqual([]);
+ rerender({ session: 'two', reset:1 }); expect(result.current.inputs).toEqual([]);
+});
+it('does not accept an old visit after A→B→A or unlock a newer request', async () => {
+ const { result, rerender } = renderHook(({ session }) => useChatInputs('agent',session,0), { initialProps:{session:'A'} });
+ await waitFor(() => expect(result.current.generation).toBe(4));
+ const resolvers: Array<(v: unknown) => void> = [];
+ vi.mocked(api).mockImplementation(async (_path, request) => request?.method === 'POST' ? await new Promise(resolve => resolvers.push(resolve)) : {generation:4,inputs:[]} as never);
+ let old!: ReturnType<typeof result.current.submit>, fresh!: ReturnType<typeof result.current.submit>;
+ act(() => {old = result.current.submit('queue_next','old',[],'main',null);});
+ rerender({session:'B'}); rerender({session:'A'});
+ await waitFor(() => expect(result.current.generation).toBe(4));
+ act(() => {fresh = result.current.submit('queue_next','fresh',[],'main',null);});
+ await act(async () => {resolvers[0]({input});expect(await old).toBeNull();});
+ expect(result.current.pending).toBe('submit'); expect(result.current.inputs).toEqual([]);
+ await act(async () => {resolvers[1]({input:{...input,id:'fresh'}}); await fresh;});
+});

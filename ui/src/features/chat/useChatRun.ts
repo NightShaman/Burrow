@@ -72,7 +72,7 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
     performance.measure(`chat:${runId}:first-useful-to-react-commit-observed`, `chat:${runId}:first-useful`, `chat:${runId}:react-commit-observed`);
   }, [activeRunForSelection, liveAnswerByRun, liveProgressByRun, selectedAgentId, session.sessionId]);
 
-  // Acceptance is synchronous; the returned promise still tracks run completion.
+  // Composer acceptance follows HTTP success; the returned promise tracks run completion.
   const sendMessage = async (draftOverride?: string, onAccepted?: () => void) => {
     const message = (draftOverride ?? session.draft).trim();
     if ((!message && !session.attached.length) || !selectedAgentId || !session.sessionId || activeRunForSelection || streamAbortRef.current[runKey(selectedAgentId, session.sessionId)]) return;
@@ -90,9 +90,15 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
     setActiveRuns((current) => ({ ...current, [targetKey]: { runId, ...target, stage: 'accepted' } }));
     setLiveProgressByRun((current) => ({ ...current, [targetKey]: [] }));
     setLiveAnswerByRun((current) => ({ ...current, [targetKey]: '' }));
-    setAgentActivity(target.agentId, 'thinking'); session.clearError(); session.setDraft(''); onAccepted?.(); session.clearAttachment(); session.leaveNewSessionForMessage();
+    setAgentActivity(target.agentId, 'thinking'); session.clearError();
     const appendVisibleTurn = transientContextCommand ? session.appendTransientTurn : session.appendTurn;
-    appendVisibleTurn(target.agentId, target.sessionId, { type: 'message', role: 'user', content: message, ts: new Date().toISOString(), runId, ...(attachments.length ? { metadata: { attachments: attachments.map(({ name, type, size }, index) => ({ index, name, type, size, encoding: 'data-url', ...(type.startsWith('image/') ? { preview: attachments[index].content } : {}) })) } } : {}) });
+    const acceptSubmission = () => {
+      if (abortController.signal.aborted || streamAbortRef.current[targetKey] !== abortController) return;
+      if (onAccepted) onAccepted();
+      else { session.setDraft(''); session.clearAttachment(); }
+      session.leaveNewSessionForMessage();
+      appendVisibleTurn(target.agentId, target.sessionId, { type: 'message', role: 'user', content: message, ts: new Date().toISOString(), runId, ...(attachments.length ? { metadata: { attachments: attachments.map(({ name, type, size }, index) => ({ index, name, type, size, encoding: 'data-url', ...(type.startsWith('image/') ? { preview: attachments[index].content } : {}) })) } } : {}) });
+    };
     performance.mark(`chat:${runId}:send`, { startTime: sentAt });
     let firstUseful = false;
     let streamedAnswer = ''; let progressEntries: ProgressEntry[] = []; let toolSequence = 0; let frame = 0;
@@ -133,7 +139,7 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
           session.storeToolActivity({ runId, items, status: hasError ? 'warn' : hasPending ? 'running' : 'ok' });
         }
       };
-      const { terminalType, finalResult } = await streamChat({ requestBody, signal: abortController.signal, onEvent: handleEvent });
+      const { terminalType, finalResult } = await streamChat({ requestBody, signal: abortController.signal, onEvent: handleEvent, onAccepted: acceptSubmission });
       if (streamAbortRef.current[targetKey] !== abortController || abortController.signal.aborted) return;
       if (frame) { cancelAnimationFrame(frame); flushLiveText(); }
       const runStatus: NonNullable<RunProgress['status']> = terminalType === 'run.failed' ? 'failed' : terminalType === 'run.cancelled' ? 'cancelled' : terminalType === 'run.superseded' ? 'superseded' : 'complete';

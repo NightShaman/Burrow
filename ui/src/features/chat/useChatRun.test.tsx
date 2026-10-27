@@ -43,7 +43,8 @@ describe('useChatRun', () => {
   });
 
   it('closes a superseded run without appending or reporting a synthetic assistant error', async () => {
-    streamChatMock.mockImplementation(async ({ onEvent }) => {
+    streamChatMock.mockImplementation(async ({ onEvent, onAccepted }) => {
+      onAccepted?.();
       onEvent({ type: 'assistant.thought', data: { delta: 'Old run progress.' } });
       onEvent({ type: 'tool.started', data: { tool: 'shell_exec', activityId: 'old-tool', command: 'echo old' } });
       return {
@@ -103,10 +104,7 @@ describe('useChatRun', () => {
   });
 
   it('keeps /context visible for the current visit without caching or immediately reconciling it away', async () => {
-    streamChatMock.mockResolvedValue({
-      terminalType: 'run.completed',
-      finalResult: { ok: true, answerText: 'Context: 42% used.' },
-    });
+    streamChatMock.mockImplementation(async ({ onAccepted }) => { onAccepted?.(); return { terminalType: 'run.completed', finalResult: { ok: true, answerText: 'Context: 42% used.' } }; });
     const session = createSession();
     session.draft = '/context';
     const { result } = renderHook(() => useChatRun({
@@ -125,7 +123,7 @@ describe('useChatRun', () => {
   });
 
   it('preserves normal message persistence and reconciliation', async () => {
-    streamChatMock.mockResolvedValue({ terminalType: 'run.completed', finalResult: { ok: true, answerText: 'Normal reply.' } });
+    streamChatMock.mockImplementation(async ({ onAccepted }) => { onAccepted?.(); return { terminalType: 'run.completed', finalResult: { ok: true, answerText: 'Normal reply.' } }; });
     const session = createSession();
     session.draft = 'Hello';
     const { result } = renderHook(() => useChatRun({
@@ -140,7 +138,8 @@ describe('useChatRun', () => {
   });
 
   it('coalesces word-sized thought deltas by model call without changing the terminal answer', async () => {
-    streamChatMock.mockImplementation(async ({ onEvent }) => {
+    streamChatMock.mockImplementation(async ({ onEvent, onAccepted }) => {
+      onAccepted?.();
       onEvent({ type: 'assistant.thought', ts: '2026-09-22T10:00:00.000Z', data: { delta: 'decide', modelCall: 1 } });
       onEvent({ type: 'assistant.thought', data: { delta: ' which', modelCall: 1 } });
       onEvent({ type: 'assistant.thought', data: { delta: '\nnext', modelCall: 2 } });
@@ -169,7 +168,8 @@ describe('useChatRun', () => {
   });
 
   it('retains visible streamed output separately from the final answer', async () => {
-    streamChatMock.mockImplementation(async ({ onEvent }) => {
+    streamChatMock.mockImplementation(async ({ onEvent, onAccepted }) => {
+      onAccepted?.();
       onEvent({ type: 'assistant.delta', data: { delta: 'Draft streamed response.' } });
       await new Promise((resolve) => requestAnimationFrame(resolve));
       return { terminalType: 'run.completed', finalResult: { ok: true, answerText: 'Authoritative final answer.' } };
@@ -193,7 +193,8 @@ describe('useChatRun', () => {
     { tool: 'load_skill', skillId: 'frontend-review', expectedLabel: 'Load skill · frontend-review', expectedDetail: 'frontend-review' },
   ])('shows only safe identity for $tool in tool activity', async (identity) => {
     const activity = { items: [] as Array<{ id: string; label: string; detail?: string; status?: 'pending' | 'ok' | 'error' }> };
-    streamChatMock.mockImplementation(async ({ onEvent }) => {
+    streamChatMock.mockImplementation(async ({ onEvent, onAccepted }) => {
+      onAccepted?.();
       onEvent({ type: 'tool.started', data: {
         ...identity, activityId: 'mcp-1', detail: 'absolutely-not-for-the-transcript',
         mcpArguments: { secret: 'absolutely-not-for-the-transcript' }, output: 'also-not-for-the-transcript',
@@ -231,9 +232,10 @@ describe('FE-014 immediate acceptance', () => {
     expect(streamChatMock).not.toHaveBeenCalled();
   });
 
-  it('accepts synchronously, rejects duplicate/running sends and awaits completion', async () => {
+  it('accepts only after HTTP acceptance, rejects duplicate/running sends and awaits completion', async () => {
     let complete!: (value: Awaited<ReturnType<typeof streamChat>>) => void;
-    streamChatMock.mockImplementation(() => new Promise((resolve) => { complete = resolve; }));
+    let accept!: () => void;
+    streamChatMock.mockImplementation(({ onAccepted }) => { accept = () => onAccepted?.(); return new Promise((resolve) => { complete = resolve; }); });
     const session = createSession();
     const { result } = renderHook(() => useChatRun({ selectedAgentId: 'nigel', selected: undefined, savedProviders: [], session, setAgentActivity: vi.fn() }));
     const accepted = vi.fn(); const rejected = vi.fn(); let settled = false;
@@ -242,8 +244,10 @@ describe('FE-014 immediate acceptance', () => {
       completion = result.current.sendMessage('Accepted', accepted);
       void completion.then(() => { settled = true; });
       void result.current.sendMessage('Duplicate', rejected);
-      expect(accepted).toHaveBeenCalledTimes(1);
+      expect(accepted).not.toHaveBeenCalled();
     });
+    act(() => accept());
+    expect(accepted).toHaveBeenCalledTimes(1);
     expect(settled).toBe(false);
     await act(async () => { await result.current.sendMessage('Next draft', rejected); });
     expect(rejected).not.toHaveBeenCalled();

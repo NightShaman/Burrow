@@ -7,7 +7,9 @@ import type { Agent, SavedProvider, Subagent, Tab } from '../../app/types';
 import { useComposerHistory } from './useComposerHistory';
 import { ChatTranscript } from './ChatTranscript';
 import { ChatComposer } from './ChatComposer';
-import { isChatRunNotFoundError, useLiveSteering } from './useLiveSteering';
+import { useLiveSteering } from './useLiveSteering';
+import { useChatInputs } from './useChatInputs';
+import { pendingChatInput, reconcileChatInputs, type BusyIntent } from './chatInputs';
 import { reconcileSteeringTurns } from './chatTurnReconciliation';
 import { loadSwitchboardSessionLabels, type SwitchboardSessionLabel } from './telegramSessionLabels';
 export { ChatMessage } from './ChatTranscript';
@@ -101,53 +103,75 @@ export function Chat({ selected, parent, operator, draft, setDraft, attached, on
     setLocalDraft(value);
   }, []);
   const composerHistory = useComposerHistory(localDraft, turns.filter((turn) => turn.role === 'user').map((turn) => turn.content ?? ''), updateLocalDraft);
-  const steering = useLiveSteering(resourceAgentId ?? selected.id, sessionId ?? '', activeRunId);
-  const transcriptTurns = useMemo(() => reconcileSteeringTurns(turns, steering.inputs), [turns, steering.inputs]);
+  const attachmentsRef = useRef(attached); attachmentsRef.current = attached;
+  const steering = useLiveSteering(resourceAgentId ?? selected.id, sessionId ?? '', activeRunId, composerResetGeneration);
+  const inputs = useChatInputs(resourceAgentId ?? selected.id, sessionId ?? '', composerResetGeneration);
+  const transcriptTurns = useMemo(() => reconcileChatInputs(reconcileSteeringTurns(turns, steering.inputs), inputs.inputs), [turns, steering.inputs, inputs.inputs]);
   const [steeringError, setSteeringError] = useState('');
-  const [pendingNormalSend, setPendingNormalSend] = useState('');
+  const [intent, setIntent] = useState<BusyIntent>('queue_next');
+  const [intentRunId, setIntentRunId] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const [promotion, setPromotion] = useState<string | null>(null);
+  const context = useMemo(() => ({ key: JSON.stringify([draftContext, composerResetGeneration]) }), [draftContext, composerResetGeneration]);
+  const currentContext = useRef(context); currentContext.current = context;
   useEffect(() => {
-    if (!pendingNormalSend || isSending) return;
-    const value = pendingNormalSend;
-    setPendingNormalSend('');
-    onSend(value, () => {
-      if (localDraftRef.current === value) {
-        setDraft('');
-        localDraftRef.current = '';
-        setLocalDraft('');
-      }
-    });
-  }, [pendingNormalSend, isSending, onSend, setDraft]);
+    currentContext.current = context;
+    setIntent('queue_next'); setIntentRunId(''); setPromotion(null); setSteeringError(''); setSubmitting(false); submittingRef.current = false;
+    return () => { if (currentContext.current === context) currentContext.current = { key: 'retired' }; };
+  }, [context]);
+  const backlog = inputs.inputs.some(input => input.intent === 'queue_next' && pendingChatInput(input));
+  const explicitDelivery = isSending || backlog || intent !== 'queue_next';
+  const exactTargetAvailable = Boolean(isSending && activeRunId && (!intentRunId || intentRunId === activeRunId));
+  // Exact-run intents remain selected but unavailable when their target ends.
+  // Never reinterpret a stale steer/side question as Send, or retarget a newer run.
+  const chooseIntent = (next: BusyIntent) => { setIntent(next); setIntentRunId(activeRunId); };
+  const promote = useCallback((id: string, text: string) => {
+    setPromotion(id); setIntent('queue_next');
+    updateLocalDraft(localDraftRef.current.trim() ? `${localDraftRef.current}\n\n${text}` : text);
+    document.getElementById('chat-message')?.focus();
+  }, [updateLocalDraft]);
   const sendLocalDraft = useCallback(() => {
+    if (submittingRef.current || (intent !== 'queue_next' && !exactTargetAvailable)) return;
     const value = localDraftRef.current;
-    if (isSending && steeringReady) {
+    const accepted = () => {
+      if (currentContext.current !== context) return;
+      if (localDraftRef.current === value) { setDraft(''); updateLocalDraft(''); }
+      setIntent('queue_next'); setPromotion(null);
+      for (let index = attachmentsRef.current.length - 1; index >= 0; index--) {
+        if (attached.includes(attachmentsRef.current[index])) onRemoveAttachment(index);
+      }
+    };
+    if (explicitDelivery || promotion) {
       const message = value.trim();
       if (!message && !attached.length) return;
-      setSteeringError('');
-      void steering.submit(message, attached).then(input => {
-        if (!input) return;
-        if (localDraftRef.current === value) { setDraft(''); localDraftRef.current = ''; setLocalDraft(''); }
-        attached.forEach((_, index) => onRemoveAttachment(attached.length - index - 1));
+      submittingRef.current = true; setSubmitting(true); setSteeringError('');
+      const operation = intent === 'steer'
+        ? steering.submit(message, attached, promotion && inputs.generation !== null ? { promotedFrom: promotion, generation: inputs.generation } : undefined)
+        : inputs.submit(intent, message, attached, activeRunId, promotion);
+      void operation.then(input => {
+        if (!input || currentContext.current !== context) return;
+        accepted();
       }).catch(error => {
-        if (isChatRunNotFoundError(error)) {
-          setPendingNormalSend(value);
-          return;
-        }
-        setSteeringError(`Could not steer this run: ${error instanceof Error ? error.message : 'Unknown error'}. Your draft has been preserved.`);
-      });
+        if (currentContext.current === context) setSteeringError(`Could not ${intent === 'steer' ? 'steer this run' : intent === 'side_question' ? 'ask this side question' : 'queue this message'}: ${error instanceof Error ? error.message : 'Unknown error'}. Your draft has been preserved.`);
+      }).finally(() => { if (currentContext.current === context) { submittingRef.current = false; setSubmitting(false); } });
       return;
     }
-    onSend(value, () => {
-      setDraft('');
-      localDraftRef.current = '';
-      setLocalDraft('');
-    });
-  }, [onSend, setDraft, isSending, steeringReady, attached, steering, onRemoveAttachment, setPendingNormalSend]);
+    onSend(value, accepted);
+  }, [onSend, setDraft, explicitDelivery, intent, attached, steering, inputs, onRemoveAttachment, promotion, activeRunId, context, updateLocalDraft, exactTargetAvailable]);
+  const inputAction = useCallback((id: string, action: 'cancel' | 'resume') => {
+    setSteeringError('');
+    void inputs.action(id, action).catch(error => { if (currentContext.current === context) setSteeringError(`Could not ${action}: ${error instanceof Error ? error.message : 'Unknown error'}`); });
+  }, [inputs.action, context]);
 
   return <div className="chat-view">
-    <ChatTranscript selected={selected} parent={parent} operator={operator} isNewSession={isNewSession} turns={transcriptTurns} isLoading={isLoading} error={error} isSending={isSending} activeRunId={activeRunId} activeToolActivity={activeToolActivity} liveProgress={liveProgress} liveAnswer={liveAnswer} liveStage={liveStage} a2aActivities={a2aActivities} runtimeUserMessage={runtimeUserMessage} runtimeUserMessageMetadata={runtimeUserMessageMetadata} runtimeChildActivities={runtimeChildActivities} attachmentAgentId={resourceAgentId ?? selected.id} />
+    <ChatTranscript selected={selected} parent={parent} operator={operator} isNewSession={isNewSession} turns={transcriptTurns} isLoading={isLoading} error={error} isSending={isSending} activeRunId={activeRunId} activeToolActivity={activeToolActivity} liveProgress={liveProgress} liveAnswer={liveAnswer} liveStage={liveStage} a2aActivities={a2aActivities} runtimeUserMessage={runtimeUserMessage} runtimeUserMessageMetadata={runtimeUserMessageMetadata} runtimeChildActivities={runtimeChildActivities} attachmentAgentId={resourceAgentId ?? selected.id} chatInputs={inputs.inputs} onPromote={promote} onInputAction={inputAction} inputActionPending={inputs.pending} />
 
+    {intent !== 'queue_next' && !exactTargetAvailable && <p className="chat-promotion" role="status">The selected run is no longer active. Choose Queue next or select an intent for the current run.</p>}
+    {inputs.error && <p className="error" role="alert">{inputs.error}</p>}
+    {promotion && <div className="chat-promotion" role="status">Side answer staged for editing<button onClick={() => setPromotion(null)}>Remove link</button></div>}
     {steeringError && <p className="error" role="alert">{steeringError}</p>}
-    <ChatComposer draft={localDraft} setDraft={composerHistory.setDraft} attached={attached} onAttach={onAttach} onRemoveAttachment={onRemoveAttachment} disabled={false} sendDisabled={isSending && !steeringReady} steeringActive={isSending} onSend={sendLocalDraft} selectedAgentId={selectedAgentId} resourceAgentId={resourceAgentId} sessionId={sessionId} onCancel={onCancel} onKeyDown={composerHistory.onKeyDown} conversationTurns={turns} assistantName={selected.name} operatorName={operator.name} agentNames={new Map([[parent.id, parent.name], [selected.id, selected.name]])} placeholder={isNewSession ? `Message ${selected.name}…` : 'Message the active agent…'} />
+    <ChatComposer draft={localDraft} setDraft={composerHistory.setDraft} attached={attached} onAttach={onAttach} onRemoveAttachment={onRemoveAttachment} disabled={false} sendDisabled={submitting || (explicitDelivery && (intent === 'steer' ? !steeringReady || !exactTargetAvailable : intent === 'side_question' ? !exactTargetAvailable || inputs.generation === null : inputs.generation === null)) || Boolean(promotion && inputs.generation === null)} steeringActive={isSending} showIntent={explicitDelivery} busyIntent={intent} onIntentChange={chooseIntent} canSteer={Boolean(isSending && activeRunId && steeringReady)} canAskSide={Boolean(isSending && activeRunId)} onSend={sendLocalDraft} selectedAgentId={selectedAgentId} resourceAgentId={resourceAgentId} sessionId={sessionId} onCancel={onCancel} onKeyDown={composerHistory.onKeyDown} conversationTurns={transcriptTurns} assistantName={selected.name} operatorName={operator.name} agentNames={new Map([[parent.id, parent.name], [selected.id, selected.name]])} placeholder={isNewSession ? `Message ${selected.name}…` : 'Message the active agent…'} />
   </div>;
 }
 

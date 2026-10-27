@@ -9,9 +9,10 @@ type ChatStreamOptions = {
   requestBody: unknown;
   signal: AbortSignal;
   onEvent: (event: unknown) => void;
+  onAccepted?: () => void;
 };
 
-export async function streamChat({ requestBody, signal, onEvent }: ChatStreamOptions): Promise<ChatStreamResult> {
+export async function streamChat({ requestBody, signal, onEvent, onAccepted }: ChatStreamOptions): Promise<ChatStreamResult> {
   const response = await fetchApi('/api/chat', {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/x-ndjson' },
@@ -24,6 +25,7 @@ export async function streamChat({ requestBody, signal, onEvent }: ChatStreamOpt
     throw new Error(result ? answerFromChatResult(result) : `HTTP ${response.status}`);
   }
 
+  onAccepted?.();
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('application/x-ndjson') || !response.body) {
     return { terminalType: 'run.completed', finalResult: await response.json() };

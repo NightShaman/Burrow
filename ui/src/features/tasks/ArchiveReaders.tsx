@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useMemo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { markdownPlugins, MarkdownImage, MarkdownTable } from '../../app/markdownTables';
 import { generatedArtifactPath, textFromChatValue, type SessionTurn } from '../../app/api';
+import { chatInputLabel, reconcileChatInputs } from '../chat/chatInputs';
 import { ChatMessage } from '../chat/ChatTranscript';
 import { archiveDate, archiveSessionDate, dreamText } from './archiveDerivations';
 import type { ArchiveDetail, ArchiveSession, ContinuityCardGroup, DreamGroup } from './archiveTypes';
@@ -60,7 +61,7 @@ function archiveTurnSpeaker(turn: SessionTurn, sessionAgentName: string, agentNa
 export function archiveTurnText(turn: SessionTurn, sessionAgentName: string, agentNames: ReadonlyMap<string, string> = new Map(), operatorName = 'Operator') {
   const speaker = archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName);
   const text = textFromChatValue(turn.content);
-  const date = formatTurnDate(turn.ts);
+  const date = [formatTurnDate(turn.ts), turn.metadata?.chatInput ? chatInputLabel(turn.metadata.chatInput) : ''].filter(Boolean).join(' · ');
   const attachments = (turn.metadata?.attachments ?? []).map((item) => `- Attachment: ${item.name} (${item.type})${item.artifactPath ? ` — /api/attachments/${item.artifactPath}` : ''}`).join('\n');
   const artifacts = (turn.metadata?.outputArtifacts ?? []).map((item) => `- Generated ${item.kind}: ${item.name || item.storageReference || 'artifact'}${item.storageReference ? ` — ${generatedArtifactPath(turn.metadata?.fromAgentId || '', item.storageReference)}` : ''}`).join('\n');
   const body = [text, attachments, artifacts].filter(Boolean).join('\n\n');
@@ -115,7 +116,7 @@ export function ChatArchiveReader({ session, detail, loading, error, earlierLoad
     pendingScroll.current = null;
     if (readerRef.current) readerRef.current.scrollTop = readerRef.current.scrollHeight;
   }, [activeSession]);
-  const turns = detail?.session?.turns || detail?.turns || detail?.chatTurns || [];
+  const turns = useMemo(() => reconcileChatInputs(detail?.session?.turns || detail?.turns || detail?.chatTurns || [], []), [detail]);
   useLayoutEffect(() => {
     const node = readerRef.current;
     if (!node || !detail || loading) return;
@@ -146,7 +147,7 @@ export function ChatArchiveReader({ session, detail, loading, error, earlierLoad
           {earlierError ? <div><span>Earlier messages could not be loaded: {earlierError}</span> <button type="button" onClick={load}>Retry</button> <button type="button" onClick={onRestart}>Restart from latest</button></div> : null}
         </div>
         <div className="archive-reader-summary">{session.summary || 'A mysterious little shelf item.'}</div>
-        {turns.length ? turns.map((turn, index) => { const role = ['user', 'operator', 'human'].includes((turn.role || '').toLowerCase()) ? 'operator' : 'agent'; const text = textFromChatValue(turn.content); const artifacts = turn.metadata?.outputArtifacts ?? []; const attachments = turn.metadata?.attachments ?? []; const ownerId = attachmentAgentId || turn.metadata?.fromAgentId || session.agentId || ''; return <article className={`archive-turn ${role}`} key={`${turn.ts || 'turn'}-${index}`}><div className="archive-turn-meta"><strong>{archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName)}</strong><span>{formatTurnDate(turn.ts)}</span></div>{text ? <div className="archive-turn-body"><ReactMarkdown remarkPlugins={markdownPlugins} components={{ table: MarkdownTable, img: MarkdownImage }}>{text}</ReactMarkdown></div> : null}{attachments.length || artifacts.length ? <ChatMessage side={role} name={archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName)} avatar="" time={formatTurnDate(turn.ts)} text="" attachments={attachments} outputArtifacts={artifacts} attachmentAgentId={ownerId} /> : null}</article>; }) : <p className="archive-reader-empty">This conversation has no readable chat turns.</p>}
+        {turns.length ? turns.map((turn, index) => { const role = ['user', 'operator', 'human'].includes((turn.role || '').toLowerCase()) ? 'operator' : 'agent'; const text = textFromChatValue(turn.content); const artifacts = turn.metadata?.outputArtifacts ?? []; const attachments = turn.metadata?.attachments ?? []; const ownerId = attachmentAgentId || turn.metadata?.fromAgentId || session.agentId || ''; return <article className={`archive-turn ${role}`} key={`${turn.ts || 'turn'}-${index}`}><div className="archive-turn-meta"><strong>{archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName)}</strong><span>{formatTurnDate(turn.ts)}{turn.metadata?.chatInput ? ` · ${chatInputLabel(turn.metadata.chatInput)}` : ''}</span></div>{text ? <div className="archive-turn-body"><ReactMarkdown remarkPlugins={markdownPlugins} components={{ table: MarkdownTable, img: MarkdownImage }}>{text}</ReactMarkdown></div> : null}{attachments.length || artifacts.length ? <ChatMessage side={role} name={archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName)} avatar="" time={formatTurnDate(turn.ts)} text="" attachments={attachments} outputArtifacts={artifacts} attachmentAgentId={ownerId} /> : null}</article>; }) : <p className="archive-reader-empty">This conversation has no readable chat turns.</p>}
       </div> : null}
     </div>
   </>;

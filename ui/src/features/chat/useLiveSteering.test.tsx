@@ -46,3 +46,14 @@ it('does not leak a late acceptance into another session', async () => {
  await act(async () => {resolve({steering:input}); expect(await pending).toBeNull();});
  expect(result.current.inputs).toEqual([]); unmount();
 });
+it('ignores old A visit acceptance after A→B→A', async () => {
+ const {result,rerender,unmount} = renderHook(({session}) => useLiveSteering('agent',session,'run'),{initialProps:{session:'A'}});
+ await waitFor(()=>expect(api).toHaveBeenCalled());
+ let resolve!: (v: unknown)=>void;
+ vi.mocked(api).mockImplementationOnce(()=>new Promise(r=>{resolve=r;}) as ReturnType<typeof api>);
+ let old!: ReturnType<typeof result.current.submit>;
+ act(()=>{old=result.current.submit('old',[]);});
+ rerender({session:'B'});rerender({session:'A'});
+ await act(async()=>{resolve({steering:input});expect(await old).toBeNull();});
+ expect(result.current.inputs).toEqual([]);unmount();
+});
