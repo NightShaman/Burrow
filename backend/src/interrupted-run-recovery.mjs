@@ -15,6 +15,7 @@ export async function recordActiveRunInterruptions({ stores = null, activeRuns, 
   const records = activeRuns instanceof Map ? [...activeRuns.values()] : Array.isArray(activeRuns) ? activeRuns : [];
   const settled = await Promise.allSettled(records.map(async (record) => {
     if (!record?.agentId || !record?.sessionId || !record?.runId) return null;
+    if (record.lane === 'side_question') { record.controller?.abort?.(new Error(reason)); return null; }
     const runtime = await resolveAgentRuntime(record.agentId);
     const authority = authorityFactory({ store: stores.conversations, agentId: record.agentId });
     const generation = Number.isSafeInteger(record.generation) ? record.generation : null;

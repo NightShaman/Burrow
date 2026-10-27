@@ -49,9 +49,10 @@ export class PostgresLiveRunSteering {
   async submit(args) {
     const ids = identity(args), { idempotencyKey, message, attachments = [] } = args;
     if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim()) throw Object.assign(new Error('idempotency_key_required'), { statusCode: 400 });
-    const payload = { message, attachments };
+    const payload = { message, attachments, ...(args.promotedFrom ? { promotedFrom: args.promotedFrom } : {}) };
     return withPostgresTransaction(this.pool, async client => {
       const run = await this.lock(client, ids);
+      if (args.generation !== undefined && Number(run.generation) !== args.generation) throw Object.assign(new Error('chat_input_generation_conflict'),{statusCode:409});
       if (run.reset) throw Object.assign(new Error('chat_run_session_reset'), { statusCode: 409 });
       const prior = await client.query('SELECT * FROM chat_steering_inputs WHERE agent_id=$1 AND session_id=$2 AND run_id=$3 AND idempotency_key=$4', [...ids,idempotencyKey]);
       if (prior.rows.length) {
@@ -93,7 +94,7 @@ export class PostgresLiveRunSteering {
         row.providerMessages = providerMessages;
         if (!finish) {
           const delivered = { id: randomUUID(), sessionId: ids[1], type: 'message', role: 'user', content: row.payload.message,
-            timestamp: now, runId: ids[2], visibility: 'debug', entersPrompt: true, metadata: { steering: { id: row.input_id, runId: ids[2], status }, providerTurn: { version: 1, messages: providerMessages } } };
+            timestamp: now, runId: ids[2], visibility: 'debug', entersPrompt: true, metadata: { steering: { id: row.input_id, runId: ids[2], status, ...(row.payload.promotedFrom ? { promotedFrom: row.payload.promotedFrom } : {}) }, providerTurn: { version: 1, messages: providerMessages } } };
           await client.query(`INSERT INTO conversation_entries(agent_id,session_id,entry_id,entry,created_at) VALUES($1,$2,$3,$4::json,$5)`, [ids[0],ids[1],delivered.id,JSON.stringify(delivered),now]);
         }
         if (!run.reset) await event(client, ids, view(row), status, now);

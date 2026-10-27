@@ -1,3 +1,4 @@
+import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
 import { migrationLockKey } from './postgres-foundation.mjs';
 import { RECOVERY_TRANSCRIPT_MAX_MESSAGES, assessInterruptedRunRecovery } from './recovery-resume-policy.mjs';
 import { isChatMessage } from './session-entry.mjs';
@@ -14,15 +15,15 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
  const matches = (head,args,state='running') => head?.state===state && head.runId===String(args.runId) && Number(head.generation)===Number(args.generation) && head.ownerId===ownerId;
  const updateMetadata = async args => {
   await owner.ready();
-  return state.update({...args, update: async metadata => {
+  return state.update({...args, update: async (metadata,client) => {
    await owner.ready();
-   return args.update(metadata);
+   return args.update(metadata,client);
   }});
  };
  return {
   async close() { await owner.close(); },
   async reconcile({sessionId}) {
-   const transcript=(await store.projection({...scope(sessionId),visibility:'chat',limit:RECOVERY_TRANSCRIPT_MAX_MESSAGES})).filter(isChatMessage);
+   const transcript=(await store.projection({...scope(sessionId),visibility:'chat',limit:RECOVERY_TRANSCRIPT_MAX_MESSAGES,predicate:isChatMessage})).filter(isChatMessage);
    await updateMetadata({...scope(sessionId),update:async metadata=>{
     const head=metadata.continuityHead, queue=metadata.recoveryQueue;
     const abandoned=head && ['running','finalizing'].includes(head.state) && head.ownershipProtocol==='postgres-session-lock-v1' && !(await owner.alive(head.ownerId));
@@ -44,10 +45,15 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
   },
   async read({sessionId}) {return (await state.read(sessionId))?.continuityHead || null;},
   async current(args) {await owner.ready();return matches(await this.read(args),args);},
-  async claim({sessionId,runId,objective=null}) {
+  async claim({sessionId,runId,objective=null,expectedResetGeneration,chatInputId}) {
    await this.reconcile({sessionId});
    let result;
-   await updateMetadata({...scope(sessionId),update:metadata=>{
+   await updateMetadata({...scope(sessionId),update:async (metadata,client)=>{
+    if(expectedResetGeneration!==undefined && Number(metadata.resetGeneration||0)!==expectedResetGeneration) throw Object.assign(new Error('chat_input_generation_conflict'),{statusCode:409});
+    if(chatInputId){
+     const input=await client.query("SELECT i.status,i.generation,i.cancel_requested,(h.held AND h.generation=i.generation) AS held FROM chat_inputs i LEFT JOIN chat_input_sessions h USING(agent_id,session_id) WHERE i.id=$1 AND i.agent_id=$2 AND i.session_id=$3 AND i.run_id=$4",[chatInputId,agentId,sessionId,runId]);
+     if(!input.rows[0] || input.rows[0].status!=='running' || Number(input.rows[0].generation)!==Number(metadata.resetGeneration||0) || input.rows[0].held || input.rows[0].cancel_requested) throw Object.assign(new Error('chat_input_not_admitted'),{statusCode:409});
+    }
     const prior=metadata.continuityHead;
     // Never infer remote owner death from local PID state. Recovery must explicitly close it.
     const recovery=metadata.recoveryQueue;
@@ -56,12 +62,12 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
     if(uncertain){result={...prior,current:false,reason:'active_or_abandoned_owner_requires_reconciliation'};return metadata;}
     const head={version:1,sessionId,ownerId,ownershipProtocol:'postgres-session-lock-v1',objective,processId:process.pid,generation:Number(prior?.generation||0)+1,runId:String(runId),latestRunId:prior?.latestRunId||metadata.lastRunId||null,state:'running',claimedAt:clock(),completedAt:null};
     result={...head,current:true,recoveryManifest:metadata.interruptedRun||null};
-    return {...metadata,continuityHead:head};
+    return {...metadata,continuityHead:head,...(chatInputId && recovery?.status==='pending' && !recovery.autoResume ? {recoveryQueue:{...recovery,status:'running',claimedByRunId:String(runId),manualInputId:chatInputId,ownerId,ownershipProtocol:'postgres-session-lock-v1',autoResume:false}} : {})};
    }});return result;
   },
   async interrupt(args) {
    let manifest;
-   const assessment=await assessInterruptedRunRecovery({sessionId:args.sessionId,manifest:args,readChatMessages:async({limit})=>(await store.projection({...scope(args.sessionId),visibility:'chat',limit})).filter(isChatMessage)});
+   const assessment=await assessInterruptedRunRecovery({sessionId:args.sessionId,manifest:args,readChatMessages:async({limit})=>(await store.projection({...scope(args.sessionId),visibility:'chat',limit,predicate:isChatMessage})).filter(isChatMessage)});
    await updateMetadata({...scope(args.sessionId),update:metadata=>{
     const head=metadata.continuityHead;
     manifest={version:1,sessionId:args.sessionId,runId:args.runId,generation:args.generation,status:'interrupted',reason:args.reason,interruptedAt:clock(),objective:args.objective||null,lastCompletedStep:args.lastCompletedStep||null,pendingVerification:args.pendingVerification||[],changedFiles:args.changedFiles||[],traceRef:args.traceRef||null};
@@ -132,7 +138,11 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
    await updateMetadata({...scope(args.sessionId),update:metadata=>{
     if(!matches(metadata.continuityHead,args,'finalizing')){head=metadata.continuityHead;return metadata;}
     const at=clock();head={...metadata.continuityHead,state:'completed',latestRunId:String(args.runId),completedAt:at};completed=true;
-    return {...metadata,continuityHead:head,completedAt:at,retentionEligibleAt:at};
+    const manualRecovery=metadata.recoveryQueue?.manualInputId && metadata.recoveryQueue.claimedByRunId===String(args.runId);
+    const recovered=classifyRuntimeOutcome(value || {}).ok;
+    return {...metadata,continuityHead:head,completedAt:at,retentionEligibleAt:at,...(manualRecovery ? {
+      recoveryQueue:{...metadata.recoveryQueue,status:recovered?'completed':'failed',autoResume:false,completedAt:at,result:value?.decision || (recovered?'completed':'failed')},
+      ...(recovered && metadata.interruptedRun ? {interruptedRun:{...metadata.interruptedRun,status:'recovered',recoveredByRunId:String(args.runId)}} : {})} : {})};
    }});
    return {ok:completed,stale:!completed,head,value};
    }, migrationLockKey(`burrow-session-boundary:${JSON.stringify([agentId,args.sessionId])}`));

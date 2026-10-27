@@ -175,7 +175,7 @@ function multimodalUserMessages(promptText, images = [], baseMessages = []) {
   }];
 }
 
-function modelInputForPlainTurn({ promptText, promptMessages = null, attachments = [], modelConfig = null, modelAdapter = null } = {}) {
+export function modelInputForPlainTurn({ promptText, promptMessages = null, attachments = [], modelConfig = null, modelAdapter = null } = {}) {
   const images = imageAttachments(attachments);
   const messages = Array.isArray(promptMessages) && promptMessages.length ? promptMessages : null;
   if (!images.length) return { prompt: messages ? null : promptText, messages, imageCount: 0, images, vision: false, fallback: false };

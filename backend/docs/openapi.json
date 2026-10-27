@@ -258,7 +258,7 @@
         ],
         "summary": "Run one chat turn",
         "operationId": "runChat",
-        "description": "May return a normal JSON response or an NDJSON stream depending on request headers and runtime behavior. The streaming event contract is intentionally separate from this REST document.",
+        "description": "May return a normal JSON response or an NDJSON stream depending on request headers and runtime behavior. The streaming event contract is intentionally separate from this REST document. When the main session is busy or has queued/held/running queue_next inputs, normal admission returns 409 chat_session_busy_use_explicit_intent; choose an explicit busy-chat intent.",
         "requestBody": {
           "$ref": "#/components/requestBodies/ChatRequest"
         },
@@ -270,6 +270,185 @@
             "$ref": "#/components/responses/ErrorResponse"
           },
           "401": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "409": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/api/chat/inputs": {
+      "get": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "List current-generation chat inputs",
+        "operationId": "listChatInputs",
+        "description": "Returns all durable inputs in accepted order for the selected agent/session and the current reset generation. Only side snapshot metadata is public; captured transcript and profile content are not returned. See docs/busy-chat-inputs.md.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          },
+          {
+            "$ref": "#/components/parameters/SessionId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/ChatInputListResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "Submit an explicit busy-chat input",
+        "operationId": "submitChatInput",
+        "description": "Durably accept queue_next or side_question without waiting for execution. A side question targets an exact active main run and captures an immutable snapshot. Retry the same normalized request with the same key; do not automatically switch intent. See docs/busy-chat-inputs.md.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatInputRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "$ref": "#/components/responses/ChatInputResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "409": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "413": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/api/chat/inputs/{inputId}/cancel": {
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "Cancel a durable chat input",
+        "operationId": "cancelChatInput",
+        "description": "Cancel queued or held input, or request cancellation of running input. Cancelling a running queue_next input holds the whole main queue; cancelling a side question does not. A terminal input is returned unchanged.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathInputId"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatInputActionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/ChatInputResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "409": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/api/chat/inputs/{inputId}/resume": {
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "Resume a held main queue",
+        "operationId": "resumeChatInput",
+        "description": "Requires an input currently held in the selected session and generation; clears the session hold and resumes all held queue_next inputs in FIFO order. Does not restart a cancelled input.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathInputId"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatInputActionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/ChatInputResumeResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "409": {
             "$ref": "#/components/responses/ErrorResponse"
           },
           "500": {
@@ -331,7 +510,8 @@
           "404": {
             "$ref": "#/components/responses/ErrorResponse"
           }
-        }
+        },
+        "description": "Supplying the exact agentId of an active main run stops that run and holds its session main queue, including future queue_next submissions, until explicitly resumed. Omitting agentId uses legacy unique-run lookup but does not establish the queue hold. Stopping a side question does not hold the main queue."
       }
     },
     "/api/sessions": {
@@ -6352,7 +6532,7 @@
         ],
         "summary": "Append user steering to an existing run",
         "operationId": "steerChatRun",
-        "description": "Append-only steering is consumed at the next model boundary of the same run. A terminal race retains follow_up input without starting a run. See docs/live-run-steering.md.",
+        "description": "Append-only steering is consumed at the next model boundary of the same main run. A terminal race retains follow_up input without starting or restarting a run. Optional generation fences stale state; optional promotedFrom links an explicitly edited instruction to a succeeded side question in the same agent/session/generation. See docs/live-run-steering.md.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PathRunId"
@@ -6385,12 +6565,14 @@
               "schema": {
                 "type": "object",
                 "required": [
-                  "message",
+                  "agentId",
                   "idempotencyKey"
                 ],
                 "properties": {
                   "agentId": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Explicit agent ID for steering; unlike busy-chat inputs this route requires it."
                   },
                   "sessionId": {
                     "type": "string",
@@ -6406,12 +6588,23 @@
                   "attachments": {
                     "type": "array",
                     "items": {
-                      "type": "object",
-                      "additionalProperties": true
+                      "$ref": "#/components/schemas/ChatAttachment"
                     }
+                  },
+                  "generation": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "Session reset generation. Optional for compatibility; clients should send the generation returned by GET to fence stale actions."
+                  },
+                  "promotedFrom": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Optional source side-question input ID; send the edited instruction explicitly in message/attachments."
                   }
                 },
-                "additionalProperties": false
+                "additionalProperties": false,
+                "description": "Supply a nonblank message or at least one normalized attachment. Steering is explicit and never falls back to a new or queued run."
               }
             }
           }
@@ -6431,7 +6624,14 @@
             "$ref": "#/components/parameters/PathRunId"
           },
           {
-            "$ref": "#/components/parameters/AgentId"
+            "name": "agentId",
+            "in": "query",
+            "required": true,
+            "description": "Explicit agent ID for the selected run.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
           },
           {
             "$ref": "#/components/parameters/SessionId"
@@ -8132,6 +8332,16 @@
         "schema": {
           "type": "string"
         }
+      },
+      "PathInputId": {
+        "name": "inputId",
+        "in": "path",
+        "required": true,
+        "description": "Durable chat input UUID in the selected agent/session generation.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
       }
     },
     "requestBodies": {
@@ -9193,6 +9403,36 @@
             }
           }
         }
+      },
+      "ChatInputResponse": {
+        "description": "Durable input accepted or cancellation observed. Acceptance is not completion.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ChatInputResponse"
+            }
+          }
+        }
+      },
+      "ChatInputListResponse": {
+        "description": "Current-generation public input projections; raw snapshot and profile contents are excluded.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ChatInputListResponse"
+            }
+          }
+        }
+      },
+      "ChatInputResumeResponse": {
+        "description": "Session queue hold released and held inputs resumed.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ChatInputResumeResponse"
+            }
+          }
+        }
       }
     },
     "schemas": {
@@ -10082,7 +10322,64 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": true,
+              "properties": {
+                "runId": {
+                  "type": "string"
+                },
+                "agentId": {
+                  "type": "string"
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "lane": {
+                  "type": "string",
+                  "enum": [
+                    "main",
+                    "side_question"
+                  ],
+                  "description": "Execution lane, independent of the source field."
+                },
+                "inputId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Present for a run originating from a durable chat input."
+                },
+                "source": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Origin of the run, such as queue_next, side_question, or another registered run source."
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "running",
+                    "cancelling"
+                  ]
+                },
+                "phase": {
+                  "type": "string"
+                },
+                "startedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "steeringReady": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "runId",
+                "agentId",
+                "sessionId",
+                "lane"
+              ]
             }
           }
         },
@@ -14743,6 +15040,424 @@
             "$ref": "#/components/schemas/CompletionEventSettings"
           }
         }
+      },
+      "ChatInputRequest": {
+        "type": "object",
+        "required": [
+          "intent",
+          "idempotencyKey"
+        ],
+        "description": "Supply a nonblank message or an inline attachment. A side question needs message text for its answer and an exact active main targetRunId. The client should send the current generation.",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "description": "Selected agent; omit to use the server-selected agent."
+          },
+          "sessionId": {
+            "type": "string",
+            "default": "default"
+          },
+          "intent": {
+            "type": "string",
+            "enum": [
+              "queue_next",
+              "side_question"
+            ],
+            "description": "Explicit intent. No inference or fallback to steering or a different intent."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stable client-generated key for retries, scoped to agent, session, and generation."
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Session reset generation. Optional for compatibility; clients should send the generation returned by GET to fence stale actions."
+          },
+          "targetRunId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Required for a new side_question; exact currently active main run in this agent and session. An idempotent retry can replay after that run ends."
+          },
+          "message": {
+            "type": "string",
+            "description": "User text. A side question with no message text can be accepted if it has an attachment, but its side execution fails."
+          },
+          "attachments": {
+            "type": "array",
+            "description": "Inline attachments normalized as for chat. Current side-question attachments use normal text/native-image handling; historical attachments in a snapshot are only represented by manifest counts.",
+            "items": {
+              "$ref": "#/components/schemas/ChatAttachment"
+            }
+          },
+          "promotedFrom": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional succeeded side_question input ID in the same agent/session/generation; the operator supplies edited text/attachments explicitly."
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "intent": {
+                  "const": "side_question"
+                }
+              },
+              "required": [
+                "intent"
+              ]
+            },
+            "then": {
+              "required": [
+                "targetRunId"
+              ],
+              "properties": {
+                "targetRunId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ChatInputActionRequest": {
+        "type": "object",
+        "description": "Select the same agent and session as the input. Clients should send the generation returned by GET to fence reset races.",
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string",
+            "default": "default"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Session reset generation. Optional for compatibility; clients should send the generation returned by GET to fence stale actions."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChatInputAttachment": {
+        "type": "object",
+        "description": "Normalized inline attachment included in the public input record, including content.",
+        "required": [
+          "name",
+          "type",
+          "size",
+          "encoding",
+          "content"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "size": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "encoding": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChatInputSnapshotMetadata": {
+        "type": "object",
+        "description": "Immutable header of the original side-question snapshot. The raw captured conversation and profile are not returned.",
+        "required": [
+          "id",
+          "capturedAt",
+          "originRunId",
+          "phase",
+          "entryCount"
+        ],
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "capturedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "originRunId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phase": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entryCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChatInputResult": {
+        "type": "object",
+        "description": "Terminal runner projection; acceptance is not success.",
+        "required": [
+          "ok",
+          "answerText",
+          "decision",
+          "blockers"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "answerText": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "decision": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "blockers": {
+            "type": "array",
+            "items": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChatInput": {
+        "type": "object",
+        "description": "Public durable chat input; snapshot is metadata only, while submitted message and normalized attachments are returned.",
+        "required": [
+          "id",
+          "intent",
+          "status",
+          "agentId",
+          "sessionId",
+          "generation",
+          "targetRunId",
+          "runId",
+          "createdAt",
+          "startedAt",
+          "completedAt",
+          "message",
+          "attachments",
+          "result",
+          "error",
+          "snapshot",
+          "cancelRequested",
+          "promotedFrom",
+          "position"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "intent": {
+            "type": "string",
+            "enum": [
+              "queue_next",
+              "side_question"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "held",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "interrupted"
+            ]
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "targetRunId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "message": {
+            "type": "string"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatInputAttachment"
+            }
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatInputResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "snapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatInputSnapshotMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cancelRequested": {
+            "type": "boolean",
+            "description": "For running work, cancellation is requested before terminal status is recorded."
+          },
+          "promotedFrom": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "1-based FIFO position among queued/held main inputs, otherwise null."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChatInputResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "input"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "input": {
+            "$ref": "#/components/schemas/ChatInput"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChatInputListResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "generation",
+          "inputs"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatInput"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChatInputResumeResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "input",
+          "inputs"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "input": {
+            "$ref": "#/components/schemas/ChatInput"
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatInput"
+            },
+            "description": "All held inputs transitioned by this resume, in accepted order."
+          }
+        },
+        "additionalProperties": false
       }
     },
     "securitySchemes": {

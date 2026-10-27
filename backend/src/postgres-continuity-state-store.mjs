@@ -65,7 +65,7 @@ export function continuityStateStore(store, agentId, clock) {
     const session=await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE',[agentId,sessionId]);
     const { rows }=await client.query('SELECT head,manifest,queue FROM continuity_state WHERE agent_id=$1 AND session_id=$2',[agentId,sessionId]);
     const before={...session.rows[0].metadata,...stateMetadata(rows[0])};
-    const next=await update(before);
+    const next=await update(before,client);
     const head=next.continuityHead,manifest=next.interruptedRun,queue=next.recoveryQueue;
     if (payload(head)!==payload(before.continuityHead) || payload(manifest)!==payload(before.interruptedRun) || payload(queue)!==payload(before.recoveryQueue)) {
      await client.query(`INSERT INTO continuity_state(agent_id,session_id,head,manifest,queue,head_state,owner_id,queue_status,auto_resume,queued_at,updated_at)

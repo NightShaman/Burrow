@@ -18,6 +18,7 @@ function statusFor({ receipt = null, evidence = null, answer = null } = {}) {
   if (!receipt) return answer ? 'unverified' : 'incomplete';
   const decision = text(receipt?.decision);
   if (['model_failed', 'incomplete', 'failed'].includes(decision)) return 'failed';
+  if (['cancelled','interrupted'].includes(decision)) return 'warning';
   if (failureEvidence(evidence).length || unresolvedEvidence(evidence).length) return 'warning';
   if (answer && /^\[model_error:/u.test(text(answer.content))) return 'failed';
   return 'completed';
@@ -222,6 +223,8 @@ function terminalSummary(receipt = null, status = 'completed') {
   if (status === 'unverified') return 'Run has an assistant response but no terminal runtime receipt; outcome is unverified.';
   if (status === 'incomplete') return 'Run ended without an assistant response or terminal runtime receipt; no outcome was recorded.';
   const decision = text(receipt?.decision);
+  if (decision === 'cancelled') return 'Run cancelled.';
+  if (decision === 'interrupted') return 'Run interrupted.';
   if (status === 'failed') return decision === 'model_failed' ? 'Run failed: the model did not complete.' : 'Run failed.';
   if (status === 'warning') return 'Run completed with unresolved issues.';
   if (decision === 'answered') return 'Run completed.';

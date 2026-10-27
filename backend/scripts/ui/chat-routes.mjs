@@ -1,5 +1,18 @@
-export function createChatRoutes({ handleChat, readJsonBody, sendJson, selectedAgentRuntime, cancelChatRun, steerChatRun, listChatSteering } = {}) {
+export function createChatRoutes({ handleChat, readJsonBody, sendJson, selectedAgentRuntime, cancelChatRun, steerChatRun, listChatSteering, chatInputs = null } = {}) {
   return async function handleChatRoute({ req, res, url } = {}) {
+    if (chatInputs && url.pathname === '/api/chat/inputs' && ['GET','POST'].includes(req.method)) {
+      try {
+        const body = req.method === 'POST' ? await readJsonBody(req) : Object.fromEntries(url.searchParams);
+        sendJson(res, req.method === 'POST' ? 202 : 200, await chatInputs[req.method === 'POST' ? 'submit' : 'list'](body));
+      } catch(error) { sendJson(res, error.statusCode || 500, { ok:false, error:String(error.message || error) }); }
+      return true;
+    }
+    const inputAction = url.pathname.match(/^\/api\/chat\/inputs\/([^/]+)\/(cancel|resume)$/);
+    if (chatInputs && inputAction && req.method === 'POST') {
+      try { sendJson(res, 200, await chatInputs.action(decodeURIComponent(inputAction[1]), inputAction[2], await readJsonBody(req))); }
+      catch(error) { sendJson(res, error.statusCode || 500, { ok:false, error:String(error.message || error) }); }
+      return true;
+    }
     if (req.method === 'POST' && url.pathname === '/api/chat') return await handleChat(req, res) || true;
     const steeringRoute = url.pathname.match(/^\/api\/chat\/([^/]+)\/(steer|steering)$/);
     if (steeringRoute && ((req.method === 'POST' && steeringRoute[2] === 'steer') || (req.method === 'GET' && steeringRoute[2] === 'steering'))) {

@@ -97,11 +97,11 @@ export function chatTurnInputFromBody({ body = {}, rootDir, dataRoot, agentDataR
   };
 }
 
-export async function runChatTurnFromBody({ contextBoundary = null, attachmentInput = null, body = {}, rootDir, dataRoot, agentDataRoot, agentRuntime = null, resolveAgentRuntime = null, stores = null, groupChannelContext = null, turnSource = null, externalTurnMetadata = null, completionEvent = null, latencyTiming = null, telemetry = null, parentTraceContext = null, runSource = null, onTraceRecord = null, onModelTextDelta = null, onModelThoughtDelta = null, onModelContextUsage = null, onSteeringReady = null, registerNestedAgentRun = null, cancellationGraceMs = null, onCancellationDeadline = null } = {}) {
+export async function runChatTurnFromBody({ contextBoundary = null, attachmentInput = null, body = {}, rootDir, dataRoot, agentDataRoot, agentRuntime = null, resolveAgentRuntime = null, stores = null, groupChannelContext = null, turnSource = null, externalTurnMetadata = null, completionEvent = null, chatInput = null, latencyTiming = null, telemetry = null, parentTraceContext = null, runSource = null, onTraceRecord = null, onModelTextDelta = null, onModelThoughtDelta = null, onModelContextUsage = null, onSteeringReady = null, registerNestedAgentRun = null, cancellationGraceMs = null, onCancellationDeadline = null } = {}) {
   // Internal group producer supplies validated byte-bearing attachments, not client references.
   const input = chatTurnInputFromBody({ body: attachmentInput ? { ...body, attachments: attachmentInput } : body, rootDir, dataRoot, agentDataRoot, agentRuntime });
   if (attachmentInput) input.args.attachments = attachmentInput;
-  return runChatTurn({ ...input, contextBoundary, agentRuntime, resolveAgentRuntime, stores, groupChannelContext, turnSource, externalTurnMetadata, completionEvent, latencyTiming, telemetry, parentTraceContext, runSource, onTraceRecord, onModelTextDelta, onModelThoughtDelta, onModelContextUsage, onSteeringReady, registerNestedAgentRun, cancellationGraceMs, onCancellationDeadline });
+  return runChatTurn({ ...input, contextBoundary, agentRuntime, resolveAgentRuntime, stores, groupChannelContext, turnSource, externalTurnMetadata, completionEvent, chatInput, latencyTiming, telemetry, parentTraceContext, runSource, onTraceRecord, onModelTextDelta, onModelThoughtDelta, onModelContextUsage, onSteeringReady, registerNestedAgentRun, cancellationGraceMs, onCancellationDeadline });
 }
 
 

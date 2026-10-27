@@ -1,3 +1,4 @@
+import { fenceChatInputsForReset } from './postgres-chat-input-store.mjs';
 import { matchCompactionOccurrences, COMPACTION_COPY_BATCH_SIZE } from './postgres-compaction.mjs';
 import { POSTGRES_COMPACTION_PROJECTIONS_SQL } from './postgres-compaction-projections.mjs';
 import { POSTGRES_OPERATOR_INSTANT_SQL } from './postgres-operator-instant.mjs';
@@ -1053,7 +1054,7 @@ export class PostgresSessionStore {
     return { entries, olderCursor: hasMore ? String(entries[0].sequence) : null };
   }
 
-  async projection({ agentId, sessionId, visibility, limit }) {
+  async projection({ agentId, sessionId, visibility, limit, predicate = null }) {
     // Never invoke PostgreSQL JSON extraction on the entry: even extracting an
     // unrelated field decodes escaped NUL and fails with 22P05. Scan newest first
     // in bounded batches so the limit applies *after* visibility filtering.
@@ -1064,7 +1065,7 @@ export class PostgresSessionStore {
         WHERE agent_id=$1 AND session_id=$2 AND ($3::bigint IS NULL OR sequence<$3::bigint)
         ORDER BY sequence DESC LIMIT $4`, [aid, sid, before, 256]);
       for (const row of result.rows) {
-        if (row.entry.visibility === visibility) matches.push(rowEntry(row));
+        if (row.entry.visibility === visibility && (!predicate || predicate(row.entry))) matches.push(rowEntry(row));
         if (matches.length === size) break;
       }
       if (result.rows.length < 256) break;
@@ -1398,6 +1399,12 @@ export class PostgresSessionStore {
         await client.query(`UPDATE conversation_sessions SET metadata=jsonb_set(metadata,'{contextIsolation,historyReset}','true'::jsonb),updated_at=$3
           WHERE agent_id=$1 AND session_id=$2`, [agentId, freshExecutionSessionId, now]);
       }
+      // Fence accepted input ownership in the same transaction as archival. A
+      // submission racing reset either belongs to this archived generation or
+      // the next one; it can never become invisible pending work.
+      if ((await client.query("SELECT to_regclass('chat_inputs') AS relation")).rows[0].relation) {
+        await fenceChatInputsForReset(client, { agentId, sessionId:sid, generation:Number(prior.resetGeneration || 0), now });
+      }
       // Keep the head generation monotonic, but revoke all old ownership and recovery.
       await client.query(`UPDATE continuity_state SET head=(head::jsonb || jsonb_build_object('state','reset','ownerId',NULL))::json,
         head_state='reset',owner_id=NULL,manifest=NULL,queue=NULL,queue_status=NULL,auto_resume=false,queued_at=NULL,updated_at=$3
@@ -1426,10 +1433,11 @@ export class PostgresSessionStore {
           FROM conversation_entries e WHERE e.agent_id=$1 AND e.session_id=$2
         ) occurrences`, [agentId, sid, generation - 1, prior.resetGeneration ?? null])).rows[0].count) : null;
       if (archiveId) await client.query('INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)', [agentId, sid, archiveId, generation - 1, 'reset', JSON.stringify({ ...prior, ...metadata, archiveTranscriptTurnCount }), now]);
+      const resetProofColumn = await this.hasProofProjection(client) ? ',run_key' : '';
       if (archiveId) await client.query(`INSERT INTO conversation_archive_entries
-        (agent_id,session_id,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation,entry_id,idempotency_key)
+        (agent_id,session_id,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation,entry_id,idempotency_key${resetProofColumn})
         SELECT agent_id,session_id,'archive',$3,sequence,to_json(entry_id)::text,entry,
-          COALESCE(burrow_json_member(entry,'content')::text,''),created_at,$4,$5,entry_id,idempotency_key
+          COALESCE(burrow_json_member(entry,'content')::text,''),created_at,$4,$5,entry_id,idempotency_key${resetProofColumn}
         FROM conversation_entries WHERE agent_id=$1 AND session_id=$2`, [agentId,sid,archiveId,'reset',generation-1]);
       await client.query('DELETE FROM conversation_entries WHERE agent_id=$1 AND session_id=$2', [agentId, sid]);
       const next = { ...prior, ...metadata, generation, resetGeneration: generation, archived: false, resetAt: now, archiveId, turnCount: 0, chatTurnCount: 0 };
@@ -1514,6 +1522,12 @@ export class PostgresSessionStore {
       // Mutable ownership and citations follow the new identity; original JSON
       // entries/archives above remain byte-for-byte lexical evidence.
       const exists = async name => (await client.query('SELECT to_regclass($1) AS relation',[name])).rows[0].relation !== null;
+      if (await exists('chat_inputs')) {
+        const running = await client.query("SELECT 1 FROM chat_inputs WHERE agent_id=$1 AND session_id=$2 AND status='running' LIMIT 1",[agentId,source]);
+        if (running.rows.length) throw Object.assign(new Error('session_busy_chat_inputs'),{statusCode:409});
+        await client.query('UPDATE chat_inputs SET session_id=$3 WHERE agent_id=$1 AND session_id=$2',[agentId,source,target]);
+      }
+      if (await exists('chat_input_sessions')) await client.query('UPDATE chat_input_sessions SET session_id=$3 WHERE agent_id=$1 AND session_id=$2',[agentId,source,target]);
       if (await exists('conversation_project_bindings')) await client.query('UPDATE conversation_project_bindings SET session_id=$3 WHERE agent_id=$1 AND session_id=$2',[agentId,source,target]);
       if (await exists('working_memory')) await client.query(`UPDATE working_memory SET session_id=$3,conversation_id=CASE WHEN conversation_id=$2 THEN $3 WHEN conversation_id=$1 || ':' || $2 THEN $1 || ':' || $3 ELSE conversation_id END WHERE agent_id=$1 AND session_id=$2`,[agentId,source,target]);
       if (await exists('continuity_handoffs')) {
@@ -1637,25 +1651,50 @@ export class PostgresSessionStore {
     if (!requested.length) return [];
     const keys = requested.map(item => proofRunKey({ runId: item.runId }));
     const sessions = requested.map(item => String(item.sessionId));
-    const { rows } = await this.pool.query(`WITH live AS MATERIALIZED (
-      SELECT session_id,run_key,entry,sequence::text AS sequence FROM conversation_entries
-      WHERE agent_id=$1 AND session_id=ANY($2::text[]) AND run_key=ANY($3::text[])
-    ), newest AS (
-      SELECT DISTINCT ON (session_id,run_key) session_id,run_key,generation,source_id FROM conversation_archive_entries
-      WHERE agent_id=$1 AND session_id=ANY($2::text[]) AND run_key=ANY($3::text[])
-      ORDER BY session_id,run_key,generation DESC NULLS LAST,source_id DESC
-    ) SELECT session_id,run_key,entry,sequence FROM live
+    // A run can straddle any number of compactions and a reset. Fetch only the
+    // exact requested (session, run) pairs through the existing run indexes;
+    // both stores are read in one statement so compaction cannot hide a row.
+    // Do not reserialize the JSON originals or select just the newest snapshot.
+    const { rows } = await this.pool.query(`WITH requested AS MATERIALIZED (
+      SELECT DISTINCT session_id,run_key FROM unnest($2::text[],$3::text[]) AS r(session_id,run_key)
+      WHERE run_key IS NOT NULL
+    ), occurrences AS (
+      SELECT e.session_id,e.run_key,e.entry_id,e.entry,e.sequence::text AS sequence,
+        1 AS priority,NULL::bigint AS generation,NULL::text AS source_id
+      FROM conversation_entries e JOIN requested r USING(session_id,run_key)
+      WHERE e.agent_id=$1 AND e.session_id=ANY($2::text[]) AND e.run_key=ANY($3::text[])
       UNION ALL
-      SELECT e.session_id,e.run_key,e.entry,e.ordinal::text FROM conversation_archive_entries e JOIN newest n USING(session_id,run_key,generation,source_id)
-      WHERE NOT EXISTS (SELECT 1 FROM live l WHERE l.session_id=e.session_id AND l.run_key=e.run_key)
-      ORDER BY session_id,run_key,sequence`, [agentId,sessions,keys]);
+      SELECT e.session_id,e.run_key,e.entry_id,e.entry,e.ordinal::text AS sequence,
+        0 AS priority,e.generation,e.source_id
+      FROM conversation_archive_entries e JOIN requested r USING(session_id,run_key)
+      WHERE e.agent_id=$1 AND e.session_id=ANY($2::text[]) AND e.run_key=ANY($3::text[])
+    ) SELECT * FROM occurrences
+      ORDER BY session_id,run_key,priority,generation ASC NULLS FIRST,source_id ASC,sequence::bigint`, [agentId,sessions,keys]);
+    const grouped = new Map();
+    for (const row of rows) {
+      const key = JSON.stringify([row.session_id,row.run_key]);
+      let group = grouped.get(key);
+      if (!group) { group = { snapshots: [], source: null }; grouped.set(key,group); }
+      // Within an archive the earliest duplicate wins; newer generations and
+      // source IDs replace it. Live originals take precedence, with a later live
+      // sequence winning if legacy payload IDs collide. Id-less retained copies
+      // use their relational entry_id; equal-content distinct rows stay distinct.
+      const source = row.source_id === null ? `live:${row.sequence}` : `archive:${row.source_id}`;
+      if (source !== group.source) { group.snapshots.push([]); group.source = source; }
+      group.snapshots.at(-1).push({ entry: rowEntry(row), occurrence: row.entry_id });
+    }
     const metadataRows = await this.pool.query('SELECT session_id,metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=ANY($2::text[])', [agentId,[...new Set(sessions)]]);
     const metadata = new Map(metadataRows.rows.map(row => [row.session_id,row.metadata]));
     return requested.map((item,index) => {
-      const entries = rows.filter(row => row.session_id===String(item.sessionId) && row.run_key===keys[index]).map(rowEntry)
-        .sort((left,right)=>String(left.ts||'').localeCompare(String(right.ts||'')) || String(left.sequence||'').localeCompare(String(right.sequence||'')));
-      const evidence = (Array.isArray(metadata.get(String(item.sessionId))?.runEvidence) ? metadata.get(String(item.sessionId)).runEvidence : []).find(value => value?.runId===item.runId) || null;
-      return { sessionId:String(item.sessionId),runId:item.runId,entries,evidence };
+      const group = grouped.get(JSON.stringify([sessions[index],keys[index]]));
+      const entries = mergeTranscriptSnapshots(group?.snapshots || []).sort((left,right) => {
+        const at = String(left.ts || '').localeCompare(String(right.ts || ''));
+        if (at) return at;
+        const a = BigInt(left.sequence), b = BigInt(right.sequence);
+        return a < b ? -1 : a > b ? 1 : 0;
+      });
+      const evidence = (Array.isArray(metadata.get(sessions[index])?.runEvidence) ? metadata.get(sessions[index]).runEvidence : []).find(value => value?.runId===item.runId) || null;
+      return { sessionId:sessions[index],runId:item.runId,entries,evidence };
     });
   }
 
@@ -1668,23 +1707,8 @@ export class PostgresSessionStore {
       ORDER BY sort_timestamp DESC,session_id DESC LIMIT 1`, [agentId, key, sessionId]);
     const sid = located.rows[0]?.session_id;
     if (!sid) return null;
-    const { rows } = await this.pool.query(`WITH live AS MATERIALIZED (
-      SELECT entry,sequence::text AS sequence FROM conversation_entries
-      WHERE agent_id=$1 AND run_key=encode(convert_to($3,'UTF8'),'hex') AND session_id=$2
-    ), newest_archive AS (
-      SELECT generation,source_id FROM conversation_archive_entries
-      WHERE agent_id=$1 AND run_key=encode(convert_to($3,'UTF8'),'hex') AND session_id=$2
-      ORDER BY generation DESC NULLS LAST,source_id DESC LIMIT 1
-    ) SELECT entry,sequence FROM live
-      UNION ALL
-      SELECT e.entry,e.ordinal::text FROM conversation_archive_entries e,newest_archive n
-      WHERE NOT EXISTS (SELECT 1 FROM live) AND e.agent_id=$1 AND e.session_id=$2
-        AND e.run_key=encode(convert_to($3,'UTF8'),'hex') AND e.generation=n.generation AND e.source_id=n.source_id
-      ORDER BY sequence`, [agentId, sid, key]);
-    const metadata = await this.getMetadata({ agentId, sessionId: sid });
-    const evidence = (Array.isArray(metadata?.runEvidence) ? metadata.runEvidence : []).find(item => item?.runId === runId) || null;
-    const entries = rows.map(rowEntry).sort((left, right) => String(left.ts || '').localeCompare(String(right.ts || '')) || String(left.sequence || '').localeCompare(String(right.sequence || '')));
-    return { sessionId: sid, entries, evidence };
+    const [source] = await this.readArchiveRunSources({ agentId, runs: [{ sessionId: sid, runId }] });
+    return { sessionId: sid, entries: source.entries, evidence: source.evidence };
   }
 
   async listArchiveSessions({ agentId: rawAgentId, includeArchived = true, query = '', date = null, month = null, timezone = 'UTC', limit = 100, boundary = null } = {}) {

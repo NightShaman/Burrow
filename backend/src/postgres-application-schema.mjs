@@ -1,3 +1,4 @@
+import { POSTGRES_CHAT_INPUT_SCHEMA_SQL } from './postgres-chat-input-store.mjs';
 import { POSTGRES_EVENT_OPERATOR_PROJECTION_SQL } from './postgres-event-operator-projection.mjs';
 import { POSTGRES_COMPLETION_EVENT_SETTINGS_SQL } from './postgres-completion-event-settings-store.mjs';
 import { POSTGRES_COMPLETION_EVENT_SCHEMA_SQL } from './postgres-completion-event-store.mjs';
@@ -186,4 +187,5 @@ ALTER TABLE dream_settings ADD COLUMN memory_prompt_override TEXT CHECK (char_le
   { version: 74, name: 'durable-github-completion-events', sql: POSTGRES_COMPLETION_EVENT_SCHEMA_SQL },
   { version: 75, name: 'settings-first-completion-webhook', sql: POSTGRES_COMPLETION_EVENT_SETTINGS_SQL },
   { version: 76, name: 'event-operator-projection-copies', sql: POSTGRES_EVENT_OPERATOR_PROJECTION_SQL },
+  { version: 77, name: 'durable-chat-inputs', sql: POSTGRES_CHAT_INPUT_SCHEMA_SQL },
 ]);

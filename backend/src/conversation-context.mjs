@@ -103,6 +103,7 @@ function safeAttachmentManifest(entries = [], limit = 24) {
   const attachments = [];
   const seen = new Set();
   for (const entry of entries) {
+    if (entry?.metadata?.lane === 'side_question' || (entry?.metadata?.chatInput && entry.entersPrompt === false)) continue;
     for (const item of Array.isArray(entry?.metadata?.attachments) ? entry.metadata.attachments : []) {
       const artifactPath = String(item?.artifactPath || '').trim();
       const key = artifactPath || `${entry?.id || ''}:${item?.index ?? attachments.length}`;

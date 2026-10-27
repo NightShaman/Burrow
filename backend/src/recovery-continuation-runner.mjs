@@ -59,15 +59,17 @@ export async function runPendingRecoveryContinuations({ stores = null, agentRunt
 // as recurring schedulers. Runtime discovery belongs to this owner too.
 export function createRecoveryContinuationScheduler({ resolveOptions, ...options } = {}) {
   const lifecycle = createBackgroundLifecycle({ name: 'recovery_continuation_scheduler' });
-  let started = null;
-  function start() {
+  let started = null, running = null;
+  function wake() {
     if (lifecycle.stopped) return Promise.resolve([]);
-    started ||= lifecycle.track(async () => {
+    if (running) return running;
+    running = lifecycle.track(async () => {
       const resolved = resolveOptions ? await resolveOptions() : options;
       if (lifecycle.stopped) return [];
       return runPendingRecoveryContinuations({ ...resolved, signal: lifecycle.signal });
-    });
-    return started;
+    }).finally(() => { running = null; });
+    return running;
   }
-  return { start, stop: lifecycle.stop, close: lifecycle.close, health: lifecycle.health };
+  function start() { started ||= wake(); return started; }
+  return { start, wake, stop: lifecycle.stop, close: lifecycle.close, health: lifecycle.health };
 }
