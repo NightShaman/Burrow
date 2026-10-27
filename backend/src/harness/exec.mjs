@@ -59,6 +59,8 @@ export async function runExec({
   inheritEnv = false,
   maxOutputChars = 100_000,
   protectedValues = [],
+  // Composite tools own their logical tool span while retaining exec artifacts.
+  emitToolEvents = true,
 } = {}) {
   if (command != null && (typeof command !== 'string' || !command.trim())) throw new Error('command_invalid');
   if (executable != null && (typeof executable !== 'string' || !executable.trim())) throw new Error('executable_invalid');
@@ -128,7 +130,7 @@ export async function runExec({
     }
     return envelope;
   };
-  const started = await logger.toolStart?.({ tool: 'shell_exec', command: redact(displayCommand), cwd: cwd || process.cwd(), reason: typeof reason === 'string' ? reason.slice(0, 500) : null });
+  const started = emitToolEvents ? await logger.toolStart?.({ tool: 'shell_exec', command: redact(displayCommand), cwd: cwd || process.cwd(), reason: typeof reason === 'string' ? reason.slice(0, 500) : null }) : null;
   const activityId = started?.payload?.activityId || null;
 
   let timedOut = false;
@@ -231,7 +233,7 @@ export async function runExec({
   result.artifacts.resultPath = resultPath;
   await fs.writeFile(resultPath, JSON.stringify(result, null, 2) + '\n', 'utf8');
 
-  await (logger.toolEnd || logger.tool)({
+  if (emitToolEvents) await (logger.toolEnd || logger.tool)?.({
     tool: 'shell_exec',
     ...(activityId ? { activityId } : {}),
     ok: result.ok,

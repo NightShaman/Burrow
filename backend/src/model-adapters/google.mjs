@@ -124,10 +124,11 @@ export function createGoogleNativeModelAdapter({ config = {}, fetchImpl = fetch,
       const text = parts.filter(p => !p.thought).map(p => p.text || '').join('');
       const ok = response.ok && !data.error && candidate?.finishReason === 'STOP' && (text.length > 0 || calls.length > 0);
       const assistant = { role:'assistant', content:parts.map(part => ({ type:'google_part', part })), ...(calls.length ? { tool_calls:calls.map(c => ({ id:c.id, type:'function', function:{ name:c.name, arguments:c.rawArguments } })) } : {}) };
-      const usage = data.usageMetadata ? { prompt_tokens:data.usageMetadata.promptTokenCount, completion_tokens:data.usageMetadata.candidatesTokenCount, total_tokens:data.usageMetadata.totalTokenCount, prompt_tokens_details:{ cached_tokens:data.usageMetadata.cachedContentTokenCount || 0 } } : null;
+      const cachedTokens = data.usageMetadata?.cachedContentTokenCount ?? null;
+      const usage = data.usageMetadata ? { prompt_tokens:data.usageMetadata.promptTokenCount, completion_tokens:data.usageMetadata.candidatesTokenCount, total_tokens:data.usageMetadata.totalTokenCount, prompt_tokens_details:{ cached_tokens:cachedTokens } } : null;
       const contextUsage = contextUsageFromResponse(requestContext, usage, clock);
       await onContextUsage?.(contextUsage);
-      await traceLogger?.model?.({ stage:'model-response', requestId, provider:'google', api, model, modelCall, status:response.status, ok, usage, finishReason:candidate?.finishReason || null, responseChars:text.length, streamed:streaming, ts:clock() });
+      await traceLogger?.model?.({ stage:'model-response', requestId, provider:'google', api, model, modelCall, status:response.status, ok, usage, cachedTokens, finishReason:candidate?.finishReason || null, responseChars:text.length, streamed:streaming, ts:clock() });
       return { ok, requestId, provider:'google', api, model, status:response.status, choice:{ index:0, finishReason:candidate?.finishReason, text, message:{ role:'assistant', content:text }, toolCalls:calls }, usage, contextUsage, error:ok ? null : `google_generation_failed:${response.status}:${candidate?.finishReason || 'no_candidate'}`, raw:{ usageMetadata:data.usageMetadata }, nativeTranscript:[...source,...(parts.length ? [assistant] : [])] };
     } finally { await flushProviderDiagnostics(traceLogger); }
   };

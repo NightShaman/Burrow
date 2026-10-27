@@ -233,6 +233,19 @@ async function runAskChatUnserialized({
     onSteeringReady?.(steeringIdentity);
     normalizedArgs.live_steering = { boundary: options => stores.steering.boundary(steeringIdentity, options) };
   }
+  let telemetryRun = null;
+  let telemetryTerminalResult = null;
+  let telemetryEnded = false;
+  const rememberTelemetryTerminal = (result) => {
+    // The orchestrator retains cancellation evidence on the model without
+    // changing the persisted/product model_failed decision contract.
+    telemetryTerminalResult ||= result?.decision === 'model_failed' && result?.model?.cancelled === true ? { ...result, cancelled: true } : result;
+  };
+  const endTelemetryRun = () => {
+    if (!telemetryRun || telemetryEnded) return;
+    telemetryEnded = true;
+    try { telemetry.endRun?.(resolvedRunId, telemetryTerminalResult || { ok: false, status: 'failed' }); } catch {}
+  };
   try {
   const continuityAuthority = postgresContinuity({ store: stores.conversations, agentId: runtimeState.agentId });
   const continuity = await continuityAuthority.claim({
@@ -287,16 +300,21 @@ async function runAskChatUnserialized({
     agentId: runtimeState.agentId,
     sessionId: resolvedSessionId,
   });
-  const telemetryRun = runtimeConfig.opentelemetry?.effective?.enabled
-    ? telemetry?.startRun?.({ runId: resolvedRunId, sessionId: resolvedSessionId, agentId: runtimeState.agentId, source: runSource || turnSource || command, parentTraceContext })
+  // A still-owned A2A delegation belongs to its sender's generation, even if
+  // settings were disabled after the sender started. Neither an arbitrary W3C
+  // carrier nor serialized args may enroll an unrelated run while disabled.
+  const telemetryParentRunId = incomingAgentMessage?.sourceRunId || null;
+  const ownedTelemetryParent = telemetryParentRunId && telemetry?.traceContextForRun?.(telemetryParentRunId);
+  telemetryRun = runtimeConfig.opentelemetry?.effective?.enabled || ownedTelemetryParent
+    ? telemetry?.startRun?.({ runId: resolvedRunId, sessionId: resolvedSessionId, agentId: runtimeState.agentId, source: runSource || turnSource || command, parentRunId: telemetryParentRunId, parentTraceContext })
     : null;
   const observeTrace = telemetryRun
     ? (record) => { telemetry.observe?.(record); return onTraceRecord?.(record); }
     : onTraceRecord;
   const logger = createTraceLogger({ rootDir: traceRoot, runId: resolvedRunId, sessionId: resolvedSessionId, conversationId, onRecord: observeTrace });
   if (latencyTiming) await logger.event('chat-admission-timing', { ...latencyTiming, clockDomain: 'server-process' });
-  const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, logger, onTerminal: telemetryRun ? (result) => telemetry.endRun?.(resolvedRunId, result) : null, testHooks });
-  const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, messageMode = 'request_reply', inboundEntryId, contextBoundary = null, parentSignal = null }) => {
+  const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, logger, onTerminal: rememberTelemetryTerminal, testHooks });
+  const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, messageMode = 'request_reply', inboundEntryId, contextBoundary = null, parentTraceContext = null, parentSignal = null }) => {
     // Ingress is already durable/idempotent before this callback. Each distinct
     // exchange needs a distinct run, while replays retain the same identity.
     if (!inboundEntryId) throw new Error('agent_message_inbound_identity_required');
@@ -326,7 +344,8 @@ async function runAskChatUnserialized({
         stores: historyStores,
         onTraceRecord: lifecycle?.onTraceRecord || null,
         telemetry,
-        parentTraceContext: telemetryRun ? telemetry.traceContextForRun?.(resolvedRunId) : null,
+        // The sender tool, not its root run, is the immediate A2A parent.
+        parentTraceContext,
         runSource: 'a2a',
         onModelTextDelta: lifecycle?.onModelTextDelta || null,
         onModelThoughtDelta: lifecycle?.onModelThoughtDelta || null,
@@ -503,7 +522,7 @@ async function runAskChatUnserialized({
   const { turnContext, conversationContext, prompt, finalPromptInspection, contextCompression } = promptContext;
   if (finalPromptInspection.pressure === 'blocked') {
     const content = 'I could not safely fit the final prompt inside the configured model context window after compression. I should not call the model with an over-budget prompt.';
-    return commitTerminalResult({
+    return await commitTerminalResult({
       branch: 'prompt_context_over_budget',
       finalize: () => finalizeBlockedRuntimeResult({
         sessionRoot, stores, agentId: runtimeState.agentId,
@@ -531,12 +550,14 @@ async function runAskChatUnserialized({
 
   const modelExecution = await runRuntimeModelExecution({ continuityAuthority, runtimeTurn, prompt, message, shouldCallModel, modelConfig, logger, resolvedWorkingRoot, rootDir, dataRoot, resolvedSessionId, conversationId, runtimeConfig, executionPolicy, executionContext, normalizedArgs, attachments: turnAttachments, sessionRoot, resolvedRunId, continuity, initialWorkingContext, onTextDelta: onModelTextDelta, onThoughtDelta: onModelThoughtDelta, onContextUsage: onModelContextUsage, command, json });
   if (modelExecution.superseded) {
+    rememberTelemetryTerminal(modelExecution.result);
     await continuityAuthority.interrupt({
       rootDir: sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation,
       reason: 'superseded_by_newer_session_run', objective: message, traceRef: logger.traceDir,
       lastCompletedStep: 'Model execution completed after session ownership changed; terminal result was not persisted.',
       pendingVerification: ['Reconcile durable workspace and tool state before continuing.'], workingContext: initialWorkingContext,
     });
+    await logger.terminal();
     return modelExecution.result;
   }
   const { modelTurn, finalWorkingContext } = modelExecution;
@@ -556,8 +577,17 @@ async function runAskChatUnserialized({
     },
   });
   return result;
+  } catch (error) {
+    rememberTelemetryTerminal({ ok: false, status: normalizedArgs.abort_signal?.aborted || error?.name === 'AbortError' ? 'cancelled' : 'failed' });
+    throw error;
   } finally {
-    if (stores.steering) await stores.steering.boundary(steeringIdentity, { finish: true });
+    try {
+      if (stores.steering) await stores.steering.boundary(steeringIdentity, { finish: true });
+    } finally {
+      // Finish only after the terminal owner (including its trace writes) has
+      // settled. Exceptions and supersession cannot strand a started OTel run.
+      endTelemetryRun();
+    }
   }
 }
 

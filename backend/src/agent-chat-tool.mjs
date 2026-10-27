@@ -87,7 +87,9 @@ async function appendAgentMessage({ conversationStore, agentId: transcriptAgentI
 
 // An agent message is a first-class, attributed transcript turn. It is not a
 // user turn; attribution identifies where the message came from.
-export async function sendAgentMessage({ conversationStore = null, senderRuntime, resolveRecipientRuntime, runRecipientReply = null, recipientAgentId, targetSessionId = null, replyTo = null, content, messageMode = 'request_reply', runId = null, sourceSessionId = null, abortSignal = null } = {}) {
+// parentTraceContext is runtime-only transport: never add it to delivery identity,
+// persisted requests, transcript provenance, or model-visible content.
+export async function sendAgentMessage({ conversationStore = null, senderRuntime, resolveRecipientRuntime, runRecipientReply = null, recipientAgentId, targetSessionId = null, replyTo = null, content, messageMode = 'request_reply', runId = null, sourceSessionId = null, parentTraceContext = null, abortSignal = null } = {}) {
   if (!conversationStore) throw new Error('conversation_store_required');
   const sender = agentId(senderRuntime?.agentId, 'agent_message_sender');
   const requestedRecipient = agentId(recipientAgentId, 'agent_message_recipient');
@@ -186,7 +188,7 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
           const delivery = await deliver();
           abortSignal?.throwIfAborted();
           await assertOwner();
-          const response = await runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, messageMode: resolvedMode, inboundEntryId: delivery.recipientEntry.id, contextBoundary, parentSignal: abortSignal });
+          const response = await runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, messageMode: resolvedMode, inboundEntryId: delivery.recipientEntry.id, contextBoundary, parentTraceContext, parentSignal: abortSignal });
           return { ...delivery, reply: response };
         },
       });

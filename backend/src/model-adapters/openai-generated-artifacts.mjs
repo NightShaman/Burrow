@@ -194,7 +194,7 @@ export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = 
       }
     }
     const result = { ok: true, requestId, responseId, provider, api: 'openai-generated-artifact', model, status: response.status, choice: { text: '', finishReason: 'stop', toolCalls: [] }, usage, outputArtifacts, error: null };
-    await options.traceLogger?.model?.({ stage: 'model-response', requestId, provider, api: 'openai-generated-artifact', model, status: response.status, ok: true, artifactCount: outputArtifacts.length, responseBytes: outputArtifacts.reduce((sum, item) => sum + item.sizeBytes, 0), ts: clock() });
+    await options.traceLogger?.model?.({ stage: 'model-response', requestId, provider, api: 'openai-generated-artifact', model, status: response.status, ok: true, usage: result.usage, artifactCount: outputArtifacts.length, responseBytes: outputArtifacts.reduce((sum, item) => sum + item.sizeBytes, 0), ts: clock() });
     return result;
   };
 

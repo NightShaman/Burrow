@@ -648,9 +648,12 @@ export async function runPlainModelTurn({
     }
 
   } catch (error) {
-    model = { ok: false, error: String(error?.message || error), usage: null, choice: { text: '' } };
+    model = { ok: false, error: String(error?.message || error), usage: null, choice: { text: '' }, ...(abortSignal?.aborted || error?.name === 'AbortError' ? { cancelled: true } : {}) };
   }
 
+  // Some adapters return a failed envelope instead of throwing on abort. Do
+  // not relabel a successful model merely because cancellation arrived later.
+  if (model?.ok === false && abortSignal?.aborted) model = { ...model, cancelled: true };
   const proposal = model ? parseActionProposal(model.choice?.text ?? '') : null;
   // Keep source bytes/file handles on this ephemeral internal field only. They
   // are persisted by the plain-chat finalizer before any session serialization.

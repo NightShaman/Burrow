@@ -160,8 +160,8 @@ async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSes
     processExecutionTarget: parentExecutionContext?.processExecutionTarget?.kind === 'remote' ? parentExecutionContext.processExecutionTarget : (parentExecutionContext?.executionEnvironment?.kind === 'remote' ? parentExecutionContext.executionEnvironment : null),
     processExecutionController: (parentExecutionContext?.processExecutionTarget?.kind === 'remote' || parentExecutionContext?.executionEnvironment?.kind === 'remote') ? parentExecutionContext?.processExecutionController || null : null,
     processExecutionRouter: (parentExecutionContext?.processExecutionTarget?.kind === 'remote' || parentExecutionContext?.executionEnvironment?.kind === 'remote') ? parentExecutionContext?.processExecutionRouter || null : null,
-    parentRunId: parentExecutionContext?.parentRunId || traceLogger?.runId || null,
-    traceContext: parentExecutionContext?.traceContext || null,
+    parentRunId: traceLogger?.runId || parentExecutionContext?.parentRunId || null,
+    traceContext: parentExecutionContext?.telemetry?.traceContextForRun?.(traceLogger?.runId) || parentExecutionContext?.traceContext || null,
     telemetry: parentExecutionContext?.telemetry || null,
   });
   const execution = await executeReviewedProposalActions({
@@ -485,7 +485,44 @@ function followupPromptWithEvidence({ prompt, toolResults = [], latestResults = 
   ].join('\n');
 }
 
-export async function runSpawnSubagentChild({
+// Both the OS worker and in-process/remote dispatch enter here. The OS
+// initializer may already own this registration (and its terminal/shutdown);
+// otherwise the helper owns exactly one run around every return/throw below.
+export async function runSpawnSubagentChild(options = {}) {
+  const { id, childSessionId, owner = {}, parentExecutionContext = null,
+    signal = parentExecutionContext?.abortSignal || null } = options;
+  const telemetry = parentExecutionContext?.telemetry;
+  const registeredTraceContext = telemetry?.traceContextForRun?.(id);
+  const telemetryRun = registeredTraceContext ? null : telemetry?.startRun?.({
+    runId: id, sessionId: childSessionId, agentId: owner.agentId,
+    parentRunId: parentExecutionContext?.parentRunId || null,
+    source: 'subagent', parentTraceContext: parentExecutionContext?.traceContext || null,
+  });
+  const childExecutionContext = {
+    ...parentExecutionContext,
+    // Execution-context dependencies are deliberately non-enumerable.
+    conversationStore: parentExecutionContext?.conversationStore,
+    stores: parentExecutionContext?.stores,
+    telemetry,
+    abortSignal: signal,
+    parentRunId: id,
+    traceContext: telemetryRun?.traceContext || registeredTraceContext || parentExecutionContext?.traceContext || null,
+  };
+  let result;
+  try {
+    signal?.throwIfAborted();
+    result = await runRegisteredSpawnSubagentChild({ ...options, parentExecutionContext: childExecutionContext, signal });
+    return result;
+  } catch (error) {
+    result = { ok: false, error: error?.message || String(error), cancelled: error?.name === 'AbortError' };
+    throw error;
+  } finally {
+    // Never end an OS-initialized run: its process wrapper is the sole owner.
+    if (telemetryRun) telemetry?.endRun?.(id, signal?.aborted ? { ...result, ok: false, cancelled: true } : result);
+  }
+}
+
+async function runRegisteredSpawnSubagentChild({
   id,
   task,
   target,

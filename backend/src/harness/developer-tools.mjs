@@ -196,11 +196,18 @@ export async function editFileEnvelope({ filePath, oldText, newText, workspaceRo
   }
 }
 
-async function gitEnvelope({ tool, args, dirPath, workspaceRoot, traceLogger, rootDir, runId, artifactPrefix, reason, execute = runExec }) {
+async function gitEnvelope({ tool, args, dirPath, workspaceRoot, traceLogger, rootDir, runId, artifactPrefix, reason, execute = runExec, toolCallId = null, executionTarget = 'local', providerId = null, targetId = null }) {
   const cwd = resolved(dirPath, workspaceRoot);
-  const context = await toolContext({ tool, rootDir, runId, traceLogger, artifactPrefix, payload: { cwd, reason } });
-  const result = await execute({ executable: 'git', args, cwd, traceLogger: context.logger, artifactPrefix: `${context.prefix}-shell_exec`, reason });
-  return finish({ logger: context.logger, tool, activityId: context.activityId, result: { ...result, tool, dirPath: cwd, reason, resultFingerprint: resultFingerprint({ exitCode: result.exitCode, stdout: result.stdout || '', stderr: result.stderr || '' }), trace: { cwd, exitCode: result.exitCode } } });
+  const traceDetails = { cwd, reason, toolCallId, executionTarget, providerId, targetId };
+  const context = await toolContext({ tool, rootDir, runId, traceLogger, artifactPrefix, payload: traceDetails });
+  let result;
+  try {
+    // Git is the logical tool; its implementation subprocess is not a second call.
+    result = await execute({ executable: 'git', args, cwd, traceLogger: context.logger, emitToolEvents: false, artifactPrefix: `${context.prefix}-shell_exec`, reason });
+  } catch (error) {
+    result = { ok: false, error: typeof error?.code === 'string' ? error.code : 'process_dispatch_failed', failureClass: 'tool_dispatch_failed' };
+  }
+  return finish({ logger: context.logger, tool, activityId: context.activityId, result: { ...result, tool, dirPath: cwd, reason, resultFingerprint: resultFingerprint({ exitCode: result.exitCode, stdout: result.stdout || '', stderr: result.stderr || '' }), trace: { ...traceDetails, exitCode: result.exitCode, signal: result.signal, timedOut: result.timedOut === true, cancelled: result.cancelled === true } } });
 }
 
 export function gitStatusEnvelope(options = {}) { return gitEnvelope({ ...options, tool: 'git_status', args: ['status', '--short', '--branch'] }); }

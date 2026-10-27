@@ -20,7 +20,6 @@ export function createTerminalCommitter({ stores = null, agentId, continuityAuth
       },
     });
     if (completion.stale) {
-      await continuityAuthority.interrupt({ rootDir: sessionRoot, sessionId, runId, generation, reason: 'superseded_by_newer_session_run', objective, traceRef, lastCompletedStep: 'Terminal result could not be committed because session ownership changed.', pendingVerification: ['Reconcile durable workspace and tool state before continuing.'], workingContext });
       const superseded = {
         ...(completion.value || {}),
         ok: false,
@@ -34,12 +33,23 @@ export function createTerminalCommitter({ stores = null, agentId, continuityAuth
         blockers: ['superseded_by_newer_session_run'],
         continuity: { ...completion.head, current: false },
       };
+      try {
+        await continuityAuthority.interrupt({ rootDir: sessionRoot, sessionId, runId, generation, reason: 'superseded_by_newer_session_run', objective, traceRef, lastCompletedStep: 'Terminal result could not be committed because session ownership changed.', pendingVerification: ['Reconcile durable workspace and tool state before continuing.'], workingContext });
+        await logger?.terminal?.();
+      } finally {
+        try { onTerminal?.(superseded); } catch {}
+      }
       return json ? superseded : compactAskChatResult(superseded);
     }
     const result = completion.value;
-    await afterCommitBeforeTraceTerminal?.(result);
-    await logger?.terminal?.();
-    try { onTerminal?.(result); } catch {}
+    try {
+      await afterCommitBeforeTraceTerminal?.(result);
+      await logger?.terminal?.();
+    } finally {
+      // Ownership has already reached a genuine terminal. Advisory/trace
+      // cleanup failures must not hide that outcome from lifecycle observers.
+      try { onTerminal?.(result); } catch {}
+    }
     void testHooks?.afterTerminalResponse?.({ branch, sessionId, runId, postTerminalCuration: null });
     return json ? { ...result, continuity: { ...completion.head, current: true } } : compactAskChatResult(result);
   };

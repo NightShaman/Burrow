@@ -137,8 +137,10 @@ function anthropicCacheableTools(tools = []) {
 }
 
 function anthropicCachedTokens(usage = {}) {
-  const value = Number(usage?.cache_read_input_tokens ?? usage?.prompt_tokens_details?.cached_tokens ?? usage?.input_tokens_details?.cached_tokens);
-  return Number.isFinite(value) ? value : null;
+  const value = usage?.cache_read_input_tokens ?? usage?.prompt_tokens_details?.cached_tokens ?? usage?.input_tokens_details?.cached_tokens;
+  if (value === null || value === undefined || typeof value === 'boolean' || (typeof value === 'string' && !value.trim())) return null;
+  const count = Number(value);
+  return Number.isSafeInteger(count) && count >= 0 ? count : null;
 }
 
 const ANTHROPIC_THINKING_BUDGETS = Object.freeze({ minimal: 1024, low: 4000, medium: 8000, high: 16000, xhigh: 32000, ultra: 32000 });
@@ -360,7 +362,9 @@ function mergeAnthropicStreamEvent(state, event) {
       catch (error) { state.malformedToolInput = { index: event.index || 0, message: error?.message || 'invalid tool input JSON' }; }
     }
   } else if (type === 'message_delta') {
-    state.message = { ...(state.message || {}), stop_reason: event.delta?.stop_reason || state.message?.stop_reason, usage: event.usage || state.message?.usage };
+    // Usage deltas are cumulative field updates, not a complete replacement:
+    // output-only updates must retain message_start input and cache counts.
+    state.message = { ...(state.message || {}), stop_reason: event.delta?.stop_reason || state.message?.stop_reason, usage: event.usage ? { ...state.message?.usage, ...event.usage } : state.message?.usage };
   }
 }
 

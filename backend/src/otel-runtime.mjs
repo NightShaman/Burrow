@@ -16,6 +16,7 @@ const DEFAULT_BATCH_SIZE = 128;
 const DEFAULT_METRIC_INTERVAL_MS = 15_000;
 
 function finite(value) {
+  if (value === null || value === undefined || typeof value === 'boolean' || (typeof value === 'string' && !value.trim())) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -26,10 +27,15 @@ function bounded(value, limit = 160) {
 }
 
 function safeOutcome(result = {}) {
-  if (result?.ok === true) return 'success';
-  if (result?.decision === 'cancelled' || result?.status === 'cancelled') return 'cancelled';
-  if (result?.decision === 'superseded') return 'superseded';
-  if (result?.decision === 'blocked') return 'blocked';
+  const statuses = [result?.decision, result?.status];
+  // Explicit terminal evidence takes precedence over a generic transport ok.
+  if (result?.timedOut === true || statuses.some(value => ['timeout', 'timed_out', 'timedOut'].includes(value))) return 'timeout';
+  if (result?.cancelled === true || statuses.includes('cancelled')) return 'cancelled';
+  if (statuses.includes('superseded')) return 'superseded';
+  if (statuses.includes('blocked')) return 'blocked';
+  if (statuses.some(value => ['failed', 'failure', 'error'].includes(value))) return 'failure';
+  if (result?.ok === false) return 'failure';
+  if (result?.ok === true || statuses.some(value => ['success', 'succeeded', 'completed'].includes(value))) return 'success';
   return 'failure';
 }
 
@@ -193,9 +199,9 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
       instruments.exportFailures.addCallback((observable) => observable.observe(failures.export));
       instruments.telemetryDropped.addCallback((observable) => observable.observe(dropped));
       started = true;
-    } catch (error) {
+    } catch {
       failures.start += 1;
-      failures.lastStart = bounded(error?.message || error, 160);
+      failures.lastStart = 'otel_runtime_start_failed';
     }
     return status();
   }
@@ -203,6 +209,8 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
   function startRun({ runId, sessionId = null, agentId = null, source = 'chat', parentTraceContext = null } = {}) {
     if (!started || closed || !runId) return null;
     try {
+      const existing = activeRuns.get(String(runId));
+      if (existing) return Object.freeze({ runId: existing.runId, traceContext: traceContextFromSpan(existing.span), context: existing.context });
       const parentContext = extractTraceContext(parentTraceContext, context.active());
       const startedAt = clock();
       const span = tracer.startSpan('burrow.run', {
@@ -273,11 +281,12 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
       if (record.type === 'model' && payload.stage === 'model-response' && payload.requestId) {
         const entry = state.modelSpans.get(String(payload.requestId));
         if (!entry) return;
-        const outcome = payload.ok === true ? 'success' : 'failure';
+        const outcome = safeOutcome(payload);
         const metricAttributes = { 'gen_ai.provider.name': entry.attributes['gen_ai.provider.name'] || 'unknown', 'gen_ai.request.model': entry.attributes['gen_ai.request.model'] || 'unknown', 'burrow.outcome': outcome };
         const status = finite(payload.status);
         if (status !== null) entry.span.setAttribute('http.response.status_code', status);
-        entry.span.setStatus({ code: payload.ok === true ? SpanStatusCode.OK : SpanStatusCode.ERROR, ...(payload.ok === true ? {} : { message: bounded(payload.error, 160) || 'model_request_failed' }) });
+        // External statuses are curated too: raw errors remain local receipts.
+        entry.span.setStatus({ code: outcome === 'success' ? SpanStatusCode.OK : SpanStatusCode.ERROR, ...(outcome === 'success' ? {} : { message: outcome === 'failure' ? 'model_request_failed' : outcome }) });
         const usage = usageValues(payload.usage || {});
         const cached = tokenCount(payload.cachedTokens);
         for (const [kind, value] of Object.entries(usage)) {
@@ -305,11 +314,12 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
       if (record.type === 'tool' && payload.phase === 'result' && payload.activityId) {
         const entry = state.toolSpans.get(String(payload.activityId));
         if (!entry) return;
-        const outcome = payload.ok === true ? 'success' : 'failure';
+        const outcome = safeOutcome(payload);
         const metricAttributes = { 'burrow.tool.name': entry.attributes['burrow.tool.name'], 'burrow.execution.target': entry.attributes['burrow.execution.target'] || 'local', 'burrow.outcome': outcome };
         const exitCode = finite(payload.exitCode);
         if (exitCode !== null) entry.span.setAttribute('process.exit.code', exitCode);
-        entry.span.setStatus({ code: payload.ok === true ? SpanStatusCode.OK : SpanStatusCode.ERROR, ...(payload.ok === true ? {} : { message: bounded(payload.error, 160) || 'tool_call_failed' }) });
+        entry.span.setAttribute('burrow.outcome', outcome);
+        entry.span.setStatus({ code: outcome === 'success' ? SpanStatusCode.OK : SpanStatusCode.ERROR, ...(outcome === 'success' ? {} : { message: outcome === 'failure' ? 'tool_call_failed' : outcome }) });
         entry.span.end();
         state.toolSpans.delete(String(payload.activityId));
         instruments.tools.add(1, metricAttributes);
@@ -330,7 +340,7 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
       entry.span.end();
     }
     state.span.setAttribute('burrow.run.outcome', outcome);
-    if (outcome !== 'success') state.span.setStatus({ code: SpanStatusCode.ERROR, message: bounded(result.error || result.decision || result.status, 160) || outcome });
+    if (outcome !== 'success') state.span.setStatus({ code: SpanStatusCode.ERROR, message: outcome });
     else state.span.setStatus({ code: SpanStatusCode.OK });
     state.span.end();
     const attributes = { 'burrow.run.source': state.source, 'burrow.outcome': outcome };
@@ -354,33 +364,77 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
   return Object.freeze({ start, startRun, observe, endRun, traceContextForRun, traceContextForTool, status, shutdown });
 }
 
+function genericEndpointForConfiguration(config = {}) {
+  const endpoint = String(config.endpoint || '').trim();
+  // otel-settings also reports the effective display endpoint in `endpoint`
+  // when only signal-specific environment URLs exist. That alias is not a base.
+  return [config.tracesEndpoint, config.metricsEndpoint].includes(endpoint) ? '' : endpoint;
+}
+
+// Private transport configuration: generic endpoints are bases; signal endpoints
+// are exact URLs. Keep this allowlist separate from ambient process credentials.
+export function otelEnvironmentForConfiguration(config = {}) {
+  const transport = { ...config, endpoint: genericEndpointForConfiguration(config) };
+  return Object.fromEntries([
+    ['endpoint', 'OTEL_EXPORTER_OTLP_ENDPOINT'],
+    ['tracesEndpoint', 'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT'],
+    ['metricsEndpoint', 'OTEL_EXPORTER_OTLP_METRICS_ENDPOINT'],
+    ['headers', 'OTEL_EXPORTER_OTLP_HEADERS'],
+    ['tracesHeaders', 'OTEL_EXPORTER_OTLP_TRACES_HEADERS'],
+    ['metricsHeaders', 'OTEL_EXPORTER_OTLP_METRICS_HEADERS'],
+  ].filter(([key]) => transport[key]).map(([key, envKey]) => [envKey, String(transport[key])]));
+}
+
 export function createReconfigurableOtelRuntime({ serviceVersion = null, clock = () => Date.now(), runtimeFactory = createOtelRuntime, tuningEnv = process.env } = {}) {
   const runtimeTuning = Object.fromEntries(Object.entries(tuningEnv).filter(([key, value]) => value && /^(?:OTEL_BSP_|OTEL_METRIC_EXPORT_|OTEL_RESOURCE_ATTRIBUTES$|OTEL_SERVICE_NAME$|OTEL_SDK_DISABLED$|OTEL_EXPORTER_OTLP_(?:TIMEOUT|TRACES_TIMEOUT|METRICS_TIMEOUT))/.test(key)));
-  let active = runtimeFactory({ env: runtimeTuning, serviceVersion, clock });
-  let applied = { enabled: false, endpoint: '', headers: null, tracesEndpoint: null, metricsEndpoint: null, tracesHeaders: null, metricsHeaders: null };
+  const emptyConfiguration = { enabled: false, endpoint: '', headers: null, tracesEndpoint: null, metricsEndpoint: null, tracesHeaders: null, metricsHeaders: null };
+  const runtimes = new Set();
+  const owners = new Map();
+  const completed = { failures: { start: 0, observe: 0, export: 0, shutdown: 0 }, dropped: 0, lastExportFailure: null };
+  function generationRuntime(runtime, config) {
+    const entry = { runtime, config, runIds: new Set(), draining: null };
+    runtimes.add(entry);
+    return entry;
+  }
+  let active = generationRuntime(runtimeFactory({ env: runtimeTuning, serviceVersion, clock }), emptyConfiguration);
+  let applied = emptyConfiguration;
   let generation = 0;
   let applying = Promise.resolve();
+  let closed = false;
+  let shuttingDown = null;
 
   function configurationKey(config) {
     return JSON.stringify([config.enabled === true, String(config.endpoint || ''), String(config.headers || ''), String(config.tracesEndpoint || ''), String(config.metricsEndpoint || ''), String(config.tracesHeaders || ''), String(config.metricsHeaders || '')]);
   }
 
+  function accumulate(target, snapshot = {}) {
+    for (const key of Object.keys(target.failures)) target.failures[key] += snapshot.failures?.[key] || 0;
+    target.dropped += snapshot.dropped || 0;
+    if (snapshot.lastExportFailure) target.lastExportFailure = snapshot.lastExportFailure;
+  }
+
+  function drain(entry, options) {
+    if (entry.draining) return entry.draining;
+    // A settings change is not a run terminal. Old generations keep accepting
+    // their own observations and completions, including while disabled globally.
+    if (entry.runIds.size && !closed) return Promise.resolve();
+    entry.draining = Promise.resolve().then(() => entry.runtime.shutdown(options)).catch(() => {
+      completed.failures.shutdown += 1;
+    }).finally(() => {
+      accumulate(completed, entry.runtime.status());
+      runtimes.delete(entry);
+    });
+    return entry.draining;
+  }
+
   async function apply(config = {}) {
-    const normalized = { enabled: config.enabled === true, endpoint: String(config.endpoint || '').trim(), headers: config.headers ? String(config.headers) : null,
+    if (closed) throw new Error('opentelemetry_runtime_closed');
+    const normalized = { enabled: config.enabled === true, endpoint: genericEndpointForConfiguration(config), headers: config.headers ? String(config.headers) : null,
       tracesEndpoint: config.tracesEndpoint || null, metricsEndpoint: config.metricsEndpoint || null, tracesHeaders: config.tracesHeaders || null, metricsHeaders: config.metricsHeaders || null };
     const operation = async () => {
-      if (configurationKey(normalized) === configurationKey(applied)) return status();
+      if (closed || configurationKey(normalized) === configurationKey(applied)) return status();
       const previous = active;
-      const previousApplied = applied;
-      const env = {
-        ...runtimeTuning,
-        ...(normalized.endpoint ? { OTEL_EXPORTER_OTLP_ENDPOINT: normalized.endpoint } : {}),
-        ...(normalized.tracesEndpoint ? { OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: normalized.tracesEndpoint } : {}),
-        ...(normalized.metricsEndpoint ? { OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: normalized.metricsEndpoint } : {}),
-        ...(normalized.headers ? { OTEL_EXPORTER_OTLP_HEADERS: normalized.headers } : {}),
-        ...(normalized.tracesHeaders ? { OTEL_EXPORTER_OTLP_TRACES_HEADERS: normalized.tracesHeaders } : {}),
-        ...(normalized.metricsHeaders ? { OTEL_EXPORTER_OTLP_METRICS_HEADERS: normalized.metricsHeaders } : {}),
-      };
+      const env = { ...runtimeTuning, ...otelEnvironmentForConfiguration(normalized) };
       const candidate = runtimeFactory({ env, serviceVersion, clock });
       try {
         if (normalized.enabled && (normalized.endpoint || normalized.tracesEndpoint || normalized.metricsEndpoint)) {
@@ -389,14 +443,16 @@ export function createReconfigurableOtelRuntime({ serviceVersion = null, clock =
         }
       } catch (error) {
         await candidate.shutdown().catch(() => {});
-        active = previous;
-        applied = previousApplied;
         throw error;
       }
-      active = candidate;
+      if (closed) {
+        await candidate.shutdown();
+        return status();
+      }
+      active = generationRuntime(candidate, normalized);
       applied = normalized;
       generation += 1;
-      await previous.shutdown();
+      await drain(previous);
       return status();
     };
     applying = applying.then(operation, operation);
@@ -404,26 +460,76 @@ export function createReconfigurableOtelRuntime({ serviceVersion = null, clock =
   }
 
   function status() {
-    return { ...active.status(), configured: Boolean(applied.endpoint || applied.tracesEndpoint || applied.metricsEndpoint), generation };
+    const snapshot = { failures: { ...completed.failures }, dropped: completed.dropped, lastExportFailure: completed.lastExportFailure };
+    for (const entry of runtimes) accumulate(snapshot, entry.runtime.status());
+    const current = active.runtime.status();
+    return { ...current, ...snapshot, enabled: !closed && current.enabled,
+      activeRuns: owners.size, drainingRuntimes: [...runtimes].filter(entry => entry !== active).length,
+      configured: Boolean(applied.endpoint || applied.tracesEndpoint || applied.metricsEndpoint), generation };
   }
 
-  function remoteConfiguration() {
-    const endpoint = applied.tracesEndpoint || applied.endpoint;
-    const headers = applied.tracesHeaders || applied.headers;
-    return Object.freeze({ enabled: applied.enabled && Boolean(endpoint), endpoint, ...(headers ? { headers } : {}) });
+  function remoteConfiguration(runId = null) {
+    const config = owners.get(String(runId || ''))?.config || applied;
+    return Object.freeze({ enabled: config.enabled && Boolean(config.endpoint || config.tracesEndpoint || config.metricsEndpoint), endpoint: config.endpoint,
+      ...Object.fromEntries(['headers', 'tracesEndpoint', 'metricsEndpoint', 'tracesHeaders', 'metricsHeaders'].filter(key => config[key]).map(key => [key, config[key]])) });
   }
 
+  function startRun(options = {}) {
+    if (closed) return null;
+    const runId = String(options.runId || '');
+    // Ownership is trusted internal provenance, independent of the W3C span
+    // parent. A delegated run joins its parent's generation even after a
+    // replacement/disable; its own runIds entry then retains that generation.
+    const owner = owners.get(runId) || owners.get(String(options.parentRunId || '')) || active;
+    const result = owner.runtime.startRun(options);
+    if (result) {
+      owners.set(runId, owner);
+      owner.runIds.add(runId);
+    }
+    return result;
+  }
+
+  function endRun(runId, result) {
+    const key = String(runId || '');
+    const owner = owners.get(key);
+    if (!owner) return;
+    try { return owner.runtime.endRun(runId, result); }
+    finally {
+      owners.delete(key);
+      owner.runIds.delete(key);
+      if (owner !== active) void drain(owner);
+    }
+  }
+
+  function shutdown(options = {}) {
+    if (shuttingDown) return shuttingDown;
+    closed = true;
+    // Drain known generations immediately, even if an apply is still starting.
+    // In-flight candidates see closed and dispose themselves before installing.
+    const draining = Promise.all([...runtimes].map(entry => drain(entry, options)));
+    shuttingDown = (async () => {
+      try {
+        await timeout(Promise.all([applying.catch(() => {}), draining]),
+          positiveInteger(options.timeoutMs, DEFAULT_SHUTDOWN_TIMEOUT_MS), 'otel_shutdown_timeout');
+      } catch { completed.failures.shutdown += 1; }
+      owners.clear();
+      return status();
+    })();
+    return shuttingDown;
+  }
+
+  const ownerFor = runId => owners.get(String(runId || ''))?.runtime || active.runtime;
   return Object.freeze({
     apply,
     remoteConfiguration,
-    start: () => active.start(),
-    startRun: (...args) => active.startRun(...args),
-    observe: (...args) => active.observe(...args),
-    endRun: (...args) => active.endRun(...args),
-    traceContextForRun: (...args) => active.traceContextForRun(...args),
-    traceContextForTool: (...args) => active.traceContextForTool(...args),
+    start: () => closed ? Promise.resolve(status()) : active.runtime.start(),
+    startRun,
+    observe: (record = {}) => ownerFor(record.runId).observe(record),
+    endRun,
+    traceContextForRun: (runId, ...args) => ownerFor(runId).traceContextForRun(runId, ...args),
+    traceContextForTool: (runId, ...args) => ownerFor(runId).traceContextForTool(runId, ...args),
     status,
-    shutdown: (...args) => active.shutdown(...args),
+    shutdown,
   });
 }
 

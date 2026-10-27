@@ -331,13 +331,25 @@ export async function executeSpawnSubagentTool({
   const running = await updateSubagentStatus({ dataRoot, id, status: 'running', phase: 'spawned', trace: { runId: id, childSessionId, traceDir }, activity: { kind: 'run', status: 'running', phase: 'spawned', label: 'Subagent spawned', sequence: 0, startedAt: spawnedAt, lastActualActivityAt: spawnedAt }, provenance: { source: 'spawn-subagent-tool', reason: 'spawned' } });
 
   const remoteExecution = resolveNativeFilesystemExecutionTarget(executionContext || {}).kind === 'remote';
+  // Capture the live spawn-tool carrier before dispatch. In-process children
+  // must receive the same immediate parent as OS children, not the parent run.
+  const parentTraceContext = executionContext?.telemetry?.traceContextForTool?.(parentRunId, activityId) || executionContext?.traceContext || null;
+  const childParentExecutionContext = executionContext ? {
+    ...executionContext,
+    // Keep server-only dependencies that createExecutionContext hides from JSON.
+    conversationStore: executionContext.conversationStore,
+    stores: executionContext.stores,
+    telemetry: executionContext.telemetry,
+    abortSignal: executionContext.abortSignal,
+    traceContext: parentTraceContext,
+  } : null;
   let childRun;
   try {
     abortSignal?.throwIfAborted();
     if (remoteExecution && typeof childRunner !== 'function') throw new Error('subagent_child_runner_required');
     childRun = remoteExecution || childRunner
-      ? { ok: true, spawned: true, exitCode: 0, durationMs: null, result: await childRunner({ id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy, parentExecutionContext: executionContext, signal: abortSignal }) }
-      : await runSubagentProcess({ args: { id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy, executionBoundaries: executionContext?.executionBoundaries || null, traceContext: executionContext?.telemetry?.traceContextForTool?.(parentRunId, activityId) || executionContext?.traceContext || null, otelConfiguration: executionContext?.telemetry?.remoteConfiguration?.() || null }, signal: abortSignal });
+      ? { ok: true, spawned: true, exitCode: 0, durationMs: null, result: await childRunner({ id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy, parentExecutionContext: childParentExecutionContext, signal: abortSignal }) }
+      : await runSubagentProcess({ args: { id, task, target, dataRoot, childSessionId, owner, modelConfig: childModelConfig, traceDir, executionPolicy, executionBoundaries: executionContext?.executionBoundaries || null, traceContext: parentTraceContext, otelConfiguration: executionContext?.telemetry?.remoteConfiguration?.(parentRunId) || null }, signal: abortSignal });
   } catch (error) {
     const code = compactString(error?.code || error?.message || 'subagent_child_dispatch_failed').split(':')[0];
     childRun = {
