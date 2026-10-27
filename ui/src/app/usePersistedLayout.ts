@@ -18,7 +18,7 @@ function migrateRightPanelDefaults() {
   writeStorage(rightPanelDefaultsVersionKey, rightPanelDefaultsVersion);
 }
 
-export const themes = ['smatchet', 'midnight', 'blue-hour', 'nexus', 'hatchet', 'chaos', 'paper', 'terminal', 'high-contrast'] as const;
+export const themes = ['smatchet', 'midnight', 'blue-hour', 'nexus', 'hatchet', 'chaos', 'terminal'] as const;
 
 export const themeDetails = {
   smatchet: { label: 'Smatchet Dark', description: 'Dense dark workspace with a magenta focus color.' },
@@ -27,9 +27,7 @@ export const themeDetails = {
   nexus: { label: 'Nexus', description: 'Deep blue control-room surfaces with crisp electric focus.' },
   hatchet: { label: 'Hatchet', description: 'Industrial dark teal with calm, deliberate contrast.' },
   chaos: { label: 'Chaos', description: 'Charcoal and red with sharp, high-energy feedback.' },
-  paper: { label: 'Paper', description: 'A calm light workspace with clear, ink-like contrast.' },
   terminal: { label: 'Terminal', description: 'Near-black, compact, and quietly green.' },
-  'high-contrast': { label: 'High Contrast', description: 'Maximum contrast with reduced visual decoration.' },
 } as const;
 export type Theme = typeof themes[number];
 

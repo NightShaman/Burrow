@@ -6,14 +6,14 @@ beforeEach(() => localStorage.clear());
 
 describe('persisted layout state', () => {
   it('loads legacy values and rewrites them as validated versioned payloads', async () => {
-    localStorage.setItem('hc.theme', 'paper');
+    localStorage.setItem('hc.theme', 'midnight');
     localStorage.setItem('hc.selectedAgentId', 'node-1::smatchet');
     const theme = renderHook(() => usePersistedTheme());
     const agent = renderHook(() => usePersistedAgentSelection());
 
-    expect(theme.result.current[0]).toBe('paper');
+    expect(theme.result.current[0]).toBe('midnight');
     expect(agent.result.current[0]).toBe('node-1::smatchet');
-    await waitFor(() => expect(JSON.parse(localStorage.getItem('hc.theme') ?? '{}')).toEqual({ version: 1, value: 'paper' }));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem('hc.theme') ?? '{}')).toEqual({ version: 1, value: 'midnight' }));
     expect(JSON.parse(localStorage.getItem('hc.selectedAgentId') ?? '{}')).toEqual({ version: 1, value: 'node-1::smatchet' });
   });
 
@@ -98,3 +98,9 @@ it.each(['codex', JSON.stringify({ version: 1, value: 'codex' })])('falls back f
  expect(reload.result.current.rightTopPanel).toBe('accounts');
  reload.unmount();
 });
+
+ it.each(['paper', 'high-contrast'])('falls back when the removed %s theme was saved', (removed) => {
+    localStorage.setItem('hc.theme', JSON.stringify({ version: 1, value: removed }));
+    const theme = renderHook(() => usePersistedTheme());
+    expect(theme.result.current[0]).toBe('smatchet');
+  });

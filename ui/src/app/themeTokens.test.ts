@@ -10,7 +10,7 @@ it('all stylesheet custom-property references resolve or explicitly provide a fa
  expect(css).not.toContain('var(--text-strong)9');
 });
 it('every supported palette defines status and selection roles', () => {
- for (const theme of ['midnight','blue-hour','nexus','hatchet','chaos','paper','terminal','high-contrast']) {
+ for (const theme of ['midnight','blue-hour','nexus','hatchet','chaos','terminal']) {
   const block = base.slice(base.indexOf(`[data-theme="${theme}"]`)).split('}')[0];
   for (const token of ['--accent:','--line:','--muted:','--ok:','--warn:']) expect(block).toContain(token);
  }
