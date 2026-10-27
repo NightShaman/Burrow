@@ -3,7 +3,7 @@ import { createModCapabilities } from './mod-capabilities.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { startModHost } from './mod-host.mjs';
+import { emitModEvent, modLogIdentity, startModHost } from './mod-host.mjs';
 import { manifestManagedSkills } from './managed-skills.mjs';
 
 // Reserved for mod-owned persistent data; never a discoverable/installable mod.
@@ -12,6 +12,7 @@ const MOD_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SYSTEM_CAPABILITY_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 export const SUPPORTED_SYSTEM_MOD_CAPABILITIES = Object.freeze(['execution-provider-v1', 'mod-management-v1']);
 const SUPPORTED_SYSTEM_MOD_CAPABILITY_SET = new Set(SUPPORTED_SYSTEM_MOD_CAPABILITIES);
+const ACTIVATION_LOG_CODES = new Set(['mod_activation_failed', 'mod_activation_timeout', 'mod_host_unavailable', 'mod_host_exited', 'mod_host_disconnected', 'mod_host_error', 'mod_host_send_failed', 'mod_tool_description_invalid', 'mod_route_description_invalid', 'mod_route_parameter_invalid', 'system_controller_registration_failed', 'system_controller_registration_invalid']);
 const MIME = Object.freeze({ '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' });
 
 function manifestSystemCapabilities(id, manifest = {}) {
@@ -122,10 +123,10 @@ function failedMod({ id, name, root, error }) {
 export async function discoverMods({ runtimeRoot = process.env.BURROW_RUNTIME_ROOT || '/mnt/local/burrow', logger = console } = {}) {
   const modsRoot = path.join(runtimeRoot, 'mods');
   try { await fs.mkdir(modsRoot, { recursive: true }); }
-  catch (error) { logger.warn?.(`Burrow mod directory unavailable: ${String(error?.message || error)}`); return []; }
+  catch { emitModEvent(logger, 'mod_discovery_unavailable', { errorCode: 'mod_directory_unavailable' }, 'warn'); return []; }
   let entries;
   try { entries = await fs.readdir(modsRoot, { withFileTypes: true }); }
-  catch (error) { logger.warn?.(`Burrow mod directory unreadable: ${String(error?.message || error)}`); return []; }
+  catch { emitModEvent(logger, 'mod_discovery_unavailable', { errorCode: 'mod_directory_unreadable' }, 'warn'); return []; }
   const mods = [];
   const seen = new Map();
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
@@ -154,8 +155,8 @@ export async function discoverMods({ runtimeRoot = process.env.BURROW_RUNTIME_RO
       const mod = { id, name, root, manifest, systemCapabilities, managedSkills, server: server ? inside(root, server) : null, ui, contributions };
       seen.set(id, mod); mods.push(mod);
     } catch (error) {
-      mods.push(failedMod({ id: manifestId, root, error }));
-      logger.warn?.(`Burrow mod ${entry.name} ignored: ${String(error?.message || error)}`);
+      mods.push(failedMod({ id: entry.name, root, error }));
+      emitModEvent(logger, 'mod_discovery_failed', { modId: modLogIdentity({ id: entry.name }), errorCode: 'mod_manifest_invalid' }, 'warn');
     }
   }
   return mods;
@@ -191,7 +192,7 @@ async function closeModStore(mod, logger) {
   mod.store = null;
   if (!store) return;
   try { await store.close?.(); }
-  catch (error) { logger.error?.(`Burrow mod ${mod.id} store cleanup failed: ${String(error?.message || error)}`); }
+  catch { emitModEvent(logger, 'mod_cleanup_failed', { modId: modLogIdentity(mod), errorCode: 'mod_store_cleanup_failed' }, 'warn'); }
 }
 
 export async function cleanupMods(mods = [], { logger = console } = {}) {
@@ -200,7 +201,7 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
     mod.lifecycleCleanup = null;
     if (cleanup) {
       try { await cleanup(); }
-      catch (error) { logger.error?.(`Burrow mod ${mod.id} cleanup failed: ${String(error?.message || error)}`); }
+      catch { emitModEvent(logger, 'mod_cleanup_failed', { modId: modLogIdentity(mod), errorCode: 'mod_cleanup_failed' }, 'warn'); }
     }
     unpublishModTools(mod);
     await closeModStore(mod, logger);
@@ -208,15 +209,28 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
 }
 
 export async function loadMods({ runtimeRoot, logger = console, executionProviders = null, replaceExecutionProviders = false, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null, externalTurnDispatcher = null, generationDispatcher = null, stores = null, runtimeDiagnostics = null, modManagement = null, modAuthority = null, onlyModIds = null, modStoreFactory = null, enabledModIds = null, modCatalogWriter = null } = {}) {
-  const discoveredAll = await discoverMods({ runtimeRoot });
+  const discoveredAll = await discoverMods({ runtimeRoot, logger });
   const selectedIds = onlyModIds ? new Set(onlyModIds) : null;
   const discovered = selectedIds ? discoveredAll.filter((mod) => selectedIds.has(mod.id)) : discoveredAll;
   if (typeof enabledModIds !== 'function' || typeof modStoreFactory !== 'function' || typeof modCatalogWriter !== 'function') throw new Error('postgres_mod_dependencies_required');
   const enabled = new Set(await enabledModIds());
   const loaded = [];
+  // Enabled records without an install must be visible too, including targeted
+  // reloads, rather than silently disappearing from operational startup output.
+  for (const id of enabled) {
+    if ((!selectedIds || selectedIds.has(id)) && !discovered.some(mod => mod.id === id)) {
+      emitModEvent(logger, 'mod_activation_skipped', { modId: modLogIdentity({ id }), reason: 'not_found' }, 'warn');
+    }
+  }
   for (const mod of discovered) {
-    if (mod.status === 'failed') { loaded.push(mod); continue; }
-    if (!enabled.has(mod.id)) { loaded.push({ ...mod, status: 'disabled' }); continue; }
+    if (mod.status === 'failed') {
+      emitModEvent(logger, 'mod_activation_skipped', { modId: modLogIdentity(mod), reason: 'manifest_invalid' }, 'warn');
+      loaded.push(mod); continue;
+    }
+    if (!enabled.has(mod.id)) {
+      emitModEvent(logger, 'mod_activation_skipped', { modId: modLogIdentity(mod), reason: 'disabled' });
+      loaded.push({ ...mod, status: 'disabled' }); continue;
+    }
     let host = null;
     let store = null;
     try {
@@ -230,7 +244,7 @@ export async function loadMods({ runtimeRoot, logger = console, executionProvide
         let unregisterController = null;
         store = await modStoreFactory(mod.id);
         host = startModHost({
-          mod: { ...mod, systemCapabilities: effectiveCapabilities }, store, logger, systemCapability, modAuthority, capabilities: resolveAgentRuntime ? createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl: capabilityFetch, ownerModId: mod.id, scheduledJobScheduler, externalTurnDispatcher, generationDispatcher, stores, modStore: store, runtimeDiagnostics, modAuthority, modManagement: effectiveCapabilities.includes('mod-management-v1') ? modManagement : null }) : null, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs,
+          mod: { ...mod, systemCapabilities: effectiveCapabilities }, store, logger, deferRuntimeLogging: true, systemCapability, modAuthority, capabilities: resolveAgentRuntime ? createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl: capabilityFetch, ownerModId: mod.id, scheduledJobScheduler, externalTurnDispatcher, generationDispatcher, stores, modStore: store, runtimeDiagnostics, modAuthority, modManagement: effectiveCapabilities.includes('mod-management-v1') ? modManagement : null }) : null, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs,
           onSystemControllerReady(controllerProxy) {
             if (!systemCapability || !executionProviders) return;
             unregisterController = executionProviders.register(mod.id, controllerProxy, { replace: replaceExecutionProviders });
@@ -278,17 +292,22 @@ export async function loadMods({ runtimeRoot, logger = console, executionProvide
       }
       Object.assign(mod, { routes, store, lifecycleCleanup: host ? () => host.close() : null, commitProviderReplacement, host, status: 'loaded' });
       if (mod.status === 'loaded' && !replaceExecutionProviders) await publishModTools(mod, modCatalogWriter);
+      if (host && !host.commitActivation()) throw Object.assign(new Error('mod_host_unavailable'), { code: 'mod_host_unavailable' });
+      emitModEvent(logger, 'mod_activation_succeeded', { modId: modLogIdentity(mod), runtime: host ? 'child' : 'static', routeCount: routes.length, toolCount: mod.tools?.length || 0 });
       loaded.push(mod);
     } catch (error) {
       if (host) {
         try { await host.close(); }
-        catch (cleanupError) { logger.error?.(`Burrow mod ${mod.id} cleanup failed: ${String(cleanupError?.message || cleanupError)}`); }
+        catch { emitModEvent(logger, 'mod_cleanup_failed', { modId: modLogIdentity(mod), errorCode: 'mod_cleanup_failed' }, 'warn'); }
       }
       if (store) {
         try { await store.close(); }
-        catch (cleanupError) { logger.error?.(`Burrow mod ${mod.id} store cleanup failed: ${String(cleanupError?.message || cleanupError)}`); }
+        catch { emitModEvent(logger, 'mod_cleanup_failed', { modId: modLogIdentity(mod), errorCode: 'mod_store_cleanup_failed' }, 'warn'); }
       }
-      logger.error?.(`Burrow mod ${mod.id} failed: ${String(error?.message || error)}`);
+      // Only Core-owned codes are operational metadata; exception messages can
+      // contain secrets, SQL, paths, or arbitrary mod-controlled text.
+      const candidate = String(error?.code || error?.message || '').split(':')[0];
+      emitModEvent(logger, 'mod_activation_failed', { modId: modLogIdentity(mod), errorCode: ACTIVATION_LOG_CODES.has(candidate) ? candidate : 'mod_activation_failed', ...(host?.exitDetails || {}), ...(host ? { output: host.outputDiagnostics() } : {}) }, 'error');
       loaded.push({ ...mod, routes: [], store: null, host: null, status: 'failed', error: String(error?.message || error) });
     }
   }

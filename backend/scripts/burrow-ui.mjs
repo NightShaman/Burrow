@@ -99,7 +99,10 @@ import { createModExternalTurnDispatcher } from '../src/mod-external-turns.mjs';
 import { backgroundSchedulersEnabled } from '../src/background-scheduler-policy.mjs';
 import { diagnoseMcpConnection as diagnoseMcpConnectionRuntime, discoverMcpTools, configureMcpProviderStateStore, hydrateMcpProviderStates, reconcilePersistentMcpConnection } from '../src/mcporter-adapter.mjs';
 import { createRuntimeMetricsCollector } from '../src/runtime-metrics.mjs';
-import { createRuntimeServerLogger } from '../src/runtime-server-log.mjs';
+import { createRuntimeServerLogger, safeOperationalError } from '../src/runtime-server-log.mjs';
+import { operationalEvent } from '../src/operational-log.mjs';
+import { instrumentHttpResponse, correlateHttpRun, recordHttpFailure, observeHttpResult, observeHttpRunEvent, createCatalogRefreshDiagnostics } from '../src/http-operational-log.mjs';
+import { logAuthFailure } from '../src/ui-auth-diagnostics.mjs';
 import { latestProviderRequest } from '../src/provider-request-inspection.mjs';
 import { chatCommandHelpText, chatCommandResponse, parseChatCommand } from '../src/chat-commands.mjs';
 import { activeChatRunKey, activeChatRunSummaries, activeChatRunSummary, cancelActiveChatRun, registerActiveAgentRun } from '../src/active-chat-runs.mjs';
@@ -154,6 +157,21 @@ function summarizeSessionTurns(turns = [], { maxChars = 4000 } = {}) {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sourceRoot = path.resolve(__dirname, '..');
+const runtimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
+// PostgreSQL owns server persistence; startup fails if composition is unavailable.
+const serverLogger = createRuntimeServerLogger({ runtimeRoot });
+// Install before awaited composition/startup, not only after a listener exists.
+// Early startup cannot safely call the resource drain before its consts exist.
+let runtimeShutdownHandler = null;
+function fatalRuntimeFailure(event, signal, error) {
+  void serverLogger.event(event, { error: safeOperationalError(error) }, { level: 'fatal' }).finally(async () => {
+    if (runtimeShutdownHandler) return runtimeShutdownHandler(signal, { exitCode: 1 });
+    await serverLogger.flush().catch(() => {});
+    process.exit(1);
+  });
+}
+process.once('uncaughtException', error => fatalRuntimeFailure('uncaught_exception', 'uncaughtException', error));
+process.once('unhandledRejection', error => fatalRuntimeFailure('unhandled_rejection', 'unhandledRejection', error));
 const healthBuildIdentity = await buildIdentity(sourceRoot);
 const healthReleaseProvenance = await releaseProvenance(sourceRoot);
 const projectRoot = path.resolve(process.env.BURROW_SOURCE_ROOT || sourceRoot);
@@ -165,7 +183,6 @@ const configuredRunCancellationGraceMs = Number(process.env.BURROW_RUN_CANCELLAT
 const RUN_CANCELLATION_GRACE_MS = Number.isFinite(configuredRunCancellationGraceMs) ? Math.max(1_000, configuredRunCancellationGraceMs) : 5_000;
 const authorityConfig = httpAuthorityConfig({ host, port });
 browserOriginConfig(); // Validate optional environment override at startup.
-const requestLifecycle = createBackgroundLifecycle({ name: 'runtime_request' });
 const activeChatRuns = new Map();
 const executionProviders = createExecutionProviderRegistry();
 const sessionContinuityHeads = new Map();
@@ -193,17 +210,16 @@ const traceStatusCache = new Map();
 const TRACE_STATUS_CACHE_MS = 30_000;
 const BASIC_SESSION_COOKIE = 'hc_basic_session';
 const OPENAI_OAUTH_USAGE_URL = process.env.BURROW_OPENAI_OAUTH_USAGE_URL || 'https://chatgpt.com/backend-api/wham/usage';
-const runtimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
-// PostgreSQL owns server persistence; startup fails if composition is unavailable.
-const serverLogger = createRuntimeServerLogger({ runtimeRoot });
+const requestLifecycle = createBackgroundLifecycle({ name: 'runtime_request', logger: serverLogger });
 const runtimePostgresConfig = postgresConfig();
 // Acquire before composition starts any producers, and before orphan repair.
 // Keep the dedicated session through shutdown and store teardown until exit.
 let runtimeOwnership;
 try { runtimeOwnership = await acquirePostgresRuntimeOwnership({ config: runtimePostgresConfig }); }
-catch (error) { console.error(`Burrow UI startup refused: ${String(error?.message || error)}`); process.exit(1); }
+catch (error) { await serverLogger.event('startup_ownership_failed', { reason: String(error?.message || '').startsWith('runtime_database_already_owned:') ? 'runtime_database_already_owned' : 'runtime_database_ownership_failed', error }, { level: 'fatal', component: 'postgres' }); await serverLogger.flush(); process.exit(1); }
 const postgresApplication = await createPostgresApplication({
   poolConfig: runtimePostgresConfig,
+  logger: serverLogger,
   encryptionKey: settingsKeyFromEnvironment(),
   runtimeRoot,
   resolveAgent: async (agentId) => resolveAgentRuntime(agentId),
@@ -212,13 +228,14 @@ const postgresApplication = await createPostgresApplication({
   resolveConfig: (connectionId, modelId) => resolveModelConfig({ stores: postgresApplication.stores, modelConnectionId: connectionId, model: modelId }),
 });
 const { anthropicOauthUsage, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit } = createProviderUsageService({ modelLookup: modelsStore, authSecretToken, fetchImpl: globalThis.fetch, clock: Date.now, openaiUsageUrl: OPENAI_OAUTH_USAGE_URL });
-configureMcpProviderStateStore(postgresApplication.stores.mcpProviderStates);
-await hydrateMcpProviderStates({ runtimeRoot: process.env.BURROW_MCPORTER_ROOT || path.join(runtimeRoot, 'integrations', 'mcporter') }).catch((error) => serverLogger.event('mcp_provider_state_hydration_failed', { error: String(error?.message || error) }));
+await serverLogger.event('database_ready', {}, { component: 'postgres' });
+configureMcpProviderStateStore(postgresApplication.stores.mcpProviderStates, { logger: serverLogger });
+await hydrateMcpProviderStates({ runtimeRoot: process.env.BURROW_MCPORTER_ROOT || path.join(runtimeRoot, 'integrations', 'mcporter') }).catch(() => serverLogger.event('mcp_provider_state_hydration_failed', { errorCode: 'mcp_provider_state_hydration_failed' }, { level: 'warn', component: 'mcp' }));
 const runtimeMetrics = createRuntimeMetricsCollector({ runtimeRoot });
-const otelRuntime = createReconfigurableOtelRuntime({ serviceVersion: releaseVersion });
+const otelRuntime = createReconfigurableOtelRuntime({ serviceVersion: releaseVersion, logger: serverLogger });
 await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: postgresApplication.stores.metadata }));
 await runtimeOwnership.reconcileModJobs(postgresApplication.stores);
-const generationDispatcher = createModGenerationDispatcher({ store: postgresApplication.stores.generations, generateText: createModTextGenerator({ models: postgresApplication.stores.models }) });
+const generationDispatcher = createModGenerationDispatcher({ logger: serverLogger, store: postgresApplication.stores.generations, generateText: createModTextGenerator({ models: postgresApplication.stores.models }) });
 const chatInputRunner = createChatInputRunner({ store: postgresApplication.stores.chatInputs, stores: postgresApplication.stores,
   resolveAgentRuntime, rootDir: projectRoot, registerActiveRun: registerRuntimeActiveRun, telemetry: otelRuntime,
   requestRecovery: () => recoveryContinuationScheduler?.wake() || Promise.resolve(),
@@ -226,12 +243,55 @@ const chatInputRunner = createChatInputRunner({ store: postgresApplication.store
 });
 const chatInputs = createChatInputService({ stores: postgresApplication.stores, activeRuns: activeChatRuns, runner: chatInputRunner, resolveAgentRuntime });
 const completionEventRunner = createCompletionEventRunner({ store: postgresApplication.stores.completionEvents, stores: postgresApplication.stores, resolveAgentRuntime, rootDir: projectRoot, registerActiveRun: registerRuntimeActiveRun, telemetry: otelRuntime });
-const externalTurnDispatcher = createModExternalTurnDispatcher({ store: postgresApplication.stores.externalTurns, stores: postgresApplication.stores, resolveAgentRuntime, rootDir: projectRoot, registerActiveRun: registerRuntimeActiveRun, telemetry: otelRuntime });
+const externalTurnDispatcher = createModExternalTurnDispatcher({ logger: serverLogger, store: postgresApplication.stores.externalTurns, stores: postgresApplication.stores, resolveAgentRuntime, rootDir: projectRoot, registerActiveRun: registerRuntimeActiveRun, telemetry: otelRuntime });
+const NODE_GOBLIN_OTEL_CONFIGURATION_REASONS = new Set([
+  'provider_configuration_unsupported', 'configuration_failed',
+  'remote_configuration_controller_unavailable', 'remote_configuration_invalid',
+  'remote_configuration_failed', 'remote_configuration_send_failed', 'remote_configuration_timeout',
+  'gateway_not_connected', 'gateway_not_ready', 'gateway_disconnected', 'gateway_configuration_failed',
+  'gateway_configuration_timeout', 'telemetry_configuration_invalid',
+  'telemetry_endpoint_invalid', 'telemetry_headers_invalid',
+]);
+let nodeGoblinOtelConfigurationUnavailable = false;
 async function applyOtelConfigurationToNodeGoblins() {
   const configuration = otelRuntime.remoteConfiguration();
-  try { return await executionProviders.configure('node-goblin', configuration); }
-  catch (error) {
-    serverLogger.event('node_goblin_otel_configuration_failed', { error: String(error?.code || error?.message || 'configuration_failed') });
+  const expected = configuration.enabled === true && Boolean(executionProviders.get('node-goblin'))
+    && loadedMods.some(mod => mod.id === 'node-goblin' && mod.status === 'loaded');
+  // Disabling/removing a provider is not a failure or a recovery. Still send the
+  // configuration below, including disabled configurations, as before.
+  if (!expected) nodeGoblinOtelConfigurationUnavailable = false;
+  const failed = fields => {
+    if (!expected || nodeGoblinOtelConfigurationUnavailable) return;
+    nodeGoblinOtelConfigurationUnavailable = true;
+    operationalEvent(serverLogger, 'node_goblin_otel_configuration_failed', { providerId: 'node-goblin', ...fields }, { level: 'warn', component: 'opentelemetry' });
+  };
+  try {
+    const result = await executionProviders.configure('node-goblin', configuration);
+    if (result?.configured === false || (Number.isInteger(result?.failed) && result.failed > 0)
+      || result?.controllerRunning === false) {
+      // The controller aggregates gateway failures; retain only its known
+      // classifications, never arbitrary reply text or gateway metadata.
+      const failureReasons = [...new Set((Array.isArray(result.failures) ? result.failures.slice(0, 20) : [])
+        .map(failure => failure?.reason).filter(reason => NODE_GOBLIN_OTEL_CONFIGURATION_REASONS.has(reason)))];
+      failed({ reason: NODE_GOBLIN_OTEL_CONFIGURATION_REASONS.has(result.reason) ? result.reason
+        : failureReasons.length === 1 ? failureReasons[0] : 'configuration_failed',
+        ...(failureReasons.length ? { failureReasons } : {}),
+        ...(Number.isSafeInteger(result?.failed) && result.failed > 0 ? { failedGateways: result.failed } : {}) });
+    } else {
+      // A count is the number attempted, not an acknowledgement. Zero
+      // connected gateways cannot prove recovery from a previous outage.
+      const configured = result?.configured === true || (Number.isSafeInteger(result?.configured)
+        && result.configured > 0 && result.succeeded === result.configured
+        && result.failed === 0 && result.controllerRunning !== false);
+      if (expected && configured && nodeGoblinOtelConfigurationUnavailable) {
+        nodeGoblinOtelConfigurationUnavailable = false;
+        operationalEvent(serverLogger, 'node_goblin_otel_configuration_restored', { providerId: 'node-goblin' }, { level: 'info', component: 'opentelemetry' });
+      }
+    }
+    return result;
+  } catch (error) {
+    const { errorCode, errorType, upstreamStatus } = safeOperationalError(error, 'remote_configuration_failed');
+    failed({ reason: 'configuration_failed', errorCode, errorType, ...(upstreamStatus === undefined ? {} : { upstreamStatus }) });
     return { configured: false, reason: 'configuration_failed' };
   }
 }
@@ -364,7 +424,7 @@ async function executeBoardTask(taskId) {
         // Preserve only diagnostic fields, not arbitrary error properties or
         // credentials. The request logger applies its normal bounds/redaction;
         // keep this separate from `details`, which is exposed over HTTP.
-        const diagnostic = (error) => ({ name: String(error?.name || 'Error'), message: String(error?.message || error), ...(error?.code != null ? { code: String(error.code) } : {}) });
+        const diagnostic = (error) => safeOperationalError(error);
         failure.taskExecutionDiagnostics = {
           taskId: updated.id, runId, agentId: agentRuntime.agentId, sessionId,
           projectReadError: diagnostic(error), recoveryWriteError: diagnostic(recoveryError),
@@ -482,13 +542,28 @@ function agentRuntimeArgs(agentRuntime, dataRoot) {
 
 
 let codexClientVersionRefreshInterval = null;
-const versionRefreshLifecycle = createBackgroundLifecycle({ name: 'codex_client_version_refresh' });
+const versionRefreshLifecycle = createBackgroundLifecycle({ name: 'codex_client_version_refresh', logger: serverLogger });
+const modelCatalogDiagnostics = createCatalogRefreshDiagnostics(serverLogger, 'models');
 function refreshCodexClientVersionNow() {
   if (versionRefreshLifecycle.stopped) return;
   void versionRefreshLifecycle.track(async () => {
-    versionRefreshLifecycle.signal.throwIfAborted();
-    await refreshCodexClientVersionCache({ store: modelsStore(), signal: AbortSignal.any([versionRefreshLifecycle.signal, AbortSignal.timeout(15_000)]) }).catch(() => {});
-    await modelsStore().refreshOAuthCatalogs({ useModelsDev: true, signal: versionRefreshLifecycle.signal });
+    if (versionRefreshLifecycle.stopped) return;
+    try {
+      const cache = await refreshCodexClientVersionCache({ store: modelsStore(), signal: AbortSignal.any([versionRefreshLifecycle.signal, AbortSignal.timeout(15_000)]) });
+      if (!versionRefreshLifecycle.stopped) modelCatalogDiagnostics('codex_client_version_refresh', !cache?.lastError, { error: cache?.lastError });
+    } catch (error) {
+      if (!versionRefreshLifecycle.stopped) modelCatalogDiagnostics('codex_client_version_refresh', false, { error });
+    }
+    if (versionRefreshLifecycle.stopped) return;
+    try {
+      const results = await modelsStore().refreshOAuthCatalogs({ useModelsDev: true, signal: versionRefreshLifecycle.signal });
+      if (!versionRefreshLifecycle.stopped) {
+        modelCatalogDiagnostics('model_catalog_refresh', true);
+        for (const result of results || []) modelCatalogDiagnostics('model_catalog_refresh', result.ok === true, { connectionId: result.id, error: result.error });
+      }
+    } catch (error) {
+      if (!versionRefreshLifecycle.stopped) modelCatalogDiagnostics('model_catalog_refresh', false, { error });
+    }
   }).catch(() => {});
 }
 function startCodexClientVersionRefresh() {
@@ -501,7 +576,7 @@ const versionRefreshProducer = {
   stop() { versionRefreshLifecycle.stop(); clearInterval(codexClientVersionRefreshInterval); codexClientVersionRefreshInterval = null; },
   close() { this.stop(); return versionRefreshLifecycle.close(); },
 };
-const startupLifecycle = createBackgroundLifecycle({ name: 'runtime_startup' });
+const startupLifecycle = createBackgroundLifecycle({ name: 'runtime_startup', logger: serverLogger });
 
 let metadataStoreFactory = () => postgresApplication.stores.metadata;
 let uiAuthSecretStoreFactory = () => postgresApplication.stores.uiAuthSecrets;
@@ -537,7 +612,7 @@ async function saveMcpConnection(body = {}) { try {
   try {
     await reconcilePersistentMcpConnection(existing, connection, { previousApiKey, nextApiKey, previousEnvironmentVariables, nextEnvironmentVariables, previousHeaders, nextHeaders: await store.secretHeaders(connection.id) });
   } catch (error) {
-    console.warn(`MCP connection ${connection.id} was saved but its prior keep-alive daemon could not be stopped: ${String(error?.message || error)}`);
+    void serverLogger.event('mcp_connection_reconcile_failed', { connectionId: connection.id, error }, { level: 'warn', component: 'mcp' });
   }
   return { ok: true, connection };
 } catch (error) { return { ok: false, status: 400, error: String(error?.message || error) }; } }
@@ -550,7 +625,20 @@ async function removeMcpConnection(id) {
     return await store.remove(id);
   } catch (error) { throw error; }
 }
-async function discoverMcpConnection(body = {}) { try { const connection = await mcpStore().get(body.connectionId); if (!connection) return { ok: false, status: 404, error: 'mcp_connection_not_found' }; const tools = await discoverMcpTools(connection, { apiKey: await mcpStore().apiKey(connection.id), headers: await mcpStore().secretHeaders(connection.id), environmentVariables: await mcpStore().secretEnvironment(connection.id) }); return { ok: true, connection: await mcpStore().refreshTools(connection.id, tools), tools }; } catch (error) { return { ok: false, status: 400, error: String(error?.message || error) }; } }
+const mcpCatalogDiagnostics = createCatalogRefreshDiagnostics(serverLogger, 'mcp');
+async function discoverMcpConnection(body = {}) {
+  try {
+    const connection = await mcpStore().get(body.connectionId);
+    if (!connection) return { ok: false, status: 404, error: 'mcp_connection_not_found' };
+    const tools = await discoverMcpTools(connection, { apiKey: await mcpStore().apiKey(connection.id), headers: await mcpStore().secretHeaders(connection.id), environmentVariables: await mcpStore().secretEnvironment(connection.id) });
+    const refreshed = await mcpStore().refreshTools(connection.id, tools);
+    mcpCatalogDiagnostics('mcp_catalog_refresh', true, { connectionId: connection.id });
+    return { ok: true, connection: refreshed, tools };
+  } catch (error) {
+    mcpCatalogDiagnostics('mcp_catalog_refresh', false, { connectionId: body.connectionId, error });
+    return { ok: false, status: 400, error: String(error?.message || error) };
+  }
+}
 async function diagnoseMcpConnection(body = {}) {
   const connection = await mcpStore().get(body.connectionId);
   if (!connection) return { ok: false, status: 404, error: 'mcp_connection_not_found' };
@@ -1328,10 +1416,21 @@ async function authenticateApiToken(req, url) {
   finally { await store.close?.(); }
 }
 
+// Keep optional diagnostics guarded: focused auth fixtures extract this region
+// without importing server composition or requiring its logger dependencies.
+async function logAuthorizationFailure(req, reason, { level = 'warn', stage = 'authorization' } = {}) {
+  if (typeof serverLogger === 'undefined' || typeof serverLogger?.event !== 'function') return;
+  req.operationalFailureLogged = true;
+  try {
+    await serverLogger.event('auth.failure', { reason, stage, ...(typeof req.requestId === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(req.requestId) ? { requestId: req.requestId } : {}) }, { level, component: 'auth' });
+  } catch { /* Authentication behavior does not depend on diagnostic delivery. */ }
+}
+
 async function authorizeRequest(req, res, url) {
   const apiToken = await authenticateApiToken(req, url);
   if (apiToken) { req.burrowApiToken = apiToken; req.burrowVerifiedAuth = Object.freeze({ enabled: ((await runtimeConfig()).ui?.authMode || 'none') !== 'none', authenticated: false }); return true; }
   if (bearerToken(req)) {
+    await logAuthorizationFailure(req, 'api_token_rejected');
     sendJson(res, 403, { ok: false, error: 'api_token_forbidden' });
     return false;
   }
@@ -1343,11 +1442,13 @@ async function authorizeRequest(req, res, url) {
     const address = remoteAddress(req);
     const allowed = auth.trustedProxy?.allowedProxies || [];
     if (!allowed.includes(address)) {
+      await logAuthorizationFailure(req, 'trusted_proxy_not_allowed', { stage: 'configuration' });
       sendJson(res, 401, { ok: false, error: 'unauthorized', auth: { required: true, mode, reason: 'proxy_not_allowed' } });
       return false;
     }
     const user = String(headerValue(req, auth.trustedProxy?.userHeader || 'x-forwarded-user') || '').trim();
     if (!user) {
+      await logAuthorizationFailure(req, 'trusted_proxy_user_missing', { stage: 'configuration' });
       sendJson(res, 401, { ok: false, error: 'unauthorized', auth: { required: true, mode, reason: 'missing_proxy_user' } });
       return false;
     }
@@ -1356,6 +1457,7 @@ async function authorizeRequest(req, res, url) {
   }
   if (mode === 'basic') {
     if (!auth.basic?.username || !auth.basic?.passwordHash) {
+      await logAuthorizationFailure(req, 'auth_configuration_missing', { level: 'error', stage: 'configuration' });
       sendJson(res, 503, { ok: false, error: 'auth_not_configured', auth: { required: true, mode } });
       return false;
     }
@@ -1367,10 +1469,12 @@ async function authorizeRequest(req, res, url) {
     }
     const credentials = basicCredentials(req);
     if (!credentials) {
+      if (/^basic(?:\s|$)/i.test(String(req.headers.authorization || ''))) await logAuthorizationFailure(req, 'basic_credentials_invalid');
       denyBasic(res, 'missing_basic_credentials');
       return false;
     }
     if (credentials.username !== auth.basic.username || !verifyScryptPassword(credentials.password, auth.basic.passwordHash)) {
+      await logAuthorizationFailure(req, 'basic_credentials_invalid');
       denyBasic(res, 'invalid_basic_credentials');
       return false;
     }
@@ -1380,10 +1484,24 @@ async function authorizeRequest(req, res, url) {
   }
   if (mode === 'oidc') {
     if (!auth.oidc?.issuer || !auth.oidc?.clientId || !auth.oidc?.clientSecret) {
+      await logAuthorizationFailure(req, 'auth_configuration_missing', { level: 'error', stage: 'configuration' });
       sendJson(res, 503, { ok: false, error: 'auth_not_configured', auth: { required: true, mode } });
       return false;
     }
-    const session = oidcSessionFromRequest(req, runtime);
+    let diagnostics;
+    let session;
+    try { session = oidcSessionFromRequest(req, runtime, { onFailure: value => { diagnostics = value; } }); }
+    catch (error) {
+      if (typeof logAuthFailure === 'function' && typeof serverLogger !== 'undefined') {
+        req.operationalFailureLogged = true;
+        await logAuthFailure(serverLogger, { req, error, stage: 'session' });
+      }
+      throw error;
+    }
+    if (diagnostics && typeof logAuthFailure === 'function' && typeof serverLogger !== 'undefined') {
+      req.operationalFailureLogged = true;
+      await logAuthFailure(serverLogger, { req, diagnostics });
+    }
     if (session) { req.burrowVerifiedAuth = Object.freeze({ enabled: true, authenticated: true }); return true; }
     if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {
       res.writeHead(302, { location: `/auth/oidc/login?returnTo=${encodeURIComponent(url.pathname + url.search)}` });
@@ -1393,11 +1511,13 @@ async function authorizeRequest(req, res, url) {
     sendJson(res, 401, { ok: false, error: 'unauthorized', auth: { required: true, mode, loginUrl: '/auth/oidc/login' } });
     return false;
   }
+  await logAuthorizationFailure(req, 'auth_mode_unsupported', { level: 'error', stage: 'configuration' });
   sendJson(res, 501, { ok: false, error: 'auth_mode_not_implemented', auth: { required: true, mode } });
   return false;
 }
 
 function sendJson(res, status, body) {
+  observeHttpResult(res, status, body);
   const data = JSON.stringify(body, null, 2);
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(data) });
   res.end(data);
@@ -1755,7 +1875,8 @@ function beginNdjson(res) {
   });
 }
 
-function writeNdjson(res, event) {
+function writeNdjson(res, event, options) {
+  observeHttpRunEvent(res, event, options);
   if (res.writableEnded || res.destroyed) return;
   res.write(`${JSON.stringify(event)}\n`);
 }
@@ -2775,17 +2896,28 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
   const command = parseChatCommand(body.message);
   if (command) {
     const runId = body.runId ? String(body.runId) : createChatTurnRunId({ sessionId, prefix: 'command' });
+    correlateHttpRun(res, { runId, sessionId, agentId: agentRuntime.agentId });
     // Compaction can take time: open the command stream before doing any work.
     if (streaming) beginNdjson(res);
     const onProgress = streaming ? (event) => writeNdjson(res, { ...event, runId, sessionId, ts: new Date().toISOString() }) : null;
-    const result = await handleChatCommand({ parsed: command, sessionId, agentRuntime, runId, onProgress });
+    let result;
+    try { result = await handleChatCommand({ parsed: command, sessionId, agentRuntime, runId, onProgress }); }
+    catch (error) {
+      const expected = chatTurnErrorResponse(error);
+      if (!expected) recordHttpFailure(res, { error, status: 500, event: 'run_failed', errorCode: 'chat_command_failed' });
+      // Preserve command failure ownership: storage/admission failures reject to
+      // the HTTP boundary, never publish a command terminal receipt that could
+      // be mistaken for durably saved feedback.
+      throw error;
+    }
     if (streaming) {
-      writeNdjson(res, { type: result.response.ok ? 'run.completed' : 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: { ...result.response, result: { ...result.response.result, runId } } } });
+      writeNdjson(res, { type: result.response.ok ? 'run.completed' : 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: { ...result.response, result: { ...result.response.result, runId } } } }, { status: result.status });
       return res.end();
     }
     return sendJson(res, result.status, result.response);
   }
   const runId = body.runId ? String(body.runId) : createChatTurnRunId({ sessionId, prefix: 'ui' });
+  correlateHttpRun(res, { runId, sessionId, agentId: agentRuntime.agentId });
   if (activeChatRuns.has(activeChatRunKey(agentRuntime.agentId, runId))) throw Object.assign(new Error('chat_run_id_already_used'), { statusCode: 409 });
   const controller = new AbortController();
   const record = { agentId: agentRuntime.agentId, runId, sessionId, controller, startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: String(body.message || '').trim().slice(0, 16_000), objective: String(body.message || '').trim().slice(0, 16_000), progress: [], contextUsage: null, cancelled: false, reason: null, detached: false, steeringReady: false };
@@ -2814,6 +2946,8 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
       onCancellationDeadline: () => retireCancelledRun(record),
       registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerRuntimeActiveRun({ agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
       onTraceRecord: (traceRecord) => {
+        // Capture runtime-owned span correlation while the run is still active.
+        correlateHttpRun(res, { traceContext: otelRuntime.traceContextForRun?.(runId) });
         const progress = publicChatProgress(traceRecord);
         if (progress) {
           const event = { ...progress, runId, sessionId, ts: traceRecord.ts || new Date().toISOString() };
@@ -2854,6 +2988,10 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
       if (streaming) { writeNdjson(res, { type: 'run.superseded', runId, sessionId, ts: new Date().toISOString(), data: { response } }); return res.end(); }
       return sendJson(res, 409, response);
     }
+    correlateHttpRun(res, { cancelled: controller.signal.aborted });
+    // Observe the internal result before the stream's intentionally narrow
+    // response drops model status/codes. This never serializes model payloads.
+    observeHttpResult(res, 200, { ok: result.ok, result }, { event: 'run_failed' });
     const response = chatTurnResponse(result, { ok: result.ok });
     const streamResponse = chatTurnProgressResponse(result, { ok: result.ok });
     if (streaming) { writeNdjson(res, { type: 'run.completed', runId, sessionId, ts: new Date().toISOString(), data: { response: streamResponse } }); return res.end(); }
@@ -2866,9 +3004,10 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
     }
     const errorResponse = chatTurnErrorResponse(error);
     if (errorResponse) {
-      if (streaming) { writeNdjson(res, { type: 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: errorResponse.body } }); return res.end(); }
+      if (streaming) { writeNdjson(res, { type: 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: errorResponse.body } }, { status: errorResponse.status }); return res.end(); }
       return sendJson(res, errorResponse.status, errorResponse.body);
     }
+    recordHttpFailure(res, { error, status: 500, event: 'run_failed', errorCode: 'chat_run_failed' });
     if (streaming) { writeNdjson(res, { type: 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: { ok: false, error: String(error?.message || error), runId } } }); return res.end(); }
     throw error;
   } finally {
@@ -2998,7 +3137,7 @@ const forgeStoreFactory = () => postgresApplication.stores.forge;
 configureForgeStoreFactory(forgeStoreFactory);
 const forgeRoute = createForgeRoutes({ store: forgeStoreFactory, readJsonBody, sendJson, sendStaticFile });
 const dreamRoute = createDreamRoutes({ readJsonBody, sendJson, agentDreamSettings, agentDreamDiary, agentDreamMemoryConsolidate, agentDreamMemoryPreview, agentDreamCycle });
-const skillGitSync = new SkillGitSync({ pool: postgresApplication.pool, skills: postgresApplication.stores.skills, sources: postgresApplication.stores.skillSources, packageRoot: path.join(runtimeRoot,'skill-packages'), onError: error => { void serverLogger.event('skill_sync_error',{error: error.statusCode ? error.message : 'skill_sync_failed'}); } });
+const skillGitSync = new SkillGitSync({ pool: postgresApplication.pool, skills: postgresApplication.stores.skills, sources: postgresApplication.stores.skillSources, packageRoot: path.join(runtimeRoot,'skill-packages'), logger: serverLogger });
 const skillSourceRoute = createSkillSourceRoutes({ sources: postgresApplication.stores.skillSources, skills: postgresApplication.stores.skills, sync: skillGitSync, pool: postgresApplication.pool, readJsonBody, sendJson });
 const skillStoreCall = async (operation) => operation(postgresApplication.stores.skills);
 const skillApi = {
@@ -3019,10 +3158,10 @@ const { archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, arc
 });
 const sessionRoute = createSessionRoutes({ rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, supersedeSessionRuns, beginSessionAdmissionsReset, finishSessionAdmissionsReset, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
 const brainRoute = createBrainRoutes({ store: postgresApplication.stores.brains, metadata: metadataStore(), embeddings: postgresApplication.stores.brainEmbeddings, readJsonBody, sendJson });
-const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, browserOriginSettings: () => browserOriginSettings({ metadata: metadataStore() }), saveBrowserOriginSettings: body => saveBrowserOriginSettings(body, { metadata: metadataStore() }), browserTabSettings: () => browserTabSettings({ metadata: metadataStore() }), saveBrowserTabSettings: body => saveBrowserTabSettings(body, { metadata: metadataStore() }), otelSettings: () => otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }), saveOtelSettings: async body => { let result = await saveOtelSettings(body, { store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); if (result.ok) { try { await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore() })); await applyOtelConfigurationToNodeGoblins(); } catch (error) { serverLogger.event('otel_configuration_apply_failed', { error: String(error?.message || 'configuration_failed') }); return { ok: false, status: 500, error: 'opentelemetry_configuration_apply_failed' }; } result = await otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); } return result; }, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
+const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, browserOriginSettings: () => browserOriginSettings({ metadata: metadataStore() }), saveBrowserOriginSettings: body => saveBrowserOriginSettings(body, { metadata: metadataStore() }), browserTabSettings: () => browserTabSettings({ metadata: metadataStore() }), saveBrowserTabSettings: body => saveBrowserTabSettings(body, { metadata: metadataStore() }), otelSettings: () => otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }), saveOtelSettings: async body => { let result = await saveOtelSettings(body, { store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); if (result.ok) { try { await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore() })); await applyOtelConfigurationToNodeGoblins(); } catch (error) { serverLogger.event('otel_configuration_apply_failed', { error }); return { ok: false, status: 500, error: 'opentelemetry_configuration_apply_failed' }; } result = await otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); } return result; }, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
 const observabilityRoute = createObservabilityRoutes({ providerPoolMetrics: () => postgresApplication.stores.models.providerPoolMetrics.summary(), readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, anthropicOauthUsage, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore: postgresApplication.stores.conversations, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
 const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJson, validateBoundaryBody, withScheduledJobs, scheduler, listGroupChannels, createGroupChannel, readGroupChannelTurns, groupChannelRuns, startGroupChannelMessage, cancelGroupChannelRun, runtimeDataRoot, conversationStore: postgresApplication.stores.conversations });
-const authRoute = createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
+const authRoute = createAuthRoutes({ serverLogger, runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
 const chatRoute = createChatRoutes({ handleChat, readJsonBody, sendJson, selectedAgentRuntime, cancelChatRun, steerChatRun, listChatSteering, chatInputs });
 const modsRuntimeRoot = process.env.BURROW_RUNTIME_ROOT || process.env.BURROW_DATA_ROOT || '/mnt/local/burrow';
 const modAuthority = createModAuthority({ repositoryFactory: postgresApplication.modDistributionRepositoryFactory });
@@ -3098,7 +3237,7 @@ const modManagementCapability = Object.freeze(Object.fromEntries(['inventory', '
   if (!coreModManagement) throw new Error('mod_management_unavailable');
   return coreModManagement[method](...args);
 }])));
-const modLoadOptions = { modAuthority, modManagement: modManagementCapability, onExecutionProviderActivated: async modId => { if (modId === 'node-goblin') await applyOtelConfigurationToNodeGoblins(); }, stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), externalTurnDispatcher, generationDispatcher, runtimeDiagnostics, resolveAgentWorkspaceRoot: async (id) => {
+const modLoadOptions = { logger: serverLogger, modAuthority, modManagement: modManagementCapability, onExecutionProviderActivated: async modId => { if (modId === 'node-goblin') await applyOtelConfigurationToNodeGoblins(); }, stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), externalTurnDispatcher, generationDispatcher, runtimeDiagnostics, resolveAgentWorkspaceRoot: async (id) => {
   const agent = await agentsStore().get(id);
   if (!agent) throw new Error('agent_not_found');
   return agentRuntimeContext({ runtimeState: (await runtimeConfig()).runtimeState, agent }).agentWorkspaceRoot;
@@ -3109,6 +3248,7 @@ async function reconcileRuntimeManagedSkills(mods = loadedMods) {
   return reconcileManagedSkills({ root: path.join(workspaceRoot, 'global', 'managed-skills'), declarations: activeManagedSkillDeclarations(mods, coreManagedSkills) });
 }
 const managedSkillSynchronizer = createManagedSkillSynchronizer({
+  logger: serverLogger,
   reconcile: () => reconcileRuntimeManagedSkills(),
   intervalMs: Math.max(60_000, Number(process.env.BURROW_MANAGED_SKILL_SYNC_INTERVAL_MS || 6 * 60 * 60 * 1000)),
 });
@@ -3133,7 +3273,7 @@ async function transitionMod({ modId, enabled, installed, action, reactivate = f
     return;
   }
   if (!installed || !enabled) {
-    if (old) await cleanupMods([old]);
+    if (old) await cleanupMods([old], { logger: serverLogger });
     loadedMods = installed
       ? loadedMods.map((entry) => entry.id === modId ? { ...entry, host: null, routes: [], store: null, lifecycleCleanup: null, status: 'disabled' } : entry)
       : loadedMods.filter((entry) => entry.id !== modId);
@@ -3143,12 +3283,12 @@ async function transitionMod({ modId, enabled, installed, action, reactivate = f
   if (reactivate && old) {
     // Newly approved interfaces require a fresh host. Stop the old listener
     // before activation; overlapping Node Goblin listeners cannot share a port.
-    await cleanupMods([old]);
+    await cleanupMods([old], { logger: serverLogger });
     Object.assign(old, { host: null, routes: [], store: null, lifecycleCleanup: null, status: 'disabled' });
   }
   const [next] = await loadMods({ ...modLoadOptions, onlyModIds: [modId], replaceExecutionProviders: action === 'update' });
   if (!next || next.status !== 'loaded') {
-    if (next) await cleanupMods([next]);
+    if (next) await cleanupMods([next], { logger: serverLogger });
     throw Object.assign(new Error(next?.error || 'mod_activation_failed'), { statusCode: 409 });
   }
   // Activation awaits child IPC; acquire an idle admission barrier before
@@ -3162,15 +3302,16 @@ async function transitionMod({ modId, enabled, installed, action, reactivate = f
     next.commitProviderReplacement?.();
     loadedMods = old ? loadedMods.map((entry) => entry.id === modId ? next : entry) : [...loadedMods, next];
   } catch (error) {
-    await cleanupMods([next]);
+    await cleanupMods([next], { logger: serverLogger });
     resumeAdmissions?.();
     throw error;
   }
-  if (old) await cleanupMods([old]);
+  if (old) await cleanupMods([old], { logger: serverLogger });
   await reconcileRuntimeManagedSkills();
   await modLoadOptions.onExecutionProviderActivated?.(modId);
 }
 const modDistribution = createModDistribution({
+  logger: serverLogger,
   runtimeRoot: modsRuntimeRoot,
   repositoryFactory: postgresApplication.modDistributionRepositoryFactory,
   onLifecycleChange: transitionMod,
@@ -3182,15 +3323,14 @@ const modDistribution = createModDistribution({
 await modDistribution.ready;
 await migrateLegacyExecutionProviderApproval({
   repositoryFactory: postgresApplication.modDistributionRepositoryFactory,
-  mods: await discoverMods({ runtimeRoot: modsRuntimeRoot }),
+  mods: await discoverMods({ runtimeRoot: modsRuntimeRoot, logger: serverLogger }),
   agents: await agentsStore().list({ includeDisabled: true }),
 });
 loadedMods = await loadMods(modLoadOptions);
-const initialManagedSkillSync = await managedSkillSynchronizer.tick();
-if (!initialManagedSkillSync.ok) await serverLogger.event('managed_skill_sync_failed', { error: initialManagedSkillSync.error });
+await managedSkillSynchronizer.tick();
 await applyOtelConfigurationToNodeGoblins();
 modsStarting = false;
-coreModManagement = createModManagement({ modAuthority, distribution: modDistribution, repositoryFactory: postgresApplication.modDistributionRepositoryFactory });
+coreModManagement = createModManagement({ logger: serverLogger, modAuthority, distribution: modDistribution, repositoryFactory: postgresApplication.modDistributionRepositoryFactory });
 await coreModManagement.ready;
 const modAuthorityRoute = createModAuthorityRoute({ authority: modAuthority, getMods: () => loadedMods, readJsonBody, sendJson });
 const modManagementDistribution = {
@@ -3216,17 +3356,14 @@ const modManagementDistribution = {
 const modManagementRoute = createModManagementRoute({ distribution: modManagementDistribution, readJsonBody, sendJson });
 
 const server = createServer((req, res) => {
-  void requestLifecycle.track(() => handleRequest(req, res)).catch(error => {
-    console.error(`Burrow request failed: ${String(error?.message || error)}`);
-    res.destroy(error);
-  });
+  instrumentHttpResponse({ req, res, logger: serverLogger });
+  void requestLifecycle.track(async () => {
+    try { await handleRequest(req, res); }
+    catch (error) { recordHttpFailure(res, { error, status: 500 }); res.destroy(error); }
+  }).catch(() => {});
 });
 async function handleRequest(req, res) {
   if (shuttingDown) return sendJson(res, 503, { ok: false, error: 'runtime_shutting_down' });
-  const startedAt = Date.now();
-  let responseStatus = null;
-  res.once('finish', () => { void serverLogger.event('http_request', { method: req.method || null, path: String(req.url || '/').split('?')[0], status: responseStatus || res.statusCode, durationMs: Date.now() - startedAt }); });
-  req.once('aborted', () => { void serverLogger.event('client_disconnect', { method: req.method || null, path: req.url || null, phase: 'request_aborted', durationMs: Date.now() - startedAt }); });
   try {
     const authority = hostAuthorityPolicy(req, authorityConfig, authorityConfig.enabled ? (await runtimeConfig()).ui.authMode : 'none');
     if (authority.error) return sendJson(res, authority.status, { ok: false, error: authority.error });
@@ -3235,7 +3372,8 @@ async function handleRequest(req, res) {
     if (authorityConfig.enabled && url.host !== authority.authority) return sendJson(res, 403, { ok: false, error: 'host_authority_not_allowed' });
     const origin = `${url.protocol}//${url.host}`;
     if (await applyApiCors(req, res, url)) return;
-    if (await authRoute({ req, res, url, origin })) return;
+    try { if (await authRoute({ req, res, url, origin })) return; }
+    catch (error) { req.operationalFailureLogged = true; throw error; } // Auth routes already emit safe auth.failure.
     if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/api/health')) return sendJson(res, 200, { ok: true, runtime: 'burrow', version: releaseVersion, buildIdentity: healthBuildIdentity, ...(healthReleaseProvenance ? { releaseProvenance: healthReleaseProvenance } : {}), ...(process.env.BURROW_SMOKE_TOKEN && req.headers['x-burrow-smoke-token'] === process.env.BURROW_SMOKE_TOKEN ? { smokeToken: process.env.BURROW_SMOKE_TOKEN } : {}) });
     if (await completionEventRoute({ req, res, url, webhookOnly: true })) return;
     if (!(await authorizeRequest(req, res, url))) return;
@@ -3386,7 +3524,7 @@ async function handleRequest(req, res) {
     return sendJson(res, 404, { ok: false, error: 'not_found' });
   } catch (error) {
     const status = Number(error?.statusCode) >= 400 && Number(error.statusCode) < 500 ? Number(error.statusCode) : 500;
-    void serverLogger.event('request_error', { method: req.method || null, path: req.url || null, status, error: String(error?.message || error), ...(error?.message === 'task_execution_pre_dispatch_recovery_failed' && error.taskExecutionDiagnostics ? { taskExecution: error.taskExecutionDiagnostics } : {}), durationMs: Date.now() - startedAt });
+    recordHttpFailure(res, { error, status });
     return sendJson(res, status, { ok: false, error: String(error?.message || error), ...(error?.details ? { details: error.details } : {}), stack: process.env.NODE_ENV === 'development' ? error?.stack : undefined });
   }
 }
@@ -3426,7 +3564,7 @@ const closeRuntimeResources = createCoordinatedShutdown({
     }
   },
   drainAdmission: () => httpClosePromise,
-  closers: () => [() => cleanupMods(loadedMods), () => otelRuntime.shutdown(), () => postgresApplication.close()],
+  closers: () => [() => cleanupMods(loadedMods, { logger: serverLogger }), () => otelRuntime.shutdown(), () => postgresApplication.close()],
   onTimeout: () => server.closeAllConnections?.(),
 });
 let shutdownPromise = null;
@@ -3440,47 +3578,52 @@ function shutdownRuntime(signal, { exitCode = signal === 'SIGINT' ? 130 : signal
       const { forced, errors } = await drain;
       if (errors.length) {
         exitCode ||= 1;
-        await serverLogger.event('shutdown_error', { signal, errors: errors.map(error => String(error?.message || error)) });
+        await serverLogger.event('shutdown_error', { signal, errors });
       }
-      await serverLogger.event('shutdown_complete', { signal, forced, drainMs: SHUTDOWN_DRAIN_MS });
+      await serverLogger.event(forced ? 'shutdown_forced' : 'shutdown_complete', { signal, forced, drainMs: SHUTDOWN_DRAIN_MS }, { level: forced ? 'warn' : 'info' });
     } catch (error) {
-      console.error(`Burrow shutdown recovery failed: ${String(error?.message || error)}`); exitCode ||= 1;
+      await serverLogger.event('shutdown_recovery_failed', { signal, error }); exitCode ||= 1;
       await drain;
     } finally { await serverLogger.flush().catch(() => {}); process.exit(exitCode); }
   })();
   return shutdownPromise;
 }
-process.once('uncaughtException', (error) => { void serverLogger.event('uncaught_exception', { error: String(error?.stack || error) }).finally(() => shutdownRuntime('uncaughtException', { exitCode: 1 })); });
-process.once('unhandledRejection', (error) => { void serverLogger.event('unhandled_rejection', { error: String(error?.stack || error) }).finally(() => shutdownRuntime('unhandledRejection', { exitCode: 1 })); });
+runtimeShutdownHandler = shutdownRuntime;
 process.once('SIGTERM', () => { void shutdownRuntime('SIGTERM'); });
 process.once('SIGINT', () => { void shutdownRuntime('SIGINT'); });
 
 // A duplicate launcher/service must not become an unhandled EventEmitter
 // exception that buries the actual bind conflict in a Node stack trace.
 server.once('error', (error) => {
-  const code = String(error?.code || 'server_error');
+  const { errorCode: code } = safeOperationalError(error, 'listener_failed');
   const detail = code === 'EADDRINUSE'
     ? `Burrow UI could not bind ${host}:${port}: address already in use.`
-    : `Burrow UI failed to listen on ${host}:${port}: ${String(error?.message || error)}`;
-  void serverLogger.event('listener_error', { code, host, port, error: String(error?.message || error) }).finally(() => { console.error(detail); process.exit(1); });
+    : `Burrow UI failed to listen on ${host}:${port}: ${code}.`;
+  void serverLogger.event('listener_error', { host, port, error }).finally(() => { console.error(detail); process.exit(1); });
 });
 
-server.on('clientError', (error, socket) => { void serverLogger.event('client_error', { code: error?.code || null, error: String(error?.message || error), remoteAddress: socket?.remoteAddress || null }); socket?.destroy(); });
-server.on('connection', (socket) => { socket.once('error', (error) => { void serverLogger.event('socket_error', { code: error?.code || null, error: String(error?.message || error), remoteAddress: socket.remoteAddress || null }); }); });
+server.on('clientError', (error, socket) => { void serverLogger.event('client_error', { error }); socket?.destroy(); });
+server.on('connection', (socket) => { socket.once('error', (error) => { void serverLogger.event('socket_error', { error }); }); });
 // Direct server/Docker startup must publish bundled skills just like the installer.
 const bundledSkillRuntime = await runtimeConfig();
 await ensureDefaultGlobalWorkspace({ installDir: projectRoot, workspaceRoot: bundledSkillRuntime.runtimeState.workspaceRoot, skillStore: postgresApplication.stores.skills });
 
 server.listen(port, host, () => {
   void startupLifecycle.track(async () => {
+  try {
+  await serverLogger.event('startup_summary', {
+    version: releaseVersion, authMode: bundledSkillRuntime.ui.authMode, authSource: bundledSkillRuntime.ui.authSource,
+    environmentOverride: Object.keys(process.env).some(key => key.startsWith('BURROW_UI_AUTH_') && Boolean(process.env[key])),
+    database: 'ready', schedulers: backgroundSchedulersEnabled() ? 'enabled' : 'disabled',
+    mods: { total: loadedMods.length, loaded: loadedMods.filter(mod => mod.status === 'loaded').length,
+      disabled: loadedMods.filter(mod => mod.status === 'disabled').length, failed: loadedMods.filter(mod => mod.status === 'failed').length },
+  });
   await serverLogger.event('listener_started', { host, port, pid: process.pid, version: releaseVersion });
   await postgresApplication.stores.dreamCycles.reconcileInterrupted();
   if (shuttingDown) return;
   if (backgroundSchedulersEnabled()) {
-    void managedSkillSynchronizer.start().then(result => {
-      if (!result.ok) return serverLogger.event('managed_skill_sync_failed', { error: result.error });
-    }).catch(error => serverLogger.event('managed_skill_sync_failed', { error: String(error?.message || error) }));
-    void skillGitSync.start().catch(error => serverLogger.event('skill_sync_startup_failed',{error:'skill_sync_failed'}));
+    void managedSkillSynchronizer.start().catch(() => {}); // Synchronizer owns failure/recovery diagnostics.
+    void skillGitSync.start().catch(error => serverLogger.event('skill_sync_startup_failed',{ error }, { level: 'warn', component: 'skills' }));
     const store = postgresApplication.stores.scheduledJobs;
     try { await store.markMissedRuns(); await store.markMissedSchedules({ activeOwnerModIds: loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id) }); } finally { /* Shared application store remains open. */ }
     if (shuttingDown) return;
@@ -3531,7 +3674,8 @@ server.listen(port, host, () => {
       } finally { lifecycle.finish(); }
     },
   }) });
-  void recoveryContinuationScheduler.start().catch(() => {});
-  }).catch(error => { console.error(`Burrow startup failed: ${String(error?.message || error)}`); void shutdownRuntime('startup_failure', { exitCode: 1 }); });
+  void recoveryContinuationScheduler.start().catch(error => { if (!shuttingDown) void serverLogger.event('recovery_scheduler_start_failed', { error }); });
+  } catch (error) { void serverLogger.event('startup_failed', { error }); void shutdownRuntime('startup_failure', { exitCode: 1 }); }
+  }).catch(() => {});
 });
 

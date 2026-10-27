@@ -1,3 +1,4 @@
+import { operationalEvent, infrastructureErrorCode, operationalId } from './operational-log.mjs';
 import { randomUUID } from 'node:crypto';
 
 const MOD_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -50,7 +51,7 @@ function safeOperation(row) {
  * Call close() before closing distribution or the repository pool. Only queued
  * work is replayable; an interrupted running operation has an unknown outcome.
  */
-export function createModManagement({ distribution, repositoryFactory, modAuthority = null } = {}) {
+export function createModManagement({ distribution, repositoryFactory, modAuthority = null, logger = console } = {}) {
   if (!distribution || typeof repositoryFactory !== 'function' || !['list', 'install', 'enable', 'disable', 'uninstall', 'refresh'].every(key => typeof distribution[key] === 'function')) throw new Error('mod_management_configuration_required');
   let closed = false;
   let scheduled = null;
@@ -58,6 +59,8 @@ export function createModManagement({ distribution, repositoryFactory, modAuthor
   let wake = false;
   let workerError = null;
   let closing = null;
+  let workerContext = { phase: 'claim' };
+  const report = (type, fields) => operationalEvent(logger, type, fields, { level: 'error', component: 'mod-management' });
   const admissions = new Set();
   const callerBarriers = new Map();
   let gate = Promise.resolve();
@@ -80,7 +83,7 @@ export function createModManagement({ distribution, repositoryFactory, modAuthor
     if (scheduled || worker || workerError) return;
     scheduled = setImmediate(() => {
       scheduled = null;
-      worker = drain().catch(() => { workerError = unavailable(); }).finally(() => {
+      worker = drain().catch(error => { workerError = unavailable(); report('mod_management_worker_unavailable', { ...workerContext, errorCode: infrastructureErrorCode(error, 'mod_management_storage_failed') }); }).finally(() => {
         worker = null;
         if (wake && !workerError) schedule();
       });
@@ -89,6 +92,7 @@ export function createModManagement({ distribution, repositoryFactory, modAuthor
   async function drain() {
     for (;;) {
       wake = false;
+      workerContext = { phase: 'claim' };
       const row = await exclusive(() => repository(db => db.claimManagementOperation(new Date().toISOString())));
       if (!row) return;
       // A self-update cannot retire its host until the receipt-producing tool
@@ -112,6 +116,7 @@ export function createModManagement({ distribution, repositoryFactory, modAuthor
         // after commit and must retain an unknown outcome.
         result = { outcome: errorCode === 'mod_authority_forbidden' ? 'failed' : 'unknown' };
       }
+      workerContext = { phase: 'terminal_receipt', operationId: operationalId(row.id), modId: operationalId(row.mod_id), action: ACTIONS.has(row.action) ? row.action : null };
       await repository(db => db.finishManagementOperation(row.id, { status, result, errorCode, timestamp: new Date().toISOString() }));
     }
   }
@@ -122,7 +127,7 @@ export function createModManagement({ distribution, repositoryFactory, modAuthor
       await db.interruptManagementOperations(new Date().toISOString());
     });
     schedule();
-  })().catch(() => { throw unavailable(); });
+  })().catch(error => { report('mod_management_start_failed', { errorCode: infrastructureErrorCode(error, 'mod_management_storage_failed') }); throw unavailable(); });
   void ready.catch(() => {});
 
   async function inventory(input = {}, { assertCallerActive } = {}) {
@@ -168,7 +173,16 @@ export function createModManagement({ distribution, repositoryFactory, modAuthor
       const timestamp = new Date().toISOString();
       const row = { id: randomUUID(), owner_mod_id: owner, ...actor, ...requested, status: 'queued', created_at: timestamp, updated_at: timestamp, started_at: null, finished_at: null, result: null, error_code: null };
       if (waitForCaller) callerBarriers.set(row.id, Promise.resolve(waitForCaller).catch(() => {}));
-      try { await exclusive(() => repository(db => { assertCallerActive?.(); return db.createManagementOperation(row); }), true); } catch { callerBarriers.delete(row.id); throw unavailable(); }
+      let callerRejected = false;
+      try {
+        await exclusive(() => repository(db => {
+          try { assertCallerActive?.(); } catch (error) { callerRejected = true; throw error; }
+          return db.createManagementOperation(row);
+        }), true);
+      } catch (error) {
+        if (!callerRejected) report('mod_management_receipt_persistence_failed', { phase: 'admission', operationId: operationalId(row.id), errorCode: infrastructureErrorCode(error, 'mod_management_storage_failed') });
+        callerBarriers.delete(row.id); throw unavailable();
+      }
       // Never run an installer in the submitting invocation (including self-update).
       schedule();
       return { ok: true, operation: safeOperation(row) };

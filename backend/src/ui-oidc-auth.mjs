@@ -1,5 +1,6 @@
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { createRemoteJWKSet, customFetch, jwtVerify } from 'jose';
 import { randomBytes, createHmac, createHash, timingSafeEqual } from 'node:crypto';
+import { authErrorDiagnostics, withAuthDiagnostics } from './ui-auth-diagnostics.mjs';
 
 const COOKIE_NAME = 'burrow_oidc_session';
 const STATE_COOKIE_NAME = 'burrow_oidc_state';
@@ -56,7 +57,7 @@ export function verifySessionCookie(value, secret, nowMs = Date.now()) {
 
 export function sessionSecret(runtime) {
   const secret = runtime?.ui?.oidc?.clientSecret || process.env.BURROW_SETTINGS_KEY;
-  if (!secret) throw new Error('oidc_session_secret_required');
+  if (!secret) throw withAuthDiagnostics(new Error('oidc_session_secret_required'), { stage: 'configuration', missingConfig: ['sessionSecret'] });
   return secret;
 }
 
@@ -88,14 +89,22 @@ export function assertOidcEmailAuthorization(claims, oidc = {}) {
   if (domains.length && !domains.includes(email.includes('@') ? email.split('@').pop() : '')) throw new Error('oidc_domain_not_allowed');
 }
 
-export function oidcSessionFromRequest(req, runtime) {
-  const cookies = parseCookies(req.headers.cookie || '');
-  const cookie = cookies.get(COOKIE_NAME);
-  if (!cookie) return null;
-  const session = verifySessionCookie(cookie, sessionSecret(runtime));
-  if (!session || session.authorizationRevision !== oidcAuthorizationRevision(runtime)) return null;
-  try { assertOidcEmailAuthorization({ email: session.email, email_verified: session.emailVerified }, runtime.ui.oidc); } catch { return null; }
-  return session;
+export function oidcSessionFromRequest(req, runtime, { onFailure } = {}) {
+  const reject = reason => { onFailure?.({ stage: 'session', reason }); return null; };
+  try {
+    const cookies = parseCookies(req.headers.cookie || '');
+    const cookie = cookies.get(COOKIE_NAME);
+    // No session is the normal public/unauthenticated request case, not a denial.
+    if (!cookie) return null;
+    const session = verifySessionCookie(cookie, sessionSecret(runtime));
+    if (!session) return reject('oidc_session_invalid');
+    if (session.authorizationRevision !== oidcAuthorizationRevision(runtime)) return reject('oidc_session_authorization_changed');
+    try { assertOidcEmailAuthorization({ email: session.email, email_verified: session.emailVerified }, runtime.ui.oidc); }
+    catch (error) { onFailure?.(authErrorDiagnostics(error, { stage: 'session' })); return null; }
+    return session;
+  } catch (error) {
+    throw withAuthDiagnostics(error, { stage: 'session', ...(error instanceof SyntaxError ? { reason: 'oidc_session_invalid' } : {}) });
+  }
 }
 
 export function sendOidcSessionCookie(res, session, runtime) {
@@ -104,42 +113,55 @@ export function sendOidcSessionCookie(res, session, runtime) {
 
 export async function oidcDiscovery(issuer) {
   const expectedIssuer = text(issuer);
-  if (!expectedIssuer) throw new Error('oidc_issuer_required');
+  if (!expectedIssuer) throw withAuthDiagnostics(new Error('oidc_issuer_required'), { stage: 'configuration', missingConfig: ['issuer'] });
   const cached = discoveryCache.get(expectedIssuer);
   if (cached && cached.expiresAt > Date.now()) {
-    if (cached.error) throw new Error(cached.error);
+    if (cached.error) throw withAuthDiagnostics(new Error(cached.error), { ...cached.diagnostics, cacheHit: true });
     return cached.value;
   }
+  const endpoint = `${expectedIssuer.replace(/\/+$/, '')}/.well-known/openid-configuration`;
+  let upstreamStatus;
   try {
     // Only the discovery URL strips trailing slashes; issuer identity is exact.
-    const response = await fetch(`${expectedIssuer.replace(/\/+$/, '')}/.well-known/openid-configuration`);
+    const response = await fetch(endpoint);
+    upstreamStatus = response.status;
     if (!response.ok) throw new Error(`oidc_discovery_failed:${response.status}`);
-    const value = await response.json();
-    if (value.issuer !== expectedIssuer) throw new Error('oidc_discovery_issuer_mismatch');
+    let value;
+    try { value = await response.json(); }
+    catch (error) { throw withAuthDiagnostics(error, { reason: 'oidc_discovery_invalid_response' }); }
+    try {
+      if (value.issuer !== expectedIssuer) throw withAuthDiagnostics(new Error('oidc_discovery_issuer_mismatch'), { expectedIssuer, discoveredIssuer: value.issuer });
+    } catch (error) {
+      throw withAuthDiagnostics(error, { reason: 'oidc_discovery_invalid_response' });
+    }
     discoveryCache.set(expectedIssuer, { value, expiresAt: Date.now() + DISCOVERY_SUCCESS_CACHE_MS });
     return value;
   } catch (error) {
     const message = String(error?.message || error);
-    discoveryCache.set(expectedIssuer, { error: message, expiresAt: Date.now() + DISCOVERY_FAILURE_CACHE_MS });
-    throw new Error(message);
+    const annotated = withAuthDiagnostics(error, { stage: 'discovery', endpoint, expectedIssuer, upstreamStatus });
+    const diagnostics = authErrorDiagnostics(annotated);
+    discoveryCache.set(expectedIssuer, { error: message, diagnostics, expiresAt: Date.now() + DISCOVERY_FAILURE_CACHE_MS });
+    throw withAuthDiagnostics(new Error(message), diagnostics);
   }
 }
 
 export async function oidcLoginUrl(runtime, origin) {
-  const oidc = runtime.ui.oidc || {};
-  const discovery = await oidcDiscovery(oidc.issuer);
-  const state = base64url(randomBytes(24));
-  const nonce = base64url(randomBytes(24));
-  const redirectUri = oidc.redirectUri || `${origin}/auth/oidc/callback`;
-  const params = new URLSearchParams({
-    client_id: oidc.clientId,
-    redirect_uri: redirectUri,
-    response_type: 'code',
-    scope: (oidc.scopes?.length ? oidc.scopes : ['openid', 'email', 'profile']).join(' '),
-    state,
-    nonce,
-  });
-  return { url: `${discovery.authorization_endpoint}?${params}`, state, nonce, redirectUri };
+  try {
+    const oidc = runtime.ui.oidc || {};
+    const discovery = await oidcDiscovery(oidc.issuer);
+    const state = base64url(randomBytes(24));
+    const nonce = base64url(randomBytes(24));
+    const redirectUri = oidc.redirectUri || `${origin}/auth/oidc/callback`;
+    const params = new URLSearchParams({
+      client_id: oidc.clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: (oidc.scopes?.length ? oidc.scopes : ['openid', 'email', 'profile']).join(' '),
+      state,
+      nonce,
+    });
+    return { url: `${discovery.authorization_endpoint}?${params}`, state, nonce, redirectUri };
+  } catch (error) { throw withAuthDiagnostics(error, { stage: 'login' }); }
 }
 
 function safeReturnTo(value = '/') {
@@ -156,28 +178,73 @@ export function setOidcStateCookie(res, state, nonce, returnTo = '/', runtime = 
 export const __test__ = { discoveryCache, cookieName: COOKIE_NAME };
 
 export async function completeOidcCallback(req, url, runtime, origin) {
-  const oidc = runtime.ui.oidc || {};
-  const code = url.searchParams.get('code');
-  const state = url.searchParams.get('state');
-  if (!code || !state) throw new Error('oidc_callback_missing_code_or_state');
-  const cookies = parseCookies(req.headers.cookie || '');
-  const saved = parseJsonBase64(cookies.get(STATE_COOKIE_NAME));
-  if (!saved?.state || saved.state !== state || !saved?.nonce) throw new Error('oidc_state_invalid');
-  const discovery = await oidcDiscovery(oidc.issuer);
-  const redirectUri = oidc.redirectUri || `${origin}/auth/oidc/callback`;
-  const basic = Buffer.from(`${oidc.clientId}:${oidc.clientSecret}`).toString('base64');
-  const body = new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri });
-  const tokenResponse = await fetch(discovery.token_endpoint, { method: 'POST', headers: { authorization: `Basic ${basic}`, 'content-type': 'application/x-www-form-urlencoded' }, body });
-  if (!tokenResponse.ok) throw new Error(`oidc_token_exchange_failed:${tokenResponse.status}`);
-  const tokens = await tokenResponse.json();
-  if (!tokens.id_token) throw new Error('oidc_id_token_missing');
-  const jwks = createRemoteJWKSet(new URL(discovery.jwks_uri));
-  const verified = await jwtVerify(tokens.id_token, jwks, { issuer: text(oidc.issuer), audience: oidc.clientId });
-  if (verified.payload.nonce !== saved.nonce) throw new Error('oidc_nonce_invalid');
-  const email = text(verified.payload.email).toLowerCase();
-  assertOidcEmailAuthorization(verified.payload, oidc);
-  const expiresAt = new Date(Math.min((verified.payload.exp || 0) * 1000 || Date.now() + DEFAULT_TTL_SECONDS * 1000, Date.now() + DEFAULT_TTL_SECONDS * 1000)).toISOString();
-  return { subject: text(verified.payload.sub), email, emailVerified: verified.payload.email_verified === true, authorizationRevision: oidcAuthorizationRevision(runtime), name: text(verified.payload.name || verified.payload.preferred_username || email), expiresAt, returnTo: safeReturnTo(saved.returnTo) };
+  let stage = 'callback';
+  let endpoint;
+  let upstreamStatus;
+  try {
+    const oidc = runtime.ui.oidc || {};
+    const code = url.searchParams.get('code');
+    const state = url.searchParams.get('state');
+    if (!code || !state) {
+      // Preserve the original validation/error contract. Only the diagnostics
+      // distinguish a standard provider denial; descriptions are never used.
+      const providerError = url.searchParams.get('error');
+      const known = new Set(['access_denied', 'login_required', 'interaction_required', 'consent_required', 'server_error', 'temporarily_unavailable']);
+      throw withAuthDiagnostics(new Error('oidc_callback_missing_code_or_state'), known.has(providerError) ? { reason: `oidc_provider_${providerError}` } : {});
+    }
+    stage = 'state';
+    const cookies = parseCookies(req.headers.cookie || '');
+    let saved;
+    try { saved = parseJsonBase64(cookies.get(STATE_COOKIE_NAME)); }
+    catch (error) { throw withAuthDiagnostics(error, { reason: 'oidc_state_invalid' }); }
+    if (!saved?.state || saved.state !== state || !saved?.nonce) throw new Error('oidc_state_invalid');
+    stage = 'discovery';
+    const discovery = await oidcDiscovery(oidc.issuer);
+    const redirectUri = oidc.redirectUri || `${origin}/auth/oidc/callback`;
+    const basic = Buffer.from(`${oidc.clientId}:${oidc.clientSecret}`).toString('base64');
+    const body = new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri });
+    stage = 'token_exchange';
+    endpoint = discovery.token_endpoint;
+    const tokenResponse = await fetch(discovery.token_endpoint, { method: 'POST', headers: { authorization: `Basic ${basic}`, 'content-type': 'application/x-www-form-urlencoded' }, body });
+    upstreamStatus = tokenResponse.status;
+    if (!tokenResponse.ok) throw new Error(`oidc_token_exchange_failed:${tokenResponse.status}`);
+    let tokens;
+    try { tokens = await tokenResponse.json(); }
+    catch (error) { throw withAuthDiagnostics(error, { reason: 'oidc_token_response_invalid' }); }
+    try { if (!tokens.id_token) throw new Error('oidc_id_token_missing'); }
+    catch (error) {
+      throw withAuthDiagnostics(error, { reason: error instanceof TypeError ? 'oidc_token_response_invalid' : 'oidc_id_token_missing' });
+    }
+    stage = 'token_validation';
+    endpoint = discovery.jwks_uri;
+    upstreamStatus = undefined;
+    let jwksStatus;
+    const jwks = createRemoteJWKSet(new URL(discovery.jwks_uri), {
+      [customFetch]: async (...args) => {
+        try {
+          const response = await fetch(...args);
+          jwksStatus = response.status;
+          return response;
+        } catch (error) { throw withAuthDiagnostics(error, { stage: 'jwks', endpoint }); }
+      },
+    });
+    let verified;
+    try { verified = await jwtVerify(tokens.id_token, jwks, { issuer: text(oidc.issuer), audience: oidc.clientId }); }
+    catch (error) {
+      if (error?.code === 'ERR_JOSE_GENERIC' || error?.code?.startsWith('ERR_JWK')) {
+        throw withAuthDiagnostics(error, { stage: 'jwks', reason: 'oidc_jwks_failed', endpoint, upstreamStatus: jwksStatus });
+      }
+      throw error;
+    }
+    if (verified.payload.nonce !== saved.nonce) throw new Error('oidc_nonce_invalid');
+    const email = text(verified.payload.email).toLowerCase();
+    stage = 'authorization';
+    assertOidcEmailAuthorization(verified.payload, oidc);
+    const expiresAt = new Date(Math.min((verified.payload.exp || 0) * 1000 || Date.now() + DEFAULT_TTL_SECONDS * 1000, Date.now() + DEFAULT_TTL_SECONDS * 1000)).toISOString();
+    return { subject: text(verified.payload.sub), email, emailVerified: verified.payload.email_verified === true, authorizationRevision: oidcAuthorizationRevision(runtime), name: text(verified.payload.name || verified.payload.preferred_username || email), expiresAt, returnTo: safeReturnTo(saved.returnTo) };
+  } catch (error) {
+    throw withAuthDiagnostics(error, { stage, endpoint, upstreamStatus });
+  }
 }
 
 export const OIDC_COOKIE_NAME = COOKIE_NAME;

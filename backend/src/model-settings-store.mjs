@@ -1,9 +1,48 @@
+import { safeOperationalError } from './runtime-server-log.mjs';
+import { operationalEvent } from './operational-log.mjs';
 import { googleNativeApi, discoverGoogleModels } from './model-adapters/google-native-catalog.mjs';
 import { randomBytes, randomUUID, createCipheriv, createDecipheriv } from 'node:crypto';
 import { openaiOAuthIdentity, refreshOpenAiOAuth } from './openai-oauth-login.mjs';
 import { anthropicSupportsTemperature, isAnthropicMessagesConnection } from './anthropic-model-capabilities.mjs';
 
 const AAD_PREFIX = 'burrow-model-secret-v1';
+
+// These are producer-owned whole codes, not a grammar for accepting provider
+// prose. The legacy code:status form is accepted only for these exact HTTP
+// failures (including OAuth/Google producers that still throw that form).
+const MODEL_DIAGNOSTIC_CODES = new Set([
+  'model_discovery_failed', 'model_discovery_invalid', 'model_auth_refresh_failed',
+  'model_auth_refresh_missing_access_token', 'model_auth_refresh_provider_unsupported',
+  'model_auth_refresh_token_required', 'model_connection_not_found', 'model_connection_auth_required',
+  'member_catalog_empty', 'openai_oauth_access_token_required', 'openai_oauth_refresh_token_required',
+  'openai_oauth_expires_at_required', 'codex_client_version_npm_failed', 'codex_client_version_github_failed',
+  'codex_client_version_npm_invalid', 'codex_client_version_github_invalid', 'models_dev_catalog_failed',
+]);
+const MODEL_HTTP_FAILURE = /^(model_discovery_failed|model_auth_refresh_failed|codex_client_version_npm_failed|codex_client_version_github_failed|models_dev_catalog_failed):([1-5][0-9]{2})$/;
+
+export function modelSettingsFailureDiagnostic(error, fallback = 'model_catalog_refresh_failed') {
+  const diagnostic = safeOperationalError(error, fallback);
+  const read = key => { try { return error?.[key]; } catch { return undefined; } };
+  const message = read('message');
+  const code = [read('errorCode'), read('code'), message].find(value => MODEL_DIAGNOSTIC_CODES.has(value));
+  const legacy = typeof message === 'string' && message.length <= 128 ? MODEL_HTTP_FAILURE.exec(message) : null;
+  if (code || legacy) diagnostic.errorCode = code || legacy[1];
+  if (legacy && diagnostic.upstreamStatus === undefined) diagnostic.upstreamStatus = Number(legacy[2]);
+  const status = diagnostic.upstreamStatus ?? diagnostic.httpStatus ?? diagnostic.statusCode ?? diagnostic.status;
+  let classification = 'dependency_failure';
+  if (status >= 500) classification = 'upstream_5xx';
+  else if (status >= 400) classification = 'upstream_4xx';
+  else if (diagnostic.errorType === 'TimeoutError' || diagnostic.errorCode === 'mcp_runtime_timeout'
+    || /^(?:ETIMEDOUT|ESOCKETTIMEDOUT|UND_ERR_(?:CONNECT|HEADERS)_TIMEOUT)$/.test(diagnostic.errorCode)) classification = 'dependency_timeout';
+  else if (diagnostic.errorType === 'SyntaxError' || /(?:_invalid|_empty|_missing_access_token)$/.test(diagnostic.errorCode)) classification = 'invalid_response';
+  else if (diagnostic.errorType === 'AbortError' || ['ABORT_ERR', 'ERR_ABORTED'].includes(diagnostic.errorCode)) classification = 'dependency_aborted';
+  else if (['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_SOCKET'].includes(diagnostic.errorCode)) classification = 'dependency_unavailable';
+  return { ...diagnostic, ...(status === undefined ? {} : { upstreamStatus: status }), classification };
+}
+
+function modelHttpError(code, status) {
+  return Object.assign(new Error(`${code}:${status}`), { code, upstreamStatus: status });
+}
 
 function now() { return new Date().toISOString(); }
 function normalize(value) { return String(value ?? '').trim(); }
@@ -431,7 +470,7 @@ export async function refreshAnthropicOauth(auth = {}, { fetchImpl = fetch, nowM
     try {
       const response = await fetchImpl(endpoint, { method: 'POST', ...(signal ? { signal } : {}), headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body });
       const data = await response.json().catch(() => { signal?.throwIfAborted(); return {}; });
-      if (!response.ok) throw new Error(`model_auth_refresh_failed:${response.status}`);
+      if (!response.ok) throw modelHttpError('model_auth_refresh_failed', response.status);
       const accessToken = normalize(data.access_token);
       if (!accessToken) throw new Error('model_auth_refresh_missing_access_token');
       return {
@@ -478,10 +517,10 @@ function modelDiscoveryHeaders({ apiType, apiKey, auth = {} } = {}) {
 async function fetchCodexVersionFromUrl(url, { fetchImpl = fetch, signal = undefined, source } = {}) {
   const response = await fetchImpl(url, { headers: { accept: 'application/json', 'user-agent': 'Burrow/codex-version-resolver' }, signal });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`codex_client_version_${source}_failed:${response.status}`);
+  if (!response.ok) throw modelHttpError(`codex_client_version_${source}_failed`, response.status);
   const candidate = source === 'github' ? body.tag_name || body.name || body.version : body.version || body.tag_name || body.name;
   const parsed = parseSemver(candidate);
-  if (!parsed) throw new Error(`codex_client_version_${source}_invalid`);
+  if (!parsed) throw Object.assign(new Error(`codex_client_version_${source}_invalid`), { upstreamStatus: response.status });
   return parsed.raw;
 }
 
@@ -498,7 +537,7 @@ export async function refreshCodexClientVersionCache({ store, fetchImpl = fetch,
       return writeCodexClientVersionCacheAsync(target, { currentVersion: version, source, lastCheckedAt: new Date(nowMs).toISOString(), lastError: null }, { nowMs });
     } catch (error) { lastError = error; }
   }
-  return writeCodexClientVersionCacheAsync(target, { lastCheckedAt: new Date(nowMs).toISOString(), lastError: String(lastError?.message || lastError || 'codex_client_version_refresh_failed') }, { nowMs });
+  return writeCodexClientVersionCacheAsync(target, { lastCheckedAt: new Date(nowMs).toISOString(), lastError: modelSettingsFailureDiagnostic(lastError, 'codex_client_version_refresh_failed') }, { nowMs });
 }
 
 export async function resolveCodexClientVersion({ store, nowMs = Date.now(), refresh = false, fetchImpl = fetch, signal = undefined } = {}) {
@@ -571,11 +610,31 @@ async function cacheSetAsync(target, key, value, nowMs) {
   await target.cacheSet(key, value, new Date(nowMs).toISOString());
   return value;
 }
+// Runtime-only state also covers failures before any catalog has been cached.
+// A fresh/stale cache hit is not evidence that the upstream recovered.
+const modelsDevOutages = new WeakSet();
+function modelsDevFetchTransition(store, available, error = null, cached = {}) {
+  if (!store?.logger) return;
+  if (!available) {
+    if (modelsDevOutages.has(store)) return;
+    modelsDevOutages.add(store);
+    const { errorCode, errorType, classification, upstreamStatus } = modelSettingsFailureDiagnostic(error, 'models_dev_catalog_failed');
+    operationalEvent(store.logger, 'models_dev_catalog_unavailable', {
+      dependency: 'models_dev_catalog', errorCode, errorType, classification,
+      ...(upstreamStatus === undefined ? {} : { upstreamStatus }),
+      fallback: cached.catalog ? 'stale_cache' : 'provider_only',
+    }, { level: 'warn', component: 'model-settings' });
+  } else if (modelsDevOutages.delete(store)) {
+    operationalEvent(store.logger, 'models_dev_catalog_restored', { dependency: 'models_dev_catalog' }, { level: 'info', component: 'model-settings' });
+  }
+}
+
 async function modelsDevSnapshot({ store, fetchImpl = fetch, signal, nowMs = Date.now(), catalogUrl = MODELS_DEV_CATALOG_URL, ttlMs = MODELS_DEV_CATALOG_CACHE_TTL_MS } = {}) {
   const target = store;
   const cached = safeCacheRecord(await cacheGetAsync(target, MODELS_DEV_CATALOG_META_KEY));
   const checked = Date.parse(cached.lastCheckedAt || '');
   if (cached.catalog && Number.isFinite(checked) && nowMs - checked < Math.max(1, Number(ttlMs) || MODELS_DEV_CATALOG_CACHE_TTL_MS)) return cached;
+  let fetched = false;
   try {
     const headers = { accept: 'application/json', 'user-agent': 'Burrow/models-dev-catalog' };
     if (cached.etag) headers['if-none-match'] = cached.etag;
@@ -585,14 +644,19 @@ async function modelsDevSnapshot({ store, fetchImpl = fetch, signal, nowMs = Dat
     if (response.status === 304 && cached.catalog) next = { ...cached, lastCheckedAt: checkedAt, lastError: null };
     else {
       const body = await response.json().catch(() => null);
-      if (!response.ok || !body || typeof body !== 'object') throw new Error(`models_dev_catalog_failed:${response.status}`);
+      if (!response.ok || !body || typeof body !== 'object') throw modelHttpError('models_dev_catalog_failed', response.status);
       next = { catalog: body, etag: response.headers.get('etag') || null, snapshotAt: checkedAt, lastCheckedAt: checkedAt, lastError: null };
     }
+    fetched = true;
+    modelsDevFetchTransition(target, true);
     if (target) await cacheSetAsync(target, MODELS_DEV_CATALOG_META_KEY, next, nowMs);
     return next;
   } catch (error) {
+    // Preserve the existing persistence/fallback path, but do not mislabel a
+    // cache write failure after a healthy fetch as an upstream outage.
+    if (!fetched) modelsDevFetchTransition(target, false, error, cached);
     if (cached.catalog) {
-      const next = { ...cached, lastCheckedAt: new Date(nowMs).toISOString(), lastError: String(error?.message || error) };
+      const next = { ...cached, lastCheckedAt: new Date(nowMs).toISOString(), lastError: modelSettingsFailureDiagnostic(error) };
       if (target) await cacheSetAsync(target, MODELS_DEV_CATALOG_META_KEY, next, nowMs);
       return next;
     }
@@ -627,8 +691,8 @@ export async function discoverModels({ baseUrl, provider = '', useModelsDev = fa
     for (const version of versions) {
       const response = await fetchImpl(chatGptCodexModelsUrl(baseUrl, version), { headers, signal });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) { lastError = new Error(`model_discovery_failed:${response.status}`); continue; }
-      if (!Array.isArray(body.models)) throw new Error('model_discovery_invalid');
+      if (!response.ok) { lastError = modelHttpError('model_discovery_failed', response.status); continue; }
+      if (!Array.isArray(body.models)) throw Object.assign(new Error('model_discovery_invalid'), { upstreamStatus: response.status });
       const models = normalizeCodexCatalogModels(body);
       const minimumObservedModelVersion = observedMinimumClientVersion(body);
       if (target) await writeCodexClientVersionCacheAsync(target, { lastGoodCatalogVersion: version, minimumObservedModelVersion, lastCatalogAt: new Date(nowMs).toISOString(), lastCatalogCount: models.length }, { nowMs });
@@ -641,8 +705,8 @@ export async function discoverModels({ baseUrl, provider = '', useModelsDev = fa
   return fetchImpl(url, { headers: modelDiscoveryHeaders({ apiType, apiKey, auth }), signal })
     .then(async (response) => {
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(`model_discovery_failed:${response.status}`);
-      if (!Array.isArray(body.data) && !Array.isArray(body.models)) throw new Error('model_discovery_invalid');
+      if (!response.ok) throw modelHttpError('model_discovery_failed', response.status);
+      if (!Array.isArray(body.data) && !Array.isArray(body.models)) throw Object.assign(new Error('model_discovery_invalid'), { upstreamStatus: response.status });
       const data = Array.isArray(body.data) ? body.data : body.models;
       return enrich(normalizeModels(data.map((model) => ({ ...model, id: model?.id, selected: true, manual: false }))));
     });

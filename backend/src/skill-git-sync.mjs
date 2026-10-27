@@ -1,3 +1,4 @@
+import { operationalEvent, infrastructureErrorCode, operationalId } from './operational-log.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -22,9 +23,14 @@ export async function installedSkillFiles(root) {
  await walk(root);return files;
 }
 export class SkillGitSync {
- constructor({pool,skills,sources,packageRoot,fetchSkill=fetchGitSkill,clock=()=>new Date().toISOString(),intervalMs=30000,packageGraceMs=86400000,onError=()=>{}}={}) {
-  this.pool=pool;this.skills=skills;this.sources=sources;this.packageRoot=path.resolve(packageRoot);this.fetchSkill=fetchSkill;this.clock=clock;this.intervalMs=intervalMs;this.packageGraceMs=packageGraceMs;this.onError=onError;this.active=new Set();this.timer=null;this.ticking=null;
+ constructor({pool,skills,sources,packageRoot,fetchSkill=fetchGitSkill,clock=()=>new Date().toISOString(),intervalMs=30000,packageGraceMs=86400000,onError=()=>{},logger=console}={}) {
+  this.pool=pool;this.skills=skills;this.sources=sources;this.packageRoot=path.resolve(packageRoot);this.fetchSkill=fetchSkill;this.clock=clock;this.intervalMs=intervalMs;this.packageGraceMs=packageGraceMs;this.onError=onError;this.active=new Set();this.timer=null;this.ticking=null;this.logger=logger;this.failedSources=new Set();this.tickFailed=false;
  }
+ report(type,error,fields={}) {
+  const known=['skill_local_changes','skill_sync_timeout','skill_sync_failed','skill_package_cleanup_failed'];
+  operationalEvent(this.logger,type,{...fields,errorCode:known.includes(error?.message)?error.message:infrastructureErrorCode(error,'skill_sync_failed')},{level:'warn',component:'skill-git-sync'});
+ }
+ cleanupFailure(error,id) { this.report('skill_package_cleanup_failed',error,{skillId:operationalId(id)});this.onError(skillSourceError('skill_package_cleanup_failed')); }
  async sync(id,{scheduled=false}={}) {
   const promise=this.perform(id,{scheduled});this.active.add(promise);try{return await promise;}finally{this.active.delete(promise);}
  }
@@ -65,7 +71,7 @@ export class SkillGitSync {
    }catch(e){
     await c.query('ROLLBACK TO SAVEPOINT skill_publication');
     error=e.message==='skill_local_changes'?'skill_local_changes':e.message?.includes('timed out')?'skill_sync_timeout':'skill_sync_failed';
-    if(createdPath)await fs.rm(createdPath,{recursive:true,force:true}).catch(()=>this.onError(skillSourceError('skill_package_cleanup_failed')));
+    if(createdPath)await fs.rm(createdPath,{recursive:true,force:true}).catch(error=>this.cleanupFailure(error,id));
    }
    await c.query('RELEASE SAVEPOINT skill_publication');
    const zone=await sources.zone(c);
@@ -141,12 +147,12 @@ export class SkillGitSync {
        for(const file of fetched.files){const destination=path.join(staging,file.path);await fs.mkdir(path.dirname(destination),{recursive:true});await fs.writeFile(destination,file.bytes,{mode:file.mode});await fs.chmod(destination,file.mode);}
        await fs.mkdir(path.dirname(publishedPath),{recursive:true});
        try {await fs.rename(staging,publishedPath);onCreated(publishedPath);}catch(e){if(!['EEXIST','ENOTEMPTY'].includes(e.code))throw e;if(skillFilesHash(await installedSkillFiles(publishedPath))!==hash)throw skillSourceError('skill_local_changes',409);}
-      } finally {await fs.rm(staging,{recursive:true,force:true}).catch(()=>this.onError(skillSourceError('skill_package_cleanup_failed')));}
+      } finally {await fs.rm(staging,{recursive:true,force:true}).catch(error=>this.cleanupFailure(error,id));}
      }
      await c.query('DELETE FROM skill_package_files WHERE skill_id=$1',[id]);
      if(fetched.storage==='filesystem')for(const file of fetched.files)await c.query('INSERT INTO skill_package_files(skill_id,file_path,bytes,executable) VALUES($1,$2,$3,$4)',[id,file.path,file.bytes.length,file.mode===0o755]);
      await c.query("UPDATE skills SET name=$2,description=$3,content=$4,storage=$5,content_owner='git',installed_path=$6,installed_hash=$7,updated_at=$8 WHERE id=$1",[id,fetched.name||id,fetched.description,fetched.content,fetched.storage,publishedPath,hash,this.clock()]);
-     if(old.installed_path && old.installed_path!==publishedPath) await fs.utimes(old.installed_path,new Date(this.clock()),new Date(this.clock())).catch(()=>{});
+     if(old.installed_path && old.installed_path!==publishedPath) await fs.utimes(old.installed_path,new Date(this.clock()),new Date(this.clock())).catch(error=>{if(error?.code!=='ENOENT')this.cleanupFailure(error,id);});
      status='updated';
     }
     return {hash,status,publishedPath};
@@ -178,7 +184,26 @@ export class SkillGitSync {
  }
  async tick() {
   if(this.ticking)return this.ticking;
-  this.ticking=(async()=>{const results=[];for(const id of await this.sources.due()){try{results.push(await this.sync(id,{scheduled:true}));}catch(e){if(e.message!=='skill_sync_running')this.onError(e);}}await this.cleanupPackages();return results;})();
+  this.ticking=(async()=>{
+   const results=[];
+   for(const id of await this.sources.due()) {
+    try {
+     const result=await this.sync(id,{scheduled:true});results.push(result);
+     if(result?.ok===false) {
+      if(!this.failedSources.has(id))this.report('skill_sync_unavailable',new Error(result.error),{skillId:operationalId(id),receiptId:operationalId(result.receiptId)});
+      this.failedSources.add(id);
+     } else if(result?.status!=='not_due' && this.failedSources.delete(id)) operationalEvent(this.logger,'skill_sync_restored',{skillId:operationalId(id),receiptId:operationalId(result?.receiptId)},{level:'info',component:'skill-git-sync'});
+    } catch(e) {
+     if(e.message!=='skill_sync_running') {
+      if(!this.failedSources.has(id))this.report('skill_sync_unavailable',e,{skillId:operationalId(id)});
+      this.failedSources.add(id);this.onError(e);
+     }
+    }
+   }
+   await this.cleanupPackages();
+   if(this.tickFailed)operationalEvent(this.logger,'skill_sync_worker_restored',{}, {level:'info',component:'skill-git-sync'});
+   this.tickFailed=false;return results;
+  })().catch(error=>{if(!this.tickFailed)this.report('skill_sync_worker_unavailable',error);this.tickFailed=true;throw error;});
   try{return await this.ticking;}finally{this.ticking=null;}
  }
  start(){if(!this.timer){this.timer=setInterval(()=>void this.tick().catch(this.onError),this.intervalMs);this.timer.unref?.();}return this.tick();}

@@ -5,7 +5,7 @@ import { closePostgresPool, withPostgresTransaction } from './postgres-foundatio
 import {
   assertConnection, canonicalizeOauthConnection, decrypt, encrypt, normalizeAuth, mergeOpenAiOAuthTokens,
   publicConnection, secretPreview, normalizeModels, normalizeReasoningEffort, normalizeTemperature, assertIdentity,
-  refreshAnthropicOauth, discoverModels, isProviderPool, assertProviderPoolMembers, providerPoolModels,
+  refreshAnthropicOauth, discoverModels, isProviderPool, assertProviderPoolMembers, providerPoolModels, modelSettingsFailureDiagnostic,
 } from './model-settings-store.mjs';
 import { refreshOpenAiOAuth } from './openai-oauth-login.mjs';
 
@@ -70,10 +70,11 @@ const OAUTH_REFRESH_LOCK = 'burrow-model-settings-oauth-refresh';
 const json = (value, fallback = {}) => { try { return JSON.parse(value); } catch { return fallback; } };
 
 export class PostgresModelSettingsStore {
-  constructor({ pool, key, ownsPool = false, clock = now, bootstrapSampleIdentities = process.env.BURROW_BOOTSTRAP_SAMPLE_IDENTITIES } = {}) {
+  constructor({ pool, key, ownsPool = false, clock = now, logger = null, bootstrapSampleIdentities = process.env.BURROW_BOOTSTRAP_SAMPLE_IDENTITIES } = {}) {
     if (!pool?.query || !pool?.connect) throw new Error('model_settings_postgres_pool_required');
     if (!Buffer.isBuffer(key) || key.length !== 32) throw new Error('settings_encryption_key_invalid');
     this.pool = normalizePostgresPool(pool); this.key = key; this.ownsPool = ownsPool; this.clock = clock;
+    this.logger = logger;
     this.providerPoolMetrics = new PostgresProviderPoolMetrics(this.pool);
     this.bootstrapSampleIdentities = ["1", "true", "yes", "on"].includes(String(bootstrapSampleIdentities ?? "0").trim().toLowerCase());
   }
@@ -388,7 +389,11 @@ export class PostgresModelSettingsStore {
           await this.discoverModels({ ...options, id: connection.id,
             signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000) });
           results.push({ id: connection.id, ok: true });
-        } catch { results.push({ id: connection.id, ok: false }); }
+        } catch (error) {
+          // Preserve a bounded diagnostic before this API turns exceptions into
+          // !ok. Never return provider responses, parser prose or credentials.
+          results.push({ id: connection.id, ok: false, error: modelSettingsFailureDiagnostic(error) });
+        }
       }
       return results;
     };

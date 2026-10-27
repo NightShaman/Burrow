@@ -1,3 +1,4 @@
+import { operationalEvent, infrastructureErrorCode, operationalId } from './operational-log.mjs';
 import { normalizeMcpHeaders } from './mcp-settings-store.mjs';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -29,15 +30,29 @@ const text = (value) => String(value ?? '').trim();
 const DEFAULT_STREAM_CAPTURE_BYTES = 256 * 1024;
 const providerStates = new Map();
 let providerStateStore = null;
-export function configureMcpProviderStateStore(store = null) { providerStateStore = store; providerStates.clear(); }
+let providerLogger = console;
+const stateStorageFailures = new Set();
+export function configureMcpProviderStateStore(store = null, { logger = console } = {}) {
+  providerStateStore = store; providerLogger = logger; stateStorageFailures.clear(); providerStates.clear();
+}
 
 function providerId(connection) { return text(connection?.id) || 'connection'; }
 function providerEvent(connection, status, { runtimeRoot = null, error = null } = {}) {
   if (connection?.lifecycle !== 'keep_alive') return Promise.resolve();
   const event = { ts: new Date().toISOString(), providerId: providerId(connection), status };
   if (error) event.error = publicMcpError(error);
+  const previous = providerStates.get(event.providerId);
+  if (previous?.status === status && previous?.error === event.error && !previous.lastKnown && !stateStorageFailures.has(event.providerId)) return Promise.resolve();
   providerStates.set(event.providerId, event);
-  if (providerStateStore) return providerStateStore.append(event).catch(() => {});
+  const fields = { providerId: operationalId(event.providerId) };
+  if (status === 'unavailable' && previous?.status !== 'unavailable') operationalEvent(providerLogger, 'mcp_provider_unavailable', { ...fields, errorCode: event.error || 'mcp_runtime_failed' }, { level: 'warn', component: 'mcp' });
+  if (status === 'ready' && previous?.status === 'unavailable') operationalEvent(providerLogger, 'mcp_provider_restored', fields, { level: 'info', component: 'mcp' });
+  if (providerStateStore) return Promise.resolve().then(() => providerStateStore.append(event)).then(() => {
+    if (stateStorageFailures.delete(event.providerId)) operationalEvent(providerLogger, 'mcp_provider_state_persistence_restored', fields, { level: 'info', component: 'mcp' });
+  }, error => {
+    if (!stateStorageFailures.has(event.providerId)) operationalEvent(providerLogger, 'mcp_provider_state_persistence_failed', { ...fields, errorCode: infrastructureErrorCode(error, 'mcp_provider_state_storage_failed') }, { level: 'error', component: 'mcp' });
+    stateStorageFailures.add(event.providerId);
+  });
   return Promise.resolve();
 }
 
@@ -210,19 +225,25 @@ async function withConnectionConfig(connection, apiKey, environmentVariables, he
     // whether an existing daemon must be replaced.
     const existing = await readFile(configPath, 'utf8').catch(() => null);
     if (existing !== config) await writeFile(configPath, config, { mode: 0o600 });
-    await providerEvent(connection, 'starting', { runtimeRoot });
+    if (!['ready', 'unavailable'].includes(providerStates.get(providerId(connection))?.status)) await providerEvent(connection, 'starting', { runtimeRoot });
     try {
       // daemon start is idempotent in mcporter: it both verifies an existing
       // daemon and recreates one that vanished. Never advertise a keep-alive
       // provider merely because its old catalog is cached.
       await runCommand(binary, ['daemon', 'start', '--config', configPath], { cwd: runtimeRoot, protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
-      await providerEvent(connection, 'ready', { runtimeRoot });
     } catch (error) {
       await providerEvent(connection, 'unavailable', { runtimeRoot, error });
       throw error;
     }
-    try { return await operation(configPath, { binary, runtimeRoot }); }
-    catch (error) { await providerEvent(connection, 'unavailable', { runtimeRoot, error }); throw error; }
+    try {
+      const result = await operation(configPath, { binary, runtimeRoot });
+      await providerEvent(connection, 'ready', { runtimeRoot });
+      return result;
+    } catch (error) {
+      // A valid tool error proves the provider answered, not a dependency outage.
+      await providerEvent(connection, publicMcpError(error) === 'mcp_tool_failed' ? 'ready' : 'unavailable', { runtimeRoot, ...(publicMcpError(error) === 'mcp_tool_failed' ? {} : { error }) });
+      throw error;
+    }
   }
   const temporary = await mkdtemp(path.join(configRoot, 'mcp-'));
   const configPath = path.join(temporary, 'mcporter.json');

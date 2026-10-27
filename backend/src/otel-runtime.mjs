@@ -1,3 +1,4 @@
+import { operationalEvent } from './operational-log.mjs';
 import { context, SpanKind, SpanStatusCode, trace } from '@opentelemetry/api';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
@@ -101,7 +102,7 @@ function metricExporterOptions(env) {
   return { ...(url ? { url } : {}), ...(headers ? { headers: parseExporterHeaders(headers) } : {}), timeoutMillis: positiveInteger(env.OTEL_EXPORTER_OTLP_METRICS_TIMEOUT || env.OTEL_EXPORTER_OTLP_TIMEOUT, DEFAULT_EXPORT_TIMEOUT_MS) };
 }
 
-export function createOtelRuntime({ env = process.env, serviceVersion = null, traceExporter = null, metricExporter = null, resource = null, clock = () => Date.now() } = {}) {
+export function createOtelRuntime({ env = process.env, serviceVersion = null, traceExporter = null, metricExporter = null, resource = null, clock = () => Date.now(), logger = console } = {}) {
   let started = false;
   let closed = false;
   let tracerProvider = null;
@@ -114,17 +115,33 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
   let lastExportFailure = null;
 
   function monitoredExporter(exporter, signal) {
+    let consecutiveFailures = 0;
+    let lastWarningAt = null;
+    let suppressed = 0;
+    function exported(error, batch) {
+      if (!error) {
+        if (consecutiveFailures) operationalEvent(logger, 'otel_export_restored', { signal, failures: consecutiveFailures, suppressed }, { level: 'info', component: 'opentelemetry' });
+        consecutiveFailures = 0; lastWarningAt = null; suppressed = 0;
+        return;
+      }
+      lastExportFailure = exportFailure(error, signal);
+      failures.export += 1;
+      dropped += Array.isArray(batch) ? batch.length : 1;
+      consecutiveFailures += 1;
+      if (lastWarningAt === null || clock() - lastWarningAt >= 60_000) {
+        operationalEvent(logger, lastWarningAt === null ? 'otel_export_failed' : 'otel_export_failure_summary', { ...lastExportFailure, failures: consecutiveFailures, suppressed }, { level: 'warn', component: 'opentelemetry' });
+        lastWarningAt = clock(); suppressed = 0;
+      } else suppressed += 1;
+    }
     const monitored = {
       export(batch, callback) {
         try {
           exporter.export(batch, (result) => {
-            if (result?.code !== 0) { lastExportFailure = exportFailure(result?.error, signal); failures.export += 1; dropped += Array.isArray(batch) ? batch.length : 1; }
+            exported(result?.code !== 0 ? (result?.error || new Error('otel_export_failed')) : null, batch);
             callback(result);
           });
         } catch (error) {
-          lastExportFailure = exportFailure(error, signal);
-          failures.export += 1;
-          dropped += Array.isArray(batch) ? batch.length : 1;
+          exported(error, batch);
           callback({ code: 1, error });
         }
       },
@@ -202,6 +219,7 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
     } catch {
       failures.start += 1;
       failures.lastStart = 'otel_runtime_start_failed';
+      operationalEvent(logger, 'otel_runtime_start_failed', { errorCode: 'otel_runtime_start_failed' }, { level: 'error', component: 'opentelemetry' });
     }
     return status();
   }
@@ -357,7 +375,7 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
         tracerProvider?.shutdown?.(),
         meterProvider?.shutdown?.(),
       ].filter(Boolean)), positiveInteger(timeoutMs, DEFAULT_SHUTDOWN_TIMEOUT_MS), 'otel_shutdown_timeout');
-    } catch { failures.shutdown += 1; }
+    } catch { failures.shutdown += 1; operationalEvent(logger, 'otel_runtime_shutdown_failed', { errorCode: 'otel_runtime_shutdown_failed' }, { level: 'warn', component: 'opentelemetry' }); }
     return status();
   }
 
@@ -385,7 +403,7 @@ export function otelEnvironmentForConfiguration(config = {}) {
   ].filter(([key]) => transport[key]).map(([key, envKey]) => [envKey, String(transport[key])]));
 }
 
-export function createReconfigurableOtelRuntime({ serviceVersion = null, clock = () => Date.now(), runtimeFactory = createOtelRuntime, tuningEnv = process.env } = {}) {
+export function createReconfigurableOtelRuntime({ serviceVersion = null, clock = () => Date.now(), runtimeFactory = createOtelRuntime, tuningEnv = process.env, logger = console } = {}) {
   const runtimeTuning = Object.fromEntries(Object.entries(tuningEnv).filter(([key, value]) => value && /^(?:OTEL_BSP_|OTEL_METRIC_EXPORT_|OTEL_RESOURCE_ATTRIBUTES$|OTEL_SERVICE_NAME$|OTEL_SDK_DISABLED$|OTEL_EXPORTER_OTLP_(?:TIMEOUT|TRACES_TIMEOUT|METRICS_TIMEOUT))/.test(key)));
   const emptyConfiguration = { enabled: false, endpoint: '', headers: null, tracesEndpoint: null, metricsEndpoint: null, tracesHeaders: null, metricsHeaders: null };
   const runtimes = new Set();
@@ -396,7 +414,7 @@ export function createReconfigurableOtelRuntime({ serviceVersion = null, clock =
     runtimes.add(entry);
     return entry;
   }
-  let active = generationRuntime(runtimeFactory({ env: runtimeTuning, serviceVersion, clock }), emptyConfiguration);
+  let active = generationRuntime(runtimeFactory({ env: runtimeTuning, serviceVersion, clock, logger }), emptyConfiguration);
   let applied = emptyConfiguration;
   let generation = 0;
   let applying = Promise.resolve();
@@ -420,6 +438,7 @@ export function createReconfigurableOtelRuntime({ serviceVersion = null, clock =
     if (entry.runIds.size && !closed) return Promise.resolve();
     entry.draining = Promise.resolve().then(() => entry.runtime.shutdown(options)).catch(() => {
       completed.failures.shutdown += 1;
+      operationalEvent(logger, 'otel_runtime_shutdown_failed', { errorCode: 'otel_runtime_shutdown_failed' }, { level: 'warn', component: 'opentelemetry' });
     }).finally(() => {
       accumulate(completed, entry.runtime.status());
       runtimes.delete(entry);
@@ -435,7 +454,7 @@ export function createReconfigurableOtelRuntime({ serviceVersion = null, clock =
       if (closed || configurationKey(normalized) === configurationKey(applied)) return status();
       const previous = active;
       const env = { ...runtimeTuning, ...otelEnvironmentForConfiguration(normalized) };
-      const candidate = runtimeFactory({ env, serviceVersion, clock });
+      const candidate = runtimeFactory({ env, serviceVersion, clock, logger });
       try {
         if (normalized.enabled && (normalized.endpoint || normalized.tracesEndpoint || normalized.metricsEndpoint)) {
           const started = await candidate.start();
@@ -511,7 +530,7 @@ export function createReconfigurableOtelRuntime({ serviceVersion = null, clock =
       try {
         await timeout(Promise.all([applying.catch(() => {}), draining]),
           positiveInteger(options.timeoutMs, DEFAULT_SHUTDOWN_TIMEOUT_MS), 'otel_shutdown_timeout');
-      } catch { completed.failures.shutdown += 1; }
+      } catch { completed.failures.shutdown += 1; operationalEvent(logger, 'otel_runtime_shutdown_failed', { errorCode: 'otel_runtime_shutdown_timeout' }, { level: 'warn', component: 'opentelemetry' }); }
       owners.clear();
       return status();
     })();

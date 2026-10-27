@@ -177,11 +177,10 @@ function registrar(modId) {
 
 function logger(modId) {
   return Object.freeze(Object.fromEntries(['debug', 'info', 'warn', 'error'].map((level) => [level, (...args) => {
-    const message = args.map((entry) => {
-      if (typeof entry === 'string') return entry;
-      try { return JSON.stringify(entry); } catch { return '[unserializable]'; }
-    }).join(' ');
-    send({ type: 'log', level, message, modId }, () => {});
+    // Preserve argument structure (including Error objects) for Core's log-only
+    // projection. Joining JSON with prose first loses sensitive field boundaries.
+    try { send({ type: 'log', level, args, modId }, () => {}); }
+    catch { send({ type: 'log', level, args: ['[unserializable]'], modId }, () => {}); }
   }])));
 }
 

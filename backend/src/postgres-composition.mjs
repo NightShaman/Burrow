@@ -58,6 +58,7 @@ export async function createPostgresApplication({
   clock,
   bootstrapSampleIdentities,
   operatorBackfillOptions,
+  logger = console,
 } = {}) {
   const ownedPool = !pool;
   const sharedPool = pool || createPostgresPool({ config: poolConfig, ...(PoolClass ? { PoolClass } : {}) });
@@ -70,7 +71,7 @@ export async function createPostgresApplication({
     brains: new PostgresBrainStore(common),
     agents: new PostgresAgentRegistryStore({ ...common, bootstrapSampleIdentities }),
     profiles: new PostgresAgentProfileStore({ ...common, ...(clock ? { clock } : {}) }),
-    models: new PostgresModelSettingsStore({ ...common, key: encryptionKey, ...(clock ? { clock } : {}), ...(bootstrapSampleIdentities !== undefined ? { bootstrapSampleIdentities } : {}) }),
+    models: new PostgresModelSettingsStore({ ...common, key: encryptionKey, logger, ...(clock ? { clock } : {}), ...(bootstrapSampleIdentities !== undefined ? { bootstrapSampleIdentities } : {}) }),
     mcpProviderStates: new PostgresMcpProviderStateStore(common),
     mcp: new PostgresMcpSettingsStore({ ...common, key: encryptionKey }),
     tasks: new PostgresTaskBoardStore({ ...common, ...(clock ? { clock } : {}) }),
@@ -98,7 +99,7 @@ export async function createPostgresApplication({
     completionEventSettings: new PostgresCompletionEventSettingsStore({ ...common, key: encryptionKey, ...(clock ? { clock } : {}) }),
     conversations: new PostgresSessionStore({ ...common, ...(clock ? { clock } : {}) }),
     };
-    stores.brainEmbeddings = new PostgresBrainEmbeddings({ pool: sharedPool, models: stores.models });
+    stores.brainEmbeddings = new PostgresBrainEmbeddings({ pool: sharedPool, models: stores.models, logger });
     stores.brains.embeddings = stores.brainEmbeddings;
     stores.albdruck = new PostgresAlbdruckStore({ pool: sharedPool, resolveOriginal: (ref, client) => stores.conversations.resolveOriginal(ref, client), searchHistory: input => stores.conversations.history(input) });
     await stores.forge.init();

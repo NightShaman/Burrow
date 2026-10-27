@@ -1,6 +1,8 @@
+import { operationalEvent, infrastructureErrorCode, operationalId } from './operational-log.mjs';
+
 // A producer owns every promise it starts, including admission/claim reads.
 // stop() is synchronous; close() shares one drain and never closes borrowed stores.
-export function createBackgroundLifecycle({ name, clock = () => new Date().toISOString() } = {}) {
+export function createBackgroundLifecycle({ name, clock = () => new Date().toISOString(), logger = null } = {}) {
   const controller = new AbortController();
   const pending = new Set();
   let closePromise = null;
@@ -9,7 +11,8 @@ export function createBackgroundLifecycle({ name, clock = () => new Date().toISO
   function reportFailure(error, phase = 'tick') {
     failureCount += 1;
     lastFailure = { at: clock(), phase, error: String(error?.message || error).slice(0, 2000) };
-    console.error(`${name}_failure`, JSON.stringify(lastFailure));
+    if (logger) operationalEvent(logger, `${name}_failure`, { phase: operationalId(phase), errorCode: infrastructureErrorCode(error, 'background_operation_failed') }, { level: 'error', component: 'background' });
+    else console.error(`${name}_failure`, JSON.stringify(lastFailure));
   }
   function track(operation, phase = 'tick') {
     const promise = Promise.resolve().then(operation);

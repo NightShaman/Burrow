@@ -1,3 +1,4 @@
+import { operationalEvent, infrastructureErrorCode, operationalId } from './operational-log.mjs';
 import { createBackgroundLifecycle } from './background-lifecycle.mjs';
 
 export function publicGeneration(job) {
@@ -5,23 +6,46 @@ export function publicGeneration(job) {
     createdAt: job.createdAt, updatedAt: job.updatedAt, startedAt: job.startedAt ?? null, completedAt: job.completedAt ?? null };
 }
 
-export function createModGenerationDispatcher({ store, generateText, maxConcurrent = 4 } = {}) {
+export function createModGenerationDispatcher({ store, generateText, maxConcurrent = 4, logger = console } = {}) {
   if (!store || typeof generateText !== 'function') throw new Error('mod_generation_dispatcher_dependencies_required');
   if (!Number.isSafeInteger(maxConcurrent) || maxConcurrent < 1) throw new Error('mod_generation_concurrency_invalid');
-  const lifecycle = createBackgroundLifecycle({ name: 'mod_generation_dispatcher' });
+  const lifecycle = createBackgroundLifecycle({ name: 'mod_generation_dispatcher', logger: {
+    event(type, fields, options) {
+      // Queued interruption only writes a receipt, whose writer owns its
+      // diagnostic. Keep the rejection in health without logging it twice.
+      if (fields.phase !== 'queued-interrupt') operationalEvent(logger, type, fields, options);
+    },
+  } });
+  const report = (type, job, error) => operationalEvent(logger, type, { jobId: operationalId(job.id), ownerModId: operationalId(job.ownerModId), errorCode: infrastructureErrorCode(error, 'receipt_storage_failed') }, { level: 'error', component: 'mod-generation' });
+  function receiptWriter(job) {
+    let persistenceReported = false;
+    async function complete(patch) {
+      try { return await store.complete(job.id, patch); }
+      catch (error) {
+        // The failed terminal write may be retried by run()'s catch. It is the
+        // same receipt operation, not a second incident. Claims log separately.
+        if (!persistenceReported) { persistenceReported = true; report('mod_generation_receipt_persistence_failed', job, error); }
+        throw error;
+      }
+    }
+    return { complete, interrupt: () => complete({ status: 'interrupted', error: 'service_shutdown' }) };
+  }
   const queue = [];
   let active = 0;
-  const interrupt = job => store.complete(job.id, { status: 'interrupted', error: 'service_shutdown' });
+  const interrupt = job => receiptWriter(job).interrupt();
   async function run(job) {
+    const receipt = receiptWriter(job);
     try {
-      if (lifecycle.stopped) { await interrupt(job); return; }
-      if (!(await store.markRunning(job.id))) return;
-      if (lifecycle.stopped) { await interrupt(job); return; }
+      if (lifecycle.stopped) { await receipt.interrupt(); return; }
+      let claimed;
+      try { claimed = await store.markRunning(job.id); } catch (error) { report('mod_generation_receipt_claim_failed', job, error); throw error; }
+      if (!claimed) return;
+      if (lifecycle.stopped) { await receipt.interrupt(); return; }
       const { text } = await generateText(job.payload, { signal: lifecycle.signal });
-      await store.complete(job.id, lifecycle.stopped ? { status: 'interrupted', error: 'service_shutdown' } : { status: 'succeeded', text: String(text).slice(0, 64_000) });
+      await receipt.complete(lifecycle.stopped ? { status: 'interrupted', error: 'service_shutdown' } : { status: 'succeeded', text: String(text).slice(0, 64_000) });
     } catch (error) {
-      try { await store.complete(job.id, { status: lifecycle.stopped ? 'interrupted' : 'failed', error: lifecycle.stopped ? 'service_shutdown' : (/^[a-z0-9_]+$/.test(String(error?.message || '')) ? error.message : 'mod_model_generation_failed').slice(0, 512) }); }
-      catch { /* Startup reconciliation interrupts incomplete receipts. */ }
+      try { await receipt.complete({ status: lifecycle.stopped ? 'interrupted' : 'failed', error: lifecycle.stopped ? 'service_shutdown' : (/^[a-z0-9_]+$/.test(String(error?.message || '')) ? error.message : 'mod_model_generation_failed').slice(0, 512) }); }
+      catch { /* The receipt writer reported once; startup reconciliation repairs it. */ }
     } finally {
       active -= 1;
       launchQueued();

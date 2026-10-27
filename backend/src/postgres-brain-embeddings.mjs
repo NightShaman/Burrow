@@ -1,3 +1,4 @@
+import { operationalEvent, infrastructureErrorCode, operationalId } from './operational-log.mjs';
 import pg from 'pg';
 import { createHash } from 'node:crypto';
 import { withPostgresTransaction } from './postgres-foundation.mjs';
@@ -41,9 +42,15 @@ export function cosine(a,b) {
  return aa&&bb ? dot/Math.sqrt(aa)/Math.sqrt(bb) : null;
 }
 export class PostgresBrainEmbeddings {
- constructor({pool,models,provider=new BrainEmbeddingProvider({models}),retryBaseMs=30000,retryMaxMs=3600000}) { this.pool=pool;this.models=models;this.provider=provider;this.running=null;this.timer=null;this.stopped=false;this.active=new Set();
+ constructor({pool,models,provider=new BrainEmbeddingProvider({models}),retryBaseMs=30000,retryMaxMs=3600000,logger=console}) { this.pool=pool;this.models=models;this.provider=provider;this.running=null;this.timer=null;this.stopped=false;this.active=new Set();this.logger=logger;this.operationalFailures=new Set();
   if(!Number.isSafeInteger(retryBaseMs)||retryBaseMs<1||!Number.isSafeInteger(retryMaxMs)||retryMaxMs<retryBaseMs) throw new Error('brain_embedding_retry_invalid');
   this.retryBaseMs=retryBaseMs;this.retryMaxMs=retryMaxMs; }
+ operationalState(area,error,fields={}) {
+  const failed=Boolean(error),previous=this.operationalFailures.has(area);
+  if(failed===previous)return;
+  if(failed)this.operationalFailures.add(area);else this.operationalFailures.delete(area);
+  operationalEvent(this.logger,`brain_embedding_${area}_${failed?'unavailable':'restored'}`,{...fields,...(failed?{errorCode:area==='provider'?embeddingFailure(error).code:infrastructureErrorCode(error,'brain_embedding_storage_failed')}:{})},{level:failed?'warn':'info',component:'brain-embeddings'});
+ }
  async settings(client=this.pool) { return (await client.query('SELECT * FROM brain_embedding_settings WHERE singleton')).rows[0]; }
  async reset(client) {
   await client.query('DELETE FROM brain_embedding_vectors');
@@ -92,23 +99,26 @@ export class PostgresBrainEmbeddings {
  async test(input) { const v=await this.provider.embed({...input,text:'Burrow saved memory embedding capability test.'});return {ok:true,dimensions:v.length}; }
  async reindex() { await withPostgresTransaction(this.pool,async c=>{await c.query('UPDATE brain_embedding_settings SET generation=generation+1 WHERE singleton');await this.reset(c);});this.wake();return this.status(); }
  start() { this.stopped=false;this.timer=setInterval(()=>this.wake(),2000);this.timer.unref();this.wake(); }
- wake() { if(!this.stopped && !this.running) this.running=this.drain().catch(()=>{}).finally(()=>{this.running=null;}); }
+ wake() { if(!this.stopped && !this.running) this.running=this.drain().then(()=>this.operationalState('worker',null),error=>{if(!this.stopped)this.operationalState('worker',error);}).finally(()=>{this.running=null;}); }
  async close() { this.stopped=true;clearInterval(this.timer);for(const controller of this.active) controller.abort();if(this.running) await this.running; }
  async drain() {
   // Independent session: never reserve a pool slot while provider/model operations
   // need that same pool (including max=1). Session loss releases ownership.
   const client=new pg.Client({...this.pool.options,connectionTimeoutMillis:this.pool.options.connectionTimeoutMillis || 10000});
   const controller=new AbortController();this.active.add(controller);
-  const lost=()=>controller.abort();client.on('error',lost);
+  let sessionLost=false;
+  const lost=error=>{sessionLost=true;if(!this.stopped)this.operationalState('worker',error);controller.abort();};client.on('error',lost);
   let locked=false;
   try {
    await client.connect();
    locked=(await client.query("SELECT pg_try_advisory_lock(hashtextextended(current_schema() || ':brain-embedding-worker',0)) AS locked")).rows[0].locked;
+   if(sessionLost && !this.stopped)throw new Error('brain_embedding_worker_session_lost');
    if(!locked || controller.signal.aborted) return;
    await this.drainOwned(controller.signal);
+   if(sessionLost && !this.stopped)throw new Error('brain_embedding_worker_session_lost');
   } finally {
-   if(locked) await client.query("SELECT pg_advisory_unlock(hashtextextended(current_schema() || ':brain-embedding-worker',0))").catch(()=>{});
-   await client.end().catch(()=>{});this.active.delete(controller);
+   if(locked) await client.query("SELECT pg_advisory_unlock(hashtextextended(current_schema() || ':brain-embedding-worker',0))").then(()=>this.operationalState('unlock',null),error=>{if(!this.stopped)this.operationalState('unlock',error);});
+   await client.end().then(()=>this.operationalState('session_close',null),error=>{if(!this.stopped)this.operationalState('session_close',error);});this.active.delete(controller);
   }
  }
  async drainOwned(signal) {
@@ -119,9 +129,12 @@ export class PostgresBrainEmbeddings {
    const row=(await this.pool.query(`SELECT m.*,j.attempts FROM brain_embedding_jobs j JOIN brain_memories m USING(agent_id,id)
     WHERE m.deleted_at IS NULL AND j.next_attempt_at<=now() ORDER BY j.next_attempt_at,j.agent_id,j.id LIMIT 1`)).rows[0];
    if(!row) return;
+   let phase='provider';
    try {
     const vector=embeddingVector(await this.provider.embed({connectionId:s.connection_id,model:s.model,text:row.title+'\n'+row.content,signal}));
     if(signal.aborted) return;
+    this.operationalState('provider',null,{operation:'index'});
+    phase='persistence';
     await this.reconcile();
     await withPostgresTransaction(this.pool,async c=>{
      // Lock settings then memory: edit/delete cannot race the fenced vector write.
@@ -132,8 +145,10 @@ export class PostgresBrainEmbeddings {
       ON CONFLICT(agent_id,id) DO UPDATE SET revision=EXCLUDED.revision,generation=EXCLUDED.generation,vector=EXCLUDED.vector`,[row.agent_id,row.id,row.revision,s.generation,vector]);
      await c.query('DELETE FROM brain_embedding_jobs WHERE agent_id=$1 AND id=$2 AND revision=$3',[row.agent_id,row.id,row.revision]);
     });
+    this.operationalState('persistence',null);
    } catch(error) {
     if(signal.aborted) return; // Cancellation leaves the durable job ready.
+    this.operationalState(phase==='provider'?'provider':'persistence',error,{operation:'index',memoryId:operationalId(row.id)});
     const failure=embeddingFailure(error);
     const delay=Math.min(this.retryMaxMs,this.retryBaseMs*2**Math.min(row.attempts,30));
     await withPostgresTransaction(this.pool,async c=>{
@@ -151,7 +166,8 @@ export class PostgresBrainEmbeddings {
   const s=await this.reconcile();if(!s.enabled || !input.query) return store.list(input);
   let vector;
   try { vector=await this.provider.embed({connectionId:s.connection_id,model:s.model,text:input.query,query:true}); }
-  catch { return {...await store.list(input),retrieval:{mode:'lexical',fallback:'embedding_unavailable'}}; }
+  catch(error) { this.operationalState('provider',error,{operation:'search'});return {...await store.list(input),retrieval:{mode:'lexical',fallback:'embedding_unavailable'}}; }
+  this.operationalState('provider',null,{operation:'search'});
   const current=await this.reconcile();
   if(current.generation!==s.generation || !current.enabled) return store.list(input);
   // Complete corpus scan, exact similarity, small curated Brains only. A ranked

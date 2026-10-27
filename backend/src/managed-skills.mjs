@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fetchGitSkill } from './git-skill-fetch.mjs';
 import { createBackgroundLifecycle } from './background-lifecycle.mjs';
+import { operationalEvent } from './operational-log.mjs';
 
 const SKILL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
@@ -103,15 +104,33 @@ export function activeManagedSkillDeclarations(mods = [], core = []) {
   ];
 }
 
-export function createManagedSkillSynchronizer({ reconcile, intervalMs = 6 * 60 * 60 * 1000 } = {}) {
+export function createManagedSkillSynchronizer({ reconcile, intervalMs = 6 * 60 * 60 * 1000, logger = console } = {}) {
   if (typeof reconcile !== 'function') throw new Error('managed_skill_reconcile_required');
-  const lifecycle = createBackgroundLifecycle({ name: 'managed_skill_sync' });
+  let unavailable = false;
+  const lifecycle = createBackgroundLifecycle({ name: 'managed_skill_sync', logger: {
+    event(_type, fields) {
+      // Keep every failure in lifecycle health, but emit only outage transitions.
+      // An injected logger never falls back to lifecycle's raw exception output.
+      if (unavailable) return;
+      unavailable = true;
+      operationalEvent(logger, 'managed_skill_sync_unavailable', { ...fields,
+        errorCode: fields.errorCode === 'background_operation_failed' ? 'managed_skill_sync_failed' : fields.errorCode,
+      }, { level: 'warn', component: 'skills' });
+    },
+  } });
   let timer = null;
   let ticking = false;
   async function runTick() {
     if (ticking || lifecycle.stopped) return { ok: true, skipped: true };
     ticking = true;
-    try { return { ok: true, result: await reconcile() }; }
+    try {
+      const result = await reconcile();
+      if (unavailable) {
+        unavailable = false;
+        operationalEvent(logger, 'managed_skill_sync_restored', {}, { level: 'info', component: 'skills' });
+      }
+      return { ok: true, result };
+    }
     catch (error) { lifecycle.reportFailure(error); return { ok: false, error: String(error?.message || error) }; }
     finally { ticking = false; }
   }

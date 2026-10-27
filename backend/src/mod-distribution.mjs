@@ -1,3 +1,4 @@
+import { operationalEvent, infrastructureErrorCode, operationalId } from './operational-log.mjs';
 import { approveOperatorExecutionProvider, executionProviderEligibility, isOperatorModAction } from './execution-provider-approval.mjs';
 import crypto, { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -317,6 +318,19 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
   let pollTimer = null;
   let closed = false;
   let failureCount = 0;
+  const failedSources = new Set();
+  let refreshUnavailable = false;
+  let pollingUnavailable = false;
+  const report = (type, fields = {}, level = 'warn') => operationalEvent(logger, type, fields, { level, component: 'mod-distribution' });
+  function backgroundFailure(area, error) {
+    const failed = area === 'refresh' ? refreshUnavailable : pollingUnavailable;
+    if (!failed) report(`mod_source_${area}_unavailable`, { errorCode: infrastructureErrorCode(error, 'mod_source_storage_failed') });
+    if (area === 'refresh') refreshUnavailable = true; else pollingUnavailable = true;
+  }
+  function sourceErrorCode(error) {
+    const codes = ['mod_source_authentication_failed', 'mod_source_timeout', 'mod_source_git_failed', 'mod_source_manifest_invalid', 'mod_source_version_invalid', 'mod_source_manifest_version_mismatch', 'mod_source_tag_changed', 'secret_reference_provider_unavailable'];
+    return codes.includes(error?.message) ? error.message : infrastructureErrorCode(error, 'mod_source_refresh_failed');
+  }
   const recoveryRoot = path.join(modsRoot, '.recovery');
   async function reconcileModOperations() {
     let names;
@@ -325,6 +339,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       const journalPath = path.join(recoveryRoot, name);
       const journal = JSON.parse(await fs.readFile(journalPath, 'utf8'));
       const expectedTarget = path.join(modsRoot, journal.modId || '');
+      report('mod_operation_recovery_started', { modId: operationalId(journal.modId) }, 'warn');
       if (journal.operation === 'install') {
         if (journal.version !== 1 || typeof journal.operationId !== 'string' || !journal.operationId || journal.modId === MOD_DATA_DIRECTORY || !MOD_ID.test(journal.modId) || journal.target !== expectedTarget || path.dirname(journal.backup) !== modsRoot || !path.basename(journal.backup).startsWith(`${journal.modId}.backup-`)) throw new Error('mod_install_recovery_journal_invalid');
         const recoveryDb = await repositoryFactory();
@@ -340,6 +355,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
           await syncDirectory(modsRoot);
           await onLifecycleChange?.({ modId: journal.modId, enabled: journal.enabled, installed: journal.hadTarget || committed, action: 'update' });
           await removeDurably(journalPath);
+          report('mod_operation_recovered', { modId: operationalId(journal.modId), operation: 'install' }, 'info');
         } finally { await recoveryDb.close(); }
         continue;
       }
@@ -348,6 +364,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
         await cleanupPath(journal.quarantine, { recursive: true, force: true });
         await cleanupPath(journal.recovery, { recursive: true, force: true });
         await removeDurably(journalPath);
+        report('mod_operation_recovered', { modId: operationalId(journal.modId), operation: 'uninstall' }, 'info');
         continue;
       }
       const targetPresent = await fs.stat(journal.target).then(() => true, () => false);
@@ -366,6 +383,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       await onLifecycleChange?.({ modId: journal.modId, enabled: [true, 1].includes(journal.lifecycle?.enabled), installed: true, action: 'uninstall-recovery' });
       await syncDirectory(modsRoot);
       await removeDurably(journalPath);
+      report('mod_operation_recovered', { modId: operationalId(journal.modId), operation: 'uninstall' }, 'info');
     }
     await fs.rmdir(recoveryRoot).catch((error) => { if (error?.code !== 'ENOENT' && error?.code !== 'ENOTEMPTY') throw error; });
   }
@@ -373,7 +391,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
   // Install a rejection observer immediately: callers still receive the same
   // rejected promise, but startup failures cannot become transient unhandled
   // rejections before the server reaches its explicit readiness await.
-  void ready.catch(() => {});
+  void ready.catch(error => report('mod_operation_recovery_failed', { errorCode: infrastructureErrorCode(error, 'mod_operation_recovery_failed') }, 'error'));
   async function refreshSettings(db) {
     const row = await db.refreshSettings();
     try { return validateModSourceRefreshConfig(JSON.parse(row?.value_json || '{}'), { partial: true }); }
@@ -386,7 +404,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
     pollTimer = setTimeout(() => {
       pollTimer = null;
       if (wait > MAX_TIMER_DELAY_MS) { armPoll(wait - MAX_TIMER_DELAY_MS); return; }
-      void refresh().catch((error) => logger.error?.(`Burrow mod source refresh failed: ${String(error?.message || error)}`)).finally(() => schedulePoll()).catch((error) => logger.error?.(`Burrow mod source polling failed: ${String(error?.message || error)}`));
+      void refresh().catch(() => {}).finally(() => schedulePoll()).catch(error => backgroundFailure('polling', error));
     }, delay);
     pollTimer.unref?.();
   }
@@ -396,6 +414,8 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
     const db = await repositoryFactory();
     let settings;
     try { settings = await refreshSettings(db); } finally { await db.close(); }
+    if (pollingUnavailable) report('mod_source_polling_restored', {}, 'info');
+    pollingUnavailable = false;
     if (!settings.enabled) return;
     const multiplier = 2 ** Math.min(failureCount, 52);
     const backedOff = Math.min(settings.intervalMs * multiplier, settings.maxBackoffMs);
@@ -428,9 +448,12 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
     try {
       const inspected = await repositoryPreparation(row.url, await sourceCredential(db, row.id));
       await db.updateSourceReady({ ...inspected, id: row.id }, checkedAt);
+      if (failedSources.delete(row.id) || row.status === 'failed') report('mod_source_restored', { sourceId: operationalId(row.id) }, 'info');
       return { ...row, ...inspected, status: 'ready', error: null };
     } catch (error) {
       const message = String(error?.message || error);
+      if (!failedSources.has(row.id)) report('mod_source_unavailable', { sourceId: operationalId(row.id), errorCode: sourceErrorCode(error) });
+      failedSources.add(row.id);
       await db.updateSourceFailed(row.id, message, checkedAt);
       return { ...row, status: 'failed', error: message };
     }
@@ -454,7 +477,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       for (const source of sources) if (source.mod_id && !mods.some((mod) => mod.id === source.mod_id)) mods.push({ id: source.mod_id, name: source.mod_name || source.mod_id, status: 'available', source: source.url, latestVersion: source.latest_version || undefined, canInstall: source.status === 'ready', ...(source.error ? { reason: source.error } : {}) });
       const refreshConfig = await refreshSettings(db);
       const stale = sources.some((row) => !row.last_checked_at || Date.now() - Date.parse(row.last_checked_at) >= refreshConfig.staleMs);
-      if (refreshConfig.enabled && stale && !refreshPromise) queueMicrotask(() => { void refresh().catch((error) => { failureCount += 1; logger.error?.(`Burrow mod source refresh failed: ${String(error?.message || error)}`); }); });
+      if (refreshConfig.enabled && stale && !refreshPromise) queueMicrotask(() => { void refresh().catch(() => {}); });
       return { ok: true, restartRequired: false, sourceRefresh: { enabled: Boolean(refreshConfig.enabled), intervalMs: refreshConfig.intervalMs, staleMs: refreshConfig.staleMs, concurrency: refreshConfig.concurrency, maxBackoffMs: refreshConfig.maxBackoffMs, refreshing: Boolean(refreshPromise), failures: failureCount }, mods, sources: sources.map((row) => ({ id: row.id, url: row.url, status: row.status, credential: { configured: [true, 1].includes(row.credential_configured) }, ...(row.error ? { error: row.error } : {}), ...(row.last_checked_at ? { lastCheckedAt: row.last_checked_at } : {}) })) };
     } finally { await db.close(); }
   }
@@ -487,9 +510,12 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
         }
       }));
       failureCount = failed ? failureCount + 1 : 0;
-      return list();
+      const result = await list();
+      if (refreshUnavailable) report('mod_source_refresh_restored', {}, 'info');
+      refreshUnavailable = false;
+      return result;
     })();
-    try { return await refreshPromise; } finally { refreshPromise = null; }
+    try { return await refreshPromise; } catch (error) { failureCount += 1; backgroundFailure('refresh', error); throw error; } finally { refreshPromise = null; }
   }
   async function removeSource(id) {
     await ready; const db = await repositoryFactory(); try { const removed = (await db.removeSource(String(id))).changes > 0; return { ok: removed, removed }; } finally { await db.close(); } }
@@ -556,10 +582,10 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
           if (backupPresent || !hadTarget) await cleanupPath(target, { recursive: true, force: true });
           if (backupPresent) await renamePath(backup, target);
           await syncDirectory(modsRoot);
-        } catch (recoveryError) { error.filesystemRecoveryError = recoveryError; }
+        } catch (recoveryError) { error.filesystemRecoveryError = recoveryError; report('mod_operation_compensation_failed', { modId: operationalId(id), phase: 'filesystemRecovery', errorCode: infrastructureErrorCode(recoveryError, 'mod_operation_recovery_failed') }, 'error'); }
         if (wasInstalled && enabled && !error.filesystemRecoveryError) {
           try { await onLifecycleChange?.({ modId: prepared.id, enabled: true, installed: true, action: 'update' }); }
-          catch (recoveryError) { error.runtimeRecoveryError = recoveryError; }
+          catch (recoveryError) { error.runtimeRecoveryError = recoveryError; report('mod_operation_compensation_failed', { modId: operationalId(id), phase: 'runtimeRecovery', errorCode: infrastructureErrorCode(recoveryError, 'mod_operation_recovery_failed') }, 'error'); }
         }
         if (!error.filesystemRecoveryError && !error.runtimeRecoveryError) await removeDurably(journalPath);
         throw error;
@@ -600,7 +626,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
             if (approval) await tx.restoreExecutionProviderApproval(approval);
           });
           try { await onLifecycleChange?.({ modId: id, enabled: [true, 1].includes(previous?.enabled), installed: true, action: 'enable-recovery' }); }
-          catch (recoveryError) { error.runtimeRecoveryError = recoveryError; }
+          catch (recoveryError) { error.runtimeRecoveryError = recoveryError; report('mod_operation_compensation_failed', { modId: operationalId(id), phase: 'runtimeRecovery', errorCode: infrastructureErrorCode(recoveryError, 'mod_operation_recovery_failed') }, 'error'); }
         } else await db.restoreLifecycle(id, previous, timestamp);
         throw error;
       }
@@ -638,7 +664,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
           await cleanupPath(recovery, { recursive: true, force: true });
           await syncDirectory(modsRoot);
           await removeDurably(journalPath);
-        } catch (recoveryError) { error.filesystemRecoveryError = recoveryError; }
+        } catch (recoveryError) { error.filesystemRecoveryError = recoveryError; report('mod_operation_compensation_failed', { modId: operationalId(id), phase: 'filesystemRecovery', errorCode: infrastructureErrorCode(recoveryError, 'mod_operation_recovery_failed') }, 'error'); }
         throw error;
       }
       let runtimeRemoved = false; let recordsDeleted = false; let committed = false;
@@ -662,17 +688,17 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
           await cleanupPath(quarantine, { recursive: true, force: true });
           await renamePath(recovery, target);
           await syncDirectory(modsRoot);
-        } catch (recoveryError) { error.filesystemRecoveryError = recoveryError; }
+        } catch (recoveryError) { error.filesystemRecoveryError = recoveryError; report('mod_operation_compensation_failed', { modId: operationalId(id), phase: 'filesystemRecovery', errorCode: infrastructureErrorCode(recoveryError, 'mod_operation_recovery_failed') }, 'error'); }
         if (recordsDeleted) {
           try { await db.transaction((tx) => tx.restoreMetadata(metadata)); }
-          catch (recoveryError) { error.databaseRecoveryError = recoveryError; }
+          catch (recoveryError) { error.databaseRecoveryError = recoveryError; report('mod_operation_compensation_failed', { modId: operationalId(id), phase: 'databaseRecovery', errorCode: infrastructureErrorCode(recoveryError, 'mod_operation_recovery_failed') }, 'error'); }
         }
         if (runtimeRemoved) {
           try { await onLifecycleChange?.({ modId: id, enabled: [true, 1].includes(lifecycle?.enabled), installed: true, action: 'uninstall-recovery' }); }
-          catch (recoveryError) { error.runtimeRecoveryError = recoveryError; }
+          catch (recoveryError) { error.runtimeRecoveryError = recoveryError; report('mod_operation_compensation_failed', { modId: operationalId(id), phase: 'runtimeRecovery', errorCode: infrastructureErrorCode(recoveryError, 'mod_operation_recovery_failed') }, 'error'); }
         }
         if (!error.filesystemRecoveryError && !error.databaseRecoveryError && !error.runtimeRecoveryError) {
-          try { await removeDurably(journalPath); } catch (recoveryError) { error.journalCleanupError = recoveryError; }
+          try { await removeDurably(journalPath); } catch (recoveryError) { error.journalCleanupError = recoveryError; report('mod_operation_compensation_failed', { modId: operationalId(id), phase: 'journalCleanup', errorCode: infrastructureErrorCode(recoveryError, 'mod_operation_recovery_failed') }, 'error'); }
         }
         throw error;
       }
@@ -681,7 +707,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
     } finally { try { await db?.close(); } finally { locks.delete(id); } }
   }
   const pollingReady = ready.then(() => schedulePoll());
-  void pollingReady.catch((error) => logger.error?.(`Burrow mod source polling failed: ${String(error?.message || error)}`));
+  void pollingReady.catch(error => backgroundFailure('polling', error));
   return { ready, list, sourceRefreshConfig, saveSourceRefreshConfig, addSource, refresh, removeSource, removeSourceCredential, install, enable: (id, options) => setEnabled(id, true, options), disable: (id) => setEnabled(id, false), uninstall, async close() { closed = true; clearPoll(); try { await ready; await pollingReady; await refreshPromise; } catch {} } };
 }
 

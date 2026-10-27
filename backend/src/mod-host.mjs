@@ -1,6 +1,7 @@
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { redactProtectedText } from './redaction.mjs';
 
 const CHILD_PATH = fileURLToPath(new URL('./mod-host-child.mjs', import.meta.url));
 // A hung extension handler must not hold Burrow core's HTTP request open forever.
@@ -102,17 +103,123 @@ function validateRouteResult(value) {
   return { status, ...(headers === undefined ? {} : { headers }), body };
 }
 
+// Core owns lifecycle records; mod-supplied prose is never an error detail.
+// Keep logging best-effort and instance-local, including for console-only callers.
+export function emitModEvent(logger, type, fields = {}, level = 'info') {
+  const fallback = () => {
+    try {
+      const sink = typeof logger?.[level] === 'function' ? logger : console;
+      sink[level]?.(JSON.stringify({ event: type, component: 'mods', level, ...fields }));
+    } catch { /* A broken log sink cannot take down Core. */ }
+  };
+  try {
+    if (typeof logger?.event !== 'function') { fallback(); return; }
+    const result = logger.event(type, fields, { level, component: 'mods' });
+    if (result && typeof result.catch === 'function') result.catch(fallback);
+  } catch { fallback(); }
+}
+
+export function modLogIdentity(mod) {
+  const id = String(mod?.id || '');
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) && id.length <= 120 ? id : '[invalid-mod-id]';
+}
+
+const MAX_CHILD_OUTPUT_BYTES = 1_048_576;
+const CHILD_OUTPUT_DRAIN_MS = 100;
+const MAX_MOD_LOG_INPUT_CHARS = 16_384;
+const MAX_MOD_LOG_CHARS = 2_000;
+const MOD_LOG_LEVELS = new Set(['debug', 'info', 'warn', 'error']);
+
+// This is an operational mod-logger boundary, not a conversation/prose policy.
+// Known credential fields/headers and URL credentials are projected locally;
+// exact secrets obtained from this host's store supplement those schemas.
+const MOD_LOG_SENSITIVE_KEY = /^(?:token|accesstoken|refreshtoken|idtoken|apikey|xapikey|secret|clientsecret|password|passwd|credential|credentials|privatekey|auth|authorization|proxyauthorization|cookie|cookies|setcookie|state|oauthstate|oidcstate|code|authorizationcode|authcode|nonce|codeverifier|codechallenge)$/i;
+function modLogLocation(value) {
+  try {
+    const url = new URL(value);
+    url.username = ''; url.password = ''; url.search = ''; url.hash = '';
+    return url.toString();
+  } catch {
+    return value.split(/[?#]/, 1)[0].replace(/^((?:[A-Za-z][A-Za-z0-9+.-]*:)?\/\/)[^/]*@/, '$1');
+  }
+}
+function projectModLog(args, protectedValues) {
+  let remaining = MAX_MOD_LOG_INPUT_CHARS;
+  let nodes = 512;
+  const seen = new WeakSet();
+  const consume = size => { remaining -= size; if (remaining < 0 || --nodes < 0) throw new Error('mod_log_too_large'); };
+  // Include brackets in URL matches: an exact-value replacement in userinfo
+  // must not interrupt parsing and leave a query/auth suffix intact.
+  const text = value => redactProtectedText(value, protectedValues)
+    .replace(/\b[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s<>"'(){}]+/g, modLogLocation)
+    .replace(/\b((?:proxy-authorization|authorization)\s*[:=]?\s*(?:Bearer|Basic)\s+)[^\s"',;\]}]+/gi, '$1[redacted]')
+    .replace(/\b((?:proxy-authorization|authorization|cookie|set-cookie|x-api-key)\s*:\s*)[^\r\n"'}]+/gi, '$1[redacted]');
+  const visit = (value, depth = 0, key = '') => {
+    consume(typeof value === 'string' ? value.length : 8);
+    if (MOD_LOG_SENSITIVE_KEY.test(key.replace(/[-_]/g, ''))) return '[redacted]';
+    // Exception prose/stacks can contain unmarked credentials. Preserve only the
+    // fact that an exception was logged, never its message or enumerable fields.
+    if (value instanceof Error) return { errorType: 'Error', contentOmitted: true };
+    if (typeof value === 'string') {
+      // Also support a single JSON string without weakening mixed-argument logs.
+      if (/^\s*[\[{]/.test(value)) {
+        let parsed;
+        try { parsed = JSON.parse(value); } catch { /* Ordinary prose. */ }
+        if (parsed && typeof parsed === 'object') return JSON.stringify(visit(parsed, depth + 1));
+      }
+      return /(?:url|uri|href|endpoint|issuer)$/i.test(key) ? modLogLocation(text(value)) : text(value);
+    }
+    if (value == null || typeof value === 'boolean' || typeof value === 'number') return value;
+    if (typeof value !== 'object') return '[unserializable]';
+    if (depth >= 12 || seen.has(value)) return '[log traversal truncated]';
+    seen.add(value);
+    if (Array.isArray(value)) return value.map(entry => visit(entry, depth + 1));
+    const result = Object.create(null);
+    for (const name in value) {
+      if (!Object.hasOwn(value, name)) continue;
+      consume(name.length);
+      result[text(name)] = visit(value[name], depth + 1, name);
+    }
+    return result;
+  };
+  try {
+    const projected = visit(args);
+    return { message: projected.map(entry => typeof entry === 'string' ? entry : JSON.stringify(entry)).join(' ').slice(0, MAX_MOD_LOG_CHARS) };
+  } catch { return { messageOmitted: true, reason: 'message_too_large' }; }
+}
+
 const STORE_METHODS = Object.freeze({
   settings: Object.freeze({ get: 'get', set: 'set', delete: 'delete' }),
   secrets: Object.freeze({ get: 'getSecret', set: 'setSecret', clear: 'clearSecret', has: 'hasSecret' }),
 });
 
-export function startModHost({ mod, store, logger = console, systemCapability = null, modAuthority = null, capabilities = null, capabilityTimeoutMs = null, modelCapabilityTimeoutMs = null, activationTimeoutMs = 10_000, routeTimeoutMs = DEFAULT_MOD_ROUTE_TIMEOUT_MS, cleanupTimeoutMs = 5_000, systemProcessWatchdogGraceMs = SYSTEM_PROCESS_WATCHDOG_GRACE_MS, onUnavailable = null, onSystemControllerReady = null, onSystemControllerUnavailable = null } = {}) {
+export function startModHost({ mod, store, logger = console, systemCapability = null, modAuthority = null, capabilities = null, capabilityTimeoutMs = null, modelCapabilityTimeoutMs = null, activationTimeoutMs = 10_000, routeTimeoutMs = DEFAULT_MOD_ROUTE_TIMEOUT_MS, cleanupTimeoutMs = 5_000, systemProcessWatchdogGraceMs = SYSTEM_PROCESS_WATCHDOG_GRACE_MS, onUnavailable = null, onSystemControllerReady = null, onSystemControllerUnavailable = null, deferRuntimeLogging = false } = {}) {
   if (!store) throw hostError('mod_store_required', mod?.id);
-  const child = fork(CHILD_PATH, [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], serialization: 'advanced' });
+  const child = fork(CHILD_PATH, [], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'], serialization: 'advanced' });
   const pending = new Map();
   let sequence = 0;
   let activationSettled = false;
+  let activationSucceeded = false;
+  let activationCommitted = !deferRuntimeLogging;
+  let exitDetails = null;
+  let disconnectTimer = null;
+  let outputDrainTimer = null;
+  let unavailableCode = null;
+  const modId = modLogIdentity(mod);
+  const logProtectedValues = new Set();
+  const output = { stdout: { bytes: 0, capped: false }, stderr: { bytes: 0, capped: false } };
+  // Drain continuously without buffering, decoding, or forwarding raw content. A
+  // child can print credentials or megabytes without creating a log flood.
+  for (const stream of ['stdout', 'stderr']) {
+    child[stream].on('data', chunk => {
+      const entry = output[stream];
+      const first = entry.bytes === 0;
+      entry.capped ||= entry.bytes + chunk.length > MAX_CHILD_OUTPUT_BYTES;
+      entry.bytes = Math.min(MAX_CHILD_OUTPUT_BYTES, entry.bytes + chunk.length);
+      if (first) emitModEvent(logger, 'mod_child_output', { modId, stream, contentOmitted: true, classification: 'unstructured_output' });
+    });
+  }
+  const outputDiagnostics = () => ({ stdout: { ...output.stdout }, stderr: { ...output.stderr } });
   let stopped = false;
   let closing = false;
   let admissionsPaused = false;
@@ -220,9 +327,12 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   const markUnavailable = (code) => {
     if (unavailable || closing) return;
     unavailable = true;
+    unavailableCode = code;
     revokeSystemController(code);
     onUnavailable?.(code);
   };
+  let resolveClosed;
+  const closed = new Promise(resolve => { resolveClosed = resolve; });
   let resolveExit;
   const exited = new Promise((resolve) => { resolveExit = resolve; });
 
@@ -249,6 +359,9 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       // The store was constructed from the manifest ID. Any child-supplied modId
       // is deliberately ignored and can never select another namespace.
       const result = await store[method](...args);
+      // Record before replying: a child may immediately log the retrieved value.
+      // Keep older values after rotation/clear while this process can retain them.
+      if (method === 'getSecret' && typeof result === 'string' && result && child.connected && !stopped && !closing) logProtectedValues.add(result);
       replyStore(requestId, { result });
     } catch {
       // Store failures are intentionally opaque: values, keys, SQL and secrets
@@ -279,7 +392,12 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       serviceStoreRequest(message);
       return;
     }
-    if (message?.type === 'log') logger[message.level]?.(`[mod:${mod.id}] ${message.message}`);
+    if (message?.type === 'log') {
+      if (!MOD_LOG_LEVELS.has(message.level) || !Array.isArray(message.args)) return;
+      const fields = { modId, ...projectModLog(message.args, [...logProtectedValues]) };
+      emitModEvent(logger, 'mod_log', fields, message.level);
+      return;
+    }
     if (message?.type === 'system-controller-ready') {
       if (systemCapability !== 'execution-provider-v1' || message.protocol !== systemCapability || systemControllerReady) {
         markUnavailable('system_controller_registration_invalid');
@@ -374,6 +492,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       routes.diagnosticsSupported = message.diagnostics === true;
       routes.secretReferenceSchemes = Array.isArray(message.secretReferenceSchemes) && message.secretReferenceSchemes.every(scheme => typeof scheme === 'string' && /^[a-z][a-z0-9-]{0,31}$/.test(scheme)) ? [...new Set(message.secretReferenceSchemes)] : [];
       routes.tools = message.tools;
+      activationSucceeded = true;
       resolveActivation(routes);
       return;
     }
@@ -411,10 +530,15 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     rejectPending(error);
     cancelCapabilities();
     markUnavailable('mod_host_disconnected');
-    if (!stopped) child.kill('SIGKILL');
+    // An exiting process usually disconnects before its exit event. Give that
+    // event time to preserve the real exit code/signal instead of overwriting it
+    // with Core's SIGKILL. A child that only drops IPC is still bounded.
+    if (!stopped && !closing) disconnectTimer = setTimeout(() => { if (!stopped) child.kill('SIGKILL'); }, 100);
   });
   child.once('exit', (code, signal) => {
     stopped = true;
+    exitDetails = { exitCode: code, signal: signal || null };
+    clearTimeout(disconnectTimer);
     clearTimeout(activationTimer);
     const error = hostError('mod_host_exited', `${code ?? 'null'}:${signal || 'none'}`);
     if (!activationSettled) {
@@ -425,6 +549,27 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     cancelCapabilities();
     markUnavailable('mod_host_exited');
     resolveExit({ code, signal });
+    // A mod may spawn descendants inheriting these pipes. They cannot delay
+    // Core cleanup indefinitely after the owned child has already exited.
+    outputDrainTimer = setTimeout(() => {
+      child.stdout.destroy();
+      child.stderr.destroy();
+    }, CHILD_OUTPUT_DRAIN_MS);
+  });
+  // close follows exit AND drained stdio; one terminal record covers the
+  // disconnect/error/exit cascade and contains actionable process status.
+  child.once('close', (code, signal) => {
+    clearTimeout(disconnectTimer);
+    clearTimeout(outputDrainTimer);
+    exitDetails ||= { exitCode: code, signal: signal || null };
+    logProtectedValues.clear();
+    resolveClosed({ code, signal });
+    if (!activationSucceeded || !activationCommitted) return; // loadMods owns activation failure.
+    if (unavailable) {
+      emitModEvent(logger, 'mod_runtime_unavailable', { modId, errorCode: unavailableCode, ...exitDetails, classification: signal ? 'signal' : 'process_exit', output: outputDiagnostics() }, 'error');
+    } else if (closing) {
+      emitModEvent(logger, 'mod_runtime_stopped', { modId, intentional: true, ...exitDetails, output: outputDiagnostics() });
+    }
   });
   child.once('error', () => {
     const wrapped = hostError('mod_host_error');
@@ -652,13 +797,22 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     return () => { admissionsPaused = false; };
   }
 
+  // loadMods commits after Core validates routes/tools and completes load-time
+  // publication. A crash during that work is one activation failure, not a second
+  // runtime failure for a mod that never became available.
+  function commitActivation() {
+    if (unavailable || stopped || closing) return false;
+    activationCommitted = true;
+    return true;
+  }
+
   function close() {
     if (closePromise) return closePromise;
     closing = true;
     cancelCapabilities();
     revokeSystemController('system_controller_shutdown');
     closePromise = (async () => {
-      if (stopped) return exited;
+      if (stopped) return closed;
       if (!activationSettled) {
         activationSettled = true;
         clearTimeout(activationTimer);
@@ -667,11 +821,11 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       rejectPending(hostError('mod_host_closed', mod.id));
       if (child.connected) child.send({ type: 'shutdown' }, () => {});
       const timer = setTimeout(() => { if (!stopped) child.kill('SIGKILL'); }, finiteTimeout(cleanupTimeoutMs, 5_000));
-      try { await exited; } finally { clearTimeout(timer); }
+      try { await closed; } finally { clearTimeout(timer); }
       if (shutdownError) throw shutdownError;
     })();
     return closePromise;
   }
 
-  return { child, activated, pauseAdmissions, invoke, invokeTool, resolveProtectedReference, close, exited, pendingCount: () => pending.size, activeOperationCount: () => pending.size + activeCapabilities.size + pendingSystemProcess.size + pendingSystemFilesystem.size, pendingDiagnostics: () => [...activeCapabilities.values()].map(({ method, startedAt }) => ({ kind: "capability", operation: method, status: "pending", elapsedMs: Math.max(0, Date.now() - startedAt) })), pendingSystemProcessCount: () => pendingSystemProcess.size, pendingSystemFilesystemCount: () => pendingSystemFilesystem.size, controllerInstanceId };
+  return { child, activated, commitActivation, get exitDetails() { return exitDetails; }, outputDiagnostics, pauseAdmissions, invoke, invokeTool, resolveProtectedReference, close, exited, closed, pendingCount: () => pending.size, activeOperationCount: () => pending.size + activeCapabilities.size + pendingSystemProcess.size + pendingSystemFilesystem.size, pendingDiagnostics: () => [...activeCapabilities.values()].map(({ method, startedAt }) => ({ kind: "capability", operation: method, status: "pending", elapsedMs: Math.max(0, Date.now() - startedAt) })), pendingSystemProcessCount: () => pendingSystemProcess.size, pendingSystemFilesystemCount: () => pendingSystemFilesystem.size, controllerInstanceId };
 }
