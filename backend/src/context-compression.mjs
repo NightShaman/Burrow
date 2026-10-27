@@ -1,3 +1,5 @@
+import { providerTurnsFromTranscript, providerTurnForEntry, providerTurnChars } from './conversation-message-budget.mjs';
+
 function isExecutionDigest(entry) {
   return String(entry?.type || '') === 'execution_digest'
     && entry?.metadata?.executionDigest === true
@@ -35,7 +37,7 @@ function messageText(message) {
 }
 
 function messageChars(message) {
-  return messageText(message).length;
+  return message.providerTurn ? providerTurnChars(message.providerTurn) : messageText(message).length;
 }
 
 function estimateTokensFromChars(chars = 0) {
@@ -88,6 +90,7 @@ export function normalizeContextCompressionConfig(config = {}) {
 
 export function planContextCompression({ transcript = [], config = {}, contextBudget = null } = {}) {
   const compression = normalizeContextCompressionConfig(config);
+  const providerTurns = providerTurnsFromTranscript(transcript);
   const chatMessages = (Array.isArray(transcript) ? transcript : []).filter(isCompressionEntry).map((entry) => ({
     id: entry.id || null,
     ts: entry.ts || null,
@@ -95,6 +98,7 @@ export function planContextCompression({ transcript = [], config = {}, contextBu
     role: entry.role ? String(entry.role) : null,
     type: entry.type || 'message',
     content: compressionEntryText(entry),
+    providerTurn: providerTurnForEntry(entry, providerTurns),
   }));
 
   const keptMessages = [];

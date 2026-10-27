@@ -1,5 +1,5 @@
 import { normalizeProviderMessage } from './provider-messages.mjs';
-import { contextUsageFromRequest } from './model-adapters/adapter-primitives.mjs';
+import { providerTurnsFromTranscript, providerTurnChars } from './conversation-message-budget.mjs';
 import { summarizeSessionTurns } from './session-entry.mjs';
 import { compressionSummariesFromTranscript } from './session-compression.mjs';
 import { contextStatesFromTranscript, renderContextStates } from './session-context-state.mjs';
@@ -12,19 +12,7 @@ function messageText(message) {
 function messageChars(message) {
   const snapshot = message?.metadata?.providerTurn;
   if (!snapshot) return messageText(message).length;
-  // Provider snapshots include image data URIs. Wire bytes are not text tokens;
-  // use the same text/image estimate as the provider request, without altering
-  // the persisted snapshot or the verbatim payload replayed to the model.
-  let promptChars = 0;
-  let imageCount = 0;
-  for (const entry of snapshot.messages || []) {
-    if (typeof entry.content === 'string') promptChars += entry.content.length;
-    else for (const part of Array.isArray(entry.content) ? entry.content : []) {
-      promptChars += String(part?.text || '').length;
-      if (part?.type === 'image_url' || part?.type === 'input_image' || part?.image_url || part?.input_image) imageCount++;
-    }
-  }
-  return contextUsageFromRequest({ promptChars, imageCount }).estimatedTokens * 4;
+  return providerTurnChars(snapshot);
 }
 
 function contentChars(entry) {
@@ -152,20 +140,7 @@ export function buildConversationContext({ transcript = [], limits = {} } = {}) 
   const excludedCounts = { events: 0, receipts: 0, debug: 0 };
   const excludedChars = { events: 0, receipts: 0, debug: 0 };
   const chatMessages = [];
-  const providerTurns = new Map();
-  for (const entry of entries) {
-    if (entry?.type !== 'provider_history' || !entry.runId) continue;
-    try {
-      const snapshot = JSON.parse(entry.content);
-      if (snapshot?.version === 1 && Array.isArray(snapshot.messages)
-        && snapshot.messages.length <= 2 && snapshot.messages.length > 0
-        && snapshot.messages.every((message) => message.role === 'user')
-        && (typeof snapshot.messages.at(-1).content === 'string' || Array.isArray(snapshot.messages.at(-1).content))) {
-        // First dispatch snapshot wins; retries cannot rewrite historical input.
-        if (!providerTurns.has(entry.runId)) providerTurns.set(entry.runId, snapshot);
-      }
-    } catch { /* Legacy/malformed diagnostics never become provider history. */ }
-  }
+  const providerTurns = providerTurnsFromTranscript(entries);
   const promptEnteringEntries = entries.filter((entry) => entry?.entersPrompt === true).map(promptEnteringProjection);
   const executionDigestEntries = entries.filter(isExecutionDigest);
   const retainedDigestEntries = new Set(maxPromptExecutionDigests === 0 ? [] : executionDigestEntries.slice(-maxPromptExecutionDigests));

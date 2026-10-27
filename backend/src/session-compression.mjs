@@ -168,8 +168,9 @@ export async function appendCompressionSummary({ rootDir, sessionId = 'default',
   return { entry: rotation.summaryEntry, summary, rotation };
 }
 
-export async function runSessionCompression({ rootDir, sessionId = 'default', config = {}, contextBudget = null, maxChars = null, logger = null, stores = null, agentId = 'hatchet', conversation = null, transcriptSnapshot = null, transcriptGeneration = null } = {}) {
+export async function runSessionCompression({ rootDir, sessionId = 'default', config = {}, contextBudget = null, force = false, maxChars = null, logger = null, stores = null, agentId = 'hatchet', conversation = null, transcriptSnapshot = null, transcriptGeneration = null } = {}) {
   if (!conversation && !stores?.conversations) throw new Error('conversation_store_required');
+  if (force) contextBudget = { ...contextBudget, pressure: 'compress', reason: 'manual' };
   const authority = conversation || conversationAuthority({ store: stores?.conversations || null, agentId });
   let resolvedGeneration = transcriptGeneration;
   let transcript;
@@ -187,6 +188,7 @@ export async function runSessionCompression({ rootDir, sessionId = 'default', co
   // its unsummarized chat tail is eligible for the next rotation.
   const candidateTranscript = transcript.filter((entry) => !entry?.metadata?.compressionSummary);
   const plan = planContextCompression({ transcript: candidateTranscript, config, contextBudget });
+  if (force && plan.shouldCompress) plan.reason = 'manual';
   const result = {
     ok: true,
     compressed: false,
@@ -201,23 +203,31 @@ export async function runSessionCompression({ rootDir, sessionId = 'default', co
   }
   // A preparation snapshot is safe for assessment, not a mutation authority.
   // Refresh/replan before rotation so intervening durable entries survive.
-  if (Array.isArray(transcriptSnapshot)) return runSessionCompression({ rootDir, sessionId, config, contextBudget, maxChars, logger, stores, agentId, conversation: authority });
+  if (Array.isArray(transcriptSnapshot)) return runSessionCompression({ rootDir, sessionId, config, contextBudget, force, maxChars, logger, stores, agentId, conversation: authority });
+  const lifecycle = { sessionId, reason: plan.reason, compressed: false };
+  await logger?.event?.('context-compaction-started', lifecycle);
   let appended;
   try {
     appended = await appendCompressionSummary({ rootDir, sessionId, transcript, expectedGeneration: resolvedGeneration, plan, maxChars: maxChars ?? tokenTargetToCharBudget(config.summaryTargetTokens, 6000), conversation: authority });
   } catch (error) {
-    if (error.code !== 'compression_preservation_budget_exceeded') throw error;
+    if (error.code !== 'compression_preservation_budget_exceeded') {
+      await logger?.event?.('context-compaction-failed', { ...lifecycle, error: error?.message || String(error) });
+      throw error;
+    }
     const skipped = { ...result, reason: error.code };
+    await logger?.event?.('context-compaction-completed', { ...lifecycle, reason: skipped.reason });
     await logger?.event?.('context-compression-skip', skipped);
     return skipped;
   }
   if (appended.stale) {
     const skipped = { ...result, reason: 'stale_transcript', plan: appended.rotation?.currentEntries ? planContextCompression({ transcript: appended.rotation.currentEntries.filter((entry) => !entry?.metadata?.compressionSummary), config, contextBudget }) : plan };
+    await logger?.event?.('context-compaction-completed', { ...lifecycle, reason: skipped.reason });
     await logger?.event?.('context-compression-skip', skipped);
     return skipped;
   }
   const { entry, summary, rotation } = appended;
   const completed = { ...result, compressed: true, entryId: entry.id, summary, rotation: { archiveName: rotation.archiveName, retainedCount: rotation.retainedCount } };
+  await logger?.event?.('context-compaction-completed', { ...lifecycle, compressed: true });
   await logger?.event?.('context-compression', { compressed: true, entryId: entry.id, summary: { ...summary, text: undefined } });
   return completed;
 }

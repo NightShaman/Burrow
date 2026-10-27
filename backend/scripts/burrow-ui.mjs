@@ -48,6 +48,8 @@ import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypt
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectSessionContext, inspectSessionContextStatus } from '../src/context-engine.mjs';
+import { runSessionCompression } from '../src/session-compression.mjs';
+import { createTraceLogger } from '../src/trace-logger.mjs';
 import { activeConversationLimits } from '../src/context-preparation.mjs';
 import { beginRuntimeSessionExecutionSupersession, chatTurnInputFromBody, createChatTurnRunId, finishRuntimeSessionExecutionSupersession, runChatTurnFromBody, runChatTurnFromWorkbenchContinuation, chatTurnResponse, chatTurnProgressResponse, chatTurnErrorResponse, loadRuntimeConfig } from '../src/chat-turn-controller.mjs';
 import { resolveModelConfig, resolveRuntimeTracePath, resolveRuntimeTraceRoot } from '../src/config.mjs';
@@ -1762,6 +1764,12 @@ function writeNdjson(res, event) {
 // in trace evidence; the progress stream exposes only operational state.
 function publicChatProgress(record = {}) {
   const payload = record.payload || {};
+  if (['context-compaction-started', 'context-compaction-completed', 'context-compaction-failed'].includes(record.type)) {
+    return { type: record.type.replace('context-compaction-', 'context.compaction.'), data: {
+      reason: payload.reason || null, compressed: payload.compressed === true,
+      ...(payload.error ? { error: String(payload.error).slice(0, 1000) } : {}),
+    } };
+  }
   if (record.type === 'router' && payload.stage === 'ask-chat-turn') {
     return { type: 'route.decided', data: { routeKind: payload.route?.kind || null, sessionKind: payload.runtimeTurn?.envelope?.route?.kind || null } };
   }
@@ -2632,11 +2640,11 @@ function renderContextInspection({ inspection = {}, status = {}, agentRuntime, m
   ].join('\n\n');
 }
 
-async function handleChatCommand({ parsed, sessionId, agentRuntime } = {}) {
+async function handleChatCommand({ parsed, sessionId, agentRuntime, runId = null, onProgress = null } = {}) {
   if (parsed?.error) return { status: 400, response: chatCommandResponse({ command: null, sessionId, text: `Invalid command.\n\n${chatCommandHelpText()}`, receipt: { error: parsed.error }, ok: false }) };
   if (!parsed?.definition) return { status: 400, response: chatCommandResponse({ command: parsed?.command || null, sessionId, text: `Unknown command: /${parsed?.command || ''}\n\n${chatCommandHelpText()}`, receipt: { error: 'command_unknown' }, ok: false }) };
   if (parsed.args && !(parsed.command === 'context' && parsed.args === 'full')) return { status: 400, response: chatCommandResponse({ command: parsed.command, sessionId, text: `${parsed.definition.usage} does not accept arguments.`, receipt: { error: 'command_arguments_not_supported' }, ok: false }) };
-  if (parsed.command === 'help') return { status: 200, response: chatCommandResponse({ command: 'help', sessionId, text: chatCommandHelpText(), receipt: { available: ['help', 'context', 'status', 'new', 'stop'] } }) };
+  if (parsed.command === 'help') return { status: 200, response: chatCommandResponse({ command: 'help', sessionId, text: chatCommandHelpText(), receipt: { available: ['help', 'context', 'compact', 'status', 'new', 'stop'] } }) };
   if (parsed.command === 'new') {
     const resetBarrier = await beginSessionAdmissionsReset({ agentId: agentRuntime.agentId, sessionId });
     try {
@@ -2657,6 +2665,26 @@ async function handleChatCommand({ parsed, sessionId, agentRuntime } = {}) {
     if (active.controller.signal.aborted) return { status: 200, response: chatCommandResponse({ command: 'stop', sessionId, text: `Run ${active.runId} is already cancelling.`, receipt: { status: 'cancelling', runId: active.runId, agentId: active.agentId, sessionId: active.sessionId, reason: active.reason || null } }) };
     const cancelled = await cancelChatRun(active.runId, { reason: 'stopped by /stop' }, agentRuntime);
     return { status: 200, response: chatCommandResponse({ command: 'stop', sessionId, text: `Stopped active run ${active.runId}.`, receipt: cancelled }) };
+  }
+  if (parsed.command === 'compact') {
+    const lifecycle = { reason: 'manual', compressed: false };
+    await onProgress?.({ type: 'context.compaction.started', data: lifecycle });
+    let logger;
+    try {
+      const runtime = await runtimeConfig(agentRuntime.agentId);
+      const traceRoot = resolveRuntimeTracePath({ ...runtime.runtimeState, agentId: agentRuntime.agentId, sessionId });
+      logger = createTraceLogger({ rootDir: traceRoot, runId: runId || createChatTurnRunId({ sessionId, prefix: 'compact' }), sessionId });
+      const result = await runSessionCompression({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId, config: runtime.contextConfig, force: true, stores: postgresApplication.stores, agentId: agentRuntime.agentId, logger });
+      const receipt = { reason: result.reason, compressed: Boolean(result.compressed) };
+      await onProgress?.({ type: 'context.compaction.completed', data: receipt });
+      return { status: 200, response: chatCommandResponse({ command: 'compact', sessionId, text: result.compressed ? 'Conversation context compacted. Original history remains archived.' : `No compaction performed: ${result.reason}.`, receipt }) };
+    } catch (error) {
+      const receipt = { ...lifecycle, error: error?.message || String(error) };
+      await onProgress?.({ type: 'context.compaction.failed', data: receipt });
+      return { status: 500, response: chatCommandResponse({ command: 'compact', sessionId, text: `Compaction failed: ${receipt.error}`, receipt, ok: false }) };
+    } finally {
+      await logger?.terminal?.();
+    }
   }
   const runtime = await runtimeConfig(agentRuntime.agentId);
   const limits = activeConversationLimits({ modelConfig: runtime.modelConfig, contextConfig: runtime.contextConfig });
@@ -2728,10 +2756,12 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
   const streaming = acceptsNdjson(req);
   const command = parseChatCommand(body.message);
   if (command) {
-    const result = await handleChatCommand({ parsed: command, sessionId, agentRuntime });
+    const runId = body.runId ? String(body.runId) : createChatTurnRunId({ sessionId, prefix: 'command' });
+    // Compaction can take time: open the command stream before doing any work.
+    if (streaming) beginNdjson(res);
+    const onProgress = streaming ? (event) => writeNdjson(res, { ...event, runId, sessionId, ts: new Date().toISOString() }) : null;
+    const result = await handleChatCommand({ parsed: command, sessionId, agentRuntime, runId, onProgress });
     if (streaming) {
-      const runId = body.runId ? String(body.runId) : createChatTurnRunId({ sessionId, prefix: 'command' });
-      beginNdjson(res);
       writeNdjson(res, { type: result.response.ok ? 'run.completed' : 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: { ...result.response, result: { ...result.response.result, runId } } } });
       return res.end();
     }
