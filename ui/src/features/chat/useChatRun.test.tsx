@@ -122,6 +122,23 @@ describe('useChatRun', () => {
     expect(session.refreshSessions).toHaveBeenCalledWith('nigel');
   });
 
+  it('refreshes context on compaction completion even when the run terminates immediately', async () => {
+    const onCompactionFinished = vi.fn();
+    streamChatMock.mockImplementation(async ({ onAccepted, onEvent }) => {
+      onAccepted?.();
+      onEvent({ type: 'context.compaction.started' });
+      onEvent({ type: 'context.compaction.completed', data: { compressed: true } });
+      return { terminalType: 'run.completed', finalResult: { ok: true, answerText: 'Context compacted.' } };
+    });
+    const session = createSession(); session.draft = '/compact';
+    const { result } = renderHook(() => useChatRun({ selectedAgentId: 'nigel', selected: undefined, savedProviders: [], session, setAgentActivity: vi.fn(), onCompactionFinished }));
+    await act(async () => { await result.current.sendMessage(); });
+    expect(onCompactionFinished).toHaveBeenCalledTimes(1);
+    expect(session.appendTurn).toHaveBeenCalledWith('nigel', 'session-1', expect.objectContaining({ role: 'user', content: '/compact' }));
+    expect(session.appendTurn).toHaveBeenCalledWith('nigel', 'session-1', expect.objectContaining({ role: 'assistant', content: 'Context compacted.' }));
+    expect(session.refreshConversation).toHaveBeenCalledWith('nigel', 'session-1');
+  });
+
   it('preserves normal message persistence and reconciliation', async () => {
     streamChatMock.mockImplementation(async ({ onAccepted }) => { onAccepted?.(); return { terminalType: 'run.completed', finalResult: { ok: true, answerText: 'Normal reply.' } }; });
     const session = createSession();

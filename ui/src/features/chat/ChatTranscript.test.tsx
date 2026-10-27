@@ -381,3 +381,10 @@ it('shows compaction status even alongside existing activity', () => {
   expect(screen.getByRole('status').textContent).toBe('Compacting context…');
   expect(screen.getAllByText('Earlier action').length).toBeGreaterThan(0);
 });
+
+it('shows compact acknowledgement and receipt while retaining other command filtering', () => {
+  show([message('/compact'), { type: 'message', role: 'assistant', content: 'Context compacted.' }, message('/help')], parent);
+  expect(screen.getByText('/compact')).toBeTruthy();
+  expect(screen.getByText('Context compacted.')).toBeTruthy();
+  expect(screen.queryByText('/help')).toBeNull();
+});

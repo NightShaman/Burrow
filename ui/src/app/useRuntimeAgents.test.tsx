@@ -94,6 +94,30 @@ describe('useRuntimeAgents registry state', () => {
     expect(reportError).not.toHaveBeenCalled();
   });
 
+  it('does not let an older overview overwrite a newer context refresh', async () => {
+    const overview = (percent: number) => ({ agents: [{ agent: { id: 'smatchet', name: 'Smatchet', enabled: true }, sessionId: 'default', selection: null, status: { agents: [] }, contexts: { default: { context: { percent } } } }] });
+    let resolveOld!: (value: unknown) => void;
+    let call = 0;
+    apiMock.mockImplementation(async (path) => {
+      if (path === '/api/agents') return { agents: [{ id: 'smatchet' }] };
+      if (path === '/api/agents/overview') {
+        call++;
+        if (call === 2) return new Promise(resolve => { resolveOld = resolve; });
+        return overview(call === 1 ? 80 : 20);
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { result } = renderRuntimeAgents();
+    await waitFor(() => expect(result.current.agents[0]?.context).toBe(80));
+    let old!: Promise<void>;
+    act(() => { old = result.current.refreshAgents(); });
+    await waitFor(() => expect(resolveOld).toBeDefined());
+    await act(async () => { await result.current.refreshAgents(); });
+    expect(result.current.agents[0].context).toBe(20);
+    await act(async () => { resolveOld(overview(80)); await old; });
+    expect(result.current.agents[0].context).toBe(20);
+  });
+
   it('hydrates parent and child state with one local registry overview request', async () => {
     apiMock.mockImplementation(async (path) => {
       if (path === '/api/agents') return { agents: [{ id: 'smatchet', name: 'Smatchet', enabled: true }] };

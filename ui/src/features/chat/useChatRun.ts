@@ -35,6 +35,7 @@ type UseChatRunOptions = {
   savedProviders: SavedProvider[];
   session: ChatRunSession;
   setAgentActivity: (agentId: string, status: string) => void;
+  onCompactionFinished?: () => void;
   onRunStopped?: (run: { agentId: string; sessionId: string; runId: string }) => void;
 };
 
@@ -57,7 +58,7 @@ export function trimStreamedAnswer(streamedAnswer: string, finalAnswer: string) 
 }
 
 /** Owns one-to-one chat run state, stream lifecycle, and cancellation. */
-export function useChatRun({ selectedAgentId, selected, savedProviders, session, setAgentActivity, onRunStopped }: UseChatRunOptions) {
+export function useChatRun({ selectedAgentId, selected, savedProviders, session, setAgentActivity, onRunStopped, onCompactionFinished }: UseChatRunOptions) {
   const [activeRuns, setActiveRuns] = useState<Record<string, ActiveRun>>({});
   const [liveProgressByRun, setLiveProgressByRun] = useState<Record<string, ProgressEntry[]>>({});
   const [liveAnswerByRun, setLiveAnswerByRun] = useState<Record<string, string>>({});
@@ -109,6 +110,7 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
         if (streamAbortRef.current[targetKey] !== abortController || abortController.signal.aborted || !event || typeof event !== 'object') return;
         const envelope = event as { type?: string; runId?: unknown; sessionId?: unknown; ts?: unknown; data?: { delta?: unknown; response?: unknown; message?: unknown; status?: unknown; modelCall?: unknown; compressed?: unknown; reason?: unknown } & StreamToolEvent };
         if ((envelope.runId !== undefined && envelope.runId !== runId) || (envelope.sessionId !== undefined && envelope.sessionId !== target.sessionId)) return;
+        if (envelope.type === 'context.compaction.completed') onCompactionFinished?.();
         const useful = ((envelope.type === 'assistant.delta' || envelope.type === 'assistant.thought') && typeof envelope.data?.delta === 'string' && envelope.data.delta.length > 0) || ((envelope.type === 'tool.started' || envelope.type === 'tool.completed') && typeof envelope.data?.tool === 'string' && Boolean(envelope.data.tool.trim()));
         if (useful && !firstUseful) { firstUseful = true; performance.mark(`chat:${runId}:first-useful`); performance.measure(`chat:${runId}:send-to-first-useful`, `chat:${runId}:send`, `chat:${runId}:first-useful`); }
         setActiveRuns((current) => {

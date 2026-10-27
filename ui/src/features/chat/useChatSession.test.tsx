@@ -701,3 +701,15 @@ it('hydrates the conversation cache only once, not on each draft/tool-activity r
   expect(result.current.draft).toBe('typing two');
   unmount(); get.mockRestore();
 });
+
+it.each(['Context compacted.', 'Nothing to compact.', 'Compaction failed.'])('hydrates durable compact receipt on refresh and remount: %s', async (answer) => {
+ const saved = [{ type: 'message', role: 'user', content: '/compact', runId: 'compact-run', metadata: { command: 'compact' } }, { type: 'message', role: 'assistant', content: answer, runId: 'compact-run', metadata: { command: 'compact', commandReceipt: { compressed: answer === 'Context compacted.' } } }];
+ apiMock.mockImplementation(async (path) => path === sessionListPath ? { sessions: [{ id: sessionId }] } : { session: { id: sessionId, turns: saved } });
+ const first = renderHook(() => useChatSession(agentId));
+ await waitFor(() => expect(first.result.current.turns).toHaveLength(2));
+ await act(async () => { await first.result.current.refreshConversation(); });
+ expect(first.result.current.turns.map(turn => turn.content)).toEqual(['/compact', answer]);
+ first.unmount();
+ const second = renderHook(() => useChatSession(agentId));
+ await waitFor(() => expect(second.result.current.turns.map(turn => turn.content)).toEqual(['/compact', answer]));
+});

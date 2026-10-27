@@ -100,6 +100,7 @@ export function useRuntimeAgents({ selectedAgentId, setSelectedAgentId, parentSe
   const [registryState, setRegistryState] = useState<RuntimeRegistryState>('loading');
   const [registryError, setRegistryError] = useState('');
   const [registryStale, setRegistryStale] = useState(false);
+  const refreshSequence = useRef(0);
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
   const selectedAgentIdRef = useRef(selectedAgentId);
@@ -113,6 +114,7 @@ export function useRuntimeAgents({ selectedAgentId, setSelectedAgentId, parentSe
   }, [targetKey]);
 
   const refreshAgents = useCallback(async (isCancelled: IsPollingCancelled = () => false, signal?: AbortSignal) => {
+    const sequence = ++refreshSequence.current;
     let hydrated: Agent[] = [];
     let loadError: Error | undefined;
     try {
@@ -148,7 +150,7 @@ export function useRuntimeAgents({ selectedAgentId, setSelectedAgentId, parentSe
         return { ...configured, activity: entry.agent.enabled ? formatAgentActivity(parentStatus?.status?.toLowerCase()) : 'Disabled', context: contextPercent(parentContext), contextDetails: contextDetails(parentContext), subagents };
       });
     } catch (error) { loadError = error as Error; }
-    if (isCancelled()) return;
+    if (isCancelled() || sequence !== refreshSequence.current) return;
     if (loadError) {
       if (agentsRef.current.length > 0) { setRegistryStale(true); setRegistryError(loadError.message); return; }
       setRegistryState('unavailable'); setRegistryError(loadError.message); reportError(`Could not load agents: ${loadError.message}`); return;

@@ -187,7 +187,7 @@ function AppContent() {
   const setParentActivity = (agentId: string, status: string) => {
     setAgents((current) => current.map((agent) => agent.id === agentId ? { ...agent, activity: formatAgentActivity(status.toLowerCase()) } : agent));
   };
-  const { activeRunForSelection, activeRunId, sendMessage, cancelRun, liveProgress, liveAnswer, liveStage } = useChatRun({ selectedAgentId, selected, savedProviders, session: { attached, clearAttachment, sessionId, draft, setDraft, clearError, reportError, leaveNewSessionForMessage, appendTurn, appendTransientTurn, storeToolActivity, toolActivityForRun, clearRunState, refreshSessions, refreshConversation }, setAgentActivity: setParentActivity, onRunStopped: retireRuntimeRun });
+  const { activeRunForSelection, activeRunId, sendMessage, cancelRun, liveProgress, liveAnswer, liveStage } = useChatRun({ selectedAgentId, selected, savedProviders, session: { attached, clearAttachment, sessionId, draft, setDraft, clearError, reportError, leaveNewSessionForMessage, appendTurn, appendTransientTurn, storeToolActivity, toolActivityForRun, clearRunState, refreshSessions, refreshConversation }, setAgentActivity: setParentActivity, onRunStopped: retireRuntimeRun, onCompactionFinished: () => { void refreshAgents(); } });
   const displayedRun = activeRunForSelection ?? runtimeRun;
   const cancelDisplayedRun = activeRunForSelection ? cancelRun : runtimeRun ? () => cancelRuntimeRun(runtimeRun) : () => {};
   const composers = useChatComposers({ agents: availableAgents, sessionId, selectedAgentId, activeRunId, sessions, refreshSessions, selectSession, reportError, clearError, tabs, setTabs, setActiveTabId });
