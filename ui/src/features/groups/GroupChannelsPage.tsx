@@ -203,16 +203,6 @@ export function GroupChannelsPage({ channelId, agents, operator }: { channelId: 
   if (!channel) return <div className="group-page"><div className="group-empty">{error || 'Loading group chat…'}</div></div>;
   return <div className="group-page">
     <main className="group-transcript">
-      <div className="group-agent-overlay" aria-label="Group members">
-        {channel.participantAgentIds.filter(id => { const agent = agentById.get(id); return agent && isAgentEnabled(agent); }).map((id) => {
-          const agent = agentById.get(id); const run = channel.runs.find((item) => item.agentId === id); const image = avatarImage(identityAvatars[id] || agent?.avatar);
-          return <div className="group-agent" key={id} title={`${agent?.name || id}${run ? ` · ${run.status || 'Working'}` : ''}`}>
-            <span className="group-avatar">{image ? <img src={image} alt="" /> : agent?.name.slice(0, 1) || '?'}</span>
-            {run && <span className="group-agent-state" aria-label="Working" />}
-            {run && <button className="group-cancel" onClick={() => void cancel(run)} aria-label={`Stop ${agent?.name || id}`}>×</button>}
-          </div>;
-        })}
-      </div>
       {error && <p className="group-error">{error}</p>}
       <div className="group-messages" ref={messagesRef} onScroll={updateScrollIntent} aria-busy={Boolean(channel.runs.length)}>
         {channel.turns.map((turn) => {
@@ -222,6 +212,18 @@ export function GroupChannelsPage({ channelId, agents, operator }: { channelId: 
           const activity = turn.metadata?.toolActivity as ToolActivity | undefined;
           const progress = turn.metadata?.progress as RunProgress | undefined;
           return <ChatMessage key={turn.id} side={isOperator ? 'operator' : 'agent'} name={isOperator ? (operatorIdentity?.name || operator?.name || turn.authorName) : turn.authorName} avatar={avatar} time={timeLabel(turn.createdAt)} text={turn.content} activity={activity} progress={progress} activityLive={Boolean(activity && !turn.content)} attachments={Array.isArray(turn.metadata?.attachments) ? turn.metadata.attachments as SessionAttachment[] : []} outputArtifacts={Array.isArray(turn.metadata?.outputArtifacts) ? turn.metadata.outputArtifacts as GeneratedArtifact[] : []} attachmentAgentId={text(turn.metadata?.attachmentAgentId) || turn.authorId || undefined} />;
+        })}
+      </div>
+      <div className="group-members" aria-label="Group members">
+        <span className="group-members-label">Members</span>
+        {channel.participantAgentIds.filter(id => { const agent = agentById.get(id); return agent && isAgentEnabled(agent); }).map((id) => {
+          const agent = agentById.get(id); const run = channel.runs.find((item) => item.agentId === id); const image = avatarImage(identityAvatars[id] || agent?.avatar);
+          return <div className="group-agent" key={id} title={`${agent?.name || id}${run ? ` · ${run.status || 'Working'}` : ''}`}>
+            <span className="group-agent-icon"><span className="group-avatar">{image ? <img src={image} alt="" /> : agent?.name.slice(0, 1) || '?'}</span>
+            {run && <span className="group-agent-state" aria-label="Working" />}
+            {run && <button className="group-cancel" onClick={() => void cancel(run)} aria-label={`Stop ${agent?.name || id}`}>×</button>}</span>
+            <span>{agent?.name || id}</span>
+          </div>;
         })}
       </div>
       <div className="group-composer">

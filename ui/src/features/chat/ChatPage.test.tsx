@@ -64,7 +64,7 @@ describe('Chat session picker', () => {
     expect(screen.getByRole('combobox', { name: 'Session' }).closest('label')?.className).toBe('session-selector-control');
   });
 
-  it('allows switching sessions back and forth during an active run while keeping mutation controls locked', () => {
+  it('allows new chats and session switching during an active run while keeping reset locked', () => {
     const onSessionChange = vi.fn();
     const props = { selected: agent, savedProviders: [], updateAgent: vi.fn(), sessions: [{ id: 'default' }, { id: 'Issues' }], sessionId: 'default', onSessionChange, onNewSession: vi.fn(), onNewNamedSession: vi.fn(), onCreateGroup: vi.fn(), locked: true };
     const { rerender } = render(<ChatModelSelector {...props} />);
@@ -76,7 +76,12 @@ describe('Chat session picker', () => {
     fireEvent.change(picker, { target: { value: 'default' } });
     expect(onSessionChange).toHaveBeenLastCalledWith('default');
     expect(screen.getByRole('button', { name: 'Reset Session' })).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'New session' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'New session' })).toHaveProperty('disabled', false);
+    expect(screen.getByRole('button', { name: 'Group Chat' })).toHaveProperty('disabled', false);
+    fireEvent.click(screen.getByRole('button', { name: 'New session' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Group Chat' }));
+    expect(props.onNewNamedSession).toHaveBeenCalledOnce();
+    expect(props.onCreateGroup).toHaveBeenCalledOnce();
   });
 
   it('excludes group and artifact sessions even when the API omits classification metadata', () => {
