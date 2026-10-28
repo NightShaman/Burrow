@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { runSpawnSubagentChild } from './subagent-worker-runner.mjs';
 import { createPostgresPool } from './postgres-foundation.mjs';
 import { PostgresSessionStore } from './postgres-session-store.mjs';
-import { createOtelRuntime, otelEnvironmentForConfiguration } from './otel-runtime.mjs';
+import { createReconfigurableOtelRuntime } from './otel-runtime.mjs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -16,9 +16,9 @@ const HEARTBEAT_INTERVAL_MS = 15_000;
 // open a database or execute a subagent.
 export async function startSubagentChildTelemetry(childArgs = {}) {
   const configuration = childArgs.otelConfiguration;
-  if (!childArgs.traceContext || !configuration?.enabled || !(configuration.endpoint || configuration.tracesEndpoint || configuration.metricsEndpoint)) return { telemetry: null, telemetryRun: null };
-  const telemetry = createOtelRuntime({ env: otelEnvironmentForConfiguration(configuration) });
-  await telemetry.start();
+  if (!childArgs.traceContext || !configuration?.enabled || !(configuration.destinations?.some(destination => destination.enabled && (destination.endpoint || destination.tracesEndpoint || destination.metricsEndpoint)) || configuration.endpoint || configuration.tracesEndpoint || configuration.metricsEndpoint)) return { telemetry: null, telemetryRun: null };
+  const telemetry = createReconfigurableOtelRuntime({ tuningEnv: {} });
+  await telemetry.apply(configuration);
   const telemetryRun = telemetry.startRun({ runId: childArgs.id, sessionId: childArgs.childSessionId, agentId: childArgs.owner?.agentId, source: 'subagent', parentTraceContext: childArgs.traceContext });
   return { telemetry, telemetryRun };
 }

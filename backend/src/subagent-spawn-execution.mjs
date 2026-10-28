@@ -174,8 +174,10 @@ async function resolveRemoteTarget(targetRequest, executionContext, runId) {
     remoteController: executionContext?.processExecutionController || null,
   });
   const result = await route({ target: resolveNativeFilesystemExecutionTarget(executionContext || {}), operation: { tool: 'files_inspect', arguments: { path: root } } }, {
-    parentRunId: runId || executionContext?.parentRunId || 'subagent-target-validation',
+    parentRunId: executionContext?.parentRunId || runId || 'subagent-target-validation',
     toolCallId: `spawn-target-${Date.now()}`,
+    telemetry: executionContext?.telemetry || null,
+    traceContext: executionContext?.traceContext || null,
   });
   if (!result?.ok || result.type !== 'directory') throw new Error(result?.error || 'target_root_not_found');
   return Object.freeze({ kind: 'filesystem', root: result.path || root, boundaries: [] });

@@ -112,6 +112,10 @@ const collection = {
       req('List Tiddle warm cards', 'GET', '/api/tiddle/cards', { query: [['agentId', '{{agentId}}'], ['scope', ''], ['limit', '100']] }),
       req('Read Tiddle Signal history', 'GET', '/api/tiddle/history', { query: [['agentId', '{{agentId}}'], ['cardId', ''], ['since', ''], ['limit', '100']] }),
     ]),
+    folder('Settings / OpenTelemetry', [
+      req('Read OpenTelemetry destinations', 'GET', '/api/settings/opentelemetry'),
+      req('Save named OpenTelemetry destinations', 'PUT', '/api/settings/opentelemetry', { body: { enabled: false, destinations: [{ id: 'collector', name: 'Collector', provider: 'custom', enabled: false, endpoint: 'https://collector.example:4318', protocol: 'http/protobuf', tracesEnabled: true, metricsEnabled: true, metricsTemporality: 'cumulative', connection: {}, tls: { verify: true } }] }, description: 'Atomically replaces the saved list. Omit protected headers/credentials to preserve them for the same ID/provider. Disabled example; adjust before enabling. See docs/otel-destination-contract.md.' }),
+    ]),
     folder('Settings / Skills', [
       req('List text skills', 'GET', '/api/settings/skills'),
       req('Create text skill', 'POST', '/api/settings/skills', { body: { id: 'review', name: 'Review', description: 'Review instructions', content: '# Review\n', global: false } }),

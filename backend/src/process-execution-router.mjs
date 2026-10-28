@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { remoteTelemetryConfiguration } from './remote-telemetry-configuration.mjs';
 
 function requiredId(value, name) {
   const text = String(value || '').trim();
@@ -55,12 +56,15 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
     if (command && executable) throw new Error('command_and_executable_mutually_exclusive');
     if (!command && !executable) throw new Error('command_or_executable_required');
     if (command && process.args?.length) throw new Error('args_with_command_invalid');
+    // This private transport is owned by the run, never by request/process.
+    const telemetryConfiguration = remoteTelemetryConfiguration(context.telemetry?.remoteConfiguration?.(parentRunId));
     const result = await remoteController.executeProcess({
       operationId,
       targetId,
       parentRunId,
       toolCallId,
       ...(context.traceContext ? { traceContext: { ...context.traceContext } } : {}),
+      ...(telemetryConfiguration ? { telemetryConfiguration } : {}),
       process: {
         ...(command ? { command } : { executable, args: process.args ? [...process.args] : [] }),
         ...(process.cwd ? { cwd: String(process.cwd) } : {}),

@@ -55,7 +55,7 @@ import { POSTGRES_RETENTION_SETTINGS_SCHEMA_SQL } from './postgres-retention-set
 import { POSTGRES_WORKING_MEMORY_RETENTION_SCHEMA_SQL } from './postgres-working-memory-retention-settings-store.mjs';
 import { POSTGRES_SESSION_SCHEMA_SQL, POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL, POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL, POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL, POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL, POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL, POSTGRES_SESSION_SEARCH_SCHEMA_SQL, POSTGRES_SESSION_NATIVE_SCHEMA_SQL, POSTGRES_SESSION_METADATA_SCHEMA_SQL, POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL, POSTGRES_ARCHIVE_LISTING_INDEX_SQL, POSTGRES_ARCHIVE_RUN_INDEX_SQL } from './postgres-session-store.mjs';
 import { POSTGRES_UI_AUTH_SECRET_SCHEMA_SQL } from './postgres-ui-auth-secret-store.mjs';
-import { POSTGRES_OTEL_SETTINGS_SCHEMA_SQL } from './postgres-otel-settings-store.mjs';
+import { POSTGRES_OTEL_SETTINGS_SCHEMA_SQL, POSTGRES_OTEL_DESTINATIONS_SCHEMA_SQL } from './postgres-otel-settings-store.mjs';
 import { POSTGRES_AGENT_DELIVERY_OWNER_SQL, POSTGRES_AGENT_DELIVERY_SCHEMA_SQL } from './postgres-agent-delivery-store.mjs';
 
 // Version 1 and its component SQL are immutable after adoption. Schema changes
@@ -188,4 +188,5 @@ ALTER TABLE dream_settings ADD COLUMN memory_prompt_override TEXT CHECK (char_le
   { version: 75, name: 'settings-first-completion-webhook', sql: POSTGRES_COMPLETION_EVENT_SETTINGS_SQL },
   { version: 76, name: 'event-operator-projection-copies', sql: POSTGRES_EVENT_OPERATOR_PROJECTION_SQL },
   { version: 77, name: 'durable-chat-inputs', sql: POSTGRES_CHAT_INPUT_SCHEMA_SQL },
+  { version: 78, name: 'opentelemetry-destinations', sql: POSTGRES_OTEL_DESTINATIONS_SCHEMA_SQL },
 ]);

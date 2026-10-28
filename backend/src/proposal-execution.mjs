@@ -185,6 +185,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
           ...(target.kind === 'remote' && protectedInput.bindings.length ? { protectedValues: protectedInput.env, protectedBindingMetadata: protectedInput.bindings } : {}) }, {
           parentRunId: executionContext?.parentRunId || traceLogger?.runId,
           toolCallId: action.toolCallId,
+          telemetry: executionContext?.telemetry || null,
           traceContext: executionContext?.telemetry?.traceContextForTool?.(executionContext?.parentRunId || traceLogger?.runId, action.toolCallId) || executionContext?.traceContext || null,
           abortSignal,
         });
@@ -233,6 +234,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       const execute = (process) => routeProcess({ target, process }, {
         parentRunId: executionContext?.parentRunId || traceLogger?.runId,
         toolCallId: action.toolCallId,
+        telemetry: executionContext?.telemetry || null,
         traceContext: executionContext?.telemetry?.traceContextForTool?.(executionContext?.parentRunId || traceLogger?.runId, action.toolCallId) || executionContext?.traceContext || null,
         abortSignal,
       });

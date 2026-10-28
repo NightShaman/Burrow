@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { remoteTelemetryConfiguration } from './remote-telemetry-configuration.mjs';
 import { localExecutionTarget, remoteExecutionTarget, resolveProcessExecutionTarget } from './process-execution-router.mjs';
 
 const TOOLS = new Set(['files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_write', 'files_edit', 'files_patch']);
@@ -60,13 +61,15 @@ export function createNativeFilesystemExecutionRouter({ localExecute, remoteCont
       // Resolve only after toolStart's observer has opened the Core span; a
       // carrier computed by the proposal before routing would point at the run.
       const traceContext = context.telemetry?.traceContextForTool?.(parentRunId, activityId || toolCallId) || context.traceContext;
+      const telemetryConfiguration = remoteTelemetryConfiguration(context.telemetry?.remoteConfiguration?.(parentRunId));
       result = await remoteController.executeNativeFilesystem({
         operationId,
         targetId: required(target.targetId, 'target_id'),
         parentRunId,
         toolCallId,
         ...(traceContext ? { traceContext: { ...traceContext } } : {}),
-        operation: { tool, arguments: Object.fromEntries(Object.entries(operation.arguments || {}).filter(([key, value]) => !['traceLogger', 'rootDir', 'artifactPrefix', 'runId'].includes(key) && (value == null || ['string', 'number', 'boolean'].includes(typeof value)))) },
+        ...(telemetryConfiguration ? { telemetryConfiguration } : {}),
+        operation: { tool, arguments: Object.fromEntries(Object.entries(operation.arguments || {}).filter(([key, value]) => !['traceLogger', 'rootDir', 'artifactPrefix', 'runId', 'telemetryConfiguration'].includes(key) && (value == null || ['string', 'number', 'boolean'].includes(typeof value)))) },
       }, { abortSignal: context.abortSignal || null });
       if (result && typeof result === 'object') result = { ...result, operationId: result.operationId || operationId };
     } catch (error) {

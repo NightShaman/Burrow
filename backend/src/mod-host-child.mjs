@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
+import { remoteTelemetryConfiguration } from './remote-telemetry-configuration.mjs';
 
 // Validate, never coerce, default, or silently strip model-supplied arguments.
 const toolSchemaValidator = new Ajv({ strict: false, coerceTypes: false, useDefaults: false, removeAdditional: false });
@@ -313,11 +314,13 @@ process.on('message', async (message) => {
     const operation = message.operation;
     let argumentsValue = null;
     let traceContext = null;
+    let telemetryConfiguration = null;
     try {
       argumentsValue = operation?.arguments && typeof operation.arguments === 'object' && !Array.isArray(operation.arguments)
         ? JSON.parse(JSON.stringify(operation.arguments)) : null;
       traceContext = traceContextCarrier(operation?.traceContext);
-    } catch {}
+      telemetryConfiguration = remoteTelemetryConfiguration(operation?.telemetryConfiguration);
+    } catch { return; }
     if (!validSystemMessage({ ...message, operationId: operation?.operationId, targetId: operation?.targetId }, 'system-controller-filesystem-execute')
       || typeof operation.parentRunId !== 'string' || !operation.parentRunId || typeof operation.toolCallId !== 'string' || !operation.toolCallId
       || !NATIVE_FILESYSTEM_TOOLS.has(operation.tool) || !argumentsValue || !systemController?.executeNativeFilesystem) return;
@@ -325,7 +328,8 @@ process.on('message', async (message) => {
     activeSystemFilesystems.set(message.requestId, { abort, operationId: operation.operationId, targetId: operation.targetId });
     try {
       const result = await systemController.executeNativeFilesystem({ operationId: operation.operationId, targetId: operation.targetId,
-        parentRunId: operation.parentRunId, toolCallId: operation.toolCallId, ...(traceContext ? { traceContext } : {}), operation: { tool: operation.tool, arguments: argumentsValue } }, { abortSignal: abort.signal });
+        parentRunId: operation.parentRunId, toolCallId: operation.toolCallId, ...(traceContext ? { traceContext } : {}),
+        ...(telemetryConfiguration ? { telemetryConfiguration } : {}), operation: { tool: operation.tool, arguments: argumentsValue } }, { abortSignal: abort.signal });
       if (!activeSystemFilesystems.has(message.requestId)) return;
       send({ type: 'system-controller-filesystem-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId, requestId: message.requestId,
         operationId: operation.operationId, targetId: operation.targetId, ok: true, result }, () => {});
@@ -343,17 +347,22 @@ process.on('message', async (message) => {
   }
   if (message?.type === 'system-controller-process-execute') {
     const operation = message.operation;
-    let traceContext;
-    try { traceContext = traceContextCarrier(operation?.traceContext); } catch { return; }
+    let traceContext; let telemetryConfiguration;
+    try {
+      traceContext = traceContextCarrier(operation?.traceContext);
+      telemetryConfiguration = remoteTelemetryConfiguration(operation?.telemetryConfiguration);
+    } catch { return; }
     if (!validSystemMessage({ ...message, operationId: operation?.operationId, targetId: operation?.targetId }, 'system-controller-process-execute')
       || typeof operation.parentRunId !== 'string' || !operation.parentRunId || typeof operation.toolCallId !== 'string' || !operation.toolCallId
       || !operation.process || typeof operation.process !== 'object' || Array.isArray(operation.process) || !systemController?.executeProcess) return;
     const abort = new AbortController();
     activeSystemProcesses.set(message.requestId, { abort, operationId: operation.operationId, targetId: operation.targetId });
     try {
-      const processOperation = { ...operation };
-      delete processOperation.traceContext;
-      const result = await systemController.executeProcess({ ...processOperation, ...(traceContext ? { traceContext } : {}) }, { abortSignal: abort.signal });
+      const result = await systemController.executeProcess({ operationId: operation.operationId, targetId: operation.targetId,
+        parentRunId: operation.parentRunId, toolCallId: operation.toolCallId, process: operation.process,
+        ...(operation.protectedValues ? { protectedValues: operation.protectedValues } : {}),
+        ...(operation.protectedBindingMetadata ? { protectedBindingMetadata: operation.protectedBindingMetadata } : {}),
+        ...(traceContext ? { traceContext } : {}), ...(telemetryConfiguration ? { telemetryConfiguration } : {}) }, { abortSignal: abort.signal });
       if (!activeSystemProcesses.has(message.requestId)) return;
       send({ type: 'system-controller-process-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId, requestId: message.requestId,
         operationId: operation.operationId, targetId: operation.targetId, ok: true, result }, () => {});

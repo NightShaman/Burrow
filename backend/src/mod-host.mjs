@@ -2,6 +2,7 @@ import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { redactProtectedText } from './redaction.mjs';
+import { remoteTelemetryConfiguration } from './remote-telemetry-configuration.mjs';
 
 const CHILD_PATH = fileURLToPath(new URL('./mod-host-child.mjs', import.meta.url));
 // A hung extension handler must not hold Burrow core's HTTP request open forever.
@@ -65,13 +66,47 @@ function validateResponseHeaders(value) {
 }
 // Mod HTTP responses remain JSON-only. Streaming, buffers and arbitrary structured
 // clone values are deliberately outside the generic mod-host contract.
+// Providers may inadvertently echo their private request, including inside result
+// metadata. Strip the reserved transport field recursively without inspecting or
+// rewriting ordinary command, filesystem, or metadata content.
+function stripPrivateTelemetryResult(value, code) {
+  let result;
+  try { result = JSON.parse(JSON.stringify(value)); } catch { throw hostError(code); }
+  // The parsed JSON tree has no cycles. Iteration avoids imposing a new depth or
+  // metadata limit on valid process and filesystem results.
+  const pending = [result];
+  while (pending.length) {
+    const current = pending.pop();
+    if (current && typeof current === 'object') {
+      for (const key of Object.keys(current)) {
+        if (key === 'telemetryConfiguration') { delete current[key]; continue; }
+        pending.push(current[key]);
+      }
+    }
+  }
+  return result;
+}
+
+// Preserve known operational categories without trusting arbitrary exception text.
+const SYSTEM_CONTROLLER_ERROR_CODES = new Set([
+  'remote_process_failed', 'remote_filesystem_failed', 'remote_configuration_failed',
+  'gateway_not_connected', 'gateway_not_ready', 'gateway_disconnected', 'gateway_dispatch_failed',
+  'gateway_configuration_failed', 'gateway_configuration_timeout', 'gateway_operation_id_mismatch',
+  'gateway_terminal_evidence_missing', 'operation_id_conflict', 'operation_in_progress',
+  'protected_redelivery_forbidden', 'operation_correlation_conflict', 'operation_correlation_missing',
+  'telemetry_configuration_invalid', 'telemetry_endpoint_invalid', 'telemetry_headers_invalid',
+]);
+function safeSystemControllerError(value, fallback) {
+  return SYSTEM_CONTROLLER_ERROR_CODES.has(value) ? value : fallback;
+}
+
 function validateSystemProcessResult(value, operationId, targetId) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.tool !== 'shell_exec'
     || value.operationId !== operationId || value.targetId !== targetId || typeof value.ok !== 'boolean') throw hostError('remote_process_result_invalid');
-  let encoded;
-  try { encoded = JSON.stringify(value); } catch { throw hostError('remote_process_result_invalid'); }
-  if (encoded === undefined) throw hostError('remote_process_result_invalid');
-  try { return JSON.parse(encoded); } catch { throw hostError('remote_process_result_invalid'); }
+  const result = stripPrivateTelemetryResult(value, 'remote_process_result_invalid');
+  if (!result || typeof result !== 'object' || Array.isArray(result) || result.tool !== 'shell_exec'
+    || result.operationId !== operationId || result.targetId !== targetId || typeof result.ok !== 'boolean') throw hostError('remote_process_result_invalid');
+  return result;
 }
 
 function jsonObject(value, code) {
@@ -86,7 +121,8 @@ function jsonObject(value, code) {
 }
 
 function validateSystemFilesystemResult(value, operationId, targetId, tool) {
-  const result = jsonObject(value, 'remote_filesystem_result_invalid');
+  const result = stripPrivateTelemetryResult(value, 'remote_filesystem_result_invalid');
+  if (!result || typeof result !== 'object' || Array.isArray(result)) throw hostError('remote_filesystem_result_invalid');
   if (result.tool !== tool || typeof result.ok !== 'boolean' || result.operationId !== operationId || result.targetId !== targetId) {
     throw hostError('remote_filesystem_result_invalid');
   }
@@ -431,7 +467,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       if (!entry || message.operationId !== entry.operationId || message.targetId !== entry.targetId) return;
       pendingSystemFilesystem.delete(requestId);
       entry.abortSignal?.removeEventListener?.('abort', entry.cancel);
-      if (message.ok !== true) entry.reject(hostError(typeof message.error === 'string' && /^[a-z0-9_]+$/.test(message.error) ? message.error : 'remote_filesystem_failed'));
+      if (message.ok !== true) entry.reject(hostError(safeSystemControllerError(message.error, 'remote_filesystem_failed')));
       else {
         try { entry.resolve(validateSystemFilesystemResult(message.result, entry.operationId, entry.targetId, entry.tool)); }
         catch { entry.reject(hostError('remote_filesystem_result_invalid')); }
@@ -445,8 +481,11 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       if (!entry) return;
       pendingSystemConfiguration.delete(requestId);
       clearTimeout(entry.timer);
-      if (message.ok !== true) entry.reject(hostError(typeof message.error === 'string' && /^[a-z0-9_]+$/.test(message.error) ? message.error : 'remote_configuration_failed'));
-      else entry.resolve(validateJsonBody(message.result));
+      if (message.ok !== true) entry.reject(hostError(safeSystemControllerError(message.error, 'remote_configuration_failed')));
+      else {
+        try { entry.resolve(stripPrivateTelemetryResult(message.result, 'remote_configuration_result_invalid')); }
+        catch { entry.reject(hostError('remote_configuration_result_invalid')); }
+      }
       return;
     }
     if (message?.type === 'system-controller-host-description-result') {
@@ -474,7 +513,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       pendingSystemProcess.delete(requestId);
       clearTimeout(entry.watchdogTimer);
       entry.abortSignal?.removeEventListener?.('abort', entry.cancel);
-      if (message.ok !== true) entry.reject(hostError(typeof message.error === 'string' && /^[a-z0-9_]+$/.test(message.error) ? message.error : 'remote_process_failed'));
+      if (message.ok !== true) entry.reject(hostError(safeSystemControllerError(message.error, 'remote_process_failed')));
       else {
         try { entry.resolve(validateSystemProcessResult(message.result, entry.operationId, entry.targetId)); }
         catch { entry.reject(hostError('remote_process_result_invalid')); }
@@ -653,9 +692,11 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
         if (!operationId || !targetId || !parentRunId || !toolCallId || !request.process || typeof request.process !== 'object' || Array.isArray(request.process)) return Promise.reject(hostError('remote_process_request_invalid'));
         let operation;
         const traceContext = traceContextCarrier(request.traceContext);
+        const telemetryConfiguration = remoteTelemetryConfiguration(request.telemetryConfiguration);
         try {
           operation = JSON.parse(JSON.stringify({ operationId, targetId, parentRunId, toolCallId, process: request.process,
             ...(traceContext ? { traceContext } : {}),
+            ...(telemetryConfiguration ? { telemetryConfiguration } : {}),
             ...(request.protectedBindingMetadata ? { protectedBindingMetadata: request.protectedBindingMetadata } : {}),
             ...(request.protectedValues ? { protectedValues: request.protectedValues } : {}) }));
         } catch { return Promise.reject(hostError('remote_process_request_invalid')); }
@@ -705,9 +746,10 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
         if (!operationId || !targetId || !parentRunId || !toolCallId || !NATIVE_FILESYSTEM_TOOLS.has(tool)) return Promise.reject(hostError('remote_filesystem_request_invalid'));
         let operation;
         const traceContext = traceContextCarrier(request.traceContext);
+        const telemetryConfiguration = remoteTelemetryConfiguration(request.telemetryConfiguration);
         try {
           const args = jsonObject(request.operation?.arguments || {}, 'remote_filesystem_request_invalid');
-          operation = { operationId, targetId, parentRunId, toolCallId, tool, arguments: args, ...(traceContext ? { traceContext } : {}) };
+          operation = { operationId, targetId, parentRunId, toolCallId, tool, arguments: args, ...(traceContext ? { traceContext } : {}), ...(telemetryConfiguration ? { telemetryConfiguration } : {}) };
         } catch { return Promise.reject(hostError('remote_filesystem_request_invalid')); }
         const requestId = randomUUID();
         return new Promise((resolve, reject) => {

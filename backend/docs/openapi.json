@@ -1543,7 +1543,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "Page size (1\u2013200, default 100).",
+            "description": "Page size (1–200, default 100).",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -7324,7 +7324,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "$ref": "#/components/responses/SettingsResponse"
+            "$ref": "#/components/responses/OtelSettingsResponse"
           },
           "400": {
             "$ref": "#/components/responses/ErrorResponse"
@@ -7332,7 +7332,8 @@
           "404": {
             "$ref": "#/components/responses/ErrorResponse"
           }
-        }
+        },
+        "description": "Read saved and effective lists, safe runtime state and provider metadata. Secret values are never returned."
       },
       "put": {
         "tags": [
@@ -7346,47 +7347,26 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "enabled",
-                  "endpoint"
-                ],
-                "properties": {
-                  "enabled": {
-                    "type": "boolean"
-                  },
-                  "endpoint": {
-                    "type": "string",
-                    "maxLength": 2048,
-                    "description": "Saved OTLP/HTTP base endpoint. Environment overrides may take precedence."
-                  },
-                  "headers": {
-                    "type": "string",
-                    "maxLength": 8192,
-                    "writeOnly": true,
-                    "description": "Optional replacement OTLP header string. Omit to preserve the existing protected value."
-                  },
-                  "clearHeaders": {
-                    "type": "boolean",
-                    "description": "Remove the saved protected OTLP headers. Mutually exclusive with headers."
-                  }
-                }
+                "$ref": "#/components/schemas/OtelSettingsInput"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "$ref": "#/components/responses/SettingsResponse"
+            "$ref": "#/components/responses/OtelSettingsResponse"
           },
           "400": {
             "$ref": "#/components/responses/ErrorResponse"
           },
           "404": {
             "$ref": "#/components/responses/ErrorResponse"
+          },
+          "409": {
+            "$ref": "#/components/responses/ErrorResponse"
           }
-        }
+        },
+        "description": "Atomically replace destinations or use the legacy scalar shape. Same-ID/provider edits preserve omitted secrets without reconfirmation; provider changes discard them. Hosted ingestion is not verified."
       }
     },
     "/api/settings/browser-tab": {
@@ -9430,6 +9410,16 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/ChatInputResumeResponse"
+            }
+          }
+        }
+      },
+      "OtelSettingsResponse": {
+        "description": "Saved and effective destination settings and safe provider/runtime metadata.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/OtelSettingsResponse"
             }
           }
         }
@@ -15630,6 +15620,714 @@
             "items": {
               "$ref": "#/components/schemas/ModelRecoveryRecord"
             }
+          }
+        },
+        "additionalProperties": false
+      },
+      "OtelProviderId": {
+        "type": "string",
+        "enum": [
+          "openobserve",
+          "grafana-tempo",
+          "grafana-cloud",
+          "jaeger",
+          "signoz",
+          "uptrace",
+          "elastic",
+          "datadog",
+          "new-relic",
+          "honeycomb",
+          "splunk",
+          "custom"
+        ]
+      },
+      "OtelProtocol": {
+        "type": "string",
+        "enum": [
+          "http/json",
+          "http/protobuf"
+        ]
+      },
+      "OtelMetricsTemporality": {
+        "type": "string",
+        "enum": [
+          "cumulative",
+          "delta"
+        ]
+      },
+      "OtelDestinationConnection": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Nonsecret provider connection fields. Direct is the default for Datadog and Splunk; site/realm do not synthesize endpoints.",
+        "properties": {
+          "organization": {
+            "type": "string",
+            "description": "OpenObserve organization used when deriving an /api/<organization> base."
+          },
+          "stream": {
+            "type": "string",
+            "description": "OpenObserve stream-name header."
+          },
+          "tenantId": {
+            "type": "string",
+            "description": "Grafana Tempo X-Scope-OrgID header."
+          },
+          "instanceId": {
+            "type": "string",
+            "description": "Grafana Cloud Basic authentication username."
+          },
+          "dataset": {
+            "type": "string",
+            "description": "Honeycomb dataset header."
+          },
+          "site": {
+            "type": "string",
+            "description": "Provider site metadata."
+          },
+          "realm": {
+            "type": "string",
+            "description": "Provider realm metadata."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "",
+              "direct",
+              "collector"
+            ],
+            "description": "Only for Datadog and Splunk; blank behaves like direct."
+          }
+        }
+      },
+      "OtelDestinationTls": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "verify": {
+            "type": "boolean",
+            "default": true,
+            "description": "Verify the HTTPS server certificate. Custom CA material belongs in write-only credentials.caCertificate."
+          }
+        }
+      },
+      "OtelDestinationCredentials": {
+        "type": "object",
+        "additionalProperties": false,
+        "writeOnly": true,
+        "description": "Write-only fields encrypted at rest. For the same ID and provider, omitted or empty-string fields preserve the saved values; nonempty fields replace individual values.",
+        "properties": {
+          "username": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "Provider credential username."
+          },
+          "password": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "Provider credential password."
+          },
+          "token": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "Provider credential token or full OpenObserve Authorization value."
+          },
+          "caCertificate": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "Custom CA PEM for this destination."
+          }
+        }
+      },
+      "OtelDestinationInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "provider",
+          "enabled"
+        ],
+        "description": "One operator-owned destination. Enabled rows need at least one supported signal and a URL for each enabled signal. Mode/signal/temporality constraints are provider-specific; see docs/otel-destination-contract.md. Direct Datadog and Splunk require exact URLs for enabled signals.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,80}$"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nonempty display name, at most 160 characters after trimming.",
+            "pattern": "\\S"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/OtelProviderId"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "OTLP/HTTP base URL; enabled signals derive /v1/traces or /v1/metrics when no exact URL is provided. HTTP(S) without userinfo, query or fragment; empty is allowed."
+          },
+          "tracesEndpoint": {
+            "type": "string",
+            "description": "Exact OTLP/HTTP trace URL; no signal path is appended. HTTP(S) without userinfo, query or fragment; empty is allowed."
+          },
+          "metricsEndpoint": {
+            "type": "string",
+            "description": "Exact OTLP/HTTP metric URL; no signal path is appended. HTTP(S) without userinfo, query or fragment; empty is allowed."
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/OtelProtocol"
+          },
+          "tracesEnabled": {
+            "type": "boolean",
+            "description": "Default true."
+          },
+          "metricsEnabled": {
+            "type": "boolean",
+            "description": "Provider-dependent default; Tempo, Jaeger, and direct Splunk do not support metrics."
+          },
+          "metricsTemporality": {
+            "$ref": "#/components/schemas/OtelMetricsTemporality"
+          },
+          "connection": {
+            "$ref": "#/components/schemas/OtelDestinationConnection"
+          },
+          "tls": {
+            "$ref": "#/components/schemas/OtelDestinationTls"
+          },
+          "headers": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "Comma-separated OTLP key=value pairs. Omitted or blank preserves the same ID/provider value; explicit case-insensitive names override provider headers."
+          },
+          "clearHeaders": {
+            "type": "boolean",
+            "description": "True removes stored headers and cannot be combined with headers."
+          },
+          "credentials": {
+            "$ref": "#/components/schemas/OtelDestinationCredentials"
+          },
+          "clearCredentials": {
+            "type": "boolean",
+            "description": "True removes all saved credential fields and cannot be combined with credentials."
+          }
+        },
+        "allOf": [
+          {
+            "not": {
+              "required": [
+                "headers",
+                "clearHeaders"
+              ],
+              "properties": {
+                "clearHeaders": {
+                  "const": true
+                },
+                "headers": {}
+              }
+            }
+          },
+          {
+            "not": {
+              "required": [
+                "credentials",
+                "clearCredentials"
+              ],
+              "properties": {
+                "clearCredentials": {
+                  "const": true
+                },
+                "credentials": {}
+              }
+            }
+          }
+        ]
+      },
+      "OtelDestinationPublic": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "provider",
+          "enabled",
+          "endpoint",
+          "tracesEndpoint",
+          "metricsEndpoint",
+          "protocol",
+          "tracesEnabled",
+          "metricsEnabled",
+          "metricsTemporality",
+          "connection",
+          "tls",
+          "headersConfigured",
+          "credentialsConfigured",
+          "credentialFields"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,80}$"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nonempty display name, at most 160 characters after trimming.",
+            "pattern": "\\S"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/OtelProviderId"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "OTLP/HTTP base URL; enabled signals derive /v1/traces or /v1/metrics when no exact URL is provided. HTTP(S) without userinfo, query or fragment; empty is allowed."
+          },
+          "tracesEndpoint": {
+            "type": "string",
+            "description": "Exact OTLP/HTTP trace URL; no signal path is appended. HTTP(S) without userinfo, query or fragment; empty is allowed."
+          },
+          "metricsEndpoint": {
+            "type": "string",
+            "description": "Exact OTLP/HTTP metric URL; no signal path is appended. HTTP(S) without userinfo, query or fragment; empty is allowed."
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/OtelProtocol"
+          },
+          "tracesEnabled": {
+            "type": "boolean",
+            "description": "Default true."
+          },
+          "metricsEnabled": {
+            "type": "boolean",
+            "description": "Provider-dependent default; Tempo, Jaeger, and direct Splunk do not support metrics."
+          },
+          "metricsTemporality": {
+            "$ref": "#/components/schemas/OtelMetricsTemporality"
+          },
+          "connection": {
+            "$ref": "#/components/schemas/OtelDestinationConnection"
+          },
+          "tls": {
+            "$ref": "#/components/schemas/OtelDestinationTls"
+          },
+          "headersConfigured": {
+            "type": "boolean",
+            "description": "Whether protected headers are configured."
+          },
+          "credentialsConfigured": {
+            "type": "boolean",
+            "description": "Whether any credential field is configured."
+          },
+          "credentialFields": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "username",
+                "password",
+                "token",
+                "caCertificate"
+              ]
+            },
+            "description": "Names of configured credential fields; values are never returned."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Safe saved or effective destination; contains no protected values."
+      },
+      "OtelProviderMetadata": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "description",
+          "protocols",
+          "defaultProtocol",
+          "traces",
+          "metrics",
+          "defaultTemporality",
+          "documentationUrl"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/OtelProviderId"
+          },
+          "label": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "protocols": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OtelProtocol"
+            }
+          },
+          "defaultProtocol": {
+            "$ref": "#/components/schemas/OtelProtocol"
+          },
+          "traces": {
+            "type": "boolean"
+          },
+          "metrics": {
+            "type": "boolean"
+          },
+          "defaultTemporality": {
+            "$ref": "#/components/schemas/OtelMetricsTemporality"
+          },
+          "documentationUrl": {
+            "type": "string"
+          },
+          "guidance": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Provider preset, not verification of a hosted connection. Splunk metrics are collector-only."
+      },
+      "OtelLegacySettingsInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "enabled",
+          "endpoint"
+        ],
+        "description": "Legacy scalar form. A non-equivalent saved destination list returns 409 instead of being discarded.",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "Legacy OTLP/HTTP base URL without userinfo, query or fragment. May be empty when disabled."
+          },
+          "headers": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "Replacement OTLP headers. Blank or omitted preserves the existing value."
+          },
+          "clearHeaders": {
+            "type": "boolean",
+            "description": "True removes saved headers; cannot be combined with headers."
+          }
+        },
+        "allOf": [
+          {
+            "not": {
+              "required": [
+                "headers",
+                "clearHeaders"
+              ],
+              "properties": {
+                "clearHeaders": {
+                  "const": true
+                },
+                "headers": {}
+              }
+            }
+          }
+        ]
+      },
+      "OtelDestinationSettingsInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "enabled",
+          "destinations"
+        ],
+        "description": "Atomically replace the complete list. IDs must be unique. When master enabled is true at least one destination must be enabled; an empty list is allowed when disabled.",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "destinations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OtelDestinationInput"
+            }
+          }
+        }
+      },
+      "OtelSettingsInput": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/OtelLegacySettingsInput"
+          },
+          {
+            "$ref": "#/components/schemas/OtelDestinationSettingsInput"
+          }
+        ]
+      },
+      "OtelSavedSettings": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "endpoint",
+          "headersConfigured",
+          "destinations"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "Legacy scalar projection of the saved list."
+          },
+          "headersConfigured": {
+            "type": "boolean"
+          },
+          "streamName": {
+            "type": "string",
+            "description": "Legacy stream-name projection when configured."
+          },
+          "destinations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OtelDestinationPublic"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "OtelEffectiveSettings": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "endpoint",
+          "headersConfigured",
+          "source",
+          "endpointSource",
+          "headersSource",
+          "restartRequired",
+          "destinations"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "Legacy scalar projection of the effective transport."
+          },
+          "headersConfigured": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "environment",
+              "database",
+              "default"
+            ]
+          },
+          "endpointSource": {
+            "type": "string",
+            "enum": [
+              "environment",
+              "database",
+              "default"
+            ]
+          },
+          "headersSource": {
+            "type": "string",
+            "enum": [
+              "environment",
+              "database",
+              "default"
+            ]
+          },
+          "restartRequired": {
+            "type": "boolean"
+          },
+          "destinations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OtelDestinationPublic"
+            },
+            "description": "Environment endpoint/header overrides replace saved transport with one effective environment destination."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OtelExportFailure": {
+        "type": "object",
+        "required": [
+          "signal",
+          "reason"
+        ],
+        "properties": {
+          "signal": {
+            "type": "string",
+            "enum": [
+              "traces",
+              "metrics"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "partial_success",
+              "http_error",
+              "timeout",
+              "connection_error",
+              "export_failed"
+            ]
+          },
+          "httpStatus": {
+            "type": "integer"
+          },
+          "rejectedItems": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false,
+        "description": "Safe category, numeric HTTP status and bounded partial-success rejection count when known; never raw collector text."
+      },
+      "OtelRuntimeDestinationStatus": {
+        "type": "object",
+        "required": [
+          "id",
+          "enabled",
+          "tracesEnabled",
+          "metricsEnabled",
+          "failures",
+          "dropped",
+          "lastExportFailure"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "tracesEnabled": {
+            "type": "boolean"
+          },
+          "metricsEnabled": {
+            "type": "boolean"
+          },
+          "failures": {
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "export": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "shutdown": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": true
+          },
+          "dropped": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lastExportFailure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OtelExportFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true
+      },
+      "OtelRuntimeStatus": {
+        "type": "object",
+        "description": "Safe aggregate and per-destination runtime status; delivery does not prove hosted ingestion.",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "sdkStarted": {
+            "type": "boolean"
+          },
+          "activeRuns": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "drainingRuntimes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failures": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "dropped": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lastExportFailure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OtelExportFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "serviceName": {
+            "type": "string"
+          },
+          "destinations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OtelRuntimeDestinationStatus"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "OtelSettingsResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "settings",
+          "effective",
+          "providers"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "settings": {
+            "$ref": "#/components/schemas/OtelSavedSettings"
+          },
+          "effective": {
+            "$ref": "#/components/schemas/OtelEffectiveSettings"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OtelProviderMetadata"
+            }
+          },
+          "runtime": {
+            "$ref": "#/components/schemas/OtelRuntimeStatus"
           }
         },
         "additionalProperties": false
