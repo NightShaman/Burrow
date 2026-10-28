@@ -137,8 +137,8 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
         </nav>}
         {tab === 'connections' && <nav className="settings-prototype-section-items" aria-label="Connection settings sections">
           {([
-            ['opentelemetry', 'OpenTelemetry'],
             ['authentication', 'Authentication'],
+            ['opentelemetry', 'OpenTelemetry'],
             ['browser-origin', 'Browser origin'],
             ['model-providers', 'Models'],
             ['load-balancing', 'Load Balancing'],
@@ -156,7 +156,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
         {selectedContribution?.settingsUrl ? <div ref={setModNavigationColumn} /> : selectedContribution?.settings?.length ? <nav className="settings-prototype-section-items" aria-label={`${selectedContribution.name} settings sections`}>{selectedContribution.settings.map((setting) => { const active = setting.id === selectedModSettings?.id; return <button type="button" className={active ? 'active' : ''} aria-current={active ? 'page' : undefined} onClick={() => setTab(modSettingsTab(selectedContribution.modId, setting.id))} key={setting.id}>{setting.navigation.title}</button>; })}</nav> : selectedContribution && <span>Extension settings</span>}
       </section>
       <section className="settings-blank-column settings-prototype-configuration">
-        {tab === 'connections' && connectionSection === 'opentelemetry' && <OpenTelemetrySettings />}
+        {tab === 'connections' && connectionSection === 'opentelemetry' && <OpenTelemetrySettings overflowTarget={overflowColumn} />}
         {tab === 'general' && generalSection === 'operator-profile' && <>
           <OperatorProfile onSaved={onOperatorProfileChanged} />
           <hr className="operator-profile-divider" />

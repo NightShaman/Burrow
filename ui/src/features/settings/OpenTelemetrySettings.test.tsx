@@ -87,7 +87,7 @@ function response(destinations: Destination[] = [archive, tempo], enabled = fals
       enabled, destinations, endpoint: destinations[0]?.endpoint ?? '',
       headersConfigured: destinations[0]?.headersConfigured ?? false,
       source: 'database' as Source, endpointSource: 'database' as Source,
-      headersSource: 'database' as Source, destinationsSource: 'database' as Source,
+      headersSource: 'database' as Source,
       restartRequired: false as const,
     },
     runtime: { enabled, sdkStarted: enabled },
@@ -118,7 +118,7 @@ async function mount(initial = response()) {
     if (init?.method === 'PUT') {
       saved = acceptUpdate(saved, JSON.parse(init.body as string) as Update);
       // An active environment transport remains separate from the saved list.
-      if (initial.effective.destinationsSource === 'environment') saved.effective = initial.effective;
+      if (initial.effective.endpointSource === 'environment' || initial.effective.headersSource === 'environment') saved.effective = initial.effective;
     }
     return saved;
   });
@@ -349,7 +349,7 @@ it('shows saved destinations under environment overrides and never saves the env
   });
   initial.effective = {
     ...initial.effective, enabled: true, destinations: [environment], endpoint: environment.endpoint,
-    source: 'environment', endpointSource: 'environment', headersSource: 'environment', destinationsSource: 'environment',
+    source: 'environment', endpointSource: 'environment', headersSource: 'environment',
   };
   initial.runtime = { enabled: true, sdkStarted: true };
   await mount(initial);
@@ -435,4 +435,53 @@ it.each(['datadog', 'splunk'])('allows %s collector base endpoints and disabled 
   change('Name', 'Collector updated');
   await save();
   expect(lastUpdate().destinations).toHaveLength(2);
+});
+
+it('renders destination inventory in the overflow column and selects its editor without writing secrets', async () => {
+  const target = document.createElement('aside'); document.body.appendChild(target);
+  vi.mocked(api).mockResolvedValue(response());
+  const view = render(<OpenTelemetrySettings overflowTarget={target} />);
+  await screen.findByLabelText('Name');
+  expect(target.textContent).toContain('Archive collector');
+  expect(target.textContent).toContain('Custom OTLP');
+  expect(target.textContent).toContain('https://archive.example.test:4318');
+  expect(target.textContent).toContain('Saved authentication');
+  fireEvent.click(screen.getByRole('button', { name: /Production traces.*Grafana Tempo/ }));
+  expect(input('Name').value).toBe('Production traces');
+  expect(screen.getByLabelText('Bearer token').getAttribute('placeholder')).toBe('Leave blank to keep saved value');
+  expect(screen.getByText('Advanced transport').closest('details')?.open).toBe(false);
+  expect(putCalls()).toHaveLength(0);
+  view.unmount(); target.remove();
+});
+
+it('restores legacy attribution and saved auth after switching away and back', async () => {
+  const legacy = { ...archive, id: 'default', name: 'Default', legacy: true };
+  await mount(response([legacy]));
+  selectProvider('grafana-tempo');
+  selectProvider('custom');
+  expect(screen.getByRole('button', { name: /Existing single-endpoint connection.*Custom OTLP.*Saved authentication/ })).toBeTruthy();
+  expect(screen.getByLabelText('Remove saved headers on save')).toBeTruthy();
+});
+
+it('distinguishes master-only environment control from transport override', async () => {
+  const initial = response([archive]); initial.effective.source = 'environment';
+  await mount(initial);
+  expect(screen.getByText(/Environment overrides currently control the master switch/)).toBeTruthy();
+  expect(screen.queryByText('Effective environment destinations')).toBeNull();
+});
+
+it('retains destination drafts when portal target relocates and selections change', async () => {
+  const first = document.createElement('aside'); const second = document.createElement('aside');
+  document.body.append(first, second); vi.mocked(api).mockResolvedValue(response());
+  const view = render(<OpenTelemetrySettings overflowTarget={first} />);
+  await screen.findByLabelText('Name'); change('Name', 'Unsaved archive');
+  view.rerender(<OpenTelemetrySettings overflowTarget={second} />);
+  expect(first.textContent).toBe(''); expect(second.textContent).toContain('Unsaved archive');
+  fireEvent.click(screen.getByRole('button', { name: /Production traces.*Grafana Tempo/ }));
+  change('Name', 'Unsaved tempo');
+  fireEvent.click(screen.getByRole('button', { name: /Unsaved archive.*Custom OTLP/ }));
+  expect(input('Name').value).toBe('Unsaved archive');
+  fireEvent.click(screen.getByRole('button', { name: /Unsaved tempo.*Grafana Tempo/ }));
+  expect(input('Name').value).toBe('Unsaved tempo'); expect(putCalls()).toHaveLength(0);
+  view.unmount(); first.remove(); second.remove();
 });

@@ -83,7 +83,7 @@ async function storedSettings({ store, metadata }) {
 }
 
 function publicEnvironmentDestination(destination) {
-  return { id: 'environment', name: 'Environment', provider: 'custom', enabled: destination.enabled,
+  return { id: 'environment', name: 'Environment', provider: 'custom', legacy: false, enabled: destination.enabled,
     endpoint: destination.endpoint, tracesEndpoint: destination.tracesEndpoint || '', metricsEndpoint: destination.metricsEndpoint || '',
     protocol: destination.protocol, tracesEnabled: destination.tracesEnabled, metricsEnabled: destination.metricsEnabled,
     metricsTemporality: destination.metricsTemporality, connection: {}, tls: { verify: true },

@@ -15932,6 +15932,11 @@
               ]
             },
             "description": "Names of configured credential fields; values are never returned."
+          },
+          "legacy": {
+            "type": "boolean",
+            "readOnly": true,
+            "description": "True only for an existing scalar single-endpoint configuration projected as a destination; its provider was never recorded. False for authoritative saved destinations and environment transport. Display metadata only, not inferred from id/name/endpoint and not accepted in PUT. The first successful destination-list save adopts the entry and returns false. An unchanged ID/provider preserves omitted secrets; changing the provider intentionally discards the former secrets."
           }
         },
         "additionalProperties": false,

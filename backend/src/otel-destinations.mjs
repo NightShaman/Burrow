@@ -122,14 +122,14 @@ export function mergeDestination(input, previous = null) {
 
 export function virtualDestination(settings = {}) {
   if (!settings.endpoint && !settings.headers) return [];
-  return [{ id: 'default', name: 'Default', provider: 'custom', enabled: Boolean(settings.endpoint), endpoint: settings.endpoint || '', tracesEndpoint: '', metricsEndpoint: '', protocol: 'http/json', tracesEnabled: true, metricsEnabled: true, metricsTemporality: 'cumulative', connection: {}, tls: { verify: true }, headers: settings.headers || null, credentials: {} }];
+  return [{ legacy: true, id: 'default', name: 'Default', provider: 'custom', enabled: Boolean(settings.endpoint), endpoint: settings.endpoint || '', tracesEndpoint: '', metricsEndpoint: '', protocol: 'http/json', tracesEnabled: true, metricsEnabled: true, metricsTemporality: 'cumulative', connection: {}, tls: { verify: true }, headers: settings.headers || null, credentials: {} }];
 }
 export function savedDestinations(settings = {}) { return Array.isArray(settings.destinations) ? settings.destinations : virtualDestination(settings); }
 
 export function publicDestination(destination) {
   const { id, name, provider, enabled, endpoint, tracesEndpoint, metricsEndpoint, protocol, tracesEnabled, metricsEnabled, metricsTemporality, connection, tls } = destination;
   const credentialFields = CREDENTIAL_KEYS.filter((key) => Boolean(destination.credentials?.[key]));
-  return { id, name, provider, enabled, endpoint, tracesEndpoint, metricsEndpoint, protocol, tracesEnabled, metricsEnabled, metricsTemporality, connection: { ...connection }, tls: { verify: tls?.verify !== false }, headersConfigured: Boolean(destination.headers), credentialsConfigured: credentialFields.length > 0, credentialFields };
+  return { id, name, provider, legacy: destination.legacy === true, enabled, endpoint, tracesEndpoint, metricsEndpoint, protocol, tracesEnabled, metricsEnabled, metricsTemporality, connection: { ...connection }, tls: { verify: tls?.verify !== false }, headersConfigured: Boolean(destination.headers), credentialsConfigured: credentialFields.length > 0, credentialFields };
 }
 
 function encodedHeaders(destination) {
