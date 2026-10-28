@@ -43,7 +43,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
   const navigate = useUnsavedNavigation();
   const [settingsAgentId, setSettingsAgentId] = useState(selected.id);
   const [agentSection, setAgentSection] = useState<'details' | 'profile-documents' | 'mcp-tools' | 'cron-jobs' | 'workflow-events' | 'dreams' | 'skills'>('details');
-  const [generalSection, setGeneralSection] = useState<'opentelemetry' | 'browser-tab' | 'operator-profile' | 'execution-boundaries' | 'trace-retention' | 'brain-memory' | 'global-documents' | 'export' | 'rail-panels' | 'tiddle-signal' | 'appearance'>('operator-profile');
+  const [generalSection, setGeneralSection] = useState<'opentelemetry' | 'operator-profile' | 'execution-boundaries' | 'trace-retention' | 'brain-memory' | 'global-documents' | 'export' | 'rail-panels' | 'appearance'>('operator-profile');
   const [connectionSection, setConnectionSection] = useState<'authentication' | 'browser-origin' | 'model-providers' | 'load-balancing' | 'mcp-servers' | 'api-tokens'>('authentication');
   const [skillsSection, setSkillsSection] = useState<'installed' | 'repo' | 'text'>('installed');
   const [modsSection, setModsSection] = useState<'installed' | 'sources' | 'automatic-checks'>('installed');
@@ -114,7 +114,6 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
         {tab === 'general' && <nav className="settings-prototype-section-items" aria-label="General settings sections">
           {([
             ['operator-profile', 'Operator profile'],
-            ['browser-tab', 'Browser tab'],
             ['opentelemetry', 'OpenTelemetry'],
             ['execution-boundaries', 'Execution boundaries'],
             ['trace-retention', 'Trace retention'],
@@ -122,7 +121,6 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
             ['global-documents', 'Global documents'],
             ['export', 'Export'],
             ['rail-panels', 'Rail panels'],
-            ['tiddle-signal', 'Tiddle Signal'],
             ['appearance', 'Appearance'],
           ] as const).map(([id, label]) => <button type="button" className={generalSection === id ? 'active' : ''} aria-current={generalSection === id ? 'page' : undefined} onClick={() => { if (generalSection !== id) navigate(() => setGeneralSection(id)); }} key={id}>{label}</button>)}
         </nav>}
@@ -158,7 +156,6 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
       </section>
       <section className="settings-blank-column settings-prototype-configuration">
         {tab === 'general' && generalSection === 'opentelemetry' && <OpenTelemetrySettings />}
-        {tab === 'general' && generalSection === 'browser-tab' && <BrowserTabSettings />}
         {tab === 'general' && generalSection === 'operator-profile' && <>
           <OperatorProfile onSaved={onOperatorProfileChanged} />
           <hr className="operator-profile-divider" />
@@ -170,7 +167,6 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
         {tab === 'general' && generalSection === 'global-documents' && <GlobalProfileDocuments overflowTarget={overflowColumn} />}
         {tab === 'general' && generalSection === 'export' && <ExportSettings />}
         {tab === 'general' && generalSection === 'rail-panels' && <SettingSection title="Rail Panels"><div className="field-pair compact-fields"><RailPanelSettings side="Left" layout={leftRailLayout} setLayout={setLeftRailLayout} singlePanel={leftSinglePanel} setSinglePanel={setLeftSinglePanel} topPanel={leftTopPanel} setTopPanel={setLeftTopPanel} bottomPanel={leftBottomPanel} setBottomPanel={setLeftBottomPanel} /><RailPanelSettings side="Right" layout={rightRailLayout} setLayout={setRightRailLayout} singlePanel={rightSinglePanel} setSinglePanel={setRightSinglePanel} topPanel={rightTopPanel} setTopPanel={setRightTopPanel} bottomPanel={rightBottomPanel} setBottomPanel={setRightBottomPanel} /></div></SettingSection>}
-        {tab === 'general' && generalSection === 'tiddle-signal' && <CuratorSettings savedProviders={savedProviders} />}
         {tab === 'general' && generalSection === 'appearance' && <SettingSection title="Appearance"><fieldset className="theme-picker"><legend>Theme</legend><div>{themes.map((option) => <button type="button" className={theme === option ? 'active' : ''} onClick={() => setTheme(option)} aria-pressed={theme === option} key={option}><i className={`theme-swatch ${option}`} aria-hidden="true" /><span><b>{themeDetails[option].label}</b><small>{themeDetails[option].description}</small></span></button>)}</div></fieldset></SettingSection>}
         {tab === 'agents' && (agents.length === 0 ? <SettingSection title="Agent setup"><p className="hint">No agents configured yet. Create your first agent to unlock the rest of the agent settings.</p></SettingSection> : agentSection === 'skills' ? <SkillsSettings agentView agents={agents} agentId={settingsSelected.id} overflowTarget={overflowColumn} /> : agentSection === 'mcp-tools' ? <AgentMcpTools agentId={settingsSelected.id} overflowTarget={overflowColumn} /> : <AgentSettings selected={settingsSelected} savedProviders={savedProviders} onAgentsChanged={onAgentsChanged} section={agentSection} overflowTarget={overflowColumn} />)}
         {tab === 'skills' && <SkillsSettings agents={enabledAgents(agents)} agentId={settingsSelected.id} section={skillsSection} onSectionChange={setSkillsSection} overflowTarget={overflowColumn} />}
@@ -184,6 +180,8 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
         {selectedContribution?.settingsUrl && <ModSettingsHost key={`${selectedContribution.modId}:${selectedContribution.version ?? ''}`} modId={selectedContribution.modId} settingsUrl={`${selectedContribution.settingsUrl}${selectedContribution.version ? `?v=${encodeURIComponent(selectedContribution.version)}` : ''}`} agents={enabledAgents(agents)} onAgentsChanged={onAgentsChanged} navigationTarget={modNavigationColumn} overflowTarget={overflowColumn} selectedSectionId={selectedModSettings?.id} onSectionChange={selectedContribution.settings?.length ? (sectionId) => setTab(modSettingsTab(selectedContribution.modId, sectionId)) : undefined} />}
       </section>
       <section className="settings-blank-column settings-prototype-overflow" ref={setOverflowColumn} aria-label="Additional settings">
+        {tab === 'general' && generalSection === 'operator-profile' && <div className="settings-overflow-content"><BrowserTabSettings /></div>}
+        {tab === 'general' && generalSection === 'brain-memory' && <div className="settings-overflow-content"><CuratorSettings savedProviders={savedProviders} /></div>}
         {tab === 'general' && generalSection === 'rail-panels' && hasAgentsPanel && <div className="settings-overflow-content"><AgentSidebarSettings agents={enabledAgents(agents)} preferences={agentRailPreferences} setPreferences={setAgentRailPreferences} /></div>}
       </section>
       <aside className="settings-utility-panel" aria-label="System statistics" aria-hidden={!utilityPanelOpen}>

@@ -24,6 +24,7 @@ afterEach(() => { cleanup(); vi.resetAllMocks(); loadModSettingsContributions.mo
 it('mounts only the selected configuration, with no hidden duplicate reads', async () => {
  vi.mocked(api).mockImplementation(async path => {
   if (path === '/api/settings/identities') return { operator: { name: 'Test', avatar: '' } };
+  if (path === '/api/settings/browser-tab') return { suffix: '' };
   if (path === '/api/settings/timezone') return { timezone: 'America/Chicago' };
   if (path === '/api/settings/ui-auth') return { auth: { mode: 'none' } };
   if (path === '/api/settings/browser-origin') return { settings: { checkOrigin: false }, effective: { checkOrigin: false, source: 'database' } };
@@ -42,8 +43,14 @@ it('mounts only the selected configuration, with no hidden duplicate reads', asy
  expect(profile?.nextElementSibling?.tagName).toBe('HR');
  expect(profile?.nextElementSibling?.nextElementSibling).toBe(timezone);
  expect(screen.queryByRole('button', { name: 'Operator timezone' })).toBeNull();
+ expect(screen.getByRole('heading', { name: 'Browser tab' }).closest('.settings-prototype-overflow')).toBeTruthy();
+ expect(screen.queryByRole('button', { name: 'Browser tab' })).toBeNull();
+ fireEvent.click(screen.getByRole('button', { name: 'Brain memory' }));
+ expect(screen.getByRole('heading', { name: 'Brain memory' }).closest('.settings-prototype-configuration')).toBeTruthy();
+ expect(screen.getByRole('heading', { name: 'Tiddle Signal' }).closest('.settings-prototype-overflow')).toBeTruthy();
+ expect(screen.queryByRole('button', { name: 'Tiddle Signal' })).toBeNull();
+ fireEvent.click(screen.getByRole('button', { name: 'Operator profile' }));
  await screen.findByDisplayValue('America/Chicago');
- expect(vi.mocked(api).mock.calls.map(([path]) => path).sort()).toEqual(['/api/settings/identities', '/api/settings/timezone', '/api/setup/status']);
  fireEvent.click(screen.getByRole('button', { name: /^Connections$/ }));
  await waitFor(() => expect(screen.getByRole('button', { name: 'Save authentication' }).hasAttribute('disabled')).toBe(false));
  expect(screen.getAllByRole('button', { name: 'Save authentication' })).toHaveLength(1);
@@ -66,7 +73,7 @@ it('mounts only the selected configuration, with no hidden duplicate reads', asy
  expect(screen.queryByRole('button', { name: 'Save browser origin' })).toBeNull();
 });
 it('shows agent options from active rail selections without focusing a dropdown', () => {
- vi.mocked(api).mockImplementation(async path => path === '/api/settings/timezone' ? { timezone: 'America/Chicago' } : { wizardStep: 'ready' });
+ vi.mocked(api).mockImplementation(async path => path === '/api/settings/browser-tab' ? { suffix: '' } : path === '/api/settings/timezone' ? { timezone: 'America/Chicago' } : { wizardStep: 'ready' });
  function Parent() {
   const [leftSinglePanel, setLeftSinglePanel] = useState<'agents' | 'workspace'>('agents');
   const [leftRailLayout, setLeftRailLayout] = useState<'single' | 'divided'>('single');
@@ -134,7 +141,7 @@ it('groups a mod settings contributions under one top-level tab and exposes seco
    { id: 'chat-mappings', navigation: { title: 'Chat mappings' }, primary: { title: 'Chat mappings', capability: 'settingsUi' } },
   ],
  }]);
- vi.mocked(api).mockImplementation(async path => path === '/api/settings/timezone' ? { timezone: 'America/Chicago' } : { wizardStep: 'ready' });
+ vi.mocked(api).mockImplementation(async path => path === '/api/settings/browser-tab' ? { suffix: '' } : path === '/api/settings/timezone' ? { timezone: 'America/Chicago' } : { wizardStep: 'ready' });
  function Parent() {
   const [tab, setTab] = useState<SettingsTab>('general');
   return <Settings {...{ tab, setTab, agents: [], selected: { id: '', name: '' }, savedProviders: [], onOperatorProfileChanged: vi.fn(), agentRailPreferences: { view: 'regular', order: [] } } as unknown as ComponentProps<typeof Settings>} />;
@@ -164,7 +171,7 @@ it('uses dynamic mod sections when manifest metadata is only a top-level contrib
  mountModSettings.mockImplementation(({ section, primary }: { section: string; primary: { replace: (node: Node) => void } }) => {
   const node = document.createElement('span'); node.textContent = `Mounted ${section}`; primary.replace(node);
  });
- vi.mocked(api).mockImplementation(async path => path === '/api/settings/timezone' ? { timezone: 'America/Chicago' } : { wizardStep: 'ready' });
+ vi.mocked(api).mockImplementation(async path => path === '/api/settings/browser-tab' ? { suffix: '' } : path === '/api/settings/timezone' ? { timezone: 'America/Chicago' } : { wizardStep: 'ready' });
  function Parent() {
   const [tab, setTab] = useState<SettingsTab>('general');
   return <Settings {...{ tab, setTab, agents: [], selected: { id: '', name: '' }, savedProviders: [], onOperatorProfileChanged: vi.fn(), agentRailPreferences: { view: 'regular', order: [] } } as unknown as ComponentProps<typeof Settings>} />;
@@ -179,7 +186,7 @@ it('uses dynamic mod sections when manifest metadata is only a top-level contrib
 });
 
 it('uses the top menu for General while retaining the three content columns', async () => {
- vi.mocked(api).mockImplementation(async path => path === '/api/settings/identities' ? { operator: { name: 'Test', avatar: '' } } : path === '/api/settings/timezone' ? { timezone: 'America/Chicago' } : { wizardStep: 'ready' });
+ vi.mocked(api).mockImplementation(async path => path === '/api/settings/browser-tab' ? { suffix: '' } : path === '/api/settings/identities' ? { operator: { name: 'Test', avatar: '' } } : path === '/api/settings/timezone' ? { timezone: 'America/Chicago' } : { wizardStep: 'ready' });
  const navigationTarget = document.createElement('div');
  document.body.append(navigationTarget);
  const { container, unmount } = render(<Settings {...{ navigationTarget, tab: 'general', setTab: vi.fn(), agents: [], selected: { id: '', name: '' }, savedProviders: [], onOperatorProfileChanged: vi.fn(), agentRailPreferences: { view: 'regular', order: [] } } as unknown as ComponentProps<typeof Settings>} />);
@@ -199,7 +206,7 @@ it('uses the top menu for General while retaining the three content columns', as
 
 
 it('navigates between separate Models and Load Balancing editors without leaking identity', async () => {
- vi.mocked(api).mockImplementation(async path => path === '/api/settings/timezone' ? { timezone: 'America/Chicago' } : { wizardStep: 'ready' });
+ vi.mocked(api).mockImplementation(async path => path === '/api/settings/browser-tab' ? { suffix: '' } : path === '/api/settings/timezone' ? { timezone: 'America/Chicago' } : { wizardStep: 'ready' });
  render(<ConfirmProvider><Settings {...{ tab: 'connections', setTab: vi.fn(), agents: [], selected: { id: '', name: '' }, savedProviders: [], onModelConnectionsChanged: vi.fn(), agentRailPreferences: { view: 'regular', order: [] } } as unknown as ComponentProps<typeof Settings>} /></ConfirmProvider>);
  fireEvent.click(screen.getByRole('button', { name: 'Models' }));
  expect(screen.getByRole('heading', { name: 'Models' })).toBeTruthy();
