@@ -61,7 +61,7 @@ export function WorkflowReceiverSettings() {
   const dirty = Boolean(settings && (deliveryUrl !== settings.deliveryUrl || secret || clearSecret));
   useUnsavedChanges({ dirty, busy, save, discard });
   return <SettingSection title="Webhook receiver · global">
-    <p className="settings-description">Shared by all agents’ workflow watches.</p>
+    <p className="settings-description">Shared by all agents.</p>
     {loading ? <p role="status">Loading receiver…</p> : settings ? <>
       <div className="workflow-event-status">
         <span>Secret: <b>{settings.secretConfigured ? 'Configured' : 'Not configured'}</b></span>
@@ -71,13 +71,13 @@ export function WorkflowReceiverSettings() {
       {settings.environmentOverride && <p className="settings-description">BURROW_GITHUB_WEBHOOK_SECRET overrides the stored secret. Changes here affect the stored secret only; changing the environment requires a process restart.</p>}
       {settings.readiness === 'secret_unavailable' && <p className="settings-request-error" role="alert">The stored secret cannot be decrypted. Replace it or check the server credential key.</p>}
       <div className="schedule-form">
-        <Field label="Delivery URL"><input type="url" value={deliveryUrl} onChange={event => { setDeliveryUrl(event.target.value); setNotice(''); }} placeholder={`https://your-host${settings.webhookPath}`} disabled={busy} /><small className="field-hint">Optional record of the GitHub delivery URL. Does not configure ingress or test connectivity.</small></Field>
-        <Field label="Webhook secret"><input type="password" autoComplete="new-password" value={secret} onChange={event => { setSecret(event.target.value); setNotice(''); }} disabled={busy || clearSecret} placeholder="Leave blank to preserve" /><small className="field-hint">Write-only. Use the same secret in GitHub; blank preserves the stored value.</small></Field>
+        <div className="schedule-field-pair"><Field label="Delivery URL"><input type="url" value={deliveryUrl} onChange={event => { setDeliveryUrl(event.target.value); setNotice(''); }} placeholder={`https://your-host${settings.webhookPath}`} disabled={busy} /><small className="field-hint">Optional record only; does not configure or test connectivity.</small></Field>
+        <Field label="Webhook secret"><input type="password" autoComplete="new-password" value={secret} onChange={event => { setSecret(event.target.value); setNotice(''); }} disabled={busy || clearSecret} placeholder="Leave blank to preserve" /><small className="field-hint">Use the same secret in GitHub. Leave blank to keep the current secret.</small></Field></div>
         {settings.storedSecretConfigured && <label className="schedule-enabled"><input type="checkbox" checked={clearSecret} onChange={event => { setClearSecret(event.target.checked); setSecret(''); setNotice(''); }} disabled={busy} /><span>Clear stored secret on save</span></label>}
         {clearSecret && <p className="settings-description">{settings.environmentOverride ? 'The environment override will remain active.' : 'Incoming webhook deliveries will be rejected until a secret is configured.'}</p>}
         <div className="setting-actions"><button type="button" className="secondary" onClick={discard} disabled={busy || !dirty}>Discard receiver changes</button><button type="button" className="primary" onClick={() => void save()} disabled={busy || !dirty}>{busy ? 'Saving…' : 'Save receiver'}</button></div>
       </div>
-      <small className="field-hint">Readiness covers local signature verification only, not GitHub connectivity or agent handling.</small>
+      <small className="field-hint">Ready means local signature verification only.</small>
     </> : null}
     {error && <p className="settings-request-error" role="alert">{error} {!settings && !loading && <button type="button" onClick={() => void load()}>Retry receiver</button>}</p>}
     {notice && <p role="status">{notice}</p>}

@@ -110,16 +110,16 @@ function WorkflowEditor({ agentId, overflowTarget }: { agentId: string; overflow
     finally { lock.current = false; if (!lifetime.current.signal.aborted) setBusy(false); }
   };
   const inventory = <>
-    <SettingSection title="Saved workflow watches">
+    <SettingSection title="Saved watches">
       {loading ? <p role="status">Loading watches…</p> : watchError ? <p className="settings-request-error" role="alert">{watchError} <button type="button" onClick={() => void loadWatches()}>Retry</button></p> : watches.length ? <div className="schedule-list">{watches.map(watch => <article className="schedule-card workflow-watch" key={watch.id}>
         <button type="button" className="schedule-card-select schedule-card-details" aria-pressed={editingId === watch.id} disabled={busy} onClick={() => navigate(() => choose(watch))}><strong>{watch.workflow}</strong><small>{watch.repository}</small><small>{watch.enabled ? 'Enabled' : 'Disabled'} · {watch.sessionId}</small></button>
         <div className="schedule-card-actions"><button type="button" className="secondary" disabled={busy} onClick={() => navigate(() => void toggle(watch))}>{watch.enabled ? 'Disable' : 'Enable'}</button><button type="button" className="danger" disabled={busy} onClick={() => navigate(() => void remove(watch))}>Delete</button></div>
-      </article>)}</div> : <p className="settings-empty">No workflow watches for this agent.</p>}
+      </article>)}</div> : <p className="settings-empty">No watches for this agent.</p>}
     </SettingSection>
-    <SettingSection title="Recent workflow events">
+    <SettingSection title="Recent events">
       <div className="setting-actions"><button type="button" className="secondary" onClick={() => void loadEvents()}>Refresh events</button></div>
       {eventError ? <p className="settings-request-error" role="alert">{eventError}</p> : null}
-      {!events.length && !eventError ? <p className="settings-empty">{loading ? 'Loading events…' : 'No workflow events received for this agent.'}</p> : <div className="workflow-event-list">{events.map(event => <article className="workflow-event-card" key={event.id}>
+      {!events.length && !eventError ? <p className="settings-empty">{loading ? 'Loading events…' : 'No events for this agent.'}</p> : <div className="workflow-event-list">{events.map(event => <article className="workflow-event-card" key={event.id}>
         <strong>{event.workflow}</strong><span>{event.repository}</span>
         <div className="workflow-event-status"><span>GitHub: <b>{event.conclusion || 'unknown'}</b></span><span>Burrow handling: <b>{event.status}</b></span></div>
         <small>{event.sessionId} · {eventTime(event.completedAt || event.createdAt)}</small>
@@ -129,11 +129,11 @@ function WorkflowEditor({ agentId, overflowTarget }: { agentId: string; overflow
       </article>)}</div>}
     </SettingSection>
   </>;
-  return <><WorkflowReceiverSettings /><SettingSection title="Workflow events">
-    <p className="settings-description">Run an instruction when a GitHub workflow completes. Watches belong to this agent and use its chat model.</p>
-    <div className="schedule-form"><Field label="Repository"><input ref={firstInput} value={draft.repository} onChange={event => update('repository', event.target.value)} placeholder="owner/repo" disabled={busy} /></Field><Field label="Workflow name"><input value={draft.workflow} onChange={event => update('workflow', event.target.value)} placeholder="CI" disabled={busy} /><small className="field-hint">Exact workflow name from GitHub, not the YAML filename.</small></Field><Field label="Destination session"><input value={draft.sessionId} onChange={event => update('sessionId', event.target.value)} disabled={busy} /></Field><Field label="Instruction"><textarea rows={4} value={draft.instruction} onChange={event => update('instruction', event.target.value)} placeholder="Inspect the completed run and report the result…" disabled={busy} /></Field>
+  return <><SettingSection title="Workflow events">
+    <p className="settings-description">Run an instruction when a GitHub workflow completes.</p>
+    <div className="schedule-form"><div className="schedule-field-pair"><Field label="Repository"><input ref={firstInput} value={draft.repository} onChange={event => update('repository', event.target.value)} placeholder="owner/repo" disabled={busy} /></Field><Field label="Workflow name"><input value={draft.workflow} onChange={event => update('workflow', event.target.value)} placeholder="CI" disabled={busy} /><small className="field-hint">Exact GitHub workflow name, not the filename.</small></Field></div><Field label="Destination session"><input value={draft.sessionId} onChange={event => update('sessionId', event.target.value)} disabled={busy} /></Field><Field label="Instruction"><textarea rows={4} value={draft.instruction} onChange={event => update('instruction', event.target.value)} placeholder="Inspect the completed run and report the result…" disabled={busy} /></Field>
     <div className="schedule-footer"><label className="schedule-enabled"><input type="checkbox" checked={draft.enabled} onChange={event => update('enabled', event.target.checked)} disabled={busy} /><span>Enabled</span></label><div className="setting-actions"><button type="button" className="secondary" onClick={() => navigate(() => choose())} disabled={busy}>{editingId ? 'New watch' : 'Clear'}</button><button type="button" className="primary" onClick={() => void save()} disabled={busy || loading || Boolean(watchError)}>{busy ? 'Saving…' : editingId ? 'Save watch' : 'Add watch'}</button></div></div></div>
     {error && <p className="settings-request-error" role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     <details className="workflow-setup"><summary>GitHub webhook setup</summary><p>Point a GitHub repository webhook at <code>/api/events/github</code>, select <code>workflow_run</code> events, and use JSON payloads. Use the same secret configured in the global receiver above. Burrow verifies each delivery signature; the secret is never returned to this form.</p><p>GitHub conclusion describes the workflow. Burrow handling describes the agent work it triggered. Open the destination session for existing live activity and conversation history.</p></details>
-    </SettingSection>{overflowTarget ? createPortal(<div className="settings-overflow-content">{inventory}</div>, overflowTarget) : inventory}</>;
+    </SettingSection><WorkflowReceiverSettings />{overflowTarget ? createPortal(<div className="settings-overflow-content">{inventory}</div>, overflowTarget) : inventory}</>;
 }

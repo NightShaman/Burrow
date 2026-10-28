@@ -1,10 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api, downloadExport, importExport } from '../../app/api';
 import { useConfirm } from '../../app/ConfirmDialog';
 import { Field, SettingSection } from './SettingsPrimitives';
 
 type ExportCategory = { id: string; label: string; description: string; containsSecrets: boolean };
 type ImportPreview = { encrypted?: boolean; requiresPassword?: boolean; categories?: Record<string, unknown> | string[]; supported?: unknown; unsupported?: unknown; requiresConfirmation?: boolean; conflicts?: unknown[] };
+
+const categoryDescriptions: Record<string, string> = {
+  agents: 'Agents, profiles, model selections and operator identity.',
+  skills: 'Operator text skills and assignments.',
+  'scheduled-jobs': 'Job definitions, prompts and enabled state.',
+  settings: 'Portable settings and preferences.',
+  'model-connections': 'Connections and provider credentials.',
+  'mcp-connections': 'Connections, API keys and HTTP headers.',
+  'ui-auth': 'UI authentication and OIDC credentials.',
+  'task-board': 'Projects and current task state.',
+};
 
 const importErrorMessage = (cause: unknown) => cause instanceof Error && cause.message === 'import_password_required'
   ? 'This export is encrypted. Enter its password to continue.'
@@ -22,7 +34,7 @@ function importSummary(value: unknown) {
   return 'None';
 }
 
-export function ExportSettings() {
+export function ExportSettings({ overflowTarget }: { overflowTarget?: HTMLElement | null }) {
   const confirm = useConfirm();
   const applying = useRef(false);
   const mounted = useRef(false);
@@ -107,29 +119,32 @@ export function ExportSettings() {
 
   return <>
     <SettingSection title="Export">
-      <p className="settings-help">Download selected Burrow configuration and work data as a portable bundle, not a full backup. Chats, workspace files, historical runs and mod-owned state are not included.</p>
+      <p className="settings-help">Download selected data as a portable bundle—not a full backup.</p>
       <div className="export-options">
         {categories.map((category) => <label className="export-option" key={category.id}>
           <input type="checkbox" checked={selected.includes(category.id)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, category.id] : current.filter((id) => id !== category.id))} />
-          <span><b>{category.label}</b><small>{category.description}</small></span>
+          <span><b>{category.label}</b><small>{categoryDescriptions[category.id] ?? category.description}</small></span>
         </label>)}
       </div>
-      <p className="settings-help">Dependencies are not selected automatically. Include agents for skill assignments, model connections for agent model selections or embeddings, and agents, model connections and settings (operator timezone) for scheduled jobs, unless already configured on the destination.</p>
-      {selected.includes('settings') && <p className="settings-help">Settings includes operator timezone, retention policies and embedding configuration, not memories or vectors.</p>}
-      <p className="settings-help">Review free-text profiles, skills and job prompts for credentials before sharing; non-secret field redaction does not detect secrets in prose.</p>
+      <details className="settings-help"><summary>What to know before exporting</summary>
+        <p>Chats, workspace files, run history, mod state, memories and vectors are not included.</p>
+        <p>Dependencies are not selected automatically. Include related agents, model connections and settings when needed on the destination.</p>
+        <p>Skill packages, tool grants, basic passwords, task history and attachments need separate setup or are not portable.</p>
+        <p>Check profiles, skills and job prompts for secrets before sharing; text is not automatically redacted.</p>
+      </details>
       {sensitive && <Field label="Export password (12+ characters)"><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /></Field>}
       <div className="setting-actions"><button className="primary" type="button" onClick={() => void exportBundle()} disabled={state !== 'idle' || !selected.length || (sensitive && password.length < 12)}>{state === 'exporting' ? 'Creating export…' : 'Download export'}</button></div>
     </SettingSection>
-    <SettingSection title="Import">
-      <p className="settings-help">Restore data from a Burrow export. Review the preview before applying changes. Bundled, Git-managed and filesystem skill packages are not installed. Reconfigure destination-local paths, services and environment secrets separately.</p>
+    {(() => { const importSection = <SettingSection title="Import">
+      <p className="settings-help">Choose a Burrow export and review it before importing.</p>
       <input ref={importInput} className="export-file-input" disabled={importState !== 'idle'} type="file" accept=".json.gz,.gz,.hc-export,.tar,.bin,application/octet-stream,application/gzip" onChange={(event) => { void readImportFile(event.target.files?.[0]); }} />
       <button className="secondary" type="button" onClick={() => importInput.current?.click()} disabled={importState !== 'idle'}>{importState === 'previewing' ? 'Reading export…' : 'Choose export file'}</button>
       {importName && <p className="import-file-name" role="status">Selected: <strong>{importName}</strong></p>}
       {importName && <Field label="Conflict handling"><select disabled={importState !== 'idle'} value={conflictPolicy} onChange={(event) => { setConflictPolicy(event.target.value as typeof conflictPolicy); setImportPreview(null); setPreviewedInputs(null); }}><option value="error">Stop if conflicts exist</option><option value="skip">Skip conflicting items</option><option value="replace">Replace conflicting items</option></select></Field>}
       {passwordNeeded && <Field label="Export password"><input type="password" disabled={importState !== 'idle'} value={importPassword} onChange={(event) => { setImportPassword(event.target.value); setImportPreview(null); setPreviewedInputs(null); }} autoComplete="off" /></Field>}
       {importName && importPayload && importState === 'idle' && !previewIsCurrent && <button className="secondary" type="button" onClick={() => void previewImport(importPayload, importPassword)}>Preview export</button>}
-      {previewIsCurrent && importPreview && <div className="import-preview" aria-live="polite"><strong>Export preview</strong><span>Supported: {importSummary(importPreview.supported ?? importPreview.categories)}</span>{importPreview.unsupported !== undefined && <span>Unsupported: {importSummary(importPreview.unsupported)}</span>}<p className="import-warning">Importing changes Burrow data. Enabled scheduled jobs remain enabled and may run after import. Imports can apply partially if a dependency fails; inspect the error before explicitly retrying. This cannot be undone from the UI.</p><button className="primary" type="button" onClick={() => void applyImport()} disabled={importState !== 'idle' || !previewIsCurrent || Boolean(importPreview.requiresPassword || importPreview.encrypted) && !importPassword.trim()}>{importState === 'importing' ? 'Importing…' : 'Import export'}</button></div>}
+      {previewIsCurrent && importPreview && <div className="import-preview" aria-live="polite"><strong>Export preview</strong><span>Supported: {importSummary(importPreview.supported ?? importPreview.categories)}</span>{importPreview.unsupported !== undefined && <span>Unsupported: {importSummary(importPreview.unsupported)}</span>}<p className="import-warning">Import cannot be undone here. Enabled jobs may run; a failed import may apply partially. Check errors before retrying. Skill packages and local paths, services and secrets require separate setup.</p><button className="primary" type="button" onClick={() => void applyImport()} disabled={importState !== 'idle' || !previewIsCurrent || Boolean(importPreview.requiresPassword || importPreview.encrypted) && !importPassword.trim()}>{importState === 'importing' ? 'Importing…' : 'Import export'}</button></div>}
       {error && <p className="settings-error" role="alert">{error}</p>}
-    </SettingSection>
+    </SettingSection>; return overflowTarget ? createPortal(<div className="settings-overflow-content">{importSection}</div>, overflowTarget) : importSection; })()}
   </>;
 }

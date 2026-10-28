@@ -52,10 +52,10 @@ it('edits and disables via upsert, deletes only after confirmation', async () =>
 it('does not confuse read failure with empty state and supports retry', async () => {
   mock.mockRejectedValue(new Error('Backend unavailable')); show();
   await screen.findByText(/Could not load watches/);
-  expect(screen.queryByText('No workflow watches for this agent.')).toBeNull();
+  expect(screen.queryByText('No watches for this agent.')).toBeNull();
   expect((screen.getByRole('button', { name: 'Add watch' }) as HTMLButtonElement).disabled).toBe(true);
   mock.mockResolvedValue({ ok: true, watches: [], events: [] }); fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-  await screen.findByText('No workflow watches for this agent.');
+  await screen.findByText('No watches for this agent.');
 });
 it('retains editor content and surfaces failed mutations', async () => {
   show(); fireEvent.click(await screen.findByRole('button', { name: /Assembly.*Enabled/ }));
@@ -70,7 +70,7 @@ it('does not apply old agent responses after switching destinations', async () =
   view.rerender(<ConfirmProvider><AgentWorkflowEvents agentId="smatchet" /></ConfirmProvider>);
   oldResolve({ ok: true, watches: [watch] });
   resolve({ ok: true, watches: [] });
-  await screen.findByText('No workflow watches for this agent.');
+  await screen.findByText('No watches for this agent.');
   expect(screen.queryByRole('button', { name: /Assembly/ })).toBeNull();
 });
 it('accepts only HTTPS GitHub source links', () => {

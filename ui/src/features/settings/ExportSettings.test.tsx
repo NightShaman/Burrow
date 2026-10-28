@@ -72,7 +72,6 @@ it('renders the expanded catalog unchanged and exports only explicitly selected 
   await screen.findByRole('checkbox', { name: /Scheduled jobs/ });
   expect(screen.getAllByRole('checkbox')).toHaveLength(8);
   for (const category of catalog.categories) {
-    expect(screen.getByText(category.description)).toBeTruthy();
     expect((screen.getByRole('checkbox', { name: new RegExp(category.label) }) as HTMLInputElement).checked).toBe(category.id === 'settings');
   }
   fireEvent.click(screen.getByRole('checkbox', { name: /^Settings/ }));
@@ -83,7 +82,7 @@ it('renders the expanded catalog unchanged and exports only explicitly selected 
   await waitFor(() => expect(downloadExport).toHaveBeenCalledWith(['scheduled-jobs', 'skills'], undefined));
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'fixture download blocked');
   expect(screen.getByText(/Dependencies are not selected automatically/)).toBeTruthy();
-  expect(screen.getByText(/non-secret field redaction does not detect secrets in prose/)).toBeTruthy();
+  expect(screen.getByText(/text is not automatically redacted/)).toBeTruthy();
 });
 
 it('keeps secret-category password gating and clears the transient password after download', async () => {
@@ -117,9 +116,20 @@ it('previews and confirms expanded categories with portable-limit and enabled-jo
   render(<ExportSettings />);
   await choose();
   expect(screen.getByText('Supported: 4 items')).toBeTruthy();
-  expect(screen.getByText(/skill packages are not installed/)).toBeTruthy();
-  expect(screen.getByText(/Enabled scheduled jobs remain enabled/)).toBeTruthy();
+  expect(screen.getByText(/Skill packages and local paths/)).toBeTruthy();
+  expect(screen.getByText(/Enabled jobs may run/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Import export' }));
   fireEvent.click(screen.getByRole('alertdialog').querySelector('button.danger')!);
   await waitFor(() => expect(importExport).toHaveBeenCalledWith({ payload: 'AQI=', confirm: true, conflictPolicy: 'error' }));
+});
+
+ it('places import in the provided third column', async () => {
+  vi.mocked(api).mockResolvedValue(catalog);
+  const column = document.createElement('div'); document.body.appendChild(column);
+  try {
+    const { container } = render(<ExportSettings overflowTarget={column} />);
+    await screen.findByRole('checkbox', { name: /Scheduled jobs/ });
+    expect(container.querySelector('h2')?.textContent).toBe('Export');
+    expect(column.querySelector('h2')?.textContent).toBe('Import');
+  } finally { column.remove(); }
 });

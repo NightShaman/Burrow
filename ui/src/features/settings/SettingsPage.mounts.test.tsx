@@ -45,8 +45,8 @@ it('mounts only the selected configuration, with no hidden duplicate reads', asy
  expect(screen.queryByRole('button', { name: 'Operator timezone' })).toBeNull();
  expect(screen.getByRole('heading', { name: 'Browser tab' }).closest('.settings-prototype-overflow')).toBeTruthy();
  expect(screen.queryByRole('button', { name: 'Browser tab' })).toBeNull();
- fireEvent.click(screen.getByRole('button', { name: 'Brain memory' }));
- expect(screen.getByRole('heading', { name: 'Brain memory' }).closest('.settings-prototype-configuration')).toBeTruthy();
+ fireEvent.click(screen.getByRole('button', { name: 'Continuity' }));
+ expect(screen.getByRole('heading', { name: 'Continuity' }).closest('.settings-prototype-configuration')).toBeTruthy();
  expect(screen.getByRole('heading', { name: 'Tiddle Signal' }).closest('.settings-prototype-overflow')).toBeTruthy();
  expect(screen.queryByRole('button', { name: 'Tiddle Signal' })).toBeNull();
  fireEvent.click(screen.getByRole('button', { name: 'Operator profile' }));

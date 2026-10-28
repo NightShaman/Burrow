@@ -22,7 +22,7 @@ const body = () => JSON.parse(String(mock.mock.calls.find(([, init]) => init?.me
 async function show() { render(<WorkflowReceiverSettings />); await screen.findByText('Configured'); }
 it('shows global scope, readiness, source and write-only empty secret', async () => {
   await show();
-  expect(screen.getByText('Shared by all agents’ workflow watches.')).toBeTruthy();
+  expect(screen.getByText('Shared by all agents.')).toBeTruthy();
   expect(screen.getByText('Ready')).toBeTruthy(); expect(screen.getByText('Settings')).toBeTruthy();
   const input = screen.getByLabelText(/Webhook secret/) as HTMLInputElement;
   expect(input.type).toBe('password'); expect(input.value).toBe('');
