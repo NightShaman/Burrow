@@ -1,9 +1,12 @@
+import { applyModelRecoveryProgress, modelRecoveryProgress } from './model-recovery-projection.mjs';
+import { observeModelRecovery } from './http-operational-log.mjs';
+
 export function activeChatRunKey(agentId, runId) {
   return `${String(agentId)}:${String(runId)}`;
 }
 
 export function activeChatRunSummary(record = {}) {
-  const cancelling = record.controller?.signal?.aborted === true;
+  const cancelling = record.controller?.signal?.aborted === true || record.cancelled === true || record.phase === 'cancelling';
   return {
     runId: record.runId,
     agentId: record.agentId,
@@ -35,7 +38,7 @@ export function activeChatRunSummaries(activeChatRuns, { agentId = null, session
     .map(activeChatRunSummary);
 }
 
-export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'default', runId, message = '', objective = null, source = 'internal', a2a = null, completionEvent = null, lane = 'main', inputId = null, parentSignal = null } = {}) {
+export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'default', runId, message = '', objective = null, source = 'internal', a2a = null, completionEvent = null, lane = 'main', inputId = null, parentSignal = null, logger = null } = {}) {
   if (!agentId || !runId) throw new Error('active_agent_run_identity_required');
   if (activeChatRuns.has(activeChatRunKey(agentId, runId))) throw Object.assign(new Error('chat_run_id_already_used'), { statusCode: 409 });
   const controller = new AbortController();
@@ -52,47 +55,59 @@ export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'd
   const inheritedSignal = parentSignal || a2a?.parentSignal || parent?.controller?.signal;
   const abortFromParent = () => {
     record.cancelled = true;
+    record.phase = 'cancelling';
+    record.steeringReady = false;
     record.reason = String(inheritedSignal.reason?.message || inheritedSignal.reason || 'parent cancelled');
     controller.abort(inheritedSignal.reason);
   };
   if (inheritedSignal?.aborted) abortFromParent();
   else inheritedSignal?.addEventListener('abort', abortFromParent, { once: true });
-  const activity = parent ? { id: `a2a:${record.agentId}:${record.runId}`, status: controller.signal.aborted ? 'cancelled' : 'running', startedAt: record.startedAt, updatedAt: record.startedAt, recipient: { agentId: record.agentId, sessionId: record.sessionId, runId: record.runId }, messageMode: a2a.messageMode || 'request_reply', progress: [] } : null;
+  const activity = parent ? { id: `a2a:${record.agentId}:${record.runId}`, status: controller.signal.aborted ? 'cancelling' : 'running', startedAt: record.startedAt, updatedAt: record.startedAt, recipient: { agentId: record.agentId, sessionId: record.sessionId, runId: record.runId }, messageMode: a2a.messageMode || 'request_reply', progress: [] } : null;
   if (parent && activity) parent.a2aActivities = [...(parent.a2aActivities || []), activity].slice(-12);
   const updateActivity = (patch = {}) => {
     if (!parent || !activity) return;
     Object.assign(activity, patch, { updatedAt: new Date().toISOString() });
   };
+  const onAbort = () => { record.phase = 'cancelling'; record.steeringReady = false; updateActivity({ status: 'cancelling' }); };
+  controller.signal.addEventListener('abort', onAbort, { once: true });
   return {
     record,
     signal: controller.signal,
     onTraceRecord(traceRecord) {
-      if (traceRecord?.stream === 'model' || traceRecord?.type === 'model') record.phase = 'streaming';
+      const cancelling = record.controller.signal.aborted || record.cancelled === true || record.phase === 'cancelling';
+      if (cancelling) record.phase = 'cancelling';
+      else if (traceRecord?.stream === 'model' || traceRecord?.type === 'model') record.phase = 'streaming';
       const payload = traceRecord?.payload || {};
-      const progress = traceRecord?.publicProgress || (['context-compaction-started', 'context-compaction-completed', 'context-compaction-failed'].includes(traceRecord?.type)
+      const recovery = modelRecoveryProgress(traceRecord);
+      if (recovery) observeModelRecovery(logger, traceRecord, record);
+      const progress = recovery || (traceRecord?.type === 'model-recovery' || traceRecord?.publicProgress?.type === 'model.recovery' ? null : traceRecord?.publicProgress) || (['context-compaction-started', 'context-compaction-completed', 'context-compaction-failed'].includes(traceRecord?.type)
         ? { type: traceRecord.type.replace('context-compaction-', 'context.compaction.'), data: payload }
         : traceRecord?.type === 'tool'
         ? { type: payload.phase === 'start' ? 'tool.started' : 'tool.completed', data: { tool: payload.tool || null, activityId: payload.activityId || null, ok: payload.ok ?? null, status: payload.status || null, label: payload.tool || 'Tool activity' } }
         : traceRecord?.type === 'model' && payload.stage === 'model-request' ? { type: 'model.started', data: { provider: payload.provider || null, model: payload.model || null } }
           : traceRecord?.type === 'model' && payload.stage === 'model-response' ? { type: 'model.completed', data: { ok: payload.ok === true, status: payload.status || null } } : null);
       if (progress) {
-        if (progress.type === 'context.compaction.started') record.phase = 'compacting';
-        if (['context.compaction.completed', 'context.compaction.failed'].includes(progress.type)) record.phase = 'thinking';
+        if (applyModelRecoveryProgress(record, progress)) updateActivity({ status: record.phase });
+        else if (!cancelling) {
+          if (progress.type === 'context.compaction.started') record.phase = 'compacting';
+          if (['context.compaction.completed', 'context.compaction.failed', 'model.started'].includes(progress.type)) record.phase = 'thinking';
+        }
         const event = { ...progress, runId: record.runId, sessionId: record.sessionId, ts: traceRecord?.ts || new Date().toISOString() };
         record.progress = [...record.progress, event].slice(-50);
         updateActivity({ progress: [...(activity?.progress || []), event].slice(-50) });
       }
     },
     onModelTextDelta(input) {
+      if (record.controller.signal.aborted || record.cancelled === true || record.phase === 'cancelling') { record.phase = 'cancelling'; updateActivity({ status: 'cancelling' }); return; }
       const { delta, modelCall } = typeof input === 'string' ? {delta:input,modelCall:0} : input || {};
       if (record.answerModelCall !== modelCall) { record.answerModelCall = modelCall; record.answerText = ''; }
       record.answerText = (record.answerText || '') + String(delta || '');
       record.phase = 'streaming'; updateActivity({ status: 'streaming' });
     },
-    onModelThoughtDelta() { record.phase = 'streaming'; },
+    onModelThoughtDelta() { record.phase = record.controller.signal.aborted || record.cancelled === true || record.phase === 'cancelling' ? 'cancelling' : 'streaming'; updateActivity({ status: record.phase }); },
     onModelContextUsage(usage) { if (usage && typeof usage === 'object') record.contextUsage = usage; },
-    onSteeringReady() { record.steeringReady = true; },
-    finish() { inheritedSignal?.removeEventListener('abort', abortFromParent); updateActivity({ status: record.controller.signal.aborted ? 'cancelled' : 'replied', completedAt: new Date().toISOString() }); if (activeChatRuns.get(key) === record) activeChatRuns.delete(key); },
+    onSteeringReady() { record.steeringReady = !record.controller.signal.aborted && record.cancelled !== true && record.phase !== 'cancelling'; },
+    finish() { controller.signal.removeEventListener('abort', onAbort); inheritedSignal?.removeEventListener('abort', abortFromParent); updateActivity({ status: record.controller.signal.aborted ? 'cancelled' : 'replied', completedAt: new Date().toISOString() }); if (activeChatRuns.get(key) === record) activeChatRuns.delete(key); },
   };
 }
 

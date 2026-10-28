@@ -7,6 +7,7 @@ import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { extractTraceContext, traceContextFromSpan } from './otel-context.mjs';
+import { projectModelRecoveryRecord } from './model-recovery-projection.mjs';
 
 const SERVICE_NAME = 'burrow';
 const INSTRUMENTATION_NAME = 'burrow.runtime';
@@ -268,6 +269,31 @@ export function createOtelRuntime({ env = process.env, serviceVersion = null, tr
       const state = activeRuns.get(String(record.runId || ''));
       if (!state) return;
       const payload = record.payload || {};
+      if (record.type === 'model-recovery') {
+        const recovery = projectModelRecoveryRecord(payload);
+        if (!recovery) return;
+        const attributes = { 'burrow.model.recovery.state': recovery.state };
+        if (recovery.method) attributes['burrow.model.recovery.method'] = recovery.method;
+        if (recovery.attempt !== undefined) attributes['burrow.model.recovery.attempt'] = recovery.attempt;
+        if (recovery.maxAttempts !== undefined) attributes['burrow.model.recovery.max_attempts'] = recovery.maxAttempts;
+        for (const [key, name] of [['originalFailure', 'original_failure'], ['lastFailure', 'last_failure']]) {
+          const failure = recovery[key];
+          if (!failure) continue;
+          attributes[`burrow.model.recovery.${name}.code`] = failure.code;
+          attributes[`burrow.model.recovery.${name}.origin`] = failure.origin;
+        }
+        if (recovery.originalFailure?.origin === 'upstream' && recovery.originalFailure.status !== undefined) {
+          attributes['burrow.model.recovery.upstream_status'] = recovery.originalFailure.status;
+        }
+        if (recovery.failover) {
+          attributes['burrow.model.recovery.failover.code'] = recovery.failover.code;
+          attributes['burrow.model.recovery.failover.action'] = recovery.failover.action;
+        }
+        // Recovery belongs to the live run. Its schema has no physical request
+        // ID, so do not guess which request span to annotate or close.
+        state.span.addEvent('burrow.model.recovery', attributes);
+        return;
+      }
       if (record.type === 'model' && payload.stage === 'provider-pool-attempt') {
         const attributes = {'burrow.pool.id':bounded(payload.poolId,160), 'burrow.account.id':bounded(payload.memberId,160),
           'gen_ai.request.model':bounded(payload.model,160), 'burrow.outcome':payload.outcome};

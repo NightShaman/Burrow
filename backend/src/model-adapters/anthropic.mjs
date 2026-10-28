@@ -1,4 +1,5 @@
-import { invokeProviderFetch, providerTiming, flushProviderDiagnostics } from './provider-fetch.mjs';
+import { invokeProviderFetch, providerTiming, settleProviderDiagnostics, providerDiagnostic, providerCallback, readProviderChunk, readProviderText } from './provider-fetch.mjs';
+import { classifyModelFailure, markProviderEnvelopeFailure, providerFailureResult, markProviderStreamTruncated } from '../model-failure.mjs';
 import { CLAUDE_CODE_VERSION, CLAUDE_CODE_BILLING_SYSTEM_BLOCK } from './anthropic-transport.mjs';
 import { redactStructuredJsonText } from '../redaction.mjs';
 import { DEFAULT_MODEL_OUTPUT_TOKENS } from '../config.mjs';
@@ -465,7 +466,7 @@ async function readAnthropicSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_BYTE
   if (response?.body?.getReader) {
     const reader = response.body.getReader();
     while (!failure) {
-      const { value, done } = await reader.read();
+      const { value, done } = await readProviderChunk(reader);
       if (done) break;
       bytes += value?.byteLength || 0;
       if (bytes > limit) { try { await reader.cancel(); } catch {} fail('provider_response_too_large', { maxBytes: limit }); break; }
@@ -479,7 +480,7 @@ async function readAnthropicSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_BYTE
       await consumeText(tail, true);
     }
   } else {
-    text = String(await response.text?.() || '');
+    text = String((typeof response?.text === 'function' ? await readProviderText(response) : '') || '');
     bytes = Buffer.byteLength(text);
     if (bytes > limit) fail('provider_response_too_large', { maxBytes: limit });
     else await consumeText(text, true);
@@ -504,13 +505,13 @@ async function readAnthropicSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_BYTE
       ...(state.error.code ? { code: boundedText(state.error.code, 128) } : {}),
       ...(state.error.message ? { message: boundedText(state.error.message, 500) } : {}),
     };
-    return { ok: false, text, bytes, data: null, error: boundedText(state.error.message || 'model_stream_failed', 500), errorDetails: details, eventSequence };
+    return markProviderEnvelopeFailure({ ok: false, text, bytes, data: null, error: boundedText(state.error.message || 'model_stream_failed', 500), errorDetails: details, eventSequence }, state.error);
   }
   const data = { ...(state.message || {}), content: state.blocks.filter(Boolean) };
   const stopReason = String(data.stop_reason || '');
   const hasContent = data.content.length > 0;
-  if (!sawEvent) return { ok: false, text, bytes, data: null, error: 'model_stream_empty', errorDetails: { status: response?.status || null }, eventSequence };
-  if (!sawMessageStop) return { ok: false, text, bytes, data, error: 'model_stream_truncated', errorDetails: { lastEventType: eventSequence.at(-1) || null }, eventSequence };
+  if (!sawEvent) return markProviderStreamTruncated({ ok: false, text, bytes, data: null, error: 'model_stream_empty', errorDetails: { status: response?.status || null }, eventSequence });
+  if (!sawMessageStop) return markProviderStreamTruncated({ ok: false, text, bytes, data, error: 'model_stream_truncated', errorDetails: { lastEventType: eventSequence.at(-1) || null }, eventSequence });
   if (stopReason === 'max_tokens' && !hasContent) return { ok: false, text, bytes, data, error: 'model_stream_max_tokens_empty', eventSequence };
   if (!stopReason) return { ok: false, text, bytes, data, error: 'model_stream_missing_stop_reason', eventSequence };
   return { ok: true, text, bytes, data, eventSequence };
@@ -555,61 +556,67 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
     return contextUsageFromRequest({ promptChars: request.promptChars, bodyChars: request.serializedBody.length, imageCount: request.imageCount, model, api: 'anthropic-messages', modelCall: options.modelCall, clock });
   };
 
-  const complete = async ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens ?? config.outputTokens ?? DEFAULT_MODEL_OUTPUT_TOKENS, tools = null, traceLogger, signal = null, onTextDelta = null, onThoughtDelta = null, onContextUsage = null, modelCall = null } = {}) => {
+  const complete = async ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens ?? config.outputTokens ?? DEFAULT_MODEL_OUTPUT_TOKENS, tools = null, traceLogger, signal = null, onTextDelta = null, onThoughtDelta = null, onContextUsage = null, modelCall = null, recoveryContext = null } = {}) => {
+    if (recoveryContext?.nextModelCall) modelCall = await recoveryContext.nextModelCall();
     const requestId = idFactory();
     const timing = providerTiming({ traceLogger, requestId, provider: 'anthropic', api: 'anthropic-messages', model, modelCall, clock });
-    try {
-    const streaming = typeof onTextDelta === 'function' || typeof onThoughtDelta === 'function';
-    const { body, serializedBody, promptChars, imageCount, sourceTranscript, resolvedTools, promptCaching, thinking, providerMessageManifest } = buildRequest({ prompt, messages, temperature, maxTokens, tools, streaming });
-    const headers = anthropicHeaders(config);
-    // Keep trace inspection useful without retaining raw operator secrets.
-    const diagnosticBody = { ...body, messages: body.messages.map((message) => ({
-      ...message,
-      content: message.content.map((block) => block?.type === 'thinking'
-        ? { ...block, thinking: '[redacted]', ...('signature' in block ? { signature: '[redacted]' } : {}) }
-        : block?.type === 'redacted_thinking'
-          ? { ...block, ...('data' in block ? { data: '[redacted]' } : {}), ...('signature' in block ? { signature: '[redacted]' } : {}) }
-          : block),
-    })) };
-    const providerRequestArtifact = await traceLogger?.artifact?.(`provider-request-${requestId}.json`, redactStructuredJsonText(JSON.stringify(diagnosticBody))) || null;
-    const requestContextUsage = contextUsageFromRequest({ promptChars, bodyChars: serializedBody.length, imageCount, model, api: 'anthropic-messages', modelCall, clock });
-    await onContextUsage?.(requestContextUsage);
-    const stablePrefixHash = serializedMessageHash({ system: body.system || null, tools: body.tools || [] });
-    await traceLogger?.model?.({ stage: 'model-request', requestId, modelCall, provider: 'anthropic', api: 'anthropic-messages', model, url, headers: redactHeaders(headers), messageCount: body.messages.length, promptChars, bodyChars: serializedBody.length, continuation: false, toolCount: resolvedTools?.length || 0, toolNames: resolvedTools?.map((tool) => tool.name).filter(Boolean) || [], providerMessageManifest, stablePrefixHash, promptCaching, thinking: thinking.enabled ? { mode: thinking.mode, effort: thinking.effort || null, budgetTokens: thinking.budgetTokens || null } : null, providerRequestArtifact, ts: clock() });
-    const response = await invokeProviderFetch(fetchImpl, url, { method: 'POST', headers, body: serializedBody, ...(signal ? { signal } : {}) }, { traceLogger, requestId, provider: 'anthropic', api: 'anthropic-messages', model, modelCall, clock, timing });
-    const responseBody = streaming ? await readAnthropicSse(response, { maxBytes: config.maxResponseBytes, onTextDelta: timing.wrap(onTextDelta, 'text'), onThoughtDelta: timing.wrap(onThoughtDelta, 'thought') }) : await readResponseTextBounded(response, config.maxResponseBytes);
-    let data = streaming ? responseBody.data : null;
-    if (!streaming) {
-      try { data = responseBody.ok ? (responseBody.text ? JSON.parse(responseBody.text) : {}) : { error: { message: responseBody.error } }; }
-      catch { data = { raw: responseBody.text }; }
-    }
-    const envelopeError = !streaming ? anthropicEnvelopeError(data) : null;
-    if (envelopeError) data = { ...data, error: { message: envelopeError } };
-    const ok = Boolean(response.ok) && responseBody.ok && !envelopeError;
-    const candidateChoice = ok ? normalizeAnthropicChoice(data) : null;
-    const maxTokensIncomplete = ok && candidateChoice?.finishReason === 'max_tokens';
-    const success = ok && !maxTokensIncomplete;
-    // An incomplete generation is still a failed call, but its bounded partial
-    // text and protocol blocks remain available for diagnostics and recovery.
-    const choice = candidateChoice;
-    const assistantMessage = choice && !(choice.toolCalls || []).length ? anthropicAssistantMessageFromChoice(choice) : null;
-    // Persist the exact provider assistant block sequence, including opaque
-    // signed thinking, so continuation replay does not depend on an in-memory
-    // side channel. continueWithToolResults recognizes this pending assistant
-    // turn and appends only its matching tool results.
-    const assistantBlocks = choice?.anthropic?.assistantBlocks;
-    const pendingAssistantMessage = choice && (choice.toolCalls || []).length && assistantBlocks?.length
-      ? { role: 'assistant', content: assistantBlocks }
-      : null;
-    const nativeTranscript = normalizeProviderMessages([...sourceTranscript, ...(pendingAssistantMessage ? [pendingAssistantMessage] : assistantMessage ? [assistantMessage] : [])]);
-    const failureMessage = maxTokensIncomplete ? (candidateChoice?.text || (candidateChoice?.toolCalls || []).length ? 'model_max_tokens_incomplete' : 'model_max_tokens_empty') : (responseBody.error || data?.error?.message || data?.message || responseBody.text?.slice?.(0, 500) || `HTTP ${response.status}`);
-    const failureDetails = responseBody.errorDetails || ((data?.error || data?.type) ? { ...(data?.error?.type ? { type: boundedText(data.error.type, 128) } : data?.type ? { type: boundedText(data.type, 128) } : {}), ...(data?.error?.code ? { code: boundedText(data.error.code, 128) } : {}), status: response.status } : null);
-    const result = { ok: success, requestId, provider: 'anthropic', api: 'anthropic-messages', model, status: response.status, choice, responseId: success && typeof data?.id === 'string' ? boundedText(data.id, 256) : null, usage: data?.usage || null, contextUsage: contextUsageFromResponse(requestContextUsage, data?.usage || null, clock), error: success ? null : failureMessage, raw: success ? { responseBytes: responseBody.bytes, ...(streaming ? { streamedTextChars: choice?.text?.length || 0 } : {}) } : { error: { message: failureMessage, ...(failureDetails ? { details: failureDetails } : {}) } }, nativeTranscript, ...(choice?.anthropic?.assistantBlocks?.length ? { anthropicContinuation: { assistantBlocks: choice.anthropic.assistantBlocks } } : {}) };
-    if (result.choice?.text || result.choice?.toolCalls?.length) timing.useful(result.choice?.toolCalls?.length ? 'tool' : 'final-text');
-    await onContextUsage?.(result.contextUsage);
-    await traceLogger?.model?.({ stage: 'model-response', requestId, modelCall, provider: 'anthropic', api: 'anthropic-messages', model, status: response.status, ok: success, usage: result.usage, cachedTokens: anthropicCachedTokens(result.usage), stablePrefixHash, finishReason: result.choice?.finishReason || candidateChoice?.finishReason || null, responseChars: result.choice?.text?.length || 0, responseBytes: responseBody.bytes, streamed: streaming, ...(streaming ? { streamEventSequence: responseBody.eventSequence || [] } : {}), error: result.error, ...(responseBody.errorDetails ? { errorDetails: responseBody.errorDetails } : {}), ts: clock() });
-    return result;
-    } finally { await flushProviderDiagnostics(traceLogger); }
+    return settleProviderDiagnostics(traceLogger, async (recordResult) => {
+      const streaming = typeof onTextDelta === 'function' || typeof onThoughtDelta === 'function';
+      const { body, serializedBody, promptChars, imageCount, sourceTranscript, resolvedTools, promptCaching, thinking, providerMessageManifest } = buildRequest({ prompt, messages, temperature, maxTokens, tools, streaming });
+      const headers = anthropicHeaders(config);
+      // Keep trace inspection useful without retaining raw operator secrets.
+      const diagnosticBody = { ...body, messages: body.messages.map((message) => ({
+        ...message,
+        content: message.content.map((block) => block?.type === 'thinking'
+          ? { ...block, thinking: '[redacted]', ...('signature' in block ? { signature: '[redacted]' } : {}) }
+          : block?.type === 'redacted_thinking'
+            ? { ...block, ...('data' in block ? { data: '[redacted]' } : {}), ...('signature' in block ? { signature: '[redacted]' } : {}) }
+            : block),
+      })) };
+      const providerRequestArtifact = await providerDiagnostic(() => traceLogger?.artifact?.(`provider-request-${requestId}.json`, redactStructuredJsonText(JSON.stringify(diagnosticBody)))) || null;
+      const requestContextUsage = contextUsageFromRequest({ promptChars, bodyChars: serializedBody.length, imageCount, model, api: 'anthropic-messages', modelCall, clock });
+      await providerCallback(() => onContextUsage?.(requestContextUsage));
+      const stablePrefixHash = serializedMessageHash({ system: body.system || null, tools: body.tools || [] });
+      await providerDiagnostic(() => traceLogger?.model?.({ stage: 'model-request', requestId, modelCall, provider: 'anthropic', api: 'anthropic-messages', model, url, headers: redactHeaders(headers), messageCount: body.messages.length, promptChars, bodyChars: serializedBody.length, continuation: false, toolCount: resolvedTools?.length || 0, toolNames: resolvedTools?.map((tool) => tool.name).filter(Boolean) || [], providerMessageManifest, stablePrefixHash, promptCaching, thinking: thinking.enabled ? { mode: thinking.mode, effort: thinking.effort || null, budgetTokens: thinking.budgetTokens || null } : null, providerRequestArtifact, ts: clock() }));
+      const response = await invokeProviderFetch(fetchImpl, url, { method: 'POST', headers, body: serializedBody, ...(signal ? { signal } : {}) }, { traceLogger, requestId, provider: 'anthropic', api: 'anthropic-messages', model, modelCall, recoveryContext, clock, timing });
+      const responseBody = streaming ? await readAnthropicSse(response, { maxBytes: config.maxResponseBytes, onTextDelta: timing.wrap(onTextDelta, 'text'), onThoughtDelta: timing.wrap(onThoughtDelta, 'thought') }) : await readResponseTextBounded(response, config.maxResponseBytes);
+      let data = streaming ? responseBody.data : null;
+      if (!streaming) {
+        try { data = responseBody.ok ? (responseBody.text ? JSON.parse(responseBody.text) : {}) : { error: { message: responseBody.error } }; }
+        catch { data = { raw: responseBody.text }; }
+      }
+      const providerErrorEnvelope = data?.error;
+      const envelopeError = !streaming ? anthropicEnvelopeError(data) : null;
+      if (envelopeError) data = { ...data, error: { message: envelopeError } };
+      const ok = Boolean(response.ok) && responseBody.ok && !envelopeError;
+      const candidateChoice = ok ? normalizeAnthropicChoice(data) : null;
+      const maxTokensIncomplete = ok && candidateChoice?.finishReason === 'max_tokens';
+      const success = ok && !maxTokensIncomplete;
+      // An incomplete generation is still a failed call, but its bounded partial
+      // text and protocol blocks remain available for diagnostics and recovery.
+      const choice = candidateChoice;
+      const assistantMessage = choice && !(choice.toolCalls || []).length ? anthropicAssistantMessageFromChoice(choice) : null;
+      // Persist the exact provider assistant block sequence, including opaque
+      // signed thinking, so continuation replay does not depend on an in-memory
+      // side channel. continueWithToolResults recognizes this pending assistant
+      // turn and appends only its matching tool results.
+      const assistantBlocks = choice?.anthropic?.assistantBlocks;
+      const pendingAssistantMessage = choice && (choice.toolCalls || []).length && assistantBlocks?.length
+        ? { role: 'assistant', content: assistantBlocks }
+        : null;
+      const nativeTranscript = normalizeProviderMessages([...sourceTranscript, ...(pendingAssistantMessage ? [pendingAssistantMessage] : assistantMessage ? [assistantMessage] : [])]);
+      const failureMessage = maxTokensIncomplete ? (candidateChoice?.text || (candidateChoice?.toolCalls || []).length ? 'model_max_tokens_incomplete' : 'model_max_tokens_empty') : (responseBody.error || data?.error?.message || data?.message || responseBody.text?.slice?.(0, 500) || `HTTP ${response.status}`);
+      const failureDetails = responseBody.errorDetails || ((data?.error || data?.type) ? { ...(data?.error?.type ? { type: boundedText(data.error.type, 128) } : data?.type ? { type: boundedText(data.type, 128) } : {}), ...(data?.error?.code ? { code: boundedText(data.error.code, 128) } : {}), status: response.status } : null);
+      const result = { ok: success, requestId, provider: 'anthropic', api: 'anthropic-messages', model, status: response.status, choice, responseId: success && typeof data?.id === 'string' ? boundedText(data.id, 256) : null, usage: data?.usage || null, contextUsage: contextUsageFromResponse(requestContextUsage, data?.usage || null, clock), error: success ? null : failureMessage, raw: success ? { responseBytes: responseBody.bytes, ...(streaming ? { streamedTextChars: choice?.text?.length || 0 } : {}) } : { error: { message: failureMessage, ...(failureDetails ? { details: failureDetails } : {}) } }, nativeTranscript, ...(choice?.anthropic?.assistantBlocks?.length ? { anthropicContinuation: { assistantBlocks: choice.anthropic.assistantBlocks } } : {}) };
+      if (!success && !responseBody.ok) result.modelFailure = classifyModelFailure(responseBody, { signal });
+      if (!success && providerErrorEnvelope && response.ok) result.modelFailure = classifyModelFailure(markProviderEnvelopeFailure({}, providerErrorEnvelope));
+      if (!success && signal?.aborted) result.cancelled = true;
+      const settledResult = recordResult(providerFailureResult(result));
+      if (result.choice?.text || result.choice?.toolCalls?.length) timing.useful(result.choice?.toolCalls?.length ? 'tool' : 'final-text');
+      await providerCallback(() => onContextUsage?.(result.contextUsage));
+      await providerDiagnostic(() => traceLogger?.model?.({ stage: 'model-response', requestId, modelCall, provider: 'anthropic', api: 'anthropic-messages', model, status: response.status, ok: success, usage: result.usage, cachedTokens: anthropicCachedTokens(result.usage), stablePrefixHash, finishReason: result.choice?.finishReason || candidateChoice?.finishReason || null, responseChars: result.choice?.text?.length || 0, responseBytes: responseBody.bytes, streamed: streaming, ...(streaming ? { streamEventSequence: responseBody.eventSequence || [] } : {}), error: result.error, ...(responseBody.errorDetails ? { errorDetails: responseBody.errorDetails } : {}), ts: clock() }));
+      return settledResult;
+    });
   };
 
   return { provider: 'anthropic', api: 'anthropic-messages', model, url, supportsVision: true, estimateRequest, complete, async continueWithToolResults({ previousModel = null, baseMessages = [], toolCalls = [], toolResults = [], preparedMessages = null, ...options } = {}) {
@@ -630,15 +637,21 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
       if (imageMessage) transcript.push(imageMessage);
     }
     const result = await complete({ ...options, messages: transcript });
-    if (result.ok || !preservedBlocks || !anthropicErrorLooksLikeSignedThinking(result)) return result;
-    await options.traceLogger?.model?.({ stage: 'model-request-repair', requestId: result.requestId, provider: 'anthropic', api: 'anthropic-messages', model, reason: 'signed_thinking_rejected', error: result.error, ts: clock() });
-    const repairedTranscript = transcript.map((message) => {
-      if (!sameProtocolCallIdentity(message, toolCalls) || !Array.isArray(message.content)) return message;
-      return { ...message, content: message.content.filter((part) => part?.type !== 'thinking' && part?.type !== 'redacted_thinking') };
+    if (result.ok || result.recoveryFailure || !preservedBlocks || !anthropicErrorLooksLikeSignedThinking(result)) return result;
+    // Any failure during repair (including a denied physical dispatch) keeps
+    // the original rejected provider receipt. Never repair again after a local
+    // failure; the common gate owns the physical request budget.
+    return settleProviderDiagnostics(options.traceLogger, async (recordResult) => {
+      recordResult(result);
+      await providerDiagnostic(() => options.traceLogger?.model?.({ stage: 'model-request-repair', requestId: result.requestId, provider: 'anthropic', api: 'anthropic-messages', model, reason: 'signed_thinking_rejected', error: result.error, ts: clock() }));
+      const repairedTranscript = transcript.map((message) => {
+        if (!sameProtocolCallIdentity(message, toolCalls) || !Array.isArray(message.content)) return message;
+        return { ...message, content: message.content.filter((part) => part?.type !== 'thinking' && part?.type !== 'redacted_thinking') };
+      });
+      const repaired = await complete({ ...options, messages: repairedTranscript });
+      if (repaired && typeof repaired === 'object') repaired.repairedContinuation = { reason: 'signed_thinking_rejected', originalRequestId: result.requestId };
+      return repaired;
     });
-    const repaired = await complete({ ...options, messages: repairedTranscript });
-    if (repaired && typeof repaired === 'object') repaired.repairedContinuation = { reason: 'signed_thinking_rejected', originalRequestId: result.requestId };
-    return repaired;
   } };
 }
 

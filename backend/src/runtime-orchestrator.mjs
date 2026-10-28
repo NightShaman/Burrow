@@ -5,6 +5,8 @@ import path from 'node:path';
 import { nativeToolSchemas, parseActionProposal } from './action-proposal.mjs';
 import { reviewProposalActions } from './action-safety.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
+import { createModelRequestRecovery } from './model-request-recovery.mjs';
+import { modelFailureResult } from './model-failure.mjs';
 import { executeReviewedProposalActions } from './proposal-executor.mjs';
 import { createRuntimeTurnResult, assertRuntimeTurnContract } from './chat-runtime-contracts.mjs';
 import { normalizeExecutionPolicyInput } from './execution-policy.mjs';
@@ -261,6 +263,8 @@ export async function runPlainModelTurn({
   onThoughtDelta = null,
   onContextUsage = null,
   liveSteering = null,
+  beforeModelAttempt = null,
+  modelRecoveryOptions = {},
 } = {}) {
   if (!prompt?.text) throw new Error('prompt.text is required');
   if (!shouldCallModel) {
@@ -274,6 +278,8 @@ export async function runPlainModelTurn({
   }
 
   let model = null;
+  let recoveryAdapter = null;
+  let modelCall = 0;
   // Defined outside the provider-call setup so failed/no-callback turns still
   // return a harmless null meter value.
   let peakContextUsage = null;
@@ -312,7 +318,11 @@ export async function runPlainModelTurn({
   const completedToolCallHistory = [];
   let outputOnlyArtifact = false;
   try {
-    const adapter = modelAdapter || createModelAdapter({ config: modelConfig || {} });
+    const adapter = recoveryAdapter = createModelRequestRecovery(modelAdapter || createModelAdapter({ config: modelConfig || {} }), {
+      ...modelRecoveryOptions,
+      beforeAttempt: beforeModelAttempt,
+      onAttempt: () => ++modelCall,
+    });
     outputOnlyArtifact = ['image', 'audio'].includes(adapter.outputKind);
     // Output-only generators are not conversational agents. Their paid request
     // receives only the current user instruction plus adapter-owned generation
@@ -349,9 +359,8 @@ export async function runPlainModelTurn({
       chatToolLoop,
       promptEvidenceResults,
     });
-    let modelCall = 0;
     const withModelCall = (callback) => typeof callback === 'function'
-      ? async (event) => callback({ ...event, modelCall })
+      ? async (event) => callback({ ...event, modelCall: event.modelCall ?? modelCall })
       : null;
     const emitTextDelta = withModelCall(onTextDelta);
     const emitThoughtDelta = withModelCall(onThoughtDelta);
@@ -365,7 +374,6 @@ export async function runPlainModelTurn({
           await onContextUsage(usage);
         }
       : null;
-    modelCall += 1;
     model = await adapter.complete({ sessionId, conversationId, previousModel: model, prompt: modelInput.prompt || (modelInput.vision ? undefined : prompt.text), messages: modelInput.messages || undefined, traceLogger, signal: abortSignal || undefined, ...(!outputOnlyArtifact && emitTextDelta ? { onTextDelta: emitTextDelta } : {}), ...(!outputOnlyArtifact && emitThoughtDelta ? { onThoughtDelta: emitThoughtDelta } : {}), ...(!outputOnlyArtifact && emitContextUsage ? { onContextUsage: emitContextUsage, modelCall } : {}), ...toolArgs });
     nativeTranscript = modelInput.messages || [{ role: 'user', content: modelInput.prompt || prompt.text }];
     await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-after-model-response', {
@@ -411,6 +419,8 @@ export async function runPlainModelTurn({
       // retained state from compact receipts before the native continuation, then
       // release both the executor envelope and raw result graph immediately after
       // the adapter has serialized the paired provider continuation.
+      await beforeModelAttempt?.();
+      abortSignal?.throwIfAborted();
       let executed = await executeChatToolCalls({ model, workspaceRoot, rootDir, dataRoot, sessionId, conversationId, iteration, traceLogger, executionPolicy, modelConfig, executionContext, abortSignal });
       let rawToolResults = executed.callResults || [];
       const nativeToolCalls = executed.toolCalls;
@@ -520,7 +530,6 @@ export async function runPlainModelTurn({
       await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-after-continuation-prompt-build', { iteration, followupPrompt: useNativeContinuation ? '[provider-native tool continuation]' : followupPrompt, followupInput, chatToolLoop, promptEvidenceResults });
       if (abortSignal?.aborted) throw abortSignal.reason || new Error('agent_stopped');
       await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-before-model-call', { iteration, followupInput, chatToolLoop, promptEvidenceResults });
-      modelCall += 1;
       const nativeContinuation = useNativeContinuation
         ? prepareNativeToolContinuation({
             baseMessages: normalizeProviderMessages(nativeTranscript),
@@ -618,7 +627,6 @@ export async function runPlainModelTurn({
       });
       const finalInput = modelInputForFollowupPrompt(finalPrompt, modelInput);
       if (abortSignal?.aborted) throw abortSignal.reason || new Error('agent_stopped');
-      modelCall += 1;
       model = await adapter.complete({ sessionId, conversationId, previousModel: model,
         prompt: finalInput.prompt || undefined,
         messages: finalInput.messages || undefined,
@@ -639,7 +647,6 @@ export async function runPlainModelTurn({
     const assistantPresent = preceding?.at(-1)?.role === 'assistant' && messageTextContent(preceding.at(-1).content) === (model.choice?.text || '');
     nativeTranscript = [...(preceding || []), ...(!assistantPresent ? [{ role: 'assistant', content: model.choice?.text || '' }] : []), ...finalSteering];
     modelInput = { ...modelInput, messages: nativeTranscript, prompt: null };
-    modelCall += 1;
     model = await adapter.complete({ sessionId, conversationId, previousModel: model, messages: nativeTranscript, ...toolArgs, traceLogger, signal: abortSignal || undefined,
       ...(emitTextDelta ? { onTextDelta: emitTextDelta } : {}), ...(emitThoughtDelta ? { onThoughtDelta: emitThoughtDelta } : {}),
       ...(emitContextUsage ? { onContextUsage: emitContextUsage, modelCall } : {}) });
@@ -648,7 +655,9 @@ export async function runPlainModelTurn({
     }
 
   } catch (error) {
-    model = { ok: false, error: String(error?.message || error), usage: null, choice: { text: '' }, ...(abortSignal?.aborted || error?.name === 'AbortError' ? { cancelled: true } : {}) };
+    model = modelFailureResult(error, { signal: abortSignal });
+    const modelRecovery = recoveryAdapter?.recoverySummary();
+    if (modelRecovery) model.modelRecovery = modelRecovery;
   }
 
   // Some adapters return a failed envelope instead of throwing on abort. Do

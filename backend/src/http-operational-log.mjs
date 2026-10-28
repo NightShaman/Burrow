@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { safeOperationalError } from './runtime-server-log.mjs';
 import { modelSettingsFailureDiagnostic } from './model-settings-store.mjs';
+import { modelRecoveryProgress, projectModelRecoveryMetadata } from './model-recovery-projection.mjs';
 
 const responses = new WeakMap();
+const recoveryTransitions = new WeakMap();
 const id = value => typeof value === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(value) ? value : undefined;
 const routine = new Set(['cancelled', 'canceled', 'superseded', 'stopped', 'aborted']);
 const routeSegments = new Set('api auth oidc login callback logout health discovery session validate settings ui-auth chat inputs cancel resume steer steering runs active agents profiles sessions context context-status diagnostics inventory postgres brains memories embedding-jobs forge jobs mods pending status metrics provider-pools traces archive calendar workbench task-board projects tasks memory'.split(' '));
@@ -100,16 +102,20 @@ function taskExecutionFailure(error) {
   } };
 }
 
-export function recordHttpFailure(res, { error, status = res.statusCode, event = 'request_error', errorCode = 'http_request_failed', classification = 'exception', resultStatus, upstreamStatus, failureCategory } = {}) {
+export function recordHttpFailure(res, { error, status = res.statusCode, event = 'request_error', errorCode = 'http_request_failed', classification = 'exception', resultStatus, upstreamStatus, failureCategory, modelFailure, modelRecovery } = {}) {
   const state = responses.get(res);
   if (!state || suppressed(state) || (status >= 400 && status < 500)) return;
   state.logged = true;
+  const recoveryMetadata = projectModelRecoveryMetadata({ modelFailure, modelRecovery });
+  const lastRecovery = recoveryMetadata.modelRecovery?.requests.at(-1);
   emit(state.logger, event, {
     ...fields(state), ...taskExecutionFailure(error), status: res.headersSent ? res.statusCode : status,
     ...(Number.isInteger(resultStatus) && resultStatus >= 400 && resultStatus <= 599 ? { resultStatus }
       : res.headersSent && status !== res.statusCode ? { resultStatus: status } : {}),
     ...(Number.isInteger(upstreamStatus) && upstreamStatus >= 100 && upstreamStatus <= 599 ? { upstreamStatus } : {}),
-    ...(RESULT_CODES.has(failureCategory) || (failureCategory && modelSettingsFailureDiagnostic({ errorCode: failureCategory }).errorCode === failureCategory) ? { failureCategory } : {}),
+    ...(RESULT_CODES.has(failureCategory) || (failureCategory && modelSettingsFailureDiagnostic({ errorCode: failureCategory }).errorCode === failureCategory) || (failureCategory && failureCategory === recoveryMetadata.modelFailure?.code) ? { failureCategory } : {}),
+    ...(recoveryMetadata.modelFailure ? { modelFailureOrigin: recoveryMetadata.modelFailure.origin, modelFailureCode: recoveryMetadata.modelFailure.code } : {}),
+    ...(lastRecovery?.failover ? { failoverCode: lastRecovery.failover.code, failoverAction: lastRecovery.failover.action } : {}),
     classification, ...(error === undefined ? { errorCode } : { error: safeOperationalError(error, errorCode) }),
   }, { level: 'error', component: event === 'run_failed' ? 'run' : 'http' });
 }
@@ -121,19 +127,23 @@ export function observeHttpResult(res, status, body, { event } = {}) {
   if (!state || !body || typeof body !== 'object') return;
   const result = body.result && typeof body.result === 'object' ? body.result : body;
   correlateHttpRun(res, { runId: result.runId, sessionId: result.sessionId, agentId: result.agentId });
+  const metadata = projectModelRecoveryMetadata(result);
+  const requests = metadata.modelRecovery?.requests || [];
+  const original = requests.findLast(request => request.originalFailure?.origin === 'upstream' && Number.isInteger(request.originalFailure.status))?.originalFailure;
+  const failureStatus = original?.status ?? (metadata.modelFailure?.origin === 'upstream' ? metadata.modelFailure.status : undefined);
   const diagnostic = resultDiagnostic(body, result, status >= 500 ? 'http_response_failed' : 'operation_result_failed');
   if (status >= 500) return recordHttpFailure(res, {
     status, errorCode: 'http_response_failed', classification: 'http_5xx', event,
-    error: diagnostic, failureCategory: diagnostic?.errorCode, upstreamStatus: diagnostic?.upstreamStatus,
+    error: diagnostic, failureCategory: metadata.modelFailure?.code ?? diagnostic?.errorCode, upstreamStatus: failureStatus ?? diagnostic?.upstreamStatus, ...metadata,
   });
-  if (status >= 400 || body.ok !== false || state.cancelled) return;
+  if (status >= 400 || body.ok !== false || state.cancelled || metadata.modelFailure?.origin === 'cancelled') return;
   if (routine.has(result.decision) || routine.has(result.status)) return;
   const resultStatus = Number(body.status ?? result.status);
   if (resultStatus >= 400 && resultStatus < 500) return;
-  const upstreamStatus = result.model?.status ?? diagnostic?.upstreamStatus;
+  const upstreamStatus = failureStatus ?? result.model?.status ?? diagnostic?.upstreamStatus;
   recordHttpFailure(res, {
     status, event: event || (state.correlation.runId ? 'run_failed' : 'request_error'),
-    errorCode: 'operation_result_failed', error: diagnostic, failureCategory: diagnostic?.errorCode,
+    errorCode: 'operation_result_failed', error: diagnostic, failureCategory: metadata.modelFailure?.code ?? diagnostic?.errorCode, ...metadata,
     ...(Number.isInteger(resultStatus) && resultStatus >= 500 && resultStatus <= 599 ? { resultStatus } : {}),
     ...(Number.isInteger(upstreamStatus) ? { upstreamStatus } : {}),
     classification: resultStatus >= 500 && resultStatus <= 599 ? 'result_5xx'
@@ -143,7 +153,49 @@ export function observeHttpResult(res, status, body, { event } = {}) {
   });
 }
 
+/** Emit transition diagnostics from safe recovery facts only, including the
+ * original upstream status even when a later physical attempt succeeds. Use
+ * phase/failureCode rather than the logger's reserved OAuth state/code keys. */
+export function observeModelRecovery(logger, traceRecord, context = {}) {
+  const recovery = modelRecoveryProgress(traceRecord)?.data;
+  if (!recovery || !logger || !['object', 'function'].includes(typeof logger)) return;
+  let transitions = recoveryTransitions.get(logger);
+  if (!transitions) { transitions = new Map(); recoveryTransitions.set(logger, transitions); }
+  const correlation = {};
+  for (const key of ['requestId', 'runId', 'sessionId', 'agentId', 'taskId', 'traceId', 'spanId']) {
+    const value = id(context[key]);
+    if (value) correlation[key] = value;
+  }
+  const key = `${correlation.runId || ''}:${recovery.logicalRequestId || ''}:${recovery.method || ''}`;
+  const signature = JSON.stringify(recovery);
+  if (transitions.get(key) === signature) return;
+  if (transitions.size >= 256 && !transitions.has(key)) transitions.delete(transitions.keys().next().value);
+  transitions.set(key, signature);
+  const original = recovery.originalFailure, last = recovery.lastFailure;
+  const upstreamStatus = (original?.origin === 'upstream' ? original.status : undefined)
+    ?? (last?.origin === 'upstream' ? last.status : undefined);
+  emit(logger, 'model_recovery', {
+    ...correlation,
+    phase: recovery.state,
+    ...(recovery.logicalRequestId ? { logicalRequestId: recovery.logicalRequestId } : {}),
+    ...(recovery.method ? { modelMethod: recovery.method } : {}),
+    ...Object.fromEntries(['attempt', 'maxAttempts', 'delayMs', 'retryCount'].filter(key => recovery[key] !== undefined).map(key => [key, recovery[key]])),
+    ...(original ? { originalFailureOrigin: original.origin, originalFailureCode: original.code } : {}),
+    ...(last ? { failureOrigin: last.origin, failureCategory: last.code, retryable: last.retryable } : {}),
+    ...(upstreamStatus === undefined ? {} : { upstreamStatus }),
+    ...(last?.origin === 'upstream' && last.status !== undefined && last.status !== upstreamStatus ? { lastUpstreamStatus: last.status } : {}),
+    ...(recovery.failover ? { failoverCode: recovery.failover.code, failoverAction: recovery.failover.action } : {}),
+    ...(recovery.partialOutput ? { partialOutput: recovery.partialOutput } : {}),
+  }, { level: ['resumed', 'cancelled'].includes(recovery.state) ? 'info' : 'warn', component: 'model' });
+}
+
 export function observeHttpRunEvent(res, event, { status = res.statusCode } = {}) {
+  if (event?.type === 'model.recovery' || event?.type === 'model-recovery') {
+    correlateHttpRun(res, event);
+    const state = responses.get(res);
+    if (state) observeModelRecovery(state.logger, event, { ...fields(state), ...event });
+    return;
+  }
   if (!['run.failed', 'run.completed'].includes(event?.type)) return;
   correlateHttpRun(res, event);
   const response = event.data?.response;

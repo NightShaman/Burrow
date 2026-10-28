@@ -1543,7 +1543,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "Page size (1–200, default 100).",
+            "description": "Page size (1\u2013200, default 100).",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -9833,6 +9833,12 @@
               "null"
             ],
             "additionalProperties": true
+          },
+          "modelFailure": {
+            "$ref": "#/components/schemas/ModelFailure"
+          },
+          "modelRecovery": {
+            "$ref": "#/components/schemas/ModelRecovery"
           }
         },
         "additionalProperties": true
@@ -9899,6 +9905,12 @@
               "null"
             ],
             "additionalProperties": true
+          },
+          "modelFailure": {
+            "$ref": "#/components/schemas/ModelFailure"
+          },
+          "modelRecovery": {
+            "$ref": "#/components/schemas/ModelRecovery"
           }
         },
         "additionalProperties": true
@@ -9949,7 +9961,8 @@
             "$ref": "#/components/schemas/JsonObject"
           }
         },
-        "additionalProperties": true
+        "additionalProperties": true,
+        "description": "NDJSON events include nonterminal model.recovery activity; see chat-stream-contract.md. Only run.completed/run.failed/run.cancelled/run.superseded are terminal."
       },
       "Error": {
         "type": "object",
@@ -15250,6 +15263,12 @@
           "blockers": {
             "type": "array",
             "items": {}
+          },
+          "modelFailure": {
+            "$ref": "#/components/schemas/ModelFailure"
+          },
+          "modelRecovery": {
+            "$ref": "#/components/schemas/ModelRecovery"
           }
         },
         "additionalProperties": false
@@ -15455,6 +15474,162 @@
               "$ref": "#/components/schemas/ChatInput"
             },
             "description": "All held inputs transitioned by this resume, in accepted order."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ModelFailure": {
+        "type": "object",
+        "description": "Curated producer-proven failure origin. Not provider/error prose. retryable denotes eligibility, not permission to replay tools.",
+        "required": [
+          "origin",
+          "code",
+          "retryable"
+        ],
+        "properties": {
+          "origin": {
+            "type": "string",
+            "enum": [
+              "upstream",
+              "burrow",
+              "unknown",
+              "cancelled"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599
+          }
+        },
+        "additionalProperties": false
+      },
+      "ModelRecoveryRecord": {
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "recovering",
+              "resumed",
+              "exhausted",
+              "blocked",
+              "requires_investigation",
+              "cancelled"
+            ]
+          },
+          "logicalRequestId": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "continueWithToolResults"
+            ]
+          },
+          "attempt": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "maxAttempts": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "delayMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3600000
+          },
+          "retryCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "originalFailure": {
+            "$ref": "#/components/schemas/ModelFailure"
+          },
+          "lastFailure": {
+            "$ref": "#/components/schemas/ModelFailure"
+          },
+          "failover": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "blocked",
+                  "retry",
+                  "requires_investigation",
+                  "cancelled"
+                ]
+              }
+            },
+            "required": [
+              "code",
+              "action"
+            ],
+            "additionalProperties": false
+          },
+          "partialOutput": {
+            "type": "object",
+            "properties": {
+              "textChars": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000000
+              },
+              "thoughtChars": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000000
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "ModelRecovery": {
+        "type": "object",
+        "required": [
+          "version",
+          "retryCount",
+          "requests"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer",
+            "const": 1
+          },
+          "retryCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "requests": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "$ref": "#/components/schemas/ModelRecoveryRecord"
+            }
           }
         },
         "additionalProperties": false

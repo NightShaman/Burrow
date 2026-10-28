@@ -6,6 +6,9 @@ import { buildConversationContext } from './conversation-context.mjs';
 import { activeConversationLimits } from './context-preparation.mjs';
 import { resolveContextConfig, resolveModelConfig, resolveRuntimeStateConfig, resolveRuntimeTracePath } from './config.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
+import { createModelRequestRecovery } from './model-request-recovery.mjs';
+import { modelFailureResult } from './model-failure.mjs';
+import { projectModelRecoveryMetadata } from './model-recovery-projection.mjs';
 import { inspectAssembledPromptBudget } from './prompt-budget.mjs';
 import { createTraceLogger } from './trace-logger.mjs';
 import { redactProtectedText, redactStructuredJsonText, redactValue } from './redaction.mjs';
@@ -260,7 +263,7 @@ function buildMessages(snapshot, question, attachments = []) {
 }
 
 /** One independent, tool-free generation. Persistence of chat inputs is owned by the caller. */
-export async function answerSideQuestion({ job, stores, rootDir, agentRuntime, signal, onTraceRecord, onModelTextDelta, onModelThoughtDelta, onModelContextUsage, telemetry, modelAdapter = null, resolveModel = resolveModelConfig, makeAdapter = createModelAdapter } = {}) {
+export async function answerSideQuestion({ job, stores, rootDir, agentRuntime, signal, onTraceRecord, onModelTextDelta, onModelThoughtDelta, onModelContextUsage, telemetry, modelAdapter = null, resolveModel = resolveModelConfig, makeAdapter = createModelAdapter, modelRecoveryOptions = {} } = {}) {
   const agentId = job?.agentId || agentRuntime?.agentId;
   const sessionId = job?.sessionId;
   const runId = job?.runId;
@@ -274,9 +277,13 @@ export async function answerSideQuestion({ job, stores, rootDir, agentRuntime, s
   };
   const logger = createTraceLogger({ rootDir: traceRoot, runId, sessionId, onRecord: observe });
   try { telemetry?.startRun?.({ runId, sessionId, agentId, source: 'side_question' }); } catch {}
-  let config = null;
-  let result;
-  const fail = (code, statusCode, decision = 'failed') => ({ ok: false, answerText: null, decision, blockers: [code], error: code, statusCode, runId, sessionId, traceDir: logger.traceDir });
+  let config = null, response = null, recoveryAdapter = null;
+  let result, modelCall = 0;
+  const recoveryMetadata = () => projectModelRecoveryMetadata({
+    modelFailure: response?.modelFailure,
+    modelRecovery: recoveryAdapter?.recoverySummary(),
+  });
+  const fail = (code, statusCode, decision = 'failed') => ({ ok: false, answerText: null, decision, blockers: [code], error: code, statusCode, runId, sessionId, traceDir: logger.traceDir, ...recoveryMetadata() });
   try {
     await logger.event('run-started', { lane: 'side_question', agentId, originRunId: job.snapshot?.originRunId || job.targetRunId || null,
       snapshotId: job.snapshot?.id || null, snapshotCapturedAt: job.snapshot?.capturedAt || null, generation: job.snapshot?.generation ?? null });
@@ -290,7 +297,12 @@ export async function answerSideQuestion({ job, stores, rootDir, agentRuntime, s
     config = await resolveModel({ agentId, stores, abortSignal: signal });
     if (!config?.model && !modelAdapter) throw errorWithStatus('side_question_model_not_selected', 400);
     if (signal?.aborted) throw errorWithStatus('side_question_cancelled', 499);
-    const adapter = modelAdapter || makeAdapter({ config });
+    const originalAdapter = modelAdapter || makeAdapter({ config });
+    if (typeof originalAdapter?.complete !== 'function') throw new Error('side_question_model_adapter_invalid');
+    const adapter = recoveryAdapter = createModelRequestRecovery(originalAdapter, {
+      ...modelRecoveryOptions,
+      onAttempt: () => ++modelCall,
+    });
     if (['image', 'audio'].includes(adapter.outputKind)) throw errorWithStatus('side_question_conversational_model_required', 400);
     const baseMessages = buildMessages(snapshot, job.message, job.attachments || []);
     const prepared = modelInputForPlainTurn({ promptMessages: baseMessages, attachments: job.attachments || [], modelConfig: config, modelAdapter: adapter });
@@ -298,17 +310,24 @@ export async function answerSideQuestion({ job, stores, rootDir, agentRuntime, s
     const budget = inspectAssembledPromptBudget({ prompt: { modelMessages: messages }, modelConfig: config, tools: [] });
     await logger.event('side-question-prompt-budget', { lane: 'side_question', ...budget });
     if (budget.pressure === 'blocked') throw errorWithStatus('side_question_context_over_budget', 413);
-    if (typeof adapter?.complete !== 'function') throw new Error('side_question_model_adapter_invalid');
-    const response = await adapter.complete({ messages, tools: [], traceLogger: safeAdapterLogger(logger, config), signal,
-      onTextDelta: onModelTextDelta, onThoughtDelta: onModelThoughtDelta, onContextUsage: onModelContextUsage, modelCall: 1 });
-    if (signal?.aborted) throw errorWithStatus('side_question_cancelled', 499);
+    try {
+      response = await adapter.complete({ messages, tools: [], traceLogger: safeAdapterLogger(logger, config), signal,
+        onTextDelta: onModelTextDelta, onThoughtDelta: onModelThoughtDelta,
+        onContextUsage: onModelContextUsage ? event => onModelContextUsage({ ...event, modelCall }) : undefined });
+    } catch (error) {
+      response = modelFailureResult(error, { signal });
+    }
+    if (signal?.aborted || response?.cancelled) throw errorWithStatus('side_question_cancelled', 499);
+    // Keep the existing generic code for thrown adapter defects. The original
+    // value stays internal; only classified metadata crosses this boundary.
+    if (!response?.ok && Object.hasOwn(response || {}, 'cause')) throw errorWithStatus('side_question_failed', 500);
     if (!response?.ok) throw errorWithStatus('side_question_model_failed', 502);
     if (response.choice?.toolCalls?.length || response.choice?.tool_calls?.length || response.toolCalls?.length || response.tool_calls?.length) throw errorWithStatus('side_question_tool_call_rejected', 502);
     const answerText = typeof response.choice?.text === 'string' ? response.choice.text.trim() : '';
     if (!answerText) throw errorWithStatus('side_question_empty_answer', 502);
-    result = { ok: true, answerText, decision: 'answered', blockers: [], runId, sessionId, traceDir: logger.traceDir };
+    result = { ok: true, answerText, decision: 'answered', blockers: [], runId, sessionId, traceDir: logger.traceDir, ...recoveryMetadata() };
   } catch (error) {
-    const cancelled = signal?.aborted || error?.message === 'side_question_cancelled';
+    const cancelled = signal?.aborted || response?.cancelled || error?.message === 'side_question_cancelled';
     const permitted = new Set(['side_question_snapshot_required', 'side_question_snapshot_target_mismatch', 'side_question_snapshot_generation_mismatch', 'side_question_message_required', 'side_question_attachments_unsupported', 'side_question_model_not_selected', 'side_question_context_over_budget', 'side_question_model_failed', 'side_question_tool_call_rejected', 'side_question_empty_answer', 'side_question_conversational_model_required']);
     const code = cancelled ? 'side_question_cancelled' : permitted.has(error?.message) ? error.message : 'side_question_failed';
     result = fail(code, cancelled ? 499 : permitted.has(code) ? error.statusCode || 500 : 500, cancelled ? 'cancelled' : 'failed');
@@ -319,7 +338,7 @@ export async function answerSideQuestion({ job, stores, rootDir, agentRuntime, s
     // terminal diagnostics. The full answer remains the durable result artifact.
     const artifact = { ...result, ...(result.answerText ? { answerText: redactProtectedText(result.answerText, protectedValues(config)) } : {}) };
     await logger.artifact('side-question-result.json', JSON.stringify(artifact, null, 2));
-    await logger.event(result.ok ? 'run-completed' : result.decision === 'cancelled' ? 'run-cancelled' : 'run-failed', { lane: 'side_question', originRunId: job.snapshot?.originRunId || null, ok: result.ok, decision: result.decision, blockers: result.blockers });
+    await logger.event(result.ok ? 'run-completed' : result.decision === 'cancelled' ? 'run-cancelled' : 'run-failed', { lane: 'side_question', originRunId: job.snapshot?.originRunId || null, ok: result.ok, decision: result.decision, blockers: result.blockers, ...recoveryMetadata() });
     await logger.terminal();
   } catch {
     // A terminal marker must not claim success after a failed trace flush/write.

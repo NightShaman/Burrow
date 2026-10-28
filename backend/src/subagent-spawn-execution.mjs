@@ -1,3 +1,4 @@
+import { projectModelRecoveryMetadata } from './model-recovery-projection.mjs';
 import { createHash } from 'node:crypto';
 import { withTraceGuard } from './trace-guard.mjs';
 import { promises as fs } from 'node:fs';
@@ -370,6 +371,7 @@ export async function executeSpawnSubagentTool({
   const child = childFrom({ parentSessionId, parentConversationId, parentRunId, childSessionId, receiptRefs: receiptRef ? [receiptRef] : [], dataRoot });
   const result = {
     ok: status === 'succeeded',
+    ...projectModelRecoveryMetadata(childResult),
     summary: childResult.summary || (status === 'succeeded' ? 'Minion completed.' : 'Minion failed.'),
     blockers: childResult.blockers || [],
     warnings: [...targetWarnings, ...(childResult.warnings || [])],

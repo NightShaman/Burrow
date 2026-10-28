@@ -1,5 +1,7 @@
 import { DEFAULT_MAX_RESPONSE_BYTES, MAX_MODEL_TEXT_CHARS, MAX_SSE_CARRY_CHARS, MAX_SSE_EVENT_CHARS, boundedText, normalizeToolCall, jsonText } from './adapter-primitives.mjs';
 import { isGoogleOpenAICompatible } from './google-wire.mjs';
+import { readProviderChunk } from './provider-fetch.mjs';
+import { markProviderEnvelopeFailure, markProviderStreamTruncated } from '../model-failure.mjs';
 function trimSlash(value) { return String(value || '').replace(/\/+$/, ''); }
 
 export function openAIEnvelopeError(data, mode) {
@@ -294,6 +296,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   let finalData = null;
   let streamError = null;
   let streamErrorDetails = null;
+  let providerErrorEnvelope = null;
   let finishReason = null;
   let terminalSeen = false;
   let terminalEventSeen = false;
@@ -373,6 +376,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
         const responseError = event.response?.error && typeof event.response.error === 'object' ? event.response.error : {};
         const eventError = event.error && typeof event.error === 'object' ? event.error : {};
         const providerError = Object.keys(eventError).length ? eventError : responseError;
+        providerErrorEnvelope = providerError;
         const fallbackMessage = typeof event.error === 'string' ? event.error : null;
         streamError = boundedText(providerError.message || event.message || fallbackMessage || 'model_stream_failed', 500);
         streamErrorDetails = {
@@ -390,6 +394,9 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
     // Providers may send a terminal usage-only event with choices: []. Keep
     // its bounded telemetry before handling the normal choice path.
     if (event?.usage && typeof event.usage === 'object') usage = compactUsage(event.usage) || usage;
+    if (event?.error && typeof event.error === 'object') {
+      providerErrorEnvelope = event.error; streamError = boundedText(event.error.message || 'model_stream_failed', 500); return;
+    }
     const choice = event?.choices?.[0];
     if (!choice) return;
     if (typeof choice.delta?.content === 'string') await emit(choice.delta.content);
@@ -405,7 +412,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   };
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readProviderChunk(reader);
       if (done) break;
       bytes += value?.byteLength ?? value?.length ?? 0;
       buffer += decoder.decode(value, { stream: true });
@@ -460,8 +467,15 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   } finally {
     reader.releaseLock?.();
   }
-  if (!streamError && (!terminalSeen || (mode !== 'openai-responses' && !finishReason))) streamError = 'model_stream_incomplete';
-  if (streamError) return { ok: false, bytes, error: streamError, errorDetails: streamErrorDetails, data: null, streamedTextChars: text.length };
+  if (!streamError && (!terminalSeen || (mode !== 'openai-responses' && !finishReason))) {
+    // A malformed explicit terminal is not the same as a truncated transport.
+    if (!terminalEventSeen) return markProviderStreamTruncated({ ok: false, bytes, error: 'model_stream_incomplete', errorDetails: streamErrorDetails, data: null, streamedTextChars: text.length });
+    streamError = 'model_stream_incomplete';
+  }
+  if (streamError) {
+    const failure = { ok: false, bytes, error: streamError, errorDetails: streamErrorDetails, data: null, streamedTextChars: text.length };
+    return providerErrorEnvelope ? markProviderEnvelopeFailure(failure, providerErrorEnvelope) : failure;
+  }
   const data = mode === 'openai-responses'
     ? (finalData ? { ...finalData, ...(text ? { output_text: text } : {}), ...(responseToolCalls.length ? { output: responseToolCalls.filter(Boolean) } : finalData.output ? { output: finalData.output } : {}) } : { status: streamError ? 'failed' : 'completed', output_text: text, output: responseToolCalls.filter(Boolean) })
     : { choices: [{ index: 0, finish_reason: finishReason, message: { role: 'assistant', content: text, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) } }], usage };

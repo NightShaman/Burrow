@@ -17,6 +17,7 @@ import { SkillGitSync } from '../src/skill-git-sync.mjs';
 import { createSkillSourceRoutes } from './ui/skill-source-routes.mjs';
 import { performance } from 'node:perf_hooks';
 import { createChatStreamDelta } from '../src/chat-stream-delta.mjs';
+import { applyModelRecoveryProgress, modelRecoveryProgress } from '../src/model-recovery-projection.mjs';
 import { beginSessionAdmissionSupersession, finishSessionAdmissionSupersession, serializeSessionAdmission } from '../src/session-admission.mjs';
 import { createBrainRoutes } from './ui/brain-routes.mjs';
 import { createArchiveService } from './ui/archive-service.mjs';
@@ -103,7 +104,7 @@ import { diagnoseMcpConnection as diagnoseMcpConnectionRuntime, discoverMcpTools
 import { createRuntimeMetricsCollector } from '../src/runtime-metrics.mjs';
 import { createRuntimeServerLogger, safeOperationalError } from '../src/runtime-server-log.mjs';
 import { operationalEvent } from '../src/operational-log.mjs';
-import { instrumentHttpResponse, correlateHttpRun, recordHttpFailure, observeHttpResult, observeHttpRunEvent, createCatalogRefreshDiagnostics } from '../src/http-operational-log.mjs';
+import { instrumentHttpResponse, correlateHttpRun, recordHttpFailure, observeHttpResult, observeHttpRunEvent, observeModelRecovery, createCatalogRefreshDiagnostics } from '../src/http-operational-log.mjs';
 import { logAuthFailure } from '../src/ui-auth-diagnostics.mjs';
 import { latestProviderRequest } from '../src/provider-request-inspection.mjs';
 import { chatCommandHelpText, chatCommandResponse, parseChatCommand } from '../src/chat-commands.mjs';
@@ -445,6 +446,8 @@ async function executeBoardTask(taskId) {
   sessionContinuityHeads.set(headKey, record);
   activeChatRuns.set(activeChatRunKey(agentRuntime.agentId, runId), record);
   if (lifecycle?.stopped) controller.abort(lifecycle.signal.reason);
+  const emitTextDelta = createChatStreamDelta({ record, type: 'assistant.delta', runId, sessionId, write: () => {} });
+  const emitThoughtDelta = createChatStreamDelta({ record, type: 'assistant.thought', runId, sessionId, write: () => {} });
   const runTaskTurn = () => runChatTurnFromBody({
     body: { message: record.latestUserMessage, sessionId, runId, abortSignal: controller.signal },
     rootDir: projectRoot,
@@ -456,16 +459,18 @@ async function executeBoardTask(taskId) {
     cancellationGraceMs: RUN_CANCELLATION_GRACE_MS,
     onCancellationDeadline: () => retireCancelledRun(record),
     registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerRuntimeActiveRun({ agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
-    onModelTextDelta: createChatStreamDelta({ record, type: 'assistant.delta', runId, sessionId, write: () => {} }),
-    onModelThoughtDelta: createChatStreamDelta({ record, type: 'assistant.thought', runId, sessionId, write: () => {} }),
-    onSteeringReady: () => { record.steeringReady = true; },
+    onModelTextDelta: (delta) => { if (controller.signal.aborted || record.phase === 'cancelling') { record.phase = 'cancelling'; return; } emitTextDelta(delta); },
+    onModelThoughtDelta: (delta) => { if (controller.signal.aborted || record.phase === 'cancelling') { record.phase = 'cancelling'; return; } emitThoughtDelta(delta); },
+    onSteeringReady: () => { record.steeringReady = !controller.signal.aborted && record.phase !== 'cancelling'; },
     onTraceRecord: (traceRecord) => {
       const progress = publicChatProgress(traceRecord);
       if (!progress) return;
+      if (progress.type === 'model.recovery') observeModelRecovery(serverLogger, traceRecord, record);
       record.progress = [...record.progress, { ...progress, runId, sessionId, ts: traceRecord.ts || new Date().toISOString() }].slice(-50);
+      if (applyModelRecoveryProgress(record, progress)) return;
+      if (controller.signal.aborted || record.phase === 'cancelling') { record.phase = 'cancelling'; return; }
       if (progress.type === 'context.compaction.started') record.phase = 'compacting';
-      if (['context.compaction.completed', 'context.compaction.failed'].includes(progress.type)) record.phase = 'thinking';
-      if (progress.type === 'model.started') record.phase = 'thinking';
+      if (['context.compaction.completed', 'context.compaction.failed', 'model.started'].includes(progress.type)) record.phase = 'thinking';
       if (progress.type === 'model.completed') record.phase = 'streaming';
     },
     onModelContextUsage: async (usage) => {
@@ -501,7 +506,7 @@ function updateContextUsageHighWater(previous, usage) {
 }
 
 function registerRuntimeActiveRun(options) {
-  const lifecycle = registerActiveAgentRun(activeChatRuns, options);
+  const lifecycle = registerActiveAgentRun(activeChatRuns, { ...options, logger: typeof serverLogger === 'undefined' ? null : serverLogger });
   lifecycle.cancellationGraceMs = RUN_CANCELLATION_GRACE_MS;
   lifecycle.onCancellationDeadline = options.lane === 'side_question' ? null : () => retireCancelledRun(lifecycle.record);
   return lifecycle;
@@ -1889,6 +1894,7 @@ function writeNdjson(res, event, options) {
 // Prompts, headers, tool arguments/results, and model/provider internals stay
 // in trace evidence; the progress stream exposes only operational state.
 function publicChatProgress(record = {}) {
+  if (record.type === 'model-recovery') return modelRecoveryProgress(record);
   const payload = record.payload || {};
   if (['context-compaction-started', 'context-compaction-completed', 'context-compaction-failed'].includes(record.type)) {
     return { type: record.type.replace('context-compaction-', 'context.compaction.'), data: {
@@ -2971,6 +2977,8 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
   req.on('close', () => {
     if (!res.writableEnded && !controller.signal.aborted) record.detached = true;
   });
+  const emitTextDelta = streaming ? createChatStreamDelta({ record, type: 'assistant.delta', runId, sessionId, write: (event) => writeNdjson(res, event) }) : null;
+  const emitThoughtDelta = streaming ? createChatStreamDelta({ record, type: 'assistant.thought', runId, sessionId, write: (event) => writeNdjson(res, event) }) : null;
   try {
     const chatBody = await resolveModelConnectionChatBody(body);
     const result = await runChatTurnFromBody({
@@ -2992,14 +3000,20 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
         if (progress) {
           const event = { ...progress, runId, sessionId, ts: traceRecord.ts || new Date().toISOString() };
           record.progress = [...record.progress, event].slice(-50);
-          if (progress.type === 'context.compaction.started') record.phase = 'compacting';
-          if (['context.compaction.completed', 'context.compaction.failed'].includes(progress.type)) record.phase = 'thinking';
+          if (progress.type === 'model.recovery') observeModelRecovery(serverLogger, traceRecord, record);
+          if (!applyModelRecoveryProgress(record, progress)) {
+            if (controller.signal.aborted || record.phase === 'cancelling') record.phase = 'cancelling';
+            else {
+              if (progress.type === 'context.compaction.started') record.phase = 'compacting';
+              if (['context.compaction.completed', 'context.compaction.failed', 'model.started'].includes(progress.type)) record.phase = 'thinking';
+            }
+          }
           if (streaming) writeNdjson(res, event);
         }
       },
-      onModelTextDelta: streaming ? createChatStreamDelta({ record, type: 'assistant.delta', runId, sessionId, write: (event) => writeNdjson(res, event) }) : null,
-      onModelThoughtDelta: streaming ? createChatStreamDelta({ record, type: 'assistant.thought', runId, sessionId, write: (event) => writeNdjson(res, event) }) : null,
-      onSteeringReady: () => { record.steeringReady = true; },
+      onModelTextDelta: streaming ? (delta) => { if (controller.signal.aborted || record.phase === 'cancelling') { record.phase = 'cancelling'; return; } emitTextDelta(delta); } : null,
+      onModelThoughtDelta: streaming ? (delta) => { if (controller.signal.aborted || record.phase === 'cancelling') { record.phase = 'cancelling'; return; } emitThoughtDelta(delta); } : null,
+      onSteeringReady: () => { record.steeringReady = !controller.signal.aborted && record.phase !== 'cancelling'; },
       onModelContextUsage: async (usage) => {
         if (!usage || typeof usage !== 'object') return;
         // Keep every raw measurement in telemetry, while the active card uses
@@ -3031,6 +3045,13 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
       return sendJson(res, 409, response);
     }
     correlateHttpRun(res, { cancelled: controller.signal.aborted });
+    // An abort-ignoring attempt can still settle with a result. Stop owns the
+    // public terminal; do not turn that late settlement into a completed run.
+    if (controller.signal.aborted) {
+      const response = chatTurnProgressResponse({ ...result, decision: 'cancelled', answerText: null }, { ok: false });
+      if (streaming) { writeNdjson(res, { type: 'run.cancelled', runId, sessionId, ts: new Date().toISOString(), data: { response } }); return res.end(); }
+      return sendJson(res, 499, response);
+    }
     // Observe the internal result before the stream's intentionally narrow
     // response drops model status/codes. This never serializes model payloads.
     observeHttpResult(res, 200, { ok: result.ok, result }, { event: 'run_failed' });

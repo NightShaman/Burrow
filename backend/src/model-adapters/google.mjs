@@ -2,7 +2,8 @@ import { redactStructuredJsonText } from '../redaction.mjs';
 import { buildProviderMessageManifest } from './adapter-primitives.mjs';
 import { randomUUID, normalizeProviderMessages, normalizeToolCall, toolOutputText, contextUsageFromRequest, contextUsageFromResponse, readResponseTextBounded, DEFAULT_MAX_RESPONSE_BYTES } from './adapter-primitives.mjs';
 import { googleNativeBase, googleNativeHeaders, googleModelId } from './google-native-catalog.mjs';
-import { invokeProviderFetch, providerTiming, flushProviderDiagnostics } from './provider-fetch.mjs';
+import { invokeProviderFetch, providerTiming, settleProviderDiagnostics, providerDiagnostic, providerCallback, readProviderChunk, readProviderText } from './provider-fetch.mjs';
+import { classifyModelFailure, providerFailureResult, markProviderEnvelopeFailure, markProviderStreamTruncated } from '../model-failure.mjs';
 
 function partsFor(content) {
   if (!Array.isArray(content)) return content ? [{ text: String(content) }] : [];
@@ -63,7 +64,7 @@ export async function readGoogleSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_
       const payload = event.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart()).join('\n');
       if (!payload) continue;
       const data = JSON.parse(payload); saw = true;
-      if (data.error) throw new Error('google_stream_provider_error');
+      if (data.error) throw markProviderEnvelopeFailure(new Error('google_stream_provider_error'), { ...data.error, status: data.error.code });
       const c = data.candidates?.[0];
       for (const part of c?.content?.parts || []) {
         parts.push(part);
@@ -77,20 +78,20 @@ export async function readGoogleSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_
     const reader = response.body.getReader(), decoder = new TextDecoder();
     try {
       while (true) {
-        const { value, done } = await reader.read(); if (done) break;
+        const { value, done } = await readProviderChunk(reader); if (done) break;
         bytes += value.byteLength;
         if (bytes > maxBytes) throw new Error('provider_response_too_large');
         await consume(decoder.decode(value, { stream: true }));
       }
       await consume(decoder.decode(), true);
-    } catch (error) { await reader.cancel().catch(() => {}); throw error; }
+    } catch (error) { try { await reader.cancel?.(); } catch {} throw error; }
     finally { reader.releaseLock(); }
   } else {
-    const text = await response.text(); bytes = Buffer.byteLength(text);
+    const text = await readProviderText(response); bytes = Buffer.byteLength(text);
     if (bytes > maxBytes) throw new Error('provider_response_too_large');
     await consume(text, true);
   }
-  if (!saw || !finishReason) throw new Error('google_stream_truncated');
+  if (!saw || !finishReason) throw markProviderStreamTruncated(new Error('google_stream_truncated'));
   return { candidates: [{ content: { role: 'model', parts }, finishReason }], usageMetadata };
 }
 export function createGoogleNativeModelAdapter({ config = {}, fetchImpl = fetch, clock = () => new Date().toISOString(), idFactory = randomUUID } = {}) {
@@ -106,20 +107,26 @@ export function createGoogleNativeModelAdapter({ config = {}, fetchImpl = fetch,
   };
   const estimateRequest = options => { const {body}=build(options); const chars=JSON.stringify(body).length; return contextUsageFromRequest({ promptChars:chars, bodyChars:chars, model, api, clock }); };
   const complete = async (options = {}) => {
-    const requestId = idFactory(), { traceLogger, signal, onTextDelta, onThoughtDelta, onContextUsage, modelCall } = options;
+    const requestId = idFactory(), { traceLogger, signal, onTextDelta, onThoughtDelta, onContextUsage, recoveryContext } = options;
+    const modelCall = recoveryContext?.nextModelCall ? await recoveryContext.nextModelCall() : options.modelCall;
     const timing = providerTiming({ traceLogger, requestId, provider:'google', api, model, modelCall, clock });
-    try {
+    return settleProviderDiagnostics(traceLogger, async (recordResult) => {
       const {body,source} = build(options), requestContext = estimateRequest(options);
-      await onContextUsage?.(requestContext);
+      await providerCallback(() => onContextUsage?.(requestContext));
       const streaming = typeof onTextDelta === 'function' || typeof onThoughtDelta === 'function';
       const diagnosticBody = JSON.parse(JSON.stringify(body, (key,value) => key==='thoughtSignature' ? '[redacted]' : value));
       for (const content of diagnosticBody.contents) for (const part of content.parts) if (part.thought && part.text) part.text='[redacted]';
-      const providerRequestArtifact = await traceLogger?.artifact?.(`provider-request-${requestId}.json`, redactStructuredJsonText(JSON.stringify(diagnosticBody))) || null;
-      await traceLogger?.model?.({ stage:'model-request', requestId, provider:'google', api, model, modelCall, url, providerRequestArtifact, providerMessageManifest:buildProviderMessageManifest(source), messageCount:body.contents.length, bodyChars:JSON.stringify(body).length, ts:clock() });
-      const response = await invokeProviderFetch(fetchImpl, streaming ? url.replace(':generateContent', ':streamGenerateContent?alt=sse') : url, { method:'POST', headers, body:JSON.stringify(body), ...(signal ? { signal } : {}) }, { traceLogger, requestId, provider:'google', api, model, modelCall, clock, timing });
+      const providerRequestArtifact = await providerDiagnostic(() => traceLogger?.artifact?.(`provider-request-${requestId}.json`, redactStructuredJsonText(JSON.stringify(diagnosticBody)))) || null;
+      await providerDiagnostic(() => traceLogger?.model?.({ stage:'model-request', requestId, provider:'google', api, model, modelCall, url, providerRequestArtifact, providerMessageManifest:buildProviderMessageManifest(source), messageCount:body.contents.length, bodyChars:JSON.stringify(body).length, ts:clock() }));
+      const response = await invokeProviderFetch(fetchImpl, streaming ? url.replace(':generateContent', ':streamGenerateContent?alt=sse') : url, { method:'POST', headers, body:JSON.stringify(body), ...(signal ? { signal } : {}) }, { traceLogger, requestId, provider:'google', api, model, modelCall, recoveryContext, clock, timing });
       let data;
       if (response.ok && streaming) data = await readGoogleSse(response, { maxBytes: config.maxResponseBytes, onTextDelta:timing.wrap(onTextDelta,'text'), onThoughtDelta:timing.wrap(onThoughtDelta,'thought') });
-      else { const bounded = await readResponseTextBounded(response, config.maxResponseBytes); if (!bounded.ok) throw new Error(bounded.error); try { data=JSON.parse(bounded.text); } catch { throw new Error('google_response_invalid_json'); } }
+      else {
+        const bounded = await readResponseTextBounded(response, config.maxResponseBytes);
+        if (!bounded.ok && response.ok) throw new Error(bounded.error);
+        try { data = bounded.ok ? JSON.parse(bounded.text) : {}; }
+        catch { if (response.ok) throw new Error('google_response_invalid_json'); data = {}; }
+      }
       const candidate = data.candidates?.[0], parts = candidate?.content?.parts || [], calls = parts.filter(p => p.functionCall).map((p,i) => normalizeToolCall({ id:p.functionCall.id || `google-call-${requestId}-${i}`, name:p.functionCall.name, arguments:p.functionCall.args },i));
       const text = parts.filter(p => !p.thought).map(p => p.text || '').join('');
       const ok = response.ok && !data.error && candidate?.finishReason === 'STOP' && (text.length > 0 || calls.length > 0);
@@ -127,10 +134,11 @@ export function createGoogleNativeModelAdapter({ config = {}, fetchImpl = fetch,
       const cachedTokens = data.usageMetadata?.cachedContentTokenCount ?? null;
       const usage = data.usageMetadata ? { prompt_tokens:data.usageMetadata.promptTokenCount, completion_tokens:data.usageMetadata.candidatesTokenCount, total_tokens:data.usageMetadata.totalTokenCount, prompt_tokens_details:{ cached_tokens:cachedTokens } } : null;
       const contextUsage = contextUsageFromResponse(requestContext, usage, clock);
-      await onContextUsage?.(contextUsage);
-      await traceLogger?.model?.({ stage:'model-response', requestId, provider:'google', api, model, modelCall, status:response.status, ok, usage, cachedTokens, finishReason:candidate?.finishReason || null, responseChars:text.length, streamed:streaming, ts:clock() });
-      return { ok, requestId, provider:'google', api, model, status:response.status, choice:{ index:0, finishReason:candidate?.finishReason, text, message:{ role:'assistant', content:text }, toolCalls:calls }, usage, contextUsage, error:ok ? null : `google_generation_failed:${response.status}:${candidate?.finishReason || 'no_candidate'}`, raw:{ usageMetadata:data.usageMetadata }, nativeTranscript:[...source,...(parts.length ? [assistant] : [])] };
-    } finally { await flushProviderDiagnostics(traceLogger); }
+      const result = recordResult(providerFailureResult({ ok, requestId, provider:'google', api, model, status:response.status, choice:{ index:0, finishReason:candidate?.finishReason, text, message:{ role:'assistant', content:text }, toolCalls:calls }, usage, contextUsage, error:ok ? null : `google_generation_failed:${response.status}:${candidate?.finishReason || 'no_candidate'}`, raw:{ usageMetadata:data.usageMetadata }, nativeTranscript:[...source,...(parts.length ? [assistant] : [])], ...(!ok && data.error && response.ok ? { modelFailure: classifyModelFailure(markProviderEnvelopeFailure({}, { ...data.error, status: data.error.code })) } : {}), ...(!ok && signal?.aborted ? { cancelled: true } : {}) }));
+      await providerCallback(() => onContextUsage?.(contextUsage));
+      await providerDiagnostic(() => traceLogger?.model?.({ stage:'model-response', requestId, provider:'google', api, model, modelCall, status:response.status, ok, usage, cachedTokens, finishReason:candidate?.finishReason || null, responseChars:text.length, streamed:streaming, ts:clock() }));
+      return result;
+    });
   };
   return { provider:'google', api, model, url, supportsVision:config.supportsVision === true || config.capabilities?.images === true, estimateRequest, complete,
     async continueWithToolResults({ previousModel, baseMessages=[], preparedMessages, toolCalls=[], toolResults=[], ...options } = {}) {

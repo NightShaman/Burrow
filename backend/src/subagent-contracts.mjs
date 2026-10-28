@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { projectModelRecoveryMetadata } from './model-recovery-projection.mjs';
 
 export const SUBAGENT_CONTRACT_VERSION = 1;
 export const SUBAGENT_KIND = 'subagent';
@@ -187,6 +188,7 @@ function normalizeResult(result = null) {
   const verification = normalizeVerification(result.verification);
   return {
     ok: Boolean(result.ok),
+    ...projectModelRecoveryMetadata(result),
     summary: compactString(result.summary),
     ...(['completed', 'incomplete', 'failed'].includes(result.outcome) ? { outcome: result.outcome } : {}),
     blockers: safeArray(result.blockers),

@@ -7,6 +7,7 @@ import { completionEvidence } from './completion-addendum.mjs';
 import { deriveRunEvidence, persistRunEvidence } from './run-evidence.mjs';
 import { buildExecutionDigest } from './execution-digest.mjs';
 import { persistGeneratedArtifact } from './generated-artifact-store.mjs';
+import { projectModelFailure, projectModelRecoveryMetadata } from './model-recovery-projection.mjs';
 
 const PERSISTED_CHAT_LOOP_ITERATIONS = 96;
 
@@ -130,7 +131,7 @@ export function chatToolActivity(loop = null, runId = null) {
   };
 }
 
-export function assistantTurnMetadata({ subjectScope = null, decision, proposal = null, outputArtifacts = [], compactLoop, acceptanceChecklist, integrityViolation = null } = {}) {
+export function assistantTurnMetadata({ subjectScope = null, decision, proposal = null, outputArtifacts = [], compactLoop, acceptanceChecklist, integrityViolation = null, modelFailure = null, modelRecovery = null } = {}) {
   return {
     ...(subjectScope ? { subjectScope } : {}),
     decision,
@@ -139,6 +140,7 @@ export function assistantTurnMetadata({ subjectScope = null, decision, proposal 
     chatToolLoop: compactLoop,
     acceptanceChecklist,
     ...(integrityViolation ? { terminalIntegrity: integrityViolation } : {}),
+    ...projectModelRecoveryMetadata({ modelFailure, modelRecovery }),
   };
 }
 
@@ -261,6 +263,9 @@ export async function finalizePlainChatRuntimeResult({
   subjectScope = null,
 } = {}) {
   const { model, proposal, answerText, generatedArtifactSources = [], chatToolLoop, contextUsage } = modelTurn || {};
+  const recoveryMetadata = projectModelRecoveryMetadata(modelTurn);
+  // Unknown/legacy failures get a fixed safe code, not provider/error prose.
+  if (model && !model.ok && !recoveryMetadata.modelFailure) recoveryMetadata.modelFailure = projectModelFailure({});
   validateRuntimeInvariantsBeforeSideEffects({ runtimeTurn, canonicalTurnEnvelope, chatToolLoop });
 
   // Persistence is all-or-error and precedes assistant-turn storage. Never
@@ -301,18 +306,18 @@ export async function finalizePlainChatRuntimeResult({
       content: finalAnswerText,
       runId: logger.runId,
       traceDir: logger.traceDir,
-      metadata: { ...assistantTurnMetadata({ subjectScope, decision, proposal, outputArtifacts, compactLoop, acceptanceChecklist, integrityViolation: terminalIntegrity.integrityViolation }), ...(model?.providerPool ? { providerPool: model.providerPool } : {}) },
+      metadata: { ...assistantTurnMetadata({ subjectScope, decision, proposal, outputArtifacts, compactLoop, acceptanceChecklist, integrityViolation: terminalIntegrity.integrityViolation, ...recoveryMetadata }), ...(model?.providerPool ? { providerPool: model.providerPool } : {}) },
     });
   }
   if (model && !model.ok) {
-    await appendRuntimeSessionTurn({
+    assistantTurn = await appendRuntimeSessionTurn({
       stores, agentId, sessionRoot,
       sessionId,
       role: 'assistant',
-      content: `[model_error: ${model.error || 'model failed'}]`,
+      content: `[model_error: ${recoveryMetadata.modelFailure.code}]`,
       runId: logger.runId,
       traceDir: logger.traceDir,
-      metadata: { ...(subjectScope ? { subjectScope } : {}), decision: 'model_failed', error: model.error || null },
+      metadata: { ...(subjectScope ? { subjectScope } : {}), decision: 'model_failed', error: recoveryMetadata.modelFailure.code, ...recoveryMetadata },
     });
   }
   const outcome = buildOutcome({
@@ -391,6 +396,7 @@ export async function finalizePlainChatRuntimeResult({
     acceptanceChecklist,
     proposalExecution: { executed: chatToolLoop?.consequences?.executed ?? chatToolLoop?.toolResults?.length ?? 0, skipped: skippedActionsFromChatToolLoop(chatToolLoop), tools: summarizeToolResults(chatToolLoop?.toolResults || []) },
     modelUsage: model?.usage ?? null,
+    ...recoveryMetadata,
     completionEvidence: completion,
     model,
     outcome,
@@ -402,7 +408,7 @@ export async function finalizePlainChatRuntimeResult({
     dataRoot,
     sessionId,
     logger,
-    receiptInput: { decision: result.decision, backgroundWork, prompt, contextUsage, outcome, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, executionContext, acceptanceChecklist, terminalIntegrity: terminalIntegrity.integrityViolation, delegatedWork: structuredDelegatedWork || (extraEyesReview ? { ...delegatedWork, extraEyesReview } : delegatedWork), completionEvidence: completion },
+    receiptInput: { decision: result.decision, ...recoveryMetadata, backgroundWork, prompt, contextUsage, outcome, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, executionContext, acceptanceChecklist, terminalIntegrity: terminalIntegrity.integrityViolation, delegatedWork: structuredDelegatedWork || (extraEyesReview ? { ...delegatedWork, extraEyesReview } : delegatedWork), completionEvidence: completion },
     invariantInput: { runtimeTurn, canonicalTurnEnvelope, chatToolLoop },
     subjectScope,
   });

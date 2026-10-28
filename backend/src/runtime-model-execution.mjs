@@ -25,6 +25,10 @@ export async function runRuntimeModelExecution({ continuityAuthority = null, run
       message,
       shouldCallModel,
       modelConfig,
+      beforeModelAttempt: async () => {
+        const current = await continuityAuthority.current({ rootDir: sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation });
+        if (!current) throw new Error('superseded_by_newer_session_run');
+      },
       contextThreshold: runtimeConfig.contextConfig.contextThreshold,
       traceLogger: logger,
       workspaceRoot: resolvedWorkingRoot,

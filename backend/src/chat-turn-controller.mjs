@@ -3,6 +3,7 @@ export { createChatTurnRunId } from './chat-turn-run-id.mjs';
 import { loadRuntimeConfig, runAskChat } from './app-runtime.mjs';
 export { beginRuntimeSessionExecutionSupersession, finishRuntimeSessionExecutionSupersession } from './app-runtime.mjs';
 import { buildChatSupportStatus } from './workbench-status.mjs';
+import { projectModelRecoveryMetadata } from './model-recovery-projection.mjs';
 
 // ChatTurnController owns one user-visible chat turn.
 // HTTP/UI/CLI adapters should normalize transport details, then hand the turn here.
@@ -152,6 +153,7 @@ export function chatTurnSummary(result) {
   const promptStats = result.prompt?.stats || null;
   return {
     decision: result.decision,
+    ...projectModelRecoveryMetadata(result),
     intent: result.intent || null,
     routeKind: result.session?.kind || null,
     observedResultKind: result.observedResultKind || null,
@@ -224,6 +226,7 @@ export function chatTurnProgressResponse(result, { ok = result?.ok } = {}) {
         reason: result.verification.reason ?? null,
       } : null,
       completionEvidence: result?.completionEvidence || null,
+      ...projectModelRecoveryMetadata(result),
     },
   };
 }
