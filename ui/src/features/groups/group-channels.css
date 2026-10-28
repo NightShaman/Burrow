@@ -14,7 +14,6 @@
 }
 
 .group-members { display: flex; flex: 0 0 auto; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 24px; border-top: 1px solid var(--line); background: var(--panel); }
-.group-members-label { color: var(--muted); font-weight: 600; margin-right: 4px; }
 .group-members .group-agent { display: flex; width: auto; height: auto; margin: 0; gap: 6px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); font-size: 12px; }
 .group-agent-icon { position: relative; display: block; width: 24px; height: 24px; flex: 0 0 auto; }
 .group-members + .group-composer { border-top: 0; padding-top: 2px; }

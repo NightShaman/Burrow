@@ -215,7 +215,6 @@ export function GroupChannelsPage({ channelId, agents, operator }: { channelId: 
         })}
       </div>
       <div className="group-members" aria-label="Group members">
-        <span className="group-members-label">Members</span>
         {channel.participantAgentIds.filter(id => { const agent = agentById.get(id); return agent && isAgentEnabled(agent); }).map((id) => {
           const agent = agentById.get(id); const run = channel.runs.find((item) => item.agentId === id); const image = avatarImage(identityAvatars[id] || agent?.avatar);
           return <div className="group-agent" key={id} title={`${agent?.name || id}${run ? ` · ${run.status || 'Working'}` : ''}`}>
