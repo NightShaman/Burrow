@@ -134,7 +134,6 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
   useUnsavedChanges({ dirty: state !== 'loading' && state !== 'error' && baseline !== '' && settingsBaseline(settings) !== baseline, busy: state === 'saving', save, discard: () => { setSettings(current => ({ ...current, ...JSON.parse(baseline) })); setError(''); } });
   const disabled = state !== 'idle';
   const activity = <div className="dream-cycle-activity" aria-label="Recent dream activity">
-      {!overflowTarget && <h3>Recent activity</h3>}
       {receipts.length ? <div className="dream-cycle-list">
         {receipts.map((receipt) => {
           const at = receipt.completedAt || receipt.startedAt;
@@ -154,25 +153,17 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
       </div> : <p className="settings-description">No dream activity recorded yet.</p>}
       {receiptError && <p className="settings-request-error" role="alert">{receiptError}</p>}
     </div>;
-  return <><SettingSection title="Dreams">
-    <p className="settings-description">Configure scheduled dreaming for this agent.</p>{state === 'error' && <button type="button" onClick={() => setRetry(value => value + 1)}>Retry loading</button>}
-    <div className="dream-settings-fields">
-      <label className="agent-enabled"><input type="checkbox" checked={settings.enabled} disabled={disabled} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} /><span>Enable scheduled dreaming</span></label>
-      <label className="agent-enabled"><input type="checkbox" checked={settings.quietDayDreams} disabled={disabled} aria-describedby="quiet-day-dreams-help" onChange={(event) => setSettings({ ...settings, quietDayDreams: event.target.checked })} /><span>Dream on quiet days</span></label>
-      <p id="quiet-day-dreams-help" className="settings-description">When enabled, quiet days generate a diary from retained continuity without re-extraction. When disabled, days with no new material skip model work.</p>
+  const memoryControls = <SettingSection title="Dream memory">
       <label className="agent-enabled"><input type="checkbox" checked={settings.promoteToMemory} disabled={disabled} aria-describedby="agent-dream-promotion-help" onChange={(event) => setSettings({ ...settings, promoteToMemory: event.target.checked })} /><span>Promote Dreams to memory</span></label>
-      <p id="agent-dream-promotion-help" className="settings-description">Requires global promotion in Continuity too. Off keeps Dreams and their archive; existing memories and explicit saves are unchanged. Re-enabling does not catch up skipped promotions.</p>
-      <div className="dream-schedule-fields"><div className="skill-compact-field"><Field label="Cron"><input value={settings.cron} disabled={disabled} onChange={(event) => setSettings({ ...settings, cron: event.target.value })} /></Field><small className="field-hint">Uses the operator timezone{settings.effectiveTimezone ? ` (${settings.effectiveTimezone})` : ''}. Follows operator timezone changes.</small></div><ProviderModelFields providers={savedProviders} connectionId={settings.modelConnectionId} model={settings.model} inheritLabel="Use agent chat model" disabled={disabled} onChange={(modelConnectionId, model) => setSettings({ ...settings, modelConnectionId, model })} /></div>
-      <p className="settings-description">Effective model: {effectiveModel?.modelConnectionId && effectiveModel.model ? modelLabel(effectiveModel, [{ value: '', label: 'Use agent chat model' }, ...dreamModels.map((option) => ({ value: dreamModelValue(option.connectionId, option.model), label: option.label }))]) : 'Unconfigured'}</p>
-      {modelResolutionError && <p className="settings-request-error" role="alert">Model resolution error: {modelResolutionError}</p>}
+      <p id="agent-dream-promotion-help" className="settings-description">Also requires global promotion in Continuity. Turning this off keeps the archive and existing memories; explicit saves still work. Skipped promotions are not caught up later.</p>
       <div className="dream-memory-controls">
         <Field label="Memory emphasis"><span aria-hidden="true" className="field-hint">{settings.memoryEmphasis ?? 50} · {(settings.memoryEmphasis ?? 50) === 50 ? 'Balanced' : (settings.memoryEmphasis ?? 50) < 50 ? 'Analytical' : 'Meaning-focused'}</span><input type="range" min={0} max={100} step={1} aria-describedby="dream-memory-emphasis-help" value={settings.memoryEmphasis ?? 50} disabled={disabled} aria-valuetext={`${settings.memoryEmphasis ?? 50} · ${(settings.memoryEmphasis ?? 50) === 50 ? 'Balanced' : (settings.memoryEmphasis ?? 50) < 50 ? 'Analytical' : 'Meaning-focused'}`} onChange={(event) => setSettings({ ...settings, memoryEmphasis: Number(event.target.value) })} /></Field>
         <div className="dream-emphasis-labels" aria-hidden="true"><span>0 · Analytical</span><span>50 · Balanced</span><span>100 · Meaning-focused</span></div>
-        <p id="dream-memory-emphasis-help" className="field-hint">Changes memory expression, not selection or evidence. SOUL supplies the agent’s voice.</p>
-        <div className="dream-memory-heading"><strong>Memory prompt</strong><span>{settings.memoryPromptOverride != null ? 'Custom override active' : 'Default prompt'}</span><button type="button" disabled={disabled || settings.memoryPromptOverride == null} onClick={() => setSettings({ ...settings, memoryPromptOverride: null })}>Revert to default</button></div>
+        <p id="dream-memory-emphasis-help" className="field-hint">Controls expression, not selection or evidence. SOUL supplies the agent’s voice.</p>
+        <div className="dream-memory-heading"><span>{settings.memoryPromptOverride != null ? 'Custom override active' : 'Default prompt'}</span><button type="button" disabled={disabled || settings.memoryPromptOverride == null} onClick={() => setSettings({ ...settings, memoryPromptOverride: null })}>Revert to default</button></div>
         <Field label="Memory prompt override"><textarea maxLength={20000} rows={8} value={settings.memoryPromptOverride ?? settings.defaultMemoryPrompt ?? ''} disabled={disabled} onChange={(event) => setSettings({ ...settings, memoryPromptOverride: event.target.value })} /></Field>
         <div className="dream-memory-preview">
-          <p id="dream-memory-preview-help" className="field-hint">Preview uses recent validated candidates from existing Dream extraction checkpoints—not all history, new extraction, or existing Brain memories. It may make a paid model request using the saved Dream model. No memories or settings are saved.</p>
+          <p id="dream-memory-preview-help" className="field-hint">Uses recent validated Dream extraction candidates, not full history or existing memories. May make a paid request using the saved Dream model. Nothing is saved.</p>
           <div className="dream-memory-preview-actions">
             <button type="button" disabled={disabled || previewBusy || sourceInvalid} aria-describedby="dream-memory-preview-help" onClick={() => void generatePreview()}>{previewBusy ? 'Generating preview…' : 'Preview memories'}</button>
             {(sourceToken || sourceInvalid) && <button type="button" disabled={disabled || previewBusy} onClick={() => void generatePreview(true)}>Preview new sample</button>}
@@ -187,13 +178,23 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
           </div>}
         </div>
       </div>
+  </SettingSection>;
+  return <><SettingSection title="Dreams">
+    {state === 'error' && <button type="button" onClick={() => setRetry(value => value + 1)}>Retry loading</button>}
+    <div className="dream-settings-fields">
+      <div className="dream-toggle-group"><div className="dream-scheduled-controls"><label className="agent-enabled"><input type="checkbox" checked={settings.enabled} disabled={disabled} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} /><span>Enable scheduled dreaming</span></label><div className="skill-compact-field"><Field label="Cron"><input value={settings.cron} disabled={disabled} onChange={(event) => setSettings({ ...settings, cron: event.target.value })} /></Field><small className="field-hint">Operator timezone{settings.effectiveTimezone ? `: ${settings.effectiveTimezone}` : ''}.</small></div></div>
+      <div><label className="agent-enabled"><input type="checkbox" checked={settings.quietDayDreams} disabled={disabled} aria-describedby="quiet-day-dreams-help" onChange={(event) => setSettings({ ...settings, quietDayDreams: event.target.checked })} /><span>Dream on quiet days</span></label>
+      <p id="quiet-day-dreams-help" className="settings-description">On quiet days, create a diary from retained continuity without re-extraction. Otherwise, skip model work when there is no new material.</p></div></div>
+      <div className="dream-schedule-fields"><ProviderModelFields providers={savedProviders} connectionId={settings.modelConnectionId} model={settings.model} inheritLabel="Use agent chat model" disabled={disabled} onChange={(modelConnectionId, model) => setSettings({ ...settings, modelConnectionId, model })} /></div>
+      <p className="settings-description">Effective model: {effectiveModel?.modelConnectionId && effectiveModel.model ? modelLabel(effectiveModel, [{ value: '', label: 'Use agent chat model' }, ...dreamModels.map((option) => ({ value: dreamModelValue(option.connectionId, option.model), label: option.label }))]) : 'Unconfigured'}</p>
+      {modelResolutionError && <p className="settings-request-error" role="alert">Model resolution error: {modelResolutionError}</p>}
       <Field label="Dream prompt"><textarea rows={6} value={settings.prompt} disabled={disabled} onChange={(event) => setSettings({ ...settings, prompt: event.target.value })} /></Field>
     </div>
-    {!overflowTarget && activity}
     <div className="dream-actions">
       <button className="primary" onClick={() => void save()} disabled={state !== 'idle'}>{state === 'saving' ? 'Saving…' : 'Save dream settings'}</button>
     </div>
     {error && <p className="settings-request-error" role="alert">{error}</p>}
-  </SettingSection>{overflowTarget && createPortal(<div className="settings-overflow-content"><SettingSection title="Recent activity">{activity}</SettingSection></div>, overflowTarget)}</>;
+    <details className="dream-recent-activity"><summary>Recent activity</summary>{activity}</details>
+  </SettingSection>{overflowTarget ? createPortal(<div className="settings-overflow-content">{memoryControls}</div>, overflowTarget) : memoryControls}</>;
 }
 
