@@ -21,7 +21,7 @@ For `/api/sessions/{sessionId}` and its actions, pass `agentId` in the query. Re
 | `unarchive` | Clears the archive flag |
 | `fork` | Optional `targetSessionId`, otherwise `<source>-fork`; separate copy/provenance, not a live branch |
 
-Reset and archive retain original evidence. Current reset captures a handoff, blocks new admissions during the boundary change, supersedes active session runs, and resets the stored conversation. The response can include `supersededRuns`; Archive summary generation is queued separately, so reset success is not a summary-completion receipt. Historical public 2026.10.19 predates this reset coordination. The former Albdruck purge endpoint is retired. The current retention preview/run controls manage traces, not individual conversation purge; see [retention and deletion](../../concepts/conversation-history.md#retention-and-deletion). Do not conflate hiding a session with deleting retained content.
+Reset and archive retain original evidence. Current reset captures a handoff, blocks new admissions during the boundary change, supersedes active session runs, and resets the stored conversation. Current cancellation propagates into PostgreSQL work, with rollback/drain before client release and generation fencing against late writes; do not interpret a cancellation acknowledgement as immediate quiescence. The response can include `supersededRuns`; Archive summary generation is queued separately, so reset success is not a summary-completion receipt. Historical public 2026.10.19 predates this reset coordination. The former Albdruck purge endpoint is retired. The current retention preview/run controls manage traces, not individual conversation purge; see [retention and deletion](../../concepts/conversation-history.md#retention-and-deletion). Do not conflate hiding a session with deleting retained content.
 ## Context, search and continuity
 
 `/api/session/context` and `/api/context` inspect context; `/api/session/context-status` includes current limits and live usage where available. Defaults use session `default`. These responses may expose private conversational material.
@@ -94,3 +94,7 @@ The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d
 
 - [backend/scripts/ui/session-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/session-routes.mjs)
 - [backend/src/postgres-session-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-session-store.mjs)
+
+## 28 October development delta
+
+Changed behavior above was checked statically against Backend `a04acb16b0eab2a910c3ef0fb452622df81a05cb` on **2026-10-28**. This is not a live provider, database or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../../project/source-map.md).

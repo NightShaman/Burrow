@@ -29,7 +29,7 @@ Every agent has six profile kinds: `SOUL`, `RULES`, `ORIENTATION`, `PREFERENCES`
 
 ### Newer Core: shared Rules and Orientation
 
-**Settings → General → Global documents** edits Global Rules and Global Orientation. Each agent's **Profile documents** has independent **Include Global Rules** and **Include Global Orientation** controls. Enabled global prose precedes the corresponding local document; the local document is preserved. Existing agents default to both controls off. These are prompt guidance, not tool grants or operating-system access controls.
+**Settings → Agents → Global → Global documents** edits Global Rules and Global Orientation. Each agent's **Profile documents** has independent **Include Global Rules** and **Include Global Orientation** controls. Enabled global prose precedes the corresponding local document; the local document is preserved. Existing agents default to both controls off. These are prompt guidance, not tool grants or operating-system access controls.
 
 ## Explicit scope and recall
 

@@ -6,9 +6,9 @@ The operator guide follows inspected current development implementation, without
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.10.27.7` | `bf4c46a19a1be3de1193ef948936620db8fa2358` |
-| Core / Backend | `32ff99dfc0317635f5c7aa53b4c9ec18266d4c09` |
-| UI | `2e723f5be7573b86074c91b045ae94998038f1d8` |
+| Assembled Burrow, build `2026.10.28.8` | `e1cee57c7851337bf91d179208e6cbfbd47dbdf6` |
+| Core / Backend | `a04acb16b0eab2a910c3ef0fb452622df81a05cb` |
+| UI | `b6217d4d7613dadffb444910d4715b12ed17630c` |
 | Skills | `2d120d42020eb13bc4ff0b613ea8badc46bdef1b` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
@@ -63,3 +63,7 @@ Compared source changes since the full 25 October baseline. This pass reconciles
 ## Ordinary update: 27 October 2026
 
 Compared changes since the 26 October source baseline: explicit busy-input queues and snapshot side questions, manual/pressure compaction feedback, per-agent Dream memory expression and no-save previews, GitHub workflow watches/receiver configuration, and Midnight appearance. OIDC setup/version guidance is maintained separately in [authentication](../security/authentication.md). Skills source is unchanged. This is bounded static delta reconciliation, not another full-page recertification or a live provider/database/webhook/login test. The Sunday full-review receipt remains dated 25 October; no runtime execution or public-release promotion is implied.
+
+## Ordinary update: 28 October 2026
+
+Compared implementation changes since the successful 27 October update. This pass reconciles Settings navigation and theme controls, provider/tool usage attribution, operational logs, targeted compaction and cooperative Stop handling, and bounded model-request recovery. Recovery resumes the failed model request with retained tool results; it does not replay completed tools. The seven separately documented components have no new source changes. The dated Sunday full review and previous delta evidence remain historical; this is not a new full audit, application test run, live installation check, or runtime release promotion.

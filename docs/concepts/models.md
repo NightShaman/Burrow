@@ -9,7 +9,7 @@ Configure and enable the connection/model, then select it for an agent. Do not p
 
 ## Choose and save a model in the UI
 
-Use **Settings → Connections → Model providers** to Connect, inspect discovery results, check the models to use, and Save. Model names open capability details; the checkbox enables the model. Manual Model ID entry is available after Connect, including when discovery fails. Follow the [step-by-step connection and OpenAI sign-in guide](../getting-started/initial-setup.md#configure-a-usable-model).
+Use **Settings → Connections → Models** to Connect, inspect discovery results, check the models to use, and Save. Model names open capability details; the checkbox enables the model. Manual Model ID entry is available after Connect, including when discovery fails. Follow the [step-by-step connection and OpenAI sign-in guide](../getting-started/initial-setup.md#configure-a-usable-model).
 
 Then select the agent in **Chat** and use the **Provider** and **Model** toolbar controls. **Effort** and **Temp** also persist with that agent's selection. Changing provider/model may reset effort to that model's default. The backend checks that the model is enabled and the connection has authentication. A UI temperature choice is not a promise that the adapter sends temperature: GPT-6.1, ChatGPT backend requests, and other models marked as not supporting it omit the field.
 ## Supported adapter paths
@@ -96,3 +96,4 @@ Inspect the current session with `/context` and the redacted provider-ready requ
 When diagnosing a failed turn, separate connection/authentication failure, model selection failure, unsupported request options, context pressure, stream interruption, tool failure, and missing final synthesis. Preserve the actual error and run ID. Avoid testing with a costly generation request when a harmless text or read-only tool check can establish the broken layer.
 
 Streaming completeness checks differ by adapter, and bounded transport handling is not a blanket guarantee that every truncated provider stream is marked failed. The central [limitations](../project/known-limitations.md) record the source-level caveats; [Troubleshooting](../operations/troubleshooting.md) provides operator procedures.
+

@@ -59,7 +59,7 @@ Assignment makes the skill available for discovery. It does not inject the full 
 
 Open **Settings → Agents**, choose the agent, then **Profile documents**. Select **SOUL.md**, **RULES.md**, **ORIENTATION.md**, **PREFERENCES.md**, **TOOLS.md**, or **DreamMemory.md**. Edit the Markdown and click **Save profile documents**.
 
-In current Core, **Settings → General → Global documents** also provides Global Rules and Global Orientation. Each agent independently opts in through **Include Global Rules** and **Include Global Orientation**; included global text comes first, followed by that agent's local text. Both are off by default for existing agents.
+In current Core, **Settings → Agents → Global → Global documents** also provides Global Rules and Global Orientation. Each agent independently opts in through **Include Global Rules** and **Include Global Orientation**; included global text comes first, followed by that agent's local text. Both are off by default for existing agents.
 
 These are agent guidance documents. Writing a permission into a document does not create an operating-system sandbox or an MCP grant; configure actual access separately in [Tools and mods](tools-and-mods.md).
 
@@ -86,7 +86,7 @@ Memories you create or edit through the operator interface are operator-owned; a
 
 ### Optional embeddings
 
-Open **Settings → General → Brain memory** to configure embeddings globally. This release supports Google and Ollama embedding adapters; a working chat connection to another provider does not establish embedding support. Choose a supported provider and embedding model, test it, then enable and save the settings. A manually entered model ID requires a successful test before saving an enabled configuration. **Reindex all memories asynchronously** rebuilds the index in the background; the page reports indexed, pending, and failed counts. Partial coverage remains searchable lexically, and saved-memory editing remains separate from indexing.
+Open **Settings → General → Continuity** to configure embeddings globally. This release supports Google and Ollama embedding adapters; a working chat connection to another provider does not establish embedding support. Choose a supported provider and embedding model, test it, then enable and save the settings. A manually entered model ID requires a successful test before saving an enabled configuration. **Reindex all memories asynchronously** rebuilds the index in the background; the page reports indexed, pending, and failed counts. Partial coverage remains searchable lexically, and saved-memory editing remains separate from indexing.
 
 Enabling a remote embedding provider involves sending memory text to that provider for indexing. Choose the provider with the sensitivity of your saved content in mind.
 
@@ -98,11 +98,11 @@ When you need a past execution result rather than a saved fact, ask the agent to
 
 ### Dream promotion controls
 
-Automatic Dream-to-Brains publication requires **Promote Dreams to memory** in both **Settings → General → Brain memory** and the agent's **Dreams** settings. Both default on. Save changes in each section. Off preserves Dream diaries, reflection, existing memories and explicit saves; re-enabling does not backfill skipped promotions. Current synthesis can update an existing Dream-owned record by ID/revision, or record a no-op/review instead; it does not overwrite operator-owned memories. See [Dream cycles](../concepts/dreams.md#control-automatic-promotion).
+Automatic Dream-to-Brains publication requires **Promote Dreams to memory** in both **Settings → General → Continuity** and the agent's **Dreams** settings. Both default on. Save changes in each section. Off preserves Dream diaries, reflection, existing memories and explicit saves; re-enabling does not backfill skipped promotions. Current synthesis can update an existing Dream-owned record by ID/revision, or record a no-op/review instead; it does not overwrite operator-owned memories. See [Dream cycles](../concepts/dreams.md#control-automatic-promotion).
 
 ### Tune memory expression and preview without saving
 
-In **Settings → Agents → [agent] → Dreams**, **Memory emphasis** ranges from **0 Analytical** through **50 Balanced** (default) to **100 Meaning-focused**. It changes final memory expression, not source selection, evidence or citations. SOUL supplies voice, not invented facts. **Memory prompt override** replaces the built-in expression prompt (up to 20,000 characters); even an explicitly empty override is distinct from the default. **Revert to default** restores the default in the draft; use **Save dream settings** to persist changes. The separate **Dream prompt** still controls the diary.
+In **Settings → Agents → [agent] → Dreams**, use the **Dream memory** panel in the additional-settings column. **Memory emphasis** ranges from **0 Analytical** through **50 Balanced** (default) to **100 Meaning-focused**. It changes final memory expression, not source selection, evidence or citations. SOUL supplies voice, not invented facts. **Memory prompt override** replaces the built-in expression prompt (up to 20,000 characters); even an explicitly empty override is distinct from the default. **Revert to default** restores the default in the draft; use **Save dream settings** to persist changes. The separate **Dream prompt** still controls the diary.
 
 **Preview memories** is an explicit, potentially paid model request using the saved Dream model and the draft expression settings. It does not save memories/settings, publish promotion, or run a full Dream cycle. It reuses recent validated extraction checkpoints that still match eligible REM-window sources: not all history, new extraction, or the existing Brain corpus. No eligible material means no model request. Preview results show source count/references and **Not saved**.
 
@@ -112,6 +112,6 @@ Repeat previews normally reuse the same source sample for up to 15 minutes, allo
 
 Open **Settings → Agents → [agent] → Dreams**. Enable scheduled dreaming, set the cron schedule, choose a model override or inherit the chat model, edit the prompt, and click **Save dream settings**. The schedule follows the operator timezone. **Dream on quiet days** controls whether a day with no new material still generates a diary from retained continuity; when off, such days skip model work.
 
-Check **Recent activity** for completed, partial, failed, or interrupted cycles and any phase errors. Browse retained dream entries in **Archive → Dreams**. Current Core saves individual **Dream-generated** connections in Brains and excludes DreamMemory and Dream preloads from ordinary context. Those connections are searchable on demand, not injected into every turn. A cycle may legitimately save no new connection. See [Dream cycles](../concepts/dreams.md) for the version-specific behavior.
+Expand **Recent activity** below the Dream settings (collapsed by default) for completed, partial, failed, or interrupted cycles and any phase errors. Browse retained dream entries in **Archive → Dreams**. Current Core saves individual **Dream-generated** connections in Brains and excludes DreamMemory and Dream preloads from ordinary context. Those connections are searchable on demand, not injected into every turn. A cycle may legitimately save no new connection. See [Dream cycles](../concepts/dreams.md) for the version-specific behavior.
 
 [Source: dream settings and activity](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/AgentDreams.tsx#L87-L124)

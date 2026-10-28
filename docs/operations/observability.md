@@ -33,7 +33,13 @@ docker compose ps
 docker compose logs --tail=200 burrow
 ```
 
-The runtime also writes bounded event records to `<runtime-root>/logs/server-events.jsonl`. Server events include listener startup/error, request duration/status, request/client/socket errors, disconnects, shutdown progress, and unhandled exceptions. A port conflict is logged as `EADDRINUSE`; do not launch a second foreground process merely to test a running service.
+Current development emits structured JSON lines directly to the service console: `info` to stdout and `warn`/`error`/`fatal` to stderr; debug detail stays in the file sink. Reading `docker compose logs` or the native journal does not require an application login, diagnostics token or telemetry collector. The startup summary reports effective build/auth source, database, scheduler and mod counts; the existing listening line remains. A port conflict is logged as `EADDRINUSE`; do not launch another foreground process to test a running service.
+
+Records carry UTC time, service, severity, component and event, plus available request/agent/session/run/task and existing trace correlation. `x-request-id` is accepted or generated and echoed. Request paths are templated without query strings. Ordinary successful polling and routine validation do not flood the console. A logical failed run can be logged even when its HTTP transport status is 200: distinguish `status`, `resultStatus` and `upstreamStatus`.
+
+The first warning/error appears immediately. Equivalent repeats are summarized at most once per 60 seconds and at shutdown; a recovery resets the repeat bucket. Correlation on a repeat summary represents the first event, not every occurrence. Background dependency and mod lifecycle failures are also visible; a disabled feature is not reported as a recovered dependency.
+
+The detailed sink is `<runtime-root>/logs/server-events.jsonl` (`/data/logs/server-events.jsonl` in the standard container), continuously rotated at **8 MiB** with **three backups** (`.1`–`.3`). Files use mode 0600 and the log directory 0700. Console and file writes fail independently. Rotation assumes the normal single owning logger, not a cross-process lock. Direct mod stdout/stderr is drained with bounded stream notices rather than copied as raw prose. Curated diagnostics avoid credentials and raw provider bodies, but explicit logger messages remain a trusted boundary: review logs before sharing them.
 
 ## Chat and active work
 
@@ -65,7 +71,13 @@ A receipt can show that a command ran without proving the user's overall objecti
 
 ## OpenTelemetry
 
-Public **2026.10.19** includes an OpenTelemetry settings surface under **Settings → General**. Saved operator settings and active environment overrides are shown separately; saving does not override an environment-enforced value. Review the effective endpoint and exported data before enabling collection. This source review did not verify delivery to a live collector.
+Current development places OpenTelemetry under **Settings → Connections → OpenTelemetry** (the public **2026.10.19** UI used General). Saved operator settings and active environment overrides are shown separately; saving does not override an environment-enforced value. Trace and metric endpoints/headers are signal-specific; an exact signal URL is distinct from a base URL. Review the effective destination and exported data before enabling collection. This source review did not verify live collector delivery.
+
+`burrow.model.request` spans retain available input/output/total/cache-read usage before ending. The same normalized usage feeds cumulative `burrow.model.tokens`: use rates or increases, not sums of successive samples. Cached input is a subset of input, not extra usage. Missing/invalid values are omitted, reported zero is retained, and cost is not inferred. One logical tool execution produces one logical tool span/count/duration; subprocess work is not a second logical tool. Delegated child work retains parent correlation without adding trace carriers to prompts.
+
+Changing or disabling export affects new independent runs. Existing runs and their children retain their exporter generation until they drain, with bounded shutdown; disabling settings does not erase already exported data. Exporter failures have independent service-log diagnostics.
+
+The owning run span receives `burrow.model.recovery` events with curated **`burrow.model.recovery.*`** attributes for state, method, attempt bounds, original/last failure and safe failover blocker. Failed request spans keep their observed status even if a later attempt succeeds. This is not a new TTFT instrument or account-health diagnostic subsystem. See [bounded recovery](../architecture/runtime.md#bounded-live-model-recovery).
 
 ## Native OpenAI pool metrics
 
@@ -110,3 +122,7 @@ Corrections on this page were checked against public **2026.10.19**; any newer d
 Active-run summaries distinguish main and side-question lanes; correlate by agent/session/run identity rather than mixing their activity. Inspect explicit chat input status and terminal result after acceptance. A side-question result is a frozen historical view, not a fresh inspection. Compaction progress reports started/completed/failed; a no-op can complete with `compressed:false`. Retained compaction receipts and context-meter refresh show rotation outcome rather than implying a model answered.
 
 Workflow event views separate GitHub conclusion from Burrow handling status; accepted or interrupted work requires its actual run evidence. A ready webhook receiver proves local signature setup only. Dream previews do not save memories/settings, but nonempty previews retain filesystem request/response/lifecycle diagnostics under normal evidence retention. Do not publish those artifacts without reviewing their contents.
+
+## 28 October development delta
+
+Changed behavior above was checked statically against Backend `a04acb16b0eab2a910c3ef0fb452622df81a05cb` on **2026-10-28**. This is not a live provider, database or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).

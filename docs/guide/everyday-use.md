@@ -1,6 +1,6 @@
 # Everyday use
 
-Current implementation delta reviewed **27 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation delta reviewed **28 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 ## Find your way around
 
@@ -11,7 +11,7 @@ The main navigation contains **chat**, **tasks**, **archive**, **Brains**, **For
 ## Talk to an agent
 
 1. Open **chat** and select the agent in the **Agents** panel.
-2. Check the **Provider**, **Model**, and **Effort** controls above the conversation. These use your saved model connections. The toolbar is locked while the displayed run is active.
+2. Check the **Provider**, **Model**, and **Effort** controls above the conversation. These use your saved model connections. These model controls remain locked while the displayed run is active; **New session** and **Group Chat** remain available.
 3. Type a message and press **Enter** or click **Send message**. Use **Shift+Enter** for a new line.
 4. Watch the response and tool activity. Use **Stop response** to request cancellation. Choose Queue next, Steer, or Side question explicitly while a main run is busy; see the delivery choices below.
 
@@ -57,8 +57,8 @@ Implementation: `ChatPage.tsx` and the Core agent context configuration; current
 
 - **New session** creates a named session. Enter a name and click **Create session**.
 - The **Session** selector returns to an existing session for the selected agent.
-- **Reset Session** starts a fresh generation of the current session. Prior history is archived, not erased.
-- **Group Chat** opens existing rooms or creates a room with a name and selected agent participants. In a group composer, type `@` to choose an agent mention.
+- **Reset Session** starts a fresh generation of the current session. Prior history is archived, not erased. The button remains unavailable while the displayed run is active or reset is in progress.
+- **Group Chat** opens existing rooms or creates a room with a name and selected agent participants. In a group composer, type `@` to choose an agent mention. The member strip sits between the transcript and composer, showing participant names, activity and per-agent Stop controls.
 
 Type `/help` to see chat commands. The composer also offers `/context`, `/context full`, `/status`, `/new`, and `/stop`. Selecting a command fills the composer; send it to run it.
 

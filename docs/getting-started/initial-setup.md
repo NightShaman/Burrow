@@ -32,7 +32,7 @@ For a lost response or transient error, retry in the same browser to recover the
 
 ## Configure a usable model
 
-1. Open **Settings → Connections → Model providers**. Under **Models**, enter a recognizable **Provider** label, choose **API type**, and enter the provider's **URL** and **API key**. Use distinct provider labels: the current Chat dropdown selects by label even though the backend stores durable connection IDs.
+1. Open **Settings → Connections → Models**. Under **Models**, enter a recognizable **Provider** label, choose **API type**, and enter the provider's **URL** and **API key**. Use distinct provider labels: the current Chat dropdown selects by label even though the backend stores durable connection IDs.
 2. Choose **Connect** to discover models. This populates the editor; it is not the final **Save** step. If discovery fails or returns none, enter an exact provider-supported **Model ID** and choose **Add model**.
 3. Check **Use …** for every model you want available. Click a model's name to inspect **Model details**. **Input**, **Output**, and **Context window** each have **Auto** and **Manual** modes. Keep Auto unless you have reliable provider information; an override does not add a capability the provider lacks.
 4. Choose **Save**, then verify the connection appears among saved providers. To edit one, select its card. A blank API-key field on an existing connection preserves the configured key; entering a new key replaces it.

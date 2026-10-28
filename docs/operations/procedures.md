@@ -70,7 +70,7 @@ Stop also holds all current and future main queue inputs; **Resume queue** relea
 4. Follow progress in chat and inspect the task's saved execution/history. The current board does not continuously poll task execution; use **Refresh history** or reopen the task for newer records. The assigned agent runs the task in its **default** conversation, with project context scoped to this task run.
 5. Inspect the default conversation and **Archive → Proof** for its final answer, blockers, and verification. Update the board status to reflect the reviewed outcome.
 
-The dispatch lookup is awaited in this release; the former unassigned-task warning is obsolete. Execution success does not automatically move a task to Done. An uncertain dispatch response requires checking the active chat and retained task receipt. Check runtime activity and the task's persisted execution before retrying; a disconnected browser does not prove dispatch failed. Project paths supply context, not filesystem authorization. Sources: , , .
+The dispatch lookup is awaited in this release; the former unassigned-task warning is obsolete. Execution success does not automatically move a task to Done. An uncertain dispatch response requires checking the active chat and retained task receipt. Check runtime activity and the task's persisted execution before retrying; a disconnected browser does not prove dispatch failed. Project paths supply context, not filesystem authorization.
 
 ## Recover a prior decision or saved memory
 
@@ -80,7 +80,7 @@ The dispatch lookup is awaited in this release; the former unassigned-task warni
 4. For an explicit saved memory, open **Brains**, select **Agent owner**, and search. Open the entry to inspect its content, source references, origin, and revision.
 5. To correct it, edit and choose **Save memory**. On a conflict, preserve your intended wording elsewhere, **Reload memory**, compare, and reapply only the desired correction.
 
-Brains records are agent-owned saved context, not verification of current runtime state. Legacy migration details explain origin; they do not certify present truth. Brains does not provide the old global knowledge, Recall, or purge controls. Sources: , , .
+Brains records are agent-owned saved context, not verification of current runtime state. Legacy migration details explain origin; they do not certify present truth. Brains does not provide the old global knowledge, Recall, or purge controls.
 
 ### Delete saved memories deliberately
 
@@ -89,7 +89,7 @@ Brains records are agent-owned saved context, not verification of current runtim
 3. Inspect each bulk result: these are separate deletions, so some can succeed while others conflict or fail.
 4. **Reload list** and review current revisions before retrying failed entries.
 
-These controls delete immediately without a separate UI confirmation. Memory deletion does not delete conversation originals, attachments, browser caches, or other retained evidence. The legacy Albdruck conversation-purge route adapter is not mounted in this release; its historical procedure is not a supported erasure workflow. Sources: , .
+These controls delete immediately without a separate UI confirmation. Memory deletion does not delete conversation originals, attachments, browser caches, or other retained evidence. The legacy Albdruck conversation-purge route adapter is not mounted in this release; its historical procedure is not a supported erasure workflow.
 
 ## Retention maintenance
 

@@ -4,8 +4,7 @@
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
-
-This reference retains the historical 2026.10.19 ownership map and now records the current migration ledger through **72**, checked against Core on **26 October 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
+This reference retains the historical 2026.10.19 ownership map and now records the current migration ledger through **77**, checked against Core on **28 October 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
 
 See [Persistence architecture](../architecture/persistence.md) for the data flow and [Backup and recovery](../operations/backup-recovery.md) for recovery scope.
 

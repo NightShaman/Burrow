@@ -6,7 +6,7 @@ Dreaming revisits retained conversation evidence. It produces operator-facing di
 
 Open **Settings → Agents → [agent] → Dreams**. Set enabled state, cron, prompt, and an optional model override, then save. Dreams follows the operator timezone, with UTC as fallback. The default schedule is `0 4 * * *`. A configured schedule does not verify provider credentials or model availability.
 
-**Dream on quiet days** controls diary work when there is no new material to process. A quiet cycle may legitimately produce no new connections. Inspect Recent activity for the actual result rather than treating an unchanged memory list as a scheduler failure.
+**Dream on quiet days** controls diary work when there is no new material to process. A quiet cycle may legitimately produce no new connections. Expand **Recent activity** below the Dream settings (collapsed by default) for the actual result rather than treating an unchanged memory list as a scheduler failure.
 
 ## Three evidence windows
 
@@ -42,11 +42,11 @@ Current final synthesis reconciles prior active Dream-origin records using `new`
 
 ### Control automatic promotion
 
-Both **Settings → General → Brain memory → Promote Dreams to memory** and the selected agent's **Dreams → Promote Dreams to memory** must be enabled at publication. Both default on for existing installations. Save each changed setting. Turning either off preserves diaries/reflection, explicit saves, and existing memories; it stops automatic publication, not Dream scheduling. Re-enabling does not queue skipped promotions for catch-up.
+Both **Settings → General → Continuity → Promote Dreams to memory** and the selected agent's **Dreams → Promote Dreams to memory** must be enabled at publication. Both default on for existing installations. Save each changed setting. Turning either off preserves diaries/reflection, explicit saves, and existing memories; it stops automatic publication, not Dream scheduling. Re-enabling does not queue skipped promotions for catch-up.
 
 ### Memory expression and explicit previews
 
-In **Settings → Agents → [agent] → Dreams**, **Memory emphasis** ranges from **0 Analytical** through **50 Balanced** (default) to **100 Meaning-focused**. It changes final memory expression, not source selection, evidence or citations. SOUL supplies voice, not invented facts. **Memory prompt override** replaces the built-in expression prompt (up to 20,000 characters); even an explicitly empty override is distinct from the default. **Revert to default** restores the default in the draft; use **Save dream settings** to persist changes. The separate **Dream prompt** still controls the diary.
+In **Settings → Agents → [agent] → Dreams**, the **Dream memory** panel in the additional-settings column contains promotion, expression and preview controls. **Memory emphasis** ranges from **0 Analytical** through **50 Balanced** (default) to **100 Meaning-focused**. It changes final memory expression, not source selection, evidence or citations. SOUL supplies voice, not invented facts. **Memory prompt override** replaces the built-in expression prompt (up to 20,000 characters); even an explicitly empty override is distinct from the default. **Revert to default** restores the default in the draft; use **Save dream settings** to persist changes. The separate **Dream prompt** still controls the diary.
 
 **Preview memories** is an explicit, potentially paid model request using the saved Dream model and the draft expression settings. It does not save memories/settings, publish promotion, or run a full Dream cycle. It reuses recent validated extraction checkpoints that still match eligible REM-window sources: not all history, new extraction, or the existing Brain corpus. No eligible material means no model request. Preview results show source count/references and **Not saved**.
 

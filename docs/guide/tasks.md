@@ -76,10 +76,10 @@ Mod-owned jobs show **Managed by [mod]**. Edit them through that mod. The schedu
 
 This is an inbound trigger for normal agent work, not an outbound GitHub integration or a new grant of repository permissions.
 
-1. Open **Settings → Agents → [agent] → Workflow events**. In **Webhook receiver · global**, enter a high-entropy **Webhook secret** and choose **Save receiver**. The receiver is shared by every agent's watches. Optionally record a **Delivery URL** such as `https://burrow.example.test/api/events/github`; it must have that exact path and no query, fragment or embedded credentials. This field is metadata, not ingress configuration or a connectivity test.
+1. Open **Settings → Agents → [agent] → Workflow events**. In **Webhook receiver · global** below the watch editor, enter a high-entropy **Webhook secret** and choose **Save receiver**. The receiver is shared by every agent's watches. Optionally record a **Delivery URL** such as `https://burrow.example.test/api/events/github`; it must have that exact path and no query, fragment or embedded credentials. This field is metadata, not ingress configuration or a connectivity test.
 2. In the source GitHub repository's **Settings → Webhooks → Add webhook**, use the same full public HTTPS URL, `application/json`, and the same secret. Select **Workflow runs** (`workflow_run`) and enable the webhook. Repository webhook creation requires the appropriate owner/admin access; see [GitHub's webhook instructions](https://docs.github.com/en/webhooks/using-webhooks/creating-webhooks). Burrow consumes completed workflow runs, not every GitHub event.
 3. In the agent's watch form, enter **Repository** as `owner/repo`, the exact case-sensitive **Workflow name** (the displayed workflow name, not its YAML filename), **Destination session**, and an operator-written **Instruction**. A dedicated session such as the default `ci-releases` keeps this stream separate. Keep **Enabled** checked and choose **Add watch**. Watches require an enabled agent and use its ordinary chat model.
-4. Inspect **Recent workflow events**, using **Refresh events** as needed. **GitHub** conclusion describes CI; **Burrow handling** describes the triggered agent turn. Open the destination session and inspect actual run/trace evidence before calling the work complete.
+4. Inspect **Recent events**, using **Refresh events** as needed. **GitHub** conclusion describes CI; **Burrow handling** describes the triggered agent turn. Open the destination session and inspect actual run/trace evidence before calling the work complete.
 
 An example standing instruction is: “Review the completed run and report verified results and blockers; do not change the repository without separate authorization.” Write the scope you actually intend. Webhook payloads/logs are evidence to inspect, not new operator instructions or additional permissions. Existing tools and agent grants still govern execution.
 
@@ -89,6 +89,7 @@ Signed ping is acknowledged without creating work. Accepted completed events are
 
 ## Work delegated to minions
 
-An agent may spawn a minion for part of a request. The **Agents** panel lets you inspect child activity by expanding its parent and selecting the child. To choose a default minion model, open **Settings → Agents → [agent] → Agent details**, configure **Default minion provider/model**, and click **Save minion model**. Inheritance uses the current parent turn's model; an explicit model choice at spawn takes precedence.
+An agent may spawn a minion for part of a request. The **Agents** panel lets you inspect child activity by expanding its parent and selecting the child. To choose a default minion model, open **Settings → Agents → [agent] → Agent details**, use the **Default minion model** panel in the additional-settings column to configure **Default minion provider/model**, and click **Save minion model**. Inheritance uses the current parent turn's model; an explicit model choice at spawn takes precedence.
 
 [Source: child selection](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/App.tsx#L119-L132) · [Source: default minion model](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/DefaultMinionModel.tsx#L53-L71)
+

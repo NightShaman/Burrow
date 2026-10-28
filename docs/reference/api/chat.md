@@ -39,6 +39,7 @@ Each event has `type`, `runId`, `sessionId`, `ts` and `data`. Buffer partial net
 | `run.started` | Accepted runtime turn and run identifier |
 | `route.decided` | Route/session-kind observation |
 | `model.started`, `model.completed` | Model request/response metadata |
+| `model.recovery` | Nonterminal bounded recovery state for a model request |
 | `assistant.delta` | Provisional answer text; `data.delta`, `totalChars`, `modelCall` |
 | `assistant.thought` | Separate provisional thought stream; never merge it into the final answer |
 | `tool.started`, `tool.completed` | Tool activity/status and selected presentation fields |
@@ -66,13 +67,21 @@ sequenceDiagram
     C->>H: Read session to reconcile
 ```
 
+## Model recovery and receipts
+
+Current development emits nonterminal `model.recovery` events with states `recovering`, `resumed`, `exhausted`, `blocked`, `requires_investigation` or `cancelled`. Continue reading for the terminal run event. On a replacement attempt, `modelCall` identifies a new active provisional answer; discard the abandoned partial answer instead of concatenating attempts.
+
+Terminal responses and retained assistant metadata can include `modelFailure` (origin, code, retryability and observed upstream HTTP status) and `modelRecovery` (`version: 1`, `retryCount`, bounded `requests`). At most 32 request summaries retain attempt limits, original/last failure, safe failover blocker and partial character counts—not raw prompts, provider bodies, thoughts, tool payloads or headers. The original upstream failure remains distinct from a recovery/failover failure.
+
+Defaults are three physical dispatch attempts per request and four extra attempts across the run, with cancellable one/three-second waits. The wrapper does not replay completed tools or the whole turn, and does not promise exactly-once provider billing or resume a broken byte stream. Active/child/task projections remain active while recovery or cancellation drains. See [runtime recovery boundaries](../../architecture/runtime.md#bounded-live-model-recovery) and [troubleshooting](../../operations/troubleshooting.md#recovering-exhausted-or-blocked-model-requests).
+
 ## Manual compaction
 
 Send `/compact` as the ordinary chat message to run the existing compression planner without main-agent inference. It uses normal session admission, so it is not a bypass of busy-session rejection. Originals remain archived; empty or irreducible history produces a reported no-op, not a reset. Manual NDJSON begins before the work; its feedback is retained in visible history but excluded from model input. Inspect the terminal receipt and `compressed`/`reason`, not merely a started event. Compression does not guarantee that oversized immutable/current input will fit.
 
 ## Disconnect and cancellation
 
-After admission, closing the browser or aborting the client fetch marks the turn detached; it does not automatically cancel execution. A disconnect while still waiting for session admission aborts that queued request instead. Send `POST /api/chat/{runId}/cancel` with the owning `agentId` and optional `reason` for explicit cancellation. Cancellation is a request to stop active work, not rollback of tools already executed.
+After admission, closing the browser or aborting the client fetch marks the turn detached; it does not automatically cancel execution. A disconnect while still waiting for session admission aborts that queued request instead. Send `POST /api/chat/{runId}/cancel` with the owning `agentId` and optional `reason` for explicit cancellation. Cancellation is a request to stop active work, not rollback of tools already executed. Current source also propagates Stop into compaction database checkout/owned-query cancellation and waits for safe drain or durable fencing before another write-capable owner proceeds. A cancelling run can remain visible during that drain; reset generation checks fence stale writes.
 
 After a disconnect, query `GET /api/chat/runs/active` with `agentId`/`sessionId`, then reload [session history](sessions.md). Active-run state is in memory and is not a durable streaming replay cursor. There is no automatic resumption of the same event stream. Avoid blindly reposting a turn, which can run it twice.
 ## Steering an active turn
@@ -127,3 +136,7 @@ Reconciled on **2026-10-25** against Backend commit `3bf50374d3601c821e787912d52
 ## 27 October delta review
 
 Changed contracts checked statically against Backend `32ff99dfc0317635f5c7aa53b4c9ec18266d4c09` on **2026-10-27**. This does not recertify unchanged historical sections or report live API/provider tests.
+
+## 28 October development delta
+
+Changed behavior above was checked statically against Backend `a04acb16b0eab2a910c3ef0fb452622df81a05cb` on **2026-10-28**. This is not a live provider, database or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../../project/source-map.md).

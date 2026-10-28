@@ -158,7 +158,7 @@ For external mode, verify the intended database connection and installed `vector
 
 ### No model appears, or chat fails
 
-Go to **Settings → Connections → Model providers**, then use the **Models** form. Confirm that at least one model is selected and saved, then select it in the chat toolbar. Discovery failure can be handled with an exact manual model ID, but the provider must actually support it. Check authentication, endpoint reachability from the Burrow host/container, and the provider's error message. See [models and connections](models.md).
+Go to **Settings → Connections → Models**, then use the **Models** form. Confirm that at least one model is selected and saved, then select it in the chat toolbar. Discovery failure can be handled with an exact manual model ID, but the provider must actually support it. Check authentication, endpoint reachability from the Burrow host/container, and the provider's error message. See [models and connections](models.md).
 
 ### Login settings appear unchanged
 

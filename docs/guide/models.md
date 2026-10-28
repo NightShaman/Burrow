@@ -6,7 +6,7 @@ An agent needs a saved model connection and a selected model to answer. A connec
 
 ## Add an API connection
 
-1. Open **Settings → Connections → Model providers**.
+1. Open **Settings → Connections → Models**.
 2. In the **Models** form, give the **Provider** a recognizable name.
 3. Choose the API contract your endpoint actually supports: **OpenAI Chat Completions**, **OpenAI Responses**, **Anthropic Messages**, or **Google Gemini (Developer API)**.
 4. Enter the provider's **URL** and **API key**. Use the endpoint supplied by that provider; an OpenAI-compatible service is not necessarily the OpenAI service.
@@ -86,3 +86,4 @@ Open the saved provider in Connections, edit its settings, and save again. The A
 Deleting a provider removes its saved connection. Check which agents use it first; they may need a replacement provider/model selection. If a model disappears after a change, recheck the connection's selected models and the agent's selection before creating a duplicate connection.
 
 For authentication errors, connection failures, and safe diagnostics, see [Updates, backups, and help](maintenance.md).
+

@@ -106,6 +106,18 @@ An optional configured planner can return structured intent/support information.
 
 Explicit work-item continuation takes a retained compatibility branch. The public `runBurrow` entrypoint is also a declared compatibility adapter around proposal, verification, and commit logic. Do not assume its gates are the normal-chat execution path.
 
+## Bounded live model recovery
+
+The current development runtime can repeat a failed **model request inside the existing turn**, not replay the planner, ingress or completed tools. It retains completed tool call/result pairs for the continuation. Defaults are **three physical dispatch attempts per logical request** and **four extra attempts across the run**, with cancellable waits of **one then three seconds**. Native signed-history repair and inner provider-pool alternates spend the same physical budget; normal successful tool rounds are not capped by that retry budget.
+
+Only positively classified transient upstream failures are automatically retried: observed HTTP 408/429/5xx, structured provider error frames, or actual transport/read failure and parser-observed premature EOF. Arbitrary exception text is not evidence of an upstream outage. Burrow-internal or unknown failures stop for investigation; cancellation wins. Paid output-only image/audio operations are not automatically retried. Provider switching still requires the existing safe continuation boundary; a portability blocker does not replace the original upstream failure in diagnostics.
+
+A replacement attempt abandons the previous provisional text. Clients must use `modelCall` to replace the active partial answer and wait for authoritative completion, not concatenate failed attempts. Recovery is neither byte-stream resumption nor exactly-once provider generation/billing; a lost response may already have incurred a charge. Run/child/task progress remains active while recovering and produces one terminal outcome. [Chat API](../reference/api/chat.md) describes the event and bounded receipts.
+
+Stop/reset signals are checked around model dispatch/settlement, persistence/finalization and before new tools. PostgreSQL work propagates cancellation to its owned query and drains/rolls back before release; session admission is not simply freed while an old owner can still commit. A durable fence is required for deadline release. Consequently, a cancelling indicator may remain while work drains; cancellation cannot undo an already completed external effect. Reset generation checks reject stale late writes.
+
+This live-request mechanism does not add durable native-request reconstruction or automatic crash replay. Process-loss handling remains the separate reconciliation path below.
+
 ## Restart recovery
 
 Graceful interruption writes compact runtime-owned manifests, then aborts active runs. Recovery considers a bounded same-session transcript and requires a reliable objective. It chooses `resume`, `reconcile_first`, or `needs_user_input`. Pending recovery continuations are durably claimed before work begins.
@@ -120,3 +132,7 @@ Corrections on this page were checked against public **2026.10.19**; any newer d
 
 - [backend/src/app-runtime.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/app-runtime.mjs)
 - [backend/src/session-admission.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/session-admission.mjs)
+
+## 28 October development delta
+
+Changed behavior above was checked statically against Backend `a04acb16b0eab2a910c3ef0fb452622df81a05cb` on **2026-10-28**. This is not a live provider, database or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).

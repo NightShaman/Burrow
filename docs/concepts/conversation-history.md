@@ -53,6 +53,12 @@ Current Core adds `/compact`: it invokes the existing planner through serialized
 
 Historical provider snapshots are budgeted by provider-visible text, support material and image-token estimates rather than encoded image/data-URI byte length. A small visible chat message can therefore still carry a large replayed request. Uncovered history displaced by preparation can trigger compaction even if an older request receipt was below threshold. The planner refreshes authority before rotation; below-window screenshots are not compacted just for large encoded bytes. Required/current material that still cannot fit fails the final assembled-request budget guard. Summaries remain lossy navigation, never original proof.
 
+### Targeted originals and cancellation
+
+Current development rebuilds a summary by requesting its covered original entry IDs directly. The PostgreSQL store deduplicates IDs and uses batched indexed live/archive precedence lookup rather than scanning all retained history for each ID. This changes retrieval work, not the lossy nature of the recap or the retention of original evidence.
+
+Abort signals propagate through preparation, original retrieval and transactional rotation. Stop can cancel database checkout or the owned query; rollback/drain completes before that client is released. Session ownership is retained while old work can still write, and reset generations fence stale compaction writes. A visible cancelling state is therefore not a promise of instantaneous completion. Inspect the terminal compaction receipt rather than launching overlapping requests.
+
 ## Side-question history is a separate lane
 
 A side question captures one active main run and makes an independent tool-free answer. Its visible entries and receipts are excluded from main prompt context, summaries and continuity. Only an operator's explicit edited promotion into Queue next or Steer supplies new main-lane instructions; a side answer is not fresh verification. Queue items/holds survive a browser disconnect, and reset generations fence old queued/running actions. See [explicit chat delivery](../guide/everyday-use.md#send-queue-next-steer-or-side-question).
@@ -105,3 +111,7 @@ Trace cleanup plans are dry-run by default; deletion requires explicit confirmat
     The old `/api/albdruck/purge-conversation` route is no longer mounted. Internal legacy purge code is not a supported HTTP workflow. Brains soft deletion, session retention, attachment cleanup, migration snapshots and external backups are distinct; no single operation here establishes erasure of every derivative or copy. The current retention preview/run API manages traces; it does not restore per-conversation purge. Inspect the appropriate cleanup targets before confirming any deletion.
 
 Use the operator [API reference](../reference/api.md) and [procedures](../operations/procedures.md) rather than direct SQL deletion. Review [Backup and recovery](../operations/backup-recovery.md) before applying irreversible retention changes.
+
+## 28 October development delta
+
+Changed behavior above was checked statically against Backend `a04acb16b0eab2a910c3ef0fb452622df81a05cb` on **2026-10-28**. This is not a live provider, database or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).

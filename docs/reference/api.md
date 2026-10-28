@@ -36,7 +36,7 @@ The API serves BURROW's UI and external clients. It is an operator-level control
 
 The public assembly includes `backend/docs/openapi.json`. Its contract includes Brains, Dream controls, Git-skill management, Minion model selection, task history/attachments and OpenTelemetry settings. Retired `/api/albdruck/*` routes are absent. The source-backed endpoint pages still need to be read alongside the schema: its inventory is not proof of request/response parity or live compatibility.
 
-The current development contract reviewed on **2026-10-27** has **190 paths, 252 operations and 153 component schemas**, including durable chat inputs, workflow events and Dream memory preview. Its SHA-256 is `0248d7096350b0d035b99af2ec6041955a6dccd091c24c634fbbda8625f01285`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
+The current development contract reviewed on **2026-10-28** has **190 paths, 252 operations and 156 component schemas**, including durable chat inputs, workflow events, Dream memory preview and bounded model-recovery receipts. Its SHA-256 is `d7cc8e7275b163a89fae16e0fe329adcc40ff39a70110635f818da584d386340`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
 
 
 !!! warning "The schema is incomplete"

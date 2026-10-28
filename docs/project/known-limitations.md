@@ -17,7 +17,7 @@ The retained loader deliberately does not read JSON application configuration. E
 
 The raw CLI resolves a model before dispatching `ask`, `chat`, `plan`, `run`, and `factory`, without supplying the model-settings store required by the resolver. These paths can fail with `model_settings_store_required`. The composed HTTP/UI chat path supplies its stores separately. `doctor` now uses the composed PostgreSQL application; the previous missing-store doctor caveat no longer applies. The obsolete `dream-memory` and `dream-cycle` command names are no longer accepted.
 
-Sources: , , . See [CLI distinctions](../reference/cli.md).
+ See [CLI distinctions](../reference/cli.md).
 
 ### Public assembly omits Backend tests
 
@@ -30,6 +30,10 @@ The Scalar explorer reads the packaged `backend/docs/openapi.json`. Its presence
 The retained `POST /api/agents/{agentId}/dream-memory/consolidate` route does not implement the current Dream-to-Brains workflow. Current handler/helper signatures are incompatible: the handler omits the synthesized `items` array required by the helper and can return `400 dream_memory_synthesized_items_required`. Use the supported Dream cycle and inspect its terminal receipt for current Brain connections; do not repeatedly call the legacy route or treat its presence in a schema as success. See [memory API](../reference/api/memory.md). This is a documentation contract limitation, not a runtime repair.
 
 ## Installation, recovery, and retention
+
+### Live retries are not crash replay or exactly-once billing
+
+Current development retries only classified transient failures inside a bounded model request. It does not rerun completed tools, reconstruct a durable native request after process loss, or guarantee that a provider did not bill for a lost response. Internal/unknown failures and unsafe continuation boundaries require investigation rather than unlimited retries. Stop can remain cancelling while database work drains. See [live recovery](../architecture/runtime.md#bounded-live-model-recovery) and [chat receipts](../reference/api/chat.md#model-recovery-and-receipts).
 
 ### Cold backup has explicit boundaries
 
@@ -45,7 +49,7 @@ CLI helpers that construct the PostgreSQL application can apply pending migratio
 
 The `retention` CLI uses environment-derived policy, with default eligible-session ages of main 60 days, task 30 days, and subagent 7 days. It does not read the persisted UI trace policy. Preview targets with the same environment and explicit agent ID before confirming; `--summary` omits individual target paths. The historical flattened-metadata mismatch has been fixed: the planner reads `record.metadata || record`, checks terminal board-task eligibility, and rechecks eligibility before deletion. This source review did not execute production cleanup.
 
-Sources: , , . See [retention procedures](../operations/procedures.md#retention-maintenance).
+ See [retention procedures](../operations/procedures.md#retention-maintenance).
 
 ## Setup and execution
 
@@ -61,7 +65,7 @@ Scheduler dispatch now receives the composed stores, and task-board execution aw
 
 The local process runner supports abort-driven process-group termination with a grace period and forced kill. It does not install a wall-clock task timeout merely because `timed_out` is an allowed record status. Inspect active state and tool receipts. Child policy propagation and result aggregation have been revised: the historical missing `executionBoundaries` and unconditional empty/false completion-evidence claims no longer apply. This is source inspection, not a demonstrated isolation test; host permissions remain an independent boundary.
 
-Sources: , , . See [Agents and minions](../concepts/agents-minions.md#completion-and-evidence).
+ See [Agents and minions](../concepts/agents-minions.md#completion-and-evidence).
 
 ## Security and observability cautions
 
@@ -72,7 +76,7 @@ Sources: , , . See [Agents and minions](../concepts/agents-minions.md#completion
 - A container health result or successful model response does not prove an entire workflow completed.
 - Context usage is an estimate, not an exact token-meter guarantee.
 
-Source: . See [trust boundaries](../security/trust-boundaries.md), [observability](../operations/observability.md), and [troubleshooting](../operations/troubleshooting.md).
+ See [trust boundaries](../security/trust-boundaries.md), [observability](../operations/observability.md), and [troubleshooting](../operations/troubleshooting.md).
 
 
 
@@ -83,3 +87,7 @@ Corrections on this page were checked against public **2026.10.19**; any newer d
 - [backend/package.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/package.json)
 - [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
 - [backend/src/cli-postgres.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/cli-postgres.mjs)
+
+## 28 October development delta
+
+Changed behavior above was checked statically against Backend `a04acb16b0eab2a910c3ef0fb452622df81a05cb` on **2026-10-28**. This is not a live provider, database or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).
