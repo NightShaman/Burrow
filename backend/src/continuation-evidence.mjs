@@ -32,6 +32,7 @@ function projection(result = {}) {
   // Skill discovery is decision-critical evidence: include every compact card in
   // the model-facing continuation receipt; never include loaded SKILL.md bodies here.
   if (result.tool === 'list_skills') return { ...base, skills: Array.isArray(result.skills) ? result.skills.map((skill) => ({ id: skill?.id || null, name: skill?.name || null, description: skill?.description || null, version: skill?.version || null, lifecycle: skill?.lifecycle || null, available: skill?.available === true, ownership: skill?.ownership ? { scope: skill.ownership.scope || null, agentId: skill.ownership.agentId || null } : null })) : [] };
+  if (result.tool === 'agents_list') return { ...base, agents: result.agents || [], resultCount: result.resultCount ?? null, query: result.query ?? null, includeDisabled: result.includeDisabled ?? false, totalCount: result.totalCount ?? null, nextCursor: result.nextCursor ?? null };
   if (result.tool === 'load_skill') return { ...base, skill: result.skill ? { id: result.skill.id || null, name: result.skill.name || null, version: result.skill.version || null, lifecycle: result.skill.lifecycle || null, available: result.skill.available === true } : null };
   return { ...base, path: result.filePath || result.path || result.dirPath || null, resultFingerprint: result.resultFingerprint || null };
 }

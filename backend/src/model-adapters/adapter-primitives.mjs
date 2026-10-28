@@ -235,6 +235,7 @@ function nativeToolReceipt(result = {}) {
     brain_save: ['agentId', 'result'],
     brain_update: ['agentId', 'result'],
     brain_remove: ['agentId', 'result'],
+    agents_list: ['agents', 'resultCount', 'query', 'includeDisabled', 'totalCount', 'nextCursor'],
     scheduled_jobs_list: ['jobs'],
     scheduled_jobs_read: ['job'],
     scheduled_jobs_create: ['job'],

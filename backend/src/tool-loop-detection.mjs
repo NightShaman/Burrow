@@ -32,6 +32,10 @@ function materialEvidenceKeys(results = []) {
       keys.push(`delegated:${result.tool}:${identity}:${result.status || (result.ok ? 'succeeded' : 'failed')}`);
       continue;
     }
+    if (result.tool === 'agents_list') {
+      keys.push(`agents_list:${exactArgumentFingerprint([result.ok, result.error, result.agents, result.query, result.includeDisabled, result.totalCount, result.nextCursor])}`);
+      continue;
+    }
     if (result.tool === 'files_read') {
       keys.push(`read:${result.filePath || ''}:${result.offsetBytes || 0}:${result.returnedBytes ?? result.coverage?.returnedBytes ?? 0}:${result.bytes ?? result.coverage?.bytes ?? 0}:${result.contentHash || ''}`);
       continue;
@@ -199,7 +203,7 @@ function repeatedToolCallObservations(toolCalls = [], priorIterations = []) {
 function normalizedToolOutcome(result = {}) {
   return {
     // Hash full observed payload before any bounded display projection.
-    observedPayloadFingerprint: exactArgumentFingerprint(Object.fromEntries(['output', 'job', 'jobs', 'handoff', 'attachment', 'entries', 'paths', 'matches', 'results', 'reply', 'content', 'stdout', 'stderr'].filter(key => result[key] !== undefined).map(key => [key, result[key]]))),
+    observedPayloadFingerprint: exactArgumentFingerprint(Object.fromEntries(['output', 'job', 'jobs', 'handoff', 'attachment', 'entries', 'paths', 'matches', 'results', 'agents', 'totalCount', 'nextCursor', 'includeDisabled', 'reply', 'content', 'stdout', 'stderr'].filter(key => result[key] !== undefined).map(key => [key, result[key]]))),
     ok: Boolean(result.ok),
     tool: result.tool || null,
     filePath: result.filePath || null,
@@ -383,6 +387,12 @@ function compactPromptEvidenceResult(result = {}) {
       content: typeof item?.content === 'string' ? item.content.slice(0, CHAT_TOOL_SINGLE_EXCERPT_CHARS) : null,
       sourceRef: item?.sourceRef || null,
     }));
+  }
+  if (result.tool === 'agents_list') {
+    compact.agents = Array.isArray(result.agents) ? result.agents.map(({ id, name, enabled }) => ({ id, name, enabled })) : [];
+    compact.includeDisabled = result.includeDisabled;
+    compact.totalCount = result.totalCount;
+    compact.nextCursor = result.nextCursor ?? null;
   }
   if (Array.isArray(result.tasks)) compact.tasks = result.tasks.slice(0, 12).map((task) => ({
     id: task?.id || null, projectId: task?.projectId || null,

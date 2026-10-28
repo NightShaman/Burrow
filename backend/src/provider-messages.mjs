@@ -131,6 +131,12 @@ function compactReceiptFact(round = []) {
     const resultText = renderedContent(result?.content).replace(/\s+/g, ' ').trim();
     const name = String(call?.function?.name || 'tool').slice(0, 120);
     const callId = String(call?.id || result?.tool_call_id || '').slice(0, 80);
+    if (name === 'agents_list') {
+      // Peer IDs and pagination cursors are identities, not prose excerpts.
+      // Keep the public receipt atomic even when a later round displaces it.
+      try { return `- agents_list: ${JSON.stringify(JSON.parse(renderedContent(result?.content)))}`; }
+      catch { return '- agents_list: result unavailable; query agents_list again.'; }
+    }
     return `- ${name}${callId ? ` (${callId})` : ''}: ${resultText || '[completed without textual output]'}`;
   });
 }
@@ -138,6 +144,11 @@ function compactReceiptFact(round = []) {
 function clipEvidenceFact(fact, maxChars) {
   if (maxChars <= 0) return null;
   if (fact.length <= maxChars) return fact;
+  if (fact.startsWith('- agents_list:')) {
+    const omitted = '- agents_list: directory receipt omitted; query agents_list again before messaging or continuing pagination.';
+    const short = '- agents_list: omitted; query again.';
+    return omitted.length <= maxChars ? omitted : short.length <= maxChars ? short : null;
+  }
   if (maxChars === 1) return '…';
   return `${fact.slice(0, Math.max(0, maxChars - 1))}…`;
 }

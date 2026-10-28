@@ -50,6 +50,13 @@ function agentId(value, field) {
   if (!id || id === '.' || id === '..' || !ID.test(id)) throw new Error(`${field}_invalid`);
   return id;
 }
+function recipientReference(value) {
+  // References are registry input, not path components. Validate the canonical
+  // ID only after resolution so multiword and Unicode display names work too.
+  const reference = text(value);
+  if (!reference || reference.length > 96) throw new Error('agent_message_recipient_invalid');
+  return reference;
+}
 function sessionId(value) {
   const id = text(value || 'default');
   if (!id || id.length > 120) throw new Error('agent_message_target_session_invalid');
@@ -92,7 +99,7 @@ async function appendAgentMessage({ conversationStore, agentId: transcriptAgentI
 export async function sendAgentMessage({ conversationStore = null, senderRuntime, resolveRecipientRuntime, runRecipientReply = null, recipientAgentId, targetSessionId = null, replyTo = null, content, messageMode = 'request_reply', runId = null, sourceSessionId = null, parentTraceContext = null, abortSignal = null } = {}) {
   if (!conversationStore) throw new Error('conversation_store_required');
   const sender = agentId(senderRuntime?.agentId, 'agent_message_sender');
-  const requestedRecipient = agentId(recipientAgentId, 'agent_message_recipient');
+  const requestedRecipient = recipientReference(recipientAgentId);
   const body = text(content);
   if (!body) throw new Error('agent_message_content_required');
   if (body.length > MAX_MESSAGE) throw new Error('agent_message_content_too_large');

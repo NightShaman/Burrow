@@ -93,7 +93,7 @@ function reviewAction(action = {}, { workspaceRoot = null, executionContext = nu
     return { index: action.index, tool: action.tool, status: blockers.length ? 'blocked' : 'allowed', risk, blockers: [...new Set(blockers)], warnings };
   }
 
-  if (action.tool === 'run_evidence_search' || action.tool === 'session_search' || action.tool === 'session_read_handoff' || action.tool === 'attachment_view' || action.tool === 'memory_working_search' || action.tool === 'memory_rolling_search' || action.tool === 'tasks_list' || ['scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_job_runs'].includes(action.tool)) {
+  if (action.tool === 'run_evidence_search' || action.tool === 'session_search' || action.tool === 'session_read_handoff' || action.tool === 'attachment_view' || action.tool === 'memory_working_search' || action.tool === 'memory_rolling_search' || action.tool === 'tasks_list' || action.tool === 'agents_list' || ['scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_job_runs'].includes(action.tool)) {
     risk.push('read-only');
     return {
       index: action.index,

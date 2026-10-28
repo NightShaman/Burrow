@@ -9,6 +9,7 @@ import { writeFileEnvelope } from './harness/write-file.mjs';
 import { applyPatchEnvelope } from './harness/apply-patch.mjs';
 import { editFileEnvelope, gitDiffEnvelope, gitStatusEnvelope, globEnvelope, listFilesEnvelope, searchFilesEnvelope, statPathEnvelope } from './harness/developer-tools.mjs';
 import { executeSpawnSubagentTool } from './subagent-spawn-execution.mjs';
+import { listAgentPeers } from './agent-directory-tool.mjs';
 import { sendAgentMessage } from './agent-chat-tool.mjs';
 import { updateOwnToolsProfile } from './agent-profile-tool.mjs';
 import { createAgentScheduledJob, executeAgentScheduledJobTool } from './agent-scheduled-job-tool.mjs';
@@ -539,6 +540,19 @@ export async function executeReviewedProposalActions({ conversationStore = null,
         artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-patch`,
         observedToolResults: [...observedToolResults, ...toolResults],
       }));
+      continue;
+    }
+
+    if (action.tool === 'agents_list') {
+      const started = await traceLogger?.toolStart?.({ tool: 'agents_list', toolCallId: action.toolCallId || null });
+      let result;
+      try {
+        result = await listAgentPeers({ store: executionContext?.stores?.agents, query: action.query, includeDisabled: action.includeDisabled, cursor: action.cursor, limit: action.limit ?? undefined });
+      } catch (error) {
+        result = { tool: 'agents_list', ok: false, error: error?.message || String(error) };
+      }
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'agents_list', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, resultCount: result.resultCount, error: result.error || null });
       continue;
     }
 

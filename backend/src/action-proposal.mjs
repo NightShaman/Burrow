@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { forgeToolSchemas } from './forge-agent-tools.mjs';
 
-export const ALLOWED_TOOLS = new Set(['run_evidence_search','brain_search','brain_read','brain_save','brain_update','brain_remove', 'shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'attachment_view', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now', 'files_write', 'files_patch', 'spawn_subagent', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call', 'forge_catalog', 'forge_create_job', 'forge_list_jobs', 'forge_inspect_job', 'forge_attach_artifact', 'list_skills', 'load_skill']);
+export const ALLOWED_TOOLS = new Set(['run_evidence_search','brain_search','brain_read','brain_save','brain_update','brain_remove', 'shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'attachment_view', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now', 'files_write', 'files_patch', 'spawn_subagent', 'agents_list', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call', 'forge_catalog', 'forge_create_job', 'forge_list_jobs', 'forge_inspect_job', 'forge_attach_artifact', 'list_skills', 'load_skill']);
 
 const TARGET_KIND_ALIASES = new Map([
   ['filesystem', 'filesystem'],
@@ -113,6 +113,7 @@ function normalizeAction(action, index) {
     model: action?.model || action?.modelId ? String(action.model || action.modelId).trim() : null,
     modelProfile: action?.modelProfile ? String(action.modelProfile).trim() : null,
     target: action?.target && typeof action.target === 'object' && !Array.isArray(action.target) ? action.target : null,
+    includeDisabled: action?.includeDisabled === undefined ? false : action.includeDisabled,
     recipientAgentId: action?.recipientAgentId ? String(action.recipientAgentId).trim() : null,
     targetSessionId: action?.targetSessionId ? String(action.targetSessionId).trim() : null,
     contextMode: action?.contextMode ?? undefined,
@@ -187,6 +188,12 @@ function normalizeAction(action, index) {
   if (tool === 'mcp_capabilities' && !normalized.mcpProvider) errors.push('mcp_provider_required');
   if (tool === 'mcp_call' && !normalized.mcpProvider) errors.push('mcp_provider_required');
   if (tool === 'mcp_call' && !normalized.mcpToolName) errors.push('mcp_tool_name_required');
+  if (tool === 'agents_list') {
+    if (action?.query != null && (typeof action.query !== 'string' || action.query.length > 96)) errors.push('query_must_be_string_max_96');
+    if (action?.cursor != null && (typeof action.cursor !== 'string' || action.cursor.length > 512)) errors.push('cursor_invalid');
+    if (action?.limit != null && (!Number.isInteger(action.limit) || action.limit < 1 || action.limit > 20)) errors.push('limit_must_be_integer_1_to_20');
+    if (typeof normalized.includeDisabled !== 'boolean') errors.push('includeDisabled_must_be_boolean');
+  }
   if (tool === 'agent_send_message') {
     if (!normalized.recipientAgentId) errors.push('recipientAgentId_required');
     if (normalized.content === null || !normalized.content.trim()) errors.push('content_required');
@@ -410,11 +417,19 @@ export function nativeToolSchemas({ includeForge = true, includeMutations = true
     {
       type: 'function',
       function: {
+        name: 'agents_list',
+        description: 'Discover registered peers for native A2A messaging in this Burrow. Returns paginated canonical IDs, display names and enabled state; enabled agents by default. Optional query matches ID/name substrings. Follow nextCursor with unchanged filters; a changed directory requires restarting. No Backdoor, MCP, health check or session inspection is needed. A known recipient can be messaged directly.',
+        parameters: { type: 'object', additionalProperties: false, properties: { query: { type: 'string', maxLength: 96, description: 'Optional case-insensitive ID or display-name substring.' }, includeDisabled: { type: 'boolean', description: 'Include disabled agents; defaults to false. Listed identity is not proof of runtime health.' }, cursor: { type: 'string', maxLength: 512, description: 'Returned nextCursor, with the same query and includeDisabled filters. Omit to start/restart.' }, limit: { type: 'integer', minimum: 1, maximum: 20, description: 'Page size; defaults to 20. Use a smaller page or narrower query when context is tight.' }, reason: { type: 'string' } } },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'agent_send_message',
-        description: 'Send an explicit attributed message to another registered agent. request_reply wakes the recipient for one response and leaves peer messaging available for a deliberate follow-up. request_reply_complete wakes the recipient for exactly one reply, mirrors it back, then closes this peer exchange so the sender must conclude to the user. deliver only persists a non-interrupting FYI.',
+        description: 'Send an explicit attributed message directly to a registered agent by canonical ID or unique display name. Use agents_list only when discovery/disambiguation is needed; Backdoor/MCP is not required. request_reply wakes the recipient for one response and leaves peer messaging available for a deliberate follow-up. request_reply_complete wakes the recipient for exactly one reply, mirrors it back, then closes this peer exchange so the sender must conclude to the user. deliver only persists a non-interrupting FYI.',
         parameters: {
           type: 'object', additionalProperties: false,
-          properties: { recipientAgentId: { type: 'string' }, targetSessionId: { type: 'string', description: 'Optional recipient session id. When omitted, replies to the current A2A sender use the runtime-owned return session; other messages use the recipient’s configured A2A inbox ("default" or "a2a"). An explicit value overrides that return route.' }, messageMode: { type: 'string', enum: ['deliver', 'request_reply', 'request_reply_complete'], description: 'Defaults to request_reply. Use request_reply_complete for one final recipient reply, then conclude to the user without another peer message. deliver only persists a non-interrupting FYI.' }, content: { type: 'string' }, reason: { type: 'string' } },
+          properties: { recipientAgentId: { type: 'string', description: 'Canonical agent ID (preferred) or unique display name, including spaces. Exact IDs win; unknown or ambiguous names fail without sending. Discover IDs with agents_list when needed.' }, targetSessionId: { type: 'string', description: 'Optional recipient session id. When omitted, replies to the current A2A sender use the runtime-owned return session; other messages use the recipient’s configured A2A inbox ("default" or "a2a"). An explicit value overrides that return route.' }, messageMode: { type: 'string', enum: ['deliver', 'request_reply', 'request_reply_complete'], description: 'Defaults to request_reply. Use request_reply_complete for one final recipient reply, then conclude to the user without another peer message. deliver only persists a non-interrupting FYI.' }, content: { type: 'string' }, reason: { type: 'string' } },
           required: ['recipientAgentId', 'content'],
         },
       },
@@ -455,7 +470,7 @@ export function nativeToolSchemas({ includeForge = true, includeMutations = true
     && (includeWorkingMemory || !['memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_read_handoff', 'session_write_handoff'].includes(tool.function?.name))
     && (includeTaskBoard || !['tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete'].includes(tool.function?.name))
     && (includeAgentProfile || !['agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now'].includes(tool.function?.name))
-    && (includeAgentChat || tool.function?.name !== 'agent_send_message')
+    && (includeAgentChat || !['agents_list', 'agent_send_message'].includes(tool.function?.name))
     && (includeMcpMenu || !['mcp_providers', 'mcp_capabilities', 'mcp_call'].includes(tool.function?.name)));
 }
 
@@ -493,6 +508,7 @@ export function actionFromNativeToolCall(call = {}, index = 0) {
   if (tool === 'scheduled_jobs_create' || tool === 'scheduled_jobs_update') return normalizeNative({ tool, reason: args.reason, jobId: args.jobId, name: args.name, prompt: args.prompt, cron: args.cron, timezone: args.timezone, sessionId: args.sessionId, enabled: args.enabled, modelConnectionId: args.modelConnectionId, model: args.model, contextMode: args.contextMode });
   if (tool === 'files_write') return normalizeNative({ tool, reason: args.reason, filePath: args.filePath, content: args.content });
   if (tool === 'files_patch') return normalizeNative({ tool, reason: args.reason, patch: args.patch });
+  if (tool === 'agents_list') return normalizeNative({ tool, reason: args.reason, query: args.query, includeDisabled: args.includeDisabled, cursor: args.cursor, limit: args.limit });
   if (tool === 'agent_send_message') return normalizeNative({ tool, reason: args.reason, recipientAgentId: args.recipientAgentId, targetSessionId: args.targetSessionId, messageMode: args.messageMode, content: args.content });
   if (tool === 'forge_catalog' || tool === 'forge_list_jobs') return normalizeNative({ tool, reason: args.reason });
   if (tool === 'forge_create_job') return normalizeNative({ tool, reason: args.reason, mode: args.mode, connectionId: args.connectionId, modelId: args.modelId, prompt: args.prompt, idempotencyKey: args.idempotencyKey });

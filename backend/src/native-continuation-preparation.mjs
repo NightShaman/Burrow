@@ -35,6 +35,22 @@ function projectToolFields(messages = [], maxChars = 0) {
     if (message?.role !== 'tool' || typeof message.content !== 'string') return message;
     try {
       const parsed = JSON.parse(message.content);
+      if (parsed.tool === 'agents_list') {
+        // Directory identities are atomic, never string excerpts. Its producer
+        // already paginates; under request pressure disclose an omitted page and
+        // let the model narrow the query/page size instead of using clipped IDs.
+        const agents = Array.isArray(parsed.agents) ? parsed.agents : [];
+        const keep = [];
+        let chars = 0;
+        for (const agent of agents) {
+          const size = JSON.stringify(agent).length;
+          if (chars + size > fieldBudget) break;
+          keep.push(agent); chars += size;
+        }
+        const originalCount = parsed.delivery?.complete === false ? parsed.delivery.returned + parsed.delivery.omitted : agents.length;
+        if (keep.length < agents.length) return { ...message, content: JSON.stringify({ ...parsed, agents: keep, delivery: { returned: keep.length, omitted: originalCount - keep.length, complete: false, truncated: true, guidance: 'This page was projected for provider context. Retry agents_list with a narrower query or smaller limit to retrieve exact cards before advancing nextCursor.' } }) };
+        return message;
+      }
       const artifactRef = parsed?.artifacts?.result || parsed?.artifacts?.stdout || parsed?.artifacts?.stderr || null;
       return { ...message, content: JSON.stringify(projectValue(parsed, { maxChars: fieldBudget, artifactRef })) };
     } catch { return { ...message, content: JSON.stringify(projectValue(message.content, { maxChars: fieldBudget })) }; }

@@ -88,7 +88,17 @@ function deliveryFromToolResult(toolResult = {}) {
 }
 
 export function summarizeToolResults(toolResults = []) {
-  return (toolResults || []).map((toolResult, index) => ({
+  return (toolResults || []).map((toolResult, index) => toolResult.tool === 'agents_list' ? {
+    // Keep the small public page compact in shape as well as size. A generic
+    // filesystem receipt's many irrelevant keys can exhaust metadata key limits.
+    activityId: toolResult.activityId || `tool-${index + 1}`,
+    tool: 'agents_list', toolCallId: toolResult.toolCallId || null,
+    ok: toolResult.ok ?? null, error: toolResult.error || null,
+    query: toolResult.query ?? null, includeDisabled: toolResult.includeDisabled,
+    agents: Array.isArray(toolResult.agents) ? toolResult.agents.map(({ id, name, enabled }) => ({ id, name, enabled })) : undefined,
+    resultCount: toolResult.resultCount, totalCount: toolResult.totalCount,
+    nextCursor: toolResult.nextCursor ?? null,
+  } : ({
     activityId: toolResult.activityId || `tool-${index + 1}`,
     tool: toolResult.tool || null,
     toolCallId: toolResult.toolCallId || null,
