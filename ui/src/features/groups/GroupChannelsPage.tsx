@@ -215,14 +215,14 @@ export function GroupChannelsPage({ channelId, agents, operator }: { channelId: 
       </div>
       {error && <p className="group-error">{error}</p>}
       <div className="group-messages" ref={messagesRef} onScroll={updateScrollIntent} aria-busy={Boolean(channel.runs.length)}>
-        {channel.turns.length ? channel.turns.map((turn) => {
+        {channel.turns.map((turn) => {
           const agent = turn.authorId ? agentById.get(turn.authorId) : undefined;
           const isOperator = !turn.authorId && ['user', 'operator', 'human'].includes((turn.role || '').toLowerCase());
           const avatar = isOperator ? (operatorIdentity?.avatar || operator?.avatar || 'You') : (identityAvatars[turn.authorId || ''] || agent?.avatar || turn.authorName.slice(0, 1).toUpperCase());
           const activity = turn.metadata?.toolActivity as ToolActivity | undefined;
           const progress = turn.metadata?.progress as RunProgress | undefined;
           return <ChatMessage key={turn.id} side={isOperator ? 'operator' : 'agent'} name={isOperator ? (operatorIdentity?.name || operator?.name || turn.authorName) : turn.authorName} avatar={avatar} time={timeLabel(turn.createdAt)} text={turn.content} activity={activity} progress={progress} activityLive={Boolean(activity && !turn.content)} attachments={Array.isArray(turn.metadata?.attachments) ? turn.metadata.attachments as SessionAttachment[] : []} outputArtifacts={Array.isArray(turn.metadata?.outputArtifacts) ? turn.metadata.outputArtifacts as GeneratedArtifact[] : []} attachmentAgentId={text(turn.metadata?.attachmentAgentId) || turn.authorId || undefined} />;
-        }) : <div className="group-empty"><h2>No messages yet</h2><p>Send a message to start the group chat.</p></div>}
+        })}
       </div>
       <div className="group-composer">
         {mentionCandidates.length > 0 && <div className="group-mention-menu" role="listbox" aria-label="Mention an agent">
