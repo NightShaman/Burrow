@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { api } from '../../app/api';
 import { OpenTelemetrySettings } from './OpenTelemetrySettings';
@@ -10,169 +10,429 @@ vi.mock('../../app/api', async (importOriginal) => ({
 
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
-type Fixture = {
-  ok: boolean;
-  settings: { enabled: boolean; endpoint: string; headersConfigured: boolean; streamName?: string };
-  effective: {
-    enabled: boolean;
-    endpoint: string;
-    headersConfigured: boolean;
-    source: 'environment' | 'database' | 'default';
-    endpointSource: 'environment' | 'database' | 'default';
-    headersSource: 'environment' | 'database' | 'default';
-    restartRequired: false;
+const route = '/api/settings/opentelemetry';
+type Destination = {
+  id: string;
+  name: string;
+  provider: string;
+  enabled: boolean;
+  endpoint: string;
+  tracesEndpoint: string;
+  metricsEndpoint: string;
+  protocol: string;
+  tracesEnabled: boolean;
+  metricsEnabled: boolean;
+  metricsTemporality: string;
+  connection: Record<string, string>;
+  tls: { verify: boolean };
+  headersConfigured: boolean;
+  credentialsConfigured: boolean;
+  credentialFields: string[];
+};
+type DestinationInput = Omit<Destination, 'headersConfigured' | 'credentialsConfigured' | 'credentialFields'> & {
+  headers?: string;
+  clearHeaders?: boolean;
+  credentials?: Record<string, string>;
+  clearCredentials?: boolean;
+};
+type Update = { enabled: boolean; destinations: DestinationInput[] };
+type Source = 'database' | 'environment' | 'default';
+
+const providers = [
+  { id: 'custom', label: 'Custom OTLP', traces: true, metrics: true },
+  { id: 'openobserve', label: 'OpenObserve', traces: true, metrics: true },
+  { id: 'grafana-tempo', label: 'Grafana Tempo', traces: true, metrics: false },
+  { id: 'grafana-cloud', label: 'Grafana Cloud', traces: true, metrics: true },
+  { id: 'jaeger', label: 'Jaeger', traces: true, metrics: false },
+  { id: 'signoz', label: 'SigNoz', traces: true, metrics: true },
+  { id: 'uptrace', label: 'Uptrace', traces: true, metrics: true },
+  { id: 'elastic', label: 'Elastic', traces: true, metrics: true },
+  { id: 'datadog', label: 'Datadog', traces: true, metrics: true },
+  { id: 'new-relic', label: 'New Relic', traces: true, metrics: true },
+  { id: 'honeycomb', label: 'Honeycomb', traces: true, metrics: true },
+  { id: 'splunk', label: 'Splunk', traces: true, metrics: true },
+].map(provider => ({
+  ...provider,
+  description: `${provider.label} OTLP/HTTP preset`,
+  protocols: ['http/json', 'http/protobuf'],
+  defaultProtocol: 'http/json',
+  defaultTemporality: provider.id === 'datadog' ? 'delta' : 'cumulative',
+  documentationUrl: 'https://docs.example.test/otlp',
+}));
+
+function destination(overrides: Partial<Destination> = {}): Destination {
+  return {
+    id: 'archive', name: 'Archive collector', provider: 'custom', enabled: true,
+    endpoint: 'https://archive.example.test:4318', tracesEndpoint: '', metricsEndpoint: '',
+    protocol: 'http/json', tracesEnabled: true, metricsEnabled: true,
+    metricsTemporality: 'cumulative', connection: {}, tls: { verify: true },
+    headersConfigured: true, credentialsConfigured: false, credentialFields: [],
+    ...overrides,
   };
-  runtime?: { enabled: boolean; sdkStarted: boolean };
-};
+}
+const archive = destination();
+const tempo = destination({
+  id: 'tempo', name: 'Production traces', provider: 'grafana-tempo',
+  endpoint: 'https://tempo.example.test', metricsEnabled: false,
+  connection: { tenantId: 'tenant-a' }, headersConfigured: false,
+  credentialsConfigured: true, credentialFields: ['token'],
+});
 
-const state: Fixture = {
-  ok: true,
-  settings: { enabled: false, endpoint: 'https://collector.example.com:4318', headersConfigured: true },
-  effective: {
-    enabled: false,
-    endpoint: 'https://collector.example.com:4318',
-    headersConfigured: true,
-    source: 'database' as const,
-    endpointSource: 'database' as const,
-    headersSource: 'database' as const,
-    restartRequired: false as const,
-  },
-  runtime: { enabled: false, sdkStarted: false },
-};
+function response(destinations: Destination[] = [archive, tempo], enabled = false) {
+  return {
+    ok: true,
+    providers,
+    settings: { enabled, destinations, endpoint: destinations[0]?.endpoint ?? '', headersConfigured: destinations[0]?.headersConfigured ?? false },
+    effective: {
+      enabled, destinations, endpoint: destinations[0]?.endpoint ?? '',
+      headersConfigured: destinations[0]?.headersConfigured ?? false,
+      source: 'database' as Source, endpointSource: 'database' as Source,
+      headersSource: 'database' as Source, destinationsSource: 'database' as Source,
+      restartRequired: false as const,
+    },
+    runtime: { enabled, sdkStarted: enabled },
+  };
+}
+type Fixture = ReturnType<typeof response>;
 
-async function mount(response: Fixture = state) {
-  vi.mocked(api).mockResolvedValue(response);
-  render(<OpenTelemetrySettings />);
-  await screen.findByText(/Telemetry runtime (?:is off|status is unavailable)/);
+// Model only the public API round trip: write-only fields never come back from GET/PUT.
+// Preserved values belong to the same ID AND provider, not merely the same list position.
+function acceptUpdate(saved: Fixture, update: Update): Fixture {
+  return response(update.destinations.map(input => {
+    const previous = saved.settings.destinations.find(item => item.id === input.id && item.provider === input.provider);
+    const { headers, clearHeaders, credentials, clearCredentials, ...publicFields } = input;
+    const fields = Object.keys(credentials ?? {}).filter(key => Boolean(credentials?.[key]));
+    const credentialFields = clearCredentials ? [] : [...new Set([...(previous?.credentialFields ?? []), ...fields])];
+    return {
+      ...publicFields,
+      headersConfigured: clearHeaders ? false : Boolean(headers || previous?.headersConfigured),
+      credentialsConfigured: credentialFields.length > 0,
+      credentialFields,
+    };
+  }), update.enabled);
 }
 
-function save() { fireEvent.click(screen.getByRole('button', { name: 'Save changes' })); }
-function lastRequestBody() { return JSON.parse(vi.mocked(api).mock.calls.at(-1)![1]!.body as string); }
-
-it('keeps generic collectors in the custom path and preserves protected headers when omitted', async () => {
-  await mount();
-  expect((screen.getByRole('radio', { name: /Custom OTLP/ }) as HTMLInputElement).checked).toBe(true);
-  expect((screen.getByLabelText('OTLP endpoint') as HTMLInputElement).value).toBe(state.settings.endpoint);
-  expect((screen.getByLabelText('Authentication headers') as HTMLInputElement).value).toBe('');
-  fireEvent.click(screen.getByRole('switch'));
-  save();
-  await screen.findByText('OpenTelemetry settings saved and applied live.');
-  expect(lastRequestBody()).toEqual({ enabled: true, endpoint: state.settings.endpoint });
-});
-
-it('presents OpenObserve as normal fields and converts them to the existing secure API contract', async () => {
-  const openObserve = {
-    ...state,
-    settings: { enabled: false, endpoint: '', headersConfigured: false },
-    effective: { ...state.effective, endpoint: '', headersConfigured: false },
-  };
-  await mount(openObserve);
-  fireEvent.click(screen.getByRole('radio', { name: /OpenObserve/ }));
-  fireEvent.change(screen.getByLabelText('OpenObserve server URL'), { target: { value: 'https://observe.example.com/' } });
-  fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'goblin kingdom' } });
-  fireEvent.change(screen.getByLabelText('Stream'), { target: { value: 'goblin logs' } });
-  fireEvent.change(screen.getByLabelText('OpenObserve username or email'), { target: { value: 'rob@example.com' } });
-  fireEvent.change(screen.getByLabelText('OpenObserve password'), { target: { value: 'swordfish' } });
-  fireEvent.click(screen.getByRole('switch'));
-  save();
-  await screen.findByText('OpenTelemetry settings saved and applied live.');
-  const body = lastRequestBody();
-  expect(body.enabled).toBe(true);
-  expect(body.endpoint).toBe('https://observe.example.com/api/goblin%20kingdom');
-  expect(body.headers).toBe(`Authorization=${encodeURIComponent(`Basic ${btoa('rob@example.com:swordfish')}`)},stream-name=goblin%20logs`);
-  expect(screen.queryByLabelText('OpenObserve username or email')).toBeNull();
-  expect(screen.queryByLabelText('OpenObserve password')).toBeNull();
-  expect(document.body.textContent).not.toContain('swordfish');
-});
-
-it('reloads a saved non-default OpenObserve stream without attempting to reveal credentials', async () => {
-  await mount({
-    ...state,
-    settings: { ...state.settings, endpoint: 'https://observe.example.com/api/default', streamName: 'burrow-traces' },
-    effective: { ...state.effective, endpoint: 'https://observe.example.com/api/default' },
+async function mount(initial = response()) {
+  let saved = initial;
+  vi.mocked(api).mockImplementation(async (_path, init) => {
+    if (init?.method === 'PUT') {
+      saved = acceptUpdate(saved, JSON.parse(init.body as string) as Update);
+      // An active environment transport remains separate from the saved list.
+      if (initial.effective.destinationsSource === 'environment') saved.effective = initial.effective;
+    }
+    return saved;
   });
-  expect((screen.getByRole('radio', { name: /OpenObserve/ }) as HTMLInputElement).checked).toBe(true);
-  expect((screen.getByLabelText('OpenObserve server URL') as HTMLInputElement).value).toBe('https://observe.example.com');
-  expect((screen.getByLabelText('Organization') as HTMLInputElement).value).toBe('default');
-  expect((screen.getByLabelText('Stream') as HTMLInputElement).value).toBe('burrow-traces');
-  expect((screen.getByLabelText('OpenObserve password') as HTMLInputElement).value).toBe('');
-  expect(screen.getByText(/saved sign-in is configured/i)).toBeTruthy();
-});
-
-it('requires complete OpenObserve credentials and validates the friendly fields before PUT', async () => {
-  await mount({
-    ...state,
-    settings: { enabled: false, endpoint: '', headersConfigured: false },
-    effective: { ...state.effective, endpoint: '', headersConfigured: false },
-  });
-  fireEvent.click(screen.getByRole('radio', { name: /OpenObserve/ }));
-  fireEvent.change(screen.getByLabelText('OpenObserve server URL'), { target: { value: 'https://observe.example.com' } });
-  fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'bad/org' } });
-  save();
-  expect((await screen.findByRole('alert')).textContent).toContain('Organization cannot contain');
-  expect(api).toHaveBeenCalledTimes(1);
-  fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'default' } });
-  fireEvent.change(screen.getByLabelText('OpenObserve username or email'), { target: { value: 'rob@example.com' } });
-  save();
-  expect((await screen.findByRole('alert')).textContent).toContain('both the OpenObserve username and password');
-  expect(api).toHaveBeenCalledTimes(1);
-});
-
-it('validates advanced endpoint and header syntax before PUT', async () => {
-  await mount();
-  fireEvent.change(screen.getByLabelText('OTLP endpoint'), { target: { value: 'ftp://user:pass@example.test?bad=yes' } });
-  save();
-  expect((await screen.findByRole('alert')).textContent).toContain('HTTP or HTTPS collector URL');
-  fireEvent.change(screen.getByLabelText('OTLP endpoint'), { target: { value: 'https://collector.example' } });
-  fireEvent.change(screen.getByLabelText('Authentication headers'), { target: { value: 'not-a-pair' } });
-  save();
-  expect((await screen.findByRole('alert')).textContent).toContain('comma-separated key=value');
-  expect(api).toHaveBeenCalledTimes(1);
-});
-
-it('clears saved credentials explicitly without sending a replacement', async () => {
-  await mount();
-  fireEvent.change(screen.getByLabelText('Authentication headers'), { target: { value: 'x-api-key=secret' } });
-  fireEvent.click(screen.getByLabelText('Remove saved credentials on save'));
-  save();
-  await screen.findByText('OpenTelemetry settings saved and applied live.');
-  expect(lastRequestBody()).toEqual({ enabled: false, endpoint: state.settings.endpoint, clearHeaders: true });
-});
-
-it('summarizes environment overrides without restart or manual-edit guidance', async () => {
-  await mount({
-    ...state,
-    runtime: undefined,
-    effective: { ...state.effective, enabled: true, endpoint: 'https://environment-collector.example.com', source: 'environment', endpointSource: 'environment', headersSource: 'environment' },
-  });
-  expect(screen.getByText(/telemetry preference, collector endpoint, and collector credentials/)).toBeTruthy();
-  expect(screen.queryByText(/Restart Core/)).toBeNull();
-  fireEvent.change(screen.getByLabelText('OTLP endpoint'), { target: { value: 'https://saved-change.example' } });
-  save();
-  await screen.findByText('OpenTelemetry settings saved. Active environment overrides remain in effect.');
-});
-
-it('retries load errors and keeps drafts after sanitized save errors', async () => {
-  vi.mocked(api).mockRejectedValueOnce(Error('offline')).mockResolvedValueOnce(state).mockRejectedValueOnce(Error('Authorization=do-not-render'));
   render(<OpenTelemetrySettings />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Retry OpenTelemetry settings' }));
-  await screen.findByText(/Telemetry runtime is off/);
-  fireEvent.click(screen.getByRole('switch'));
-  save();
-  const alert = await screen.findByRole('alert');
-  expect(alert.textContent).toContain('Could not save');
-  expect(alert.textContent).not.toContain('do-not-render');
-  expect((screen.getByRole('switch') as HTMLInputElement).checked).toBe(true);
+  await screen.findByLabelText('Name');
+}
+function input(label: string) { return screen.getByLabelText(label) as HTMLInputElement; }
+function change(label: string, value: string) { fireEvent.change(screen.getByLabelText(label), { target: { value } }); }
+function selectDestination(name: string) { fireEvent.click(screen.getByRole('button', { name: new RegExp(name, 'i') })); }
+function selectProvider(provider: string) { change('Provider', provider); }
+function putCalls() { return vi.mocked(api).mock.calls.filter(([, init]) => init?.method === 'PUT'); }
+function lastUpdate(): Update { return JSON.parse(putCalls().at(-1)![1]!.body as string) as Update; }
+async function save() {
+  const count = putCalls().length;
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  await waitFor(() => expect(putCalls()).toHaveLength(count + 1));
+  await screen.findByText(/OpenTelemetry settings saved/);
+}
+function expectNoSecretMutation(item: DestinationInput) {
+  for (const key of ['headers', 'credentials', 'clearHeaders', 'clearCredentials']) {
+    expect(Object.hasOwn(item, key), key).toBe(false);
+  }
+}
+
+it('loads multiple saved destinations and edits one without dropping or re-keying its peer', async () => {
+  await mount();
+  expect(api).toHaveBeenCalledWith(route, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  expect(input('Name').value).toBe(archive.name);
+  expect(input('Authentication headers').value).toBe('');
+  selectDestination(tempo.name);
+  expect(input('Provider').value).toBe('grafana-tempo');
+  expect(input('OTLP endpoint').value).toBe(tempo.endpoint);
+  expect(input('Bearer token').value).toBe('');
+  change('Name', 'Renamed traces');
+  await save();
+  const update = lastUpdate();
+  expect(update.enabled).toBe(false);
+  expect(update.destinations).toHaveLength(2);
+  expect(update.destinations.map(item => item.id)).toEqual(['archive', 'tempo']);
+  expect(update.destinations[0]).toMatchObject({ name: archive.name, endpoint: archive.endpoint, provider: 'custom' });
+  expect(update.destinations[1]).toMatchObject({ name: 'Renamed traces', provider: 'grafana-tempo', metricsEnabled: false, connection: { tenantId: 'tenant-a' } });
+  update.destinations.forEach(expectNoSecretMutation);
+  // New-format PUT must not accidentally trigger the legacy scalar replacement path.
+  expect(Object.keys(update).sort()).toEqual(['destinations', 'enabled']);
 });
 
-it('allows enablement with an environment destination and an otherwise blank custom draft', async () => {
-  await mount({
-    ...state,
-    settings: { enabled: false, endpoint: '', headersConfigured: false },
-    effective: { ...state.effective, endpoint: 'https://environment-collector.example.com', endpointSource: 'environment', headersConfigured: false },
+it('adds, reloads, and removes a destination using a stable unique caller-created ID', async () => {
+  await mount();
+  fireEvent.click(screen.getByRole('button', { name: 'Add destination' }));
+  change('Name', 'Local collector');
+  selectProvider('custom');
+  change('OTLP endpoint', 'http://localhost:4318');
+  await save();
+  const added = lastUpdate().destinations.find(item => item.name === 'Local collector')!;
+  expect(added).toBeDefined();
+  expect(added.id).toMatch(/^[A-Za-z0-9_-]{1,80}$/);
+  expect(new Set(lastUpdate().destinations.map(item => item.id)).size).toBe(3);
+  expect(added).toMatchObject({ provider: 'custom', endpoint: 'http://localhost:4318', tls: { verify: true } });
+
+  cleanup();
+  render(<OpenTelemetrySettings />);
+  await screen.findByLabelText('Name');
+  selectDestination('Local collector');
+  expect(input('OTLP endpoint').value).toBe('http://localhost:4318');
+  change('Name', 'Local renamed');
+  await save();
+  expect(lastUpdate().destinations.find(item => item.name === 'Local renamed')?.id).toBe(added.id);
+  selectDestination('Local renamed');
+  fireEvent.click(screen.getByRole('button', { name: /Remove destination/i }));
+  await save();
+  expect(lastUpdate().destinations.map(item => item.id)).toEqual(['archive', 'tempo']);
+  expect(screen.queryByRole('button', { name: /Local renamed/i })).toBeNull();
+});
+
+it('can persist an empty destination list while the master switch is off', async () => {
+  await mount(response([archive]));
+  fireEvent.click(screen.getByRole('button', { name: /Remove destination/i }));
+  await save();
+  expect(lastUpdate()).toEqual({ enabled: false, destinations: [] });
+});
+
+it('preserves saved credentials and headers by omission on an ordinary edit', async () => {
+  await mount(response([destination({ ...tempo, headersConfigured: true })]));
+  expect(input('Bearer token').value).toBe('');
+  expect(input('Authentication headers').value).toBe('');
+  change('OTLP endpoint', 'https://replacement-tempo.example.test');
+  await save();
+  const item = lastUpdate().destinations[0];
+  expect(item).toMatchObject({ id: 'tempo', provider: 'grafana-tempo', endpoint: 'https://replacement-tempo.example.test' });
+  expectNoSecretMutation(item);
+  expect(input('Bearer token').value).toBe('');
+  expect(input('Authentication headers').value).toBe('');
+});
+
+it('replaces write-only token and headers only for their destination and blanks drafts after save', async () => {
+  await mount();
+  selectDestination(tempo.name);
+  change('Bearer token', 'replacement-token-for-test');
+  change('Authentication headers', 'x-test-key=replacement-header-for-test');
+  await save();
+  const update = lastUpdate();
+  expectNoSecretMutation(update.destinations[0]);
+  expect(update.destinations[1]).toMatchObject({
+    id: 'tempo', credentials: { token: 'replacement-token-for-test' },
+    headers: 'x-test-key=replacement-header-for-test',
   });
-  fireEvent.click(screen.getByRole('switch'));
-  save();
-  await screen.findByText('OpenTelemetry settings saved. Active environment overrides remain in effect.');
-  expect(lastRequestBody()).toEqual({ enabled: true, endpoint: '' });
+  expect(update.destinations[1].clearCredentials).toBeUndefined();
+  expect(update.destinations[1].clearHeaders).toBeUndefined();
+  expect(input('Bearer token').value).toBe('');
+  expect(input('Authentication headers').value).toBe('');
+  expect(document.body.textContent).not.toContain('replacement-token-for-test');
+  expect(document.body.textContent).not.toContain('replacement-header-for-test');
+
+  change('Name', 'After replacement');
+  await save();
+  lastUpdate().destinations.forEach(expectNoSecretMutation);
+});
+
+it.each([
+  ['Remove saved credentials on save', 'clearCredentials', 'credentials'],
+  ['Remove saved headers on save', 'clearHeaders', 'headers'],
+] as const)('clears only the explicitly selected secret category: %s', async (label, clearKey, replacementKey) => {
+  await mount(response([archive, destination({ ...tempo, headersConfigured: true })]));
+  selectDestination(tempo.name);
+  fireEvent.click(screen.getByLabelText(label));
+  await save();
+  const [untouched, cleared] = lastUpdate().destinations;
+  expectNoSecretMutation(untouched);
+  expect(cleared[clearKey]).toBe(true);
+  expect(Object.hasOwn(cleared, replacementKey)).toBe(false);
+  const otherClear = clearKey === 'clearCredentials' ? 'clearHeaders' : 'clearCredentials';
+  const otherReplacement = replacementKey === 'credentials' ? 'headers' : 'credentials';
+  expect(Object.hasOwn(cleared, otherClear)).toBe(false);
+  expect(Object.hasOwn(cleared, otherReplacement)).toBe(false);
+});
+
+it('discards draft secrets on every provider switch, including switching back before save', async () => {
+  await mount(response([destination({ ...tempo, headersConfigured: true })]));
+  change('Bearer token', 'must-not-survive-provider-switch');
+  change('Authentication headers', 'x-secret=must-not-survive-provider-switch');
+  selectProvider('custom');
+  expect(input('Authentication headers').value).toBe('');
+  selectProvider('grafana-tempo');
+  expect(input('Bearer token').value).toBe('');
+  expect(input('Authentication headers').value).toBe('');
+  change('Name', 'Switched back');
+  await save();
+  expectNoSecretMutation(lastUpdate().destinations[0]);
+  expect(JSON.stringify(lastUpdate())).not.toContain('must-not-survive-provider-switch');
+
+  // A different provider must not receive the old provider's saved credential flags or draft values.
+  selectProvider('custom');
+  await save();
+  expect(lastUpdate().destinations[0]).toMatchObject({ id: 'tempo', provider: 'custom' });
+  expect(lastUpdate().destinations[0].credentials).toBeUndefined();
+  expect(lastUpdate().destinations[0].headers).toBeUndefined();
+  selectProvider('grafana-tempo');
+  expect(input('Bearer token').value).toBe('');
+});
+
+it('keeps destination-specific secret drafts isolated while navigating between destination buttons', async () => {
+  await mount();
+  change('Authentication headers', 'x-archive=archive-only-draft');
+  selectDestination(tempo.name);
+  expect(input('Bearer token').value).toBe('');
+  expect(input('Authentication headers').value).toBe('');
+  change('Bearer token', 'tempo-only-draft');
+  selectDestination(archive.name);
+  expect(input('Authentication headers').value).toBe('x-archive=archive-only-draft');
+  await save();
+  expect(lastUpdate().destinations[0].headers).toBe('x-archive=archive-only-draft');
+  expect(lastUpdate().destinations[0].credentials).toBeUndefined();
+  expect(lastUpdate().destinations[1].credentials).toEqual({ token: 'tempo-only-draft' });
+  expect(lastUpdate().destinations[1].headers).toBeUndefined();
+});
+
+it('validates endpoint and header syntax before sending an atomic destination update', async () => {
+  await mount();
+  change('OTLP endpoint', 'ftp://user:password@collector.example.test?secret=yes');
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  expect((await screen.findByRole('alert')).textContent).toMatch(/HTTP|HTTPS/i);
+  expect(putCalls()).toHaveLength(0);
+  change('OTLP endpoint', 'https://collector.example.test');
+  change('Authentication headers', 'not-a-header-pair');
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  expect((await screen.findByRole('alert')).textContent).toMatch(/key=value|header/i);
+  expect(putCalls()).toHaveLength(0);
+  change('Authentication headers', 'x-valid=value');
+  await save();
+  expect(lastUpdate().destinations).toHaveLength(2);
+});
+
+it('retries a failed read without displaying the backend error or inventing saved settings', async () => {
+  vi.mocked(api).mockRejectedValueOnce(Error('Authorization=load-secret')).mockResolvedValueOnce(response());
+  render(<OpenTelemetrySettings />);
+  const retry = await screen.findByRole('button', { name: 'Retry OpenTelemetry settings' });
+  expect((screen.getByRole('alert')).textContent).toMatch(/Could not load/);
+  expect(document.body.textContent).not.toContain('load-secret');
+  expect(putCalls()).toHaveLength(0);
+  fireEvent.click(retry);
+  await screen.findByLabelText('Name');
+  expect(input('Name').value).toBe(archive.name);
+  expect(screen.getByRole('button', { name: new RegExp(tempo.name) })).toBeTruthy();
+});
+
+it('retains all drafts after a sanitized save failure and retries the same update', async () => {
+  await mount();
+  change('Name', 'Unsaved archive');
+  selectDestination(tempo.name);
+  change('Bearer token', 'retry-token-for-test');
+  vi.mocked(api).mockRejectedValueOnce(Error('Authorization=backend-secret-do-not-render'));
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  expect((await screen.findByRole('alert')).textContent).toMatch(/Could not save/);
+  expect(document.body.textContent).not.toContain('backend-secret-do-not-render');
+  expect(input('Bearer token').value).toBe('retry-token-for-test');
+  const failedUpdate = lastUpdate();
+  selectDestination('Unsaved archive');
+  expect(input('Name').value).toBe('Unsaved archive');
+  await save();
+  expect(lastUpdate()).toEqual(failedUpdate);
+});
+
+it('shows saved destinations under environment overrides and never saves the environment transport', async () => {
+  const initial = response();
+  const environment = destination({
+    id: 'environment', name: 'Environment collector', endpoint: 'https://environment.example.test',
+    headersConfigured: true,
+  });
+  initial.effective = {
+    ...initial.effective, enabled: true, destinations: [environment], endpoint: environment.endpoint,
+    source: 'environment', endpointSource: 'environment', headersSource: 'environment', destinationsSource: 'environment',
+  };
+  initial.runtime = { enabled: true, sdkStarted: true };
+  await mount(initial);
+  expect(input('OTLP endpoint').value).toBe(archive.endpoint);
+  expect(screen.getByText(/Environment overrides currently control/i)).toBeTruthy();
+  expect(screen.queryByText(/Restart Core/i)).toBeNull();
+  change('Name', 'Saved under override');
+  await save();
+  expect(lastUpdate().destinations.map(item => item.id)).toEqual(['archive', 'tempo']);
+  expect(JSON.stringify(lastUpdate())).not.toContain(environment.endpoint);
+  expect(screen.getByText(/Active environment overrides remain in effect/)).toBeTruthy();
+  expect(input('Name').value).toBe('Saved under override');
+});
+
+it('allows a metrics-only destination with an exact metrics URL and no base endpoint', async () => {
+  await mount(response([archive]));
+  fireEvent.click(screen.getByLabelText('Traces'));
+  change('OTLP endpoint', '');
+  change('Exact metrics URL', 'https://metrics.example.test/v1/metrics');
+  await save();
+  expect(lastUpdate().destinations[0]).toMatchObject({ endpoint: '', tracesEnabled: false, metricsEnabled: true, metricsEndpoint: 'https://metrics.example.test/v1/metrics' });
+});
+
+it('restores saved secret presence when switching back to the original provider without restoring draft secrets', async () => {
+  await mount(response([destination({ ...tempo, headersConfigured: true })]));
+  change('Bearer token', 'temporary-draft');
+  selectProvider('custom');
+  selectProvider('grafana-tempo');
+  expect(input('Bearer token').value).toBe('');
+  expect(screen.getByLabelText('Remove saved credentials on save')).toBeTruthy();
+  expect(screen.getByLabelText('Remove saved headers on save')).toBeTruthy();
+});
+
+
+it('renders metadata guidance, accurate direct endpoint instructions and credential names', async () => {
+  const initial = response([archive, destination({ ...tempo, enabled: false })]);
+  initial.providers.find(p => p.id === 'datadog')!.description = 'Datadog preset';
+  Object.assign(initial.providers.find(p => p.id === 'datadog')!, { guidance: 'Metadata guidance from API' });
+  await mount(initial);
+  expect(screen.getByText(/1 effective destination/)).toBeTruthy();
+  selectProvider('datadog');
+  expect(screen.getByText('Metadata guidance from API')).toBeTruthy();
+  expect(screen.getByLabelText('API key')).toBeTruthy();
+  expect(screen.getByText(/Site/)).toBeTruthy();
+  expect(screen.getByText(/For reference only/)).toBeTruthy();
+  expect(screen.getByText(/Required for direct traces/)).toBeTruthy();
+  expect(screen.getByText(/Required for direct metrics/)).toBeTruthy();
+  selectProvider('splunk');
+  expect(screen.getByLabelText('Access token')).toBeTruthy();
+  expect(screen.getByText(/v2\/trace\/otlp/)).toBeTruthy();
+  selectProvider('uptrace');
+  expect(screen.getByLabelText('DSN')).toBeTruthy();
+  selectProvider('signoz');
+  expect(screen.getByLabelText('Ingestion key')).toBeTruthy();
+  selectProvider('new-relic');
+  expect(screen.getByLabelText('License key')).toBeTruthy();
+  selectProvider('openobserve');
+  expect(screen.getByLabelText('Authorization')).toBeTruthy();
+});
+
+it.each(['datadog', 'splunk'])('requires exact enabled signal URLs for direct %s and selects the invalid destination', async provider => {
+  const direct = destination({ id: 'direct', name: 'Direct destination', provider, connection: { mode: 'direct' }, metricsEnabled: provider === 'datadog' });
+  await mount(response([archive, direct]));
+  change('Name', 'Changed collector');
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  expect(putCalls()).toHaveLength(0);
+  expect(input('Name').value).toBe('Direct destination');
+  expect(screen.getByRole('alert').textContent).toMatch(/requires an exact traces/);
+  change('Exact traces URL', 'https://traces.example.test/v2/trace/otlp');
+  if (provider === 'datadog') {
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(putCalls()).toHaveLength(0);
+    expect(screen.getByRole('alert').textContent).toMatch(/exact metrics URL/);
+    change('Exact metrics URL', 'https://metrics.example.test/v1/metrics');
+  }
+  await save();
+});
+
+it.each(['datadog', 'splunk'])('allows %s collector base endpoints and disabled direct drafts', async provider => {
+  const collector = destination({ id: 'collector', provider, connection: { mode: 'collector' } });
+  const disabled = destination({ id: 'disabled', name: 'Disabled direct', provider, enabled: false, connection: { mode: 'direct' } });
+  await mount(response([collector, disabled]));
+  change('Name', 'Collector updated');
+  await save();
+  expect(lastUpdate().destinations).toHaveLength(2);
 });

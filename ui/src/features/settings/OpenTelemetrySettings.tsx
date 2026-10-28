@@ -1,304 +1,91 @@
-import { useUnsavedChanges } from '../../app/UnsavedChanges';
 import { useEffect, useState } from 'react';
 import { api, jsonMutation } from '../../app/api';
+import { useUnsavedChanges } from '../../app/UnsavedChanges';
 import { Field, SettingSection } from './SettingsPrimitives';
 
-type SettingSource = 'environment' | 'database' | 'default';
-type SetupMode = 'openobserve' | 'custom';
-type OpenTelemetryResponse = {
-  ok: boolean;
-  settings: { enabled: boolean; endpoint: string; headersConfigured: boolean; streamName?: string };
-  effective: {
-    enabled: boolean;
-    endpoint: string;
-    headersConfigured: boolean;
-    source: SettingSource;
-    endpointSource: SettingSource;
-    headersSource: SettingSource;
-    restartRequired: false;
-  };
-  runtime?: { enabled?: boolean; sdkStarted?: boolean; [key: string]: unknown };
-};
-
-type OpenTelemetryUpdate = {
-  enabled: boolean;
-  endpoint: string;
-  headers?: string;
-  clearHeaders?: boolean;
-};
-
-type OpenObserveEndpoint = { serverUrl: string; organization: string };
-type BusyAction = 'save' | null;
-
+type Provider = { id: string; label: string; description?: string; protocols: string[]; defaultProtocol: string; traces: boolean; metrics: boolean; defaultTemporality: string; documentationUrl?: string; guidance?: string };
+type Destination = { id: string; name: string; provider: string; enabled: boolean; endpoint: string; tracesEndpoint: string; metricsEndpoint: string; protocol: string; tracesEnabled: boolean; metricsEnabled: boolean; metricsTemporality: string; connection: Record<string, string>; tls: { verify: boolean }; headersConfigured?: boolean; credentialsConfigured?: boolean; credentialFields?: string[] };
+type Draft = Destination & { headers: string; credentials: Record<string, string>; clearHeaders: boolean; clearCredentials: boolean };
+type Response = { settings: { enabled: boolean; destinations: Destination[] }; effective: { enabled: boolean; destinations?: Destination[]; endpoint?: string; source?: string; endpointSource?: string; headersSource?: string }; providers: Provider[]; runtime?: { enabled?: boolean } };
 const route = '/api/settings/opentelemetry';
-const openObservePath = /^(.*)\/api\/([^/]+)$/;
-
-function joinLabels(labels: string[]) {
-  if (labels.length < 2) return labels[0] ?? '';
-  if (labels.length === 2) return labels.join(' and ');
-  return `${labels.slice(0, -1).join(', ')}, and ${labels.at(-1)}`;
+const connectionFields: Record<string, [string, string][]> = { openobserve: [['organization','Organization'],['stream','Stream']], 'grafana-tempo': [['tenantId','Tenant ID']], 'grafana-cloud': [['instanceId','Instance ID']], honeycomb: [['dataset','Dataset']], datadog: [['site','Site']], splunk: [['realm','Realm']] };
+const labels: Record<string,string> = { username: 'Username', password: 'Password', token: 'Token', caCertificate: 'CA certificate' };
+const tokenLabels: Record<string, string> = { openobserve: 'Authorization', 'grafana-tempo': 'Bearer token', 'grafana-cloud': 'Access token', jaeger: 'Bearer token', signoz: 'Ingestion key', uptrace: 'DSN', elastic: 'API key', datadog: 'API key', 'new-relic': 'License key', honeycomb: 'API key', splunk: 'Access token' };
+function draft(d: Destination): Draft { return { ...d, connection: { ...d.connection }, tls: { verify: d.tls?.verify !== false }, headers: '', credentials: {}, clearHeaders: false, clearCredentials: false }; }
+function input(d: Draft) {
+  const { headersConfigured: _h, credentialsConfigured: _c, credentialFields: _f, headers, credentials, clearHeaders, clearCredentials, ...value } = d;
+  const secrets = Object.fromEntries(Object.entries(credentials).filter(([, v]) => v.length));
+  return { ...value, ...(clearHeaders ? { clearHeaders: true } : headers ? { headers } : {}), ...(clearCredentials ? { clearCredentials: true } : Object.keys(secrets).length ? { credentials: secrets } : {}) };
 }
-
-function endpointError(value: string, label = 'collector URL') {
-  if (!value) return '';
-  try {
-    const parsed = new URL(value);
-    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
-      return `Use an HTTP or HTTPS ${label} without credentials, a query, or a fragment.`;
-    }
-    return '';
-  } catch { return `Enter a valid HTTP or HTTPS ${label}.`; }
-}
-
-function headersError(value: string) {
-  if (!value) return '';
-  if (/\r|\n/.test(value)) return 'Enter headers as a comma-separated key=value list on one line.';
-  try {
-    const valid = value.split(',').map(entry => entry.trim()).filter(Boolean).every((entry) => {
-      const separator = entry.indexOf('=');
-      if (separator < 1 || !entry.slice(separator + 1).trim()) return false;
-      decodeURIComponent(entry.slice(0, separator).trim());
-      decodeURIComponent(entry.slice(separator + 1).trim());
-      return true;
-    });
-    return valid ? '' : 'Enter headers as a comma-separated key=value list.';
-  } catch { return 'Header names and values must use valid percent encoding.'; }
-}
-
-function parseOpenObserveEndpoint(endpoint: string): OpenObserveEndpoint | null {
-  if (!endpoint) return null;
-  try {
-    const parsed = new URL(endpoint);
-    const match = parsed.pathname.replace(/\/+$/, '').match(openObservePath);
-    if (!match?.[2]) return null;
-    parsed.pathname = match[1] || '/';
-    const serverUrl = parsed.toString().replace(/\/$/, '');
-    return { serverUrl, organization: decodeURIComponent(match[2]) };
-  } catch { return null; }
-}
-
-function openObserveEndpoint(serverUrl: string, organization: string) {
-  return `${serverUrl.replace(/\/+$/, '')}/api/${encodeURIComponent(organization)}`;
-}
-
-function openObserveHeaders(username: string, password: string, stream: string) {
-  const bytes = new TextEncoder().encode(`${username}:${password}`);
-  let binary = '';
-  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
-  return `Authorization=${encodeURIComponent(`Basic ${btoa(binary)}`)},stream-name=${encodeURIComponent(stream)}`;
-}
-
+function validUrl(value: string) { if (!value) return true; try { const u = new URL(value); return ['http:', 'https:'].includes(u.protocol) && !u.username && !u.password && !u.search && !u.hash; } catch { return false; } }
+function validHeaders(value: string) { try { return !/[\r\n]/.test(value) && value.split(',').every(part => { const i = part.indexOf('='); if (i < 1 || !part.slice(i + 1).trim()) return false; decodeURIComponent(part.slice(0,i).trim()); decodeURIComponent(part.slice(i+1).trim()); return true; }); } catch { return false; } }
 export function OpenTelemetrySettings() {
-  const [saved, setSaved] = useState<OpenTelemetryResponse | null>(null);
+  const [saved, setSaved] = useState<Response | null>(null);
   const [enabled, setEnabled] = useState(false);
-  const [mode, setMode] = useState<SetupMode>('openobserve');
-  const [serverUrl, setServerUrl] = useState('');
-  const [organization, setOrganization] = useState('default');
-  const [stream, setStream] = useState('default');
-  const [savedStream, setSavedStream] = useState('default');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [endpoint, setEndpoint] = useState('');
-  const [headers, setHeaders] = useState('');
-  const [clearHeaders, setClearHeaders] = useState(false);
-  const [busy, setBusy] = useState<BusyAction>(null);
+  const [destinations, setDestinations] = useState<Draft[]>([]);
+  const [selected, setSelected] = useState('');
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [retry, setRetry] = useState(0);
-
-  function accept(result: OpenTelemetryResponse) {
-    const openObserve = parseOpenObserveEndpoint(result.settings.endpoint);
-    const acceptedStream = result.settings.streamName || 'default';
-    setSaved(result);
-    setEnabled(result.settings.enabled);
-    setMode(openObserve ? 'openobserve' : 'custom');
-    setServerUrl(openObserve?.serverUrl ?? '');
-    setOrganization(openObserve?.organization ?? 'default');
-    setStream(acceptedStream);
-    setSavedStream(acceptedStream);
-    setUsername('');
-    setPassword('');
-    setEndpoint(result.settings.endpoint);
-    setHeaders('');
-    setClearHeaders(false);
-  }
-
-  function markEdited() {
-    setError('');
-    setNotice('');
-  }
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setError('');
-    void api<OpenTelemetryResponse>(route, { signal: controller.signal })
-      .then((result) => { if (!controller.signal.aborted) accept(result); })
-      .catch(() => { if (!controller.signal.aborted) setError('Could not load OpenTelemetry settings.'); });
-    return () => controller.abort();
-  }, [retry]);
-
-  const parsedSaved = parseOpenObserveEndpoint(saved?.settings.endpoint ?? '');
-  const openObserveChanged = mode === 'openobserve' && (
-    serverUrl.trim().replace(/\/+$/, '') !== (parsedSaved?.serverUrl ?? '')
-    || organization.trim() !== (parsedSaved?.organization ?? 'default')
-    || stream.trim() !== savedStream
-    || Boolean(username || password)
-  );
-  const customChanged = mode === 'custom' && (endpoint !== saved?.settings.endpoint || Boolean(headers.trim()));
-  const inferredSavedMode: SetupMode = parsedSaved ? 'openobserve' : 'custom';
-  const dirty = Boolean(saved) && (
-    enabled !== saved?.settings.enabled
-    || mode !== inferredSavedMode
-    || openObserveChanged
-    || customChanged
-    || clearHeaders
-  );
-  const controlsDisabled = !saved || busy !== null;
-
-  function candidate(): OpenTelemetryUpdate | null {
-    if (!saved) return null;
-    let collectorEndpoint = endpoint.trim();
-    let replacementHeaders = headers;
-    if (mode === 'openobserve') {
-      const cleanServerUrl = serverUrl.trim();
-      const cleanOrganization = organization.trim();
-      const cleanStream = stream.trim();
-      if (enabled && !cleanServerUrl) { setError('Enter your OpenObserve server URL before enabling telemetry.'); return null; }
-      const serverValidation = endpointError(cleanServerUrl, 'OpenObserve server URL');
-      if (serverValidation) { setError(serverValidation); return null; }
-      if (!cleanOrganization) { setError('Enter the OpenObserve organization.'); return null; }
-      if (/[/?#]/.test(cleanOrganization)) { setError('Organization cannot contain slashes, a query, or a fragment.'); return null; }
-      if (!cleanStream) { setError('Enter the OpenObserve stream.'); return null; }
-      if ((username && !password) || (!username && password)) { setError('Enter both the OpenObserve username and password to replace the saved credentials.'); return null; }
-      if (!saved.settings.headersConfigured && (!username || !password) && enabled) { setError('Enter your OpenObserve username and password before enabling telemetry.'); return null; }
-      if (stream.trim() !== savedStream && saved.settings.headersConfigured && (!username || !password)) { setError('Enter your OpenObserve username and password to change the stream.'); return null; }
-      collectorEndpoint = cleanServerUrl ? openObserveEndpoint(cleanServerUrl, cleanOrganization) : '';
-      replacementHeaders = username && password ? openObserveHeaders(username, password, cleanStream) : '';
-    }
-
-    const environmentEndpointAvailable = saved.effective.endpointSource === 'environment' && Boolean(saved.effective.endpoint.trim());
-    if (enabled && !collectorEndpoint && !environmentEndpointAvailable) {
-      setError('Enter a collector endpoint before enabling telemetry.');
-      return null;
-    }
-    const endpointValidation = endpointError(collectorEndpoint);
-    if (endpointValidation) { setError(endpointValidation); return null; }
-    const headerValidation = clearHeaders ? '' : headersError(replacementHeaders.trim());
-    if (headerValidation) { setError(headerValidation); return null; }
-
-    return {
-      enabled,
-      endpoint: collectorEndpoint,
-      ...(clearHeaders
-        ? { clearHeaders: true }
-        : replacementHeaders.trim()
-          ? { headers: replacementHeaders }
-          : {}),
-    };
-  }
-
+  function accept(result: Response) { setSaved(result); setEnabled(result.settings.enabled); const items = (result.settings.destinations ?? []).map(draft); setDestinations(items); setSelected(current => items.some(d => d.id === current) ? current : items[0]?.id ?? ''); }
+  useEffect(() => { const controller = new AbortController(); setError(''); void api<Response>(route, { signal: controller.signal }).then(result => { if (!controller.signal.aborted) accept(result); }).catch(() => { if (!controller.signal.aborted) setError('Could not load OpenTelemetry settings.'); }); return () => controller.abort(); }, [retry]);
+  const current = destinations.find(d => d.id === selected);
+  const provider = saved?.providers?.find(p => p.id === current?.provider);
+  const dirty = !!saved && (enabled !== saved.settings.enabled || JSON.stringify(destinations.map(input)) !== JSON.stringify((saved.settings.destinations ?? []).map(d => input(draft(d)))));
+  const overridden = !!saved && [saved.effective.source, saved.effective.endpointSource, saved.effective.headersSource].includes('environment');
+  function edit(change: Partial<Draft>) { setDestinations(items => items.map(d => d.id === selected ? { ...d, ...change } : d)); setNotice(''); setError(''); }
+  function add() { const p = saved?.providers?.find(x => x.id === 'custom') ?? saved?.providers?.[0]; if (!p) return; const id = `destination-${Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('')}`; const d: Draft = { id, name: 'New destination', provider: p.id, enabled: true, endpoint: '', tracesEndpoint: '', metricsEndpoint: '', protocol: p.defaultProtocol, tracesEnabled: true, metricsEnabled: p.metrics, metricsTemporality: p.defaultTemporality, connection: {}, tls: { verify: true }, headers: '', credentials: {}, clearHeaders: false, clearCredentials: false }; setDestinations(items => [...items,d]); setSelected(id); setNotice(''); }
+  function switchProvider(id: string) { if (!current || !saved) return; const p = saved.providers.find(x => x.id === id); if (!p) return; edit({ provider: id, protocol: p.defaultProtocol, tracesEnabled: p.traces, metricsEnabled: p.id === 'splunk' ? false : p.metrics, metricsTemporality: p.id === 'datadog' ? 'delta' : p.defaultTemporality, connection: {}, headers: '', credentials: {}, clearHeaders: false, clearCredentials: false, headersConfigured: saved.settings.destinations.find(d => d.id === current.id && d.provider === id)?.headersConfigured ?? false, credentialsConfigured: saved.settings.destinations.find(d => d.id === current.id && d.provider === id)?.credentialsConfigured ?? false, credentialFields: saved.settings.destinations.find(d => d.id === current.id && d.provider === id)?.credentialFields ?? [] }); }
   async function save() {
     if (!saved || busy) return false;
-    setError('');
-    setNotice('');
-
-    const update = candidate();
-    if (!update) return false;
-
-    setBusy('save');
-    try {
-      const result = await api<OpenTelemetryResponse>(route, jsonMutation('PUT', update));
-      accept(result);
-      const overridden = result.effective.source === 'environment' || result.effective.endpointSource === 'environment' || result.effective.headersSource === 'environment';
-      setNotice(overridden ? 'OpenTelemetry settings saved. Active environment overrides remain in effect.' : 'OpenTelemetry settings saved and applied live.');
-      return true;
-    } catch {
-      setError('Could not save OpenTelemetry settings. Your changes have not been confirmed. Try again.');
-      return false;
-    } finally {
-      setBusy(null);
+    setError(''); setNotice('');
+    if (enabled && !destinations.some(d => d.enabled)) { setError('Enable at least one destination before enabling telemetry.'); return false; }
+    for (const d of destinations) {
+      if (!d.name.trim()) { setSelected(d.id); setError('Enter a destination name.'); return false; }
+      if ([d.endpoint, d.tracesEndpoint, d.metricsEndpoint].some(v => !validUrl(v))) { setSelected(d.id); setError('Enter a valid HTTP or HTTPS endpoint without credentials, a query, or a fragment.'); return false; }
+      if (d.enabled && ['datadog', 'splunk'].includes(d.provider) && (d.connection.mode || 'direct') === 'direct') {
+        const missing = [d.tracesEnabled && !d.tracesEndpoint.trim() ? 'traces' : '', d.metricsEnabled && !d.metricsEndpoint.trim() ? 'metrics' : ''].filter(Boolean);
+        if (missing.length) { setSelected(d.id); setError(`Direct ${d.provider === 'datadog' ? 'Datadog' : 'Splunk'} requires an exact ${missing.join(' and ')} URL for each enabled signal.`); return false; }
+      }
+      if (d.enabled && !d.endpoint && ((d.tracesEnabled && !d.tracesEndpoint) || (d.metricsEnabled && !d.metricsEndpoint))) { setSelected(d.id); setError('Enter an endpoint for the enabled destination.'); return false; }
+      if (d.headers && !validHeaders(d.headers)) { setSelected(d.id); setError('Enter headers as a comma-separated key=value list with valid percent encoding.'); return false; }
     }
+    setBusy(true); try { const result = await api<Response>(route, jsonMutation('PUT', { enabled, destinations: destinations.map(input) })); accept(result); setNotice([result.effective.source,result.effective.endpointSource,result.effective.headersSource].includes('environment') ? 'OpenTelemetry settings saved. Active environment overrides remain in effect.' : 'OpenTelemetry settings saved and applied live.'); return true; } catch { setError('Could not save OpenTelemetry settings. Your changes have not been confirmed. Try again.'); return false; } finally { setBusy(false); }
   }
-
-  useUnsavedChanges({ dirty, busy: busy !== null, save, discard: () => { if (saved) accept(saved); setError(''); setNotice(''); } });
-
-  const overriddenSettings = saved ? [
-    saved.effective.source === 'environment' ? 'telemetry preference' : '',
-    saved.effective.endpointSource === 'environment' ? 'collector endpoint' : '',
-    saved.effective.headersSource === 'environment' ? 'collector credentials' : '',
-  ].filter(Boolean) : [];
-
+  useUnsavedChanges({ dirty, busy, save, discard: () => { if (saved) accept(saved); setError(''); setNotice(''); } });
+  const disabled = !saved || busy;
+  const traceOnly = current && (current.provider === 'grafana-tempo' || current.provider === 'jaeger' || (current.provider === 'splunk' && current.connection.mode !== 'collector'));
+  const secretFields = current?.provider === 'openobserve' ? ['username','password','token','caCertificate'] : current?.provider === 'custom' ? ['caCertificate'] : ['token','caCertificate'];
   return <SettingSection title="OpenTelemetry">
-    <p className="settings-description">Send diagnostic traces and metrics to OpenObserve or another OTLP/HTTP collector. Saved changes apply live.</p>
-
-    <fieldset className="telemetry-fields" disabled={controlsDisabled}>
-      <legend>Telemetry export</legend>
-      <div className="telemetry-control">
-        <div className="telemetry-copy">
-          <label id="telemetry-label" htmlFor="telemetry-enabled">Send telemetry</label>
-          <p id="telemetry-help">Export Burrow traces and metrics to your collector.</p>
-        </div>
-        <input id="telemetry-enabled" className="telemetry-switch" type="checkbox" role="switch" aria-labelledby="telemetry-label" aria-describedby="telemetry-help" checked={enabled} onChange={(event) => { setEnabled(event.target.checked); markEdited(); }} />
-      </div>
-
-      <fieldset className="telemetry-setup-picker">
-        <legend>Setup type</legend>
-        <label><input type="radio" name="telemetry-mode" value="openobserve" checked={mode === 'openobserve'} onChange={() => { setMode('openobserve'); setClearHeaders(false); markEdited(); }} /><span><strong>OpenObserve</strong><small>Recommended setup with separate sign-in fields</small></span></label>
-        <label><input type="radio" name="telemetry-mode" value="custom" checked={mode === 'custom'} onChange={() => { setMode('custom'); setClearHeaders(false); markEdited(); }} /><span><strong>Custom OTLP</strong><small>Any OTLP/HTTP-compatible collector</small></span></label>
-      </fieldset>
-
-      {mode === 'openobserve' ? <div className="telemetry-mode-fields">
-        <Field label="OpenObserve server URL">
-          <input aria-label="OpenObserve server URL" type="url" value={serverUrl} maxLength={2048} placeholder="https://openobserve.example.com" onChange={(event) => { setServerUrl(event.target.value); markEdited(); }} />
-          <small className="telemetry-field-help">The address you use to open OpenObserve. Burrow adds the OTLP path for you.</small>
-        </Field>
-        <Field label="Organization">
-          <input aria-label="Organization" value={organization} maxLength={256} placeholder="default" autoCapitalize="none" spellCheck={false} onChange={(event) => { setOrganization(event.target.value); markEdited(); }} />
-        </Field>
-        <Field label="Stream">
-          <input aria-label="Stream" value={stream} maxLength={256} placeholder="default" autoCapitalize="none" spellCheck={false} onChange={(event) => { setStream(event.target.value); markEdited(); }} />
-        </Field>
-        <div className="field-pair telemetry-credentials">
-          <Field label="Username or email">
-            <input aria-label="OpenObserve username or email" value={username} maxLength={512} autoComplete="username" spellCheck={false} placeholder={saved?.settings.headersConfigured ? 'Leave blank to keep saved sign-in' : 'you@example.com'} onChange={(event) => { setUsername(event.target.value); markEdited(); }} />
-          </Field>
-          <Field label="Password">
-            <input aria-label="OpenObserve password" type="password" value={password} maxLength={4096} autoComplete="new-password" placeholder={saved?.settings.headersConfigured ? 'Leave blank to keep saved sign-in' : 'Enter password'} onChange={(event) => { setPassword(event.target.value); markEdited(); }} />
-          </Field>
-        </div>
-        <small className="telemetry-secret-help">{saved?.settings.headersConfigured ? 'A saved sign-in is configured. Enter both fields only to replace it.' : 'Credentials are sent only when you save and are never shown again.'}</small>
-      </div> : <div className="telemetry-mode-fields">
-        <Field label="OTLP endpoint">
-          <input aria-label="OTLP endpoint" type="url" value={endpoint} maxLength={2048} placeholder="https://collector.example.com:4318" onChange={(event) => { setEndpoint(event.target.value); markEdited(); }} />
-          <small className="telemetry-field-help">Base OTLP/HTTP URL. Burrow sends to <code>/v1/traces</code> and <code>/v1/metrics</code>.</small>
-        </Field>
-        <Field label="Authentication headers">
-          <input aria-label="Authentication headers" type="password" autoComplete="new-password" spellCheck={false} value={headers} disabled={controlsDisabled || clearHeaders} maxLength={8192} placeholder={saved?.settings.headersConfigured ? 'Leave blank to keep saved headers' : 'Optional encoded key=value pairs'} onChange={(event) => { setHeaders(event.target.value); markEdited(); }} />
-          <small className="telemetry-field-help">Advanced: comma-separated, percent-encoded <code>key=value</code> pairs. Secret values are never displayed.</small>
-        </Field>
+    <p className="settings-description">Export traces and metrics to one or more OTLP/HTTP destinations. Saved changes apply live.</p>
+    <fieldset className="telemetry-fields" disabled={disabled}><legend>Telemetry export</legend>
+      <div className="telemetry-control"><label htmlFor="telemetry-enabled">Send telemetry</label><input id="telemetry-enabled" className="telemetry-switch" type="checkbox" role="switch" checked={enabled} onChange={e => { setEnabled(e.target.checked); setNotice(''); }} /></div>
+      <div className="telemetry-destinations"><strong>Destinations</strong><div className="telemetry-destination-list">{destinations.map(d => <button type="button" className={d.id === selected ? 'primary' : 'secondary'} aria-pressed={d.id === selected} key={d.id} onClick={() => setSelected(d.id)}>{d.name || 'Unnamed destination'}</button>)}<button type="button" className="secondary" onClick={add}>Add destination</button></div></div>
+      {current && <div className="telemetry-mode-fields">
+        <Field label="Name"><input aria-label="Name" maxLength={160} value={current.name} onChange={e => edit({ name: e.target.value })} /></Field>
+        <Field label="Provider"><select aria-label="Provider" value={current.provider} onChange={e => switchProvider(e.target.value)}>{saved?.providers?.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}</select></Field>
+        {provider?.description && <small className="telemetry-field-help">{provider.description}</small>}
+        {provider?.guidance && <small className="telemetry-field-help">{provider.guidance}</small>}
+        <label><input type="checkbox" checked={current.enabled} onChange={e => edit({ enabled: e.target.checked })} /> Enable destination</label>
+        {(current.provider === 'datadog' || current.provider === 'splunk') && <Field label="Mode"><select aria-label="Mode" value={current.connection.mode || 'direct'} onChange={e => { const mode = e.target.value; edit({ connection: { ...current.connection, mode }, ...(current.provider === 'splunk' && mode === 'direct' ? { metricsEnabled: false } : {}), ...(current.provider === 'datadog' && mode === 'direct' ? { metricsTemporality: 'delta' } : {}) }); }}><option value="direct">Direct</option><option value="collector">Collector</option></select><small className="telemetry-field-help">{current.provider === 'splunk' ? 'Direct ingestion supports traces only; collector mode supports traces and metrics.' : 'Direct ingestion requires delta metrics; collector mode uses your collector endpoint.'}</small></Field>}
+        <Field label="OTLP endpoint"><input aria-label="OTLP endpoint" type="url" value={current.endpoint} onChange={e => edit({ endpoint: e.target.value })} /><small className="telemetry-field-help">{current.provider === 'openobserve' ? 'OpenObserve server URL; organization is added to the OTLP path.' : (current.provider === 'datadog' || current.provider === 'splunk') && current.connection.mode !== 'collector' ? 'Direct mode requires exact signal URLs below; the base URL does not replace them.' : 'Base OTLP/HTTP URL.'}</small></Field>
+        {(connectionFields[current.provider] ?? []).map(([key,label]) => <Field key={key} label={label}><input aria-label={label} value={current.connection[key] ?? ''} onChange={e => edit({ connection: { ...current.connection, [key]: e.target.value } })} />{(key === 'site' || key === 'realm') && <small className="telemetry-field-help">For reference only; this does not generate endpoint URLs.</small>}</Field>)}
+        <Field label="Protocol"><select aria-label="Protocol" value={current.protocol} onChange={e => edit({ protocol: e.target.value })}>{(provider?.protocols ?? ['http/json','http/protobuf']).filter(p => p === 'http/json' || p === 'http/protobuf').map(p => <option key={p}>{p}</option>)}</select></Field>
+        <div className="field-pair"><label><input type="checkbox" checked={current.tracesEnabled} disabled={provider?.traces === false} onChange={e => edit({ tracesEnabled: e.target.checked })} /> Traces</label><label><input type="checkbox" checked={current.metricsEnabled} disabled={!!traceOnly || (provider?.metrics === false && !(current.provider === 'splunk' && current.connection.mode === 'collector'))} onChange={e => edit({ metricsEnabled: e.target.checked })} /> Metrics</label></div>
+        <Field label="Metrics temporality"><select aria-label="Metrics temporality" value={current.metricsTemporality} disabled={!current.metricsEnabled || (current.provider === 'datadog' && current.connection.mode !== 'collector')} onChange={e => edit({ metricsTemporality: e.target.value })}><option value="cumulative">Cumulative</option><option value="delta">Delta</option></select></Field>
+        <Field label="Exact traces URL"><input aria-label="Exact traces URL" type="url" value={current.tracesEndpoint} onChange={e => edit({ tracesEndpoint: e.target.value })} />{current.connection.mode !== 'collector' && current.provider === 'datadog' && <small className="telemetry-field-help">Required for direct traces: use the exact traces URL from your Datadog console. Traces and metrics use different hosts.</small>}{current.connection.mode !== 'collector' && current.provider === 'splunk' && <small className="telemetry-field-help">Required for direct traces: use the exact Splunk traces URL ending in /v2/trace/otlp, not a base URL or /v1/traces.</small>}</Field>
+        <Field label="Exact metrics URL"><input aria-label="Exact metrics URL" type="url" value={current.metricsEndpoint} onChange={e => edit({ metricsEndpoint: e.target.value })} />{current.provider === 'datadog' && current.connection.mode !== 'collector' && <small className="telemetry-field-help">Required for direct metrics: use the exact metrics URL from your Datadog console, which uses a different host from traces.</small>}</Field>
+        <label><input type="checkbox" checked={current.tls.verify} onChange={e => edit({ tls: { verify: e.target.checked } })} /> Verify TLS certificates</label>
+        {secretFields.map(key => <Field key={key} label={key === 'token' ? tokenLabels[current.provider] ?? labels[key] : labels[key]}>{key === 'caCertificate' ? <textarea aria-label={labels[key]} value={current.credentials[key] ?? ''} disabled={current.clearCredentials} placeholder={current.credentialFields?.includes(key) ? 'Leave blank to keep saved value' : 'Optional PEM certificate'} onChange={e => edit({ credentials: { ...current.credentials, [key]: e.target.value } })} /> : <input aria-label={key === 'token' ? tokenLabels[current.provider] ?? labels[key] : labels[key]} type="password" autoComplete="new-password" value={current.credentials[key] ?? ''} disabled={current.clearCredentials} placeholder={current.credentialFields?.includes(key) ? 'Leave blank to keep saved value' : 'Optional'} onChange={e => edit({ credentials: { ...current.credentials, [key]: e.target.value } })} />}</Field>)}
+        {current.credentialsConfigured && <label><input type="checkbox" checked={current.clearCredentials} onChange={e => edit({ clearCredentials: e.target.checked, ...(e.target.checked ? { credentials: {} } : {}) })} /> Remove saved credentials on save</label>}
+        <Field label="Authentication headers"><input aria-label="Authentication headers" type="password" autoComplete="new-password" value={current.headers} disabled={current.clearHeaders} placeholder={current.headersConfigured ? 'Leave blank to keep saved headers' : 'Optional key=value pairs'} onChange={e => edit({ headers: e.target.value })} /><small className="telemetry-field-help">Comma-separated, percent-encoded key=value pairs. Explicit headers override provider headers.</small></Field>
+        {current.headersConfigured && <label><input type="checkbox" checked={current.clearHeaders} onChange={e => edit({ clearHeaders: e.target.checked, ...(e.target.checked ? { headers: '' } : {}) })} /> Remove saved headers on save</label>}
+        <button type="button" className="secondary" onClick={() => { const remaining = destinations.filter(d => d.id !== current.id); setDestinations(remaining); setSelected(remaining[0]?.id ?? ''); setNotice(''); }}>Remove destination</button>
       </div>}
-
-      {saved?.settings.headersConfigured && <label className="telemetry-clear">
-        <input type="checkbox" aria-label="Remove saved credentials on save" checked={clearHeaders} onChange={(event) => { setClearHeaders(event.target.checked); if (event.target.checked) { setHeaders(''); setUsername(''); setPassword(''); } markEdited(); }} />
-        <span><strong>Remove saved credentials on save</strong><small>This does not reveal the current secret.</small></span>
-      </label>}
     </fieldset>
-
-    {saved && <>
-      <div className="telemetry-effective" role="status">
-        <strong>Effective now</strong>
-        <p>Telemetry is {saved.effective.enabled ? 'on' : 'off'}.{' '}{saved.effective.endpoint ? <>Destination: <code>{saved.effective.endpoint}</code>.</> : 'No destination is active.'}{' '}Credentials are {saved.effective.headersConfigured ? 'configured' : 'not configured'}.</p>
-        <small>{typeof saved.runtime?.enabled === 'boolean' ? `Telemetry runtime is ${saved.runtime.enabled ? 'on' : 'off'}.` : 'Telemetry runtime status is unavailable.'}{dirty ? ' Unsaved changes are not effective yet.' : ''}</small>
-      </div>
-      {overriddenSettings.length > 0 && <p className="telemetry-guidance">Environment overrides currently control the {joinLabels(overriddenSettings)}. The form shows saved values; saving does not replace active overrides.</p>}
-    </>}
-
-    <div className="telemetry-actions">
-      <button type="button" className="primary" disabled={controlsDisabled || !dirty} onClick={() => void save()}>{busy === 'save' ? 'Saving…' : 'Save changes'}</button>
-    </div>
-    {!saved && !error && <p className="settings-help" role="status">Loading OpenTelemetry settings…</p>}
-    {error && <p className="settings-request-error" role="alert">{error}</p>}
-    {!saved && error && <button type="button" className="secondary" onClick={() => setRetry((value) => value + 1)}>Retry OpenTelemetry settings</button>}
-    {notice && <p className="telemetry-notice" role="status">{notice}</p>}
+    {saved && <><div className="telemetry-effective" role="status"><strong>Effective now</strong><p>Telemetry is {saved.effective.enabled ? 'on' : 'off'}. {saved.effective.destinations?.filter(d => d.enabled).length ?? 0} effective destination(s).</p><small>{typeof saved.runtime?.enabled === 'boolean' ? `Telemetry runtime is ${saved.runtime.enabled ? 'on' : 'off'}.` : 'Telemetry runtime status is unavailable.'}{dirty ? ' Unsaved changes are not effective yet.' : ''}</small></div>{overridden && <p className="telemetry-guidance">Environment overrides currently control {saved.effective.source === 'environment' ? 'the master switch' : ''}{saved.effective.source === 'environment' && (saved.effective.endpointSource === 'environment' || saved.effective.headersSource === 'environment') ? ' and ' : ''}{saved.effective.endpointSource === 'environment' || saved.effective.headersSource === 'environment' ? 'the transport, replacing saved destinations for export' : ''}. The form shows saved values; saving does not replace active overrides.</p>}</>}
+    <div className="telemetry-actions"><button type="button" className="primary" disabled={disabled || !dirty} onClick={() => void save()}>{busy ? 'Saving…' : 'Save changes'}</button></div>
+    {!saved && !error && <p role="status">Loading OpenTelemetry settings…</p>}{error && <p className="settings-request-error" role="alert">{error}</p>}{!saved && error && <button type="button" className="secondary" onClick={() => setRetry(n => n + 1)}>Retry OpenTelemetry settings</button>}{notice && <p className="telemetry-notice" role="status">{notice}</p>}
   </SettingSection>;
 }
