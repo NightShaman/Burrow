@@ -51,6 +51,21 @@ describe('AgentsPanel', () => {
     expect(onSelectSubagent).toHaveBeenCalledWith('smatchet', 'child');
   });
 
+  it.each(['regular', 'compact'] as const)('nests descendants in %s view and selects them through the root agent', view => {
+    const onSelectSubagent = vi.fn();
+    const grandchild = { ...agent.subagents[0], id: 'grandchild', stream: 'grandchild', name: 'Grandchild', parentSessionId: 'child', depth: 2, maxDepth: 3 };
+    const orphan = { ...agent.subagents[0], id: 'orphan', name: 'Orphan', parentSessionId: 'missing', depth: 2 };
+    render(<AgentsPanel agents={[{ ...agent, subagents: [grandchild, agent.subagents[0], orphan] }]} view={view} selectedStreamId="grandchild" expandedAgents={new Set(['smatchet'])} onSelectAgent={vi.fn()} onToggleAgent={vi.fn()} onSelectSubagent={onSelectSubagent} />);
+    const child = screen.getByRole('button', { name: 'Select Child' });
+    const grand = screen.getByRole('button', { name: 'Select Grandchild' });
+    expect(child.closest('li')?.querySelector('ul')?.contains(grand)).toBe(true);
+    expect(grand.getAttribute('aria-pressed')).toBe('true');
+    expect(child.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(grand);
+    expect(onSelectSubagent).toHaveBeenCalledWith('smatchet', 'grandchild');
+    expect(screen.getByRole('button', { name: 'Select Orphan' }).closest('ul')?.getAttribute('aria-label')).toBe('Minions');
+  });
+
   it.each(['Error', 'Incomplete'])('keeps %s rail status free of diagnostic text', (activity) => {
     const child = { ...agent.subagents[0], activity, outcomeReason: 'Recorded diagnostic reason' };
     render(<AgentsPanel agents={[{ ...agent, subagents: [child] }]} selectedStreamId="child" expandedAgents={new Set(['smatchet'])} onSelectAgent={vi.fn()} onToggleAgent={vi.fn()} onSelectSubagent={vi.fn()} />);

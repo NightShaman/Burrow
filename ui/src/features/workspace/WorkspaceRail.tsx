@@ -6,6 +6,7 @@ import { api, type RuntimeHealth, type RuntimeMetrics } from '../../app/api';
 import type { ProviderConnectionStatus } from '../../app/useRuntimeDashboard';
 import { getPanelTitle } from '../../app/panelRegistry';
 import { orderAgents, type AgentRailView } from '../../app/useAgentRailPreferences';
+import { minionTree, type MinionNode } from './minionTree';
 import './workspace-rail.css';
 
 export function Chevron({ direction }: { direction: 'left' | 'right' | 'down' }) { return <svg className={`chevron chevron-${direction}`} viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 2.75 5.25 5.25-5.25 5.25" /></svg>; }
@@ -63,7 +64,20 @@ export function SystemPanel({ provider, providerConnectionStatus }: { provider: 
 
 function AgentCard({ agent, selectedStreamId, expanded, compact, onToggle, onSelect, onSelectSubagent }: { agent: Agent; selectedStreamId: string; expanded: boolean; compact: boolean; onToggle: () => void; onSelect: () => void; onSelectSubagent: (id: string) => void }) {
   const selected = selectedStreamId === agent.id;
-  return <div className={`agent-group ${selected ? 'active' : ''}`}><div className="agent-card"><button type="button" className="agent-select" onClick={onSelect} aria-label={`Select ${agent.name}`} aria-pressed={selected}><span className="avatar">{agent.avatar.startsWith('data:image/') ? <img src={agent.avatar} alt="" /> : agent.avatar}</span><span className="agent-details"><span className="agent-summary"><span className="agent-identity"><span className="agent-name"><b>{agent.name}</b></span></span><span className={`agent-status ${statusClass(agent.activity)}`}><i />{agent.activity}</span></span></span></button><button type="button" className="agent-toggle" onClick={onToggle} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${agent.name}`} aria-expanded={expanded}><Chevron direction="right" /></button>{!compact && <ContextUsage value={agent.context} details={agent.contextDetails} />}</div>{expanded && <div className="subagent-list">{agent.subagents.map((subagent) => <button type="button" className={`subagent-row ${selectedStreamId === subagent.id ? 'active' : ''}`} onClick={() => onSelectSubagent(subagent.id)} key={subagent.id} aria-label={`Select ${subagent.name}`} aria-pressed={selectedStreamId === subagent.id}><span className="subagent-branch">└</span><span className="subagent-copy"><b>{subagent.name}</b><small>{subagent.activity}</small></span></button>)}</div>}</div>;
+  return <div className={`agent-group ${selected ? 'active' : ''}`}><div className="agent-card"><button type="button" className="agent-select" onClick={onSelect} aria-label={`Select ${agent.name}`} aria-pressed={selected}><span className="avatar">{agent.avatar.startsWith('data:image/') ? <img src={agent.avatar} alt="" /> : agent.avatar}</span><span className="agent-details"><span className="agent-summary"><span className="agent-identity"><span className="agent-name"><b>{agent.name}</b></span></span><span className={`agent-status ${statusClass(agent.activity)}`}><i />{agent.activity}</span></span></span></button><button type="button" className="agent-toggle" onClick={onToggle} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${agent.name}`} aria-expanded={expanded}><Chevron direction="right" /></button>{!compact && <ContextUsage value={agent.context} details={agent.contextDetails} />}</div>{expanded && <MinionList nodes={minionTree(agent.subagents)} selectedStreamId={selectedStreamId} onSelect={onSelectSubagent} />}</div>;
+}
+
+function MinionList({ nodes, selectedStreamId, onSelect, level = 1 }: { nodes: MinionNode[]; selectedStreamId: string; onSelect: (id: string) => void; level?: number }) {
+  if (!nodes.length) return null;
+  return <ul className="subagent-list" aria-label={level === 1 ? 'Minions' : 'Nested minions'}>
+    {nodes.map(({ minion, children }) => <li key={minion.id}>
+      <button type="button" className={`subagent-row ${selectedStreamId === minion.id ? 'active' : ''}`} onClick={() => onSelect(minion.id)} aria-label={`Select ${minion.name}`} aria-pressed={selectedStreamId === minion.id}>
+        <span className="subagent-branch" aria-hidden="true">└</span>
+        <span className="subagent-copy"><b>{minion.name}</b><small>{minion.activity}</small></span>
+      </button>
+      <MinionList nodes={children} selectedStreamId={selectedStreamId} onSelect={onSelect} level={level + 1} />
+    </li>)}
+  </ul>;
 }
 
 function ContextUsage({ value, details, compact = false }: { value: number | null; details?: Agent['contextDetails']; compact?: boolean }) {

@@ -171,3 +171,69 @@ it.each([true, false])('retains disabled identities for management but selects o
   const reconcileStream = setSelectedStreamId.mock.lastCall?.[0];
   expect(reconcileStream('disabled-child')).toBe(hasEnabled ? 'enabled' : '');
 });
+
+describe('nested minion hydration', () => {
+  beforeEach(() => {
+    apiMock.mockReset();
+    setSelectedAgentId.mockReset();
+    setSelectedStreamId.mockReset();
+    onNoAgents.mockReset();
+    reportError.mockReset();
+  });
+
+  it.each(['overview', 'legacy'])('keeps all descendants flat with backend ancestry via %s', async mode => {
+    const agent = { id: 'smatchet', name: 'Smatchet', enabled: true };
+    const statuses = [
+      { sessionId: 'default', status: 'THINKING', depth: 0, maxDepth: 0 },
+      { sessionId: 'grandchild', parentSessionId: 'child', parentRunId: 'child-run', runId: 'grandchild-run', rootSessionId: 'default', rootRunId: 'root-run', depth: 2, maxDepth: 3, label: 'Grandchild', status: 'VERIFYING' },
+      { sessionId: 'child', parentSessionId: 'default', parentRunId: 'root-run', runId: 'child-run', depth: 1, maxDepth: 3, status: 'THINKING' },
+      { sessionId: 'orphan', parentSessionId: 'retained-away', parentRunId: 'missing-run', depth: 2, maxDepth: 3, status: 'ERROR', result: { outcome: 'incomplete', summary: 'Stopped early' } },
+    ];
+    apiMock.mockImplementation(async (path) => {
+      if (path === '/api/agents') return { agents: [agent] };
+      if (path === '/api/agents/overview') {
+        if (mode === 'legacy') throw Object.assign(new Error('Not found'), { status: 404 });
+        return { agents: [{ agent, sessionId: 'default', selection: null, status: { agents: statuses }, contexts: { grandchild: { context: { percent: 27 } } } }] };
+      }
+      if (path === '/api/settings/identities') return { agents: [] };
+      if (path === '/api/agents/smatchet/model-selection') return { selection: null };
+      if (path === '/api/agent-status?sessionId=default&agentId=smatchet') return { agents: statuses };
+      if (path.startsWith('/api/session/context-status?')) return { status: { context: { percent: path.endsWith('grandchild') ? 27 : 10 } } };
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { result } = renderRuntimeAgents('smatchet');
+    await waitFor(() => expect(result.current.registryState).toBe('ready'));
+    const children = result.current.agents[0].subagents;
+    expect(children.map(child => child.id)).toEqual(['grandchild', 'child', 'orphan']);
+    expect(children[0]).toMatchObject({ agentId: 'smatchet', id: 'grandchild', resourceId: 'grandchild', stream: 'grandchild', parentSessionId: 'child', parentRunId: 'child-run', runId: 'grandchild-run', rootSessionId: 'default', rootRunId: 'root-run', depth: 2, maxDepth: 3, context: 27, activity: 'Verifying' });
+    expect(children[2]).toMatchObject({ parentSessionId: 'retained-away', depth: 2, maxDepth: 3 });
+    const reconcile = setSelectedStreamId.mock.lastCall?.[0];
+    expect(reconcile('grandchild')).toBe('grandchild');
+    expect(reconcile('orphan')).toBe('orphan');
+    expect(reconcile('removed')).toBe('smatchet');
+    if (mode === 'legacy') {
+      for (const session of ['default', 'child', 'grandchild', 'orphan']) {
+        expect(apiMock).toHaveBeenCalledWith(`/api/session/context-status?agentId=smatchet&sessionId=${session}`, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+      }
+    } else {
+      expect(apiMock).toHaveBeenCalledTimes(2);
+      // A capped overview may omit context without omitting the descendant.
+      expect(children[2].context).toBeNull();
+    }
+  });
+
+  it('uses the requested session as the displayed parent even when it has ancestry', async () => {
+    apiMock.mockImplementation(async path => {
+      if (path === '/api/agents') return { agents: [{ id: 'smatchet' }] };
+      if (path === '/api/agents/overview') return { agents: [{ agent: { id: 'smatchet', name: 'Smatchet', enabled: true }, sessionId: 'default', selection: null, status: { agents: [
+        { sessionId: 'default', parentSessionId: 'original-root', depth: 1, status: 'STREAMING' },
+        { sessionId: 'nested', parentSessionId: 'default', depth: 2, maxDepth: 2, status: 'THINKING' },
+      ] }, contexts: {} }] };
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { result } = renderRuntimeAgents('smatchet');
+    await waitFor(() => expect(result.current.registryState).toBe('ready'));
+    expect(result.current.agents[0].activity).toBe('Streaming');
+    expect(result.current.agents[0].subagents.map(child => child.id)).toEqual(['nested']);
+  });
+});

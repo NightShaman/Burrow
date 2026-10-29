@@ -66,9 +66,19 @@ export type RuntimeAgent = {
   executionEnvironment?: { kind: 'local' | 'remote' | 'unresolved'; providerId?: string; targetId?: string; legacyKind?: string; workspaceRoot: string } | null;
 };
 
-export type AgentStatus = {
-  sessionId: string;
+/** Runtime-owned lineage; a child keeps its spawn-time depth budget. */
+export type MinionAncestry = {
+  runId?: string | null;
   parentSessionId?: string | null;
+  parentRunId?: string | null;
+  depth?: number;
+  maxDepth?: number;
+  rootSessionId?: string | null;
+  rootRunId?: string | null;
+};
+
+export type AgentStatus = MinionAncestry & {
+  sessionId: string;
   label?: string;
   status?: string;
   since?: string;
@@ -215,7 +225,7 @@ export type ActiveSubagentActivity = {
   error?: string | null;
   counts?: Record<string, unknown> | null;
 };
-export type ActiveSubagent = {
+export type ActiveSubagent = MinionAncestry & {
   id: string;
   status?: string | null;
   phase?: string | null;
@@ -244,7 +254,7 @@ export type WorkflowCompletionEvent = {
   url?: string;
 };
 
-export type ActiveChatRun = {
+export type ActiveChatRun = MinionAncestry & {
   lane?: 'main' | 'side_question';
   inputId?: string | null;
   answerText?: string;

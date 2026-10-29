@@ -87,8 +87,8 @@ async function loadLegacyOverview(parentSessionIdForAgent: (agentId: string) => 
       api<{ status: ContextStatus }>( `/api/session/context-status?agentId=${encodeURIComponent(agent.id)}&sessionId=${encodeURIComponent(sessionId)}`, { signal }).catch(() => ({ status: {} })),
       api<{ selection: ModelSelection }>( `/api/agents/${encodeURIComponent(agent.id)}/model-selection`, { signal }).catch(() => ({ selection: null })),
     ]);
-    const childContexts = await Promise.all(status.agents.filter((item) => item.parentSessionId === sessionId).map(async (child) => {
-      const result = await api<{ status: ContextStatus }>( `/api/session/context-status?agentId=${encodeURIComponent(agent.id)}&sessionId=${encodeURIComponent(child.sessionId)}`).catch(() => ({ status: {} }));
+    const childContexts = await Promise.all(status.agents.filter((item) => item.sessionId !== sessionId).map(async (child) => {
+      const result = await api<{ status: ContextStatus }>( `/api/session/context-status?agentId=${encodeURIComponent(agent.id)}&sessionId=${encodeURIComponent(child.sessionId)}`, { signal }).catch(() => ({ status: {} }));
       return [child.sessionId, result.status] as const;
     }));
     return { agent, identity: identitiesByAgentId.get(agent.id), sessionId, selection: selection.selection, status, contexts: { [sessionId]: context.status, ...Object.fromEntries(childContexts) } };
@@ -130,11 +130,24 @@ export function useRuntimeAgents({ selectedAgentId, setSelectedAgentId, parentSe
       }
       hydrated = entries.map((entry) => {
         const agent = asAgent(entry);
-        const parentStatus = entry.status.agents.find((item) => item.sessionId === entry.sessionId && !item.parentSessionId);
-        const childStatuses = entry.status.agents.filter((item) => item.parentSessionId === parentStatus?.sessionId);
+        const parentStatus = entry.status.agents.find((item) => item.sessionId === entry.sessionId);
+        // The backend scopes this list to the requested subtree, including
+        // retained descendants whose immediate parent is no longer present.
+        // Keep it flat for stream selection; only the rail builds a hierarchy.
+        const childStatuses = entry.status.agents.filter((item) => item.sessionId !== entry.sessionId);
         const subagents: Subagent[] = childStatuses.map((child) => {
           const childContext = entry.contexts[child.sessionId] ?? {};
-          return { id: child.sessionId, resourceId: child.sessionId, targetId: 'local', name: child.label || child.subagentId || 'Minion', avatar: '↳', activity: minionOutcome(child.status, child.result).label ?? formatAgentActivity(child.status), outcomeReason: minionOutcome(child.status, child.result).reason, context: contextPercent(childContext), contextDetails: contextDetails(childContext), stream: child.sessionId, subagentId: child.subagentId };
+          const outcome = minionOutcome(child.status, child.result);
+          return {
+            id: child.sessionId, resourceId: child.sessionId, stream: child.sessionId,
+            agentId: entry.agent.id, targetId: 'local', subagentId: child.subagentId,
+            runId: child.runId, parentSessionId: child.parentSessionId, parentRunId: child.parentRunId,
+            depth: child.depth, maxDepth: child.maxDepth,
+            rootSessionId: child.rootSessionId, rootRunId: child.rootRunId,
+            name: child.label || child.subagentId || 'Minion', avatar: '↳',
+            activity: outcome.label ?? formatAgentActivity(child.status), outcomeReason: outcome.reason,
+            context: contextPercent(childContext), contextDetails: contextDetails(childContext),
+          };
         });
         const selection = entry.selection;
         const selectedProvider = runtimeProviders.current.find((item) => item.id === selection?.connectionId && item.models.includes(selection.model));
