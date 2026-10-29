@@ -43,3 +43,9 @@ describe('conversation copy attribution', () => {
     expect(value).not.toContain('Rob —');
   });
 });
+
+it('does not invent an operator or parent identity for delegation without a parent ID', () => {
+  const result = formatConversationCopy([turn('user', 'Task', { kind: 'subagent-delegated-task' })], { operatorName: 'Rob' });
+  expect(result).toContain('Parent agent —');
+  expect(result).not.toContain('Rob —');
+});

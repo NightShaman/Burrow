@@ -31,16 +31,17 @@ it('hides modern and legacy generated context without altering stored turns or h
   expect(screen.getByText('Actual followup')).toBeTruthy();
   expect(JSON.stringify(turns)).toBe(before);
 });
-it.each([{ kind: 'subagent-delegated-task', parentAgentId: 'hatchet' }, { workerProfile: 'frontend', subagentId: 'child' }])('attributes delegated tasks to the known parent: %j', (metadata) => {
+it.each([{ kind: 'subagent-delegated-task', parentAgentId: 'hatchet' }, { workerProfile: 'frontend', subagentId: 'child', parentAgentId: 'hatchet' }])('attributes delegated tasks to the known parent: %j', (metadata) => {
   show([message('**Delegated task**', metadata), message('Operator followup')]);
   expect(screen.getByLabelText('Hatchet avatar')).toBeTruthy();
   expect(screen.getAllByLabelText('Rob avatar')).toHaveLength(1);
   expect(screen.getByText('Delegated task').tagName).toBe('STRONG');
 });
-it('uses Parent agent when attribution is unavailable, never the operator', () => {
-  show([message('Task', { kind: 'subagent-delegated-task' })], parent);
+it.each([{ kind: 'subagent-delegated-task' }, { workerProfile: 'frontend', subagentId: 'child' }])('uses Parent agent when attribution is unavailable, never the operator or workspace parent: %j', (metadata) => {
+  show([message('Task', metadata)]);
   expect(screen.getByLabelText('Parent agent avatar')).toBeTruthy();
   expect(screen.queryByLabelText('Rob avatar')).toBeNull();
+  expect(screen.queryByLabelText('Hatchet avatar')).toBeNull();
 });
 it('honors explicit parent identity rather than the workspace parent', () => {
   show([message('Task', { kind: 'subagent-delegated-task', parentAgentId: 'smatchet' })]);

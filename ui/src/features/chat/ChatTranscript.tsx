@@ -51,7 +51,7 @@ export const ChatTranscript = memo(function ChatTranscript({ selected, parent, o
     const delegated = metadata?.kind === 'subagent-delegated-task' || Boolean(metadata?.parentAgentId) || (isSubagent && Boolean(metadata?.workerProfile || metadata?.subagentId));
     if (!delegated) return { name: operator.name, avatar: operator.avatar || operator.name.slice(0, 1).toUpperCase() };
     const parentId = metadata?.parentAgentId;
-    const knownParent = parentId ? [parent.id, parent.resourceId].includes(parentId) : isSubagent;
+    const knownParent = Boolean(parentId && [parent.id, parent.resourceId].includes(parentId));
     const name = knownParent ? parent.name : parentId || 'Parent agent';
     return { name, avatar: (knownParent && parent.avatar) || name.slice(0, 1).toUpperCase() };
   };

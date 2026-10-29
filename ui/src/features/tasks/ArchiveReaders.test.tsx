@@ -90,3 +90,7 @@ it('renders and copies workflow-event speakers with a fallback, preserving ordin
   expect([...container.querySelectorAll('.archive-turn-meta strong')].map(node => node.textContent)).toEqual(speakers);
   turns.forEach((turn, index) => expect(archiveTurnText(turn, 'Smatchet', names, 'Rob')).toBe(`## ${speakers[index]}\n\n${turn.content}`));
 });
+
+it('does not invent a sender for archived delegation with no parent ID', () => {
+  expect(archiveTurnText({ role: 'user', content: 'Task', metadata: { kind: 'subagent-delegated-task' } }, 'Minion', names, 'Rob')).toBe('## Parent agent\n\nTask');
+});

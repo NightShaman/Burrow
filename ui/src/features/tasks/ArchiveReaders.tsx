@@ -52,7 +52,7 @@ function archiveTurnSpeaker(turn: SessionTurn, sessionAgentName: string, agentNa
   if (['user', 'operator', 'human'].includes(role)) {
     if (turn.metadata?.source === 'workflow-event') return `GitHub · ${turn.metadata.completionEvent?.workflow?.trim() || 'workflow event'}`;
     const delegatedParentId = turn.metadata?.parentAgentId;
-    return delegatedParentId ? agentNames.get(delegatedParentId) || delegatedParentId : operatorName || 'Operator';
+    return delegatedParentId ? agentNames.get(delegatedParentId) || delegatedParentId : turn.metadata?.kind === 'subagent-delegated-task' ? 'Parent agent' : operatorName || 'Operator';
   }
   const senderId = turn.metadata?.fromAgentId;
   return turn.metadata?.fromAgentName || (senderId ? agentNames.get(senderId) || senderId : '') || sessionAgentName || 'Agent';

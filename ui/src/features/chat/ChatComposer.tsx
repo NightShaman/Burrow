@@ -242,8 +242,9 @@ export function ChatComposer({
 function conversationSpeaker(turn: SessionTurn, assistantName: string, operatorName: string, agentNames: ReadonlyMap<string, string>) {
   const role = (turn.role ?? '').toLowerCase();
   if (['user', 'operator', 'human'].includes(role)) {
+    if (turn.metadata?.source === 'workflow-event') return `GitHub · ${turn.metadata.completionEvent?.workflow?.trim() || 'workflow event'}`;
     const parentId = turn.metadata?.parentAgentId;
-    return parentId ? agentNames.get(parentId) || parentId : operatorName || 'You';
+    return parentId ? agentNames.get(parentId) || parentId : turn.metadata?.kind === 'subagent-delegated-task' ? 'Parent agent' : operatorName || 'You';
   }
   const senderId = turn.metadata?.fromAgentId;
   return turn.metadata?.fromAgentName || (senderId ? agentNames.get(senderId) || senderId : '') || assistantName || 'Assistant';
