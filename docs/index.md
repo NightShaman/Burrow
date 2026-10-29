@@ -9,7 +9,7 @@ Burrow is a self-hosted, chat-first AI agent application. Connect a model, give 
 [Install Burrow](guide/installation.md){ .md-button .md-button--primary }
 [Create your first agent](guide/first-agent.md){ .md-button }
 
-Operator guide · **current implementation reviewed 26 October 2026**
+Operator guide · **current implementation reviewed 29 October 2026**
 
 </div>
 

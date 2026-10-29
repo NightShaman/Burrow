@@ -67,7 +67,7 @@ Under **Settings → Agents**, select the agent you intend to edit.
 
 - **Agent details** changes its displayed name, image, and enabled state. Click **Save changes**.
 - **Profile documents** holds its instructions and personality documents. Keep credentials out of reusable prose.
-- **Default minion model** sets the model for delegated work. Leaving it on inheritance uses the current parent turn's model.
+- **Minion settings**, beside Agent details, contains **Default minion model** for delegated work. Leaving the model on inheritance uses the current parent turn's model. **Maximum minion depth** separately permits no children (0), direct children only (1, the default), or one additional nested level (2). Choose **Save minion depth** after changing it; an existing child tree cannot gain extra depth. See [Agents and Minions](../concepts/agents-minions.md).
 
 Set **Settings → General → Operator profile → Operator timezone** before relying on scheduled jobs. Add tools, schedules, and execution permissions deliberately as you begin using them; they are not needed to prove the first chat works.
 

@@ -18,7 +18,7 @@ BURROW stores operator-managed configuration in PostgreSQL. The service environm
 | Operator timezone | PostgreSQL metadata | Settings → General → Operator profile |
 | Skills, Git sources and per-agent assignments | PostgreSQL skill/source records; installed package files on disk | Settings → Skills; per-agent assignments under Agents |
 | Browser Origin checking | Persisted `checkOrigin`, with environment override | Settings browser-origin control; `/api/settings/browser-origin` |
-| OpenTelemetry export | PostgreSQL endpoint/enabled state and encrypted headers, with environment overrides | Settings → Connections → OpenTelemetry; `/api/settings/opentelemetry` |
+| OpenTelemetry export | PostgreSQL destination list/master switch and encrypted credentials/headers, with explicit environment overrides | Settings → Connections → OpenTelemetry; `/api/settings/opentelemetry` |
 | System-mod authority | Core-owned capability and agent grants | `/api/operator/mods/{modId}/access`; current Core allows direct UI use in `none` mode; enabled authentication requires operator login; API tokens do not authorize this route |
 | Dream schedule and model selection | PostgreSQL agent Dream settings | Agent Dreams settings |
 | Retention | Saved trace policy; separate CLI session-retention policy | Settings → General → Trace retention; deliberate CLI maintenance |
@@ -34,6 +34,14 @@ Runtime composition requires injected PostgreSQL-backed stores; there is no sile
 For UI authentication, precedence is explicit runtime arguments → service environment → persisted settings → defaults. A saved authentication form can therefore differ from the effective mode. `GET /api/settings/ui-auth` returns both the saved `auth` object and `effective` mode, enabled state and source. Responses report whether secrets are configured rather than returning them. Saving an omitted Basic password preserves its existing hash; a nonblank supplied OIDC client secret replaces the encrypted stored secret.
 
 Listener host/port are selected at process start. Changing the service environment requires a restart. The direct HTTP entry point defaults to `0.0.0.0:42817`; the native installer explicitly writes `127.0.0.1`, while Docker uses `0.0.0.0`. The generic configuration resolver's loopback default does not override the server entry point. Set the listener deliberately before enabling remote access.
+## OpenTelemetry destination ownership
+
+Current development saves a master switch and an authoritative list of named OTLP/HTTP destinations. Each destination selects its provider preset, enabled signals, base or exact signal URLs, protocol and metric temporality; headers, credentials and CA material are encrypted and write-only. Changes apply live to Core. See [configuration procedure](../operations/observability.md#configure-destinations) and [settings API](api/settings.md#opentelemetry-destinations).
+
+`BURROW_OTEL_ENABLED` overrides only the master switch. Generic/signal-specific OTLP endpoint or header overrides select one effective environment destination rather than fan out environment credentials to saved destinations. The saved list remains unchanged. A headers-only transport override uses the first enabled saved transport for endpoint/signal defaults but does not copy its destination credentials; legacy scalar settings retain their documented saved-header fallback for an endpoint-only override. Generic and signal-specific headers are combined with signal-specific names winning. Standard environment CA/mTLS settings apply to environment-owned transport, not saved destinations. See [environment variables](environment.md).
+
+Existing scalar settings remain a virtual Custom destination until a successful list save adopts them. Reading does not migrate them or identify their original provider. An explicitly saved empty list stays empty across restart. Older scalar clients cannot overwrite a non-equivalent or multi-destination list; the API rejects ambiguous updates. Existing runs and their descendants retain their old export generation while new independent runs use the changed configuration.
+
 ## Paths and agent ownership
 
 The native installer normally uses `$HOME/.burrow`. The generic runtime fallback is `/mnt/local/burrow`; it is not the native installation recommendation. Explicit path arguments precede environment values. Agent workspaces normally resolve under the shared workspace root, with agent data and workspace pointing to the same selected tree.
@@ -62,6 +70,10 @@ Select an enabled connection and an enabled model within it. Agent defaults can 
 | Image input | Per-model accepted input takes precedence over connection-level compatibility metadata |
 
 Capacity fallbacks are BURROW defaults, not a guarantee of a provider's current limits. Catalog output capacity is metadata and is distinct from the requested generation limit. See [models](../concepts/models.md) before changing provider details.
+## Minion settings
+
+Minion Depth is a durable per-agent integer 0–2, default 1, separate from the Minion model selection. Zero disables spawning; one permits direct children; two permits grandchildren. Runtime-owned child lineage retains its original budget and can be tightened by current settings. See the [settings API](api/settings.md#minion-depth).
+
 ## Context compression
 
 Compression policy is runtime configuration, not a client-owned chat-body setting. Defaults are a 0.75 threshold, 48 fresh-tail messages, 24,000 fresh-tail tokens, 20,000 leaf-chunk tokens, a 6,000-token summary target, at most four sweep iterations and a 120,000 ms deadline. A summary-model override is optional. See the exact [environment variables](environment.md#context-and-memory) and [conversation history](../concepts/conversation-history.md).
@@ -89,3 +101,7 @@ Corrections on this page were checked against public **2026.10.19**; any newer d
 - [backend/src/postgres-application-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-application-schema.mjs)
 - [backend/src/postgres-scheduled-job-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-scheduled-job-store.mjs)
 - [backend/src/postgres-dream-settings-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-dream-settings-store.mjs)
+
+## 29 October development delta
+
+Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).

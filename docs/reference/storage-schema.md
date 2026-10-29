@@ -4,7 +4,7 @@
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
-This reference retains the historical 2026.10.19 ownership map and now records the current migration ledger through **77**, checked against Core on **28 October 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
+This reference retains the historical 2026.10.19 ownership map and now records the current migration ledger through **79**, checked against Core on **29 October 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
 
 See [Persistence architecture](../architecture/persistence.md) for the data flow and [Backup and recovery](../operations/backup-recovery.md) for recovery scope.
 
@@ -234,7 +234,8 @@ Managed mod MCP catalogs use stable `mod://` identities. Removing an installatio
 | Table | Key | Stored data |
 |---|---|---|
 | `settings_meta` | `key` | JSON text and update time; application-owned metadata keys |
-| `opentelemetry_settings` | `id=operator` | Export enabled state, collector endpoint and encrypted header bytes |
+| `opentelemetry_settings` | `id=operator` | Master enabled state, destination-list authority, and retained legacy scalar transport |
+| `opentelemetry_destinations` | Stable destination `id`, unique list position | Provider/transport/signal settings and encrypted per-ID protected headers/credentials |
 | `installation_setup_state` | `owner_id` | Persisted initial-setup state JSONB |
 | `retention_settings` | `owner_id` | Trace retention policy/state JSONB |
 | `working_memory_retention_settings` | `owner_id` | Working/rolling TTL settings JSONB |
@@ -279,4 +280,8 @@ Migration 70 adds default-true per-agent Dream promotion; the global promotion f
 
 ## Additions after migration 72
 
-Current Core reaches migration **77**: **73** adds per-agent Dream memory emphasis/override; **74** durable GitHub completion watches/events; **75** settings-managed encrypted webhook receiver; **76** retained operator event projections; **77** durable chat inputs, session holds and generation fencing. Side-question snapshots/results are owned by the chat-input store, not automatically injected main-lane memory. Preview source tokens remain bounded in-process state; preview execution traces are filesystem evidence, not saved Dream memories. These are application migrations, not instructions to edit the migration ledger or perform a PostgreSQL-major upgrade.
+Current Core reaches migration **79**: **73** adds per-agent Dream memory emphasis/override; **74** durable GitHub completion watches/events; **75** settings-managed encrypted webhook receiver; **76** retained operator event projections; **77** durable chat inputs, session holds and generation fencing; **78** authoritative OpenTelemetry destination storage; **79** the built-in `group-channel` shared-transcript identity. This identity is not an executable agent: participants still run as themselves, existing identity metadata/transcripts remain intact and session foreign keys remain enforced. Legacy scalar OTel settings remain readable until a list save adopts them; an explicitly saved empty list stays authoritative across restart. Per-agent Minion Depth is stored in metadata independently of Minion model selection; child depth/root/budget persist with session lineage. Side-question snapshots/results are owned by the chat-input store, not automatically injected main-lane memory. Preview source tokens remain bounded in-process state; preview execution traces are filesystem evidence, not saved Dream memories. These are application migrations, not instructions to edit the migration ledger or perform a PostgreSQL-major upgrade.
+
+## 29 October development delta
+
+Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).

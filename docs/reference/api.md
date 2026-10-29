@@ -36,7 +36,7 @@ The API serves BURROW's UI and external clients. It is an operator-level control
 
 The public assembly includes `backend/docs/openapi.json`. Its contract includes Brains, Dream controls, Git-skill management, Minion model selection, task history/attachments and OpenTelemetry settings. Retired `/api/albdruck/*` routes are absent. The source-backed endpoint pages still need to be read alongside the schema: its inventory is not proof of request/response parity or live compatibility.
 
-The current development contract reviewed on **2026-10-28** has **190 paths, 252 operations and 156 component schemas**, including durable chat inputs, workflow events, Dream memory preview and bounded model-recovery receipts. Its SHA-256 is `d7cc8e7275b163a89fae16e0fe329adcc40ff39a70110635f818da584d386340`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
+The current development contract reviewed on **2026-10-29** has **191 paths, 254 operations and 179 component schemas**, including Minion Depth/ancestry and multi-destination OpenTelemetry alongside durable chat inputs, workflow events, Dream memory preview and bounded model-recovery receipts. Its SHA-256 is `ad2176cef665ca3986b735dbdba0c3e844286dbcbcc8db47696ce8429d426dc2`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
 
 
 !!! warning "The schema is incomplete"
@@ -108,3 +108,7 @@ Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-
 ## 27 October delta review
 
 Changed contracts checked statically against Backend `32ff99dfc0317635f5c7aa53b4c9ec18266d4c09` on **2026-10-27**. This does not recertify unchanged historical sections or report live API/provider tests.
+
+## 29 October development delta
+
+Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).

@@ -171,7 +171,7 @@ For Claude CLI-backed login, verify the runtime-owned integration executable pat
 
 Current development reports bounded live recovery rather than silently restarting a whole turn. `recovering` means another physical model attempt is pending; `resumed` means a usable continuation returned. `exhausted` means the retry budget ran out; `blocked` means a safe recovery path was unavailable; `requires_investigation` identifies an internal/unknown failure; `cancelled` respects the stop signal. Inspect `modelFailure` and `modelRecovery` in the terminal receipt and correlate `model_recovery` service events by run ID.
 
-Keep the original observed provider status/code separate from any later failover blocker. Do not treat a portability block as proof that the original 429/5xx disappeared, or repeatedly resubmit a turn whose tools may already have run. Defaults allow three physical attempts per request and four extra per run, with one/three-second cancellable waits. After a terminal failure, inspect completed effects and persisted history before deliberately continuing. [Recovery boundaries](../architecture/runtime.md#bounded-live-model-recovery) explain unsupported cases and billing uncertainty.
+An observed generic `provider_generation_failed` error envelope can receive bounded recovery even with an unfamiliar vendor code, unless structured terminal evidence or nontransient numeric status forbids it. This does not mean every unfamiliar failure is transient, and prose or an unmarked exception is not enough to retry. Keep the original observed provider status/code separate from any later failover blocker. Do not treat a portability block as proof that the original 429/5xx disappeared, or repeatedly resubmit a turn whose tools may already have run. Defaults allow three physical attempts per request and four extra per run, with one/three-second cancellable waits. After a terminal failure, inspect completed effects and persisted history before deliberately continuing. [Recovery boundaries](../architecture/runtime.md#bounded-live-model-recovery) explain unsupported cases and billing uncertainty.
 
 For service failures, start with the [structured console logs](observability.md#service-and-container-logs). OIDC diagnostics identify stages such as discovery, callback state, token exchange, JWKS, validation and authorization without publishing tokens/claims. A repeat summary is not an exact count of independent incidents, and a quiet console does not prove every request succeeded.
 
@@ -195,6 +195,16 @@ Check agent/session identity, archived/reset history, date/timezone filters, pag
 
 Preview cleanup and inspect the selected retention policy before confirming. Current persistence includes PostgreSQL and filesystem artifacts; old “trace-only” runbooks are not universal statements about all current retention settings. Back up before destructive changes. Use [storage schema](../reference/storage-schema.md) and [procedures](procedures.md#retention-maintenance).
 
+## Telemetry saves but data is missing
+
+1. Check **Settings → Connections → OpenTelemetry → Effective now**, not just the saved list. The master switch and intended destination/signals must be enabled. Environment endpoint/header overrides replace the saved export transport with one effective environment destination; saving the list does not remove an override.
+2. Check the destination's protocol and URLs. Base endpoints append signal paths; exact URLs do not. Direct Datadog needs separate exact signal URLs and delta metrics; direct Splunk is trace-only and needs its exact `/v2/trace/otlp` URL. A Site or Realm value does not generate an ingest URL.
+3. Inspect bounded per-destination diagnostics and service logs. `lastExportFailure` has a fixed category, signal and numeric HTTP status when known. Positive `rejectedItems` means the collector rejected that many items; a warning-only response does not mean accepted items were dropped. Missing/raw collector response text is intentional. Counters alone are not ingestion proof.
+4. Inspect a new independent run at the intended collector. Work already in flight and its later child operations keep their old exporter generation after a settings change. Do not resubmit consequential work merely to create telemetry.
+5. For remote execution, verify matching Node Goblin/gateway packages support the destination/per-operation transport contract. Saving Core settings does not upgrade remote packages.
+
+A legacy client receiving `409 opentelemetry_legacy_ambiguous` must use the destination-list contract, not retry a scalar write that cannot represent the saved configuration. A failed list save leaves the prior list intact. Do not share headers, credentials, raw environments or unreviewed local receipts while diagnosing. See [OpenTelemetry guidance](observability.md#opentelemetry).
+
 ## Escalation checklist
 
 Include build version/source pins, deployment shape, sanitized exact error, relevant IDs, attempted steps, and terminal check results. Exclude settings keys, tokens/passwords, raw environment dumps, and unrelated conversation material. Distinguish a static source limitation from a reproduced failure.
@@ -212,3 +222,7 @@ Corrections on this page were checked against public **2026.10.19**; any newer d
 ## 28 October development delta
 
 Changed behavior above was checked statically against Backend `a04acb16b0eab2a910c3ef0fb452622df81a05cb` on **2026-10-28**. This is not a live provider, database or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).
+
+## 29 October development delta
+
+Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).

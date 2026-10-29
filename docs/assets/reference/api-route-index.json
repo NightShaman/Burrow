@@ -1637,7 +1637,28 @@
       "page": "reference/api.md",
       "inPinnedOpenApi": false,
       "routeFamilySource": "backend/scripts/burrow-ui.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agentId}/minion-settings",
+      "operationId": "getAgentMinionSettings",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agents/{agentId}/minion-settings",
+      "operationId": "updateAgentMinionSettings",
+      "page": "reference/api/settings.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
     }
   ],
-  "contractArtifactSourceBaseline": "d6490825401405ce719e007fd96a487c5b0cde56"
+  "contractArtifactSourceBaseline": "d6490825401405ce719e007fd96a487c5b0cde56",
+  "latestSourceAdditionReview": {
+    "date": "2026-10-29",
+    "sourceCommit": "4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9",
+    "scope": "Minion Depth GET/PUT additions; retained pinned artifact remains historical."
+  }
 }

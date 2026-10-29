@@ -19,6 +19,12 @@ The current wizard sends all six profile kinds. Before retrying its known retain
 Create requires `name`; an optional `id` must be a string and pass registry validation. Update supported identity/configuration fields through PATCH; deleting an agent affects its related store records, so treat it as a destructive administrative action. Disabling an agent is separate from deletion.
 
 `GET /api/agents` includes disabled agents unless `includeDisabled=false`. `POST /api/agents/overview` is a bulk UI projection with normalized request selection; it does not launch agents. `GET /api/agent-status` is listed under [diagnostics](diagnostics.md).
+## Native peer discovery
+
+The agent-facing `agents_list` tool is separate from this operator registry API: it lists enabled peers by default, with optional substring query, disabled inclusion and pages of up to 20 exact identity cards. Known peers can be addressed directly by `agent_send_message` using canonical ID or unique full display name; discovery does not require Backdoor or MCP. See [peer messaging](../../concepts/agents-minions.md#peer-agent-messages). Registry listing is not a runtime health or peer-data permission check.
+
+Overview/status now retain root, immediate-parent and depth ancestry. Context hydration is bounded separately from the descendant tree; see [status projections](diagnostics.md#descendant-status).
+
 ## Profile documents
 
 The six kinds are `SOUL`, `RULES`, `ORIENTATION`, `PREFERENCES`, `TOOLS` and `DREAM_MEMORY`. Each is at most 48,000 characters. GET returns the persisted documents; PUT replaces a complete set and requires all six, rather than merging an arbitrary one-document patch. Preserve the other current documents when preparing a replacement.
@@ -51,3 +57,7 @@ The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d
 
 - [backend/src/agent-profile-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/agent-profile-store.mjs)
 - [backend/scripts/ui/agent-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/agent-routes.mjs)
+
+## 29 October development delta
+
+Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../../project/source-map.md).

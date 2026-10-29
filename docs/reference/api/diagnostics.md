@@ -13,6 +13,14 @@ Health, operational projections and conversation/trace evidence expose different
 
 `GET /api/status` remains gated and returns detailed runtime status, including roots and model/policy/trace metadata. Its payload can have `ok: false` despite HTTP 200.
 `/api/metrics` returns bounded operational metrics. `/api/diagnostics/inventory` exposes only configured MCP and installed/enabled mod counts. `/api/diagnostics/postgres` reports PostgreSQL availability and pgvector installation without exposing its password. See [observability](../../operations/observability.md).
+## Descendant status
+
+`GET /api/agent-status?agentId=...&sessionId=...` returns the requested session and scoped descendants. Entries include `sessionId`, nullable `runId`, `subagentId`, immediate `parentSessionId`/`parentRunId`, `rootSessionId`/`rootRunId`, `depth` and `maxDepth`. Roots are depth 0, children 1, grandchildren 2. A child-scoped read excludes siblings; ancestor-first ordering retains ended ancestors needed to connect visible descendants. Missing parent records do not authorize inventing a new root: recorded orphan ancestry is preserved.
+
+`GET /api/chat/runs/active` and `POST /api/agents/overview` use the same scoped lineage. Overview hydrates context for the requested session plus at most 12 descendants and reports omitted **contexts**, not a truncated status tree. Live descendants can remain visible from persisted session metadata even without a retained child receipt file.
+
+Root `maxDepth` reflects the current setting; child `maxDepth` is its saved spawn-time budget, not permission to spawn now. Statuses include `THINKING`, `STREAMING`, `VERIFYING`, `CANCELLING`, `DONE`, `ERROR` and `IDLE`. Structured incomplete outcomes remain distinct from actual execution errors. These projections are observability, not execution authorization.
+
 ## Traces and authority
 
 List traces for `agentId` and `sessionId` (default `default`). Detail uses `runId`; `output=true` requests tool output in the summary. The `/authority` child route returns an execution explanation with tool output disabled. These are evidence inspections, not additional approvals or grants.
@@ -110,3 +118,7 @@ The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d
 ## 26 October delta review
 
 Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-26**. This is a focused source comparison since the full review above, not a new application or provider test pass.
+
+## 29 October development delta
+
+Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../../project/source-map.md).

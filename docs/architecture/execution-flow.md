@@ -38,6 +38,8 @@ This catches changes between discovery, model selection, and execution. It does 
 
 Process and supported native filesystem routers use immutable target facts. Remote operation identity is derived from parent-run and provider-tool-call identifiers. Protected values are passed separately from ordinary command text.
 
+Minion spawning is independently depth-gated: per-agent `maxDepth` defaults to 1 and permits 0–2; leaf tool surfaces omit `spawn_subagent`, and the executor rejects attempted bypasses. Runtime-owned lineage persists root, immediate parent, depth and the saved budget. See [Minion Depth](../concepts/agents-minions.md#minion-depth).
+
 For local minions, the parent writes a private temporary payload, starts the child Node process, and captures bounded stdout/stderr tails. The child emits progress and a distinct terminal JSON sentinel. The parent records the final receipt and removes temporary payload material. For remote-assigned minions, the runner stays in-process to retain the trusted execution controller.  
 
 ## Bound memory without ending useful work
@@ -80,3 +82,7 @@ The retained work-loop verification helper looks for a successful model call, a 
 | Minion prose without terminal signal | Not a completed child result |
 
 The runtime is not a transaction manager for arbitrary shell commands, remote systems, or multi-tool work. Recovery must reconcile observed effects. [Known limitations](../project/known-limitations.md) records static wiring and edge-path concerns; [Troubleshooting](../operations/troubleshooting.md) explains operational diagnosis.
+
+## 29 October development delta
+
+Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).

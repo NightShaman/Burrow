@@ -75,6 +75,10 @@ Terminal responses and retained assistant metadata can include `modelFailure` (o
 
 Defaults are three physical dispatch attempts per request and four extra attempts across the run, with cancellable one/three-second waits. The wrapper does not replay completed tools or the whole turn, and does not promise exactly-once provider billing or resume a broken byte stream. Active/child/task projections remain active while recovery or cancellation drains. See [runtime recovery boundaries](../../architecture/runtime.md#bounded-live-model-recovery) and [troubleshooting](../../operations/troubleshooting.md#recovering-exhausted-or-blocked-model-requests).
 
+Generic observed provider-generation error envelopes can now be retried within the same bounds, including unfamiliar codes, unless structured terminal credential/permission/request/quota/billing/context/policy evidence or nontransient numeric status overrides them. Do not interpret a retryable generic code as proof of a transient outage. Unmarked exceptions and normal refusal/incomplete terminals without an error envelope are not made retryable.
+
+Active-run reads also carry [scoped descendant ancestry](diagnostics.md#descendant-status), including root, immediate parent and depth. A child-session filter excludes siblings; context hydration truncation is not status-tree truncation.
+
 ## Manual compaction
 
 Send `/compact` as the ordinary chat message to run the existing compression planner without main-agent inference. It uses normal session admission, so it is not a bypass of busy-session rejection. Originals remain archived; empty or irreducible history produces a reported no-op, not a reset. Manual NDJSON begins before the work; its feedback is retained in visible history but excluded from model input. Inspect the terminal receipt and `compressed`/`reason`, not merely a started event. Compression does not guarantee that oversized immutable/current input will fit.
@@ -140,3 +144,7 @@ Changed contracts checked statically against Backend `32ff99dfc0317635f5c7aa53b4
 ## 28 October development delta
 
 Changed behavior above was checked statically against Backend `a04acb16b0eab2a910c3ef0fb452622df81a05cb` on **2026-10-28**. This is not a live provider, database or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../../project/source-map.md).
+
+## 29 October development delta
+
+Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../../project/source-map.md).

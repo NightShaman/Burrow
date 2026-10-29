@@ -133,7 +133,7 @@ Compression controls normalize invalid values to supported defaults. The retaine
 MCP provider-specific environment variables are saved per connection; they are not arbitrary `BURROW_*` service settings. Mod Git credentials are injected into a subprocess internally and should not be configured as global service variables. See [MCP](../concepts/mcp.md) and [extensions](../development/extensions.md).
 ## OpenTelemetry export
 
-Export starts disabled unless enabled in saved settings or overridden below. A usable collector endpoint is also required. Environment endpoint/header fields override their saved counterparts; signal-specific fields can override the generic transport for that signal. Saved headers are encrypted and are not returned in settings reads. Enabling export sends operational telemetry to the chosen collector.
+Current development starts export disabled unless enabled in saved settings or overridden below. Saved settings can contain multiple destinations; each enabled signal needs a usable endpoint. `BURROW_OTEL_ENABLED` overrides only the master switch. Any generic or signal-specific endpoint/header override selects one effective environment destination instead of the saved export list; it does not broadcast environment credentials to saved destinations or alter that saved list. Generic and signal-specific headers are combined, with signal-specific names winning case-insensitively. For headers-only overrides and legacy scalar fallback details, see [configuration ownership](configuration.md#opentelemetry-destination-ownership). Saved destination headers and credentials are encrypted and write-only. Enabling export shares curated operational telemetry with each effective destination.
 
 | Variable | Default / purpose |
 |---|---|
@@ -144,6 +144,11 @@ Export starts disabled unless enabled in saved settings or overridden below. A u
 | `OTEL_EXPORTER_OTLP_HEADERS` | Comma-separated `key=value` exporter headers; treat as credentials |
 | `OTEL_EXPORTER_OTLP_TRACES_HEADERS` | Trace-specific headers |
 | `OTEL_EXPORTER_OTLP_METRICS_HEADERS` | Metric-specific headers |
+| `OTEL_EXPORTER_OTLP_CERTIFICATE`, `OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE`, `OTEL_EXPORTER_OTLP_METRICS_CERTIFICATE` | CA PEM file for environment-owned HTTPS transport |
+| `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE`, `OTEL_EXPORTER_OTLP_TRACES_CLIENT_CERTIFICATE`, `OTEL_EXPORTER_OTLP_METRICS_CLIENT_CERTIFICATE` | Client-certificate PEM file for environment-owned mTLS |
+| `OTEL_EXPORTER_OTLP_CLIENT_KEY`, `OTEL_EXPORTER_OTLP_TRACES_CLIENT_KEY`, `OTEL_EXPORTER_OTLP_METRICS_CLIENT_KEY` | Private-key PEM file for environment-owned mTLS |
+
+Signal-specific TLS fields win independently over generic fields. The run-owned generation privately snapshots selected file contents for children and remote operations, not host paths; missing/unreadable material fails the affected signal safely. Saved destinations do not inherit environment TLS identity. Do not expose these files in diagnostics. See [export lifecycle](../operations/observability.md#opentelemetry).
 
 ## Compatibility, installer and development-only names
 

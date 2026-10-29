@@ -71,11 +71,31 @@ A receipt can show that a command ran without proving the user's overall objecti
 
 ## OpenTelemetry
 
-Current development places OpenTelemetry under **Settings → Connections → OpenTelemetry** (the public **2026.10.19** UI used General). Saved operator settings and active environment overrides are shown separately; saving does not override an environment-enforced value. Trace and metric endpoints/headers are signal-specific; an exact signal URL is distinct from a base URL. Review the effective destination and exported data before enabling collection. This source review did not verify live collector delivery.
+Current development places OpenTelemetry under **Settings → Connections → OpenTelemetry** (the public **2026.10.19** UI used General). It exports the same curated traces and supported metrics to **one or more destinations**, with isolated, bounded exporters and a separate metric reader for each destination. One failing or hung destination does not make application work fail or block a healthy peer. OTLP/HTTP JSON and protobuf are supported; gRPC is not.
+
+### Configure destinations
+
+1. Choose **Add destination** in the **Destinations** inventory, or select an existing entry. The inventory is in the additional-settings column; the selected editor is in the main column.
+2. Set a descriptive **Name**, **Provider**, endpoint and the provider's connection/authentication fields. Review the receiving service and its data handling before enabling export.
+3. Under **Advanced transport**, check enabled signals, protocol, metric temporality and exact signal URLs. A base endpoint receives `/v1/traces` or `/v1/metrics`; exact signal URLs are used unchanged. Keep TLS certificate verification enabled; use a trusted CA certificate where required.
+4. Enable the intended destinations and the master **Send telemetry** switch, then **Save changes**. The master requires at least one enabled destination. Additions, removals and edits are drafts until the complete list is saved; a rejected list does not partially replace the saved configuration.
+5. Inspect **Effective now**, available exporter diagnostics and actual receiving-service evidence. A saved configuration, active SDK or successful settings response does not prove ingestion. This review did not verify a live collector.
+
+The provider presets are OpenObserve, Grafana Tempo, Grafana Cloud, Jaeger, SigNoz, Uptrace, Elastic, Datadog, New Relic, Honeycomb, Splunk and Custom OTLP. Presets supply configuration defaults, not a guarantee of hosted-service compatibility. Tempo and Jaeger are trace-only. Splunk direct mode is trace-only and requires the exact traces URL ending in `/v2/trace/otlp`; collector mode can export both signals. Direct Datadog requires the service's exact URL for each enabled signal (traces and metrics use different hosts) and delta metrics. **Site** and **Realm** are reference fields, not URL generators. OpenObserve adds the organization to its OTLP base path. Use the provider's actual ingest settings rather than guessing URLs.
+
+**Authentication headers** accepts comma-separated, percent-encoded `key=value` pairs; explicit headers override generated provider headers. Saved credentials and headers are write-only: leave them blank to preserve them for the same destination ID and provider, or use the explicit removal checkbox. Changing an endpoint can therefore send preserved credentials to the new endpoint—verify the destination before saving. Changing provider or destination identity does not inherit the former secrets. Provider switches discard unsaved secret drafts. No saved secret value is shown in the inventory or returned by the settings API.
+
+### Saved settings and environment overrides
+
+Saved destinations and active overrides are shown separately. `BURROW_OTEL_ENABLED` controls only the master switch. A generic or signal-specific OTLP endpoint/header override selects one effective environment transport instead of broadcasting environment credentials to the saved list. Saving does not replace active overrides. Generic and signal-specific environment headers are combined, with signal-specific names winning. See the [environment reference](../reference/environment.md) and [settings API](../reference/api/settings.md) for exact compatibility rules.
+
+An older single-endpoint configuration appears as an **Existing single-endpoint connection** / **Custom OTLP** entry until adopted by a destination-list save; the original provider was not recorded and must not be inferred from its URL. Saving an empty list with export off remains empty across restart. Settings changes apply live to Core, but matching Node Goblin/gateway packages must support the new destination and per-operation transport contract. Saving Core settings is not proof that a remote package was upgraded.
+
+OTel is a curated external projection; PostgreSQL history, Archive and local receipts remain the authoritative evidence. Prompts, answers, tool arguments/output, credentials, private file paths, raw errors and secret-bearing URLs are excluded from this projection. Local diagnostic artifacts can still contain sensitive evidence and need review before sharing.
 
 `burrow.model.request` spans retain available input/output/total/cache-read usage before ending. The same normalized usage feeds cumulative `burrow.model.tokens`: use rates or increases, not sums of successive samples. Cached input is a subset of input, not extra usage. Missing/invalid values are omitted, reported zero is retained, and cost is not inferred. One logical tool execution produces one logical tool span/count/duration; subprocess work is not a second logical tool. Delegated child work retains parent correlation without adding trace carriers to prompts.
 
-Changing or disabling export affects new independent runs. Existing runs and their children retain their exporter generation until they drain, with bounded shutdown; disabling settings does not erase already exported data. Exporter failures have independent service-log diagnostics.
+Changing or disabling export affects new independent runs. Existing runs and their children retain their exporter generation until they drain, including new process/filesystem operations started by those older runs after the change. A child keeps its generation independently if its parent finishes first. Shutdown remains bounded; disabling settings does not erase already exported data. Exporter failures have independent service-log diagnostics.
 
 The owning run span receives `burrow.model.recovery` events with curated **`burrow.model.recovery.*`** attributes for state, method, attempt bounds, original/last failure and safe failover blocker. Failed request spans keep their observed status even if a later attempt succeeds. This is not a new TTFT instrument or account-health diagnostic subsystem. See [bounded recovery](../architecture/runtime.md#bounded-live-model-recovery).
 
@@ -85,7 +105,7 @@ The footer and `GET /api/metrics/provider-pools` report rolling 24-hour/7-day **
 
 When tracing and OTel export are active, `burrow.provider_pool.requests` and `burrow.provider_pool.duration` describe logical calls. `burrow.provider_pool.tokens` attributes reported input/output/cached usage to pool/account/model/outcome. It is separate from existing transport `burrow.model.tokens`; do not add both series as independent usage. Unknown token counts are omitted. This source review does not verify delivery to a collector.
 
-Current OTel runtime exposes bounded exporter diagnostics through its runtime status projection; the settings UI shows whether telemetry is active and whether overrides apply. A saved endpoint or active runtime does not prove collector delivery. Inspect available diagnostics without sharing authentication headers.
+Current OTel runtime exposes bounded overall and per-destination exporter failures and dropped-item counts, plus safe `lastExportFailure` fields (signal, fixed category and numeric HTTP status when known). OTLP partial-success rejection counts appear as `rejectedItems`; a positive count increments failure/drop counters, while a warning-only response does not drop accepted items. Raw collector bodies, warnings and headers are not exposed by these diagnostics. The settings UI shows whether telemetry is active and whether overrides apply. These counters still do not prove ingestion; inspect each destination without sharing authentication headers.
 
 ## Diagnostic API access
 
@@ -126,3 +146,7 @@ Workflow event views separate GitHub conclusion from Burrow handling status; acc
 ## 28 October development delta
 
 Changed behavior above was checked statically against Backend `a04acb16b0eab2a910c3ef0fb452622df81a05cb` on **2026-10-28**. This is not a live provider, database or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).
+
+## 29 October development delta
+
+Multi-destination export, settings, generation ownership and exporter diagnostics above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` and UI `daa914ae80ed154ce39a76d0b8ca5f84aa278b21` on **2026-10-29**. No collector, remote gateway or application runtime was exercised. Unchanged historical sections retain their earlier qualifications. See [source coverage](../project/source-map.md).

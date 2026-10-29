@@ -35,6 +35,28 @@ Pools are saved through the existing model-connection POST route, not a separate
 
 Members must exist and belong to the matching provider family. OpenAI pools accept OpenAI OAuth connections using `openai-responses` or `openai-chat-completions`; Anthropic pools accept Anthropic/Claude OAuth with `anthropic-messages`. API-key-only members, self-membership, and nested pools are rejected. Discovery now exposes the **intersection** of non-manual model IDs present in every member catalog, selected by default—not the earlier union. Inspect `discovery.status` and `error`, because a manual-only fallback can still return `ok: true`. See [models](../../concepts/models.md) for runtime selection and fallback limits. The generated OpenAPI schema now includes pool settings, but its model-connection description still says union; current source uses the intersection.
 
+## Minion Depth
+
+`GET /api/agents/{agentId}/minion-settings` returns `{ "ok": true, "maxDepth": 1 }` when unset. `PUT` requires `{ "maxDepth": 0 }`, `{ "maxDepth": 1 }` or `{ "maxDepth": 2 }` and returns the saved value with `ok: true`. Settings are durable and isolated per agent, independently of `/minion-model-selection`.
+
+Zero disables spawning; one permits direct children only; two also permits grandchildren. Root depth is zero. Leaves lack the spawn tool and runtime execution independently enforces the ceiling. No extra fan-out or per-spawn depth setting exists. The current setting can tighten a resumed child's saved budget; it does not rewrite ancestry. See [agents and minions](../../concepts/agents-minions.md#minion-depth).
+
+Missing/null/string/boolean/fractional/out-of-range `maxDepth` returns **400 `minion_max_depth_invalid`** without changing settings; omission is not reset-to-default. Malformed JSON returns `invalid_json`. Normal authorization and enabled-agent requirements apply: unknown agent gives `agent_not_found` (404), disabled agent `agent_disabled` (409).
+
+## OpenTelemetry destinations
+
+`GET /api/settings/opentelemetry` returns saved `settings`, `effective` transport, `providers` metadata and safe `runtime` status when available. Current `PUT` atomically replaces the entire list with `{enabled, destinations}`. Each destination has a unique stable `id`, display `name`, supported `provider` and boolean `enabled`; optional transport/authentication fields use provider defaults. An enabled master requires an enabled destination; `{ "enabled": false, "destinations": [] }` is an authoritative empty list, including after restart. A rejected entry leaves the old list intact.
+
+IDs match `[A-Za-z0-9_-]{1,80}` and names are nonempty, up to 160 characters after trimming. Disabled drafts may be incomplete, but supplied values and signal/provider combinations still require validation. Retained scalar fields in GET are compatibility projections; use destination arrays for the full configuration.
+
+Base `endpoint` appends signal paths; `tracesEndpoint`/`metricsEndpoint` are exact URLs. Supported protocols are `http/json` and `http/protobuf`, not gRPC. Enabled entries need an endpoint for each enabled, provider-supported signal. Metric temporality is independently `cumulative` or `delta` per destination. See [destination setup and presets](../../operations/observability.md#configure-destinations) for operator configuration.
+
+`headers` and `credentials` (`username`, `password`, `token`, `caCertificate`) are write-only, encrypted values. Responses expose only configured flags and credential-field names. With the same ID and provider, omitted or empty-string secrets preserve existing values, including when the endpoint changes: trust the new endpoint before saving, because preserved credentials can be sent there. `clearHeaders` and `clearCredentials` explicitly clear the corresponding group; do not combine a true clear with its replacement value. Changing provider or ID never inherits the previous owner's secrets.
+
+The legacy `{enabled, endpoint, headers?, clearHeaders?}` form remains accepted for scalar settings or an equivalent single Custom JSON destination. If it cannot represent the current list, it returns **409 `opentelemetry_legacy_ambiguous`**, not a destructive downgrade. Do not mix list and scalar shapes or send extra top-level keys. Output-only `legacy: true` identifies a virtual old scalar connection whose provider was never recorded; do not infer provider from its label/URL or submit that flag. Reading does not migrate it; the first successful list save adopts it.
+
+Environment endpoint/header overrides select one effective environment destination, without sending environment credentials to every saved destination. The saved list remains unchanged; effective source fields identify overrides. Saving applies live to Core, while existing runs retain their original exporter generation. Remote Node Goblin gateways require matching updated packages. A saved configuration or successful SDK start is not proof of hosted ingestion.
+
 ## MCP configuration and grants
 
 Connection save requires `name` (up to 120 characters) and `transport` (`http` or `stdio`). HTTP requires an HTTP(S) `baseUrl`; stdio requires `command` (up to 240 characters), with arguments up to 2,000 characters each. `lifecycle` is `ephemeral` or `keep_alive`, default ephemeral; `enabled` defaults true.
@@ -52,7 +74,7 @@ Skills have central PostgreSQL records and per-agent assignments. Current source
 
 Timezone GET/PUT manages the operator's IANA timezone. Scheduled jobs, Dreams and Git-skill sync schedules all use that zone; per-schedule timezone overrides are retired and reconciliation recalculates upcoming occurrences. Execution-boundary GET/PUT manages concrete configured blockers; see [enforcement limits](../../security/permissions.md).
 
-Browser-origin settings read/save a boolean `checkOrigin`; the environment can override it. Keep checking enabled unless the deployment has an independent reason to disable it. OpenTelemetry settings read/save export enablement, collector endpoint and write-only exporter headers; enabling export shares telemetry with that collector.
+Browser-origin settings read/save a boolean `checkOrigin`; the environment can override it. Keep checking enabled unless the deployment has an independent reason to disable it. OpenTelemetry settings read/save a destination list, export enablement and write-only protected transport values; enabling a destination shares curated telemetry with it. See [destination contract](#opentelemetry-destinations).
 
 Trace retention supports read/save, a non-deleting preview and an explicit run. `/api/retention` and `/api/retention/cleanup` are compatibility aliases; new clients use `/api/settings/retention/*`. Preview and run require the exact current `policy` object; a missing or changed policy returns 409 `retention_policy_changed`. The explicit run uses that supplied current policy without requiring the background enabled flag. This is trace retention, not a per-conversation purge API. Retired Albdruck routes are not a supported cleanup path; see [memory boundaries](memory.md).
 ## Endpoint inventory
@@ -83,6 +105,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `POST` | `/api/retention/cleanup` | Deprecated: run retention cleanup (compatibility) |
 | `GET` | `/api/agents/{agentId}/model-selection` | Read agent model selection |
 | `PUT` | `/api/agents/{agentId}/model-selection` | Update agent model selection |
+| `GET`, `PUT` | `/api/agents/{agentId}/minion-settings` | Read/save nesting depth 0–2 |
 | `GET` | `/api/agents/{agentId}/minion-model-selection` | Read separate Minion model selection |
 | `PUT` | `/api/agents/{agentId}/minion-model-selection` | Save separate Minion model selection |
 | `GET` | `/api/agents/{agentId}/mcp-tools` | Read agent MCP tools |
@@ -117,7 +140,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `PUT` | `/api/settings/timezone` | Save operator timezone; schedule reconciliation uses the new zone |
 | `GET`, `PUT` | `/api/settings/browser-origin` | Read/save browser Origin checking |
 | `GET`, `PUT` | `/api/settings/browser-tab` | Read/save browser tab settings |
-| `GET`, `PUT` | `/api/settings/opentelemetry` | Read/save collector and export settings |
+| `GET`, `PUT` | `/api/settings/opentelemetry` | Read/save destination list and export settings |
 | `POST` | `/api/settings/skills/git/preview` | Preview a Git skill package |
 | `POST` | `/api/settings/skills/git/import` | Import a Git skill package |
 | `GET`, `PUT`, `DELETE` | `/api/settings/skills/{id}/source` | Read/save/remove Git source metadata |
@@ -138,3 +161,7 @@ The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d
 ## 26 October delta review
 
 Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-26**. This is a focused source comparison since the full review above, not a new application or provider test pass.
+
+## 29 October development delta
+
+Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../../project/source-map.md).

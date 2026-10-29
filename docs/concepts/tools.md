@@ -20,12 +20,14 @@ The effective schema depends on runtime context and enabled integrations. The na
 | Historical run proof | `run_evidence_search` | Explicit read-only search of the active agent's retained run evidence across sessions; not current verification or authorization |
 | Saved memories | `brain_search`, `brain_read`, `brain_save`, `brain_update`, `brain_remove` | Explicit agent-owned saved memories |
 | Continuity updates | `memory_working_write`, `session_write_handoff` | Record explicitly structured operational context |
-| Coordination | `spawn_subagent`, `agent_send_message` | Child tasks or registered peer agents |
+| Coordination | `spawn_subagent`, `agents_list`, `agent_send_message` | Depth-gated child tasks, native peer discovery and registered-agent messaging |
 | Work records | `tasks_*`, `scheduled_jobs_*` | Task metadata and scheduled prompts |
 | Discovery | `list_skills`, `load_skill`, `mcp_providers`, `mcp_capabilities`, `mcp_call` | Load instructions or discover/invoke integrations |
 | Generation | `forge_*` | Asynchronous media jobs and artifact attachment |
 
 Schemas, required fields, and feature filters are defined centrally. The supplied schema is authoritative for a particular turn; do not assume every row is available to every agent or minion.
+
+Current development provides `agents_list` beside native messaging: use it only when peer discovery or disambiguation is needed, not a Backdoor/MCP lookup or health check. A known unique display name or canonical ID can be messaged directly. Minion spawning is omitted at the configured depth ceiling and independently blocked by execution; see [depth and directory contracts](agents-minions.md).
 
 See [MCP](mcp.md), [Agents and minions](agents-minions.md), and [Workers and tasks](workers-tasks.md) for those specific workflows.
 
@@ -120,3 +122,7 @@ Treat traces as potentially sensitive. Bounded output and selective redaction ar
 Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
 
 - [backend/src/action-proposal.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/action-proposal.mjs)
+
+## 29 October development delta
+
+Native directory and minion-depth changes were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. No application/provider tests or revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).

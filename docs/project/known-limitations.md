@@ -33,7 +33,7 @@ The retained `POST /api/agents/{agentId}/dream-memory/consolidate` route does no
 
 ### Live retries are not crash replay or exactly-once billing
 
-Current development retries only classified transient failures inside a bounded model request. It does not rerun completed tools, reconstruct a durable native request after process loss, or guarantee that a provider did not bill for a lost response. Internal/unknown failures and unsafe continuation boundaries require investigation rather than unlimited retries. Stop can remain cancelling while database work drains. See [live recovery](../architecture/runtime.md#bounded-live-model-recovery) and [chat receipts](../reference/api/chat.md#model-recovery-and-receipts).
+Current development retries classified transient failures and observed generic provider-generation error envelopes without terminal evidence, inside a bounded model request. It does not rerun completed tools, reconstruct a durable native request after process loss, or guarantee that a provider did not bill for a lost response. Unmarked internal/unknown failures and unsafe continuation boundaries require investigation rather than unlimited retries; structured credential, request, quota, context and refusal evidence remains nonretryable. Stop can remain cancelling while database work drains. See [live recovery](../architecture/runtime.md#bounded-live-model-recovery) and [chat receipts](../reference/api/chat.md#model-recovery-and-receipts).
 
 ### Cold backup has explicit boundaries
 

@@ -80,7 +80,7 @@ The composer suggests `/help`, `/context [full]`, `/status`, `/new`, and `/stop`
 
 Chat submits `POST /api/chat` and requests newline-delimited JSON events. Progress, tool activity, and streamed answer text are displayed separately. The terminal result supplies the authoritative final answer; materially different streamed text can remain in a separate disclosure. A connection error does not prove that the runtime stopped.
 **Stop response** (square icon) aborts the browser's stream read and requests cancellation through `POST /api/chat/{runId}/cancel`. The interface also reconciles activity with `GET /api/chat/runs/active` and reloads session records. It does not resume a disconnected stream from an event offset. If work seems stuck, inspect current runtime activity and [Troubleshooting](../operations/troubleshooting.md) before resubmitting a potentially consequential instruction.
-Expand an agent to inspect its Minion streams. Selecting a Minion changes the displayed child conversation while preserving its parent agent's identity for workspace ownership. See [Agents and Minions](agents-minions.md). MCP activity cards show provider and tool identity without exposing MCP argument and output payloads in the transcript. Use the relevant evidence views when investigating execution.
+Expand an agent to inspect its Minion tree, then select a child or nested child to view its stream. Work whose parent is no longer retained remains visible at the top of the displayed subtree rather than disappearing. Selecting a Minion changes the displayed child conversation while preserving its parent agent's identity for workspace ownership. See [Agents and Minions](agents-minions.md). MCP activity cards show provider and tool identity without exposing MCP argument and output payloads in the transcript. Use the relevant evidence views when investigating execution.
 <figure markdown="span">
 [![Synthetic Chat conversation with an expanded runtime activity card beneath an assistant message.](../assets/screenshots/04-chat-runtime-actions.webp){ loading=lazy }](../assets/screenshots/04-chat-runtime-actions.webp)
 <figcaption>Expanded runtime activity in a synthetic conversation. Visible fixture entries do not verify that an operation ran.</figcaption>
@@ -107,16 +107,17 @@ On viewports at or below 600 pixels wide, controls reflow into a stacked layout,
 
 ## Settings map
 
-This settings map reflects the development UI reviewed **28 October 2026**, rather than the older screenshots below. Settings separates category navigation, subsection navigation, the main editor, and supporting inventory or details. The agent selected inside Settings can differ from the agent selected in Chat; check the agent selector before saving.
+This settings map reflects the development UI reviewed **29 October 2026**, rather than the older screenshots below. Settings separates category navigation, subsection navigation, the main editor, and supporting inventory or details. The agent selected inside Settings can differ from the agent selected in Chat; check the agent selector before saving.
 
 | Category | Built-in sections |
 | --- | --- |
 | **General** | Operator profile (including Operator timezone and Browser tab), Trace retention, Continuity, Export, Rail panels, Appearance |
 | **Agents** | Select **Global** for Global documents and Execution boundaries; select an agent for Agent details, Profile documents, MCP tools, Cron jobs, Workflow events, Dreams, Skills |
 | **Skills** | Text skills, managed Git sources, lifecycle, global use, and assignments |
-| **Connections** | OpenTelemetry, Authentication, Browser origin, Models, Load balancing, MCP servers, API tokens |
+| **Connections** | Authentication, OpenTelemetry, Browser origin, Models, Load balancing, MCP servers, API tokens |
 | **Mods** | Installed mods, Mod sources, Automatic source checks |
 
+- **OpenTelemetry:** add, select, enable or remove destinations, then save the complete draft list. The master **Send telemetry** switch and individual destination switches are separate. Saved and effective environment-controlled destinations are distinguished; see [Observability](../operations/observability.md#opentelemetry).
 - **Models:** configure connections, discover or enter models, and select the models exposed to agents. See [Models and providers](models.md).
 - **MCP servers and MCP tools:** configure a connection under Connections, then review the selected agent's grants under Agents. Mod-managed connections and mod-authorized tools have different editing rules. See [MCP](mcp.md).
 - **Profile documents:** edit `SOUL.md`, `RULES.md`, `ORIENTATION.md`, `PREFERENCES.md`, `TOOLS.md`, and `DreamMemory.md`. See [Agents and Minions](agents-minions.md).
@@ -125,7 +126,7 @@ This settings map reflects the development UI reviewed **28 October 2026**, rath
 - **Authentication, API tokens, and Execution boundaries:** review the relevant [authentication](../security/authentication.md) and [trust-boundary](../security/trust-boundaries.md) guidance before changing access or execution policy.
 - **Export and Trace retention:** use [Backup and recovery](../operations/backup-recovery.md) and [Operator procedures](../operations/procedures.md). Trace retention requires **Save policy**, then **Preview cleanup**, then **Run now** for the unchanged policy. Any edit requires saving and previewing again.
 
-**Export** keeps export controls in the main editor and **Import** in the additional-settings column. **Agent details** places **Default minion model** in that additional column; **Dreams** uses it for **Dream memory**, while **Recent activity** is a collapsed disclosure below the main Dream settings. Settings boolean controls are styled as switches; save the relevant section where it offers a Save action.
+**Export** keeps export controls in the main editor and **Import** in the additional-settings column. **Agent details** places **Minion settings** in that additional column, with the default Minion model and **Maximum minion depth** (0: none; 1: direct children, the default; 2: one further nested level). Choose **Save minion depth** to apply its draft; existing Minion trees cannot gain extra depth. **OpenTelemetry** keeps the selected destination editor in the main column and the **Destinations** inventory in the additional column; **Dreams** uses it for **Dream memory**, while **Recent activity** is a collapsed disclosure below the main Dream settings. Settings boolean controls are styled as switches; save the relevant section where it offers a Save action.
 
 Under **Mods**, source checks discover available versions; they do not automatically install updates. Newly installed mods begin disabled, while updates preserve enabled state. Honor any restart-required or busy response shown by the runtime. A mod UI is dynamically imported into the application page, so installing a mod is a trust decision rather than an isolated visual customization.
 
@@ -337,3 +338,7 @@ Corrections on this page were checked against public **2026.10.19**; any newer d
 ## Current chat and appearance additions
 
 The chat composer distinguishes Send, Queue next, Steer and Side question; [everyday use](../guide/everyday-use.md#send-queue-next-steer-or-side-question) explains their different effects and held queues. Compaction has visible started/completed/failed feedback and retained completion receipts. The current **Settings → General → Appearance** choices include **Midnight** (black with blue outlines and magenta accents) and **Blue Hour** (black and blue with purple accents); Paper and High Contrast are no longer listed. Theme changes do not alter model or runtime policy.
+
+## 29 October development delta
+
+The Minion depth controls, nested Minion tree and multi-destination telemetry settings above were checked statically against UI `daa914ae80ed154ce39a76d0b8ca5f84aa278b21` on **2026-10-29**. This did not recapture the historical screenshots or verify a live deployment. See [source coverage](../project/source-map.md).
