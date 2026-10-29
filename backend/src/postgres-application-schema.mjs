@@ -189,4 +189,10 @@ ALTER TABLE dream_settings ADD COLUMN memory_prompt_override TEXT CHECK (char_le
   { version: 76, name: 'event-operator-projection-copies', sql: POSTGRES_EVENT_OPERATOR_PROJECTION_SQL },
   { version: 77, name: 'durable-chat-inputs', sql: POSTGRES_CHAT_INPUT_SCHEMA_SQL },
   { version: 78, name: 'opentelemetry-destinations', sql: POSTGRES_OTEL_DESTINATIONS_SCHEMA_SQL },
+  // Shared group transcripts have a durable owner, not an executable agent.
+  // Keep existing identity metadata (including historical backfill) untouched.
+  { version: 79, name: 'builtin-group-channel-identity', sql: `
+INSERT INTO agent_identity_registry(agent_id,archived) VALUES('group-channel',false)
+ON CONFLICT(agent_id) DO NOTHING;
+` },
 ]);
