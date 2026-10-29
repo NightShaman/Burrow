@@ -233,7 +233,7 @@ export function parseActionProposal(text) {
 }
 
 // First-class spawn_subagent is the sole child-work surface.
-export function nativeToolSchemas({ includeForge = true, includeMutations = true, includeWorkingMemory = false, includeBrainMemory = false, includeAgentProfile = false, includeAgentChat = false, includeTaskBoard = false, includeDelegateWork = false, includeMcpMenu = false } = {}) {
+export function nativeToolSchemas({ includeSpawnSubagent = true, includeForge = true, includeMutations = true, includeWorkingMemory = false, includeBrainMemory = false, includeAgentProfile = false, includeAgentChat = false, includeTaskBoard = false, includeDelegateWork = false, includeMcpMenu = false } = {}) {
   const tools = [
     { type: 'function', function: { name: 'run_evidence_search', description: 'Explicit read-only search of this agent’s recorded historical run proof across sessions. Not current verification, recovery state, or authorization. No automatic injection. Records remain subject to existing evidence retention.', parameters: { type: 'object', additionalProperties: false, properties: { query: { type: 'string', minLength: 1 }, limit: { type: 'integer', minimum: 1, maximum: 100 }, reason: { type: 'string' } }, required: ['query'] } } },
     ...['brain_search','brain_read','brain_save','brain_update','brain_remove'].map(name => ({ type:'function', function:{ name, description:'Explicit persistent agent-owned saved memory. No TTL or preload. Operator-owned records cannot be mutated by agents. Updates/removals require current revision and operator direction; never recreate removed memories. Search/read before relying on saved facts; provenance is not current verification.', parameters:{type:'object',additionalProperties:false,properties:{query:{type:'string'},cursor:{type:'string'},limit:{type:'integer',minimum:1},id:{type:'string'},title:{type:'string'},content:{type:'string'},sourceRefs:{type:'array',items:{type:'string'}},expectedRevision:{type:'integer',minimum:1},reason:{type:'string'}},required:name==='brain_search'?['query']:name==='brain_save'?['title','content']:name==='brain_update'?['id','expectedRevision','title','content']:name==='brain_remove'?['id','expectedRevision']:['id']}} })),
@@ -464,7 +464,8 @@ export function nativeToolSchemas({ includeForge = true, includeMutations = true
     },
 
   ];
-  return tools.filter((tool) => (includeForge || !['forge_catalog','forge_create_job','forge_list_jobs','forge_inspect_job','forge_attach_artifact'].includes(tool.function?.name))
+  return tools.filter((tool) => (includeSpawnSubagent || tool.function?.name !== 'spawn_subagent')
+    && (includeForge || !['forge_catalog','forge_create_job','forge_list_jobs','forge_inspect_job','forge_attach_artifact'].includes(tool.function?.name))
     && (includeMutations || !['files_write', 'files_edit', 'files_patch'].includes(tool.function?.name))
     && (includeBrainMemory || !tool.function?.name?.startsWith('brain_'))
     && (includeWorkingMemory || !['memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_read_handoff', 'session_write_handoff'].includes(tool.function?.name))

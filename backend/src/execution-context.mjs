@@ -1,3 +1,4 @@
+import { canSpawnMinion, normalizeMinionDepth } from './minion-depth.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { nativeToolSchemas } from './action-proposal.mjs';
@@ -68,6 +69,7 @@ export function createExecutionContext({
   filesystemBoundaries = [],
   executionBoundaries = null,
   toolSchemas = null,
+  minionDepth = null,
   mcpTools = null,
   mcpConnections = null,
   protectedValues = null,
@@ -105,7 +107,8 @@ export function createExecutionContext({
     runAgentReply: typeof runAgentReply === 'function' ? runAgentReply : null,
     filesystemBoundaries: filesystemBoundaries.map((item) => absolute(item, 'filesystem_boundary')).filter(Boolean),
     executionBoundaries: executionBoundaries && typeof executionBoundaries === 'object' ? executionBoundaries : null,
-    toolSchemas: Array.isArray(toolSchemas) ? toolSchemas : nativeToolSchemas({ includeWorkingMemory: Boolean(agentId), includeBrainMemory: Boolean(includeBrainMemory), includeAgentProfile: Boolean(agentId), includeAgentChat: Boolean(includeAgentChat), includeTaskBoard: Boolean(includeTaskBoard), includeMcpMenu: mcpConnections instanceof Map && mcpConnections.size > 0 }),
+    minionDepth: minionDepth ? normalizeMinionDepth(minionDepth) : null,
+    toolSchemas: (Array.isArray(toolSchemas) ? toolSchemas : nativeToolSchemas({ includeWorkingMemory: Boolean(agentId), includeBrainMemory: Boolean(includeBrainMemory), includeAgentProfile: Boolean(agentId), includeAgentChat: Boolean(includeAgentChat), includeTaskBoard: Boolean(includeTaskBoard), includeMcpMenu: mcpConnections instanceof Map && mcpConnections.size > 0 })).filter(tool => canSpawnMinion(minionDepth) || tool.function?.name !== 'spawn_subagent'),
     mcpTools: mcpTools instanceof Map ? mcpTools : new Map(),
     mcpConnections: mcpConnections instanceof Map ? mcpConnections : new Map(),
     protectedValues: protectedValues instanceof Map ? protectedValues : new Map(),

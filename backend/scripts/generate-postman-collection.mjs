@@ -87,6 +87,8 @@ const collection = {
         { kind: 'SOUL', markdown: '# SOUL\n' }, { kind: 'RULES', markdown: '# RULES\n' }, { kind: 'ORIENTATION', markdown: '# ORIENTATION\n' }, { kind: 'TOOLS', markdown: '# TOOLS\n' },
       ] } }),
       req('Get agent model selection', 'GET', '/api/agents/{{agentId}}/model-selection'),
+      req('Get minion depth', 'GET', '/api/agents/{{agentId}}/minion-settings'),
+      req('Set minion depth', 'PUT', '/api/agents/{{agentId}}/minion-settings', { body: { maxDepth: 1 } }),
       req('Get minion model default', 'GET', '/api/agents/{{agentId}}/minion-model-selection'),
       req('Set minion model default', 'PUT', '/api/agents/{{agentId}}/minion-model-selection', { body: { connectionId: '{{connectionId}}', model: 'gpt-5.6-luna', reasoningEffort: 'off', temperature: 0.2 } }),
       req('Clear minion model default', 'PUT', '/api/agents/{{agentId}}/minion-model-selection', { body: { connectionId: null, model: null } }),

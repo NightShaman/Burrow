@@ -1,3 +1,4 @@
+import { canSpawnMinion, nextMinionDepth, normalizeMinionDepth } from './minion-depth.mjs';
 import { CHAT_TOOL_RESULT_HISTORY_LIMIT, CHAT_TOOL_CALL_HISTORY_LIMIT, compactToolCalls, exactRepeatVerdict, fingerprint, normalizedToolOutcome, appendBoundedChatHistory } from './tool-loop-detection.mjs';
 import { accumulateToolConsequences } from './runtime-result-shapes.mjs';
 import { promises as fs } from 'node:fs';
@@ -84,9 +85,9 @@ function subagentFinishToolSchema() {
   };
 }
 
-function subagentToolSchemas({ includeFinish = true } = {}) {
+function subagentToolSchemas({ includeFinish = true, minionDepth = { depth: 1 } } = {}) {
   // Isolated child processes do not own the server Forge dispatcher.
-  const tools = nativeToolSchemas({ includeForge: false });
+  const tools = nativeToolSchemas({ includeForge: false, includeSpawnSubagent: canSpawnMinion(minionDepth) });
   return includeFinish ? [...tools, subagentFinishToolSchema()] : tools;
 }
 
@@ -155,6 +156,7 @@ async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSes
   const executionContext = createExecutionContext({
     conversationStore: parentExecutionContext?.conversationStore || parentExecutionContext?.stores?.conversations,
     stores: parentExecutionContext?.stores,
+    minionDepth: parentExecutionContext?.minionDepth,
     agentId: parentExecutionContext?.agentId,
     executionBoundaries: parentExecutionContext?.executionBoundaries || null,
     abortSignal: signal,
@@ -501,8 +503,10 @@ export async function runSpawnSubagentChild(options = {}) {
     parentRunId: parentExecutionContext?.parentRunId || null,
     source: 'subagent', parentTraceContext: parentExecutionContext?.traceContext || null,
   });
+  const minionDepth = normalizeMinionDepth(options.minionDepth || nextMinionDepth(parentExecutionContext?.minionDepth, { sessionId: owner.sessionId, runId: owner.parentRunId }));
   const childExecutionContext = {
     ...parentExecutionContext,
+    minionDepth,
     // Execution-context dependencies are deliberately non-enumerable.
     conversationStore: parentExecutionContext?.conversationStore,
     stores: parentExecutionContext?.stores,
@@ -676,7 +680,7 @@ async function runRegisteredSpawnSubagentChild({
   const messages = normalizeProviderMessages([{ role: 'system', content: 'Internal subagent task. This isolated child request is not parent conversation history.' }, { role: 'user', content: prompt }]);
   await progress?.({ type: 'subagent-progress', phase: 'model-request', id });
   await recordLiveActivity({ kind: 'model', phase: 'model-request', label: 'Waiting for model response', model: modelConfig?.model || null }, 'model_request');
-  const first = await callModel('complete', { sessionId: childSessionId, messages, tools: subagentToolSchemas(), traceLogger: modelTrace, signal });
+  const first = await callModel('complete', { sessionId: childSessionId, messages, tools: subagentToolSchemas({ minionDepth: parentExecutionContext.minionDepth }), traceLogger: modelTrace, signal });
   if (!first.cancelled && !signal?.aborted) await progress?.({ type: 'subagent-progress', phase: 'model-response', id });
   await recordLiveActivity({ kind: 'model', phase: 'model-response', label: first.ok ? 'Model response received' : 'Model response failed', status: first.ok ? 'completed' : 'error', model: modelConfig?.model || null, error: first.ok ? null : (first.error || first.status) }, first.ok ? 'model_response' : 'model_error');
   if (first.ok) signal?.throwIfAborted();
@@ -729,7 +733,7 @@ async function runRegisteredSpawnSubagentChild({
     const nativeContinuation = Boolean(current.choice?.toolCalls?.length && typeof adapter.continueWithToolResults === 'function');
     await progress?.({ type: 'subagent-progress', phase: 'model-request', id });
     await recordLiveActivity({ kind: 'model', phase: 'model-request', label: 'Waiting for model continuation', model: modelConfig?.model || null }, 'model_request');
-    const continuationTools = subagentToolSchemas();
+    const continuationTools = subagentToolSchemas({ minionDepth: parentExecutionContext.minionDepth });
     let next;
     try {
       const preparedContinuation = nativeContinuation

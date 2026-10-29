@@ -1,3 +1,4 @@
+import { normalizeMinionDepth } from './minion-depth.mjs';
 import { randomUUID } from 'node:crypto';
 import { projectModelRecoveryMetadata } from './model-recovery-projection.mjs';
 
@@ -59,6 +60,7 @@ function subagentId(value = null) {
 
 function normalizeOwner(owner = {}) {
   return {
+    ...(compactString(owner.agentId) ? { agentId: compactString(owner.agentId) } : {}),
     sessionId: compactString(owner.sessionId) || 'default',
     conversationId: compactString(owner.conversationId) || null,
     turnId: compactString(owner.turnId) || null,
@@ -206,6 +208,7 @@ function normalizeResult(result = null) {
 export function createSubagentContract({
   id = null,
   owner = {},
+  minionDepth = null,
   purpose,
   label = null,
   scope = {},
@@ -228,6 +231,7 @@ export function createSubagentContract({
     kind: SUBAGENT_KIND,
     id: subagentId(id),
     owner: normalizeOwner(owner),
+    ...(minionDepth ? { minionDepth: normalizeMinionDepth(minionDepth) } : {}),
     purpose: compactString(purpose),
     label: compactString(label).slice(0, 80) || null,
     scope: normalizeScope(scope),

@@ -482,7 +482,8 @@
           "404": {
             "$ref": "#/components/responses/ErrorResponse"
           }
-        }
+        },
+        "description": "Runtime-owned minion ancestry. Session/root selection is agent-scoped, includes descendants and necessary ended ancestors in parent-first order, and excludes siblings when a child is requested. Live children can be recovered from session metadata when subagent records have been retained away. Explicit root markers retain honest orphan descendants without inventing a parent or turning a child into a depth-zero root. Child maxDepth is the saved spawn-time budget, while root maxDepth is the current setting; these fields are observability, not authorization."
       }
     },
     "/api/chat/{runId}/cancel": {
@@ -1454,7 +1455,8 @@
           "404": {
             "$ref": "#/components/responses/ErrorResponse"
           }
-        }
+        },
+        "description": "Runtime-owned minion ancestry. Session/root selection is agent-scoped, includes descendants and necessary ended ancestors in parent-first order, and excludes siblings when a child is requested. Live children can be recovered from session metadata when subagent records have been retained away. Explicit root markers retain honest orphan descendants without inventing a parent or turning a child into a depth-zero root. Child maxDepth is the saved spawn-time budget, while root maxDepth is the current setting; these fields are observability, not authorization."
       }
     },
     "/api/archive/sessions": {
@@ -3989,7 +3991,7 @@
           "Agents"
         ],
         "summary": "Read bulk agent UI overview",
-        "description": "Return registered agents with identities, current parent/child status, context usage, and model selections in one request. The optional sessions map selects the parent session for each agent.",
+        "description": "Return registered agents with identities, requested-session/descendant status, context usage, and model selections in one request. The optional sessions map selects each agent’s session. Status uses the same runtime-owned ancestry as /api/agent-status, including metadata-only live descendants and honest orphans. Context inspection is bounded to the requested session plus 12 descendants per agent; contextHydration.truncated reports omitted contexts, not a truncated status tree.",
         "operationId": "getAgentOverview",
         "requestBody": {
           "$ref": "#/components/requestBodies/JsonBody"
@@ -6711,6 +6713,207 @@
         "description": "Save the per-agent minion default. Send null connectionId and model to clear and inherit the current parent turn."
       }
     },
+    "/api/agents/{agentId}/minion-settings": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Read an agent minion depth setting",
+        "operationId": "getAgentMinionSettings",
+        "description": "Read the per-agent maximum nesting depth (integer 0–2, default 1). This is independent of minion model selection. Zero disables spawning, one permits direct children, and two also permits grandchildren. Requires an enabled registered agent.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathAgentId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The agent’s durable minion depth setting; defaults to one when unset.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentMinionSettingsResponse"
+                },
+                "example": {
+                  "ok": true,
+                  "maxDepth": 1
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Normal UI/API authentication is required when enabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No registered agent has this ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "agent_not_found": {
+                    "value": {
+                      "ok": false,
+                      "status": 404,
+                      "error": "agent_not_found"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The registered agent is disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "agent_disabled": {
+                    "value": {
+                      "ok": false,
+                      "status": 409,
+                      "error": "agent_disabled"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Save an agent minion depth setting",
+        "operationId": "updateAgentMinionSettings",
+        "description": "Persist maxDepth for this agent only. maxDepth is required and must be a JSON integer 0, 1 or 2; missing, null, strings, booleans, fractions and out-of-range values are rejected without changing saved settings. This operation does not change model selection or expose any additional minion settings. Child status retains the saved spawn-time budget; root status reports the current setting.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathAgentId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentMinionSettingsUpdate"
+              },
+              "example": {
+                "maxDepth": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The agent’s durable minion depth setting; defaults to one when unset.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentMinionSettingsResponse"
+                },
+                "example": {
+                  "ok": true,
+                  "maxDepth": 1
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid maxDepth or malformed JSON. Saved settings are unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "minion_max_depth_invalid": {
+                    "value": {
+                      "ok": false,
+                      "status": 400,
+                      "error": "minion_max_depth_invalid"
+                    }
+                  },
+                  "invalid_json": {
+                    "value": {
+                      "ok": false,
+                      "status": 400,
+                      "error": "invalid_json"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Normal UI/API authentication is required when enabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No registered agent has this ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "agent_not_found": {
+                    "value": {
+                      "ok": false,
+                      "status": 404,
+                      "error": "agent_not_found"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The registered agent is disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "agent_disabled": {
+                    "value": {
+                      "ok": false,
+                      "status": 409,
+                      "error": "agent_disabled"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
     "/api/settings/browser-origin": {
       "get": {
         "tags": [
@@ -8975,7 +9178,7 @@
         }
       },
       "AgentStatusResponse": {
-        "description": "AgentStatusResponse response.",
+        "description": "Requested session and visible descendant status with runtime-owned ancestry.",
         "content": {
           "application/json": {
             "schema": {
@@ -8985,7 +9188,7 @@
         }
       },
       "ActiveChatRunsResponse": {
-        "description": "ActiveChatRunsResponse response.",
+        "description": "Registered live runs and scoped descendant tree with runtime-owned ancestry.",
         "content": {
           "application/json": {
             "schema": {
@@ -10284,28 +10487,21 @@
       "AgentStatusResponse": {
         "type": "object",
         "required": [
-          "ok"
+          "ok",
+          "sessionId",
+          "agents"
         ],
         "properties": {
           "ok": {
             "type": "boolean"
           },
-          "agentId": {
+          "sessionId": {
             "type": "string"
           },
-          "agent": {
-            "type": "object",
-            "additionalProperties": true
-          },
-          "session": {
-            "type": "object",
-            "additionalProperties": true
-          },
-          "subagents": {
+          "agents": {
             "type": "array",
             "items": {
-              "type": "object",
-              "additionalProperties": true
+              "$ref": "#/components/schemas/AgentStatusEntry"
             }
           }
         },
@@ -10375,6 +10571,56 @@
                 },
                 "steeringReady": {
                   "type": "boolean"
+                },
+                "parentSessionId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Immediate owning session, not the root; null for a root. A retained-away parent is not fabricated."
+                },
+                "parentRunId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Immediate owning run ID when recorded; null for a root."
+                },
+                "subagentId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Runtime-owned child identity when recorded; null for a root or unavailable historical identity."
+                },
+                "depth": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 2,
+                  "description": "Root is 0, direct children are 1, grandchildren are 2. Historical children without a depth marker remain depth 1.",
+                  "enum": [
+                    0,
+                    1,
+                    2
+                  ]
+                },
+                "maxDepth": {
+                  "$ref": "#/components/schemas/MinionMaxDepth",
+                  "description": "Current agent setting for a depth-zero root; SAVED spawn-time lineage budget for a child (historical default 1), not its recalculated effective spawn permission."
+                },
+                "rootSessionId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Saved root session marker, or ancestry-derived root when available. Distinct from the immediate parent; may be null when unavailable."
+                },
+                "rootRunId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Saved root run marker, or ancestry-derived root run when available; null when unavailable."
                 }
               },
               "required": [
@@ -10384,6 +10630,13 @@
                 "lane"
               ]
             }
+          },
+          "subagents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubagentTreeEntry"
+            },
+            "description": "Scoped descendant tree including ended ancestors needed by visible/live descendants. Includes metadata-only live children when durable records are absent."
           }
         },
         "additionalProperties": true
@@ -16336,6 +16589,240 @@
           }
         },
         "additionalProperties": false
+      },
+      "MinionMaxDepth": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2,
+        "default": 1,
+        "description": "Maximum nesting from the depth-zero root. 0 disables spawning; 1 permits direct children; 2 also permits grandchildren. The spawn tool is absent at an allowed leaf.",
+        "enum": [
+          0,
+          1,
+          2
+        ]
+      },
+      "AgentMinionSettingsUpdate": {
+        "type": "object",
+        "required": [
+          "maxDepth"
+        ],
+        "properties": {
+          "maxDepth": {
+            "$ref": "#/components/schemas/MinionMaxDepth"
+          }
+        },
+        "additionalProperties": true,
+        "description": "The only supported minion setting is maxDepth. It is required even though the default for an unset agent is 1; unknown fields do not create additional settings."
+      },
+      "AgentMinionSettingsResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "maxDepth"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "maxDepth": {
+            "$ref": "#/components/schemas/MinionMaxDepth"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentStatusEntry": {
+        "type": "object",
+        "description": "Runtime-owned minion ancestry. Session/root selection is agent-scoped, includes descendants and necessary ended ancestors in parent-first order, and excludes siblings when a child is requested. Live children can be recovered from session metadata when subagent records have been retained away. Explicit root markers retain honest orphan descendants without inventing a parent or turning a child into a depth-zero root. Child maxDepth is the saved spawn-time budget, while root maxDepth is the current setting; these fields are observability, not authorization.",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Current registered run ID when live; saved child run ID when available, otherwise null."
+          },
+          "parentSessionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Immediate owning session, not the root; null for a root. A retained-away parent is not fabricated."
+          },
+          "parentRunId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Immediate owning run ID when recorded; null for a root."
+          },
+          "subagentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Runtime-owned child identity when recorded; null for a root or unavailable historical identity."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2,
+            "description": "Root is 0, direct children are 1, grandchildren are 2. Historical children without a depth marker remain depth 1.",
+            "enum": [
+              0,
+              1,
+              2
+            ]
+          },
+          "maxDepth": {
+            "$ref": "#/components/schemas/MinionMaxDepth",
+            "description": "Current agent setting for a depth-zero root; SAVED spawn-time lineage budget for a child (historical default 1), not its recalculated effective spawn permission."
+          },
+          "rootSessionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Saved root session marker, or ancestry-derived root when available. Distinct from the immediate parent; may be null when unavailable."
+          },
+          "rootRunId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Saved root run marker, or ancestry-derived root run when available; null when unavailable."
+          },
+          "label": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "THINKING",
+              "STREAMING",
+              "VERIFYING",
+              "CANCELLING",
+              "DONE",
+              "ERROR",
+              "IDLE"
+            ]
+          },
+          "since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "result": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "SubagentTreeEntry": {
+        "type": "object",
+        "description": "Runtime-owned minion ancestry. Session/root selection is agent-scoped, includes descendants and necessary ended ancestors in parent-first order, and excludes siblings when a child is requested. Live children can be recovered from session metadata when subagent records have been retained away. Explicit root markers retain honest orphan descendants without inventing a parent or turning a child into a depth-zero root. Child maxDepth is the saved spawn-time budget, while root maxDepth is the current setting; these fields are observability, not authorization.",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Current registered run ID when live; saved child run ID when available, otherwise null."
+          },
+          "parentSessionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Immediate owning session, not the root; null for a root. A retained-away parent is not fabricated."
+          },
+          "parentRunId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Immediate owning run ID when recorded; null for a root."
+          },
+          "subagentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Runtime-owned child identity when recorded; null for a root or unavailable historical identity."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2,
+            "description": "Root is 0, direct children are 1, grandchildren are 2. Historical children without a depth marker remain depth 1.",
+            "enum": [
+              0,
+              1,
+              2
+            ]
+          },
+          "maxDepth": {
+            "$ref": "#/components/schemas/MinionMaxDepth",
+            "description": "Current agent setting for a depth-zero root; SAVED spawn-time lineage budget for a child (historical default 1), not its recalculated effective spawn permission."
+          },
+          "rootSessionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Saved root session marker, or ancestry-derived root when available. Distinct from the immediate parent; may be null when unavailable."
+          },
+          "rootRunId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Saved root run marker, or ancestry-derived root run when available; null when unavailable."
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phase": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "final": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string",
+            "const": "subagent"
+          },
+          "result": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
       }
     },
     "securitySchemes": {

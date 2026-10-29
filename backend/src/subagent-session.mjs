@@ -8,7 +8,7 @@ export function subagentChildSessionId(id) {
   return `subagent-${compact(id, 'worker')}`.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 140);
 }
 
-export async function startSubagentChildSession({ dataRoot, id, workerProfile, purpose, owner = {}, trace = {}, model = null, conversationStore = null } = {}) {
+export async function startSubagentChildSession({ dataRoot, id, workerProfile, purpose, owner = {}, minionDepth = null, trace = {}, model = null, conversationStore = null } = {}) {
   if (!conversationStore) throw new Error('conversation_store_required');
   if (!dataRoot || !id) return null;
   const sessionId = subagentChildSessionId(id);
@@ -20,6 +20,7 @@ export async function startSubagentChildSession({ dataRoot, id, workerProfile, p
   const parentRunId = compact(owner.parentRunId || owner.turnId || trace.runId);
   await conversationStore.updateMetadata({ agentId, sessionId, update: old => ({ ...old,
       sessionKind: 'subagent',
+      ...(minionDepth ? { minionDepth } : {}),
       workerProfile: compact(workerProfile),
       subagentId: compact(id),
       parentSessionId,

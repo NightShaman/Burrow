@@ -61,6 +61,8 @@ import { API_TOKEN_SCOPES } from '../src/api-token-store.mjs';
 import { loadEffectiveSkillCatalog, skillManifest } from '../src/skill-catalog.mjs';
 import { collectTraceObservability } from '../src/trace-observability.mjs';
 import { listSubagentRecords, subagentVisibilitySummary } from '../src/subagent-store.mjs';
+import { readMinionSettings, saveMinionSettings } from '../src/minion-depth.mjs';
+import { projectSubagentTree, sessionMinionAncestry } from '../src/subagent-projection.mjs';
 import { buildContinuityHandoff } from '../src/continuity-handoff-store.mjs';
 import { createRecoveryContinuationScheduler } from '../src/recovery-continuation-runner.mjs';
 import { recordActiveRunInterruptions } from '../src/interrupted-run-recovery.mjs';
@@ -866,6 +868,16 @@ async function saveAgentMinionModelSelection(agentId, body = {}) {
   } catch (error) {
     return { ok: false, status: error?.statusCode || 400, error: String(error?.message || error) };
   }
+}
+
+async function agentMinionSettings(agentId) {
+  const runtime = await resolveAgentRuntime(agentId);
+  return { ok: true, ...await readMinionSettings(metadataStore(), runtime.agentId) };
+}
+
+async function saveAgentMinionSettings(agentId, body = {}) {
+  const runtime = await resolveAgentRuntime(agentId);
+  return { ok: true, ...await saveMinionSettings(metadataStore(), runtime.agentId, body) };
 }
 
 async function archiveSummarySelection(agentId) {
@@ -2556,18 +2568,20 @@ async function archiveWorkbenchItem(id, agentRuntime = null) {
   return { ok: true, item };
 }
 
-async function listSubagentSummaries(agentRuntime = null) {
-  const records = await listSubagentRecords({ dataRoot: await dataRootForAgent(agentRuntime), limit: 100 });
-  return records.map(subagentVisibilitySummary);
+async function listSubagentSummaries(agentRuntime) {
+  // Truncating before ancestry selection can strand a live grandchild behind
+  // its older/final parent. Bound context hydration, not the projected tree.
+  const records = await listSubagentRecords({ dataRoot: agentRuntime.agentDataRoot, includeFinal: true, limit: Number.MAX_SAFE_INTEGER });
+  return records
+    .filter(record => [record.agentId, record.owner?.agentId].every(id => !id || id === agentRuntime.agentId))
+    .map(record => ({ ...subagentVisibilitySummary(record), ...(record.minionDepth || {}) }));
 }
 
 const CHILD_LIVE_FINAL_WINDOW_MS = 60 * 60 * 1000;
-function visibleChildWorkRecords(records = [], now = Date.now()) {
-  return records.filter((item) => {
-    if (!item?.final) return true;
-    const updatedAt = Date.parse(item.updatedAt || '');
-    return Number.isFinite(updatedAt) && now - updatedAt <= CHILD_LIVE_FINAL_WINDOW_MS;
-  });
+function visibleChildWorkRecord(item, now = Date.now()) {
+  if (!item?.final) return true;
+  const updatedAt = Date.parse(item.updatedAt || '');
+  return Number.isFinite(updatedAt) && now - updatedAt <= CHILD_LIVE_FINAL_WINDOW_MS;
 }
 
 async function agentOverview(body = {}) {
@@ -2596,7 +2610,7 @@ async function agentOverview(body = {}) {
         .filter(Boolean);
       const { all: sessionIds, hydrated: hydratedSessionIds, truncated } = overviewSessionIds(sessionId, childSessionIds);
       const contextEntries = await Promise.all(hydratedSessionIds.map(async (currentSessionId) => {
-        const liveRun = currentSessionId === sessionId ? active : null;
+        const liveRun = currentSessionId === sessionId ? active : [...activeChatRuns.values()].find(run => run.agentId === agent.id && run.sessionId === currentSessionId && !run.controller.signal.aborted);
         const context = await inspectSessionContextStatus({ stores: postgresApplication.stores, agentId: agentRuntime.agentId, rootDir: projectRoot, dataRoot: agentRuntime.agentWorkspaceRoot, sessionId: currentSessionId, limits, contextConfig: runtime.contextConfig, contextWindow: runtime.modelConfig?.contextWindow, contextTokens: runtime.modelConfig?.contextTokens, liveContext: liveRun?.contextUsage || null });
         return [currentSessionId, context];
       }));
@@ -2619,45 +2633,53 @@ async function agentOverview(body = {}) {
 }
 
 async function agentStatusForSession(sessionId = 'default', agentRuntime = null) {
-  const records = visibleChildWorkRecords(await listSubagentSummaries(agentRuntime));
-  const child = records.find((item) => item.trace?.childSessionId === sessionId);
+  agentRuntime ||= await resolveAgentRuntime();
+  const [records, metadata, settings] = await Promise.all([
+    listSubagentSummaries(agentRuntime),
+    postgresApplication.stores.conversations.getMetadata({ agentId: agentRuntime.agentId, sessionId }),
+    readMinionSettings(metadataStore(), agentRuntime.agentId),
+  ]);
+  const requested = sessionMinionAncestry({ sessionId, metadata, maxDepth: settings.maxDepth });
+  const agentRuns = [...activeChatRuns.values()].filter(run => run.agentId === agentRuntime.agentId);
+  const activeForSession = id => {
+    const matches = agentRuns.filter(run => run.sessionId === id);
+    return matches.find(run => !run.controller.signal.aborted) || matches.at(-1) || null;
+  };
+  const liveSessions = new Set(agentRuns.map(run => run.sessionId));
+  const activeSessions = await Promise.all(agentRuns.map(async run => ({
+    ...activeChatRunSummary(run),
+    metadata: run.sessionId === sessionId ? metadata : await postgresApplication.stores.conversations.getMetadata({ agentId: agentRuntime.agentId, sessionId: run.sessionId }),
+  })));
+  const tree = projectSubagentTree(records, { agentId: agentRuntime.agentId, sessionId, rootSessionId: requested.depth > 0 ? requested.rootSessionId : null, activeSessions, visible: item => visibleChildWorkRecord(item) || liveSessions.has(item.sessionId) });
   const statusFor = (item) => item.status === 'running'
     ? (item.phase === 'streaming' ? 'STREAMING' : item.phase === 'verifying' ? 'VERIFYING' : 'THINKING')
     : item.status === 'succeeded' ? 'DONE'
       : item.status === 'failed' || item.status === 'timed_out' ? 'ERROR'
         : 'IDLE';
-  if (child) {
+  const active = activeForSession(sessionId);
+  const child = tree.find(item => item.sessionId === sessionId);
+  const ancestry = sessionMinionAncestry({ sessionId, runId: active?.runId, metadata, maxDepth: settings.maxDepth, subagent: child });
+  const liveStatusFor = run => run ? (run.controller.signal.aborted ? 'CANCELLING' : run.phase === 'streaming' ? 'STREAMING' : 'THINKING') : null;
+  const rowFor = item => {
+    const live = activeForSession(item.sessionId);
     return {
-      sessionId,
-      agents: [{
-        sessionId,
-        parentSessionId: child.owner?.sessionId || null,
-        label: child.label || child.purpose || child.id,
-        status: statusFor(child),
-        since: child.updatedAt || null,
-        subagentId: child.id,
-        result: child.result || null,
-      }],
-    };
-  }
-  const children = records
-    .filter((item) => item.owner?.sessionId === sessionId && item.trace?.childSessionId)
-    .map((item) => ({
-      sessionId: item.trace.childSessionId,
-      parentSessionId: sessionId,
-      label: item.label || item.purpose || item.id,
-      status: statusFor(item),
-      since: item.updatedAt || null,
-      subagentId: item.id,
+      ...sessionMinionAncestry({ sessionId: item.sessionId, runId: live?.runId, subagent: item }),
+      label: item.label || item.purpose || item.id || item.sessionId,
+      status: liveStatusFor(live) || statusFor(item),
+      since: live?.startedAt || item.updatedAt || null,
       result: item.result || null,
-    }));
-  const matchingRuns = [...activeChatRuns.values()].filter((run) => run.agentId === agentRuntime?.agentId && run.sessionId === sessionId);
-  const active = matchingRuns.find((run) => !run.controller.signal.aborted) || matchingRuns.at(-1) || null;
+    };
+  };
   return {
     sessionId,
     agents: [
-      { sessionId, parentSessionId: null, label: agentRuntime?.agent?.name || agentRuntime?.agentId || 'Hatchet', status: active ? (active.controller.signal.aborted ? 'CANCELLING' : active.phase === 'streaming' ? 'STREAMING' : 'THINKING') : 'IDLE', since: active ? new Date().toISOString() : null },
-      ...children,
+      child ? { ...rowFor(child), ...ancestry } : {
+        ...ancestry,
+        label: agentRuntime.agent?.name || agentRuntime.agentId || 'Hatchet',
+        status: liveStatusFor(active) || 'IDLE',
+        since: active?.startedAt || null,
+      },
+      ...tree.filter(item => item.sessionId && item.sessionId !== sessionId).map(rowFor),
     ],
   };
 }
@@ -3171,31 +3193,46 @@ async function listChatSteering(runId, body, agentRuntime) {
 }
 
 async function currentActiveChatRunSummaries({ agentId = null, sessionId = null } = {}) {
-  const runs = activeChatRunSummaries(activeChatRuns, { agentId, sessionId });
-  for (const run of runs) {
-    if (run.lane === 'side_question') { run.steering = []; continue; }
-    try { run.steering = await postgresApplication.stores.steering.list(run); }
-    catch (error) { if (error.statusCode !== 404) throw error; run.steering = []; }
-  }
+  const allRuns = activeChatRunSummaries(activeChatRuns, { agentId });
+  const runs = [];
   const childRecords = [];
   // Observability reads stored identity/data, not permission to execute a turn.
   const runtimes = agentId ? [await resolveAgentContext(agentId)] : await Promise.all((await agentsStore().list({ includeDisabled: true })).map((agent) => resolveAgentContext(agent.id)));
   for (const agentRuntime of runtimes) {
-    const records = await listSubagentRecords({ dataRoot: agentRuntime.agentDataRoot, includeFinal: false, limit: 100 });
-    for (const record of records) {
-      const summary = subagentVisibilitySummary(record);
-      if (sessionId && summary.owner?.sessionId !== sessionId && summary.trace?.childSessionId !== sessionId) continue;
-      childRecords.push({
-        ...summary,
-        agentId: agentRuntime.agentId,
-        runId: summary.trace?.runId || summary.id,
-        sessionId: summary.trace?.childSessionId || null,
-        parentSessionId: summary.owner?.sessionId || null,
-        parentRunId: summary.owner?.parentRunId || summary.owner?.turnId || null,
-        source: 'subagent',
-      });
+    const [records, settings, metadata] = await Promise.all([
+      listSubagentSummaries(agentRuntime),
+      readMinionSettings(metadataStore(), agentRuntime.agentId),
+      sessionId ? postgresApplication.stores.conversations.getMetadata({ agentId: agentRuntime.agentId, sessionId }) : null,
+    ]);
+    const requested = sessionId ? sessionMinionAncestry({ sessionId, metadata, maxDepth: settings.maxDepth }) : null;
+    const agentRuns = allRuns.filter(run => run.agentId === agentRuntime.agentId);
+    const activeSessions = await Promise.all(agentRuns.map(async run => ({
+      ...run,
+      metadata: run.sessionId === sessionId ? metadata : await postgresApplication.stores.conversations.getMetadata({ agentId: agentRuntime.agentId, sessionId: run.sessionId }),
+    })));
+    const tree = projectSubagentTree(records, { agentId: agentRuntime.agentId, sessionId, rootSessionId: requested?.depth > 0 ? requested.rootSessionId : null, activeSessions });
+    const expectedRoot = requested?.depth > 0 ? requested.rootSessionId : tree.find(item => item.sessionId === sessionId)?.rootSessionId || sessionId;
+    const liveSessions = new Set(agentRuns.map(run => run.sessionId));
+    const activeTree = projectSubagentTree(tree, { agentId: agentRuntime.agentId, sessionId, rootSessionId: requested?.depth > 0 ? requested.rootSessionId : null, visible: item => !item.final || liveSessions.has(item.sessionId) });
+    childRecords.push(...activeTree.map(item => ({ ...item, source: 'subagent' })));
+    for (const run of agentRuns) {
+      const subagent = tree.find(item => item.sessionId === run.sessionId && (!item.trace?.runId || item.trace.runId === run.runId));
+      const runMetadata = subagent ? null : activeSessions.find(item => item.runId === run.runId)?.metadata;
+      const ancestry = sessionMinionAncestry({ sessionId: run.sessionId, runId: run.runId, metadata: runMetadata, maxDepth: settings.maxDepth, subagent });
+      if (sessionId && run.sessionId !== sessionId && ancestry.rootSessionId && expectedRoot && ancestry.rootSessionId !== expectedRoot) continue;
+      if (sessionId && run.sessionId !== sessionId && !subagent && ancestry.rootSessionId !== sessionId && ancestry.parentSessionId !== sessionId) continue;
+      // A requested child must not pick up siblings sharing its root marker.
+      if (sessionId && requested?.depth > 0 && run.sessionId !== sessionId && !subagent && ancestry.parentSessionId !== sessionId) continue;
+      const observed = { ...run, ...ancestry };
+      if (run.lane === 'side_question') observed.steering = [];
+      else {
+        try { observed.steering = await postgresApplication.stores.steering.list(run); }
+        catch (error) { if (error.statusCode !== 404) throw error; observed.steering = []; }
+      }
+      runs.push(observed);
     }
   }
+  runs.sort((a, b) => a.agentId.localeCompare(b.agentId) || a.depth - b.depth);
   return { runs, subagents: childRecords };
 }
 
@@ -3220,7 +3257,7 @@ const skillApi = {
   agentSkills: async (id) => { const runtime = await resolveAgentContext(id); const assignments = await skillStoreCall(store => store.assignments(runtime.agentId)); const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: runtime.workspaceRoot, agentRuntime: runtime, skillStore: postgresApplication.stores.skills }); return { ok: true, ...assignments, effectiveSkills: catalog.skills.map(skillManifest) }; },
   saveAgentSkills: async (id, body) => { const runtime = await resolveAgentContext(id); await skillStoreCall(store => store.replaceAssignments(runtime.agentId, body.skillIds)); return skillApi.agentSkills(runtime.agentId); },
 };
-const settingsRoute = createSettingsRoutes({ globalProfileDocuments, timezoneSettings: async () => ({ ok: true, timezone: await operatorTimezone(postgresApplication.stores.metadata) }), saveTimezoneSettings: (body) => saveOperatorTimezone(postgresApplication.stores.metadata, body), ...skillApi, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, agentMinionModelSelection, saveAgentMinionModelSelection, archiveSummaryModelSelection: async (agentId) => ({ ok: true, selection: await archiveSummarySelection((await resolveAgentRuntime(agentId)).agentId) }), saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection: async (id) => await modelsStore().remove(id), completeSetupOperation: async body => { try { return await completeSetupOperation({ pool: postgresApplication.pool, encryptionKey: modelsStore().key, body }); } catch (error) { return { ok: false, status: error.message === 'setup_operation_conflict' || error.message === 'agent_id_exists' ? 409 : 400, error: error.message }; } }, setupStatus: async () => postgresApplication.stores.setupState.readStatus(), completeSetup: async () => postgresApplication.stores.setupState.completeSetup() });
+const settingsRoute = createSettingsRoutes({ globalProfileDocuments, timezoneSettings: async () => ({ ok: true, timezone: await operatorTimezone(postgresApplication.stores.metadata) }), saveTimezoneSettings: (body) => saveOperatorTimezone(postgresApplication.stores.metadata, body), ...skillApi, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, agentMinionModelSelection, saveAgentMinionModelSelection, agentMinionSettings, saveAgentMinionSettings, archiveSummaryModelSelection: async (agentId) => ({ ok: true, selection: await archiveSummarySelection((await resolveAgentRuntime(agentId)).agentId) }), saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection: async (id) => await modelsStore().remove(id), completeSetupOperation: async body => { try { return await completeSetupOperation({ pool: postgresApplication.pool, encryptionKey: modelsStore().key, body }); } catch (error) { return { ok: false, status: error.message === 'setup_operation_conflict' || error.message === 'agent_id_exists' ? 409 : 400, error: error.message }; } }, setupStatus: async () => postgresApplication.stores.setupState.readStatus(), completeSetup: async () => postgresApplication.stores.setupState.completeSetup() });
 const agentRoute = createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession, agentOverview });
 const { archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail } = createArchiveService({
   stores: () => postgresApplication.stores, agentsStore, dreamDiaryStore,

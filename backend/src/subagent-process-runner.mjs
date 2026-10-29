@@ -86,7 +86,7 @@ export async function runSubagentProcess({
   childScriptPath: overrideChildScriptPath = null,
   maxStreamCaptureBytes = DEFAULT_STREAM_CAPTURE_BYTES,
   signal = null,
-  cancellationGraceMs = 1_000,
+  cancellationGraceMs = null,
 } = {}) {
   const { dir, payloadPath } = await writePayload({ args }, tempDir);
   const startedAt = Date.now();
@@ -110,7 +110,12 @@ export async function runSubagentProcess({
     });
     let cancelled = Boolean(signal?.aborted);
     let killTimer = null;
-    const graceMs = Math.max(1, Number(cancellationGraceMs) || 1_000);
+    // A worker must outlive teardown of its separately detached descendants.
+    // Leaves own shell tools (1s escalation); each enclosing depth gets another
+    // 2s to drain its child and remove that child's private payload directory.
+    const depth = args.minionDepth?.depth;
+    const nestedGrace = Number.isInteger(depth) && depth > 0 ? (4 - Math.min(2, depth)) * 2_000 : 1_000;
+    const graceMs = Math.max(1, Number(cancellationGraceMs) || nestedGrace);
     const abortChild = () => {
       cancelled = true;
       if (settled || killTimer) return;

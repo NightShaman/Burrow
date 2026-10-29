@@ -248,6 +248,10 @@ export function mergeSubagentResult(record = {}) {
 export function subagentVisibilitySummary(record = {}) {
   return {
     id: record.id || null,
+    depth: record.minionDepth?.depth ?? 1,
+    maxDepth: record.minionDepth?.maxDepth ?? 1,
+    rootSessionId: record.minionDepth?.rootSessionId || null,
+    rootRunId: record.minionDepth?.rootRunId || null,
     status: record.status || null,
     phase: record.phase || (isFinalSubagentStatus(record.status) ? 'idle' : record.status === 'running' ? 'thinking' : 'idle'),
     final: isFinalSubagentStatus(record.status),
@@ -256,6 +260,7 @@ export function subagentVisibilitySummary(record = {}) {
     purpose: record.purpose || '',
     label: record.label || null,
     owner: {
+      ...(record.owner?.agentId ? { agentId: record.owner.agentId } : {}),
       sessionId: record.owner?.sessionId || null,
       conversationId: record.owner?.conversationId || null,
       turnId: record.owner?.turnId || null,

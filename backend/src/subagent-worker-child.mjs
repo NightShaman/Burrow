@@ -30,10 +30,11 @@ async function main() {
   const childArgs = payload.args || payload;
   const pool = createPostgresPool();
   const conversationStore = new PostgresSessionStore({ pool });
-  if (['openai-lb', 'anthropic-lb'].includes(childArgs.modelConfig?.api)) {
+  if (childArgs.modelConfig?.connectionId) {
     const selected = childArgs.modelConfig;
     childArgs.modelConfig = await resolveModelConfig({
       modelSettings: new PostgresModelSettingsStore({ pool, key: settingsKeyFromEnvironment() }),
+      agentId: childArgs.owner?.agentId,
       modelConnectionId: selected.connectionId, model: selected.model,
       temperature: selected.temperature, maxTokens: selected.maxTokens,
       reasoning_effort: selected.extra?.reasoning?.effort || 'off',
@@ -43,8 +44,13 @@ async function main() {
   const heartbeat = setInterval(() => {
     process.stdout.write(`${JSON.stringify({ __burrowSubagentProgress: true, phase: 'heartbeat', at: new Date().toISOString() })}\n`);
   }, HEARTBEAT_INTERVAL_MS);
+  const controller = new AbortController();
+  const cancel = () => controller.abort(new Error('subagent_cancelled'));
+  process.once('SIGTERM', cancel);
+  process.once('SIGINT', cancel);
   try {
     const result = await runSpawnSubagentChild({
+      signal: controller.signal,
       ...childArgs,
       parentExecutionContext: { conversationStore, agentId: childArgs.owner?.agentId, executionBoundaries: childArgs.executionBoundaries || null, parentRunId: childArgs.id, traceContext: telemetryRun?.traceContext || childArgs.traceContext || null, telemetry },
       progress: async (event = {}) => {
@@ -57,6 +63,8 @@ async function main() {
     telemetry?.endRun(childArgs.id, { ok: false, error: error?.message || String(error) });
     throw error;
   } finally {
+    process.removeListener('SIGTERM', cancel);
+    process.removeListener('SIGINT', cancel);
     clearInterval(heartbeat);
     await telemetry?.shutdown?.();
     await pool.end();

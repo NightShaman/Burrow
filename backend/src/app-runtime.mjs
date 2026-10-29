@@ -1,3 +1,4 @@
+import { resolveTurnMinionDepth } from './minion-depth.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 import { contextSessionId, withContextHistory } from './model-context-boundary.mjs';
 import { createHash } from 'node:crypto';
@@ -377,7 +378,8 @@ async function runAskChatUnserialized({
   const agentMessageReplyTo = incomingAgentMessage?.senderAgentId && incomingAgentMessage?.sourceSessionId
     ? { recipientAgentId: incomingAgentMessage.senderAgentId, sessionId: incomingAgentMessage.sourceSessionId }
     : null;
-  const executionContext = createRuntimeExecutionContext({ agentMessageReplyTo, stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, traceContext: telemetryRun ? telemetry.traceContextForRun?.(resolvedRunId) : null, telemetry: telemetryRun ? telemetry : null, abortSignal: normalizedArgs.abort_signal || null, skillOverrides: scopedSkillsConfig });
+  const minionDepth = await resolveTurnMinionDepth({ metadata: stores?.metadata, conversations: stores?.conversations, agentId: runtimeState.agentId, sessionId: resolvedSessionId, runId: resolvedRunId });
+  const executionContext = createRuntimeExecutionContext({ minionDepth, agentMessageReplyTo, stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, traceContext: telemetryRun ? telemetry.traceContextForRun?.(resolvedRunId) : null, telemetry: telemetryRun ? telemetry : null, abortSignal: normalizedArgs.abort_signal || null, skillOverrides: scopedSkillsConfig });
   const effectiveSkillCatalog = await loadEffectiveSkillCatalog({
     workspaceRoot: runtimeState.workspaceRoot,
     agentId: runtimeState.agentId,
