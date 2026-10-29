@@ -64,7 +64,7 @@ export async function readGoogleSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_
       const payload = event.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart()).join('\n');
       if (!payload) continue;
       const data = JSON.parse(payload); saw = true;
-      if (data.error) throw markProviderEnvelopeFailure(new Error('google_stream_provider_error'), { ...data.error, status: data.error.code });
+      if (data.error) throw markProviderEnvelopeFailure(new Error('google_stream_provider_error'), data.error);
       const c = data.candidates?.[0];
       for (const part of c?.content?.parts || []) {
         parts.push(part);
@@ -134,7 +134,7 @@ export function createGoogleNativeModelAdapter({ config = {}, fetchImpl = fetch,
       const cachedTokens = data.usageMetadata?.cachedContentTokenCount ?? null;
       const usage = data.usageMetadata ? { prompt_tokens:data.usageMetadata.promptTokenCount, completion_tokens:data.usageMetadata.candidatesTokenCount, total_tokens:data.usageMetadata.totalTokenCount, prompt_tokens_details:{ cached_tokens:cachedTokens } } : null;
       const contextUsage = contextUsageFromResponse(requestContext, usage, clock);
-      const result = recordResult(providerFailureResult({ ok, requestId, provider:'google', api, model, status:response.status, choice:{ index:0, finishReason:candidate?.finishReason, text, message:{ role:'assistant', content:text }, toolCalls:calls }, usage, contextUsage, error:ok ? null : `google_generation_failed:${response.status}:${candidate?.finishReason || 'no_candidate'}`, raw:{ usageMetadata:data.usageMetadata }, nativeTranscript:[...source,...(parts.length ? [assistant] : [])], ...(!ok && data.error && response.ok ? { modelFailure: classifyModelFailure(markProviderEnvelopeFailure({}, { ...data.error, status: data.error.code })) } : {}), ...(!ok && signal?.aborted ? { cancelled: true } : {}) }));
+      const result = recordResult(providerFailureResult({ ok, requestId, provider:'google', api, model, status:response.status, choice:{ index:0, finishReason:candidate?.finishReason, text, message:{ role:'assistant', content:text }, toolCalls:calls }, usage, contextUsage, error:ok ? null : `google_generation_failed:${response.status}:${candidate?.finishReason || 'no_candidate'}`, raw:{ usageMetadata:data.usageMetadata }, nativeTranscript:[...source,...(parts.length ? [assistant] : [])], ...(!ok && data.error && response.ok ? { modelFailure: classifyModelFailure(markProviderEnvelopeFailure({}, data.error)) } : {}), ...(!ok && signal?.aborted ? { cancelled: true } : {}) }));
       await providerCallback(() => onContextUsage?.(contextUsage));
       await providerDiagnostic(() => traceLogger?.model?.({ stage:'model-response', requestId, provider:'google', api, model, modelCall, status:response.status, ok, usage, cachedTokens, finishReason:candidate?.finishReason || null, responseChars:text.length, streamed:streaming, ts:clock() }));
       return result;

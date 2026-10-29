@@ -109,18 +109,44 @@ export function markProviderStreamTruncated(value) {
   return value;
 }
 
+// Exact structured provider fields only: terminal evidence must not become
+// retryable just because an error arrived over HTTP 200 or has an unfamiliar
+// companion type. Keep raw vendor codes/messages out of public metadata.
+const TERMINAL_PROVIDER_ERRORS = new Set([
+  'authentication_error', 'invalid_api_key', 'invalid_authentication',
+  'permission_error', 'permission_denied', 'access_denied',
+  'invalid_request_error', 'invalid_request', 'invalid_argument',
+  'not_found_error', 'model_not_found', 'unsupported_parameter',
+  'context_length_exceeded', 'insufficient_quota', 'billing_error',
+  'billing_hard_limit_reached', 'content_policy_violation', 'content_filter',
+  'content_filter_error', 'refusal',
+  'UNAUTHENTICATED', 'PERMISSION_DENIED', 'INVALID_ARGUMENT',
+  'NOT_FOUND', 'FAILED_PRECONDITION', 'OUT_OF_RANGE', 'UNIMPLEMENTED',
+]);
+const TRANSIENT_PROVIDER_ERRORS = new Set([
+  'overloaded_error', 'api_error', 'server_error', 'internal_error',
+  'upstream_error', 'UNAVAILABLE', 'INTERNAL',
+]);
+const RATE_LIMIT_PROVIDER_ERRORS = new Set([
+  'rate_limit_error', 'rate_limit_exceeded', 'RESOURCE_EXHAUSTED',
+]);
+
 // Only parsers/adapters that actually observed a provider error envelope call
-// this. Structured types/codes, not exception prose, establish retry semantics.
+// this. Generic upstream generation failures get bounded recovery; unmarked
+// exceptions and malformed/semantic response failures still remain unknown.
+// Unknown vendor codes are intentionally eligible unless terminal evidence is
+// present. This is a retry policy, not proof that every upstream error is transient.
 export function markProviderEnvelopeFailure(value, error = {}) {
   if (!isObject(value)) return value;
-  const status = get(error, 'status') ?? (Number.isInteger(get(error, 'code')) ? get(error, 'code') : undefined);
-  const type = get(error, 'type'), code = get(error, 'code');
-  const transient = new Set(['overloaded_error', 'api_error', 'server_error', 'internal_error', 'upstream_error', 'UNAVAILABLE', 'INTERNAL']);
-  const limited = new Set(['rate_limit_error', 'rate_limit_exceeded', 'RESOURCE_EXHAUSTED']);
-  const modelFailure = failureHttpStatus(status) ? httpFailure(status)
-    : limited.has(type) || limited.has(code) ? { origin: 'upstream', code: 'provider_rate_limited', retryable: true }
-      : transient.has(type) || transient.has(code) ? { origin: 'upstream', code: 'provider_unavailable', retryable: true }
-        : { origin: 'upstream', code: 'provider_generation_failed', retryable: false };
+  const fields = [get(error, 'type'), get(error, 'code'), get(error, 'status')];
+  const statuses = [fields[2], fields[1]].filter(failureHttpStatus);
+  const status = statuses.find(status => !transientStatus(status)) ?? statuses[0];
+  const terminal = fields.some(field => TERMINAL_PROVIDER_ERRORS.has(field));
+  const modelFailure = failureHttpStatus(status) && (!transientStatus(status) || !terminal) ? httpFailure(status)
+    : terminal ? { origin: 'upstream', code: 'provider_generation_failed', retryable: false }
+      : fields.some(field => RATE_LIMIT_PROVIDER_ERRORS.has(field)) ? { origin: 'upstream', code: 'provider_rate_limited', retryable: true }
+        : fields.some(field => TRANSIENT_PROVIDER_ERRORS.has(field)) ? { origin: 'upstream', code: 'provider_unavailable', retryable: true }
+          : { origin: 'upstream', code: 'provider_generation_failed', retryable: true };
   scopeSet(provenance, value, modelFailure);
   return value;
 }
@@ -129,7 +155,7 @@ function safeMetadata(value) {
   if (!isObject(value)) return null;
   const origin = get(value, 'origin'), code = get(value, 'code'), retryable = get(value, 'retryable'), status = get(value, 'status');
   if (origin === 'upstream' && failureHttpStatus(status) && code === `provider_http_${status}` && retryable === transientStatus(status)) return httpFailure(status);
-  if (origin === 'upstream' && code === 'provider_generation_failed' && retryable === false) return { origin, code, retryable };
+  if (origin === 'upstream' && code === 'provider_generation_failed' && typeof retryable === 'boolean') return { origin, code, retryable };
   if (origin === 'upstream' && ['provider_unavailable', 'provider_rate_limited', 'provider_stream_truncated', 'provider_read_failed', 'provider_transport_failed'].includes(code) && retryable === true) return { origin, code, retryable };
   if (origin === 'cancelled' && code === 'model_cancelled' && retryable === false) return cancellation();
   if (origin === 'unknown' && code === 'model_failure_unknown' && retryable === false) return unknown();

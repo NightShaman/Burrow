@@ -375,7 +375,10 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
         terminalEventSeen = true;
         const responseError = event.response?.error && typeof event.response.error === 'object' ? event.response.error : {};
         const eventError = event.error && typeof event.error === 'object' ? event.error : {};
-        const providerError = Object.keys(eventError).length ? eventError : responseError;
+        // Responses `error` events also carry code/message directly on the
+        // event. Preserve that structured terminal evidence, not just its prose.
+        const providerError = Object.keys(eventError).length ? eventError
+          : Object.keys(responseError).length ? responseError : event.type === 'error' ? event : {};
         providerErrorEnvelope = providerError;
         const fallbackMessage = typeof event.error === 'string' ? event.error : null;
         streamError = boundedText(providerError.message || event.message || fallbackMessage || 'model_stream_failed', 500);

@@ -491,7 +491,8 @@ async function readAnthropicSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_BYTE
     try {
       const json = text ? JSON.parse(text) : {};
       const providerError = json?.error || json;
-      return { ok: false, text, bytes, data: null, error: boundedText(providerError?.message || `HTTP ${response?.status || 0}`, 500), errorDetails: { ...(providerError?.type ? { type: boundedText(providerError.type, 128) } : {}), ...(providerError?.code ? { code: boundedText(providerError.code, 128) } : {}), status: response?.status || null, responseType: 'json' }, eventSequence };
+      const failure = { ok: false, text, bytes, data: null, error: boundedText(providerError?.message || `HTTP ${response?.status || 0}`, 500), errorDetails: { ...(providerError?.type ? { type: boundedText(providerError.type, 128) } : {}), ...(providerError?.code ? { code: boundedText(providerError.code, 128) } : {}), status: response?.status || null, responseType: 'json' }, eventSequence };
+      return json?.error ? markProviderEnvelopeFailure(failure, json.error) : failure;
     } catch (error) {
       if (contentType.includes('application/json')) fail('model_response_malformed_json', { message: boundedText(error?.message, 500), status: response?.status || null });
     }
