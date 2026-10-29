@@ -13,35 +13,46 @@ function Leave({ onLeave }: { onLeave: () => void }) {
   return <button onClick={() => navigate(onLeave)}>Leave</button>;
 }
 const providers = [{ id: 'provider', provider: 'Test', apiType: '', url: '', apiKey: '', models: ['model'] }];
-it('guards an edited minion model; Stay retains and Discard restores without writing', async () => {
-  vi.mocked(api).mockResolvedValue({ selection: null });
+const loaded = { connectionId: 'provider', model: 'model', reasoningEffort: 'off', temperature: 0.2 };
+const temperature = () => screen.getByLabelText('Minion temperature') as HTMLInputElement;
+
+it('guards an in-progress temperature draft; Stay retains and Discard restores without writing', async () => {
+  vi.mocked(api).mockResolvedValue({ ok: true, selection: loaded });
   const leave = vi.fn();
   render(<UnsavedChangesProvider><DefaultMinionModel resourceId="agent" savedProviders={providers} /><Leave onLeave={leave} /></UnsavedChangesProvider>);
-  await waitFor(() => expect((screen.getByLabelText('Default minion provider') as HTMLSelectElement).disabled).toBe(false));
-  fireEvent.change(screen.getByLabelText('Default minion provider'), { target: { value: 'provider' } });
+  await waitFor(() => expect(temperature().disabled).toBe(false));
+  fireEvent.pointerDown(temperature(), { pointerId: 1 });
+  fireEvent.change(temperature(), { target: { value: '1.1' } });
   fireEvent.click(screen.getByText('Leave'));
   expect(screen.getByText('Unsaved changes')).toBeTruthy();
   fireEvent.click(screen.getByText('Stay'));
   expect(leave).not.toHaveBeenCalled();
-  expect((screen.getByLabelText('Default minion provider') as HTMLSelectElement).value).toBe('provider');
+  expect(temperature().value).toBe('1.1');
   fireEvent.click(screen.getByText('Leave'));
   fireEvent.click(screen.getByText('Discard'));
   expect(leave).toHaveBeenCalledTimes(1);
-  expect((screen.getByLabelText('Default minion provider') as HTMLSelectElement).value).toBe('');
+  expect(temperature().value).toBe('0.2');
   expect(vi.mocked(api).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
 });
-it('failed guarded Save retains the model and cancels the requested navigation', async () => {
-  vi.mocked(api).mockImplementation(async (_path, init) => { if (init?.method === 'PUT') throw new Error('denied'); return { selection: null }; });
+
+it('failed autosave stays guarded; failed guard retry retains the draft and cancels navigation', async () => {
+  vi.mocked(api).mockImplementation(async (_path, init) => { if (init?.method === 'PUT') throw new Error('denied'); return { ok: true, selection: loaded }; });
   const leave = vi.fn();
   render(<UnsavedChangesProvider><DefaultMinionModel resourceId="agent" savedProviders={providers} /><Leave onLeave={leave} /></UnsavedChangesProvider>);
-  await waitFor(() => expect((screen.getByLabelText('Default minion provider') as HTMLSelectElement).disabled).toBe(false));
-  fireEvent.change(screen.getByLabelText('Default minion provider'), { target: { value: 'provider' } });
-  fireEvent.click(screen.getByText('Leave'));
-  fireEvent.click(screen.getByText('Save', { selector: 'button' }));
+  await waitFor(() => expect(temperature().disabled).toBe(false));
+  fireEvent.pointerDown(temperature(), { pointerId: 1 });
+  fireEvent.change(temperature(), { target: { value: '1.1' } });
+  fireEvent.pointerUp(temperature(), { pointerId: 1 });
   await screen.findByText(/Could not save default minion model: denied/);
+  fireEvent.click(screen.getByText('Leave'));
+  expect(screen.getByText('Unsaved changes')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+  await waitFor(() => expect(vi.mocked(api).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(2));
   expect(leave).not.toHaveBeenCalled();
-  expect((screen.getByLabelText('Default minion provider') as HTMLSelectElement).value).toBe('provider');
+  expect(temperature().value).toBe('1.1');
+  expect(screen.getByText(/Could not save default minion model: denied/)).toBeTruthy();
 });
+
 it('toolbar sends a changed agent through the shared navigation boundary', () => {
   const agent = (id: string): Agent => ({ id, name: id, avatar: '', activity: 'Idle', context: null, provider: '', model: '', effort: '', temperature: 0, workspace: '', files: [], subagents: [] });
   const select = vi.fn();

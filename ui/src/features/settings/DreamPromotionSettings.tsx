@@ -45,7 +45,7 @@ export function DreamPromotionSettings() {
     } finally { if (active()) { busy.current = false; setState('idle'); } }
     return false;
   };
-  useUnsavedChanges({ dirty: state !== 'loading' && state !== 'error' && value !== saved, busy: state === 'saving', save: () => save(), discard: () => { setValue(saved); setError(''); setNotice(''); } });
+  useUnsavedChanges({ dirty: state !== 'loading' && state !== 'error' && value !== saved, busy: state === 'saving', resumeAfterAutosave: true, save: () => save(), discard: () => { setValue(saved); setError(''); setNotice(''); } });
   return <div className="curator-card dream-promotion-settings">
     <label className="agent-enabled"><input type="checkbox" checked={value} disabled={state !== 'idle'} aria-describedby="global-dream-promotion-help" onChange={event => { const next = event.target.checked; setValue(next); setError(''); setNotice(''); void save(next); }} /><span>Promote Dreams to memory</span></label>
     <p id="global-dream-promotion-help" className="settings-description">Requires promotion in the agent’s Dreams settings too. Off keeps Dreams and their archive; existing memories and explicit saves are unchanged. Re-enabling does not catch up skipped promotions.</p>

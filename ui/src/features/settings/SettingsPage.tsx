@@ -151,7 +151,7 @@ export function Settings({ navigationTarget, tab, setTab, agents, selected, save
             ['installed', 'Installed mods'],
             ['sources', 'Mod sources'],
             ['automatic-checks', 'Automatic source checks'],
-          ] as const).map(([id, label]) => <button type="button" className={modsSection === id ? 'active' : ''} aria-current={modsSection === id ? 'page' : undefined} onClick={() => setModsSection(id)} key={id}>{label}</button>)}
+          ] as const).map(([id, label]) => <button type="button" className={modsSection === id ? 'active' : ''} aria-current={modsSection === id ? 'page' : undefined} onClick={() => { if (modsSection !== id) navigate(() => setModsSection(id)); }} key={id}>{label}</button>)}
         </nav>}
         {selectedContribution?.settingsUrl ? <div ref={setModNavigationColumn} /> : selectedContribution?.settings?.length ? <nav className="settings-prototype-section-items" aria-label={`${selectedContribution.name} settings sections`}>{selectedContribution.settings.map((setting) => { const active = setting.id === selectedModSettings?.id; return <button type="button" className={active ? 'active' : ''} aria-current={active ? 'page' : undefined} onClick={() => setTab(modSettingsTab(selectedContribution.modId, setting.id))} key={setting.id}>{setting.navigation.title}</button>; })}</nav> : selectedContribution && <span>Extension settings</span>}
       </section>

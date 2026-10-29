@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isModBusyError, loadModManagement, modLifecyclePath, normalizeModManagement } from './modManagementApi';
+import { isModBusyError, loadModManagement, loadSourceRefreshConfig, saveSourceRefreshConfig, modLifecyclePath, normalizeModManagement } from './modManagementApi';
 
 const emptyRefresh = { enabled: false, refreshing: false, failures: 0 };
 
@@ -55,5 +55,28 @@ describe('mod running versions', () => {
     expect(state.mods[0]).not.toHaveProperty('runningVersion');
     expect(state.mods[1]).not.toHaveProperty('runningVersion');
     expect(state.mods[2]).toMatchObject({ enabled: true, version: '2.0.0', runningVersion: '1.0.0' });
+  });
+});
+
+describe('automatic source-check response validation', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([
+    {},
+    { sourceRefresh: { enabled: true, intervalMs: 0, staleMs: 1000 } },
+    { sourceRefresh: { enabled: true, intervalMs: 1000, staleMs: 0.1 } },
+    { sourceRefresh: { enabled: 'true', intervalMs: 1000, staleMs: 1000 } },
+  ])('rejects malformed reads and write acknowledgements: %j', async response => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(JSON.stringify(response), { headers: { 'content-type': 'application/json' } })));
+    await expect(loadSourceRefreshConfig()).rejects.toThrow('invalid mod source refresh settings');
+    await expect(saveSourceRefreshConfig({ enabled: false, intervalMs: 1234, staleMs: 5678 })).rejects.toThrow('invalid saved mod source refresh settings');
+  });
+
+  it('sends exact millisecond values and returns only confirmed settings', async () => {
+    const config = { enabled: false, intervalMs: 1234, staleMs: 5678 };
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ sourceRefresh: config }), { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(saveSourceRefreshConfig(config)).resolves.toEqual(config);
+    expect(fetchMock).toHaveBeenCalledWith('/api/mod-management/source-refresh', expect.objectContaining({ method: 'PUT', body: JSON.stringify(config) }));
   });
 });

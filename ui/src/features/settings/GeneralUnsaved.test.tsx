@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, expect, it, vi } from 'vitest';
 import { api } from '../../app/api';
 import { UnsavedChangesProvider, useUnsavedNavigation } from '../../app/UnsavedChanges';
+import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { BrowserTabSettings } from './BrowserTabSettings';
 import { GlobalProfileDocuments } from './GlobalProfileDocuments';
 import { ExecutionBoundaries } from './ExecutionBoundaries';
@@ -14,7 +15,7 @@ function Destination() {
 }
 function mount(form: React.ReactNode) { document.body.removeAttribute('data-destination'); render(<UnsavedChangesProvider>{form}<Destination /></UnsavedChangesProvider>); }
 
-it('browser tab guards dirty navigation, failed Save stays, Discard restores accepted suffix', async () => {
+it('browser tab guards a dirty focused draft; failed guarded Save stays and Discard restores the accepted suffix', async () => {
   vi.mocked(api).mockResolvedValueOnce({ suffix: 'Dev' }).mockRejectedValueOnce(new Error('offline'));
   mount(<BrowserTabSettings />);
   const field = await screen.findByLabelText('Browser tab suffix');
@@ -59,8 +60,8 @@ it('boundary item selection guards dirty rule edits', async () => {
 
 it('retention policy rejects invalid guarded Save and preserves draft', async () => {
   const { RetentionSettings } = await import('./RetentionSettings');
-  vi.mocked(api).mockResolvedValue({ policy: { enabled: false, traceMaxAgeDays: null, traceMaxBytes: null, intervalMinutes: 1440 }, state: {}, plan: {} });
-  mount(<RetentionSettings />);
+  vi.mocked(api).mockResolvedValue({ ok: true, policy: { version: 1, enabled: false, traceMaxAgeDays: null, traceMaxBytes: null, intervalMinutes: 1440 }, state: {}, plan: { ok: true, dryRun: true, retention: {}, counts: { deleteTraces: 0, deleteTraceBytes: 0 } } });
+  mount(<ConfirmProvider><RetentionSettings /></ConfirmProvider>);
   const checkbox = await screen.findByRole('checkbox', { name: /Enable managed cleanup/ });
   await waitFor(() => expect((checkbox as HTMLInputElement).disabled).toBe(false));
   fireEvent.click(checkbox);
@@ -68,6 +69,8 @@ it('retention policy rejects invalid guarded Save and preserves draft', async ()
   fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
   expect(document.body.getAttribute('data-destination')).toBeNull();
   expect((checkbox as HTMLInputElement).checked).toBe(true);
+  expect(vi.mocked(api).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
+  expect(screen.getAllByText('Enable at least one limit before turning on managed cleanup.').length).toBeGreaterThan(0);
   await waitFor(() => expect(screen.queryByText('Unsaved changes')).toBeNull());
   fireEvent.click(screen.getByText('Leave settings'));
   fireEvent.click(screen.getByRole('button', { name: 'Discard' }));

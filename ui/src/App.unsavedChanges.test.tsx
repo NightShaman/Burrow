@@ -26,6 +26,7 @@ beforeEach(() => {
   mocks.refreshConversation.mockResolvedValue(undefined);
   vi.mocked(api).mockImplementation(async (path, options) => {
     if (options?.method === 'PUT' || options?.method === 'POST') return { ok: true };
+    if (path === '/api/settings/browser-tab') return { suffix: '' };
     if (path === '/api/settings/identities') return { operator: { name: 'Operator', avatar: '' } };
     if (path === '/api/settings/mcp-connections') return { connections: [alpha] };
     if (path === '/api/settings/ui-auth') return { auth: { mode: 'none' } };
@@ -77,7 +78,7 @@ it.each((['profile', 'MCP'] as const).flatMap(form => (['Stay', 'Discard', 'Save
       expect(mocks.refreshSessions).not.toHaveBeenCalled();
       expect(mutations()).toHaveLength(1);
       expect(JSON.parse(String(mutations()[0][1]?.body))).toMatchObject({ name: 'Dirty draft', id: form === 'profile' ? 'default' : 'alpha' });
-      await act(async () => resolve({ ok: true }));
+      await act(async () => resolve(form === 'profile' ? { ok: true, operator: { name: 'Dirty draft', avatar: '' } } : { ok: true }));
     } else fireEvent.click(within(dialog).getByRole('button', { name: 'Discard' }));
     await screen.findByRole('heading', { name: 'Chat destination' });
     expect(screen.queryByRole('alertdialog')).toBeNull();

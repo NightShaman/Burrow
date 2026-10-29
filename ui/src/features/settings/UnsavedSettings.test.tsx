@@ -42,7 +42,7 @@ it('Save waits for success, locks dialog actions and blocks repeated submission'
   expect((screen.getByText('Discard') as HTMLButtonElement).disabled).toBe(true);
   fireEvent.keyDown(document, { key: 'Escape' }); expect(screen.getByRole('alertdialog')).toBeTruthy();
   fireEvent.click(within(screen.getByRole('alertdialog')).getByText('Saving…')); expect(vi.mocked(api)).toHaveBeenCalledTimes(2);
-  await act(async () => resolve({ ok: true })); expect(screen.getByText('Destination')).toBeTruthy();
+  await act(async () => resolve({ ok: true, operator: { ...profile, name: 'Changed' } })); expect(screen.getByText('Destination')).toBeTruthy();
 });
 it('Save failure cancels destination and retains draft, validation also explains failure', async () => {
   await openProfile(); changeName('Changed'); vi.mocked(api).mockRejectedValueOnce(new Error('offline'));
@@ -52,7 +52,16 @@ it('Save failure cancels destination and retains draft, validation also explains
 it('normal save clears dirty state; browser unload is protected only while dirty or busy', async () => {
   await openProfile(); const clean = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(clean); expect(clean.defaultPrevented).toBe(false);
   changeName('Changed'); const dirty = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(dirty); expect(dirty.defaultPrevented).toBe(true);
-  vi.mocked(api).mockResolvedValueOnce({ ok: true }); choose('Save profile'); await waitFor(() => expect((screen.getByText('Save profile') as HTMLButtonElement).disabled).toBe(false)); leave(); expect(screen.getByText('Destination')).toBeTruthy();
+  let resolve!: (value: unknown) => void;
+  vi.mocked(api).mockReturnValueOnce(new Promise(done => { resolve = done; }));
+  fireEvent.blur(screen.getByLabelText('Displayed name'));
+  expect(JSON.parse(String(vi.mocked(api).mock.calls[1][1]?.body))).toMatchObject({ kind: 'operator', name: 'Changed' });
+  const busy = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(busy); expect(busy.defaultPrevented).toBe(true);
+  expect((screen.getByLabelText('Displayed name') as HTMLInputElement).disabled).toBe(true);
+  await act(async () => resolve({ ok: true, operator: { ...profile, name: 'Changed' } }));
+  expect((screen.getByLabelText('Displayed name') as HTMLInputElement).disabled).toBe(false);
+  const saved = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(saved); expect(saved.defaultPrevented).toBe(false);
+  leave(); expect(screen.getByText('Destination')).toBeTruthy(); expect(screen.queryByRole('alertdialog')).toBeNull();
 });
 it('MCP same-item clicks preserve edits; Stay keeps selection; Discard switches and restores saved values', async () => {
   vi.mocked(api).mockResolvedValue({ connections: [alpha, beta] }); mount(true); await editMcp();
@@ -90,5 +99,5 @@ it('deleting locks editor navigation until DELETE resolves so another draft cann
   vi.mocked(api).mockResolvedValueOnce({ connections: [alpha, beta] }); mount(true); await screen.findByText('Alpha'); choose('Edit Alpha'); choose('Delete Alpha');
   let resolve!: (value: unknown) => void; vi.mocked(api).mockReturnValueOnce(new Promise(done => { resolve = done; })); choose('Delete connection');
   await waitFor(() => expect((screen.getByRole('button', { name: 'Edit Beta' }) as HTMLButtonElement).disabled).toBe(true)); leave(); expect(screen.queryByText('Destination')).toBeNull();
-  await act(async () => resolve({ ok: true })); choose('Edit Beta'); fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Beta draft' } }); expect(screen.getByDisplayValue('Beta draft')).toBeTruthy();
+  await act(async () => resolve({ ok: true, operator: { ...profile, name: 'Changed' } })); choose('Edit Beta'); fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Beta draft' } }); expect(screen.getByDisplayValue('Beta draft')).toBeTruthy();
 });

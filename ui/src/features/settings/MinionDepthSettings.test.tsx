@@ -103,6 +103,21 @@ describe('Per-agent minion depth', () => {
     expect(api).toHaveBeenCalledTimes(1);
   });
 
+  it('does not commit an active slider interaction when the unsaved modal takes focus', async () => {
+    vi.mocked(api).mockResolvedValue({ ok: true, maxDepth: 1 });
+    const leave = vi.fn();
+    render(<UnsavedChangesProvider><MinionDepthSettings resourceId="agent" /><Leave onLeave={leave} /></UnsavedChangesProvider>);
+    await ready();
+    act(() => slider().focus());
+    fireEvent.pointerDown(slider()); fireEvent.change(slider(), { target: { value: '2' } });
+    fireEvent.click(screen.getByText('Leave'));
+    expect(await screen.findByRole('alertdialog')).toBeTruthy();
+    expect(api).toHaveBeenCalledTimes(1);
+    expect(slider().value).toBe('2');
+    fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
+    expect(leave).not.toHaveBeenCalled();
+  });
+
   it('cancels guarded navigation on failed Save and permits it after successful Save', async () => {
     vi.mocked(api).mockResolvedValueOnce({ ok: true, maxDepth: 1 }).mockRejectedValueOnce(new Error('denied')).mockResolvedValueOnce({ ok: true, maxDepth: 2 });
     const leave = vi.fn();

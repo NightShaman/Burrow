@@ -53,7 +53,7 @@ export function BrowserOriginSettings() {
       if (ticket !== null && owner.current === ticket) { busy.current = false; setState('idle'); }
     }
   };
-  useUnsavedChanges({ dirty: !!result && checkOrigin !== result.settings.checkOrigin, busy: state === 'saving', save: () => save(), discard: () => { if (result) setCheckOrigin(result.settings.checkOrigin); setError(''); setNotice(''); } });
+  useUnsavedChanges({ dirty: !!result && checkOrigin !== result.settings.checkOrigin, busy: state === 'saving', resumeAfterAutosave: true, save: () => save(), discard: () => { if (result) setCheckOrigin(result.settings.checkOrigin); setError(''); setNotice(''); } });
   return <SettingSection title="Browser origin">
     <label className="agent-enabled"><input type="checkbox" checked={checkOrigin} disabled={state !== 'idle' || !result} onChange={event => { const next = event.target.checked; setCheckOrigin(next); setNotice(''); setError(''); void save(next); }} /><span>Check browser origin</span></label>
     <p className="settings-description">Reject requests from unapproved browser origins. This check is independent of authentication and is saved separately.</p>

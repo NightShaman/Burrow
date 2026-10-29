@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
+import type { FocusEvent, KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { modsChangedEvent } from '../../app/modPanels';
 import { modContributionsChangedEvent } from '../../app/apiTargets';
+import { isUnsavedChangesModalTarget, useUnsavedChanges } from '../../app/UnsavedChanges';
 import { Field } from './SettingsPrimitives';
 import { defaultSourceRefresh, isModBusyError, loadModManagement, loadSecretReferences, loadSourceRefreshConfig, modLifecyclePath, modManagementAction, saveSourceRefreshConfig, type ModRecord, type ModSource, type NormalizedModManagement, type SecretReference, type SourceRefreshConfig } from './modManagementApi';
 
@@ -99,6 +100,10 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [refreshConfig, setRefreshConfig] = useState<SourceRefreshConfig | null>(null);
   const [refreshConfigError, setRefreshConfigError] = useState<string | null>(null);
+  const [refreshNotice, setRefreshNotice] = useState('');
+  const [refreshSaveFailed, setRefreshSaveFailed] = useState(false);
+  const refreshSaving = useRef(false);
+  const refreshOwner = useRef<object | null>(null);
   const [refreshEnabled, setRefreshEnabled] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState<DurationDraft>({ value: '', unit: 'hours' });
   const [refreshStale, setRefreshStale] = useState<DurationDraft>({ value: '', unit: 'minutes' });
@@ -111,11 +116,16 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   }, []);
 
   const loadRefreshConfiguration = useCallback(async () => {
-    setRefreshConfigError(null);
+    const ticket = {};
+    refreshOwner.current = ticket;
+    refreshSaving.current = false;
+    setBusy(current => current === 'source-refresh-settings' ? null : current);
+    setRefreshConfig(null); setRefreshConfigError(null); setRefreshNotice(''); setRefreshSaveFailed(false);
     try {
-      applyRefreshConfig(await loadSourceRefreshConfig());
+      const config = await loadSourceRefreshConfig();
+      if (refreshOwner.current === ticket) applyRefreshConfig(config);
     } catch (cause) {
-      setRefreshConfigError(cause instanceof Error ? cause.message : 'Could not load source refresh settings.');
+      if (refreshOwner.current === ticket) setRefreshConfigError(cause instanceof Error ? cause.message : 'Could not load source refresh settings.');
     }
   }, [applyRefreshConfig]);
 
@@ -136,7 +146,11 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
       setSecretReferenceError(cause instanceof Error ? cause.message : 'Stored credentials are unavailable.');
     });
   }, [section]);
-  useEffect(() => { if (section === 'automatic-checks') void loadRefreshConfiguration(); }, [section, loadRefreshConfiguration]);
+  useEffect(() => {
+    if (section === 'automatic-checks') void loadRefreshConfiguration();
+    else { refreshSaving.current = false; setBusy(current => current === 'source-refresh-settings' ? null : current); }
+    return () => { refreshOwner.current = null; };
+  }, [section, loadRefreshConfiguration]);
   useEffect(() => {
     if (!credentialPickerOpen) return;
     const close = (event: PointerEvent) => { if (!credentialPickerRef.current?.contains(event.target as Node)) setCredentialPickerOpen(false); };
@@ -204,26 +218,67 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
     }
   };
 
-  const saveRefreshConfiguration = async () => {
-    const intervalMs = durationMilliseconds(refreshInterval);
-    const staleMs = durationMilliseconds(refreshStale);
+  const refreshDirty = !!refreshConfig && (refreshEnabled !== refreshConfig.enabled
+    || durationMilliseconds(refreshInterval) !== refreshConfig.intervalMs
+    || durationMilliseconds(refreshStale) !== refreshConfig.staleMs);
+
+  const clearRefreshFeedback = () => {
+    setRefreshConfigError(null); setRefreshNotice(''); setRefreshSaveFailed(false);
+  };
+  const saveRefreshConfiguration = async (draft = { enabled: refreshEnabled, interval: refreshInterval, stale: refreshStale }) => {
+    if (!refreshConfig || busy !== null || refreshSaving.current || !refreshOwner.current) return false;
+    const intervalMs = durationMilliseconds(draft.interval);
+    const staleMs = durationMilliseconds(draft.stale);
     if (intervalMs === null || staleMs === null) {
       setRefreshConfigError('Enter positive whole durations that resolve to milliseconds.');
-      return;
+      return false;
     }
+    if (draft.enabled === refreshConfig.enabled && intervalMs === refreshConfig.intervalMs && staleMs === refreshConfig.staleMs) {
+      clearRefreshFeedback();
+      return true;
+    }
+    const ticket = refreshOwner.current;
+    refreshSaving.current = true;
     setBusy('source-refresh-settings');
-    setRefreshConfigError(null);
+    clearRefreshFeedback();
     try {
-      const saved = await saveSourceRefreshConfig({ enabled: refreshEnabled, intervalMs, staleMs });
+      const saved = await saveSourceRefreshConfig({ enabled: draft.enabled, intervalMs, staleMs });
+      if (refreshOwner.current !== ticket) return false;
       applyRefreshConfig(saved);
-      const next = await loadModManagement();
-      setState(next);
+      setRefreshNotice('Automatic source checks saved.');
+      // The write is confirmed independently of the catalog reload. A failed
+      // reload must not turn a persisted setting back into an unsaved draft.
+      try {
+        const next = await loadModManagement();
+        if (refreshOwner.current === ticket) setState(next);
+      } catch {
+        if (refreshOwner.current === ticket) setError('Automatic source checks saved, but the catalog could not be refreshed.');
+      }
+      return true;
     } catch (cause) {
-      setRefreshConfigError(cause instanceof Error ? cause.message : 'Could not save source refresh settings.');
+      if (refreshOwner.current === ticket) {
+        setRefreshConfigError(cause instanceof Error ? cause.message : 'Could not save source refresh settings.');
+        setRefreshSaveFailed(true);
+      }
+      return false;
     } finally {
-      setBusy(null);
+      if (refreshOwner.current === ticket) { refreshSaving.current = false; setBusy(null); }
     }
   };
+  // The numeric value and unit are a single editor. Blurring the number
+  // into its select must not save/disable the select before its change event.
+  const refreshDurationBlur = (event: FocusEvent<HTMLDivElement>) => {
+    if (isUnsavedChangesModalTarget(event.relatedTarget)) return;
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    if (refreshDirty) void saveRefreshConfiguration();
+  };
+  useUnsavedChanges({
+    dirty: section === 'automatic-checks' && refreshDirty,
+    busy: busy === 'source-refresh-settings',
+    resumeAfterAutosave: true,
+    save: () => saveRefreshConfiguration(),
+    discard: () => { if (refreshConfig) applyRefreshConfig(refreshConfig); clearRefreshFeedback(); },
+  });
 
   const install = (mod: ModRecord) => {
     void run(mod.id, modLifecyclePath(mod.id, 'install'), { method: 'POST', body: JSON.stringify({}) });
@@ -339,13 +394,15 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
       <h2 id="source-refresh-settings-heading">Automatic source checks</h2>
       {refreshConfigError && <p className="settings-request-error" role="alert">{refreshConfigError}</p>}
       {refreshConfig ? <>
-        <label className="agent-enabled"><input type="checkbox" checked={refreshEnabled} disabled={busy !== null} onChange={(event) => setRefreshEnabled(event.target.checked)} /><span>Enable background source checks</span></label>
+        <label className="agent-enabled"><input type="checkbox" checked={refreshEnabled} disabled={busy !== null} onChange={(event) => { const enabled = event.target.checked; setRefreshEnabled(enabled); clearRefreshFeedback(); void saveRefreshConfiguration({ enabled, interval: refreshInterval, stale: refreshStale }); }} /><span>Enable background source checks</span></label>
         <div className="field-pair">
-          <Field label="Check every"><div className="field-pair"><input type="number" step="any" value={refreshInterval.value} disabled={busy !== null} onChange={(event) => setRefreshInterval((current) => ({ ...current, value: event.target.value }))} /><select aria-label="Check interval unit" value={refreshInterval.unit} disabled={busy !== null} onChange={(event) => setRefreshInterval((current) => ({ ...current, unit: event.target.value as DurationUnit }))}>{Object.keys(durationMultipliers).map((unit) => <option value={unit} key={unit}>{unit}</option>)}</select></div></Field>
-          <Field label="Consider source stale after"><div className="field-pair"><input type="number" step="any" value={refreshStale.value} disabled={busy !== null} onChange={(event) => setRefreshStale((current) => ({ ...current, value: event.target.value }))} /><select aria-label="Stale threshold unit" value={refreshStale.unit} disabled={busy !== null} onChange={(event) => setRefreshStale((current) => ({ ...current, unit: event.target.value as DurationUnit }))}>{Object.keys(durationMultipliers).map((unit) => <option value={unit} key={unit}>{unit}</option>)}</select></div></Field>
+          <Field label="Check every"><div className="field-pair" onBlur={refreshDurationBlur}><input type="number" step="any" value={refreshInterval.value} disabled={busy !== null} onChange={(event) => { setRefreshInterval((current) => ({ ...current, value: event.target.value })); clearRefreshFeedback(); }} /><select aria-label="Check interval unit" value={refreshInterval.unit} disabled={busy !== null} onChange={(event) => { const interval = { ...refreshInterval, unit: event.target.value as DurationUnit }; setRefreshInterval(interval); clearRefreshFeedback(); void saveRefreshConfiguration({ enabled: refreshEnabled, interval, stale: refreshStale }); }}>{Object.keys(durationMultipliers).map((unit) => <option value={unit} key={unit}>{unit}</option>)}</select></div></Field>
+          <Field label="Consider source stale after"><div className="field-pair" onBlur={refreshDurationBlur}><input type="number" step="any" value={refreshStale.value} disabled={busy !== null} onChange={(event) => { setRefreshStale((current) => ({ ...current, value: event.target.value })); clearRefreshFeedback(); }} /><select aria-label="Stale threshold unit" value={refreshStale.unit} disabled={busy !== null} onChange={(event) => { const stale = { ...refreshStale, unit: event.target.value as DurationUnit }; setRefreshStale(stale); clearRefreshFeedback(); void saveRefreshConfiguration({ enabled: refreshEnabled, interval: refreshInterval, stale }); }}>{Object.keys(durationMultipliers).map((unit) => <option value={unit} key={unit}>{unit}</option>)}</select></div></Field>
         </div>
         <p className="settings-help">Durations are saved exactly in milliseconds. Decimal values are accepted only when they resolve to a whole millisecond.</p>
-        <div className="model-actions"><button className="primary" type="button" disabled={busy !== null} onClick={() => void saveRefreshConfiguration()}>{busy === 'source-refresh-settings' ? 'Saving…' : 'Save automatic checks'}</button></div>
+        {busy === 'source-refresh-settings' && <p role="status">Saving automatic source checks…</p>}
+        {refreshNotice && <p role="status">{refreshNotice}</p>}
+        {refreshSaveFailed && refreshDirty && <button className="secondary" type="button" disabled={busy !== null} onClick={() => void saveRefreshConfiguration()}>Retry saving automatic checks</button>}
       </> : <div className="model-actions"><button className="secondary" type="button" disabled={busy !== null} onClick={() => void loadRefreshConfiguration()}>Retry settings</button></div>}
   </section>;
   const sourceConfiguration = <section className="setting-section mod-source-configuration" aria-labelledby="mod-sources-heading">

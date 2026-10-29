@@ -1,5 +1,6 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { UnsavedChangesProvider, useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { ModsSettings } from './ModsSettings';
 import * as management from './modManagementApi';
 
@@ -186,17 +187,21 @@ describe('explicit mod activation', () => {
 describe('Git mod sources', () => {
   it('edits automatic checks in friendly units and saves exact milliseconds', async () => {
     loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [], sourceRefresh: { enabled: true, intervalMs: 21_600_000, staleMs: 900_000, refreshing: false, failures: 0 } });
-    saveRefreshMock.mockResolvedValue({ enabled: false, intervalMs: 5_400_000, staleMs: 90_000 });
+    saveRefreshMock.mockImplementation(async config => config);
     render(<ModsSettings section="automatic-checks" />);
     const enabled = await screen.findByRole('checkbox', { name: 'Enable background source checks' });
     expect((screen.getByLabelText('Check every') as HTMLInputElement).value).toBe('6');
     expect((screen.getByLabelText('Check interval unit') as HTMLSelectElement).value).toBe('hours');
     expect((screen.getByLabelText('Consider source stale after') as HTMLInputElement).value).toBe('15');
     fireEvent.click(enabled);
+    await waitFor(() => expect((enabled as HTMLInputElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText('Check every')!, { target: { value: '1.5' } });
+    fireEvent.blur(screen.getByLabelText('Check every'));
+    await waitFor(() => expect((enabled as HTMLInputElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText('Stale threshold unit'), { target: { value: 'seconds' } });
+    await waitFor(() => expect((enabled as HTMLInputElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText('Consider source stale after')!, { target: { value: '90' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save automatic checks' }));
+    fireEvent.blur(screen.getByLabelText('Consider source stale after'));
     await waitFor(() => expect(saveRefreshMock).toHaveBeenCalledWith({ enabled: false, intervalMs: 5_400_000, staleMs: 90_000 }));
   });
 
@@ -206,20 +211,23 @@ describe('Git mod sources', () => {
     loadRefreshMock.mockResolvedValue({ enabled: true, intervalMs: 1_234, staleMs: 5_678 });
     saveRefreshMock.mockRejectedValue(new Error('refresh settings unavailable'));
     render(<ModsSettings section="automatic-checks" />);
-    await screen.findByRole('button', { name: 'Save automatic checks' });
+    await screen.findByRole('checkbox', { name: 'Enable background source checks' });
     expect((screen.getByLabelText('Check every') as HTMLInputElement).value).toBe('1234');
     expect((screen.getByLabelText('Check interval unit') as HTMLSelectElement).value).toBe('milliseconds');
-    fireEvent.click(screen.getByRole('button', { name: 'Save automatic checks' }));
+    fireEvent.change(screen.getByLabelText('Check every'), { target: { value: '1235' } });
+    fireEvent.blur(screen.getByLabelText('Check every'));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('refresh settings unavailable'));
+    expect((screen.getByLabelText('Check every') as HTMLInputElement).value).toBe('1235');
+    expect(saveRefreshMock).toHaveBeenCalledWith({ enabled: true, intervalMs: 1235, staleMs: 5678 });
   });
 
   it('rejects durations that do not resolve to positive safe integer milliseconds', async () => {
     loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
     render(<ModsSettings section="automatic-checks" />);
-    await screen.findByRole('button', { name: 'Save automatic checks' });
+    await screen.findByRole('checkbox', { name: 'Enable background source checks' });
     fireEvent.change(screen.getByLabelText('Check every')!, { target: { value: '0.0001' } });
     fireEvent.change(screen.getByLabelText('Check interval unit'), { target: { value: 'seconds' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save automatic checks' }));
+    fireEvent.blur(screen.getByLabelText('Check every'));
     expect(screen.getByRole('alert').textContent).toContain('positive whole durations');
     expect(saveRefreshMock).not.toHaveBeenCalled();
   });
@@ -277,7 +285,7 @@ describe('Git mod sources', () => {
     loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [{ id: 'x', url: 'https://git.example.com/x.git' }] });
     const overflow = document.createElement('section'); document.body.appendChild(overflow);
     const { container, unmount } = render(<ModsSettings section="automatic-checks" overflowTarget={overflow} />);
-    await screen.findByRole('button', { name: 'Save automatic checks' });
+    await screen.findByRole('checkbox', { name: 'Enable background source checks' });
     expect(container.textContent).toContain('Automatic source checks');
     expect(container.querySelector('[aria-label="Configured mod sources"]')).toBeNull();
     expect(overflow.textContent).not.toContain('git.example.com');
@@ -461,4 +469,217 @@ describe('Git mod sources', () => {
     }));
   });
 
+});
+
+function LeaveChecks({ leave }: { leave: () => void }) {
+  const navigate = useUnsavedNavigation();
+  return <button onClick={() => navigate(leave)}>Leave checks</button>;
+}
+
+describe('automatic-check autosave guard', () => {
+  beforeEach(() => {
+    loadMock.mockResolvedValue({ restartRequired: false, mods: [], sources: [] });
+    saveRefreshMock.mockImplementation(async config => config);
+  });
+
+  it('does not write on load, unchanged blur, or an equivalent duration', async () => {
+    render(<ModsSettings section="automatic-checks" />);
+    const interval = await screen.findByLabelText('Check every');
+    fireEvent.blur(interval);
+    fireEvent.change(interval, { target: { value: '6.0' } });
+    fireEvent.blur(interval);
+    expect(saveRefreshMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Save automatic checks' })).toBeNull();
+  });
+
+  it.each([
+    { label: 'Check every', unitLabel: 'Check interval unit', initial: '6', unit: 'minutes', expected: { enabled: true, intervalMs: 120_000, staleMs: 900_000 } },
+    { label: 'Consider source stale after', unitLabel: 'Stale threshold unit', initial: '15', unit: 'seconds', expected: { enabled: true, intervalMs: 21_600_000, staleMs: 2_000 } },
+  ])('keeps $label and its unit one focus scope before committing the chosen unit', async ({ label, unitLabel, initial, unit, expected }) => {
+    let resolve!: (config: management.SourceRefreshConfig) => void;
+    saveRefreshMock.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    render(<><ModsSettings section="automatic-checks" /><button>Outside durations</button></>);
+    const input = await screen.findByLabelText(label) as HTMLInputElement;
+    const select = screen.getByLabelText(unitLabel) as HTMLSelectElement;
+    expect(input.value).toBe(initial);
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: '2' } });
+
+    // Native focus() emits blur/focusout with relatedTarget, as Tab or a
+    // pointer focus transfer would, before the select's change event.
+    fireEvent.pointerDown(select);
+    fireEvent.mouseDown(select);
+    act(() => select.focus());
+    fireEvent.mouseUp(select);
+    fireEvent.click(select);
+    expect(saveRefreshMock).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(select);
+    expect(select.disabled).toBe(false);
+
+    fireEvent.change(select, { target: { value: unit } });
+    expect(saveRefreshMock.mock.calls).toEqual([[expected]]);
+    await act(async () => resolve(expected));
+    await waitFor(() => expect(select.disabled).toBe(false));
+    act(() => screen.getByRole('button', { name: 'Outside durations' }).focus());
+    expect(saveRefreshMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { label: 'Check every', unitLabel: 'Check interval unit', expected: { enabled: true, intervalMs: 7_200_000, staleMs: 900_000 } },
+    { label: 'Consider source stale after', unitLabel: 'Stale threshold unit', expected: { enabled: true, intervalMs: 21_600_000, staleMs: 120_000 } },
+  ])('commits $label when focus leaves through the unit without a unit change', async ({ label, unitLabel, expected }) => {
+    render(<><ModsSettings section="automatic-checks" /><button>Outside durations</button></>);
+    const input = await screen.findByLabelText(label);
+    const select = screen.getByLabelText(unitLabel);
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: '2' } });
+    act(() => select.focus());
+    expect(saveRefreshMock).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(select);
+    act(() => screen.getByRole('button', { name: 'Outside durations' }).focus());
+    expect(saveRefreshMock.mock.calls).toEqual([[expected]]);
+    await screen.findByText('Automatic source checks saved.');
+  });
+
+  it.each([
+    { label: 'Check every', unitLabel: 'Check interval unit', expected: { enabled: true, intervalMs: 7_200_000, staleMs: 900_000 } },
+    { label: 'Consider source stale after', unitLabel: 'Stale threshold unit', expected: { enabled: true, intervalMs: 21_600_000, staleMs: 120_000 } },
+  ])('keeps reverse unit-to-number focus internal and saves $label on native blur', async ({ label, unitLabel, expected }) => {
+    render(<ModsSettings section="automatic-checks" />);
+    const input = await screen.findByLabelText(label) as HTMLInputElement;
+    const select = screen.getByLabelText(unitLabel);
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: '2' } });
+    act(() => select.focus());
+    act(() => input.focus());
+    expect(saveRefreshMock).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(input);
+    act(() => input.blur());
+    expect(saveRefreshMock.mock.calls).toEqual([[expected]]);
+    await screen.findByText('Automatic source checks saved.');
+  });
+
+  it('blocks navigation while saving and preserves a failed draft for guard Save and retry', async () => {
+    let reject!: (cause: Error) => void;
+    saveRefreshMock.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+    const leave = vi.fn();
+    render(<UnsavedChangesProvider><ModsSettings section="automatic-checks" /><LeaveChecks leave={leave} /></UnsavedChangesProvider>);
+    const enabled = await screen.findByRole('checkbox');
+    fireEvent.click(enabled);
+    expect((enabled as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByText('Leave checks'));
+    expect(leave).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    await act(async () => reject(new Error('offline')));
+    expect((enabled as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByRole('alert').textContent).toContain('offline');
+    expect(screen.getByRole('button', { name: 'Retry saving automatic checks' })).toBeTruthy();
+    fireEvent.click(screen.getByText('Leave checks'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(leave).toHaveBeenCalledTimes(1));
+    expect(saveRefreshMock).toHaveBeenCalledTimes(2);
+    expect(saveRefreshMock).toHaveBeenLastCalledWith({ enabled: false, intervalMs: 21_600_000, staleMs: 900_000 });
+  });
+
+  it('does not leave when guard Save fails; Discard restores the confirmed baseline', async () => {
+    saveRefreshMock.mockRejectedValue(new Error('offline'));
+    const leave = vi.fn();
+    render(<UnsavedChangesProvider><ModsSettings section="automatic-checks" /><LeaveChecks leave={leave} /></UnsavedChangesProvider>);
+    const interval = await screen.findByLabelText('Check every');
+    fireEvent.change(interval, { target: { value: '2' } });
+    expect(saveRefreshMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Leave checks'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByRole('alert');
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(leave).not.toHaveBeenCalled();
+    expect((interval as HTMLInputElement).value).toBe('2');
+    fireEvent.click(screen.getByText('Leave checks'));
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect((interval as HTMLInputElement).value).toBe('6');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('keeps invalid drafts guarded without issuing a write', async () => {
+    const leave = vi.fn();
+    render(<UnsavedChangesProvider><ModsSettings section="automatic-checks" /><LeaveChecks leave={leave} /></UnsavedChangesProvider>);
+    const interval = await screen.findByLabelText('Check every');
+    fireEvent.change(interval, { target: { value: '' } });
+    fireEvent.blur(interval);
+    fireEvent.click(screen.getByText('Leave checks'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(screen.getByRole('alert').textContent).toContain('positive whole durations');
+    expect(saveRefreshMock).not.toHaveBeenCalled();
+    expect(leave).not.toHaveBeenCalled();
+  });
+
+  it('clears a failure when toggled back to baseline without writing again', async () => {
+    saveRefreshMock.mockRejectedValue(new Error('offline'));
+    const leave = vi.fn();
+    render(<UnsavedChangesProvider><ModsSettings section="automatic-checks" /><LeaveChecks leave={leave} /></UnsavedChangesProvider>);
+    const enabled = await screen.findByRole('checkbox');
+    fireEvent.click(enabled);
+    await screen.findByRole('alert');
+    fireEvent.click(enabled);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry saving automatic checks' })).toBeNull();
+    expect(screen.queryByText('Automatic source checks saved.')).toBeNull();
+    expect(saveRefreshMock).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByText('Leave checks'));
+    expect(leave).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers retry after a write failure and adopts the confirmed server response', async () => {
+    saveRefreshMock.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ enabled: false, intervalMs: 7_200_000, staleMs: 60_000 });
+    render(<ModsSettings section="automatic-checks" />);
+    fireEvent.click(await screen.findByRole('checkbox'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry saving automatic checks' }));
+    await screen.findByText('Automatic source checks saved.');
+    await waitFor(() => expect((screen.getByRole('checkbox') as HTMLInputElement).disabled).toBe(false));
+    expect((screen.getByLabelText('Check every') as HTMLInputElement).value).toBe('2');
+    expect((screen.getByLabelText('Consider source stale after') as HTMLInputElement).value).toBe('1');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(saveRefreshMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not treat a failed catalog reload as an unconfirmed settings write', async () => {
+    loadMock.mockResolvedValueOnce({ restartRequired: false, mods: [], sources: [] }).mockRejectedValueOnce(new Error('catalog offline'));
+    const leave = vi.fn();
+    render(<UnsavedChangesProvider><ModsSettings section="automatic-checks" /><LeaveChecks leave={leave} /></UnsavedChangesProvider>);
+    fireEvent.click(await screen.findByRole('checkbox'));
+    await screen.findByText('Automatic source checks saved.');
+    await waitFor(() => expect((screen.getByRole('checkbox') as HTMLInputElement).disabled).toBe(false));
+    expect(screen.getByRole('alert').textContent).toContain('saved, but the catalog could not be refreshed');
+    fireEvent.click(screen.getByText('Leave checks'));
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry saving automatic checks' })).toBeNull();
+  });
+
+  it('does not expose editable defaults after a failed read, and retries safely', async () => {
+    loadRefreshMock.mockRejectedValueOnce(new Error('read offline'));
+    render(<ModsSettings section="automatic-checks" />);
+    await screen.findByRole('alert');
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.queryByLabelText('Check every')).toBeNull();
+    expect(saveRefreshMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry settings' }));
+    await screen.findByRole('checkbox');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(saveRefreshMock).not.toHaveBeenCalled();
+  });
+
+  it('ignores an obsolete read after leaving and reopening the section', async () => {
+    let resolve!: (config: management.SourceRefreshConfig) => void;
+    loadRefreshMock.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    const { rerender } = render(<ModsSettings section="automatic-checks" />);
+    rerender(<ModsSettings section="installed" />);
+    rerender(<ModsSettings section="automatic-checks" />);
+    await screen.findByRole('checkbox');
+    await act(async () => resolve({ enabled: false, intervalMs: 1000, staleMs: 1000 }));
+    expect((screen.getByLabelText('Check every') as HTMLInputElement).value).toBe('6');
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
+  });
 });

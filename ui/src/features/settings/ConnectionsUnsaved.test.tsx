@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { api } from '../../app/api';
 import { ConfirmProvider } from '../../app/ConfirmDialog';
@@ -15,6 +15,7 @@ function Harness({ children }: { children: React.ReactNode }) {
   return <><button onClick={() => navigate(() => setLeft(true))}>Leave</button>{left ? <p>Destination</p> : children}</>;
 }
 function mount(children: React.ReactNode) { render(<ConfirmProvider><UnsavedChangesProvider><Harness>{children}</Harness></UnsavedChangesProvider></ConfirmProvider>); }
+function deferred<T>() { let resolve!: (value: T) => void; return { promise: new Promise<T>(finish => { resolve = finish; }), resolve }; }
 
 it('browser origin stays on failed save, then discards to the accepted preference', async () => {
   vi.mocked(api).mockImplementation(async (_, init) => {
@@ -34,6 +35,24 @@ it('browser origin stays on failed save, then discards to the accepted preferenc
   expect(screen.queryByText('Destination')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Leave' }));
   fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+  expect(await screen.findByText('Destination')).toBeTruthy();
+});
+
+it('navigation requested during token creation does not unmount the one-time reveal', async () => {
+  const creation = deferred<{ token: { id: string; name: string; scopes: string[]; token: string } }>();
+  vi.mocked(api).mockImplementation(async (_, init) => init?.method === 'POST'
+    ? creation.promise
+    : { tokens: [], supportedScopes: ['diagnostics:read'] });
+  mount(<ApiTokensSettings />);
+  await screen.findByText('No API tokens created yet.');
+  fireEvent.change(screen.getByRole('textbox', { name: 'Token name' }), { target: { value: 'Diagnostic' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Create API token' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Leave' }));
+  expect(screen.queryByText('Destination')).toBeNull();
+  await act(async () => creation.resolve({ token: { id: 'token-1', name: 'Diagnostic', scopes: ['diagnostics:read'], token: 'secret-once' } }));
+  expect(await screen.findByRole('textbox', { name: 'New API token plaintext' })).toHaveProperty('value', 'secret-once');
+  expect(screen.queryByText('Destination')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Leave' }));
   expect(await screen.findByText('Destination')).toBeTruthy();
 });
 

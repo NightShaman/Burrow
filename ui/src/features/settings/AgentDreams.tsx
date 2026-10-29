@@ -1,4 +1,4 @@
-import { useUnsavedChanges } from '../../app/UnsavedChanges';
+import { isUnsavedChangesModalTarget, useUnsavedChanges } from '../../app/UnsavedChanges';
 import { ProviderModelFields } from './ProviderModelFields';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -11,7 +11,39 @@ type DreamSettings = { enabled: boolean; quietDayDreams: boolean; promoteToMemor
 type DreamSettingsResponse = { settings: DreamSettings; effectiveModel?: DreamModel | null; modelResolutionError?: string | null };
 const normalizeSettings = (settings: DreamSettings): DreamSettings => ({ ...settings, quietDayDreams: settings.quietDayDreams ?? true, promoteToMemory: settings.promoteToMemory ?? true, memoryEmphasis: settings.memoryEmphasis ?? 50, memoryPromptOverride: settings.memoryPromptOverride ?? null });
 const editableSettings = (settings: DreamSettings) => ({ enabled: settings.enabled, quietDayDreams: settings.quietDayDreams ?? true, promoteToMemory: settings.promoteToMemory ?? true, cron: settings.cron, prompt: settings.prompt, modelConnectionId: settings.modelConnectionId ?? null, model: settings.model ?? null, memoryEmphasis: settings.memoryEmphasis ?? 50, memoryPromptOverride: settings.memoryPromptOverride ?? null });
+type EditableDreamSettings = ReturnType<typeof editableSettings>;
+type EditableDreamKey = keyof EditableDreamSettings;
 const settingsBaseline = (settings: DreamSettings) => JSON.stringify(editableSettings(settings));
+const editableKeys = ['enabled', 'quietDayDreams', 'promoteToMemory', 'cron', 'prompt', 'modelConnectionId', 'model', 'memoryEmphasis', 'memoryPromptOverride'] as const satisfies readonly EditableDreamKey[];
+function validCron(value: string) {
+  const ranges = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 6]] as const;
+  const fields = value.trim().split(/\s+/);
+  if (fields.length !== 5) return false;
+  return fields.every((field, index) => {
+    const [min, max] = ranges[index];
+    return field.split(',').every(part => {
+      const pieces = part.split('/');
+      if (pieces.length > 2) return false;
+      const step = pieces[1] === undefined ? 1 : Number(pieces[1]);
+      if (!Number.isInteger(step) || step < 1 || step > max - min + 1) return false;
+      if (pieces[0] === '*') return true;
+      const match = /^(\d+)(?:-(\d+))?$/.exec(pieces[0]);
+      if (!match) return false;
+      const start = Number(match[1]);
+      const end = match[2] === undefined ? start : Number(match[2]);
+      return start >= min && end <= max && end >= start;
+    });
+  });
+}
+function validateSettings(settings: EditableDreamSettings) {
+  if (typeof settings.enabled !== 'boolean' || typeof settings.quietDayDreams !== 'boolean' || typeof settings.promoteToMemory !== 'boolean') return 'Dream toggle values are invalid.';
+  if (typeof settings.cron !== 'string' || !validCron(settings.cron)) return 'Enter a valid five-field cron schedule.';
+  if (typeof settings.prompt !== 'string' || !settings.prompt.trim() || settings.prompt.length > 20_000) return 'Dream prompt must contain text and use 20,000 characters or fewer.';
+  if (!Number.isInteger(settings.memoryEmphasis) || settings.memoryEmphasis < 0 || settings.memoryEmphasis > 100) return 'Memory emphasis must be from 0 to 100.';
+  if (settings.memoryPromptOverride != null && (typeof settings.memoryPromptOverride !== 'string' || settings.memoryPromptOverride.length > 20_000)) return 'Memory prompt override must use 20,000 characters or fewer.';
+  if ((settings.modelConnectionId != null && typeof settings.modelConnectionId !== 'string') || (settings.model != null && typeof settings.model !== 'string') || ((settings.modelConnectionId || settings.model) && (!settings.modelConnectionId || !settings.model || settings.modelConnectionId.length > 256 || settings.model.length > 256))) return 'Choose a complete Dream provider and model, or use the agent chat model.';
+  return '';
+}
 type MemoryPreview = { memories: { title: string; content: string; sourceRefs: string[] }[]; sourceToken: string; sourceCount: number; generatedAt: string; evidenceScope: string; persisted: false };
 type DreamCycleReceipt = {
   runId: string;
@@ -41,11 +73,23 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
   const [state, setState] = useState<'loading' | 'idle' | 'saving' | 'error'>('loading');
   const [retry, setRetry] = useState(0);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [failedKeys, setFailedKeys] = useState<EditableDreamKey[]>([]);
   const [effectiveModel, setEffectiveModel] = useState<DreamModel | null>(null);
   const [modelResolutionError, setModelResolutionError] = useState<string | null>(null);
   const [receipts, setReceipts] = useState<DreamCycleReceipt[]>([]);
   const [receiptError, setReceiptError] = useState('');
   const requestVersion = useRef(0);
+  const accepted = useRef<DreamSettings | null>(null);
+  const draft = useRef(settings);
+  const saving = useRef(false);
+  const emphasisInteraction = useRef(false);
+  const changeSettings = (changes: Partial<EditableDreamSettings>) => {
+    draft.current = { ...draft.current, ...changes };
+    setSettings(current => ({ ...current, ...changes }));
+    setNotice('');
+    setFailedKeys(current => current.filter(key => !(key in changes)));
+  };
   const previewVersion = useRef(0);
   const [preview, setPreview] = useState<MemoryPreview | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -88,7 +132,10 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
   useEffect(() => {
     const version = ++requestVersion.current;
     const controller = new AbortController();
-    setState('loading'); setError(''); setSettings({ enabled: false, quietDayDreams: true, promoteToMemory: true, cron: '0 4 * * *', timezone: null, prompt: '', modelConnectionId: null, model: null }); setEffectiveModel(null); setModelResolutionError(null); setReceiptError(''); setReceipts([]);
+    saving.current = false; emphasisInteraction.current = false; accepted.current = null;
+    const empty: DreamSettings = { enabled: false, quietDayDreams: true, promoteToMemory: true, cron: '0 4 * * *', timezone: null, prompt: '', modelConnectionId: null, model: null };
+    draft.current = empty;
+    setState('loading'); setError(''); setNotice(''); setFailedKeys([]); setSettings(empty); setBaseline(''); setEffectiveModel(null); setModelResolutionError(null); setReceiptError(''); setReceipts([]);
     Promise.all([
       request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-settings`, { signal: controller.signal }),
       request<DreamCycleResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-cycle?limit=5`, { signal: controller.signal }).catch((cause) => {
@@ -97,8 +144,11 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
       }),
     ]).then(([dreamSettings, dreamCycles]) => {
       if (controller.signal.aborted || version !== requestVersion.current) return;
-      setSettings(normalizeSettings(dreamSettings.settings));
-      setBaseline(settingsBaseline(dreamSettings.settings));
+      if (!dreamSettings?.settings) throw new Error('Invalid dream settings response.');
+      const loaded = normalizeSettings(dreamSettings.settings);
+      accepted.current = loaded; draft.current = loaded;
+      setSettings(loaded);
+      setBaseline(settingsBaseline(loaded));
       setEffectiveModel(dreamSettings.effectiveModel ?? null);
       setModelResolutionError(dreamSettings.modelResolutionError ?? null);
       setReceipts(Array.isArray(dreamCycles.receipts) ? dreamCycles.receipts : []);
@@ -110,28 +160,67 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
     });
     return () => controller.abort();
   }, [agentId, retry]);
-  const save = async () => {
-    if (state !== 'idle') return false;
-    if (settings.modelConnectionId && !settings.model) { setError('Choose a model for the selected provider or use the agent chat model.'); return false; }
+  const saveChanges = async (changes: Partial<EditableDreamSettings>, keys: EditableDreamKey[], message = 'Dream setting saved.') => {
+    if (state !== 'idle' || saving.current || !accepted.current) return false;
+    const payload = { ...editableSettings(accepted.current), ...changes };
+    const validationError = validateSettings(payload) || (payload.modelConnectionId && !savedProviders.some(provider => provider.id === payload.modelConnectionId && provider.models.includes(payload.model!)) ? 'Choose an available Dream provider and model, or use the agent chat model.' : '');
+    if (validationError) { setError(validationError); setNotice(''); return false; }
+    if (keys.every(key => editableSettings(accepted.current!)[key] === payload[key])) {
+      setError(''); setNotice(''); setFailedKeys(current => current.filter(key => !keys.includes(key)));
+      return true;
+    }
     const version = requestVersion.current;
-    setState('saving'); setError('');
+    saving.current = true;
+    setState('saving'); setError(''); setNotice(''); setFailedKeys(current => current.filter(key => !keys.includes(key)));
     try {
-      const result = await request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-settings`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(editableSettings(settings)) });
+      const result = await request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-settings`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
       if (version !== requestVersion.current) return false;
-      setBaseline(settingsBaseline(result.settings));
-      setSettings(normalizeSettings(result.settings));
+      if (!result?.settings) throw new Error('Invalid dream settings response.');
+      const nextAccepted = normalizeSettings(result.settings);
+      const invalidResponse = validateSettings(editableSettings(nextAccepted));
+      if (invalidResponse) throw new Error(`Invalid dream settings response: ${invalidResponse}`);
+      accepted.current = nextAccepted;
+      setBaseline(settingsBaseline(nextAccepted));
+      setSettings(current => {
+        const committed = Object.fromEntries(keys.map(key => [key, editableSettings(nextAccepted)[key]])) as Partial<EditableDreamSettings>;
+        const next = normalizeSettings({ ...current, timezone: nextAccepted.timezone, effectiveTimezone: nextAccepted.effectiveTimezone, defaultMemoryPrompt: nextAccepted.defaultMemoryPrompt, effectiveMemoryPrompt: nextAccepted.effectiveMemoryPrompt, ...committed });
+        draft.current = next;
+        return next;
+      });
       setEffectiveModel(result.effectiveModel ?? null);
       setModelResolutionError(result.modelResolutionError ?? null);
+      setNotice(message);
       return true;
     } catch (cause) {
-      if (version !== requestVersion.current) return false;
-      setError(cause instanceof Error ? `Could not save dream settings: ${cause.message}` : 'Could not save dream settings.');
+      if (version === requestVersion.current) {
+        setFailedKeys(current => [...new Set([...current, ...keys])]);
+        setError(cause instanceof Error ? `Could not save dream settings: ${cause.message}` : 'Could not save dream settings.');
+      }
+      return false;
     } finally {
-      if (version === requestVersion.current) setState('idle');
+      if (version === requestVersion.current) { saving.current = false; setState('idle'); }
     }
-    return false;
   };
-  useUnsavedChanges({ dirty: state !== 'loading' && state !== 'error' && baseline !== '' && settingsBaseline(settings) !== baseline, busy: state === 'saving', save, discard: () => { setSettings(current => ({ ...current, ...JSON.parse(baseline) })); setError(''); } });
+  const save = () => saveChanges(editableSettings(draft.current), [...editableKeys], 'Dream settings saved.');
+  const retryFailed = () => {
+    const current = editableSettings(draft.current);
+    const changes = Object.fromEntries(failedKeys.map(key => [key, current[key]])) as Partial<EditableDreamSettings>;
+    void saveChanges(changes, failedKeys);
+  };
+  useUnsavedChanges({ dirty: state !== 'loading' && state !== 'error' && baseline !== '' && settingsBaseline(settings) !== baseline, busy: state === 'saving', resumeAfterAutosave: true, save, discard: () => {
+    if (!accepted.current) return;
+    emphasisInteraction.current = false; draft.current = accepted.current; setSettings(accepted.current); setError(''); setNotice(''); setFailedKeys([]);
+  } });
+  const commitEmphasis = () => {
+    if (!emphasisInteraction.current) return;
+    emphasisInteraction.current = false;
+    void saveChanges({ memoryEmphasis: draft.current.memoryEmphasis ?? 50 }, ['memoryEmphasis']);
+  };
+  // Focus moves before click/change. Do not let a blur save disable an
+  // independent action (or turn a no-save preview into an implicit write).
+  // relatedTarget also covers keyboard navigation and touch-generated focus.
+  const commitsOnBlur = (relatedTarget: EventTarget | null) => !isUnsavedChangesModalTarget(relatedTarget)
+    && !(relatedTarget instanceof Element && relatedTarget.closest('[data-dream-independent-action]'));
   const disabled = state !== 'idle';
   const activity = <div className="dream-cycle-activity" aria-label="Recent dream activity">
       {receipts.length ? <div className="dream-cycle-list">
@@ -154,19 +243,19 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
       {receiptError && <p className="settings-request-error" role="alert">{receiptError}</p>}
     </div>;
   const memoryControls = <SettingSection title="Dream memory">
-      <label className="agent-enabled"><input type="checkbox" checked={settings.promoteToMemory} disabled={disabled} aria-describedby="agent-dream-promotion-help" onChange={(event) => setSettings({ ...settings, promoteToMemory: event.target.checked })} /><span>Promote Dreams to memory</span></label>
+      <label className="agent-enabled"><input type="checkbox" data-dream-independent-action checked={settings.promoteToMemory} disabled={disabled} aria-describedby="agent-dream-promotion-help" onChange={(event) => { const promoteToMemory = event.target.checked; changeSettings({ promoteToMemory }); void saveChanges({ promoteToMemory }, ['promoteToMemory']); }} /><span>Promote Dreams to memory</span></label>
       <p id="agent-dream-promotion-help" className="settings-description">Also requires global promotion in Continuity. Turning this off keeps the archive and existing memories; explicit saves still work. Skipped promotions are not caught up later.</p>
       <div className="dream-memory-controls">
-        <Field label="Memory emphasis"><span aria-hidden="true" className="field-hint">{settings.memoryEmphasis ?? 50} · {(settings.memoryEmphasis ?? 50) === 50 ? 'Balanced' : (settings.memoryEmphasis ?? 50) < 50 ? 'Analytical' : 'Meaning-focused'}</span><input type="range" min={0} max={100} step={1} aria-describedby="dream-memory-emphasis-help" value={settings.memoryEmphasis ?? 50} disabled={disabled} aria-valuetext={`${settings.memoryEmphasis ?? 50} · ${(settings.memoryEmphasis ?? 50) === 50 ? 'Balanced' : (settings.memoryEmphasis ?? 50) < 50 ? 'Analytical' : 'Meaning-focused'}`} onChange={(event) => setSettings({ ...settings, memoryEmphasis: Number(event.target.value) })} /></Field>
+        <Field label="Memory emphasis"><span aria-hidden="true" className="field-hint">{settings.memoryEmphasis ?? 50} · {(settings.memoryEmphasis ?? 50) === 50 ? 'Balanced' : (settings.memoryEmphasis ?? 50) < 50 ? 'Analytical' : 'Meaning-focused'}</span><input type="range" data-dream-independent-action min={0} max={100} step={1} aria-describedby="dream-memory-emphasis-help" value={settings.memoryEmphasis ?? 50} disabled={disabled} aria-valuetext={`${settings.memoryEmphasis ?? 50} · ${(settings.memoryEmphasis ?? 50) === 50 ? 'Balanced' : (settings.memoryEmphasis ?? 50) < 50 ? 'Analytical' : 'Meaning-focused'}`} onPointerDown={(event) => { emphasisInteraction.current = true; event.currentTarget.setPointerCapture?.(event.pointerId); }} onPointerUp={commitEmphasis} onPointerCancel={commitEmphasis} onLostPointerCapture={commitEmphasis} onKeyDown={(event) => { if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) emphasisInteraction.current = true; }} onKeyUp={(event) => { if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) commitEmphasis(); }} onBlur={(event) => { if (commitsOnBlur(event.relatedTarget)) commitEmphasis(); else emphasisInteraction.current = false; }} onChange={(event) => { emphasisInteraction.current = true; changeSettings({ memoryEmphasis: Number(event.target.value) }); }} /></Field>
         <div className="dream-emphasis-labels" aria-hidden="true"><span>0 · Analytical</span><span>50 · Balanced</span><span>100 · Meaning-focused</span></div>
         <p id="dream-memory-emphasis-help" className="field-hint">Controls expression, not selection or evidence. SOUL supplies the agent’s voice.</p>
-        <div className="dream-memory-heading"><span>{settings.memoryPromptOverride != null ? 'Custom override active' : 'Default prompt'}</span><button type="button" disabled={disabled || settings.memoryPromptOverride == null} onClick={() => setSettings({ ...settings, memoryPromptOverride: null })}>Revert to default</button></div>
-        <Field label="Memory prompt override"><textarea maxLength={20000} rows={8} value={settings.memoryPromptOverride ?? settings.defaultMemoryPrompt ?? ''} disabled={disabled} onChange={(event) => setSettings({ ...settings, memoryPromptOverride: event.target.value })} /></Field>
+        <div className="dream-memory-heading"><span>{settings.memoryPromptOverride != null ? 'Custom override active' : 'Default prompt'}</span><button type="button" data-dream-independent-action disabled={disabled || settings.memoryPromptOverride == null} onMouseDown={(event) => event.preventDefault()} onClick={() => { changeSettings({ memoryPromptOverride: null }); void saveChanges({ memoryPromptOverride: null }, ['memoryPromptOverride']); }}>Revert to default</button></div>
+        <Field label="Memory prompt override"><textarea maxLength={20000} rows={8} value={settings.memoryPromptOverride ?? settings.defaultMemoryPrompt ?? ''} disabled={disabled} onChange={(event) => changeSettings({ memoryPromptOverride: event.target.value })} onBlur={(event) => { if (commitsOnBlur(event.relatedTarget)) void saveChanges({ memoryPromptOverride: draft.current.memoryPromptOverride ?? null }, ['memoryPromptOverride']); }} /></Field>
         <div className="dream-memory-preview">
           <p id="dream-memory-preview-help" className="field-hint">Uses recent validated Dream extraction candidates, not full history or existing memories. May make a paid request using the saved Dream model. Nothing is saved.</p>
           <div className="dream-memory-preview-actions">
-            <button type="button" disabled={disabled || previewBusy || sourceInvalid} aria-describedby="dream-memory-preview-help" onClick={() => void generatePreview()}>{previewBusy ? 'Generating preview…' : 'Preview memories'}</button>
-            {(sourceToken || sourceInvalid) && <button type="button" disabled={disabled || previewBusy} onClick={() => void generatePreview(true)}>Preview new sample</button>}
+            <button type="button" data-dream-independent-action disabled={disabled || previewBusy || sourceInvalid} aria-describedby="dream-memory-preview-help" onMouseDown={(event) => event.preventDefault()} onClick={() => void generatePreview()}>{previewBusy ? 'Generating preview…' : 'Preview memories'}</button>
+            {(sourceToken || sourceInvalid) && <button type="button" data-dream-independent-action disabled={disabled || previewBusy} onMouseDown={(event) => event.preventDefault()} onClick={() => void generatePreview(true)}>Preview new sample</button>}
           </div>
           {sourceToken && !sourceInvalid && <p className="field-hint">Comparisons reuse the same source sample for up to 15 minutes, unless sources change. Model output may vary.</p>}
           {previewBusy && <p role="status" className="field-hint">Generating a no-save preview…</p>}
@@ -182,18 +271,18 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
   return <><SettingSection title="Dreams">
     {state === 'error' && <button type="button" onClick={() => setRetry(value => value + 1)}>Retry loading</button>}
     <div className="dream-settings-fields">
-      <div className="dream-toggle-group"><div className="dream-scheduled-controls"><label className="agent-enabled"><input type="checkbox" checked={settings.enabled} disabled={disabled} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} /><span>Enable scheduled dreaming</span></label><div className="skill-compact-field"><Field label="Cron"><input value={settings.cron} disabled={disabled} onChange={(event) => setSettings({ ...settings, cron: event.target.value })} /></Field><small className="field-hint">Operator timezone{settings.effectiveTimezone ? `: ${settings.effectiveTimezone}` : ''}.</small></div></div>
-      <div><label className="agent-enabled"><input type="checkbox" checked={settings.quietDayDreams} disabled={disabled} aria-describedby="quiet-day-dreams-help" onChange={(event) => setSettings({ ...settings, quietDayDreams: event.target.checked })} /><span>Dream on quiet days</span></label>
+      <div className="dream-toggle-group"><div className="dream-scheduled-controls"><label className="agent-enabled"><input type="checkbox" data-dream-independent-action checked={settings.enabled} disabled={disabled} onChange={(event) => { const enabled = event.target.checked; changeSettings({ enabled }); void saveChanges({ enabled }, ['enabled']); }} /><span>Enable scheduled dreaming</span></label><div className="skill-compact-field"><Field label="Cron"><input value={settings.cron} disabled={disabled} onChange={(event) => changeSettings({ cron: event.target.value })} onBlur={(event) => { if (commitsOnBlur(event.relatedTarget)) void saveChanges({ cron: draft.current.cron }, ['cron']); }} /></Field><small className="field-hint">Operator timezone{settings.effectiveTimezone ? `: ${settings.effectiveTimezone}` : ''}.</small></div></div>
+      <div><label className="agent-enabled"><input type="checkbox" data-dream-independent-action checked={settings.quietDayDreams} disabled={disabled} aria-describedby="quiet-day-dreams-help" onChange={(event) => { const quietDayDreams = event.target.checked; changeSettings({ quietDayDreams }); void saveChanges({ quietDayDreams }, ['quietDayDreams']); }} /><span>Dream on quiet days</span></label>
       <p id="quiet-day-dreams-help" className="settings-description">On quiet days, create a diary from retained continuity without re-extraction. Otherwise, skip model work when there is no new material.</p></div></div>
-      <div className="dream-schedule-fields"><ProviderModelFields providers={savedProviders} connectionId={settings.modelConnectionId} model={settings.model} inheritLabel="Use agent chat model" disabled={disabled} onChange={(modelConnectionId, model) => setSettings({ ...settings, modelConnectionId, model })} /></div>
+      <div className="dream-schedule-fields" data-dream-independent-action><ProviderModelFields providers={savedProviders} connectionId={settings.modelConnectionId} model={settings.model} inheritLabel="Use agent chat model" disabled={disabled} onChange={(modelConnectionId, model) => { changeSettings({ modelConnectionId, model }); if ((!modelConnectionId && !model) || (modelConnectionId && model)) void saveChanges({ modelConnectionId, model }, ['modelConnectionId', 'model']); }} /></div>
       <p className="settings-description">Effective model: {effectiveModel?.modelConnectionId && effectiveModel.model ? modelLabel(effectiveModel, [{ value: '', label: 'Use agent chat model' }, ...dreamModels.map((option) => ({ value: dreamModelValue(option.connectionId, option.model), label: option.label }))]) : 'Unconfigured'}</p>
       {modelResolutionError && <p className="settings-request-error" role="alert">Model resolution error: {modelResolutionError}</p>}
-      <Field label="Dream prompt"><textarea rows={6} value={settings.prompt} disabled={disabled} onChange={(event) => setSettings({ ...settings, prompt: event.target.value })} /></Field>
+      <Field label="Dream prompt"><textarea rows={6} value={settings.prompt} disabled={disabled} onChange={(event) => changeSettings({ prompt: event.target.value })} onBlur={(event) => { if (commitsOnBlur(event.relatedTarget)) void saveChanges({ prompt: draft.current.prompt }, ['prompt']); }} /></Field>
     </div>
-    <div className="dream-actions">
-      <button className="primary" onClick={() => void save()} disabled={state !== 'idle'}>{state === 'saving' ? 'Saving…' : 'Save dream settings'}</button>
-    </div>
+    {state === 'saving' && <p role="status">Saving dream settings…</p>}
+    {state === 'idle' && failedKeys.length > 0 && <div className="dream-actions"><button className="secondary" type="button" data-dream-independent-action disabled={state !== 'idle'} onClick={retryFailed}>Retry saving dream settings</button></div>}
     {error && <p className="settings-request-error" role="alert">{error}</p>}
+    {notice && <p role="status">{notice}</p>}
     <details className="dream-recent-activity"><summary>Recent activity</summary>{activity}</details>
   </SettingSection>{overflowTarget ? createPortal(<div className="settings-overflow-content">{memoryControls}</div>, overflowTarget) : memoryControls}</>;
 }

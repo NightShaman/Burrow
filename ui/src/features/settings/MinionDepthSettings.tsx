@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../app/api';
-import { useUnsavedChanges } from '../../app/UnsavedChanges';
+import { isUnsavedChangesModalTarget, useUnsavedChanges } from '../../app/UnsavedChanges';
 import { Field } from './SettingsPrimitives';
 
 type MaxDepth = 0 | 1 | 2;
@@ -63,7 +63,7 @@ export function MinionDepthSettings({ resourceId }: { resourceId: string }) {
     }
     return false;
   };
-  useUnsavedChanges({ dirty, busy: state === 'saving', save: () => save(), discard: () => { draft.current = baseline; setMaxDepth(baseline); setError(''); setSaved(false); } });
+  useUnsavedChanges({ dirty, busy: state === 'saving', resumeAfterAutosave: true, save: () => save(), discard: () => { draft.current = baseline; setMaxDepth(baseline); setError(''); setSaved(false); } });
   return <>
     <Field label={`Maximum minion depth (${maxDepth})`}><input aria-label="Maximum minion depth" aria-valuetext={`${maxDepth}: ${depthDescriptions[maxDepth]}`} type="range" min="0" max="2" step="1" value={maxDepth} disabled={state !== 'idle'}
       onPointerDown={event => { interaction.current = true; event.currentTarget.setPointerCapture?.(event.pointerId); }}
@@ -72,7 +72,7 @@ export function MinionDepthSettings({ resourceId }: { resourceId: string }) {
       onLostPointerCapture={() => { if (interaction.current) { interaction.current = false; void save(); } }}
       onKeyDown={event => { if (event.key === 'Escape' && interaction.current) { interaction.current = false; draft.current = baseline; setMaxDepth(baseline); setError(''); setSaved(false); event.preventDefault(); return; } if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) interaction.current = true; }}
       onKeyUp={event => { if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) { interaction.current = false; void save(); } }}
-      onBlur={() => { if (interaction.current) { interaction.current = false; void save(); } }}
+      onBlur={event => { if (isUnsavedChangesModalTarget(event.relatedTarget)) { interaction.current = false; return; } if (interaction.current) { interaction.current = false; void save(); } }}
       onChange={event => { const value = Number(event.target.value) as MaxDepth; draft.current = value; setMaxDepth(value); setError(''); setSaved(false); if (!interaction.current) void save(value); }} /><span className="minion-depth-marks" aria-hidden="true"><span>0</span><span>1</span><span>2</span></span></Field>
     <p className="settings-description">{depthDescriptions[maxDepth]} Applies to this agent. Existing minion trees cannot gain extra depth.</p>
     {state === 'loading' && <p role="status">Loading minion depth…</p>}
