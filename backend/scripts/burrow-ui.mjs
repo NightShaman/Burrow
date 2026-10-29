@@ -10,6 +10,7 @@ import { isInternalContextSession } from '../src/model-context-boundary.mjs';
 import { createModGenerationDispatcher } from '../src/mod-generations.mjs';
 import { createModTextGenerator } from '../src/mod-capabilities.mjs';
 import { migrateLegacyExecutionProviderApproval } from '../src/execution-provider-approval.mjs';
+import { createCoreApiDispatcher, coreApiCaller } from '../src/core-api-dispatch.mjs';
 import { createModAuthority, createModAuthorityRoute } from '../src/mod-authority.mjs';
 import { createProviderUsageService } from '../src/provider-usage-service.mjs';
 import { createBackgroundLifecycle, createCoordinatedShutdown } from '../src/background-lifecycle.mjs';
@@ -2123,8 +2124,10 @@ function compactAttachmentMetadata(attachment = {}, index = 0) {
   return projected;
 }
 
+import { compactDelegationMetadata } from '../src/compact-delegation-metadata.mjs';
+
 function compactChatTurn(turn = {}) {
-  const metadata = {};
+  const metadata = compactDelegationMetadata(turn.metadata);
   if (turn.metadata?.toolActivity) metadata.toolActivity = turn.metadata.toolActivity;
   if (Array.isArray(turn.metadata?.attachments)) {
     const attachments = turn.metadata.attachments.map(compactAttachmentMetadata).filter(Boolean);
@@ -2963,7 +2966,7 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
     // even a compact blocked behind another producer.
     const manualCompact = command.command === 'compact' && command.definition && !command.args && !command.error;
     const owner = manualCompact ? registerActiveAgentRun(activeChatRuns, {
-      agentId: agentRuntime.agentId, sessionId, runId, message: '/compact', source: 'operator-chat',
+      agentId: agentRuntime.agentId, sessionId, runId, message: '/compact', source: coreApiCaller(req) ? 'backdoor-api' : 'operator-chat',
     }) : null;
     if (owner) { owner.record.phase = 'compacting'; owner.record.detached = false; }
     const detached = () => { if (owner && !res.writableEnded) owner.record.detached = true; };
@@ -3021,7 +3024,7 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
       resolveAgentRuntime,
       latencyTiming,
       telemetry: otelRuntime,
-      runSource: 'operator-chat',
+      runSource: coreApiCaller(req) ? 'backdoor-api' : 'operator-chat',
       cancellationGraceMs: RUN_CANCELLATION_GRACE_MS,
       onCancellationDeadline: () => retireCancelledRun(record),
       registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerRuntimeActiveRun({ agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
@@ -3355,7 +3358,15 @@ const modManagementCapability = Object.freeze(Object.fromEntries(['inventory', '
   if (!coreModManagement) throw new Error('mod_management_unavailable');
   return coreModManagement[method](...args);
 }])));
-const modLoadOptions = { logger: serverLogger, modAuthority, modManagement: modManagementCapability, onExecutionProviderActivated: async modId => { if (modId === 'node-goblin') await applyOtelConfigurationToNodeGoblins(); }, stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), externalTurnDispatcher, generationDispatcher, runtimeDiagnostics, resolveAgentWorkspaceRoot: async (id) => {
+const coreApi = createCoreApiDispatcher({
+  handleRequest,
+  trackRequest: (operation, phase) => requestLifecycle.track(operation, phase),
+  onComplete: ({ method, route, status, actor }) => serverLogger.event('core_api_request', {
+    method, route, status, modId: actor?.ownerModId, agentId: actor?.caller.agentId,
+    sessionId: actor?.caller.sessionId, runId: actor?.caller.runId,
+  }, { component: 'api' }),
+});
+const modLoadOptions = { coreApi, logger: serverLogger, modAuthority, modManagement: modManagementCapability, onExecutionProviderActivated: async modId => { if (modId === 'node-goblin') await applyOtelConfigurationToNodeGoblins(); }, stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), externalTurnDispatcher, generationDispatcher, runtimeDiagnostics, resolveAgentWorkspaceRoot: async (id) => {
   const agent = await agentsStore().get(id);
   if (!agent) throw new Error('agent_not_found');
   return agentRuntimeContext({ runtimeState: (await runtimeConfig()).runtimeState, agent }).agentWorkspaceRoot;
@@ -3483,24 +3494,29 @@ const server = createServer((req, res) => {
 async function handleRequest(req, res) {
   if (shuttingDown) return sendJson(res, 503, { ok: false, error: 'runtime_shutting_down' });
   try {
-    const authority = hostAuthorityPolicy(req, authorityConfig, authorityConfig.enabled ? (await runtimeConfig()).ui.authMode : 'none');
+    const internal = coreApiCaller(req);
+    // Only Core-created request objects can take this path. No header/token/
+    // cookie or mod-owned HTTP route can mint this trusted caller identity.
+    const authority = internal ? { protocol: 'http:', authority: 'core-api.invalid' }
+      : hostAuthorityPolicy(req, authorityConfig, authorityConfig.enabled ? (await runtimeConfig()).ui.authMode : 'none');
     if (authority.error) return sendJson(res, authority.status, { ok: false, error: authority.error });
     const url = new URL(req.url || '/', `${authority.protocol}//${authority.authority || `${host}:${port}`}`);
     // Absolute-form request targets cannot override the checked authority.
     if (authorityConfig.enabled && url.host !== authority.authority) return sendJson(res, 403, { ok: false, error: 'host_authority_not_allowed' });
     const origin = `${url.protocol}//${url.host}`;
-    if (await applyApiCors(req, res, url)) return;
+    if (!internal && await applyApiCors(req, res, url)) return;
+    if (internal && req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
     try { if (await authRoute({ req, res, url, origin })) return; }
     catch (error) { req.operationalFailureLogged = true; throw error; } // Auth routes already emit safe auth.failure.
     if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/api/health')) return sendJson(res, 200, { ok: true, runtime: 'burrow', version: releaseVersion, buildIdentity: healthBuildIdentity, ...(healthReleaseProvenance ? { releaseProvenance: healthReleaseProvenance } : {}), ...(process.env.BURROW_SMOKE_TOKEN && req.headers['x-burrow-smoke-token'] === process.env.BURROW_SMOKE_TOKEN ? { smokeToken: process.env.BURROW_SMOKE_TOKEN } : {}) });
     if (await completionEventRoute({ req, res, url, webhookOnly: true })) return;
-    if (!(await authorizeRequest(req, res, url))) return;
+    if (!internal && !(await authorizeRequest(req, res, url))) return;
     if (await completionEventRoute({ req, res, url })) return;
     if (req.method === 'GET' && url.pathname === '/api/auth/validate') {
       const runtime = await runtimeConfig();
       const mode = runtime?.ui?.authMode || 'none';
       if (mode === 'none') return sendJson(res, 401, { ok: false, error: 'authentication_not_enabled', auth: { mode, enabled: false, authenticated: false } });
-      return sendJson(res, 200, { ok: true, auth: { mode, enabled: true, authenticated: req.burrowVerifiedAuth?.authenticated === true } });
+      return sendJson(res, 200, { ok: true, auth: { mode, enabled: true, authenticated: req.burrowVerifiedAuth?.authenticated === true, ...(internal ? { authorized: true, actor: { type: 'agent', id: internal.caller.agentId } } : {}) } });
     }
     if (await forgeRoute({ req, res, url })) return;
     if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {

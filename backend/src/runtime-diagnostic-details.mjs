@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import { redactAndTruncateText } from './redaction.mjs';
 import { validTraceRunId } from './trace-summary.mjs';
 import { runtimeDiagnosticSessionSummary } from './runtime-diagnostic-sessions.mjs';
+import { compactDelegationMetadata } from './compact-delegation-metadata.mjs';
 
 // Match the existing mod/Forge diagnostic page convention. Text previews use
 // trace-summary's existing 1,000-character default and can be configured per read.
@@ -31,11 +32,13 @@ export async function runtimeDiagnosticSessionDetail(conversationStore, { agentI
     ...runtimeDiagnosticSessionSummary({ ...metadata, sessionId }),
     turns: rows.slice(-limit).map(turn => {
       const preview = redactAndTruncateText(String(turn.content || ''), { maxChars: maxContentChars });
+      const metadata = compactDelegationMetadata(turn.metadata);
       return {
         ...project(turn, { id: text, ts: text, type: text, role: text, runId: text, visibility: text }),
         content: preview.text,
         contentChars: preview.originalChars,
         contentTruncated: turn.contentTruncated === true || preview.truncated,
+        ...(Object.keys(metadata).length ? { metadata } : {}),
       };
     }),
     hasMore: rows.length > limit,

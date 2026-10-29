@@ -280,19 +280,19 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     const controller = new AbortController();
     const parentInvocationId = String(message.parentInvocationId || "");
     const invocation = pending.get(parentInvocationId);
-    const parentRequired = message.method === 'readRuntimeDiagnostics' || message.method.startsWith('management');
+    const parentRequired = message.method === 'readRuntimeDiagnostics' || message.method === 'requestCoreApi' || message.method.startsWith('management');
     if (parentRequired && parentInvocationId && !invocation) {
-      child.send({ type: "capability-result", requestId, error: message.method.startsWith('management') ? 'mod_management_caller_required' : 'mod_diagnostic_caller_required' }, () => {}); return;
+      child.send({ type: "capability-result", requestId, error: message.method === 'requestCoreApi' ? 'core_api_caller_required' : message.method.startsWith('management') ? 'mod_management_caller_required' : 'mod_diagnostic_caller_required' }, () => {}); return;
     }
     if (!parentRequired && parentInvocationId && !invocation) { child.send({ type: "capability-result", requestId, error: "mod_capability_cancelled" }, () => {}); return; }
-    if (activeCapabilities.size >= 4 || !capabilities || !["managementInventory", "managementSubmit", "managementOperation", "readRuntimeDiagnostics", "listAgents", "getOperatorIdentity", "getOperatorTimezone", "listConversations", "readConversation", "listModels", "generateText", "submitGeneration", "readGeneration", "submitExternalTurn", "readExternalTurn", "cancelExternalTurn", "createExternalSession", "readExternalSessionModel", "setExternalSessionModel", "getForgeImageStatus", "createForgeImage", "readForgeImageJob", "listScheduledJobs", "readScheduledJob", "createScheduledJob", "updateScheduledJob", "deleteScheduledJob", "listScheduledJobRuns", "triggerScheduledJob"].includes(message.method)) {
+    if (activeCapabilities.size >= 4 || !capabilities || !["requestCoreApi", "managementInventory", "managementSubmit", "managementOperation", "readRuntimeDiagnostics", "listAgents", "getOperatorIdentity", "getOperatorTimezone", "listConversations", "readConversation", "listModels", "generateText", "submitGeneration", "readGeneration", "submitExternalTurn", "readExternalTurn", "cancelExternalTurn", "createExternalSession", "readExternalSessionModel", "setExternalSessionModel", "getForgeImageStatus", "createForgeImage", "readForgeImageJob", "listScheduledJobs", "readScheduledJob", "createScheduledJob", "updateScheduledJob", "deleteScheduledJob", "listScheduledJobRuns", "triggerScheduledJob"].includes(message.method)) {
       child.send({ type: "capability-result", requestId, error: "mod_capability_unavailable" }, () => {}); return;
     }
     // Capability methods validate their own inputs; transport does not impose a
     // smaller arbitrary envelope than the model/provider or archive reader.
     activeCapabilities.set(requestId, { controller, parentInvocationId, method: message.method, startedAt: Date.now() });
     const configuredTimeout = message.method === "generateText" ? modelCapabilityTimeoutMs : capabilityTimeoutMs;
-    const deadline = Number(configuredTimeout);
+    const deadline = message.method === 'requestCoreApi' ? 0 : Number(configuredTimeout);
     const timer = Number.isFinite(deadline) && deadline > 0
       ? setTimeout(() => controller.abort(hostError("mod_capability_timeout")), deadline)
       : null;
@@ -309,15 +309,17 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
         if (controller.signal.aborted) throw controller.signal.reason;
         let caller = null;
         const management = message.method.startsWith('management');
+        const coreApi = message.method === 'requestCoreApi';
         let parent = null;
-        if (message.method === 'readRuntimeDiagnostics' || management) {
+        if (message.method === 'readRuntimeDiagnostics' || management || coreApi) {
+          if (coreApi && !(mod.systemCapabilities || []).includes('core-api-v1')) throw hostError('mod_capability_unavailable');
           if (management && !(mod.systemCapabilities || []).includes('mod-management-v1')) throw hostError('mod_capability_unavailable');
           parent = pending.get(String(message.parentInvocationId || ''));
-          if (!parent?.trustedCaller || !parent.routeId?.startsWith('tool:')) throw hostError(management ? 'mod_management_caller_required' : 'mod_diagnostic_caller_required');
+          if (!parent?.trustedCaller || !parent.routeId?.startsWith('tool:')) throw hostError(coreApi ? 'core_api_caller_required' : management ? 'mod_management_caller_required' : 'mod_diagnostic_caller_required');
           caller = parent.trustedCaller;
         }
         const assertCallerActive = () => {
-          if (controller.signal.aborted || !parent || pending.get(String(message.parentInvocationId || '')) !== parent) throw hostError('mod_management_caller_required');
+          if (controller.signal.aborted || !parent || pending.get(String(message.parentInvocationId || '')) !== parent) throw hostError(coreApi ? 'core_api_caller_required' : 'mod_management_caller_required');
         };
         return capabilities[message.method](message.input, { signal: controller.signal, caller, assertCallerActive, waitForCaller: parent?.completed });
       })]);
@@ -625,7 +627,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
 
   // Deliberately send only identity and entrypoint. Database ownership and path
   // remain in core and are never part of the child activation context.
-  child.send({ type: 'activate', modId: mod.id, serverPath: mod.server, management: (mod.systemCapabilities || []).includes('mod-management-v1'), ...(systemCapability ? { systemCapability, controllerInstanceId } : {}) }, (error) => {
+  child.send({ type: 'activate', modId: mod.id, serverPath: mod.server, management: (mod.systemCapabilities || []).includes('mod-management-v1'), coreApi: (mod.systemCapabilities || []).includes('core-api-v1'), ...(systemCapability ? { systemCapability, controllerInstanceId } : {}) }, (error) => {
     if (!error || activationSettled) return;
     activationSettled = true;
     clearTimeout(activationTimer);
@@ -797,7 +799,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
         fail(hostError('mod_tool_cancelled'));
       };
       abortSignal?.addEventListener('abort', cancel, { once: true });
-      const timer = setTimeout(() => {
+      const timer = routeId === 'tool:burrow_api_request' && (mod.systemCapabilities || []).includes('core-api-v1') ? null : setTimeout(() => {
         if (!pending.has(requestId)) return;
         pending.delete(requestId);
         abortSignal?.removeEventListener('abort', cancel);

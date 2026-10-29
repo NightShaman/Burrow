@@ -207,6 +207,9 @@ async function activate(message) {
     scheduler: Object.freeze({ list: (input = {}) => capabilityRequest("listScheduledJobs", input), read: (jobId) => capabilityRequest("readScheduledJob", { jobId }), create: (input) => capabilityRequest("createScheduledJob", input), update: (jobId, patch) => capabilityRequest("updateScheduledJob", { jobId, patch }), delete: (jobId) => capabilityRequest("deleteScheduledJob", { jobId }), runs: (jobId, input = {}) => capabilityRequest("listScheduledJobRuns", { ...input, jobId }), trigger: (jobId) => capabilityRequest("triggerScheduledJob", { jobId }) }),
     logger: logger(modId),
   };
+  if (message.coreApi === true) {
+    context.coreApi = Object.freeze({ request: (input, options) => capabilityRequest('requestCoreApi', input, options) });
+  }
   if (message.management === true) {
     context.modManagement = Object.freeze({
       inventory: (input = {}) => capabilityRequest('managementInventory', input),

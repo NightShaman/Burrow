@@ -1,6 +1,7 @@
+import { coreApiCaller } from '../../src/core-api-dispatch.mjs';
 import { artifactResponseHeaders } from '../../src/artifact-response-policy.mjs';
 
-function operatorAudit() { return { actor: { type: 'operator', id: 'default' } }; }
+function operatorAudit(req) { const actor = coreApiCaller(req); return actor ? { actor: { type: 'agent', id: actor.caller.agentId }, runId: actor.caller.runId, sessionId: actor.caller.sessionId } : { actor: { type: 'operator', id: 'default' } }; }
 function statusCode(error) { return Number(error?.statusCode) || 400; }
 function sendAttachment(res, attachment) {
   const bytes = Buffer.isBuffer(attachment.content) ? attachment.content : Buffer.from(attachment.content || '');
@@ -64,7 +65,7 @@ export function createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundary
     }
     if (req.method === 'POST' && url.pathname === '/api/task-board/tasks') {
       const body = validateBoundaryBody('task-create', await readJsonBody(req));
-      sendJson(res, 201, await withTaskBoard(async (store) => ({ ok: true, task: await store.createTask(body, operatorAudit()) }))); return true;
+      sendJson(res, 201, await withTaskBoard(async (store) => ({ ok: true, task: await store.createTask(body, operatorAudit(req)) }))); return true;
     }
     if (url.pathname.startsWith('/api/task-board/tasks/')) {
       const parts = url.pathname.slice('/api/task-board/tasks/'.length).split('/').map(decodeURIComponent);
@@ -82,7 +83,7 @@ export function createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundary
         if (req.method === 'POST' && !attachmentId) {
           try {
             const body = await readJsonBody(req);
-            const attachment = await withTaskBoard((store) => store.addAttachment(taskId, body, operatorAudit()));
+            const attachment = await withTaskBoard((store) => store.addAttachment(taskId, body, operatorAudit(req)));
             sendJson(res, attachment ? 201 : 404, attachment ? { ok: true, attachment } : { ok: false, error: 'task_not_found' });
           } catch (error) { sendJson(res, statusCode(error), { ok: false, error: error?.message || 'task_attachment_failed' }); }
           return true;
@@ -93,17 +94,17 @@ export function createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundary
           return true;
         }
         if (req.method === 'DELETE' && attachmentId) {
-          const attachment = await withTaskBoard((store) => store.deleteAttachment(taskId, attachmentId, operatorAudit()));
+          const attachment = await withTaskBoard((store) => store.deleteAttachment(taskId, attachmentId, operatorAudit(req)));
           const status = attachment === null ? 404 : attachment === false ? 404 : 200;
           sendJson(res, status, attachment ? { ok: true, attachment } : { ok: false, error: attachment === null ? 'task_not_found' : 'task_attachment_not_found' }); return true;
         }
       }
       if (req.method === 'PATCH' && !action) {
-        const task = await withTaskBoard(async (store) => store.updateTask(taskId, await readJsonBody(req), operatorAudit()));
+        const task = await withTaskBoard(async (store) => store.updateTask(taskId, await readJsonBody(req), operatorAudit(req)));
         sendJson(res, task ? 200 : 404, task ? { ok: true, task } : { ok: false, error: 'task_not_found' }); return true;
       }
       if (req.method === 'DELETE' && !action) {
-        const task = await withTaskBoard(async (store) => store.deleteTask(taskId, operatorAudit()));
+        const task = await withTaskBoard(async (store) => store.deleteTask(taskId, operatorAudit(req)));
         sendJson(res, task ? 200 : 404, task ? { ok: true, task } : { ok: false, error: 'task_not_found' }); return true;
       }
       if (req.method === 'GET' && !action) {

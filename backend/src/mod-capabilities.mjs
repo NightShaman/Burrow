@@ -72,7 +72,7 @@ function summarizedRun(run) {
 }
 
 // Only this core-side service has access to PostgreSQL secrets and provider credentials.
-export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null, externalTurnDispatcher = null, generationDispatcher = null, stores = null, modStore = null, runtimeDiagnostics = null, modManagement = null, modAuthority = null } = {}) {
+export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null, externalTurnDispatcher = null, generationDispatcher = null, stores = null, modStore = null, runtimeDiagnostics = null, modManagement = null, coreApi = null, modAuthority = null } = {}) {
   if (typeof resolveAgentRuntime !== 'function') throw new Error('mod_agent_resolver_required');
   const injected = stores || {};
   for (const key of ['agents','models','scheduledJobs','conversations']) if (!injected[key]) throw new Error(`mod_${key}_store_required`);
@@ -115,6 +115,16 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
     await modAuthority.assertAllowed(ownerModId, 'mod-management-v1', caller.agentId);
     assertCallerActive();
     return modManagement[method](input, { ownerModId, caller: Object.freeze({ agentId: caller.agentId, sessionId: caller.sessionId || null, conversationId: caller.conversationId || null, runId: caller.runId || null }), waitForCaller, assertCallerActive });
+  }
+  async function requestCoreApi(input, { caller, signal, assertCallerActive } = {}) {
+    if (!coreApi?.request || !modAuthority || !caller?.agentId || typeof assertCallerActive !== 'function') throw new Error('core_api_caller_required');
+    assertCallerActive();
+    await modAuthority.assertAllowed(ownerModId, 'core-api-v1', caller.agentId);
+    assertCallerActive();
+    // Identity and privilege never come from the request body or headers.
+    return coreApi.request(input, { ownerModId, signal, assertCallerActive,
+      caller: Object.freeze({ agentId: caller.agentId, sessionId: caller.sessionId || null,
+        conversationId: caller.conversationId || null, runId: caller.runId || null }) });
   }
   const ownedJob = (store, jobId) => store.getOwnedJob(schedulerOwner(), bounded(jobId, 96));
   function page(input = {}, max = 100) { const value = plain(input); const limit = count(value.limit, 50, max); let offset = 0; if (value.cursor !== undefined && value.cursor !== null) { let cursor; try { cursor = JSON.parse(Buffer.from(bounded(value.cursor, 512), 'base64url').toString('utf8')); } catch { invalid(); } if (cursor?.ownerModId !== schedulerOwner() || !Number.isSafeInteger(cursor.offset) || cursor.offset < 1) invalid(); offset = cursor.offset; } return { value, limit, offset }; }
@@ -168,6 +178,7 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
   return Object.freeze({
     dispose,
     readRuntimeDiagnostics,
+    requestCoreApi,
     managementInventory: (input, options) => manage('inventory', input, options),
     managementSubmit: (input, options) => manage('submit', input, options),
     managementOperation: (input, options) => manage('operation', input, options),

@@ -1,9 +1,11 @@
+import { coreApiCaller } from './core-api-dispatch.mjs';
 // Core-owned compatibility policy. A manifest name or system flag is not trust.
 const CAPABILITY = 'execution-provider-v1';
 const PROVIDER_ID = 'node-goblin';
 const SOURCES = new Set(['nightshaman/node-goblin', 'goblinking-burrow/node-goblin']);
 
 export function isOperatorModAction(req) {
+  if (coreApiCaller(req)) return true; // Trusted Core API authority, not a fabricated human login.
   if (req?.burrowApiToken || !req?.burrowVerifiedAuth) return false;
   const auth = req.burrowVerifiedAuth;
   return (auth.enabled === true && auth.authenticated === true) || (auth.enabled === false && auth.authenticated === false);
