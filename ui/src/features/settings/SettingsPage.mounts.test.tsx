@@ -63,7 +63,7 @@ it('mounts only the selected configuration, with no hidden duplicate reads', asy
  const originButton = screen.getByRole('button', { name: 'Browser origin' });
  expect(originButton.closest('.settings-prototype-sections')).toBeTruthy();
  fireEvent.click(originButton);
- await waitFor(() => expect(screen.getByRole('button', { name: 'Save browser origin' }).hasAttribute('disabled')).toBe(false));
+ await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Check browser origin' }).hasAttribute('disabled')).toBe(false));
  expect(originButton.getAttribute('aria-current')).toBe('page');
  expect(screen.getByRole('heading', { name: 'Browser origin' }).closest('.settings-prototype-configuration')).toBeTruthy();
  expect(screen.queryByRole('button', { name: 'Save authentication' })).toBeNull();

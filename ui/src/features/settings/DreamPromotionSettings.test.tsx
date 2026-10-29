@@ -15,7 +15,7 @@ it('defaults missing values to true and persists both values across remount', as
   await waitFor(() => expect(toggle().disabled).toBe(false));
   expect(toggle().checked).toBe(true);
   for (const value of [false, true]) {
-    fireEvent.click(toggle()); fireEvent.click(screen.getByRole('button', { name: 'Save promotion settings' }));
+    fireEvent.click(toggle());
     await waitFor(() => expect(toggle().disabled).toBe(false));
     expect(settings).toEqual({ promoteDreamsToMemory: value });
     view.unmount(); view = render(<DreamPromotionSettings />);
@@ -30,9 +30,9 @@ it('blocks edits on failed read, retries, and preserves failed save draft', asyn
   fireEvent.click(screen.getByRole('button', { name: 'Retry loading promotion settings' }));
   await waitFor(() => expect(toggle().disabled).toBe(false));
   expect(toggle().checked).toBe(false);
-  fireEvent.click(toggle()); fireEvent.click(screen.getByRole('button', { name: 'Save promotion settings' }));
+  fireEvent.click(toggle());
   await screen.findByText(/Could not save/); expect(toggle().checked).toBe(true);
-  fireEvent.click(screen.getByRole('button', { name: 'Save promotion settings' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Retry saving promotion settings' }));
   await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
 });
 it('ignores a late save after navigation', async () => {
@@ -40,7 +40,7 @@ it('ignores a late save after navigation', async () => {
   vi.mocked(api).mockImplementation(async (_path, init) => init?.method === 'PUT' ? new Promise(r => { resolve = r; }) : { promoteDreamsToMemory: true });
   const view = render(<DreamPromotionSettings />);
   await waitFor(() => expect(toggle().disabled).toBe(false));
-  fireEvent.click(toggle()); fireEvent.click(screen.getByRole('button', { name: 'Save promotion settings' }));
+  fireEvent.click(toggle());
   view.unmount(); render(<DreamPromotionSettings />);
   await waitFor(() => expect(toggle().disabled).toBe(false));
   await act(async () => resolve({ promoteDreamsToMemory: false }));

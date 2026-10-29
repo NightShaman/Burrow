@@ -24,9 +24,12 @@ it('browser origin stays on failed save, then discards to the accepted preferenc
   mount(<BrowserOriginSettings />);
   const input = await screen.findByRole('checkbox', { name: 'Check browser origin' });
   fireEvent.click(input);
+  await screen.findByText('Could not save browser origin settings. Try saving again.');
+  expect(vi.mocked(api).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
   fireEvent.click(screen.getByRole('button', { name: 'Leave' }));
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
   await screen.findByText('Could not save browser origin settings. Try saving again.');
+  expect(vi.mocked(api).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(2);
   expect(screen.getByRole('checkbox', { name: 'Check browser origin' })).toHaveProperty('checked', true);
   expect(screen.queryByText('Destination')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Leave' }));

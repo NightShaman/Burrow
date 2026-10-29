@@ -13,8 +13,7 @@ async function mount() { render(<BrowserOriginSettings />); await waitFor(() => 
 describe('Browser origin settings', () => {
   it('loads default on, saves the preference and reports returned effective state', async () => {
     await mount(); expect(checkbox().checked).toBe(true);
-    fireEvent.click(checkbox()); mocked.mockResolvedValueOnce(response(false));
-    fireEvent.click(screen.getByText('Save browser origin'));
+    mocked.mockResolvedValueOnce(response(false)); fireEvent.click(checkbox());
     await screen.findByText('Browser origin setting saved and applied.');
     expect(mocked).toHaveBeenLastCalledWith('/api/settings/browser-origin', expect.objectContaining({ method: 'PUT', body: '{"checkOrigin":false}' }));
     expect(screen.getByText('Effective: Off')).toBeTruthy();
@@ -22,30 +21,30 @@ describe('Browser origin settings', () => {
   it('distinguishes saved preference from an environment override after save', async () => {
     mocked.mockResolvedValue(response(true, false, 'environment')); await mount();
     expect(checkbox().checked).toBe(true); expect(screen.getByText(/Effective: Off.*Environment override/)).toBeTruthy();
-    fireEvent.click(screen.getByText('Save browser origin'));
+    mocked.mockResolvedValueOnce(response(false, false, 'environment')); fireEvent.click(checkbox());
     await screen.findByText('Preference saved. Environment override remains active.');
     expect(screen.queryByText('Browser origin setting saved and applied.')).toBeNull();
   });
   it('locks edits and saves during loading and saving', async () => {
     const load = deferred(); mocked.mockReturnValueOnce(load.promise); render(<BrowserOriginSettings />);
-    expect(checkbox().disabled).toBe(true); expect(screen.getByText('Save browser origin')).toHaveProperty('disabled', true);
+    expect(checkbox().disabled).toBe(true);
     await act(async () => load.resolve(response()));
-    const save = deferred(); mocked.mockReturnValueOnce(save.promise); fireEvent.click(screen.getByText('Save browser origin'));
-    expect(checkbox().disabled).toBe(true); expect(screen.getByText('Saving…')).toHaveProperty('disabled', true);
+    const save = deferred(); mocked.mockReturnValueOnce(save.promise); fireEvent.click(checkbox());
+    expect(checkbox().disabled).toBe(true); expect(screen.getByText('Saving browser origin…')).toBeTruthy();
     await act(async () => save.resolve(response())); expect(checkbox().disabled).toBe(false);
   });
   it('retries loading and preserves the draft on save failure', async () => {
     mocked.mockRejectedValueOnce(new Error('offline')); render(<BrowserOriginSettings />);
     await screen.findByText('Could not load browser origin settings.'); fireEvent.click(screen.getByText('Retry browser origin'));
-    await waitFor(() => expect(checkbox().disabled).toBe(false)); fireEvent.click(checkbox());
-    mocked.mockRejectedValueOnce(new Error('offline')); fireEvent.click(screen.getByText('Save browser origin'));
+    await waitFor(() => expect(checkbox().disabled).toBe(false));
+    mocked.mockRejectedValueOnce(new Error('offline')); fireEvent.click(checkbox());
     await screen.findByText('Could not save browser origin settings. Try saving again.'); expect(checkbox().checked).toBe(false); expect(checkbox().disabled).toBe(false);
   });
   it.each(['load', 'save'])('ignores an old runtime owner %s completion after remount', async action => {
     const old = deferred();
     if (action === 'load') mocked.mockReturnValueOnce(old.promise);
     const view = render(<BrowserOriginSettings />);
-    if (action === 'save') { await waitFor(() => expect(checkbox().disabled).toBe(false)); mocked.mockReturnValueOnce(old.promise); fireEvent.click(screen.getByText('Save browser origin')); }
+    if (action === 'save') { await waitFor(() => expect(checkbox().disabled).toBe(false)); mocked.mockReturnValueOnce(old.promise); fireEvent.click(checkbox()); }
     view.unmount(); await mount();
     await act(async () => old.resolve(response(false))); expect(checkbox().checked).toBe(true); expect(screen.queryByText('Browser origin setting saved and applied.')).toBeNull();
   });
