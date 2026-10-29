@@ -31,6 +31,27 @@ describe('minionTree presentation', () => {
     expect(tree[1].children).toEqual([]);
   });
 
+  it('matches both parent ids when a run id is reused across sessions', () => {
+    const tree = minionTree([
+      child('expected-parent', { resourceId: 'expected-session', runId: 'reused-run' }),
+      child('other-parent', { resourceId: 'other-session', runId: 'reused-run' }),
+      child('descendant', { parentSessionId: 'expected-session', parentRunId: 'reused-run' }),
+    ]);
+    expect(tree.map(node => node.minion.id)).toEqual(['expected-parent', 'other-parent']);
+    expect(tree[0].children.map(node => node.minion.id)).toEqual(['descendant']);
+    expect(tree[1].children).toEqual([]);
+  });
+
+  it('keeps conflicting parent ids visible as an orphan without either fallback', () => {
+    const tree = minionTree([
+      child('session-match', { resourceId: 'expected-session', runId: 'other-run' }),
+      child('run-match', { resourceId: 'other-session', runId: 'expected-run' }),
+      child('descendant', { parentSessionId: 'expected-session', parentRunId: 'expected-run' }),
+    ]);
+    expect(tree.map(node => node.minion.id)).toEqual(['session-match', 'run-match', 'descendant']);
+    expect(tree.every(node => node.children.length === 0)).toBe(true);
+  });
+
   it('keeps a missing parent run visible as an orphan despite a matching session', () => {
     const tree = minionTree([
       child('other-run', { resourceId: 'shared-session', runId: 'other-run' }),

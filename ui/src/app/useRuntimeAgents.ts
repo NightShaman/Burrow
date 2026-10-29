@@ -4,9 +4,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type AgentStatus, type ContextStatus, type RuntimeAgent } from './api';
 import type { Agent, ContextDetails, SavedProvider, Subagent } from './types';
 import { usePolling, type IsPollingCancelled } from './usePolling';
+import { childStreamId } from './useRuntimeSelection';
 
 type RuntimeAgentHydrationOptions = {
   selectedAgentId: string;
+  selectedStreamId: string;
   setSelectedAgentId: (agentId: string) => void;
   parentSessionIdForAgent: (agentId: string) => string;
   runtimeProviders: React.MutableRefObject<SavedProvider[]>;
@@ -22,7 +24,7 @@ type AgentOverviewEntry = {
   identity?: AgentIdentity | null;
   sessionId: string;
   selection: ModelSelection;
-  status: { agents: AgentStatus[] };
+  status: { agents: AgentStatus[]; minionScope?: 'agent' | 'session' };
   contexts: Record<string, ContextStatus>;
   error?: string;
 };
@@ -82,20 +84,23 @@ async function loadLegacyOverview(parentSessionIdForAgent: (agentId: string) => 
   return Promise.all(agents.map(async (agent) => {
     const sessionId = parentSessionIdForAgent(agent.id);
     if (!agent.enabled) return { agent, identity: identitiesByAgentId.get(agent.id), sessionId, selection: null, status: { agents: [] }, contexts: {} };
-    const [status, context, selection] = await Promise.all([
-      api<{ agents: AgentStatus[] }>( `/api/agent-status?sessionId=${encodeURIComponent(sessionId)}&agentId=${encodeURIComponent(agent.id)}`, { signal }).catch(() => ({ agents: [] })),
-      api<{ status: ContextStatus }>( `/api/session/context-status?agentId=${encodeURIComponent(agent.id)}&sessionId=${encodeURIComponent(sessionId)}`, { signal }).catch(() => ({ status: {} })),
+    const [statusResult, contextResult, selection] = await Promise.all([
+      api<{ agents: AgentStatus[] }>( `/api/agent-status?sessionId=${encodeURIComponent(sessionId)}&agentId=${encodeURIComponent(agent.id)}`, { signal }).then((status) => ({ status })).catch((error: Error) => ({ error })),
+      api<{ status: ContextStatus }>( `/api/session/context-status?agentId=${encodeURIComponent(agent.id)}&sessionId=${encodeURIComponent(sessionId)}`, { signal }).then((context) => ({ context })).catch((error: Error) => ({ error })),
       api<{ selection: ModelSelection }>( `/api/agents/${encodeURIComponent(agent.id)}/model-selection`, { signal }).catch(() => ({ selection: null })),
     ]);
+    const status = 'status' in statusResult ? statusResult.status : { agents: [] };
+    const context = 'context' in contextResult ? contextResult.context : { status: {} };
     const childContexts = await Promise.all(status.agents.filter((item) => item.sessionId !== sessionId).map(async (child) => {
       const result = await api<{ status: ContextStatus }>( `/api/session/context-status?agentId=${encodeURIComponent(agent.id)}&sessionId=${encodeURIComponent(child.sessionId)}`, { signal }).catch(() => ({ status: {} }));
       return [child.sessionId, result.status] as const;
     }));
-    return { agent, identity: identitiesByAgentId.get(agent.id), sessionId, selection: selection.selection, status, contexts: { [sessionId]: context.status, ...Object.fromEntries(childContexts) } };
+    const statusError = 'error' in statusResult ? statusResult.error : undefined;
+    return { agent, identity: identitiesByAgentId.get(agent.id), sessionId, selection: selection.selection, status, contexts: { [sessionId]: context.status, ...Object.fromEntries(childContexts) }, error: statusError?.message };
   }));
 }
 
-export function useRuntimeAgents({ selectedAgentId, setSelectedAgentId, parentSessionIdForAgent, runtimeProviders, setSelectedStreamId, onNoAgents, reportError }: RuntimeAgentHydrationOptions) {
+export function useRuntimeAgents({ selectedAgentId, selectedStreamId, setSelectedAgentId, parentSessionIdForAgent, runtimeProviders, setSelectedStreamId, onNoAgents, reportError }: RuntimeAgentHydrationOptions) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [registryState, setRegistryState] = useState<RuntimeRegistryState>('loading');
   const [registryError, setRegistryError] = useState('');
@@ -105,6 +110,8 @@ export function useRuntimeAgents({ selectedAgentId, setSelectedAgentId, parentSe
   agentsRef.current = agents;
   const selectedAgentIdRef = useRef(selectedAgentId);
   selectedAgentIdRef.current = selectedAgentId;
+  const selectedStreamIdRef = useRef(selectedStreamId);
+  selectedStreamIdRef.current = selectedStreamId;
   const targetKey = 'local';
   useEffect(() => {
     setAgents([]);
@@ -123,23 +130,36 @@ export function useRuntimeAgents({ selectedAgentId, setSelectedAgentId, parentSe
       const sessions = Object.fromEntries(registeredAgents.map((agent) => [agent.id, parentSessionIdForAgent(agent.id)]));
       let entries: AgentOverviewEntry[];
       try {
-        entries = (await api<{ agents: AgentOverviewEntry[] }>('/api/agents/overview', { signal, method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessions }) })).agents;
+        entries = (await api<{ agents: AgentOverviewEntry[] }>('/api/agents/overview', { signal, method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessions, minionScope: 'agent' }) })).agents;
       } catch (error) {
         if ((error as Error & { status?: number }).status !== 404) throw error;
         entries = await loadLegacyOverview(parentSessionIdForAgent, signal);
       }
+      const currentAnchors = Object.fromEntries(registeredAgents.map((agent) => [agent.id, parentSessionIdForAgent(agent.id)]));
       hydrated = entries.map((entry) => {
+        const oldAgent = agentsRef.current.find((candidate) => candidate.id === entry.agent.id);
+        const anchorChangedInFlight = currentAnchors[entry.agent.id] !== sessions[entry.agent.id] || entry.sessionId !== sessions[entry.agent.id];
+        if (anchorChangedInFlight) return {
+          ...(oldAgent ?? asAgent(entry)),
+          activity: entry.agent.enabled ? 'Unknown' : 'Disabled',
+          context: null,
+          contextDetails: undefined,
+          minionScope: 'session',
+          minionCoverage: oldAgent ? 'stale' : 'unavailable',
+          subagents: oldAgent?.subagents.map((child) => ({ ...child, retained: true })) ?? [],
+        };
         const agent = asAgent(entry);
         const parentStatus = entry.status.agents.find((item) => item.sessionId === entry.sessionId);
-        // The backend scopes this list to the requested subtree, including
-        // retained descendants whose immediate parent is no longer present.
+        // Keep all returned descendants, including retained orphans and the
+        // requested anchor itself when the backend identifies it as a minion.
         // Keep it flat for stream selection; only the rail builds a hierarchy.
-        const childStatuses = entry.status.agents.filter((item) => item.sessionId !== entry.sessionId);
+        const childStatuses = entry.status.agents.filter((item) => item.sessionId !== entry.sessionId || (item.depth ?? 0) > 0).filter((item, index, all) => all.findIndex((other) => other.sessionId === item.sessionId) === index);
         const subagents: Subagent[] = childStatuses.map((child) => {
           const childContext = entry.contexts[child.sessionId] ?? {};
           const outcome = minionOutcome(child.status, child.result);
+          const streamId = childStreamId(entry.agent.id, child.sessionId);
           return {
-            id: child.sessionId, resourceId: child.sessionId, stream: child.sessionId,
+            id: streamId, resourceId: child.sessionId, stream: streamId,
             agentId: entry.agent.id, targetId: 'local', subagentId: child.subagentId,
             runId: child.runId, parentSessionId: child.parentSessionId, parentRunId: child.parentRunId,
             depth: child.depth, maxDepth: child.maxDepth,
@@ -160,7 +180,11 @@ export function useRuntimeAgents({ selectedAgentId, setSelectedAgentId, parentSe
           return { ...agent, provider: provider.provider, model, effort, temperature };
         })();
         const parentContext = entry.contexts[entry.sessionId] ?? {};
-        return { ...configured, activity: entry.agent.enabled ? formatAgentActivity(parentStatus?.status?.toLowerCase()) : 'Disabled', context: contextPercent(parentContext), contextDetails: contextDetails(parentContext), subagents };
+        // An agent-level failure is not an authoritative empty minion list or
+        // proof of agent-wide coverage. Keep every known child until a good load.
+        const knownChildren = entry.error ? oldAgent?.subagents.map((child) => ({ ...child, retained: true })) : undefined;
+        const minionCoverage = entry.error ? (knownChildren ? 'stale' : 'unavailable') : 'current';
+        return { ...configured, activity: entry.agent.enabled ? formatAgentActivity(parentStatus?.status?.toLowerCase()) : 'Disabled', context: contextPercent(parentContext), contextDetails: contextDetails(parentContext), minionScope: !entry.error && entry.status.minionScope === 'agent' ? 'agent' : 'session', minionCoverage, subagents: knownChildren ?? subagents };
       });
     } catch (error) { loadError = error as Error; }
     if (isCancelled() || sequence !== refreshSequence.current) return;
@@ -172,6 +196,13 @@ export function useRuntimeAgents({ selectedAgentId, setSelectedAgentId, parentSe
     const fallbackAgentId = enabled[0]?.id ?? '';
     const latestSelectedAgentId = selectedAgentIdRef.current;
     const nextAgentId = enabled.some((agent) => agent.id === latestSelectedAgentId) ? latestSelectedAgentId : fallbackAgentId;
+    // Keep an actively viewed child identifiable even if retention or a transient
+    // scoped response removes it from the latest overview. Never switch its transcript.
+    hydrated = hydrated.map((agent) => {
+      if (agent.id !== latestSelectedAgentId || selectedStreamIdRef.current === agent.id) return agent;
+      const retained = agentsRef.current.find((old) => old.id === agent.id)?.subagents.find((child) => child.id === selectedStreamIdRef.current);
+      return retained && !agent.subagents.some((child) => child.id === retained.id) ? { ...agent, subagents: [...agent.subagents, { ...retained, retained: true }] } : agent;
+    });
     setAgents(hydrated);
     setRegistryState(hydrated.length === 0 ? 'empty' : 'ready');
     setRegistryStale(false);

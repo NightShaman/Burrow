@@ -59,7 +59,9 @@ export function projectSubagentTree(records = [], { agentId = null, sessionId = 
     bySession.get(node.sessionId).push(node);
   }
   const parentOf = node => {
-    const candidates = bySession.get(node.parentSessionId) || [];
+    const candidates = (bySession.get(node.parentSessionId) || []).filter(parent =>
+      !(node.rootSessionId && parent.rootSessionId && node.rootSessionId !== parent.rootSessionId)
+      && !(node.rootRunId && parent.rootRunId && node.rootRunId !== parent.rootRunId));
     // A known run mismatch is not an ancestry edge. Historical records without
     // a trace run id can still be joined by their immediate session identity.
     return (node.parentRunId && candidates.find(parent => parent.runId === node.parentRunId))
@@ -75,8 +77,12 @@ export function projectSubagentTree(records = [], { agentId = null, sessionId = 
       if (!node.rootRunId && current.rootRunId) node.rootRunId = current.rootRunId;
       const parent = parentOf(current);
       if (!parent) {
-        if (!node.rootSessionId) node.rootSessionId = current.parentSessionId;
-        if (!node.rootRunId) node.rootRunId = current.parentRunId;
+        // An orphan's immediate parent is not necessarily its root. Only a
+        // retained depth-one ancestor can establish an otherwise absent root.
+        if (current.depth === 1) {
+          if (!node.rootSessionId) node.rootSessionId = current.parentSessionId;
+          if (!node.rootRunId) node.rootRunId = current.parentRunId;
+        }
         break;
       }
       current = parent;
@@ -155,7 +161,7 @@ export function sessionMinionAncestry({ sessionId, runId = null, metadata = {}, 
     subagentId: child ? text(metadata?.subagentId) : null,
     depth: child ? (Number.isInteger(marker.depth) && marker.depth > 0 ? marker.depth : 1) : 0,
     maxDepth: child ? maxDepthOr(marker.maxDepth) : maxDepthOr(maxDepth),
-    rootSessionId: text(marker.rootSessionId) || (child ? text(metadata?.parentSessionId) : sessionId),
-    rootRunId: text(marker.rootRunId) || (child ? text(metadata?.parentRunId) : runId),
+    rootSessionId: text(marker.rootSessionId) || (child ? (!marker.depth || marker.depth === 1 ? text(metadata?.parentSessionId) : null) : sessionId),
+    rootRunId: text(marker.rootRunId) || (child ? (!marker.depth || marker.depth === 1 ? text(metadata?.parentRunId) : null) : runId),
   };
 }

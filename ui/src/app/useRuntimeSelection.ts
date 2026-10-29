@@ -1,6 +1,10 @@
 import { useCallback, useState } from 'react';
 import { usePersistedAgentSelection } from './usePersistedLayout';
 
+// Child sessions are only unique within their owning agent. Keep this UI-only
+// identity separate from the raw session resource used by runtime APIs.
+export const childStreamId = (agentId: string, sessionId: string) => JSON.stringify(['child', agentId, sessionId]);
+
 export function useRuntimeSelection() {
   const [selectedAgentId, setSelectedAgentId] = usePersistedAgentSelection();
   const [selectedStreamId, setSelectedStreamId] = useState('');
@@ -11,9 +15,9 @@ export function useRuntimeSelection() {
     setSelectedStreamId(agentId);
   }, [setSelectedAgentId]);
 
-  const selectChildStream = useCallback((agentId: string, streamId: string) => {
+  const selectChildStream = useCallback((agentId: string, sessionId: string) => {
     setSelectedAgentId(agentId);
-    setSelectedStreamId(streamId);
+    setSelectedStreamId(childStreamId(agentId, sessionId));
   }, [setSelectedAgentId]);
 
   const showParentStream = useCallback(() => {

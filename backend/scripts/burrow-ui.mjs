@@ -2605,7 +2605,7 @@ async function agentOverview(body = {}) {
     try {
       const agentRuntime = await resolveAgentRuntime(agent.id);
       const [status, runtime] = await Promise.all([
-        agentStatusForSession(sessionId, agentRuntime),
+        agentStatusForSession(sessionId, agentRuntime, { minionScope: body.minionScope }),
         runtimeConfig(agent.id),
       ]);
       const matchingRuns = [...activeChatRuns.values()].filter((run) => run.agentId === agent.id && run.sessionId === sessionId);
@@ -2639,7 +2639,7 @@ async function agentOverview(body = {}) {
   return { ok: true, agents: overview };
 }
 
-async function agentStatusForSession(sessionId = 'default', agentRuntime = null) {
+async function agentStatusForSession(sessionId = 'default', agentRuntime = null, { minionScope = 'session' } = {}) {
   agentRuntime ||= await resolveAgentRuntime();
   const [records, metadata, settings] = await Promise.all([
     listSubagentSummaries(agentRuntime),
@@ -2657,7 +2657,9 @@ async function agentStatusForSession(sessionId = 'default', agentRuntime = null)
     ...activeChatRunSummary(run),
     metadata: run.sessionId === sessionId ? metadata : await postgresApplication.stores.conversations.getMetadata({ agentId: agentRuntime.agentId, sessionId: run.sessionId }),
   })));
-  const tree = projectSubagentTree(records, { agentId: agentRuntime.agentId, sessionId, rootSessionId: requested.depth > 0 ? requested.rootSessionId : null, activeSessions, visible: item => visibleChildWorkRecord(item) || liveSessions.has(item.sessionId) });
+  // Only bulk rail hydration opts into agent-wide discovery. Chat recovery and
+  // cancellation stay scoped to the requested conversation's subtree.
+  const tree = projectSubagentTree(records, { agentId: agentRuntime.agentId, sessionId: minionScope === 'agent' ? null : sessionId, rootSessionId: minionScope === 'agent' ? null : requested.depth > 0 ? requested.rootSessionId : null, activeSessions, visible: item => visibleChildWorkRecord(item) || liveSessions.has(item.sessionId) });
   const statusFor = (item) => item.status === 'running'
     ? (item.phase === 'streaming' ? 'STREAMING' : item.phase === 'verifying' ? 'VERIFYING' : 'THINKING')
     : item.status === 'succeeded' ? 'DONE'
@@ -2679,6 +2681,7 @@ async function agentStatusForSession(sessionId = 'default', agentRuntime = null)
   };
   return {
     sessionId,
+    minionScope,
     agents: [
       child ? { ...rowFor(child), ...ancestry } : {
         ...ancestry,

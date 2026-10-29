@@ -2,6 +2,7 @@ export const MAX_OVERVIEW_CHILD_CONTEXTS = 12;
 
 export function normalizeOverviewBody(body = {}) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw Object.assign(new Error('request_body_object_required'), { statusCode: 400 });
+  if (body.minionScope !== undefined && !['session', 'agent'].includes(body.minionScope)) throw Object.assign(new Error('minion_scope_invalid'), { statusCode: 400 });
   if (body.sessions === undefined) return body;
   if (!body.sessions || typeof body.sessions !== 'object' || Array.isArray(body.sessions)) throw Object.assign(new Error('sessions_invalid'), { statusCode: 400 });
   const entries = Object.entries(body.sessions);

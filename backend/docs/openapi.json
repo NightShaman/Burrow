@@ -1545,7 +1545,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "Page size (1–200, default 100).",
+            "description": "Page size (1\u2013200, default 100).",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -3991,10 +3991,42 @@
           "Agents"
         ],
         "summary": "Read bulk agent UI overview",
-        "description": "Return registered agents with identities, requested-session/descendant status, context usage, and model selections in one request. The optional sessions map selects each agent’s session. Status uses the same runtime-owned ancestry as /api/agent-status, including metadata-only live descendants and honest orphans. Context inspection is bounded to the requested session plus 12 descendants per agent; contextHydration.truncated reports omitted contexts, not a truncated status tree.",
+        "description": "Return registered agents with identities, requested-session/descendant status, context usage, and model selections in one request. The optional sessions map selects each agent\u2019s session. Status uses the same runtime-owned ancestry as /api/agent-status, including metadata-only live descendants and honest orphans. Context inspection is bounded to the requested session plus 12 descendants per agent; contextHydration.truncated reports omitted contexts, not a truncated status tree. Opt in to agent-wide minions with minionScope: agent (session is the default). status.minionScope: agent confirms a successful all-origin scan for that agent; disabled/error entries do not claim coverage. The anchor session and its activity remain independent. Ordinary unrelated chats are not minions; requested child anchors retain depth and appear once. Depth-two orphans without root metadata keep unknown roots. Context hydration remains bounded to the anchor plus 12 distinct minion sessions; session recovery and cancellation stay scoped.",
         "operationId": "getAgentOverview",
         "requestBody": {
-          "$ref": "#/components/requestBodies/JsonBody"
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessions": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "description": "Optional mapping of registered agent IDs to requested anchor sessions."
+                  },
+                  "minionScope": {
+                    "type": "string",
+                    "enum": [
+                      "session",
+                      "agent"
+                    ],
+                    "default": "session",
+                    "description": "Session subtree (default) or visible minions across all originating sessions of each agent."
+                  }
+                }
+              },
+              "example": {
+                "sessions": {
+                  "hatchet": "default"
+                },
+                "minionScope": "agent"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
@@ -6720,7 +6752,7 @@
         ],
         "summary": "Read an agent minion depth setting",
         "operationId": "getAgentMinionSettings",
-        "description": "Read the per-agent maximum nesting depth (integer 0–2, default 1). This is independent of minion model selection. Zero disables spawning, one permits direct children, and two also permits grandchildren. Requires an enabled registered agent.",
+        "description": "Read the per-agent maximum nesting depth (integer 0\u20132, default 1). This is independent of minion model selection. Zero disables spawning, one permits direct children, and two also permits grandchildren. Requires an enabled registered agent.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PathAgentId"
@@ -6728,7 +6760,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The agent’s durable minion depth setting; defaults to one when unset.",
+            "description": "The agent\u2019s durable minion depth setting; defaults to one when unset.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6821,7 +6853,7 @@
         },
         "responses": {
           "200": {
-            "description": "The agent’s durable minion depth setting; defaults to one when unset.",
+            "description": "The agent\u2019s durable minion depth setting; defaults to one when unset.",
             "content": {
               "application/json": {
                 "schema": {

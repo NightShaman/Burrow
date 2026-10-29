@@ -713,3 +713,23 @@ it.each(['Context compacted.', 'Nothing to compact.', 'Compaction failed.'])('hy
  const second = renderHook(() => useChatSession(agentId));
  await waitFor(() => expect(second.result.current.turns.map(turn => turn.content)).toEqual(['/compact', answer]));
 });
+
+it('remembers explicitly selected parent sessions and returns from nested children to their root', async () => {
+  apiMock.mockImplementation(async path => {
+    if (path === sessionListPath) return { sessions: [{ id: 'default' }, { id: 'named' }] };
+    if (path.startsWith('/api/sessions/')) return { session: { turns: [] } };
+    return {};
+  });
+  const { result } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.sessionId).toBe('default'));
+  act(() => result.current.selectSession('named'));
+  expect(result.current.parentSessionIdForAgent(agentId)).toBe('named');
+  act(() => result.current.selectChildSession(agentId, 'nested', 'another-root'));
+  expect(result.current.sessionId).toBe('nested');
+  act(() => result.current.prepareAgentSelection(agentId));
+  expect(result.current.sessionId).toBe('another-root');
+  expect(result.current.parentSessionIdForAgent(agentId)).toBe('another-root');
+  act(() => result.current.selectChildSession(agentId, 'unknown'));
+  act(() => result.current.prepareAgentSelection(agentId));
+  expect(result.current.sessionId).toBe('another-root');
+});

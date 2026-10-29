@@ -44,8 +44,8 @@ export function useChatSession(selectedAgentId: string) {
     window.addEventListener(conversationCacheInvalidated, invalidate);
     return () => window.removeEventListener(conversationCacheInvalidated, invalidate);
   }, []);
-  // The displayed chat session may be a child session. Agent-status is scoped
-  // separately to the parent session and must never follow that selection.
+  // Track the displayed session separately from each agent’s return anchor.
+  // A child selection must not replace the root used when returning to its agent.
   const sessionIdByAgentRef = useRef<Record<string, string>>({});
   const parentSessionIdByAgentRef = useRef<Record<string, string>>({});
   const toolActivityByRunRef = useRef<Record<string, ToolActivity>>({});
@@ -133,7 +133,7 @@ export function useChatSession(selectedAgentId: string) {
       setSessionId((current) => {
         const remembered = sessionIdByAgentRef.current[selectedAgentId];
         const availableSessionIds = new Set(cachedSessions.map((session) => session.id));
-        const rememberedSelection = remembered && remembered !== 'default' ? remembered : '';
+        const rememberedSelection = remembered || '';
         const nextSessionId = rememberedSelection || ([current, 'default', cachedSessions[0]?.id].find((id): id is string => Boolean(id && availableSessionIds.has(id))) ?? '');
         if (nextSessionId) sessionIdByAgentRef.current[selectedAgentId] = nextSessionId;
         if (!parentSessionIdByAgentRef.current[selectedAgentId]) parentSessionIdByAgentRef.current[selectedAgentId] = availableSessionIds.has('default') ? 'default' : cachedSessions[0]?.id ?? 'default';
@@ -150,19 +150,15 @@ export function useChatSession(selectedAgentId: string) {
       setSessionId((current) => {
         const remembered = sessionIdByAgentRef.current[selectedAgentId];
         const availableSessionIds = new Set(nextSessions.map((session) => session.id));
-        // Child sessions are surfaced by /api/agent-status, not necessarily by
-        // the parent's /api/sessions list. Preserve an explicitly selected
-        // non-default session while that list refreshes.
         // `remembered` is the authoritative selection for this agent. A child
         // session intentionally is not required to appear in the parent's
         // `/api/sessions` collection, so do not discard it during the list
         // refresh that follows a rail click.
-        const rememberedSelection = remembered && remembered !== 'default' ? remembered : '';
+        const rememberedSelection = remembered || '';
         const nextSessionId = rememberedSelection || ([current, 'default', nextSessions[0]?.id].find((id): id is string => Boolean(id && availableSessionIds.has(id))) ?? '');
         if (nextSessionId) sessionIdByAgentRef.current[selectedAgentId] = nextSessionId;
         if (!parentSessionIdByAgentRef.current[selectedAgentId]) {
-          // Parent status/context must follow the canonical default session,
-          // not whichever named session the API happens to return first.
+          // Initialize the return anchor when no explicit parent or root is known.
           parentSessionIdByAgentRef.current[selectedAgentId] = availableSessionIds.has('default') ? 'default' : nextSessions[0]?.id ?? 'default';
         }
         return nextSessionId;
@@ -252,6 +248,7 @@ export function useChatSession(selectedAgentId: string) {
     // Remember explicit choices before React state changes so concurrent list
     // refreshes cannot restore the previous session.
     sessionIdByAgentRef.current[targetAgentId] = targetSessionId;
+    parentSessionIdByAgentRef.current[targetAgentId] = targetSessionId;
     setSessionId(targetSessionId);
     setTurns(conversationCacheRef.current[conversationCacheKey(targetAgentId, targetSessionId)] ?? []);
     setIsNewSession(false);
@@ -259,8 +256,7 @@ export function useChatSession(selectedAgentId: string) {
   }, [selectedAgentId, sessionId, clearActivity]);
   const prepareAgentSelection = useCallback((agentId: string) => {
     clearActivity();
-    // Rail selections always reopen the parent's canonical session rather than
-    // inheriting a displayed child session.
+    // Return to this agent’s remembered parent/root anchor, not the child.
     const targetSessionId = parentSessionIdByAgentRef.current[agentId] ?? '';
     if (targetSessionId) sessionIdByAgentRef.current[agentId] = targetSessionId;
     else delete sessionIdByAgentRef.current[agentId];
@@ -270,9 +266,10 @@ export function useChatSession(selectedAgentId: string) {
     setIsNewSession(false);
     setChatError('');
   }, [clearActivity]);
-  const selectChildSession = useCallback((agentId: string, childSessionId: string) => {
+  const selectChildSession = useCallback((agentId: string, childSessionId: string, rootSessionId?: string | null) => {
     clearActivity();
     childSessionsRef.current.add(conversationCacheKey(agentId, childSessionId));
+    if (rootSessionId) parentSessionIdByAgentRef.current[agentId] = rootSessionId;
     sessionIdByAgentRef.current[agentId] = childSessionId;
     setSessionId(childSessionId);
     setTurns(conversationCacheRef.current[conversationCacheKey(agentId, childSessionId)] ?? []);
