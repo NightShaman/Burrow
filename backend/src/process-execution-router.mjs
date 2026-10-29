@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { remoteTelemetryConfiguration } from './remote-telemetry-configuration.mjs';
+import { startExecutionDispatch } from './execution-operational-telemetry.mjs';
 
 function requiredId(value, name) {
   const text = String(value || '').trim();
@@ -58,7 +59,7 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
     if (command && process.args?.length) throw new Error('args_with_command_invalid');
     // This private transport is owned by the run, never by request/process.
     const telemetryConfiguration = remoteTelemetryConfiguration(context.telemetry?.remoteConfiguration?.(parentRunId));
-    const result = await remoteController.executeProcess({
+    const dispatch = {
       operationId,
       targetId,
       parentRunId,
@@ -75,7 +76,13 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
       },
       ...(request.protectedValues ? { protectedValues: { ...request.protectedValues } } : {}),
       ...(request.protectedBindingMetadata ? { protectedBindingMetadata: request.protectedBindingMetadata.map((entry) => ({ ...entry })) } : {}),
-    }, { abortSignal: context.abortSignal || null });
+    };
+    const completeDispatch = startExecutionDispatch({ controller: remoteController, target, context, operation: 'process', operationId });
+    let result;
+    try {
+      result = await remoteController.executeProcess(dispatch, { abortSignal: context.abortSignal || null });
+      completeDispatch(result);
+    } catch (error) { completeDispatch(null, error); throw error; }
     return result && typeof result === 'object' ? { ...result, operationId: result.operationId || operationId } : result;
   };
 }

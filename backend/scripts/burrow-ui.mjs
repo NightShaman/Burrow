@@ -107,7 +107,7 @@ import { createRuntimeMetricsCollector } from '../src/runtime-metrics.mjs';
 import { createRuntimeServerLogger, safeOperationalError } from '../src/runtime-server-log.mjs';
 import { operationalEvent } from '../src/operational-log.mjs';
 import { instrumentHttpResponse, correlateHttpRun, recordHttpFailure, observeHttpResult, observeHttpRunEvent, observeModelRecovery, createCatalogRefreshDiagnostics } from '../src/http-operational-log.mjs';
-import { logAuthFailure } from '../src/ui-auth-diagnostics.mjs';
+import { logAuthFailure, startAuthLoginTelemetry, observeAuthEnvironmentOverride } from '../src/ui-auth-diagnostics.mjs';
 import { latestProviderRequest } from '../src/provider-request-inspection.mjs';
 import { chatCommandHelpText, chatCommandResponse, parseChatCommand } from '../src/chat-commands.mjs';
 import { activeChatRunKey, activeChatRunSummaries, activeChatRunSummary, cancelActiveChatRun, registerActiveAgentRun } from '../src/active-chat-runs.mjs';
@@ -239,6 +239,7 @@ await hydrateMcpProviderStates({ runtimeRoot: process.env.BURROW_MCPORTER_ROOT |
 const runtimeMetrics = createRuntimeMetricsCollector({ runtimeRoot });
 const otelRuntime = createReconfigurableOtelRuntime({ serviceVersion: releaseVersion, logger: serverLogger });
 await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: postgresApplication.stores.metadata }));
+await runtimeConfig();
 await runtimeOwnership.reconcileModJobs(postgresApplication.stores);
 const generationDispatcher = createModGenerationDispatcher({ logger: serverLogger, store: postgresApplication.stores.generations, generateText: createModTextGenerator({ models: postgresApplication.stores.models }) });
 const chatInputRunner = createChatInputRunner({ store: postgresApplication.stores.chatInputs, stores: postgresApplication.stores,
@@ -1156,7 +1157,9 @@ async function resolveModelConnectionChatBody(body = {}) {
 }
 
 async function runtimeConfig(agentId = 'hatchet') {
-  return loadRuntimeConfig({ rootDir: projectRoot, args: { agent_id: String(agentId || 'hatchet') }, stores: postgresApplication.stores, tolerateModelResolutionError: true });
+  const runtime = await loadRuntimeConfig({ rootDir: projectRoot, args: { agent_id: String(agentId || 'hatchet') }, stores: postgresApplication.stores, tolerateModelResolutionError: true });
+  observeAuthEnvironmentOverride(runtime);
+  return runtime;
 }
 
 // Settings and retention maintenance need identity/context, not permission to execute a turn.
@@ -1488,18 +1491,22 @@ async function authorizeRequest(req, res, url) {
       req.burrowVerifiedAuth = Object.freeze({ enabled: true, authenticated: true });
       return true;
     }
+    const loginObservation = /^basic(?:\s|$)/i.test(String(req.headers.authorization || '')) && typeof startAuthLoginTelemetry === 'function' ? startAuthLoginTelemetry('basic') : null;
     const credentials = basicCredentials(req);
     if (!credentials) {
+      loginObservation?.('failure', { diagnostics:{ reason:'basic_credentials_invalid', stage:'login' } });
       if (/^basic(?:\s|$)/i.test(String(req.headers.authorization || ''))) await logAuthorizationFailure(req, 'basic_credentials_invalid');
       denyBasic(res, 'missing_basic_credentials');
       return false;
     }
     if (credentials.username !== auth.basic.username || !verifyScryptPassword(credentials.password, auth.basic.passwordHash)) {
+      loginObservation?.('failure', { diagnostics:{ reason:'basic_credentials_invalid', stage:'login' } });
       await logAuthorizationFailure(req, 'basic_credentials_invalid');
       denyBasic(res, 'invalid_basic_credentials');
       return false;
     }
     setBasicSessionCookie(res, auth);
+    loginObservation?.('success');
     req.burrowVerifiedAuth = Object.freeze({ enabled: true, authenticated: true });
     return true;
   }

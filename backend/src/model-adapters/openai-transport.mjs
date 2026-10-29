@@ -278,7 +278,7 @@ function compactResponseCompletion(response = {}) {
   };
 }
 
-async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_RESPONSE_BYTES, onTextDelta = null, onThoughtDelta = null } = {}) {
+async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_RESPONSE_BYTES, onTextDelta = null, onThoughtDelta = null, onToolDelta = null } = {}) {
   // A provider terminal owns the result; transport teardown is best effort and
   // must not keep a completed/failed generation waiting for the peer's EOF.
   const cancelStream = (stream) => {
@@ -309,11 +309,12 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   };
   let dataLines = [];
   let dataChars = 0;
-  const emit = async (delta) => {
+  const emit = async (delta, terminalSnapshot = false) => {
     const safe = boundedAppend(text, delta);
     if (!safe) return;
     text += safe;
-    await notifyStreamDelta(onTextDelta, safe, text.length);
+    if (terminalSnapshot) { try { await onTextDelta?.({ delta: safe, totalChars: text.length }, true); } catch {} }
+    else await notifyStreamDelta(onTextDelta, safe, text.length);
   };
   const emitThought = async (delta) => {
     const remaining = Math.max(0, MAX_MODEL_TEXT_CHARS - thoughtChars);
@@ -341,9 +342,12 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
         recordToolCallFailure(responseFunctionCallFailure(responseToolCalls, event));
         if (!toolCallFailure && !mergeResponseFunctionCall(responseToolCalls, event)) recordToolCallFailure('model_tool_call_conflict');
       }
+      // IDs, function names, item-added and final snapshots are metadata.
+      // Only nonempty argument bytes constitute a streaming tool delta.
       if (event?.type === 'response.function_call_arguments.delta') {
         recordToolCallFailure(responseFunctionCallFailure(responseToolCalls, event));
         if (!toolCallFailure && !mergeResponseFunctionCall(responseToolCalls, event)) recordToolCallFailure('model_tool_call_conflict');
+        if (!toolCallFailure && typeof event.delta === 'string' && event.delta.length) await onToolDelta?.();
       }
       if (event?.type === 'response.function_call_arguments.done') {
         recordToolCallFailure(responseFunctionCallFailure(responseToolCalls, event));
@@ -354,7 +358,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
         terminalSeen = event.response.status === 'completed';
         finalData = compactResponseCompletion(event.response);
         usage = finalData.usage || usage;
-        if (!text && finalData.output_text) await emit(finalData.output_text);
+        if (!text && finalData.output_text) await emit(finalData.output_text, true);
         for (const call of (finalData.output || [])) {
           const prior = responseToolCalls.find((item) => item?.call_id === call.call_id);
           if (prior && ((prior.name && prior.name !== call.name) || (prior.arguments && prior.arguments !== call.arguments))) {
@@ -410,6 +414,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
     for (const call of choice.delta?.tool_calls || []) {
       recordToolCallFailure(streamToolCallFailure(toolCalls, call));
       if (!toolCallFailure && !mergeStreamToolCall(toolCalls, call)) recordToolCallFailure('model_tool_call_conflict');
+      if (!toolCallFailure && typeof call?.function?.arguments === 'string' && call.function.arguments.length) await onToolDelta?.();
     }
     if (choice.finish_reason) finishReason = choice.finish_reason;
   };

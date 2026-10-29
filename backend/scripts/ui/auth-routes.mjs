@@ -1,4 +1,4 @@
-import { logAuthFailure, oidcMissingConfiguration, withAuthDiagnostics } from '../../src/ui-auth-diagnostics.mjs';
+import { logAuthFailure, observeAuthEnvironmentOverride, oidcMissingConfiguration, startAuthLoginTelemetry, withAuthDiagnostics } from '../../src/ui-auth-diagnostics.mjs';
 
 export function createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson, serverLogger, logger } = {}) {
   const authLogger = serverLogger || logger;
@@ -8,10 +8,12 @@ export function createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCook
       '/auth/oidc/callback': 'callback', '/api/auth/session': 'session',
     }[url.pathname] : req.method === 'POST' && url.pathname === '/auth/logout' ? 'logout' : null;
     if (!stage) return false;
+    const completeLogin = stage === 'login' || stage === 'callback' ? startAuthLoginTelemetry('oidc') : null;
     let failureStage = 'configuration';
     let missingConfig = [];
     try {
       const runtime = await runtimeConfig();
+      observeAuthEnvironmentOverride(runtime);
       failureStage = stage;
       if (stage === 'configuration') {
         const mode = runtime?.ui?.authMode || 'none';
@@ -38,6 +40,7 @@ export function createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCook
         res.setHeader('set-cookie', [...(Array.isArray(cookies) ? cookies : [cookies].filter(Boolean)), oidcCookieClearHeader(runtime)]);
         res.writeHead(302, { location: session.returnTo || '/' });
         res.end();
+        completeLogin('success');
         return true;
       }
       if (stage === 'logout') {
@@ -59,6 +62,7 @@ export function createAuthRoutes({ runtimeConfig, oidcLoginUrl, setOidcStateCook
       // Attach configuration names even when the downstream failure is more
       // specific. Do not add validation or log the same failure twice.
       const diagnosticsError = withAuthDiagnostics(error, { stage: failureStage, missingConfig });
+      completeLogin?.('failure', { error: diagnosticsError, oidcCallback: stage === 'callback' });
       await logAuthFailure(authLogger, { req, route: url.pathname, stage: failureStage, error: diagnosticsError });
       // Preserve the existing caller-owned HTTP error response contract.
       throw error;

@@ -585,6 +585,8 @@ async function runRegisteredSpawnSubagentChild({
   const childTraceDir = traceDir || path.join(dataRoot, 'subagents', id, 'trace');
   const emitTelemetry = (type, payload) => parentExecutionContext?.telemetry?.observe?.({ runId: id, sessionId: childSessionId, type, payload, ts: nowIso() });
   const modelTrace = {
+    providerTiming: true,
+    observeOptional(type,payload) { try { emitTelemetry(type,payload); } catch {} },
     runId: id,
     traceDir: childTraceDir,
     model: async (payload) => {
@@ -594,8 +596,12 @@ async function runRegisteredSpawnSubagentChild({
       emitTelemetry('model', payload);
     },
     event: async (type, payload) => {
-      // Provider timing callbacks also use event(); this minimal child logger
-      // only needs to persist the bounded recovery decision record here.
+      if (['provider-dispatched','provider-response-headers','provider-first-content','provider-completed'].includes(type)) {
+        // Additional child timing is an optional projection, not a new durable
+        // file prerequisite. Existing mandatory model/recovery receipts remain.
+        try { emitTelemetry(type,payload); } catch {}
+        return;
+      }
       if (type !== 'model-recovery') return;
       const record = projectModelRecoveryRecord(payload);
       if (!record) return;

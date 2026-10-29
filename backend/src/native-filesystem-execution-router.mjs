@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { remoteTelemetryConfiguration } from './remote-telemetry-configuration.mjs';
+import { startExecutionDispatch } from './execution-operational-telemetry.mjs';
 import { localExecutionTarget, remoteExecutionTarget, resolveProcessExecutionTarget } from './process-execution-router.mjs';
 
 const TOOLS = new Set(['files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_write', 'files_edit', 'files_patch']);
@@ -62,7 +63,7 @@ export function createNativeFilesystemExecutionRouter({ localExecute, remoteCont
       // carrier computed by the proposal before routing would point at the run.
       const traceContext = context.telemetry?.traceContextForTool?.(parentRunId, activityId || toolCallId) || context.traceContext;
       const telemetryConfiguration = remoteTelemetryConfiguration(context.telemetry?.remoteConfiguration?.(parentRunId));
-      result = await remoteController.executeNativeFilesystem({
+      const dispatch = {
         operationId,
         targetId: required(target.targetId, 'target_id'),
         parentRunId,
@@ -70,7 +71,12 @@ export function createNativeFilesystemExecutionRouter({ localExecute, remoteCont
         ...(traceContext ? { traceContext: { ...traceContext } } : {}),
         ...(telemetryConfiguration ? { telemetryConfiguration } : {}),
         operation: { tool, arguments: Object.fromEntries(Object.entries(operation.arguments || {}).filter(([key, value]) => !['traceLogger', 'rootDir', 'artifactPrefix', 'runId', 'telemetryConfiguration'].includes(key) && (value == null || ['string', 'number', 'boolean'].includes(typeof value)))) },
-      }, { abortSignal: context.abortSignal || null });
+      };
+      const completeDispatch = startExecutionDispatch({ controller: remoteController, target, context, operation: 'filesystem', operationId });
+      try {
+        result = await remoteController.executeNativeFilesystem(dispatch, { abortSignal: context.abortSignal || null });
+        completeDispatch(result);
+      } catch (error) { completeDispatch(null, error); throw error; }
       if (result && typeof result === 'object') result = { ...result, operationId: result.operationId || operationId };
     } catch (error) {
       result = { ...failure(tool, operation.arguments || {}, error), ...(operationId ? { operationId } : {}) };

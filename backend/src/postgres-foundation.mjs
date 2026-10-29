@@ -2,6 +2,7 @@ import pg from 'pg';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { checkServerIdentity } from 'node:tls';
+import { instrumentPostgresPool } from './postgres-operational-telemetry.mjs';
 
 const { Pool } = pg;
 
@@ -73,7 +74,8 @@ export function createPostgresPool({ config = postgresConfig(), PoolClass = Pool
     try { onIdleError({ event: 'postgres_idle_connection_lost', recovery: 'replace_on_next_checkout' }); }
     catch { /* diagnostics must not convert recoverable loss into process failure */ }
   });
-  return pool;
+  try { return instrumentPostgresPool(pool); }
+  catch { return pool; } // Frozen/custom pools remain usable without observation.
 }
 
 const transactionClients = new WeakMap();

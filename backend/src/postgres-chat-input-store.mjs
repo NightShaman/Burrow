@@ -3,6 +3,8 @@ import { isDeepStrictEqual } from 'node:util';
 import { createContinuityOwner } from './postgres-continuity-owner.mjs';
 import { migrationLockKey, withPostgresTransaction } from './postgres-foundation.mjs';
 import { attachmentSummary } from './runtime-turn-input.mjs';
+import { operationalTelemetry } from './operational-telemetry.mjs';
+import { performance } from 'node:perf_hooks';
 
 // This is an append-only successor migration. Payloads use JSON rather than
 // JSONB, preserving the conversation store's lossless string semantics.
@@ -275,6 +277,33 @@ export class PostgresChatInputStore {
       return row ? project(client, row) : null;
     });
   }
+  // Only current-generation pending rows; held work is pending too. This read
+  // cannot mutate admission/ordering and never returns messages or SQL details.
+  async queueTelemetrySnapshot({ signal } = {}) {
+    // Sampling has a small total checkout + query budget. A timed-out checkout
+    // is still owned/released by withPostgresTransaction; an active statement
+    // is cancelled and drained before its client is released. The server-side
+    // timeout also bounds lock waits if delivery of CancelRequest is delayed.
+    const budgetMs = 250;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error('chat_queue_observation_timeout')), budgetMs);
+    timer.unref?.();
+    const observationSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    try {
+      return await withPostgresTransaction(this.pool, async client => {
+        await client.query(`SET LOCAL statement_timeout = '${budgetMs}ms'`);
+        const { rows } = await client.query(`SELECT i.intent,count(*) AS pending_depth,
+          GREATEST(0,EXTRACT(EPOCH FROM ($1::timestamptz-min(i.created_at)))*1000) AS oldest_age_ms
+          FROM chat_inputs i JOIN conversation_sessions s USING(agent_id,session_id)
+          WHERE i.status IN ('queued','held') AND i.generation=COALESCE((s.metadata->>'resetGeneration')::bigint,0)
+          GROUP BY i.intent`, [nowIso(this.clock)]);
+        return ['queue_next', 'side_question'].map(intent => {
+          const row = rows.find(item => item.intent === intent);
+          return { intent, pendingDepth: row ? Number(row.pending_depth) : 0, oldestAgeMs: row ? Number(row.oldest_age_ms) : 0 };
+        });
+      }, { signal: observationSignal });
+    } finally { clearTimeout(timer); }
+  }
   async pendingMainScopes() {
     const { rows }=await this.pool.query(`SELECT DISTINCT i.agent_id,i.session_id FROM chat_inputs i
       JOIN conversation_sessions s USING(agent_id,session_id)
@@ -453,6 +482,7 @@ export class PostgresChatInputStore {
       const candidates = (await this.pool.query("SELECT id,agent_id,session_id FROM chat_inputs WHERE status='running' AND ($1::text IS NULL OR owner_id=$1) ORDER BY ordinal", [ownerId ?? null])).rows;
       const interrupted = [];
       for (const candidate of candidates) {
+        const startedAt = performance.now();
         // The shared reset boundary serializes death probing against active
         // terminal guards and against reset while examining session state.
         const value = await probe.guard(() => withPostgresTransaction(this.pool, async client => {
@@ -464,7 +494,11 @@ export class PostgresChatInputStore {
           if (Number(row.generation) === current) await lifecycle(client, done, now);
           return publicRow(done);
         }), migrationLockKey(`burrow-session-boundary:${JSON.stringify([candidate.agent_id,candidate.session_id])}`));
-        if (value) interrupted.push(value);
+        if (value) {
+          interrupted.push(value);
+          operationalTelemetry('run-interrupted', { sessionId: value.sessionId, runId: value.runId, source: value.intent === 'side_question' ? 'side_question' : 'main',
+            outcome: 'recorded', reason: 'queue_owner_lost', durationMs: Math.max(0, performance.now() - startedAt) });
+        }
       }
       return interrupted;
     } finally { await probe.close(); }
@@ -479,6 +513,7 @@ export class PostgresChatInputStore {
     const candidates = (await this.pool.query("SELECT id,agent_id,session_id FROM chat_inputs WHERE status='running' AND owner_id=$1 AND owner_lock_id=$2 ORDER BY ordinal", [ownerId, owner.id])).rows;
     const interrupted = [];
     for (const candidate of candidates) {
+      const startedAt = performance.now();
       const value = await withPostgresTransaction(this.pool, async client => {
         const now = nowIso(this.clock), current = await sessionLock(client, [candidate.agent_id, candidate.session_id], now);
         const row = (await client.query(`UPDATE chat_inputs SET status='interrupted',error='chat_input_owner_shutdown',completed_at=$4,
@@ -488,7 +523,11 @@ export class PostgresChatInputStore {
         if (Number(row.generation) === current) await lifecycle(client, row, now);
         return publicRow(row);
       });
-      if (value) interrupted.push(value);
+      if (value) {
+        interrupted.push(value);
+        operationalTelemetry('run-interrupted', { sessionId: value.sessionId, runId: value.runId, source: value.intent === 'side_question' ? 'side_question' : 'main',
+          outcome: 'recorded', reason: 'queue_owner_shutdown', durationMs: Math.max(0, performance.now() - startedAt) });
+      }
     }
     if (this.owners.get(ownerId) === owner) this.owners.delete(ownerId);
     this.uncertainClaims.delete(ownerId); await owner.close();

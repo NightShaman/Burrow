@@ -192,9 +192,11 @@ export class ProviderPoolEngine {
 
   async cooldown(memberId, reason, durationMs = 60_000) {
     const now = this.clock();
-    await this.db.query(`INSERT INTO provider_pool_health(pool_id,member_id,cooldown_until,last_reason,updated_at)
+    const result = await this.db.query(`INSERT INTO provider_pool_health(pool_id,member_id,cooldown_until,last_reason,updated_at)
       VALUES($1,$2,$3,$4,$5) ON CONFLICT(pool_id,member_id) DO UPDATE SET
-      cooldown_until=GREATEST(provider_pool_health.cooldown_until,EXCLUDED.cooldown_until),last_reason=EXCLUDED.last_reason,updated_at=EXCLUDED.updated_at`,
+      cooldown_until=GREATEST(provider_pool_health.cooldown_until,EXCLUDED.cooldown_until),last_reason=EXCLUDED.last_reason,updated_at=EXCLUDED.updated_at
+      RETURNING cooldown_until,last_reason,updated_at`,
     [this.connection.id, memberId, new Date(now + durationMs), reason, new Date(now)]);
+    return result.rows[0] || null;
   }
 }

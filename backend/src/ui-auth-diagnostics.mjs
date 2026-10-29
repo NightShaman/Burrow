@@ -1,3 +1,6 @@
+import { performance } from 'node:perf_hooks';
+import { operationalTelemetry } from './operational-telemetry.mjs';
+
 // Auth diagnostics are an allowlisted projection, never an Error/message dump.
 // Provider errors (including JOSE errors) can contain tokens, claims and URLs
 // with credentials. Keep the original exception for callers, but log only this
@@ -102,6 +105,47 @@ export function oidcMissingConfiguration(runtime, stage) {
   const oidc = runtime?.ui?.oidc || {};
   const required = stage === 'login' || stage === 'callback' ? ['issuer', 'clientId', 'clientSecret'] : [];
   return required.filter(key => !String(oidc[key] ?? '').trim());
+}
+
+const authModes = new Set(['none', 'basic', 'oidc', 'trusted-proxy']);
+const loginReasons = new Set([...reasons.keys(), 'basic_credentials_invalid', 'auth_mode_unsupported', 'api_token_rejected', 'trusted_proxy_not_allowed', 'trusted_proxy_user_missing']);
+let observedOverrideMode = null;
+
+function publishAuth(type, fields) {
+  try { operationalTelemetry(type, fields); } catch { /* Authentication never depends on telemetry. */ }
+}
+
+/** A terminal login attempt, not an ordinary authenticated session poll. */
+export function startAuthLoginTelemetry(mode) {
+  const startedAt = performance.now();
+  let completed = false;
+  return (outcome, { error, diagnostics, oidcCallback = false } = {}) => {
+    if (completed) return;
+    completed = true;
+    try {
+      const fields = { mode: authModes.has(mode) ? mode : 'unknown', outcome: outcome === 'success' ? 'success' : 'failure', durationMs: Math.max(0, performance.now() - startedAt) };
+      if (fields.outcome === 'failure') {
+        const detail = diagnostics || authErrorDiagnostics(error);
+        fields.reason = loginReasons.has(detail.reason) ? detail.reason : 'auth_internal_error';
+        if (stages.has(detail.stage)) fields.stage = detail.stage;
+      }
+      publishAuth('auth-login', fields);
+      if (oidcCallback && fields.outcome === 'failure') publishAuth('auth-oidc-callback-failed', fields);
+    } catch { /* Ignore diagnostics objects that cannot be safely projected. */ }
+  };
+}
+
+/** Observe an effective environment override without reading/exporting values. */
+export function observeAuthEnvironmentOverride(runtime, env = process.env) {
+  try {
+    const mode = authModes.has(runtime?.ui?.authMode) ? runtime.ui.authMode : 'unknown';
+    const active = runtime?.ui?.authSource === 'environment'
+      || Object.keys(env).some(key => key.startsWith('BURROW_UI_AUTH_') && Boolean(env[key]));
+    if (!active) { if (observedOverrideMode !== null) publishAuth('auth-environment-inactive', {}); observedOverrideMode = null; return; }
+    if (observedOverrideMode === mode) return;
+    observedOverrideMode = mode;
+    publishAuth('auth-environment-override', { mode, outcome: 'activated', durationMs: 0 });
+  } catch { /* Observation does not resolve or validate authentication config. */ }
 }
 
 export async function logAuthFailure(logger, { req, route, stage, error, diagnostics } = {}) {

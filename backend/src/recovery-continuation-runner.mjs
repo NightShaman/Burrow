@@ -1,5 +1,7 @@
 import { createBackgroundLifecycle } from './background-lifecycle.mjs';
 import { postgresContinuity } from './postgres-continuity.mjs';
+import { operationalTelemetry } from './operational-telemetry.mjs';
+import { performance } from 'node:perf_hooks';
 
 // Startup recovery is deliberately bounded and idempotent. A queue claim is
 // durable before model work begins; duplicate startups see it as running and
@@ -20,6 +22,12 @@ export async function runPendingRecoveryContinuations({ stores = null, agentRunt
       const runId = createRunId({ sessionId: item.sessionId, prefix: 'recover' });
       const claim = await authority.claimRecovery({ rootDir: runtime.agentWorkspaceRoot, sessionId: item.sessionId, recoveryRunId: runId });
       if (!claim.ok) continue;
+      const startedAt = performance.now();
+      const attempt = Number(claim.continuation?.attempts);
+      const fields = { sessionId: item.sessionId, runId,
+        attempt: Number.isSafeInteger(attempt) && attempt > 0 ? attempt : null };
+      operationalTelemetry('recovery-attempt', { ...fields, outcome: 'started', durationMs: 0 });
+      let terminalOutcome = 'persistence_failure';
       try {
         signal?.throwIfAborted();
         const execution = Promise.resolve(runContinuation({ runtime, sessionId: item.sessionId, runId, manifest: claim.manifest, continuation: claim.continuation, signal }));
@@ -44,11 +52,15 @@ export async function runPendingRecoveryContinuations({ stores = null, agentRunt
           rootDir: runtime.agentWorkspaceRoot, sessionId: item.sessionId, recoveryRunId: runId,
           ok: Boolean(result?.ok), result: result?.decision || (result?.ok ? 'completed' : 'failed'),
         });
+        terminalOutcome = completed.stale ? 'stale' : result?.ok ? 'success' : signal?.aborted ? 'cancelled' : 'failure';
         outcomes.push({ agentId: runtime.agentId, sessionId: item.sessionId, runId, ok: Boolean(result?.ok), result, continuation: completed.continuation });
       } catch (error) {
         const completed = await authority.completeRecovery({ rootDir: runtime.agentWorkspaceRoot, sessionId: item.sessionId, recoveryRunId: runId, ok: false, result: String(error?.message || error) });
+        terminalOutcome = completed.stale ? 'stale' : signal?.aborted ? 'cancelled' : 'failure';
         logger?.error?.(`Burrow recovery continuation failed for ${runtime.agentId}/${item.sessionId}: ${String(error?.message || error)}`);
         outcomes.push({ agentId: runtime.agentId, sessionId: item.sessionId, runId, ok: false, error: String(error?.message || error), continuation: completed.continuation });
+      } finally {
+        operationalTelemetry('recovery-completed', { ...fields, outcome: terminalOutcome, durationMs: Math.max(0, performance.now() - startedAt) });
       }
     }
   }

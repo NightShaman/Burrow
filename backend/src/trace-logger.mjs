@@ -112,6 +112,15 @@ export function createTraceLogger({ rootDir, runId, sessionId, conversationId = 
     });
   }
 
+  // New optional telemetry observations use the existing best-effort observer
+  // path without starting a detachable file append. No delayed write can erase
+  // terminal.json after the owning diagnostics flush has completed.
+  function observeOptional(type, payload = {}) {
+    const record = {ts:clock(),runId:resolvedRunId,sessionId:sessionId || null,type,payload:compactTracePayload(payload),stream:type === 'model' ? 'model.jsonl' : 'events-stream.jsonl'};
+    try { const pending=onRecord?.(record); pending?.catch?.(()=>{}); } catch {}
+    return record;
+  }
+
   async function event(type, payload = {}) {
     return append('events-stream.jsonl', { type, payload });
   }
@@ -161,6 +170,7 @@ export function createTraceLogger({ rootDir, runId, sessionId, conversationId = 
   return {
     deferDiagnostic,
     flushDiagnostics,
+    observeOptional,
     rootDir,
     runId: resolvedRunId,
     sessionId: sessionId || null,

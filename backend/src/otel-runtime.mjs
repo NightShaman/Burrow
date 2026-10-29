@@ -13,6 +13,10 @@ import { JsonTraceSerializer, JsonMetricsSerializer, ProtobufTraceSerializer, Pr
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { extractTraceContext, traceContextFromSpan } from './otel-context.mjs';
 import { projectModelRecoveryRecord } from './model-recovery-projection.mjs';
+import { createProviderResponsivenessProjection } from './provider-responsiveness-otel.mjs';
+import { createOperationalProjection } from './operational-otel.mjs';
+import { observeOperationalTelemetry, operationalTelemetrySnapshot } from './operational-telemetry.mjs';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 
 const SERVICE_NAME = 'burrow';
 const INSTRUMENTATION_NAME = 'burrow.runtime';
@@ -391,7 +395,7 @@ function safeDestinationId(value, index) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value) ? value : `invalid-${index + 1}`;
 }
 
-export function createOtelRuntime({ env = process.env, destinations = null, serviceVersion = null, traceExporter = null, metricExporter = null, resource = null, clock = () => Date.now(), logger = console } = {}) {
+export function createOtelRuntime({ env = process.env, destinations = null, serviceVersion = null, traceExporter = null, metricExporter = null, resource = null, clock = () => Date.now(), logger = console, subscribeOperational = true } = {}) {
   let started = false;
   let attemptedStart = false;
   let closed = false;
@@ -399,6 +403,8 @@ export function createOtelRuntime({ env = process.env, destinations = null, serv
   let meterProvider = null;
   let tracer = null;
   let instruments = null;
+  let providerProjection = null;
+  let operationalProjection = null, stopOperational = null, eventLoop = null;
   const activeRuns = new Map();
   const destinationStatuses = [];
   const spanProcessors = [];
@@ -557,8 +563,18 @@ export function createOtelRuntime({ env = process.env, destinations = null, serv
         poolRequests: meter.createCounter('burrow.provider_pool.requests'),
         poolTokens: meter.createCounter('burrow.provider_pool.tokens'),
         poolDuration: meter.createHistogram('burrow.provider_pool.duration', { unit: 'ms' }),
+        poolAttempts: meter.createCounter('burrow.provider_pool.attempts'),
+        poolAttemptDuration: meter.createHistogram('burrow.provider_pool.attempt.duration', { unit: 'ms' }),
+        poolTTFT: meter.createHistogram('burrow.provider_pool.ttft', { unit: 'ms' }),
+        poolRequestTTFT: meter.createHistogram('burrow.provider_pool.request.ttft', { unit:'ms' }),
+        poolRetries: meter.createCounter('burrow.provider_pool.retries'),
+        poolFailovers: meter.createCounter('burrow.provider_pool.failovers'),
+        poolCooldownTransitions: meter.createCounter('burrow.provider_pool.cooldown.transitions'),
+        poolCooldownDuration: meter.createHistogram('burrow.provider_pool.cooldown.duration', { unit: 'ms' }),
         models: meter.createCounter('burrow.model.requests'),
         modelDuration: meter.createHistogram('burrow.model.duration', { unit: 'ms' }),
+        modelTTFT: meter.createHistogram('burrow.model.ttft', { unit: 'ms' }),
+        modelFirstDelta: meter.createHistogram('burrow.model.first_delta', { unit: 'ms' }),
         tokens: meter.createCounter('burrow.model.tokens'),
         tools: meter.createCounter('burrow.tool.calls'),
         toolDuration: meter.createHistogram('burrow.tool.duration', { unit: 'ms' }),
@@ -568,6 +584,19 @@ export function createOtelRuntime({ env = process.env, destinations = null, serv
         exportFailures: meter.createObservableCounter('burrow.otel.export.failures'),
         telemetryDropped: meter.createObservableCounter('burrow.otel.telemetry.dropped'),
       };
+      providerProjection = createProviderResponsivenessProjection({ tracer, instruments, clock, usageValues, tokenCount, onContext:observeOperational });
+      operationalProjection = createOperationalProjection({ tracer, meter, clock, stateForRun:runId => activeRuns.get(String(runId || '')) });
+      eventLoop = monitorEventLoopDelay({ resolution:20 });
+      eventLoop.enable();
+      const lag = meter.createObservableGauge('burrow.core.event_loop.lag', { unit:'ms' });
+      lag.addCallback(observer => {
+        if (!eventLoop?.count) return;
+        for (const statistic of ['mean','max']) if (Number.isFinite(eventLoop[statistic])) observer.observe(eventLoop[statistic] / 1e6, { 'burrow.statistic':statistic });
+      });
+      const runStates = meter.createObservableGauge('burrow.runs.state', { unit:'{run}' });
+      runStates.addCallback(observer => {
+        for (const phase of ['working','recovering']) observer.observe([...activeRuns.values()].filter(state => (state.recoveryState === 'recovering' ? 'recovering' : 'working') === phase).length, { 'burrow.run.state':phase });
+      });
       instruments.activeRuns.addCallback((observable) => observable.observe(activeRuns.size));
       instruments.processUptime.addCallback((observable) => observable.observe(process.uptime()));
       instruments.processMemory.addCallback((observable) => {
@@ -580,6 +609,8 @@ export function createOtelRuntime({ env = process.env, destinations = null, serv
       instruments.exportFailures.addCallback((observable) => observable.observe(failures.export));
       instruments.telemetryDropped.addCallback((observable) => observable.observe(dropped));
       started = true;
+      for (const record of operationalTelemetrySnapshot()) observeOperational(record);
+      if (subscribeOperational) stopOperational = observeOperationalTelemetry(observeOperational);
     } catch {
       failures.start += 1;
       failures.lastStart = 'otel_runtime_start_failed';
@@ -593,7 +624,7 @@ export function createOtelRuntime({ env = process.env, destinations = null, serv
     try {
       const existing = activeRuns.get(String(runId));
       if (existing) return Object.freeze({ runId: existing.runId, traceContext: traceContextFromSpan(existing.span), context: existing.context });
-      const parentContext = extractTraceContext(parentTraceContext, context.active());
+      const parentContext = extractTraceContext(parentTraceContext, operationalProjection?.parentForRun(String(runId)) || context.active());
       const startedAt = clock();
       const span = tracer.startSpan('burrow.run', {
         kind: SpanKind.INTERNAL,
@@ -626,15 +657,28 @@ export function createOtelRuntime({ env = process.env, destinations = null, serv
     return entry ? traceContextFromSpan(entry.span) : traceContextForRun(runId);
   }
 
+  function observeOperational(record = {}) {
+    if (!started || closed) return;
+    try { operationalProjection?.observe(record); } catch { failures.observe += 1; }
+  }
+
   function observe(record = {}) {
     if (!started || closed) return;
     try {
       const state = activeRuns.get(String(record.runId || ''));
       if (!state) return;
       const payload = record.payload || {};
+      if (record.type === 'context-build-receipt') {
+        const budget = payload.budget || {};
+        const usage = typeof budget.estimatedTokens === 'number' ? budget.estimatedTokens : null;
+        observeOperational({ type:'context-pressure',runId:record.runId,usageTokens:usage, budgetTokens:budget.contextTokens ?? budget.contextWindow, usageRatio:budget.usageRatio,pressure:budget.pressure,source:'runtime_receipt',tokenSource:budget.source === 'provider-input-tokens' ? 'measured' : 'estimated' });
+        return;
+      }
       if (record.type === 'model-recovery') {
         const recovery = projectModelRecoveryRecord(payload);
         if (!recovery) return;
+        state.recoveryState = recovery.state;
+        operationalProjection?.modelRecovery(recovery);
         const attributes = { 'burrow.model.recovery.state': recovery.state };
         if (recovery.method) attributes['burrow.model.recovery.method'] = recovery.method;
         if (recovery.attempt !== undefined) attributes['burrow.model.recovery.attempt'] = recovery.attempt;
@@ -657,57 +701,7 @@ export function createOtelRuntime({ env = process.env, destinations = null, serv
         state.span.addEvent('burrow.model.recovery', attributes);
         return;
       }
-      if (record.type === 'model' && payload.stage === 'provider-pool-attempt') {
-        const attributes = {'burrow.pool.id':bounded(payload.poolId,160), 'burrow.account.id':bounded(payload.memberId,160),
-          'gen_ai.request.model':bounded(payload.model,160), 'burrow.outcome':payload.outcome};
-        // Dedicated LB series, not a second emission into the generic transport counter.
-        // IDs for individual requests remain in trace records, never metric labels.
-        for (const [kind,key] of [['input','inputTokens'],['output','outputTokens'],['cached','cachedTokens']]) {
-          const value = payload[key];
-          if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
-            instruments.poolTokens.add(value,{...attributes,'burrow.token.kind':kind});
-        }
-        return;
-      }
-      if (record.type === 'model' && payload.stage === 'provider-pool-outcome') {
-        const attributes = {'burrow.pool.id':bounded(payload.poolId,160), 'gen_ai.request.model':bounded(payload.model,160), 'burrow.outcome':payload.outcome};
-        instruments.poolRequests.add(1,attributes);
-        instruments.poolDuration.record(Math.max(0,Number(payload.durationMs)||0),attributes);
-        return;
-      }
-      if (record.type === 'model' && payload.stage === 'model-request' && payload.requestId) {
-        const attributes = {
-          ...(bounded(payload.provider, 80) ? { 'gen_ai.provider.name': bounded(payload.provider, 80) } : {}),
-          ...(bounded(payload.model, 160) ? { 'gen_ai.request.model': bounded(payload.model, 160) } : {}),
-          ...(bounded(payload.api, 80) ? { 'burrow.model.api': bounded(payload.api, 80) } : {}),
-        };
-        const span = tracer.startSpan('burrow.model.request', { kind: SpanKind.CLIENT, attributes }, state.context);
-        state.modelSpans.set(String(payload.requestId), { span, startedAt: clock(), attributes });
-        return;
-      }
-      if (record.type === 'model' && payload.stage === 'model-response' && payload.requestId) {
-        const entry = state.modelSpans.get(String(payload.requestId));
-        if (!entry) return;
-        const outcome = safeOutcome(payload);
-        const metricAttributes = { 'gen_ai.provider.name': entry.attributes['gen_ai.provider.name'] || 'unknown', 'gen_ai.request.model': entry.attributes['gen_ai.request.model'] || 'unknown', 'burrow.outcome': outcome };
-        const status = finite(payload.status);
-        if (status !== null) entry.span.setAttribute('http.response.status_code', status);
-        // External statuses are curated too: raw errors remain local receipts.
-        entry.span.setStatus({ code: outcome === 'success' ? SpanStatusCode.OK : SpanStatusCode.ERROR, ...(outcome === 'success' ? {} : { message: outcome === 'failure' ? 'model_request_failed' : outcome }) });
-        const usage = usageValues(payload.usage || {});
-        const cached = tokenCount(payload.cachedTokens);
-        for (const [kind, value] of Object.entries(usage)) {
-          if (value !== null) entry.span.setAttribute(`gen_ai.usage.${kind}_tokens`, value);
-        }
-        if (cached !== null) entry.span.setAttribute('gen_ai.usage.cache_read.input_tokens', cached);
-        entry.span.end();
-        state.modelSpans.delete(String(payload.requestId));
-        instruments.models.add(1, metricAttributes);
-        instruments.modelDuration.record(Math.max(0, clock() - entry.startedAt), metricAttributes);
-        for (const [kind, value] of Object.entries(usage)) if (value !== null) instruments.tokens.add(value, { ...metricAttributes, 'burrow.token.kind': kind });
-        if (cached !== null) instruments.tokens.add(cached, { ...metricAttributes, 'burrow.token.kind': 'cached' });
-        return;
-      }
+      if (providerProjection?.observe(record, state)) return;
       if (record.type === 'tool' && payload.phase === 'start' && payload.activityId) {
         const attributes = {
           'burrow.tool.name': bounded(payload.tool, 120) || 'unknown',
@@ -742,7 +736,8 @@ export function createOtelRuntime({ env = process.env, destinations = null, serv
     if (!state) return;
     activeRuns.delete(state.runId);
     const outcome = safeOutcome(result);
-    for (const entry of [...state.modelSpans.values(), ...state.toolSpans.values()]) {
+    providerProjection?.endRun(state);
+    for (const entry of state.toolSpans.values()) {
       entry.span.setStatus({ code: SpanStatusCode.ERROR, message: 'run_ended_before_child_span' });
       entry.span.end();
     }
@@ -758,6 +753,9 @@ export function createOtelRuntime({ env = process.env, destinations = null, serv
   async function shutdown({ timeoutMs = Number(env.BURROW_OTEL_SHUTDOWN_TIMEOUT_MS || DEFAULT_SHUTDOWN_TIMEOUT_MS) } = {}) {
     if (closed) return status();
     for (const state of [...activeRuns.values()]) endRun(state.runId, { ok: false, status: 'cancelled' });
+    stopOperational?.(); stopOperational = null;
+    eventLoop?.disable();
+    operationalProjection?.shutdown();
     closed = true;
     try {
       // Start every destination shutdown independently, even when one rejects
@@ -776,7 +774,7 @@ export function createOtelRuntime({ env = process.env, destinations = null, serv
     return status();
   }
 
-  return Object.freeze({ start, startRun, observe, endRun, traceContextForRun, traceContextForTool, status, shutdown });
+  return Object.freeze({ start, startRun, observe, observeOperational, endRun, traceContextForRun, traceContextForTool, status, shutdown });
 }
 
 function genericEndpointForConfiguration(config = {}) {
@@ -833,13 +831,14 @@ export function createReconfigurableOtelRuntime({ serviceVersion = null, clock =
   const emptyConfiguration = { enabled: false, endpoint: '', headers: null, tracesEndpoint: null, metricsEndpoint: null, tracesHeaders: null, metricsHeaders: null };
   const runtimes = new Set();
   const owners = new Map();
+  const operationOwners = new Map();
   const completed = { failures: { start: 0, observe: 0, export: 0, shutdown: 0 }, dropped: 0, lastExportFailure: null, destinations: [] };
   function generationRuntime(runtime, config) {
-    const entry = { runtime, config, runIds: new Set(), draining: null };
+    const entry = { runtime, config, runIds: new Set(), operations:new Set(), draining: null };
     runtimes.add(entry);
     return entry;
   }
-  let active = generationRuntime(runtimeFactory({ env: runtimeTuning, serviceVersion, clock, logger }), emptyConfiguration);
+  let active = generationRuntime(runtimeFactory({ env: runtimeTuning, serviceVersion, clock, logger, subscribeOperational:false }), emptyConfiguration);
   let applied = emptyConfiguration;
   let generation = 0;
   let applying = Promise.resolve();
@@ -873,7 +872,7 @@ export function createReconfigurableOtelRuntime({ serviceVersion = null, clock =
     if (entry.draining) return entry.draining;
     // A settings change is not a run terminal. Old generations keep accepting
     // their own observations and completions, including while disabled globally.
-    if (entry.runIds.size && !closed) return Promise.resolve();
+    if ((entry.runIds.size || entry.operations.size) && !closed) return Promise.resolve();
     entry.draining = Promise.resolve().then(() => entry.runtime.shutdown(options)).catch(() => {
       completed.failures.shutdown += 1;
       operationalEvent(logger, 'otel_runtime_shutdown_failed', { errorCode: 'otel_runtime_shutdown_failed' }, { level: 'warn', component: 'opentelemetry' });
@@ -918,7 +917,7 @@ export function createReconfigurableOtelRuntime({ serviceVersion = null, clock =
       if (configurationKey(normalized) === configurationKey(applied)) return status();
       const previous = active;
       const env = { ...runtimeTuning, ...otelEnvironmentForConfiguration(normalized) };
-      const candidate = runtimeFactory({ env, serviceVersion, clock, logger, ...(Array.isArray(normalized.destinations) ? { destinations: copyDestinations(normalized.destinations) } : {}) });
+      const candidate = runtimeFactory({ env, serviceVersion, clock, logger, subscribeOperational:false, ...(Array.isArray(normalized.destinations) ? { destinations: copyDestinations(normalized.destinations) } : {}) });
       try {
         if (normalized.enabled && configurationHasTransport(normalized)) {
           const started = await candidate.start();
@@ -981,7 +980,7 @@ export function createReconfigurableOtelRuntime({ serviceVersion = null, clock =
     // Ownership is trusted internal provenance, independent of the W3C span
     // parent. A delegated run joins its parent's generation even after a
     // replacement/disable; its own runIds entry then retains that generation.
-    const owner = owners.get(runId) || owners.get(String(options.parentRunId || '')) || active;
+    const owner = owners.get(runId) || operationOwners.get(`recovery:${runId}`) || owners.get(String(options.parentRunId || '')) || active;
     const result = owner.runtime.startRun(options);
     if (result) {
       owners.set(runId, owner);
@@ -1005,6 +1004,7 @@ export function createReconfigurableOtelRuntime({ serviceVersion = null, clock =
   function shutdown(options = {}) {
     if (shuttingDown) return shuttingDown;
     closed = true;
+    stopOperational();
     // Drain known generations immediately, even if an apply is still starting.
     // In-flight candidates see closed and dispose themselves before installing.
     const draining = Promise.all([...runtimes].map(entry => drain(entry, options)));
@@ -1013,19 +1013,43 @@ export function createReconfigurableOtelRuntime({ serviceVersion = null, clock =
         await timeout(Promise.all([applying.catch(() => {}), draining]),
           positiveInteger(options.timeoutMs, DEFAULT_SHUTDOWN_TIMEOUT_MS), 'otel_shutdown_timeout');
       } catch { completed.failures.shutdown += 1; operationalEvent(logger, 'otel_runtime_shutdown_failed', { errorCode: 'otel_runtime_shutdown_timeout' }, { level: 'warn', component: 'opentelemetry' }); }
-      owners.clear();
+      owners.clear(); operationOwners.clear();
       return status();
     })();
     return shuttingDown;
   }
 
   const ownerFor = runId => owners.get(String(runId || ''))?.runtime || active.runtime;
+  function observeOperational(record = {}) {
+    if (closed) return;
+    const recovery = ['recovery-attempt','recovery-completed'].includes(record.type) && typeof record.runId === 'string';
+    const drainOperation = record.type === 'run-drain-overdue' && record.operationToken && typeof record.operationToken === 'object';
+    const key = recovery ? `recovery:${record.runId}` : drainOperation ? record.operationToken : null;
+    const start = recovery ? record.type === 'recovery-attempt' : drainOperation && record.outcome === 'deadline_exceeded';
+    const terminal = recovery ? record.type === 'recovery-completed' : drainOperation && record.outcome === 'drained';
+    // A terminal for a start observed while disabled/unavailable is not work
+    // belonging to a later generation. In particular it cannot drain a peer.
+    if (terminal && !operationOwners.has(key)) return;
+    const owner = (key && operationOwners.get(key)) || owners.get(String(record.runId || '')) || active;
+    if (start && !operationOwners.has(key) && owner.runtime.status().enabled) {
+      operationOwners.set(key,owner); owner.operations.add(key);
+    }
+    try { owner.runtime.observeOperational?.(record); }
+    finally {
+      if (terminal && operationOwners.get(key) === owner) {
+        operationOwners.delete(key); owner.operations.delete(key);
+        if (owner !== active) void drain(owner);
+      }
+    }
+  }
+  const stopOperational = observeOperationalTelemetry(observeOperational, {active:() => !closed && active.runtime.status().enabled});
   return Object.freeze({
     apply,
     remoteConfiguration,
     start: () => closed ? Promise.resolve(status()) : active.runtime.start(),
     startRun,
     observe: (record = {}) => ownerFor(record.runId).observe(record),
+    observeOperational,
     endRun,
     traceContextForRun: (runId, ...args) => ownerFor(runId).traceContextForRun(runId, ...args),
     traceContextForTool: (runId, ...args) => ownerFor(runId).traceContextForTool(runId, ...args),

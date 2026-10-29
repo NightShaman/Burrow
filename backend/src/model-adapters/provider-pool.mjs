@@ -1,3 +1,7 @@
+import { randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
+import { withProviderRoute, deferProviderDiagnostic, providerObservation } from './provider-fetch.mjs';
+import { providerIdentity, providerCompletion, configuredProviderName, providerUsageValues, capturedProviderUsage } from './provider-responsiveness.mjs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { classifyModelFailure, markModelInternalError, modelFailureResult, retainModelFailure } from '../model-failure.mjs';
 import { poolAttemptUsage } from '../postgres-provider-pool-metrics.mjs';
@@ -57,7 +61,8 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
     const state = fetchAttempts.getStore();
     // This wrapper is entered only AFTER the shared provider-fetch gate grants
     // dispatch. A denied gate is not a physical attempt or a pool measurement.
-    const dispatch = state ? { started: now(), ordinal: state.metric ? ++state.metric.attempts : null } : null;
+    const dispatch = state ? { started: now(), monotonicStarted: performance.now(), ordinal: ++state.metric.attempts } : null;
+    if (dispatch) state.route.attempt = dispatch.ordinal;
     if (dispatch) state.dispatches.push(dispatch);
     try {
       const response = await fetchImpl(...fetchArgs);
@@ -75,13 +80,13 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
     const resolved = await pool.resolveMember(memberId);
     const memberConfig = resolved?.model && typeof resolved.model === 'object' ? resolved.model : resolved;
     if (!memberConfig || memberConfig.providerPool || /-lb$/.test(memberConfig.api || memberConfig.apiType || '')) throw new Error('provider_pool_invalid_member_config');
-    if (!fresh && cached && cached.authToken === memberConfig.apiKey && now() - cached.usedAt < AFFINITY_CACHE_TTL_MS) { cached.usedAt = now(); return cached.adapter; }
+    if (!fresh && cached && cached.authToken === memberConfig.apiKey && now() - cached.usedAt < AFFINITY_CACHE_TTL_MS) { cached.usedAt = now(); return { adapter: cached.adapter, identity: providerIdentity(memberConfig) }; }
     const adapter = createMemberAdapter({ ...options, fetchImpl: memberFetch, providerPool: null, config: { ...memberConfig, model: config.model, temperature: config.temperature, maxTokens: config.maxTokens, extra: config.extra, reasoningEffort: config.reasoningEffort, codexSessionId: threadKey, codexThreadId: threadKey, providerPool: null } });
     // Native turn-state is isolated by both thread AND account, never copied.
     for (const [oldKey, value] of adapters) if (now() - value.usedAt >= AFFINITY_CACHE_TTL_MS) adapters.delete(oldKey);
     if (adapters.size >= 1000) adapters.delete(adapters.keys().next().value);
     adapters.set(key, { adapter, authToken: memberConfig.apiKey, usedAt: now() });
-    return adapter;
+    return { adapter, identity: providerIdentity(memberConfig) };
   };
   const metrics = family === 'openai' ? pool.store?.providerPoolMetrics : null;
   // A distinct key per pool adapter avoids conflating different adapters sharing
@@ -147,8 +152,8 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
         throw retainSecondary(error, routedReceipt(originalReceipt, originalRoute, diagnostic));
       }
       const useReplay = continuation && canReplay && selection.memberId !== previousRoute.servingConnectionId;
-      let adapter;
-      try { adapter = await getAdapter(selection.memberId, threadKey, attempt > 0 || useReplay); }
+      let adapter, identity;
+      try { ({ adapter, identity } = await getAdapter(selection.memberId, threadKey, attempt > 0 || useReplay)); }
       catch (error) {
         if (!originalFailure) {
           const prior = priorManagedFailure(args);
@@ -163,7 +168,28 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
       let callbackFailed = false;
       let callbackInvoked = false;
       const callArgs = { ...(useReplay ? replay : args) };
-      const fetchState = { metric, dispatches: [], gateError: null };
+      metric.accountNames.set(selection.memberId, identity.accountName);
+      const telemetryRoute = { poolId: pool.connection.id, poolName: configuredProviderName(pool.connection.provider), poolRequestId: metric.id, accountId: selection.memberId, accountName: identity.accountName };
+      const fetchState = { metric, route: telemetryRoute, dispatches: [], gateError: null };
+      telemetryRoute.observe = (type, payload) => {
+        if (type === 'provider-dispatched') {
+          const dispatch = fetchState.dispatches.at(-1);
+          if (dispatch) {
+            dispatch.providerRequestId = payload.requestId;
+            if (metric.lastAccountId && metric.lastAccountId !== selection.memberId) metric.failovers++;
+            metric.lastAccountId = selection.memberId;
+          }
+        } else if (type === 'provider-first-content' && payload.first === true && metric.ttftMs === undefined) {
+          metric.ttftMs = Math.max(0, payload.monotonicMs - metric.monotonicStarted);
+        } else if (type === 'provider-completed') {
+          const dispatch = fetchState.dispatches.find(entry => entry.providerRequestId === payload.requestId);
+          if (dispatch) dispatch.durationMs = payload.durationMs;
+        }
+      };
+      telemetryRoute.complete = (requestId, value, durable = {}) => {
+        const dispatch = fetchState.dispatches.find(entry => entry.providerRequestId === requestId);
+        if (dispatch) { dispatch.result = value; dispatch.hasResult = true; dispatch.durable = durable; }
+      };
       if (args.recoveryContext?.beforeDispatch) {
         callArgs.recoveryContext = { ...args.recoveryContext, beforeDispatch: async () => {
           try { return await args.recoveryContext.beforeDispatch(); }
@@ -181,7 +207,7 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
       const route = { logicalConnectionId: pool.connection.id, servingConnectionId: selection.memberId,
         ownerConnectionId: selection.ownerId, threadKey, substitute: selection.substitute, attempt: attempt + 1,
         diagnostics: selection.diagnostics, rebalanceReason: selection.rebalanceReason || null };
-      try { await args.traceLogger?.model?.({ stage: 'provider-pool-selection', ...route, model: config.model }); }
+      try { await args.traceLogger?.model?.({ stage: 'provider-pool-selection', ...route, poolId: pool.connection.id, requestId: metric.id, accountName: identity.accountName, model: config.model }); }
       catch (error) {
         if (originalReceipt) throw retainSecondary(error, routedReceipt(originalReceipt, originalRoute));
         const prior = priorManagedFailure(args);
@@ -190,7 +216,7 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
       }
       const attemptStarted = now();
       let result, caughtError;
-      try { result = await fetchAttempts.run(fetchState, () => adapter[method](callArgs)); }
+      try { result = await withProviderRoute(telemetryRoute, () => fetchAttempts.run(fetchState, () => adapter[method](callArgs))); }
       catch (error) {
         caughtError = error;
         // Capture *inside the failure scope* before metrics/trace/cooldown can
@@ -199,25 +225,31 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
       }
       const receipt = routedReceipt(result, route);
       const capture = async () => {
-        if (!metric) return;
         // Preserve direct callers using custom member adapters that don't use
         // provider-fetch; managed real members are counted only at fetch.
         const dispatches = fetchState.dispatches.length ? fetchState.dispatches
           : !args.recoveryContext && !adapter.url ? [{ started: attemptStarted, ordinal: ++metric.attempts }] : [];
         for (let index = 0; index < dispatches.length; index++) {
           const dispatch = dispatches[index], last = index === dispatches.length - 1;
-          const measured = last ? result : null;
-          const error = dispatch.error || (last ? caughtError : null);
+          const measured = dispatch.hasResult ? dispatch.result : last ? result : null;
+          const error = dispatch.error || (!dispatch.hasResult && last ? caughtError : null);
           const status = measured?.status ?? dispatch.status;
           const success = measured ? measured.ok : !error && status >= 200 && status < 300;
+          const completion = dispatch.hasResult ? { outcome:measured.outcome, ...(status !== undefined ? { status } : {}),
+            ...(measured.failureCategory ? { failureCategory:measured.failureCategory } : {}) }
+            : providerCompletion(measured || { ok:success }, { error, signal:args.signal, observedStatus:dispatch.status ?? (error && !measured?.requestId ? null : status) });
+          const normalized = measured?.normalizedUsage ? capturedProviderUsage(measured.normalizedUsage)
+            : family === 'anthropic' ? providerUsageValues(measured?.usage, { provider:family }) : null;
           const measurement = { attempt: dispatch.ordinal, memberId: selection.memberId,
-            providerRequestId: measured?.requestId, durationMs: Math.max(0, now() - dispatch.started),
-            outcome: args.signal?.aborted || error?.name === 'AbortError' ? 'cancelled' : success ? 'success' : 'failed',
-            status, errorKind: success ? null : error && !measured?.status ? (args.signal?.aborted ? 'cancelled' : 'exception') : 'provider_failure',
-            ...poolAttemptUsage(measured?.usage) };
-          await metrics.attempt(metric.id, measurement);
-          await args.traceLogger?.model?.({stage:'provider-pool-attempt',requestId:metric.id,
-            poolId:pool.connection.id,model:config.model,...measurement});
+            providerRequestId: dispatch.providerRequestId || measured?.requestId, durationMs: dispatch.durationMs ?? Math.max(0, dispatch.monotonicStarted === undefined ? now() - dispatch.started : performance.now() - dispatch.monotonicStarted),
+            outcome: (dispatch.hasResult ? dispatch.durable?.cancelled : args.signal?.aborted || error?.name === 'AbortError') ? 'cancelled' : success ? 'success' : 'failed',
+            status, errorKind: dispatch.hasResult ? dispatch.durable?.errorKind ?? null : success ? null : error && !measured?.status ? (args.signal?.aborted ? 'cancelled' : 'exception') : 'provider_failure',
+            ...(metrics && dispatch.hasResult ? dispatch.durable.usage : normalized ? { inputTokens:normalized.input, outputTokens:normalized.output, cachedTokens:normalized.cached } : poolAttemptUsage(measured?.usage)) };
+          await metrics?.attempt(metric.id, measurement);
+          const attemptRecord = {stage:'provider-pool-attempt',requestId:metric.id,
+            poolId:pool.connection.id,model:config.model,accountName:identity.accountName,...measurement, ...completion};
+          if (metrics) await args.traceLogger?.model?.(attemptRecord); // Existing OpenAI durable path.
+          else deferProviderDiagnostic(args.traceLogger, () => providerObservation(args.traceLogger,'model',attemptRecord), { optional:true });
         }
       };
       try { await capture(); } catch (error) {
@@ -270,7 +302,7 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
           throw caughtError;
         }
         originalFailure = caughtError; originalReceipt = result; originalRoute = route;
-        try { await engine.cooldown(selection.memberId, 'transport_unavailable'); }
+        try { await cooldown(selection.memberId, 'transport_unavailable', args, metric); }
         catch (error) { throw retainSecondary(error, receipt); }
         excluded.push(selection.memberId);
         continue;
@@ -280,7 +312,7 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
       if (result.recoveryFailure) return receipt;
       const retryable = !result.ok && ([401, 403, 429].includes(Number(result.status)) || (Number(result.status) >= 500 && Number(result.status) <= 599));
       if (retryable) {
-        try { await engine.cooldown(selection.memberId, `http_${result.status}`); }
+        try { await cooldown(selection.memberId, `http_${result.status}`, args, metric); }
         catch (error) { throw retainSecondary(error, receipt); }
       }
       if (retryable && continuation && replay?.error && !callbackInvoked && !visible && !args.signal?.aborted && attempt === 0 && !result.choice?.text && !result.choice?.toolCalls?.length) {
@@ -304,21 +336,43 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
     throw new Error('provider_pool_retry_exhausted');
   };
 
+  // The authoritative write returns the exact persisted health window. Do not
+  // add observational reads before/after it: a slow optional snapshot must never
+  // prevent the cooldown or the alternate provider dispatch. Without prior-row
+  // evidence this is a persisted window, not a claimed entry/extension transition.
+  const cooldown = async (memberId, reason, args, metric) => {
+    const row = await engine.cooldown(memberId, reason);
+    if (!(engine instanceof ProviderPoolEngine) || !row) return;
+    const timestamp = value => value instanceof Date ? value.getTime() : Date.parse(value);
+    const until = timestamp(row.cooldown_until), updated = timestamp(row.updated_at);
+    if (!Number.isFinite(until) || !Number.isFinite(updated) || until <= updated || row.last_reason !== reason) return;
+    deferProviderDiagnostic(args.traceLogger, () => providerObservation(args.traceLogger,'model',{ stage:'provider-pool-cooldown', requestId:metric.id, poolId:pool.connection.id, memberId, model:config.model,
+      transition:'persisted', reason:reason === 'transport_unavailable' ? 'transport' : reason === 'http_429' ? 'rate_limited' : ['http_401','http_403'].includes(reason) ? 'authentication' : 'provider_failure',
+      durationMs:until - updated, updatedAtMs:updated, cooldownUntilMs:until, boundary:'persisted-health-window' }), { optional:true });
+  };
   const startMetrics = async args => {
-    const started = now();
+    const started = now(), monotonicStarted = performance.now();
     let id;
-    try { id = await metrics.start({poolId:pool.connection.id,model:config.model,runId:args.runId || args.traceLogger?.runId}); }
+    try { id = metrics ? await metrics.start({poolId:pool.connection.id,model:config.model,runId:args.runId || args.traceLogger?.runId}) : randomUUID(); }
     catch (error) { throw markModelInternalError(error, INTERNAL_DIAGNOSTIC_CODE); }
-    return { id, started, attempts: 0 };
+    deferProviderDiagnostic(args.traceLogger, () => providerObservation(args.traceLogger,'model',{ stage:'provider-pool-request', requestId:id, poolId:pool.connection.id,
+      poolName:configuredProviderName(pool.connection.provider), model:config.model, provider:family, api:pool.connection.apiType }), { optional:true });
+    return { id, started, monotonicStarted, attempts: 0, failovers:0, accountNames: new Map() };
   };
   const finishMetrics = async (metric, result, args) => {
+    if (metric.finished) return;
+    metric.finished = true;
     const outcome = args.signal?.aborted || result?.cancelled || result?.modelFailure?.origin === 'cancelled' ? 'cancelled' : result?.ok ? 'success' : 'failed';
     const errorKind = outcome === 'success' ? null : outcome === 'cancelled' ? 'cancelled' : result?.status ? 'provider_failure' : 'exception';
-    const durationMs = Math.max(0, now() - metric.started);
+    const durationMs = Math.max(0, performance.now() - metric.monotonicStarted);
     let failure = null;
-    try { await metrics.finish(metric.id, { outcome, durationMs, errorKind }); } catch (error) { failure = error; }
-    try { await args.traceLogger?.model?.({stage:'provider-pool-outcome',requestId:metric.id,poolId:pool.connection.id,model:config.model,outcome,durationMs}); }
-    catch (error) { failure ||= error; }
+    try { await metrics?.finish(metric.id, { outcome, durationMs, errorKind }); } catch (error) { failure = error; }
+    const accountId = result?.providerPool?.servingConnectionId;
+    const outcomeRecord = {stage:'provider-pool-outcome',requestId:metric.id,poolId:pool.connection.id,model:config.model,
+      ...(accountId ? { accountId, accountName:metric.accountNames.get(accountId) } : {}),
+      ...providerCompletion(result, { error:result?.cause, signal:args.signal }),durationMs,attempts:metric.attempts,failovers:metric.failovers,...(metric.ttftMs !== undefined ? {ttftMs:metric.ttftMs} : {})};
+    if (metrics) { try { await args.traceLogger?.model?.(outcomeRecord); } catch (error) { failure ||= error; } }
+    else deferProviderDiagnostic(args.traceLogger, () => providerObservation(args.traceLogger,'model',outcomeRecord), { optional:true });
     if (failure) throw retainSecondary(failure, result);
   };
   const invoke = async (method, args = {}) => {
@@ -335,7 +389,6 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
         throw error;
       }
     };
-    if (!metrics) return run(null);
     const finalizers = args.recoveryContext?.finalizers;
     if (finalizers instanceof Map) {
       let finalize = finalizers.get(metricKey);

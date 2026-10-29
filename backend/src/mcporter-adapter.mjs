@@ -1,4 +1,5 @@
 import { operationalEvent, infrastructureErrorCode, operationalId } from './operational-log.mjs';
+import { operationalTelemetry } from './operational-telemetry.mjs';
 import { normalizeMcpHeaders } from './mcp-settings-store.mjs';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -44,6 +45,11 @@ function providerEvent(connection, status, { runtimeRoot = null, error = null } 
   const previous = providerStates.get(event.providerId);
   if (previous?.status === status && previous?.error === event.error && !previous.lastKnown && !stateStorageFailures.has(event.providerId)) return Promise.resolve();
   providerStates.set(event.providerId, event);
+  // The daemon check/operation, not cached catalog data, owns these states.
+  // This is an MCP dependency observation, not execution-host reachability.
+  if ((status === 'unavailable' && previous?.status !== 'unavailable') || (status === 'ready' && previous?.status === 'unavailable')) {
+    try { operationalTelemetry('dependency-state', { dependency: 'mcp', outcome: status === 'ready' ? 'restored' : 'unavailable', durationMs: 0 }); } catch { /* Optional observation cannot fail MCP work. */ }
+  }
   const fields = { providerId: operationalId(event.providerId) };
   if (status === 'unavailable' && previous?.status !== 'unavailable') operationalEvent(providerLogger, 'mcp_provider_unavailable', { ...fields, errorCode: event.error || 'mcp_runtime_failed' }, { level: 'warn', component: 'mcp' });
   if (status === 'ready' && previous?.status === 'unavailable') operationalEvent(providerLogger, 'mcp_provider_restored', fields, { level: 'info', component: 'mcp' });

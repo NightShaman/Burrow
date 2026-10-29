@@ -4,6 +4,7 @@ import { assertContextBoundary } from './context-boundary.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 import { compressionSummariesFromTranscript } from './session-compression.mjs';
 import { planContextCompression } from './context-compression.mjs';
+import { operationalTelemetry } from './operational-telemetry.mjs';
 import {
   assertContextEngineContract,
   createContextEngineResult,
@@ -271,7 +272,18 @@ function contextBudgetState({ promptSections = [], contextWindow = null, context
   };
 }
 
-export function inspectContextEngineResult({ sessionId = 'default', context, transcript = [], contextWindow = null, contextTokens = null } = {}) {
+function observeContextPressure({ sessionId, runId = null, usageTokens, budgetTokens, usageRatio, pressure, source, measured = false }) {
+  try {
+    const known = value => value != null && typeof value !== 'boolean' && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null;
+    const usage = known(usageTokens), capacity = known(budgetTokens);
+    operationalTelemetry('context-pressure', { sessionId: String(sessionId || 'default'), ...(runId ? { runId } : {}),
+      usageTokens: usage, budgetTokens: capacity > 0 ? capacity : null, usageRatio: known(usageRatio),
+      tokenSource: usage === null ? 'unknown' : measured ? 'measured' : 'estimated', source,
+      pressure: ['ok', 'watch', 'compress', 'blocked'].includes(pressure) ? pressure : 'unknown' });
+  } catch { /* Observation cannot change context construction. */ }
+}
+
+export function inspectContextEngineResult({ sessionId = 'default', context, transcript = [], contextWindow = null, contextTokens = null, observeTelemetry = true } = {}) {
   const resolvedContext = context || buildContextEngineResult({ transcript });
   const conversation = conversationContextFromEngine(resolvedContext);
   const sectionSizes = {
@@ -312,6 +324,12 @@ export function inspectContextEngineResult({ sessionId = 'default', context, tra
       };
     })()
     : { ...reconstructedBudget, ...(measurements.compacted ? { source: 'reconstructed', provenance: 'post-compaction-estimate' } : {}) };
+  // Receipt token provenance is preserved; reconstruction is a narrower
+  // conversation/support estimate, never a fresh provider measurement.
+  if (observeTelemetry) observeContextPressure({ sessionId, runId: latestReceipt?.runId,
+    usageTokens: hasReceiptBudget ? receiptBudget.estimatedTokens : budget.estimatedTokens,
+    budgetTokens: budget.contextTokens ?? budget.contextWindow, usageRatio: budget.usageRatio, pressure: budget.pressure,
+    source: hasReceiptBudget ? 'runtime_receipt' : 'reconstructed', measured: receiptBudget?.source === 'provider-input-tokens' });
   return {
     sessionId: String(sessionId || 'default'),
     promptSectionOrder: resolvedContext.promptSectionOrder || [],
@@ -390,7 +408,7 @@ export async function inspectSessionContextStatus({ rootDir, dataRoot = rootDir,
   const snapshot = await authority.sessionSnapshot(sessionId);
   const transcript = activeTranscriptAfterReset(snapshot.entries, snapshot.metadata?.resetAt);
   const context = await buildTurnContext({ rootDir, dataRoot, sessionId, transcript, limits, includeProfileFiles: false, agentRuntime, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId });
-  const inspection = inspectContextEngineResult({ sessionId, context, transcript, contextWindow, contextTokens });
+  const inspection = inspectContextEngineResult({ sessionId, context, transcript, contextWindow, contextTokens, observeTelemetry: false });
   const budget = inspection.contextBudget || {};
   const summaries = compressionSummariesFromTranscript(transcript);
   const next = planContextCompression({ transcript: transcript.filter((entry) => !entry?.metadata?.compressionSummary), config: contextConfig, contextBudget: budget });
@@ -424,6 +442,14 @@ export async function inspectSessionContextStatus({ rootDir, dataRoot = rootDir,
     : (hasFreshReceipt ? receiptEstimatedTokens : finiteNumber(persistedMeter?.estimatedTokens) ?? receiptEstimatedTokens);
   const displayedRatio = displayedTokens !== null && capacityTokens !== null ? displayedTokens / capacityTokens : null;
   const displayedPressure = displayedRatio === null ? 'unknown' : contextBudgetPressure(displayedRatio);
+  const meter = meterKind === 'live' ? liveContext : meterKind === 'persisted' ? persistedMeter : inspection.contextBuildReceipt?.budget;
+  // A high-water estimate is only measured when it still equals the measured
+  // count. Never relabel a larger mixed/estimated high-water as provider usage.
+  observeContextPressure({ sessionId, runId: meter?.runId || inspection.contextBuildReceipt?.runId,
+    usageTokens: meterKind === 'receipt' ? meter?.estimatedTokens : displayedTokens,
+    budgetTokens: capacityTokens, usageRatio: displayedRatio, pressure: displayedPressure,
+    source: meterKind === 'receipt' ? 'runtime_receipt' : meterKind,
+    measured: meter?.source === 'provider-input-tokens' && (meterKind === 'receipt' || displayedTokens === meter?.providerInputTokens || displayedTokens === meter?.highWaterProviderInputTokens) });
   const recall = inspection.contextBuildReceipt?.providers?.sessionRecall || {};
   return {
     sessionId: inspection.sessionId,

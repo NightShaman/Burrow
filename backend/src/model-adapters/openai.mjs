@@ -1,3 +1,4 @@
+import { providerIdentity, providerUsageValues } from './provider-responsiveness.mjs';
 import { invokeProviderFetch, providerTiming, settleProviderDiagnostics, providerDiagnostic, providerCallback } from './provider-fetch.mjs';
 import { classifyModelFailure, markProviderEnvelopeFailure, providerFailureResult } from '../model-failure.mjs';
 import { apiMode, isChatGptBackendBaseUrl, isCodexBackendConfig, responsesUrl, completionUrl } from './openai-transport.mjs';
@@ -131,7 +132,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
   const complete = async ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens, tools = null, toolChoice = 'auto', traceLogger, signal = null, toolContinuation = null, onTextDelta = null, onThoughtDelta = null, onContextUsage = null, modelCall = null, recoveryContext = null } = {}) => {
     if (recoveryContext?.nextModelCall) modelCall = await recoveryContext.nextModelCall();
     const requestId = idFactory();
-    const timing = providerTiming({ traceLogger, requestId, provider: 'openai-compatible', api: mode, model, modelCall, clock });
+    const timing = providerTiming({ identity: providerIdentity(config), traceLogger, requestId, provider: 'openai-compatible', api: mode, model, modelCall, contextBudgetTokens: config.contextTokens ?? config.contextWindow, clock });
     return settleProviderDiagnostics(traceLogger, async (recordResult) => {
       const headers = {
         'content-type': 'application/json',
@@ -167,7 +168,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       await providerCallback(() => onContextUsage?.(requestContextUsage));
 
       await providerDiagnostic(() => traceLogger?.model?.({
-        stage: 'model-request',
+        stage: 'model-request', providerTiming: timing.projected, ...timing.ownership,
         requestId,
         modelCall,
         provider: 'openai-compatible',
@@ -198,7 +199,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       // answer into an empty streamed one.
       const providerReturnedJson = streaming && /application\/json/i.test(String(response?.headers?.get?.('content-type') || ''));
       const responseBody = streaming && !providerReturnedJson
-        ? await readResponseSseBounded(response, { mode, maxBytes: config.maxResponseBytes, onTextDelta: timing.wrap(onTextDelta, 'text'), onThoughtDelta: timing.wrap(onThoughtDelta, 'thought') })
+        ? await readResponseSseBounded(response, { mode, maxBytes: config.maxResponseBytes, onTextDelta: timing.wrap(onTextDelta, 'text'), onThoughtDelta: timing.wrap(onThoughtDelta, 'thought'), onToolDelta: () => { try { timing.stream('tool'); } catch {} } })
         : await readResponseTextBounded(response, config.maxResponseBytes);
       const text = responseBody.text || '';
       let data = streaming && !providerReturnedJson ? responseBody.data : null;
@@ -227,6 +228,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         choice: ok ? (mode === 'openai-responses' ? normalizeResponseChoice(data) : normalizeChoice(data)) : null,
         responseId: ok && typeof data?.id === 'string' ? boundedText(data.id, 256) : null,
         usage: data?.usage || null,
+        normalizedUsage: providerUsageValues(data?.usage, { provider:'openai-compatible', api:mode }),
         contextUsage: contextUsageFromResponse(requestContextUsage, data?.usage || null, clock),
         error: ok ? null : (responseBody.error || data?.error?.message || data?.message || text.slice(0, 500) || `HTTP ${response.status}`),
         // Provider envelopes can include unbounded vendor-specific fields
@@ -260,6 +262,8 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         status: response.status,
         ok,
         usage: result.usage,
+        normalizedUsage: result.normalizedUsage,
+        contextUsage: result.contextUsage, contextBudgetTokens: config.contextTokens ?? config.contextWindow ?? null,
         cachedTokens: result.usage?.prompt_tokens_details?.cached_tokens ?? result.usage?.input_tokens_details?.cached_tokens ?? null,
         stablePrefixHash,
         finishReason: result.choice?.finishReason || null,
@@ -274,7 +278,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       }));
 
       return settledResult;
-    });
+    }, { timing, signal });
   };
 
   return {

@@ -2,6 +2,9 @@ import { conversationAuthority } from './conversation-authority.mjs';
 import { summarizeSessionTurns } from './session-entry.mjs';
 import { planContextCompression } from './context-compression.mjs';
 import { contextStatesFromTranscript, renderContextStates } from './session-context-state.mjs';
+import { providerTurnsFromTranscript, providerTurnForEntry, providerTurnChars } from './conversation-message-budget.mjs';
+import { operationalTelemetry } from './operational-telemetry.mjs';
+import { performance } from 'node:perf_hooks';
 
 function isExecutionDigest(entry) {
   return String(entry?.type || '') === 'execution_digest'
@@ -174,7 +177,63 @@ export async function appendCompressionSummary({ rootDir, sessionId = 'default',
   return { entry: rotation.summaryEntry, summary, rotation };
 }
 
-export async function runSessionCompression({ rootDir, sessionId = 'default', config = {}, contextBudget = null, force = false, maxChars = null, logger = null, stores = null, agentId = 'hatchet', conversation = null, transcriptSnapshot = null, transcriptGeneration = null, expectedGeneration = null, signal = null } = {}) {
+// Comparable conversation-only estimates, not a claim about the next assembled
+// provider request. Historical dispatch snapshots include their support/image
+// estimate; non-conversation prompt sections are deliberately outside this scope.
+function conversationTokenEstimate(transcript = [], summary = null, sourceEntryIds = null) {
+  const turns = providerTurnsFromTranscript(transcript);
+  const removed = sourceEntryIds === null ? null : new Set(sourceEntryIds);
+  let chars = 0;
+  for (const entry of transcript) {
+    const priorSummary = entry?.metadata?.compressionSummary;
+    if (priorSummary) {
+      if (!removed) chars += String(priorSummary.text || '').length + 2;
+    } else if (isCompressionEntry(entry) && !removed?.has(entry.id)) {
+      const turn = providerTurnForEntry(entry, turns);
+      chars += (turn ? providerTurnChars(turn) : compressionEntryText(entry).length) + 2;
+    }
+  }
+  if (summary) chars += String(summary.text || '').length + 2;
+  return Math.ceil(chars / 4);
+}
+
+const COMPACTION_REASONS = new Set(['manual', 'context_pressure', 'uncovered_history', 'unknown_capacity_safety', 'below_threshold', 'no_eligible_messages', 'compression_preservation_budget_exceeded', 'stale_transcript', 'session_generation_stale', 'cancelled']);
+const compactionReason = reason => COMPACTION_REASONS.has(reason) ? reason : 'other';
+
+export async function runSessionCompression(options = {}) {
+  const startedAt = performance.now();
+  let started = false, beforeTokens = null, afterTokens = null;
+  const fields = () => ({ sessionId: options.sessionId || 'default', ...(options.logger?.runId ? { runId: options.logger.runId } : {}),
+    trigger: options.force ? 'manual' : 'automatic', tokenScope: 'conversation', beforeTokens, afterTokens,
+    beforeTokenSource: beforeTokens === null ? 'unknown' : 'estimated', afterTokenSource: afterTokens === null ? 'unknown' : 'estimated' });
+  // Optional observation must neither affect storage nor create a second owner.
+  const observe = (phase, details = {}) => {
+    try {
+      if (phase === 'assessed') beforeTokens = conversationTokenEstimate(details.transcript);
+      if (phase === 'stale') beforeTokens = null;
+      if (phase === 'completed') afterTokens = conversationTokenEstimate(details.transcript, details.summary, details.plan.sourceEntryIds);
+      if (phase === 'started') {
+        started = true;
+        operationalTelemetry('context-compaction-started', { ...fields(), reason: compactionReason(details.reason), outcome: 'started', durationMs: 0 });
+      }
+    } catch { /* Estimates are optional. */ }
+  };
+  try {
+    const result = await compressSession(options, observe);
+    if (!result.compressed && result.reason !== 'stale_transcript') afterTokens = beforeTokens;
+    operationalTelemetry(started ? 'context-compaction-completed' : 'context-compression-skip', {
+      ...fields(), reason: compactionReason(result.reason), outcome: result.compressed ? 'success' : 'noop', durationMs: Math.max(0, performance.now() - startedAt),
+    });
+    return result;
+  } catch (error) {
+    const cancelled = options.signal?.aborted || error?.name === 'AbortError';
+    operationalTelemetry('context-compaction-failed', { ...fields(), afterTokens: null, afterTokenSource: 'unknown',
+      reason: cancelled ? 'cancelled' : compactionReason(error?.code || error?.message), outcome: cancelled ? 'cancelled' : 'failure', durationMs: Math.max(0, performance.now() - startedAt) });
+    throw error;
+  }
+}
+
+async function compressSession({ rootDir, sessionId = 'default', config = {}, contextBudget = null, force = false, maxChars = null, logger = null, stores = null, agentId = 'hatchet', conversation = null, transcriptSnapshot = null, transcriptGeneration = null, expectedGeneration = null, signal = null } = {}, observe) {
   signal?.throwIfAborted();
   if (!conversation && !stores?.conversations) throw new Error('conversation_store_required');
   if (force) contextBudget = { ...contextBudget, pressure: 'compress', reason: 'manual' };
@@ -194,8 +253,10 @@ export async function runSessionCompression({ rootDir, sessionId = 'default', co
   // A manual command owns its initial generation even if a non-HTTP producer
   // resets the session without sharing its controller. Never adopt that reset.
   if (expectedGeneration !== null && Number(resolvedGeneration ?? 0) !== expectedGeneration) {
+    observe('stale');
     throw Object.assign(new Error('session_generation_stale'), { statusCode: 409 });
   }
+  observe('assessed', { transcript });
   const existingSummaries = compressionSummariesFromTranscript(transcript);
   // The active successor already contains the current semantic summary. Only
   // its unsummarized chat tail is eligible for the next rotation.
@@ -217,10 +278,11 @@ export async function runSessionCompression({ rootDir, sessionId = 'default', co
   }
   // A preparation snapshot is safe for assessment, not a mutation authority.
   // Refresh/replan before rotation so intervening durable entries survive.
-  if (Array.isArray(transcriptSnapshot)) return runSessionCompression({ rootDir, sessionId, config, contextBudget, force, maxChars, logger, stores, agentId, conversation: authority, expectedGeneration, signal });
+  if (Array.isArray(transcriptSnapshot)) return compressSession({ rootDir, sessionId, config, contextBudget, force, maxChars, logger, stores, agentId, conversation: authority, expectedGeneration, signal }, observe);
   const lifecycle = { sessionId, reason: plan.reason, compressed: false };
   await logger?.event?.('context-compaction-started', lifecycle);
   signal?.throwIfAborted();
+  observe('started', { reason: plan.reason });
   let appended;
   try {
     appended = await appendCompressionSummary({ rootDir, sessionId, transcript, expectedGeneration: resolvedGeneration, plan, maxChars: maxChars ?? tokenTargetToCharBudget(config.summaryTargetTokens, 6000), conversation: authority, signal });
@@ -249,6 +311,7 @@ export async function runSessionCompression({ rootDir, sessionId = 'default', co
     return skipped;
   }
   const { entry, summary, rotation } = appended;
+  observe('completed', { transcript, plan, summary });
   const completed = { ...result, compressed: true, entryId: entry.id, summary, rotation: { archiveName: rotation.archiveName, retainedCount: rotation.retainedCount } };
   await logger?.event?.('context-compaction-completed', { ...lifecycle, compressed: true });
   signal?.throwIfAborted();

@@ -1,3 +1,5 @@
+import { operationalTelemetry } from './operational-telemetry.mjs';
+import { performance } from 'node:perf_hooks';
 const queueStates = new WeakMap();
 
 function statesFor(queues) {
@@ -56,12 +58,15 @@ export function serializeSessionAdmission(queues, key, operation, signal = null,
   const hasDeadline = typeof cancellationGraceMs === 'number'
     && Number.isFinite(cancellationGraceMs) && cancellationGraceMs >= 0
     && typeof onCancellationDeadline === 'function';
-  let admitted = false;
+  const operationToken = {}; // private pairing identity, never a metric label
+  let admitted = false, overdue = false, overdueAt = null;
   let onAbort;
   let timer = null;
   let deadlineReject;
   const deadline = new Promise((_, reject) => { deadlineReject = reject; });
   const releaseDeadline = async () => {
+    overdue = true; overdueAt = performance.now();
+    operationalTelemetry('run-drain-overdue', { operationToken, outcome:'deadline_exceeded', durationMs:cancellationGraceMs });
     try {
       const fenced = await onCancellationDeadline?.();
       if (fenced !== true && fenced?.ok !== true) return;
@@ -86,6 +91,8 @@ export function serializeSessionAdmission(queues, key, operation, signal = null,
     admitted = true;
     return operation();
   });
+  const observeDrain = () => { if (overdue) { overdue = false; operationalTelemetry('run-drain-overdue',{ operationToken, outcome:'drained',durationMs:Math.max(0,performance.now()-overdueAt) }); } };
+  execution.then(observeDrain,observeDrain);
   const current = hasDeadline
     ? Promise.race([execution, deadline])
     : execution;

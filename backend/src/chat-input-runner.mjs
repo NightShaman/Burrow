@@ -5,6 +5,8 @@ import { createBackgroundLifecycle } from './background-lifecycle.mjs';
 import { runChatTurnFromBody } from './chat-turn-controller.mjs';
 import { answerSideQuestion } from './chat-side-question.mjs';
 import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
+import { hasOperationalTelemetryObservers, operationalTelemetry } from './operational-telemetry.mjs';
+import { performance } from 'node:perf_hooks';
 
 // Dispatch is deliberately small: queue-next uses the ordinary session turn;
 // side questions use a frozen, tool-free snapshot and never claim that session.
@@ -20,8 +22,17 @@ export function createChatInputRunner({ store, stores, rootDir, resolveAgentRunt
   async function flush() {
     for (const [id, receipt] of receipts) {
       try {
-        await store.complete(id, receipt);
-        if (receipts.get(id) === receipt) receipts.delete(id);
+        const startedAt = performance.now();
+        const completed = await store.complete(id, receipt);
+        // Another flush may have acknowledged a newer receipt while this
+        // idempotent persistence awaited its lock. Observe only this owner.
+        if (receipts.get(id) === receipt) {
+          if (completed?.status === 'interrupted') operationalTelemetry('run-interrupted', {
+            sessionId: completed.sessionId, runId: completed.runId, source: completed.intent === 'side_question' ? 'side_question' : 'main',
+            outcome: 'recorded', reason: 'service_shutdown', durationMs: Math.max(0, performance.now() - startedAt),
+          });
+          receipts.delete(id);
+        }
       } catch (error) {
         if (error?.message === 'chat_input_owner_fenced') {
           // Reset/dead-owner reconciliation already owns this terminal state.
@@ -33,6 +44,25 @@ export function createChatInputRunner({ store, stores, rootDir, resolveAgentRunt
       }
     }
   }
+  let observingQueue = false;
+  function observeQueue() {
+    if (observingQueue || lifecycle.stopped || !hasOperationalTelemetryObservers() || typeof store.queueTelemetrySnapshot !== 'function') return;
+    observingQueue = true;
+    // Coalesce the optional aggregate read without gating admission/receipts.
+    // Pass shutdown cancellation to supporting stores and own every read until
+    // it settles. Custom stores that ignore the signal must still be drained.
+    void lifecycle.track(async () => {
+      try {
+        if (lifecycle.stopped || !hasOperationalTelemetryObservers()) return;
+        const snapshots = await store.queueTelemetrySnapshot({ signal: lifecycle.signal });
+        if (lifecycle.stopped || !hasOperationalTelemetryObservers()) return;
+        for (const { intent, pendingDepth, oldestAgeMs } of snapshots || []) {
+          operationalTelemetry('chat-queue-snapshot', { intent, pendingDepth, oldestAgeMs });
+        }
+      } catch { /* Observation cannot change dispatch or health. */ }
+      finally { observingQueue = false; }
+    }, 'queue_observation').catch(() => {});
+  }
   async function run(job, controller) {
     let registered = null, receipt;
     let signal = AbortSignal.any([lifecycle.signal, controller.signal]);
@@ -43,6 +73,9 @@ export function createChatInputRunner({ store, stores, rootDir, resolveAgentRunt
         const current = await store.get(job);
         if (!current || current.status !== 'running') throw new Error('chat_input_session_reset');
         if (current.cancelRequested) { controller.abort(new Error('chat_input_cancelled')); signal.throwIfAborted(); }
+        const enqueuedAt = Date.parse(job.createdAt || '');
+        operationalTelemetry('chat-queue-started', { intent: job.intent, sessionId: job.sessionId, runId: job.runId,
+          waitMs: Number.isFinite(enqueuedAt) ? Math.max(0, Date.now() - enqueuedAt) : null });
         registered = registerActiveRun?.({ agentId: job.agentId, sessionId: job.sessionId, runId: job.runId,
           message: job.message, source: job.intent, lane: job.intent === 'side_question' ? 'side_question' : 'main',
           inputId: job.id, parentSignal: signal });
@@ -108,6 +141,7 @@ export function createChatInputRunner({ store, stores, rootDir, resolveAgentRunt
           queueMicrotask(() => { void wake().catch(() => {}); });
         }).catch(() => {});
       }
+      observeQueue();
     }, 'admission').finally(() => { pumping = null; });
     return pumping;
   }
