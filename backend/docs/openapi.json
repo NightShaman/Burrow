@@ -3568,6 +3568,198 @@
         }
       }
     },
+    "/api/archive/dreams/groups": {
+      "get": {
+        "tags": [
+          "Archive"
+        ],
+        "summary": "List complete Dream groups by agent and local day",
+        "description": "Page complete agent/local-day groups across enabled and disabled agents, newest local day then agent ID descending. Each group combines real diaries (by createdAt) and retained Dream cycle receipts (by startedAt, falling back to createdAt then generatedAt); failure-only days remain visible. A matching search returns the whole group, not only matching entries. Phase attempts, unattributed cycle failures/running progress and diaries are separate; only an explicit diaryId is recorded as a link, and it may refer to a diary outside this group or no longer retained. No link is inferred from phase or day. Errors are sanitized; owner metadata, provider responses and receipt graphs are not returned.",
+        "operationId": "listArchiveDreamGroups",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "description": "Local day of diary creation or cycle start/creation, not diary entryDate.",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Case-insensitive substring of agent identity, local day, full diary narrative and ID/date, phase, run identity/status, or sanitized error.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timezone",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "UTC"
+            },
+            "description": "IANA timezone defining local day/month boundaries (including DST); omitted or empty uses UTC."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum page size; larger values are clamped to 500.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 200
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque nextCursor from the previous page; keep q, date, agentId, and timezone unchanged.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/ArchiveDreamGroupListResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/api/archive/dreams/groups/{agentId}/{day}": {
+      "get": {
+        "tags": [
+          "Archive"
+        ],
+        "summary": "Read a complete Dream agent/day group",
+        "description": "Read retained diaries, recorded phase attempts and unattributed cycle failure/running progress for one agent/local day; not a raw receipt graph or an exhaustive list of cycle receipts. Use the same timezone as the list or calendar. Phase timestamps are included only when recorded; cycle timing is labeled separately. Missing evidence returns 404.",
+        "operationId": "getArchiveDreamGroup",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathAgentId"
+          },
+          {
+            "name": "day",
+            "in": "path",
+            "required": true,
+            "description": "Local creation day, YYYY-MM-DD.",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timezone",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "UTC"
+            },
+            "description": "IANA timezone defining local day/month boundaries (including DST); omitted or empty uses UTC."
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/ArchiveDreamGroupDetailResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/api/archive/workflow-events": {
+      "get": {
+        "tags": [
+          "Archive"
+        ],
+        "summary": "List archived GitHub workflow completion events",
+        "description": "Read retained completion-event snapshots, including provenance captured at acceptance, newest createdAt then ID descending. This is a normally UI-authorized read-only Archive projection, not a webhook acknowledgment or proof of completed agent work. Result is boundary-redacted; instruction and error remain retained text; ownerId and traceDir are omitted. Search matches retained data before result redaction.",
+        "operationId": "listArchiveWorkflowEvents",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "description": "Local day of event acceptance createdAt, not GitHub completedAt.",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Case-insensitive substring of repository, workflow, run ID, SHA, conclusion, agent/session, instruction, status, chat run ID, error, or retained result JSON.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timezone",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "UTC"
+            },
+            "description": "IANA timezone defining local day/month boundaries (including DST); omitted or empty uses UTC."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum rows in this page (1\u2013500, default 100). Invalid or out-of-range values return 400 archive_limit_invalid.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque nextCursor from the previous page; keep q, date, agentId, and timezone unchanged.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/ArchiveWorkflowEventListResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
     "/api/agents/{agentId}/archive-summary-model-selection": {
       "get": {
         "tags": [
@@ -5516,7 +5708,7 @@
         "tags": [
           "Archive"
         ],
-        "summary": "List UTC days with retained Archive records in a month",
+        "summary": "List local days with retained Archive records in a month",
         "operationId": "listArchiveCalendarDates",
         "parameters": [
           {
@@ -5527,7 +5719,8 @@
               "type": "string",
               "enum": [
                 "sessions",
-                "dreams"
+                "dreams",
+                "workflow-events"
               ]
             }
           },
@@ -5561,7 +5754,8 @@
           "400": {
             "$ref": "#/components/responses/ErrorResponse"
           }
-        }
+        },
+        "description": "Days are computed across retained records independently of page limits. Dreams includes diary creation and cycle receipt start/creation days, including failure-only receipts; workflow-events uses event acceptance createdAt. Calendar is not filtered by q."
       }
     },
     "/api/settings/timezone": {
@@ -9419,6 +9613,36 @@
           }
         }
       },
+      "ArchiveDreamGroupListResponse": {
+        "description": "Complete agent/local-day Dream group summaries.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ArchiveDreamGroupListResponse"
+            }
+          }
+        }
+      },
+      "ArchiveDreamGroupDetailResponse": {
+        "description": "Retained diaries and phase/cycle receipt attempts for one Dream group.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ArchiveDreamGroupDetailResponse"
+            }
+          }
+        }
+      },
+      "ArchiveWorkflowEventListResponse": {
+        "description": "Retained workflow completion snapshots for Archive inspection.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ArchiveWorkflowEventListResponse"
+            }
+          }
+        }
+      },
       "ArchiveContinuityCardListResponse": {
         "description": "Current warm continuity cards for Archive inspection. Cards are mutable continuity metadata, not immutable archived sessions or prompt authority.",
         "content": {
@@ -9550,7 +9774,7 @@
         }
       },
       "ArchiveCalendarResponse": {
-        "description": "UTC days with retained Archive sessions or Dreams, independent of list pagination.",
+        "description": "Local days with retained Archive sessions, Dreams or workflow events, independent of list pagination.",
         "content": {
           "application/json": {
             "schema": {
@@ -11716,6 +11940,723 @@
         },
         "additionalProperties": false
       },
+      "ArchiveDreamPhaseAttemptStatus": {
+        "type": "string",
+        "enum": [
+          "unknown",
+          "running",
+          "completed",
+          "failed",
+          "partial",
+          "interrupted"
+        ]
+      },
+      "ArchiveDreamCycleAttemptStatus": {
+        "type": "string",
+        "enum": [
+          "unknown",
+          "running",
+          "failed",
+          "partial",
+          "interrupted"
+        ]
+      },
+      "ArchiveDreamDiarySummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "entryDate",
+          "createdAt",
+          "excerpt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "entryDate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "excerpt": {
+            "type": "string",
+            "description": "Trimmed first 320 characters of retained diary Markdown."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveDreamDiary": {
+        "type": "object",
+        "description": "Actual retained diary narrative, without source references or model/runtime metadata.",
+        "required": [
+          "id",
+          "phase",
+          "entryDate",
+          "createdAt",
+          "markdown"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "entryDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Diary entry date; not the local creation day used to group records."
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "markdown": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveDreamPhaseErrors": {
+        "type": "object",
+        "description": "Present diagnostic stages have bounded, redacted error text.",
+        "properties": {
+          "extraction": {
+            "type": "string"
+          },
+          "diary": {
+            "type": "string"
+          },
+          "reconciliation": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveDreamPhaseAttempt": {
+        "type": "object",
+        "description": "Receipt phase evidence. A retry failure does not invalidate an earlier diary.",
+        "required": [
+          "runId",
+          "status",
+          "error",
+          "errors",
+          "startedAt",
+          "completedAt",
+          "runStartedAt",
+          "runCompletedAt",
+          "diaryId"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string",
+            "description": "Dream cycle receipt run identity."
+          },
+          "status": {
+            "$ref": "#/components/schemas/ArchiveDreamPhaseAttemptStatus"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "First sanitized phase error, if any."
+          },
+          "errors": {
+            "$ref": "#/components/schemas/ArchiveDreamPhaseErrors"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Explicitly recorded phase start, not inferred from cycle timing."
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Explicitly recorded phase completion, not inferred from cycle timing."
+          },
+          "runStartedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Cycle start, falling back to receipt createdAt then generatedAt."
+          },
+          "runCompletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Cycle completion, not phase completion."
+          },
+          "diaryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Explicit receipt diary ID only; may identify a diary outside this group or no longer retained. No association is inferred from matching day or phase."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveDreamCycleAttempt": {
+        "type": "object",
+        "description": "Unattributed cycle-level failure/interruption or running progress; not assigned to a phase.",
+        "required": [
+          "runId",
+          "status",
+          "error",
+          "startedAt",
+          "completedAt"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ArchiveDreamCycleAttemptStatus"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Sanitized unattributed cycle error, if any."
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveDreamPhaseSummary": {
+        "type": "object",
+        "required": [
+          "phase",
+          "diaryCount",
+          "attemptCount",
+          "latestStatus",
+          "latestError",
+          "latestDiary"
+        ],
+        "properties": {
+          "phase": {
+            "type": "string",
+            "enum": [
+              "light",
+              "deep",
+              "rem"
+            ]
+          },
+          "diaryCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attemptCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "latestStatus": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ArchiveDreamPhaseAttemptStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latestError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "latestDiary": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ArchiveDreamDiarySummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveDreamPhaseDetail": {
+        "type": "object",
+        "description": "Real diaries and receipt phase attempts remain separate; only an explicit diaryId records a link, which need not resolve within this group.",
+        "required": [
+          "phase",
+          "diaries",
+          "attempts"
+        ],
+        "properties": {
+          "phase": {
+            "type": "string",
+            "enum": [
+              "light",
+              "deep",
+              "rem"
+            ]
+          },
+          "diaries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArchiveDreamDiary"
+            }
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArchiveDreamPhaseAttempt"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveDreamPhaseSummaries": {
+        "type": "object",
+        "required": [
+          "light",
+          "deep",
+          "rem"
+        ],
+        "properties": {
+          "light": {
+            "$ref": "#/components/schemas/ArchiveDreamPhaseSummary"
+          },
+          "deep": {
+            "$ref": "#/components/schemas/ArchiveDreamPhaseSummary"
+          },
+          "rem": {
+            "$ref": "#/components/schemas/ArchiveDreamPhaseSummary"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveDreamPhaseDetails": {
+        "type": "object",
+        "required": [
+          "light",
+          "deep",
+          "rem"
+        ],
+        "properties": {
+          "light": {
+            "$ref": "#/components/schemas/ArchiveDreamPhaseDetail"
+          },
+          "deep": {
+            "$ref": "#/components/schemas/ArchiveDreamPhaseDetail"
+          },
+          "rem": {
+            "$ref": "#/components/schemas/ArchiveDreamPhaseDetail"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveDreamOtherDiarySummary": {
+        "type": "object",
+        "required": [
+          "diaryCount",
+          "latestDiary"
+        ],
+        "properties": {
+          "diaryCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "latestDiary": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ArchiveDreamDiarySummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveDreamCycleAttemptSummary": {
+        "type": "object",
+        "required": [
+          "count",
+          "latestStatus",
+          "latestError"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "latestStatus": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ArchiveDreamCycleAttemptStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latestError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveDreamGroupSummary": {
+        "type": "object",
+        "description": "One whole agent/local-day group; list counts cover all retained evidence in that group.",
+        "required": [
+          "agentId",
+          "agentName",
+          "day",
+          "timezone",
+          "createdAt",
+          "phases",
+          "otherDiaries",
+          "cycleAttempts"
+        ],
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "agentName": {
+            "type": "string"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "description": "Local creation day in timezone, not diary entryDate."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "Resolved IANA timezone used for grouping."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Latest diary or receipt creation timestamp within the group."
+          },
+          "phases": {
+            "$ref": "#/components/schemas/ArchiveDreamPhaseSummaries"
+          },
+          "otherDiaries": {
+            "$ref": "#/components/schemas/ArchiveDreamOtherDiarySummary"
+          },
+          "cycleAttempts": {
+            "$ref": "#/components/schemas/ArchiveDreamCycleAttemptSummary"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveDreamGroup": {
+        "type": "object",
+        "description": "Retained diary, phase-attempt and unattributed cycle evidence for one agent/local day, including nonstandard phase diaries. Cycle attempts are only unattributed failures/interruption or running progress, not every receipt.",
+        "required": [
+          "agentId",
+          "agentName",
+          "day",
+          "timezone",
+          "createdAt",
+          "phases",
+          "otherDiaries",
+          "cycleAttempts"
+        ],
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "agentName": {
+            "type": "string"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "description": "Local creation day in timezone, not diary entryDate."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "Resolved IANA timezone used for grouping."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Latest diary or receipt creation timestamp within the group."
+          },
+          "phases": {
+            "$ref": "#/components/schemas/ArchiveDreamPhaseDetails"
+          },
+          "otherDiaries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArchiveDreamDiary"
+            }
+          },
+          "cycleAttempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArchiveDreamCycleAttempt"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveDreamGroupListResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "groups",
+          "nextCursor",
+          "hasMore"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArchiveDreamGroupSummary"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as cursor for the next page with the same filters; null when there is no next page."
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveDreamGroupDetailResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "group"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "group": {
+            "$ref": "#/components/schemas/ArchiveDreamGroup"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveWorkflowEvent": {
+        "type": "object",
+        "description": "GitHub completion-event snapshot and provenance captured at acceptance. ownerId and traceDir are omitted; result is redacted. instruction and error remain retained text.",
+        "required": [
+          "id",
+          "watchId",
+          "repository",
+          "workflow",
+          "runId",
+          "runAttempt",
+          "headSha",
+          "conclusion",
+          "url",
+          "completedAt",
+          "agentId",
+          "sessionId",
+          "instruction",
+          "status",
+          "chatRunId",
+          "result",
+          "error",
+          "createdAt",
+          "startedAt",
+          "finishedAt",
+          "agentName"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "watchId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "workflow": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "maxLength": 128
+          },
+          "runAttempt": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "headSha": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{40,64}$"
+          },
+          "conclusion": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failure",
+              "neutral",
+              "cancelled",
+              "skipped",
+              "timed_out",
+              "action_required",
+              "startup_failure",
+              "stale"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "GitHub Actions run URL validated against repository and run ID."
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "succeeded",
+              "failed",
+              "interrupted"
+            ],
+            "description": "pending/running are outstanding; succeeded/failed are terminal; interrupted is retained for reconciliation, not blindly replayed. Webhook receipt accepted=true means only durable acceptance, not handled."
+          },
+          "chatRunId": {
+            "type": "string"
+          },
+          "result": {
+            "description": "Retained runtime result, which may be any JSON value (including null); recursively redacted and traversal-bounded for the Archive projection. Redaction is boundary-based, not a guarantee that arbitrary free-text secrets are removed."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "agentName": {
+            "type": "string",
+            "description": "Current agent name, falling back to agentId."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveWorkflowEventListResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "events",
+          "hasMore",
+          "nextCursor"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArchiveWorkflowEvent"
+            }
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as cursor for the next page with the same filters; null when there is no next page."
+          }
+        },
+        "additionalProperties": false
+      },
       "ArchiveSessionListItem": {
         "type": "object",
         "required": [
@@ -13847,7 +14788,8 @@
             "type": "string",
             "enum": [
               "sessions",
-              "dreams"
+              "dreams",
+              "workflow-events"
             ]
           },
           "month": {

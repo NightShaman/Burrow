@@ -185,40 +185,23 @@ describe('agent settings sections', () => {
   });
 
   function mountDreamsWithOverflow() {
-    apiMock.mockImplementation((path) => Promise.resolve(path.includes('/dream-cycle')
-      ? { receipts: [{ runId: 'cycle-1', status: 'completed' }] }
-      : { settings: dreamSettings() }));
+    apiMock.mockResolvedValue({ settings: dreamSettings() });
     const overflow = document.createElement('section');
     document.body.append(overflow);
     const view = render(<AgentDreams agentId="smatchet" savedProviders={[]} overflowTarget={overflow} />);
     return { ...view, overflow };
   }
 
-  it('keeps the Dream prompt in primary and renders activity and memory controls once', async () => {
+  it('keeps the Dream prompt and memory controls without recent activity in either pane', async () => {
     const view = mountDreamsWithOverflow();
     try {
       await screen.findByDisplayValue('Reflect on the day.');
       expect(view.container.contains(screen.getByLabelText('Dream prompt'))).toBe(true);
-      expect(screen.getAllByText('Recent activity')).toHaveLength(1);
-      fireEvent.click(screen.getByText('Recent activity'));
-      expect(await screen.findByText('Completed')).toBeTruthy();
+      expect(view.container.textContent).not.toContain('Recent activity');
+      expect(view.overflow.textContent).not.toContain('Recent activity');
+      expect(apiMock.mock.calls.map(([path]) => path)).toEqual(['/api/agents/smatchet/dream-settings']);
       expect(screen.getAllByText('Dream memory')).toHaveLength(1);
       expect(screen.getAllByLabelText('Memory prompt override')).toHaveLength(1);
-    } finally { view.unmount(); view.overflow.remove(); }
-  });
-
-  // Known preexisting discrepancy: HEAD already renders recent activity in primary
-  // and portals editable Dream memory controls into supporting content. Do not invert
-  // the placement contract to bless that baseline or move the shell in this autosave task.
-  it.fails('places recent Dream activity in supporting content (known preexisting placement gap)', async () => {
-    const view = mountDreamsWithOverflow();
-    try {
-      await screen.findByDisplayValue('Reflect on the day.');
-      fireEvent.click(screen.getByText('Recent activity'));
-      await screen.findByText('Completed');
-      expect.soft(view.container.textContent).not.toContain('Recent activity');
-      expect.soft(view.overflow.textContent).toContain('Recent activity');
-      expect.soft(view.overflow.textContent).toContain('Completed');
     } finally { view.unmount(); view.overflow.remove(); }
   });
 
@@ -251,9 +234,8 @@ describe('agent settings sections', () => {
     const firstLoad = deferred<{ settings: ReturnType<typeof dreamSettings> }>();
     const save = deferred<{ settings: ReturnType<typeof dreamSettings> }>();
     const secondLoad = deferred<{ settings: ReturnType<typeof dreamSettings> }>();
-    apiMock.mockImplementation((path, init) => {
+    apiMock.mockImplementation((_path, init) => {
       if (init?.method === 'PUT') return save.promise;
-      if (path.includes('/dream-cycle')) return Promise.resolve({ receipts: [] });
       return apiMock.mock.calls.filter(([requestPath]) => requestPath.includes('/dream-settings')).length === 1 ? firstLoad.promise : secondLoad.promise;
     });
     const view = render(<AgentDreams agentId="smatchet" savedProviders={[]} />);
@@ -308,34 +290,6 @@ describe('agent settings sections', () => {
     await waitFor(() => expect(apiMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true));
     const [, init] = apiMock.mock.calls.find(([, request]) => request?.method === 'PUT')!;
     expect(JSON.parse(init?.body as string)).toMatchObject({ modelConnectionId: null, model: null });
-  });
-
-  it('shows running and interrupted Dream activity with the backend error', async () => {
-    apiMock.mockImplementation((path) => path.includes('/dream-cycle')
-      ? Promise.resolve({ receipts: [
-        { runId: 'running-1', status: 'running', startedAt: '2026-09-18T03:00:00.000Z' },
-        { runId: 'interrupted-1', status: 'interrupted', error: 'Dream interrupted by runtime restart before completion', completedAt: '2026-09-18T03:05:00.000Z' },
-      ] })
-      : Promise.resolve({ settings: dreamSettings() }));
-    render(<AgentDreams agentId="smatchet" savedProviders={[]} />);
-
-    expect(await screen.findByText('Running')).toBeTruthy();
-    expect(screen.getByText('Interrupted')).toBeTruthy();
-    expect(screen.getByRole('alert').textContent).toBe('Dream interrupted by runtime restart before completion');
-  });
-
-  it('renders Dream activity with a missing status without crashing Agents settings', async () => {
-    apiMock.mockImplementation((path) => path.includes('/dream-cycle')
-      ? Promise.resolve({ receipts: [{ runId: 'legacy-1', completedAt: '2026-09-18T03:05:00.000Z' }] })
-      : Promise.resolve({ settings: dreamSettings() }));
-    render(<AgentDreams agentId="smatchet" savedProviders={[]} />);
-
-    expect(await screen.findByText('Unknown')).toBeTruthy();
-    expect(screen.getByLabelText('Dream prompt')).toHaveProperty('disabled', false);
-    fireEvent.change(screen.getByLabelText('Dream prompt'), { target: { value: 'Still editable' } });
-    fireEvent.blur(screen.getByLabelText('Dream prompt'));
-    await waitFor(() => expect(apiMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true));
-    expect(JSON.parse(apiMock.mock.calls.find(([, init]) => init?.method === 'PUT')![1]!.body as string)).toMatchObject({ prompt: 'Still editable' });
   });
 
   it('omits mod-authorized tools while preserving grant-required tools from a mixed mod server', async () => {

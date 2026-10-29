@@ -40,6 +40,7 @@ const collection = {
     { key: 'agentId', value: 'hatchet' },
     { key: 'sessionId', value: 'default' },
     { key: 'archiveSessionId', value: 'default.reset.2026-08-15T20-05-44-730Z' },
+    { key: 'archiveDay', value: '2026-08-09' },
     { key: 'runId', value: 'manual-run' },
     { key: 'inputId', value: '00000000-0000-4000-8000-000000000000' },
     { key: 'generation', value: '0' },
@@ -169,6 +170,10 @@ const collection = {
       req('Search all HC evidence', 'GET', '/api/session/search', { query: [['scope', 'burrow'], ['q', 'search terms'], ['role', 'any'], ['limit', '50'], ['archived', 'true']] }),
     ]),
     folder('Sessions', [
+      req('List Archive calendar dates', 'GET', '/api/archive/calendar', { query: [['kind', 'dreams', 'Also sessions or workflow-events'], ['month', '2026-08'], ['agentId', '{{agentId}}'], ['timezone', 'UTC']] }),
+      req('List Dream day groups', 'GET', '/api/archive/dreams/groups', { query: [['agentId', '{{agentId}}'], ['date', ''], ['q', ''], ['timezone', 'UTC'], ['limit', '200'], ['cursor', '']], description: 'Pages complete agent/local-day groups; keep filters unchanged with nextCursor.' }),
+      req('Read Dream day group', 'GET', '/api/archive/dreams/groups/{{agentId}}/{{archiveDay}}', { query: [['timezone', 'UTC']] }),
+      req('List archived workflow events', 'GET', '/api/archive/workflow-events', { query: [['agentId', '{{agentId}}'], ['date', ''], ['q', ''], ['timezone', 'UTC'], ['limit', '100'], ['cursor', '']], description: 'Normally UI-authorized, retained snapshots; date is the event acceptance day.' }),
       req('List archive Dreams', 'GET', '/api/archive/dreams', { query: [['agentId', '{{agentId}}'], ['limit', '200']] }),
       req('Read archive Dream', 'GET', '/api/archive/dreams/{{agentId}}/{{dreamEntryId}}'),
       req('List archive continuity cards', 'GET', '/api/archive/continuity/cards', { query: [['agentId', '{{agentId}}'], ['scope', ''], ['limit', '200']] }),

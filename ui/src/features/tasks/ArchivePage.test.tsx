@@ -43,7 +43,7 @@ describe('Archive detail selection', () => {
     await waitFor(() => expect(availability).toHaveBeenLastCalledWith('sessions', expect.stringMatching(/^\d{4}-\d{2}$/), 'smatchet', expect.any(AbortSignal)));
 
     fireEvent.click(screen.getByRole('button', { name: /Dreams/ }));
-    await waitFor(() => expect(dreams).toHaveBeenCalledWith(expect.any(AbortSignal), null, undefined, 'smatchet'));
+    await waitFor(() => expect(dreams).toHaveBeenCalledWith(expect.any(AbortSignal), null, undefined, 'smatchet', ''));
   });
 
   it('does not let a slower previous Tiddle request replace the current card', async () => {
@@ -292,7 +292,7 @@ it('prefetches navigation counts and still drops selection on leaving and return
 });
 
 it.each(['dreams', 'tiddle'] as const)('aborts %s pagination on filter-owner replacement and ignores late rows', async kind => {
-  const dream = { id: 'd', agentId: 'a', agentName: 'A', phase: 'REM', date: '2026-10-15', excerpt: 'Dream fixture' } as any;
+  const dream = { agentId: 'a', agentName: 'A', day: '2026-10-15', timezone: 'UTC', phases: Object.fromEntries(['light', 'deep', 'rem'].map(phase => [phase, { diaryCount: 0, attemptCount: 0 }])), otherDiaries: { diaryCount: 0 }, cycleAttempts: { count: 1, latestStatus: 'failed' } } as any;
   const tiddle = card('c', 'Card fixture');
   const pending = deferred<any>();
   vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([]));

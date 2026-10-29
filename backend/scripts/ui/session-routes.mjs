@@ -22,6 +22,9 @@ export function createSessionRoutes({
   archiveRunDetail,
   archiveDreams,
   archiveDreamDetail,
+  archiveDreamGroups,
+  archiveDreamGroupDetail,
+  archiveWorkflowEvents,
   archiveContinuityCards,
   archiveContinuityCardDetail,
   listSessions,
@@ -98,6 +101,22 @@ export function createSessionRoutes({
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/calendar') {
       sendJson(res, 200, await archiveCalendar({ kind: url.searchParams.get('kind'), month: url.searchParams.get('month'), timezone: url.searchParams.get('timezone'), agentId: url.searchParams.get('agentId') }));
+      return true;
+    }
+    if (req.method === 'GET' && url.pathname === '/api/archive/workflow-events') {
+      sendJson(res, 200, await archiveWorkflowEvents({ agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), timezone: url.searchParams.get('timezone'), query: url.searchParams.get('q') || '', limit: url.searchParams.get('limit') || 100, cursor: url.searchParams.get('cursor') }));
+      return true;
+    }
+    if (req.method === 'GET' && url.pathname === '/api/archive/dreams/groups') {
+      sendJson(res, 200, await archiveDreamGroups({ agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), timezone: url.searchParams.get('timezone'), query: url.searchParams.get('q') || '', limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') }));
+      return true;
+    }
+    if (req.method === 'GET' && url.pathname.startsWith('/api/archive/dreams/groups/') && url.pathname.slice('/api/archive/dreams/groups/'.length).split('/').length !== 1) {
+      const parts = url.pathname.slice('/api/archive/dreams/groups/'.length).split('/').map(decodeURIComponent);
+      const [agentId, day] = parts;
+      if (!agentId || !day || parts.length !== 2) { sendJson(res, 400, { ok: false, error: 'archive_dream_target_required' }); return true; }
+      const result = await archiveDreamGroupDetail({ agentId, day, timezone: url.searchParams.get('timezone') });
+      sendJson(res, result.ok ? 200 : (result.status || 500), result);
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/dreams') {
@@ -203,7 +222,7 @@ export function createSessionRoutes({
     return false;
     } catch (error) {
       if (error?.message === 'session_target_exists') { sendJson(res, 409, { ok: false, error: error.message }); return true; }
-      if (!['archive_cursor_invalid', 'archive_date_invalid', 'archive_month_invalid', 'archive_kind_invalid', 'archive_timezone_invalid'].includes(error?.message)) throw error;
+      if (!['archive_cursor_invalid', 'archive_date_invalid', 'archive_month_invalid', 'archive_kind_invalid', 'archive_timezone_invalid', 'archive_limit_invalid'].includes(error?.message)) throw error;
       sendJson(res, 400, { ok: false, error: error.message });
       return true;
     }

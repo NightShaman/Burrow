@@ -1,8 +1,8 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../../app/api';
 import { ConfirmProvider } from '../../app/ConfirmDialog';
-import { AgentWorkflowEvents, githubRunUrl, type WorkflowWatch } from './AgentWorkflowEvents';
+import { AgentWorkflowEvents, type WorkflowWatch } from './AgentWorkflowEvents';
 vi.mock('../../app/api', async original => ({ ...await original<typeof import('../../app/api')>(), api: vi.fn() }));
 const mock = vi.mocked(api);
 const watch: WorkflowWatch = { id: 'watch-1', repository: 'kingdom/burrow', workflow: 'Assembly', agentId: 'hatchet', sessionId: 'ci-releases', instruction: 'Inspect the result', enabled: true };
@@ -13,16 +13,29 @@ beforeEach(() => {
     if (init?.method === 'DELETE') return { ok: true } as never;
     if (init?.method === 'POST') return { ok: true, watch: { ...JSON.parse(String(init.body)), id: 'watch-1' } } as never;
     if (path === '/api/events/watches') return { ok: true, watches: [watch, { ...watch, id: 'other', agentId: 'smatchet', workflow: 'Other agent watch' }] } as never;
-    return { ok: true, events: [{ id: 'e', agentId: 'hatchet', workflow: 'Assembly', repository: 'kingdom/burrow', runId: '123', runAttempt: 2, conclusion: 'failure', status: 'succeeded', sessionId: 'ci-releases', url: 'https://github.com/kingdom/burrow/actions/runs/123', error: null }] } as never;
+    throw new Error(`Unexpected request: ${path}`);
   });
 });
 function show(agentId = 'hatchet') { return render(<ConfirmProvider><AgentWorkflowEvents agentId={agentId} /></ConfirmProvider>); }
-it('scopes watches and events to the selected agent, with distinct source and handling outcomes', async () => {
-  show(); await screen.findByRole('button', { name: /Assembly.*Enabled/ });
-  expect(screen.queryByText('Other agent watch')).toBeNull();
-  expect(screen.getByText('failure')).toBeTruthy(); expect(screen.getByText('succeeded')).toBeTruthy();
-  expect(screen.getByRole('link', { name: 'GitHub run #123 · attempt 2' }).getAttribute('href')).toContain('/runs/123');
-  expect(mock).toHaveBeenCalledWith('/api/events?agentId=hatchet&limit=50', expect.anything());
+it('scopes watches to the selected agent without fetching or polling recent events', async () => {
+  const overflow = document.createElement('section');
+  document.body.append(overflow);
+  vi.useFakeTimers();
+  const view = render(<ConfirmProvider><AgentWorkflowEvents agentId="hatchet" overflowTarget={overflow} /></ConfirmProvider>);
+  try {
+    await act(async () => {});
+    const savedWatch = screen.getByRole('button', { name: /Assembly.*Enabled/ });
+    expect(overflow.contains(savedWatch)).toBe(true);
+    expect(screen.queryByText('Other agent watch')).toBeNull();
+    expect(screen.queryByText('Recent events')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Refresh events' })).toBeNull();
+    expect(screen.getByLabelText('Repository')).toBeTruthy();
+    expect(screen.getByText('GitHub webhook setup')).toBeTruthy();
+    const paths = () => mock.mock.calls.map(([path]) => path);
+    expect(paths().sort()).toEqual(['/api/events/settings', '/api/events/watches']);
+    await act(async () => { vi.advanceTimersByTime(45000); });
+    expect(paths().sort()).toEqual(['/api/events/settings', '/api/events/watches']);
+  } finally { view.unmount(); overflow.remove(); vi.useRealTimers(); }
 });
 it('validates then creates an explicit instruction and destination, disabled by default', async () => {
   show(); await screen.findByRole('button', { name: /Assembly.*Enabled/ });
@@ -72,8 +85,4 @@ it('does not apply old agent responses after switching destinations', async () =
   resolve({ ok: true, watches: [] });
   await screen.findByText('No watches for this agent.');
   expect(screen.queryByRole('button', { name: /Assembly/ })).toBeNull();
-});
-it('accepts only HTTPS GitHub source links', () => {
-  expect(githubRunUrl('https://github.com/owner/repo/actions/runs/1')).toBeTruthy();
-  for (const url of ['javascript:alert(1)', 'https://github.com.evil.test/a', 'http://github.com/a', 'invalid']) expect(githubRunUrl(url)).toBeUndefined();
 });

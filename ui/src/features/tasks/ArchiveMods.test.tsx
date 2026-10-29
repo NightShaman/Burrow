@@ -1,9 +1,11 @@
+import archiveCss from './archive.css?raw';
 import { archiveRepository } from './archiveRepository';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Archive } from './ArchivePage';
 import { loadModArchives, modsChangedEvent } from '../../app/modPanels';
 vi.mock('../../app/modPanels', () => ({ loadModArchives: vi.fn(), modsChangedEvent: 'burrow:mods-changed' }));
+vi.mock('./WorkflowEventsArchiveShelf', () => ({ WorkflowEventsArchiveShelf: () => <div>Workflow shelf</div> }));
 vi.mock('../mods/ModArchiveHost', () => ({ ModArchiveHost: ({ date }: { date: string }) => <div data-testid="mod-date">{date || 'all dates'}</div> }));
 const emptyPage = { items: [], nextCursor: null, hasMore: false };
 vi.mock('./archiveRepository', () => ({ archiveRepository: { listContinuityCards: async () => emptyPage, listCalendarAvailability: async (kind: 'sessions' | 'dreams', month: string) => ({ ok: true as const, kind, month, dates: [] }), listDreams: async () => emptyPage, listSessions: async () => emptyPage } }));
@@ -20,4 +22,17 @@ it('discovers Archive contributions, passes calendar date and removes disabled d
   vi.mocked(loadModArchives).mockResolvedValue([]); window.dispatchEvent(new Event(modsChangedEvent));
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Fixture archive' })).toBeNull());
   expect(screen.queryByTestId('mod-date')).toBeNull();
+});
+
+it('hides global heading filters for mods and restores them for Workflow Events', async () => {
+  vi.mocked(loadModArchives).mockResolvedValue([{ modId: 'fixture', name: 'Fixture archive', archiveUrl: '/api/mods/fixture/ui/archive.js' }]);
+  const { container } = render(<Archive repository={archiveRepository} agents={[]} />);
+  const tools = container.querySelector('.archive-heading-tools') as HTMLDivElement;
+  expect(tools.hidden).toBe(false);
+  fireEvent.click(await screen.findByRole('button', { name: 'Fixture archive' }));
+  expect(tools.hidden).toBe(true);
+  expect(archiveCss).toMatch(/\.archive-heading-tools\[hidden\]\s*\{\s*display\s*:\s*none\s*;?\s*\}/);
+  fireEvent.click(screen.getByRole('button', { name: /Workflow Events/i }));
+  expect(tools.hidden).toBe(false);
+  expect(screen.getByPlaceholderText('Search workflow events')).toBeTruthy();
 });

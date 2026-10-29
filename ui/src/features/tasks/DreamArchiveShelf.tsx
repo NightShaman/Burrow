@@ -1,92 +1,93 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ArchiveRepository } from './archiveRepository';
-import { dreamDate, filterDreamEntries, groupDreamEntries } from './archiveDerivations';
-import { DreamArchiveReader, formatArchiveDate } from './ArchiveReaders';
-import type { DreamEntry, DreamGroup } from './archiveTypes';
+import { DreamArchiveReader } from './ArchiveReaders';
+import type { DreamArchiveGroup, DreamGroupSummary, DreamPhase } from './archiveTypes';
 
 type ShelfProps = { archiveRepository: ArchiveRepository; selectedAgent: string; selectedDate: string; search: string; queryKey: string; onCount: (count: number) => void };
+const phases: DreamPhase[] = ['light', 'deep', 'rem'];
+const phaseName = (phase: DreamPhase) => phase === 'rem' ? 'REM' : phase === 'light' ? 'Light' : 'Deep';
+const formatDay = (day: string) => {
+  const [year, month, date] = day.split('-');
+  return year && month && date ? `${month}-${date}-${year}` : day;
+};
+const identity = (group: DreamGroupSummary) => JSON.stringify([group.agentId, group.day, group.timezone]);
+const unique = (groups: DreamGroupSummary[]) => [...new Map(groups.map(group => [identity(group), group])).values()];
+const message = (cause: unknown) => cause instanceof Error ? cause.message : 'Could not load dream archive.';
 
-function formatDreamGroupDay(value: string) {
-  const [year, month, day] = value.split('-');
-  return month && day && year ? `${month}-${day}-${year}` : value;
+export function DreamArchiveShelf(props: ShelfProps) {
+  return <DreamShelf key={props.queryKey} {...props} />;
 }
-
-export function DreamArchiveShelf({ archiveRepository, selectedAgent, selectedDate, search, queryKey, onCount }: ShelfProps) {
-  const [dreamsCursor, setDreamsCursor] = useState<string | null>(null);
-  const [dreamsHasMore, setDreamsHasMore] = useState(false);
-  const [dreamsMoreLoading, setDreamsMoreLoading] = useState(false);
-  const [selectedDreamGroup, setSelectedDreamGroup] = useState<DreamGroup | null>(null);
-  const [dreams, setDreams] = useState<DreamEntry[]>([]);
-  const [dreamsLoading, setDreamsLoading] = useState(false);
-  const [dreamsRetry, setDreamsRetry] = useState(0);
-  const [dreamDetailLoading, setDreamDetailLoading] = useState(false);
-  const [dreamsError, setDreamsError] = useState('');
-  const [dreamDetailError, setDreamDetailError] = useState('');
-  const scopeRef = useRef(queryKey);
-  scopeRef.current = queryKey;
-  const moreRequests = useRef(new Set<AbortController>());
-  useEffect(() => () => {
-    moreRequests.current.forEach((request) => request.abort());
-    moreRequests.current.clear();
-  }, []);
+function DreamShelf({ archiveRepository, selectedAgent, selectedDate, search, onCount }: ShelfProps) {
+  const [groups, setGroups] = useState<DreamGroupSummary[]>([]);
+  const [selected, setSelected] = useState<DreamGroupSummary | null>(null);
+  const [detail, setDetail] = useState<DreamArchiveGroup | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [moreLoading, setMoreLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [moreError, setMoreError] = useState('');
+  const [retry, setRetry] = useState(0);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
+  const [detailRetry, setDetailRetry] = useState(0);
+  const moreRequest = useRef<AbortController | null>(null);
   useEffect(() => {
     const abort = new AbortController();
-    const load = async () => {
-      moreRequests.current.forEach((request) => request.abort()); moreRequests.current.clear();
-      setDreamsCursor(null); setDreamsHasMore(false); setDreamsMoreLoading(false);
-      setDreamsLoading(true); setDreamsError('');
-      try {
-        const page = await archiveRepository.listDreams(abort.signal, null, selectedDate || undefined, selectedAgent || undefined);
-        if (!abort.signal.aborted) { setDreams(page.items); setDreamsCursor(page.nextCursor); setDreamsHasMore(page.hasMore); }
-      } catch (cause) { if (!abort.signal.aborted) setDreamsError(cause instanceof Error ? cause.message : 'Could not load dream archive.'); }
-      finally { if (!abort.signal.aborted) setDreamsLoading(false); }
-    };
-    void load();
+    moreRequest.current?.abort(); moreRequest.current = null;
+    setGroups([]); setSelected(null); setDetail(null); setCursor(null); setHasMore(false);
+    setLoading(true); setMoreLoading(false); setError(''); setMoreError('');
+    void archiveRepository.listDreams(abort.signal, null, selectedDate || undefined, selectedAgent || undefined, search)
+      .then(page => { if (!abort.signal.aborted) { setGroups(unique(page.items)); setCursor(page.nextCursor); setHasMore(page.hasMore); } })
+      .catch(cause => { if (!abort.signal.aborted) setError(message(cause)); })
+      .finally(() => { if (!abort.signal.aborted) setLoading(false); });
+    return () => { abort.abort(); moreRequest.current?.abort(); };
+  }, [archiveRepository, selectedAgent, selectedDate, search, retry]);
+  useEffect(() => { if (!loading && !error) onCount(groups.length); }, [groups.length, loading, error, onCount]);
+  useEffect(() => {
+    if (!selected) return;
+    const abort = new AbortController();
+    setDetail(null); setDetailLoading(true); setDetailError('');
+    void archiveRepository.loadDreamGroup(selected, abort.signal)
+      .then(group => { if (!abort.signal.aborted) setDetail(group); })
+      .catch(cause => { if (!abort.signal.aborted) setDetailError(message(cause)); })
+      .finally(() => { if (!abort.signal.aborted) setDetailLoading(false); });
     return () => abort.abort();
-  }, [selectedDate, selectedAgent, search, queryKey, dreamsRetry, archiveRepository]);
-  const loadMoreDreams = async () => {
-    if (!dreamsHasMore || !dreamsCursor || dreamsMoreLoading || moreRequests.current.size) return;
-    const scope = queryKey; const abort = new AbortController(); moreRequests.current.add(abort);
-    const current = () => !abort.signal.aborted && scopeRef.current === scope;
-    setDreamsMoreLoading(true);
-    try { const date = selectedDate; const page = await archiveRepository.listDreams(abort.signal, dreamsCursor, date || undefined, selectedAgent || undefined); if (!current()) return; setDreams((current) => [...current, ...page.items]); setDreamsCursor(page.nextCursor); setDreamsHasMore(page.hasMore); }
-    catch (cause) { if (current()) setDreamsError(cause instanceof Error ? cause.message : 'Could not load more dreams.'); }
-    finally { moreRequests.current.delete(abort); if (current()) setDreamsMoreLoading(false); }
+  }, [selected, detailRetry, archiveRepository]);
+  const loadMore = async () => {
+    if (!hasMore || !cursor || loading || moreRequest.current) return;
+    const abort = new AbortController(); moreRequest.current = abort;
+    setMoreLoading(true); setMoreError('');
+    try {
+      const page = await archiveRepository.listDreams(abort.signal, cursor, selectedDate || undefined, selectedAgent || undefined, search);
+      if (abort.signal.aborted) return;
+      setGroups(current => unique([...current, ...page.items])); setCursor(page.nextCursor); setHasMore(page.hasMore);
+    } catch (cause) { if (!abort.signal.aborted) setMoreError(message(cause)); }
+    finally { if (moreRequest.current === abort) moreRequest.current = null; if (!abort.signal.aborted) setMoreLoading(false); }
   };
-  useEffect(() => {
-    if (!selectedDreamGroup) return;
-    const abort = new AbortController();
-    const groupKey = selectedDreamGroup.key;
-    setDreamDetailLoading(true); setDreamDetailError('');
-    Promise.all(selectedDreamGroup.entries.map((entry) => archiveRepository.loadDream(entry, abort.signal)))
-      .then((entries) => {
-        if (!abort.signal.aborted) setSelectedDreamGroup((group) => group?.key === groupKey ? { ...group, entries } : group);
-      })
-      .catch((nextError: Error) => { if (!abort.signal.aborted) setDreamDetailError(nextError.message || 'Could not load the full dream.'); })
-      .finally(() => { if (!abort.signal.aborted) setDreamDetailLoading(false); });
-    return () => abort.abort();
-  }, [selectedDreamGroup?.key, archiveRepository]);
-  const visibleDreams = useMemo(() => filterDreamEntries(dreams, '', search, selectedDate), [dreams, search, selectedDate]);
-  const dreamGroups = useMemo<DreamGroup[]>(() => groupDreamEntries(visibleDreams), [visibleDreams]);
-  useEffect(() => { onCount(dreams.length); }, [dreams.length, onCount]);
-
-  return (
-<div className="archive-split-view">
-              <section className="archive-results-pane" aria-label="Dream diary groups">
-                <div className="archive-pane-heading"><span className="eyebrow">Dreams</span><strong>{dreamGroups.length} dream groups</strong></div>
-                {dreamsLoading ? <p role="status">Loading dreams…</p> : null}
-                {dreamsError ? <div role="alert"><p>{dreamsError}</p><button type="button" onClick={() => setDreamsRetry((value) => value + 1)}>Retry dreams</button></div> : null}
-                <div className="archive-session-list">
-                  {dreamsLoading ? <section className="archive-empty-state"><div className="archive-empty-mark" aria-hidden="true">⌁</div><div><h3>Gathering the dreams.</h3><p>Opening the remembered things from your agents.</p></div></section> : null}
-                  {dreamsError ? <section className="archive-empty-state archive-error"><div className="archive-empty-mark" aria-hidden="true">!</div><div><h3>Could not load the dream archive.</h3><p>{dreamsError}</p></div></section> : null}
-                  {!dreamsLoading && !dreamsError && !dreamGroups.length ? <section className="archive-empty-state"><div className="archive-empty-mark" aria-hidden="true">⌁</div><div><h3>No dreams match this shelf.</h3><p>Try adjusting the search, date, or agent filter.</p></div></section> : null}
-                  {!dreamsLoading && !dreamsError ? dreamGroups.map((group) => <button type="button" key={group.key} className={`archive-session-card${selectedDreamGroup?.key === group.key ? ' selected' : ''}`} onClick={() => setSelectedDreamGroup(group)}><div className="archive-session-main"><div className="archive-session-meta"><span>{group.agentName}</span><span>{formatArchiveDate(dreamDate(group.entries[0]))}</span></div><h3>{group.agentName} Dreams {formatDreamGroupDay(group.day)}</h3><p>{group.entries.length} remembered states: {group.entries.map((entry) => entry.phase).join(', ')}</p></div><div className="archive-session-side"><strong>{group.entries.length}</strong><span>states</span></div></button>) : null}
-                  {dreamsError ? null : dreamsHasMore ? <button type="button" className="archive-load-more" disabled={dreamsMoreLoading} onClick={() => void loadMoreDreams()}>{dreamsMoreLoading ? 'Loading more dreams…' : 'Load more dreams'}</button> : null}
-                </div>
-              </section>
-              <section className="archive-reader-pane">
-                <DreamArchiveReader group={selectedDreamGroup} loading={dreamDetailLoading} error={dreamDetailError} />
-              </section>
-            </div>
-  );
+  return <div className="archive-split-view">
+    <section className="archive-results-pane" aria-label="Dream diary groups">
+      <div className="archive-pane-heading"><span className="eyebrow">Dreams</span><strong>{groups.length} dream groups{hasMore ? ' loaded' : ''}</strong></div>
+      {loading && <p role="status">Loading dreams…</p>}
+      {error && <div role="alert"><p>{error}</p><button type="button" onClick={() => setRetry(value => value + 1)}>Retry dreams</button></div>}
+      {!loading && !error && !groups.length && <section className="archive-empty-state"><div className="archive-empty-mark" aria-hidden="true">⌁</div><div><h3>No dreams match this shelf.</h3><p>Try adjusting the search, date, or agent filter.</p></div></section>}
+      <div className="archive-session-list">
+        {groups.map(group => {
+          const diaryCount = phases.reduce((count, phase) => count + group.phases[phase].diaryCount, group.otherDiaries.diaryCount);
+          const recordedPhases = phases.filter(phase => group.phases[phase].diaryCount || group.phases[phase].attemptCount);
+          const records = [
+            ...recordedPhases.map(phaseName),
+            ...(group.otherDiaries.diaryCount ? ['Other diaries'] : []),
+            ...(group.cycleAttempts.count ? ['Cycle records'] : []),
+          ];
+          return <button type="button" key={identity(group)} className={`archive-session-card${selected && identity(selected) === identity(group) ? ' selected' : ''}`} aria-pressed={!!selected && identity(selected) === identity(group)} onClick={() => setSelected(group)}>
+            <div className="archive-session-main"><div className="archive-session-meta"><span>{group.agentName}</span><span>{formatDay(group.day)}</span></div><h3>{group.agentName} Dreams {formatDay(group.day)}</h3><p>{diaryCount} retained {diaryCount === 1 ? 'diary' : 'diaries'}{records.length ? ` · ${records.join(', ')}` : ''}</p></div><div className="archive-session-side"><strong>{diaryCount}</strong><span>{diaryCount === 1 ? 'diary' : 'diaries'}</span></div>
+          </button>;
+        })}
+        {moreError && <p role="alert">{moreError}</p>}
+        {hasMore && cursor && <button type="button" className="archive-load-more" disabled={moreLoading} onClick={() => void loadMore()}>{moreLoading ? 'Loading more dreams…' : moreError ? 'Retry more dreams' : 'Load more dreams'}</button>}
+      </div>
+    </section>
+    <section className="archive-reader-pane"><DreamArchiveReader group={detail} selected={selected} loading={detailLoading} error={detailError} onRetry={() => setDetailRetry(value => value + 1)} /></section>
+  </div>;
 }

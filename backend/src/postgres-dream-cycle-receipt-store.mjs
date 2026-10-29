@@ -119,6 +119,13 @@ export class PostgresDreamCycleReceiptStore {
       return count;
     });
   }
+  // Archive needs the entire retained history, not the bounded Settings activity
+  // view. Keep the latter's latest/limit semantics unchanged.
+  async listArchiveDreamCycleReceipts({ agentId } = {}) {
+    const id = text(agentId); if (!id) throw new Error('dream_cycle_agent_required');
+    const result = await this.pool.query('SELECT receipt_json FROM dream_cycle_receipts WHERE agent_id=$1 ORDER BY updated_at DESC,run_id DESC', [id]);
+    return result.rows.map((row) => parse(row.receipt_json));
+  }
   async latestDreamCycleReceipts(options = {}) { return this.latest(options); }
 
   async latest({ agentId = null, limit = 20 } = {}) {

@@ -5,25 +5,26 @@ import { UnsavedChangesProvider, useUnsavedNavigation } from '../../app/UnsavedC
 import { AgentDreams } from './AgentDreams';
 vi.mock('../../app/api', () => ({ api: vi.fn() }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
-function show(receipts: unknown[]) {
-  vi.mocked(api).mockImplementation(async (path) => path.includes('dream-settings') ? { settings: { enabled: true, cron: '0 4 * * *', timezone: 'UTC', prompt: '' } } : { receipts });
-  render(<AgentDreams agentId="nigel" savedProviders={[]} />);
-}
-it('shows phase, provider, model, HTTP status and provider message as plain text', async () => {
-  show([{ runId: 'new', status: 'failed', phases: [{ phase: 'rem', modelResponses: [{ ok: false, provider: 'anthropic', model: 'opus', status: '400', error: '<script>Invalid model</script>' }, { ok: true, provider: 'anthropic', model: 'good', status: '200' }] }] }]);
-  expect(await screen.findByText('rem · anthropic · opus · HTTP 400 · <script>Invalid model</script>')).toBeTruthy();
-  expect(document.querySelector('script')).toBeNull();
-  expect(screen.queryByText(/HTTP 200/)).toBeNull();
-});
-it('falls back to older phase errors and preserves top-level interruption errors', async () => {
-  show([{ runId: 'old', status: 'failed', phases: [{ phase: 'light', extractionError: 'dream_model_empty_response', diaryError: 'dream_model_empty_response' }, { phase: 'deep', diaryError: 'diary_failed' }] }, { runId: 'stop', status: 'interrupted', error: 'Runtime stopped' }]);
-  expect(await screen.findByText('light · dream_model_empty_response')).toBeTruthy();
-  expect(screen.getByText('deep · diary_failed')).toBeTruthy();
-  expect(screen.getByRole('alert').textContent).toBe('Runtime stopped');
-});
-it('uses older phase errors when a failed response has no provider message', async () => {
-  show([{ runId: 'legacy', status: 'partial', phases: [{ phase: 'deep', extractionError: 'extraction_failed', modelResponses: [{ ok: false, provider: 'anthropic', status: null, error: null }] }] }]);
-  expect(await screen.findByText('deep · anthropic · extraction_failed')).toBeTruthy();
+it('loads only configuration, without recent activity/history fetches or polling', async () => {
+  vi.mocked(api).mockImplementation(async path => {
+    if (!path.endsWith('/dream-settings')) throw new Error(`Unexpected request: ${path}`);
+    return { settings: { enabled: true, cron: '0 4 * * *', timezone: null, prompt: 'Dream diary' } };
+  });
+  vi.useFakeTimers();
+  try {
+    const view = render(<AgentDreams agentId="node::agent/name" savedProviders={[]} />);
+    await act(async () => {});
+    expect(screen.getByLabelText('Dream prompt')).toHaveProperty('disabled', false);
+    expect(screen.queryByText('Recent activity')).toBeNull();
+    expect(screen.queryByLabelText('Recent dream activity')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Preview memories' })).toHaveProperty('disabled', false);
+    await act(async () => { vi.advanceTimersByTime(45000); });
+    expect(vi.mocked(api).mock.calls.map(([path]) => path)).toEqual(['/api/agents/agent%2Fname/dream-settings']);
+    view.rerender(<AgentDreams agentId="other" savedProviders={[]} />);
+    await act(async () => {});
+    expect(screen.getByLabelText('Dream prompt')).toHaveProperty('disabled', false);
+    expect(vi.mocked(api).mock.calls.map(([path]) => path)).toEqual(['/api/agents/agent%2Fname/dream-settings', '/api/agents/other/dream-settings']);
+  } finally { vi.useRealTimers(); }
 });
 
 it('defaults legacy settings to quiet-day dreaming and persists explicit opt-out and opt-in', async () => {
@@ -205,7 +206,6 @@ const completeSettings = { enabled: true, quietDayDreams: true, promoteToMemory:
 const dreamPuts = () => vi.mocked(api).mock.calls.filter(([path, init]) => path.includes('/dream-settings') && init?.method === 'PUT');
 function completeApi(write: (body: Record<string, unknown>) => unknown = body => ({ settings: body })) {
   vi.mocked(api).mockImplementation(async (path, init) => {
-    if (path.includes('/dream-cycle')) return { receipts: [] };
     if (path.includes('/dream-memory/preview')) return sample;
     if (init?.method === 'PUT') return write(JSON.parse(init.body as string));
     return { settings: completeSettings };
@@ -279,7 +279,6 @@ it('commits memory emphasis once per completed interaction and preview never flu
 it('ignores a stale failed autosave after owner switch and reload', async () => {
   let rejectOld!: (cause: unknown) => void;
   vi.mocked(api).mockImplementation((path, init) => {
-    if (path.includes('/dream-cycle')) return Promise.resolve({ receipts: [] });
     if (init?.method === 'PUT') return new Promise((_resolve, reject) => { rejectOld = reject; });
     return Promise.resolve({ settings: { ...completeSettings, prompt: path.includes('/b/') ? 'Agent B' : 'Agent A' } });
   });

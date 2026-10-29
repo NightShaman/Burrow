@@ -2,8 +2,10 @@ import { createHmac } from 'node:crypto';
 import { archiveRunListPage } from './archive-run-list.mjs';
 import { readArchiveRun } from '../../src/archive-proof.mjs';
 import { archivePage, archiveUtcDay, archiveUtcMonth, archiveCalendarDates, matchesArchiveDay, archiveCursorBoundary, archiveCursor } from '../../src/archive-pagination.mjs';
+import { redactValue } from '../../src/redaction.mjs';
 import { validateTimezone } from '../../src/timezone.mjs';
 import { listTiddleCards, tiddleHistory } from '../../src/tiddle-continuity.mjs';
+import { dreamReceiptCreatedAt, listDreamGroups, projectDreamGroups } from './archive-dream-groups.mjs';
 
 // Read-only Archive projections own collection scope, pagination and snapshot
 // cursors. Store access is composed by the server, never opened by this service.
@@ -62,6 +64,51 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
       const agent = await agentsStore().get(agentId);
       return { ok: true, document: { id: entry.id, kind: 'dream', agentId, agentName: agent?.name || agentId, title: `${entry.phase.toUpperCase()} dream · ${entry.entryDate}`, subtitle: entry.entryDate, phase: entry.phase, markdown: entry.narrative, createdAt: entry.createdAt } };
     } catch (error) { return { ok: false, status: String(error?.message || error) === 'dream_diary_entry_not_found' ? 404 : 400, error: String(error?.message || error) }; } finally { await store.close(); }
+  }
+
+  async function archiveDreamReceiptRows(agents) {
+    const cycleStore = stores()?.dreamCycles;
+    if (!cycleStore) return new Map(agents.map((agent) => [agent.id, []]));
+    // Never silently fall back to Settings' latest-100 view: an incomplete
+    // history would make search, calendar, and cursors incorrect.
+    if (typeof cycleStore.listArchiveDreamCycleReceipts !== 'function') throw new Error('dream_cycle_archive_read_required');
+    return new Map(await Promise.all(agents.map(async (agent) => [agent.id, await cycleStore.listArchiveDreamCycleReceipts({ agentId: agent.id })])));
+  }
+
+  async function archiveDreamGroupRows({ agentId = null, timezone = 'UTC' } = {}) {
+    const agents = (await agentsStore().list({ includeDisabled: true })).filter((agent) => !agentId || agent.id === String(agentId));
+    const diaryStore = dreamDiaryStore();
+    try {
+      const [diaryRows, receiptsByAgent] = await Promise.all([
+        Promise.all(agents.map(async (agent) => [agent.id, await diaryStore.list(agent.id, { limit: null })])),
+        archiveDreamReceiptRows(agents),
+      ]);
+      return projectDreamGroups({ agents, diariesByAgent: new Map(diaryRows), receiptsByAgent, timezone });
+    } finally { await diaryStore.close(); }
+  }
+
+  async function archiveDreamGroups({ timezone = 'UTC', agentId = null, date = null, query = '', limit = 200, cursor = null } = {}) {
+    timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
+    if (date) archiveUtcDay(date);
+    const groups = await archiveDreamGroupRows({ agentId, timezone });
+    return listDreamGroups(groups, { timezone, agentId, date, query, limit, cursor });
+  }
+
+  async function archiveDreamGroupDetail({ agentId, day, timezone = 'UTC' } = {}) {
+    timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
+    archiveUtcDay(day);
+    if (!agentId) return { ok: false, status: 400, error: 'archive_dream_target_required' };
+    const group = (await archiveDreamGroupRows({ agentId, timezone })).find((item) => item.day === day);
+    return group ? { ok: true, group } : { ok: false, status: 404, error: 'archive_dream_group_not_found' };
+  }
+
+  async function archiveWorkflowEvents(options = {}) {
+    const page = await stores().completionEvents.listArchive(options);
+    const names = new Map((await agentsStore().list({ includeDisabled: true })).map(agent => [agent.id, agent.name]));
+    return { ok: true, ...page, events: page.events.map(({ ownerId, traceDir, ...event }) => ({
+      ...event, agentName: names.get(event.agentId) || event.agentId,
+      result: redactValue(event.result),
+    })) };
   }
 
   async function archiveContinuityCards({ agentId = null, scope = null, limit = 200, cursor = null } = {}) {
@@ -138,7 +185,8 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
   async function archiveCalendar({ timezone = 'UTC', kind, month, agentId = null } = {}) {
     timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
     const parsedMonth = archiveUtcMonth(month);
-    if (!['sessions', 'dreams'].includes(kind)) throw new Error('archive_kind_invalid');
+    if (!['sessions', 'dreams', 'workflow-events'].includes(kind)) throw new Error('archive_kind_invalid');
+    if (kind === 'workflow-events') return { ok: true, kind, month: parsedMonth, dates: await stores().completionEvents.listArchiveCalendarDates({ agentId, month: parsedMonth, timezone }) };
     if (kind === 'sessions' && typeof stores().conversations.listArchiveCalendarDates === 'function') {
       const agents = (await agentsStore().list({ includeDisabled: true })).filter((agent) => !agentId || agent.id === agentId);
       const dates = [...new Set((await Promise.all(agents.map((agent) => stores().conversations.listArchiveCalendarDates({ agentId: agent.id, month: parsedMonth, timezone })))).flat())].sort();
@@ -148,12 +196,14 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
       const agents = (await agentsStore().list({ includeDisabled: true })).filter((agent) => !agentId || agent.id === agentId);
       const store = dreamDiaryStore();
       try {
-        if (typeof store.listCalendarDates === 'function') {
-          const dates = [...new Set((await Promise.all(agents.map((agent) => store.listCalendarDates(agent.id, { month: parsedMonth, timezone })))).flat())].sort();
-          return { ok: true, kind, month: parsedMonth, dates };
-        }
-        const rows = (await Promise.all(agents.map(async (agent) => (await store.list(agent.id, { limit: null })).map((entry) => ({ createdAt: entry.createdAt }))))).flat();
-        return { ok: true, kind, month: parsedMonth, dates: archiveCalendarDates(rows, parsedMonth, (row) => row.createdAt, timezone) };
+        const [diaryDates, receiptsByAgent] = await Promise.all([
+          typeof store.listCalendarDates === 'function'
+            ? Promise.all(agents.map((agent) => store.listCalendarDates(agent.id, { month: parsedMonth, timezone }))).then((dates) => dates.flat())
+            : Promise.all(agents.map(async (agent) => (await store.list(agent.id, { limit: null })).map((entry) => ({ createdAt: entry.createdAt })))).then((rows) => archiveCalendarDates(rows.flat(), parsedMonth, (row) => row.createdAt, timezone)),
+          archiveDreamReceiptRows(agents),
+        ]);
+        const receiptDates = archiveCalendarDates([...receiptsByAgent.values()].flat(), parsedMonth, dreamReceiptCreatedAt, timezone);
+        return { ok: true, kind, month: parsedMonth, dates: [...new Set([...diaryDates, ...receiptDates])].sort() };
       } finally { await store.close(); }
     }
     const rows = await archiveSessionRows({ agentId });
@@ -264,5 +314,5 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
     };
   }
 
-  return { archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveContinuityCards, archiveContinuityCardDetail };
+  return { archiveWorkflowEvents, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveDreamGroups, archiveDreamGroupDetail, archiveContinuityCards, archiveContinuityCardDetail };
 }

@@ -4,8 +4,8 @@ import { markdownPlugins, MarkdownImage, MarkdownTable } from '../../app/markdow
 import { generatedArtifactPath, textFromChatValue, type SessionTurn } from '../../app/api';
 import { chatInputLabel, reconcileChatInputs } from '../chat/chatInputs';
 import { ChatMessage } from '../chat/ChatTranscript';
-import { archiveDate, archiveSessionDate, dreamText } from './archiveDerivations';
-import type { ArchiveDetail, ArchiveSession, ContinuityCardGroup, DreamGroup } from './archiveTypes';
+import { archiveDate, archiveSessionDate } from './archiveDerivations';
+import type { ArchiveDetail, ArchiveSession, ContinuityCardGroup, DreamArchiveGroup, DreamGroupSummary, DreamDiary, DreamPhaseAttempt } from './archiveTypes';
 
 export function formatArchiveDate(value: string | null) {
   const date = archiveDate(value);
@@ -153,15 +153,84 @@ export function ChatArchiveReader({ session, detail, loading, error, earlierLoad
   </>;
 }
 
-export function DreamArchiveReader({ group, loading, error }: { group: DreamGroup | null; loading: boolean; error: string }) {
-  if (!group) return <Placeholder title="Select a dream group." detail="Choose a day from the list to read Light, Deep, and REM here." />;
-  const dreamMarkdown = (entry: DreamGroup['entries'][number]) => `## ${entry.phase} · ${formatArchiveDate(entry.createdAt)}\n\n${dreamText(entry)}`;
+function dreamTime(value: string | null) {
+  return value ? new Date(value).toLocaleString() : 'Not recorded';
+}
+function dreamDiaryMarkdown(diary: DreamDiary) {
+  return `## ${diary.phase} · ${dreamTime(diary.createdAt)}\n\n${diary.markdown}`;
+}
+function dreamAttemptFailures(attempt: DreamPhaseAttempt) {
+  const failures = Object.entries(attempt.errors).map(([stage, error]) => `${stage}: ${error}`);
+  if (attempt.error && !Object.values(attempt.errors).includes(attempt.error)) failures.push(attempt.error);
+  return failures;
+}
+function DreamPhaseAttempts({ attempts, hasDiaries }: { attempts: DreamPhaseAttempt[]; hasDiaries: boolean }) {
+  if (!attempts.length) return null;
+  // Aggregate every recorded status, not an inferred latest result or retry order.
+  const statuses = new Map<string, number>();
+  for (const attempt of attempts) {
+    const status = attempt.status || 'Not recorded';
+    if (status.toLowerCase() !== 'completed' || !hasDiaries) statuses.set(status, (statuses.get(status) ?? 0) + 1);
+  }
+  const statusSummary = [...statuses].sort(([a], [b]) => a.localeCompare(b)).map(([status, count]) => `${count} ${status}`).join(' · ');
+  return <div className="dream-phase-attempts">
+    {statusSummary && <p className="dream-phase-status">Recorded statuses: {statusSummary}</p>}
+    <div className="dream-attempt-errors">
+      {attempts.flatMap((attempt, index) => dreamAttemptFailures(attempt).map((failure, failureIndex) => <p key={`${index}:${failureIndex}`}>Attempt {index + 1} · {failure}</p>))}
+    </div>
+    <details className="dream-evidence-details dream-phase-attempt-details">
+      <summary>Attempt details ({attempts.length})</summary>
+      <p>Numbers distinguish retained records; they do not indicate execution order.</p>
+      {attempts.map((attempt, index) => <section className="dream-attempt" key={`${attempt.runId}:${index}`}>
+        <h4>Recorded attempt {index + 1} · <span className="dream-recorded-status">{attempt.status || 'Not recorded'}</span></h4>
+        {dreamAttemptFailures(attempt).map((failure, failureIndex) => <p key={failureIndex}>{failure}</p>)}
+        <p>Run: {attempt.runId || 'Not recorded'}</p>
+        <p>Phase started: {dreamTime(attempt.startedAt)} · Phase completed: {dreamTime(attempt.completedAt)}</p>
+        <p>Run started: {dreamTime(attempt.runStartedAt)} · Run completed: {dreamTime(attempt.runCompletedAt)}</p>
+        {attempt.diaryId ? <p>Recorded diary ID: {attempt.diaryId}</p> : <p>No diary ID recorded for this attempt.</p>}
+      </section>)}
+    </details>
+  </div>;
+}
+function DreamDiaryEntry({ diary, index, count = 1 }: { diary: DreamDiary; index: number; count?: number }) {
+  return <article className="dream-diary">
+    {count > 1 && <h4 className="dream-diary-label">Retained diary {index + 1}</h4>}
+    <div className="dream-diary-narrative">
+      {diary.markdown ? <ReactMarkdown remarkPlugins={markdownPlugins} components={{ table: MarkdownTable, img: MarkdownImage }}>{diary.markdown}</ReactMarkdown> : <p>This retained diary has no narrative.</p>}
+    </div>
+    <div className="dream-diary-footer">
+      <details className="dream-evidence-details">
+        <summary>Diary {count > 1 ? `${index + 1} ` : ''}provenance</summary>
+        <p>Diary: {diary.id}</p>
+        <p>Recorded phase: {diary.phase || 'Not recorded'}</p>
+        <p>Created: {dreamTime(diary.createdAt)} · Entry date: {diary.entryDate || 'Not recorded'}</p>
+      </details>
+      <div className="dream-archive-entry-actions"><DreamCopyButton text={dreamDiaryMarkdown(diary)} /></div>
+    </div>
+  </article>;
+}
+export function DreamArchiveReader({ group, selected, loading, error, onRetry }: { group: DreamArchiveGroup | null; selected: DreamGroupSummary | null; loading: boolean; error: string; onRetry: () => void }) {
+  if (!selected) return <Placeholder title="Select a dream group." detail="Choose a day from the list to read Light, Deep, and REM here." />;
+  const phases = ['light', 'deep', 'rem'] as const;
+  const diaries = group ? [...phases.flatMap(phase => group.phases[phase].diaries), ...group.otherDiaries] : [];
   return <>
-    <ArchiveReaderToolbar eyebrow={`${group.agentName} · Dreams`} title={group.day} detail={`${group.entries.length} remembered states`} value={group.entries.map(dreamMarkdown).join('\n\n')} copyLabel="Copy dreams" />
+    <ArchiveReaderToolbar eyebrow={`${selected.agentName} · Dreams`} title={selected.day} detail={`${selected.timezone}${group ? ` · ${diaries.length} retained ${diaries.length === 1 ? 'diary' : 'diaries'}` : ''}`} value={group && !loading && !error ? diaries.map(dreamDiaryMarkdown).join('\n\n') : ''} copyLabel="Copy dreams" />
     <div className="archive-content-body archive-reader-body">
-      {loading ? <LoadingState title="Opening the full dreams." detail="Gathering every remembered state." /> : null}
-      {error ? <ErrorState title="Could not open these dreams." error={error} /> : null}
-      {!loading && !error ? <div className="archive-reader dream-archive-stack">{group.entries.map((entry) => <article className="archive-reader-summary dream-archive-entry" key={entry.id}><div className="archive-turn-meta"><strong>{entry.phase}</strong><span>{formatArchiveDate(entry.createdAt)}</span></div><ReactMarkdown remarkPlugins={markdownPlugins} components={{ table: MarkdownTable, img: MarkdownImage }}>{dreamText(entry)}</ReactMarkdown><div className="dream-archive-entry-actions"><DreamCopyButton text={dreamMarkdown(entry)} /></div></article>)}</div> : null}
+      {loading ? <LoadingState title="Opening the full dreams." detail="Gathering diaries and recorded attempts." /> : null}
+      {error ? <div role="alert"><ErrorState title="Could not open these dreams." error={error} /><button type="button" onClick={onRetry}>Retry dream details</button></div> : null}
+      {!loading && !error && group ? <div className="archive-reader dream-archive-stack">
+        {phases.map(phase => {
+          const evidence = group.phases[phase];
+          // Missing phases have no evidence: do not invent diary or failure cards.
+          if (!evidence.diaries.length && !evidence.attempts.length) return null;
+          return <section className="archive-reader-summary dream-archive-entry dream-phase-card" key={phase} aria-label={`${phase} evidence`}><header className="dream-phase-heading"><h3>{phase === 'rem' ? 'REM' : phase === 'light' ? 'Light' : 'Deep'}</h3></header>
+            {evidence.diaries.map((diary, index) => <DreamDiaryEntry key={diary.id} diary={diary} index={index} count={evidence.diaries.length} />)}
+            <DreamPhaseAttempts attempts={evidence.attempts} hasDiaries={evidence.diaries.length > 0} />
+          </section>;
+        })}
+        {group.otherDiaries.length ? <section className="dream-archive-stack" aria-label="Other diaries"><h3>Other diaries</h3>{group.otherDiaries.map((diary, index) => <div className="archive-reader-summary dream-archive-entry" key={diary.id}><DreamDiaryEntry diary={diary} index={index} count={group.otherDiaries.length} /></div>)}</section> : null}
+        {group.cycleAttempts.length ? <section className="archive-reader-summary dream-archive-entry" aria-label="Unattributed cycle attempts"><h3>Cycle attempts · no phase attribution</h3>{group.cycleAttempts.map((attempt, index) => <section className="dream-attempt" key={`${attempt.runId}:${index}`}><h4>Cycle attempt {index + 1} · {attempt.status}</h4>{attempt.error && <p className="dream-attempt-errors">{attempt.error}</p>}<details className="dream-evidence-details"><summary>Cycle attempt {index + 1} details</summary><p>Run: {attempt.runId || 'Not recorded'}</p><p>Cycle started: {dreamTime(attempt.startedAt)} · Cycle completed: {dreamTime(attempt.completedAt)}</p></details></section>)}</section> : null}
+      </div> : null}
     </div>
   </>;
 }

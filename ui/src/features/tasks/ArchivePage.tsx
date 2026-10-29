@@ -14,6 +14,7 @@ import type { ArchiveKind } from './archiveTypes';
 import { ChatArchiveShelf } from './ChatArchiveShelf';
 import { DreamArchiveShelf } from './DreamArchiveShelf';
 import { TaskArchiveShelf, taskArchiveDate } from './TaskArchiveShelf';
+import { WorkflowEventsArchiveShelf } from './WorkflowEventsArchiveShelf';
 import { TiddleArchiveShelf } from './TiddleArchiveShelf';
 const archiveKinds: { id: ArchiveKind; label: string; detail: string }[] = [
   { id: 'chat', label: 'Chat', detail: 'Searchable conversations and session history.' },
@@ -21,6 +22,7 @@ const archiveKinds: { id: ArchiveKind; label: string; detail: string }[] = [
   { id: 'tiddle', label: 'Tiddle', detail: 'Warm continuity cards and their history.' },
   { id: 'tasks', label: 'Tasks', detail: 'Completed tasks.' },
   { id: 'forge', label: 'Forge', detail: 'Retained generation execution evidence.' },
+  { id: 'workflow-events', label: 'Workflow Events', detail: 'Retained GitHub workflow deliveries and agent handling.' },
   { id: 'proof', label: 'Proof', detail: 'Operator-readable run outcomes and evidence.' },
 ];
 
@@ -58,7 +60,7 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
   useEffect(() => {
     const abort = new AbortController();
     setDreamCount(null); setTiddleCount(null); setTaskCount(null);
-    void archiveRepository.listDreams(abort.signal, null, selectedDate || undefined, selectedAgent || undefined)
+    void archiveRepository.listDreams(abort.signal, null, selectedDate || undefined, selectedAgent || undefined, search)
       .then(page => { if (!abort.signal.aborted) setDreamCount(page.items.length); }).catch(() => {});
     void archiveRepository.listContinuityCards(selectedAgent, abort.signal)
       .then(page => { if (!abort.signal.aborted) setTiddleCount(page.items.filter(card => !search.trim() || `${card.title} ${card.summary}`.toLowerCase().includes(search.trim().toLowerCase())).length); }).catch(() => {});
@@ -77,7 +79,7 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
   const [calendarMonth, setCalendarMonth] = useState(() => monthKey(new Date()));
   const [calendarDates, setCalendarDates] = useState<string[]>([]);
   const [calendarAvailabilityState, setCalendarAvailabilityState] = useState<'loading' | 'ready' | 'error'>('loading');
-  const calendarKind: ArchiveCalendarKind | null = activeMod ? null : kind === 'chat' ? 'sessions' : kind === 'dreams' ? 'dreams' : null;
+  const calendarKind: ArchiveCalendarKind | null = activeMod ? null : kind === 'chat' ? 'sessions' : kind === 'dreams' ? 'dreams' : kind === 'workflow-events' ? 'workflow-events' : null;
   useEffect(() => {
     if (!calendarKind) { setCalendarDates([]); setCalendarAvailabilityState('ready'); return; }
     const abort = new AbortController();
@@ -102,11 +104,11 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
     <div className="page-view archive-page">
       <header className="archive-heading">
         <div><h1>Archive</h1><p>Conversations and small remembered things, organized for later.</p></div>
-        <div className="archive-heading-tools" hidden={Boolean(activeMod)}><label className="archive-search"><span className="sr-only">Search archive</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={kind === 'chat' ? 'Search conversations' : kind === 'tasks' ? 'Search tasks' : kind === 'forge' ? 'Search Forge runs' : kind === 'proof' ? 'Search proof runs' : 'Search dreams'} /></label><label className="archive-agent-filter"><span className="sr-only">Filter by agent</span><select value={selectedAgent} onChange={(event) => { setSelectedAgent(event.target.value); setSelectedDate(''); }}><option value="">All agents</option>{enabledAgents(agents).map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label></div>
+        <div className="archive-heading-tools" hidden={Boolean(activeMod)}><label className="archive-search"><span className="sr-only">Search archive</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={kind === 'chat' ? 'Search conversations' : kind === 'tasks' ? 'Search tasks' : kind === 'forge' ? 'Search Forge runs' : kind === 'proof' ? 'Search proof runs' : kind === 'workflow-events' ? 'Search workflow events' : 'Search dreams'} /></label><label className="archive-agent-filter"><span className="sr-only">Filter by agent</span><select value={selectedAgent} onChange={(event) => { setSelectedAgent(event.target.value); setSelectedDate(''); }}><option value="">All agents</option>{enabledAgents(agents).map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label></div>
       </header>
       <div className="archive-layout">
         <aside className="archive-sidebar" aria-label="Archive navigation">
-          <section><span className="archive-sidebar-label">Browse</span>{archiveKinds.map((item) => <button key={item.id} type="button" className={!activeMod && kind === item.id ? 'active' : ''} onClick={() => { setModId(''); setKind(item.id); }}><span>{item.label}</span><span className="archive-count">{item.id === 'tasks' ? taskCount ?? '—' : item.id === 'dreams' ? dreamCount ?? '—' : item.id === 'tiddle' ? tiddleCount ?? '—' : item.id === 'proof' || item.id === 'forge' ? 'Runs' : chatCount ?? '—'}</span></button>)}</section>
+          <section><span className="archive-sidebar-label">Browse</span>{archiveKinds.map((item) => <button key={item.id} type="button" className={!activeMod && kind === item.id ? 'active' : ''} onClick={() => { setModId(''); setKind(item.id); }}><span>{item.label}</span><span className="archive-count">{item.id === 'tasks' ? taskCount ?? '—' : item.id === 'dreams' ? dreamCount ?? '—' : item.id === 'tiddle' ? tiddleCount ?? '—' : item.id === 'proof' || item.id === 'forge' ? 'Runs' : item.id === 'workflow-events' ? 'Events' : chatCount ?? '—'}</span></button>)}</section>
           <section><span className="archive-sidebar-label">MODS</span>{modArchives.map((mod) => <button key={mod.modId} type="button" className={activeMod?.modId === mod.modId ? 'active' : ''} onClick={() => setModId(mod.modId)}>{mod.name}</button>)}</section>
           <section className="archive-calendar" aria-label="Archive calendar">
             <div className="archive-calendar-heading"><span className="archive-sidebar-label">When <small>Local time</small></span><button type="button" className="archive-all-dates" onClick={() => setSelectedDate('')}>All dates</button></div>
@@ -123,7 +125,7 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
             <DreamArchiveShelf key={queryKey} archiveRepository={archiveRepository} selectedAgent={selectedAgent} selectedDate={selectedDate} search={search} queryKey={queryKey} onCount={setDreamCount} />
           ) : kind === 'tiddle' ? (
             <TiddleArchiveShelf key={queryKey} archiveRepository={archiveRepository} selectedAgent={selectedAgent} search={search} queryKey={queryKey} onCount={setTiddleCount} />
-          ) : kind === 'forge' ? <ForgeArchiveShelf agents={agents} selectedAgent={selectedAgent} selectedDate={selectedDate} search={search} onDates={setForgeDates} /> : kind === 'tasks' ? <TaskArchiveShelf agents={agents} selectedAgent={selectedAgent} selectedDate={selectedDate} search={search} onCount={setTaskCount} onDates={setTaskDates} /> : <ArchiveRunsProof repository={archiveRepository} selectedAgent={selectedAgent} search={search} />}
+          ) : kind === 'workflow-events' ? <WorkflowEventsArchiveShelf archiveRepository={archiveRepository} selectedAgent={selectedAgent} selectedDate={selectedDate} search={search} queryKey={queryKey} agentNames={agentNames} /> : kind === 'forge' ? <ForgeArchiveShelf agents={agents} selectedAgent={selectedAgent} selectedDate={selectedDate} search={search} onDates={setForgeDates} /> : kind === 'tasks' ? <TaskArchiveShelf agents={agents} selectedAgent={selectedAgent} selectedDate={selectedDate} search={search} onCount={setTaskCount} onDates={setTaskDates} /> : <ArchiveRunsProof repository={archiveRepository} selectedAgent={selectedAgent} search={search} />}
         </main>
       </div>
     </div>

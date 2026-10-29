@@ -799,6 +799,7 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
       phaseWindows[phase] = await sessionWindow({ rootDir, phase, generatedAt, conversationStore, conversationAgentId: id, conversationSessionIds, originalEntries, sessions: conversationSessions });
       await progress({ sourceMessages: phaseWindows[phase].length, sourceChars: phaseWindows[phase].reduce((sum, item) => sum + item.content.length, 0) });
     }
+    await progress({ phase: null, step: 'preparing', request: null });
     const soul = (await profileStore.get(id, 'SOUL'))?.markdown || '';
     let dreamAdapter = modelAdapter; let resolvedDreamModel = modelConfig;
     if (!dreamAdapter && !resolvedDreamModel) {

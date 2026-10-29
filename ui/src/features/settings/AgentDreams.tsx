@@ -45,16 +45,6 @@ function validateSettings(settings: EditableDreamSettings) {
   return '';
 }
 type MemoryPreview = { memories: { title: string; content: string; sourceRefs: string[] }[]; sourceToken: string; sourceCount: number; generatedAt: string; evidenceScope: string; persisted: false };
-type DreamCycleReceipt = {
-  runId: string;
-  status?: 'running' | 'completed' | 'partial' | 'failed' | 'interrupted' | string | null;
-  error?: string | null;
-  phases?: { phase?: string; extractionError?: string | null; diaryError?: string | null; modelResponses?: { ok?: boolean; provider?: string | null; model?: string | null; status?: string | number | null; error?: string | null }[] }[];
-  trigger?: string | null;
-  startedAt?: string | null;
-  completedAt?: string | null;
-};
-type DreamCycleResponse = { receipts: DreamCycleReceipt[] };
 function dreamModelValue(connectionId: string, model: string) { return JSON.stringify([connectionId, model]); }
 function settingsModelValue(settings: DreamModel) { return settings.modelConnectionId && settings.model ? dreamModelValue(settings.modelConnectionId, settings.model) : ''; }
 function modelLabel(model: DreamModel, options: { value: string; label: string }[]) {
@@ -77,8 +67,6 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
   const [failedKeys, setFailedKeys] = useState<EditableDreamKey[]>([]);
   const [effectiveModel, setEffectiveModel] = useState<DreamModel | null>(null);
   const [modelResolutionError, setModelResolutionError] = useState<string | null>(null);
-  const [receipts, setReceipts] = useState<DreamCycleReceipt[]>([]);
-  const [receiptError, setReceiptError] = useState('');
   const requestVersion = useRef(0);
   const accepted = useRef<DreamSettings | null>(null);
   const draft = useRef(settings);
@@ -135,14 +123,8 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
     saving.current = false; emphasisInteraction.current = false; accepted.current = null;
     const empty: DreamSettings = { enabled: false, quietDayDreams: true, promoteToMemory: true, cron: '0 4 * * *', timezone: null, prompt: '', modelConnectionId: null, model: null };
     draft.current = empty;
-    setState('loading'); setError(''); setNotice(''); setFailedKeys([]); setSettings(empty); setBaseline(''); setEffectiveModel(null); setModelResolutionError(null); setReceiptError(''); setReceipts([]);
-    Promise.all([
-      request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-settings`, { signal: controller.signal }),
-      request<DreamCycleResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-cycle?limit=5`, { signal: controller.signal }).catch((cause) => {
-        if (!controller.signal.aborted && version === requestVersion.current) setReceiptError(cause instanceof Error ? `Could not load recent dream activity: ${cause.message}` : 'Could not load recent dream activity.');
-        return { receipts: [] };
-      }),
-    ]).then(([dreamSettings, dreamCycles]) => {
+    setState('loading'); setError(''); setNotice(''); setFailedKeys([]); setSettings(empty); setBaseline(''); setEffectiveModel(null); setModelResolutionError(null);
+    request<DreamSettingsResponse>(`/api/agents/${encodeURIComponent(resourceId)}/dream-settings`, { signal: controller.signal }).then((dreamSettings) => {
       if (controller.signal.aborted || version !== requestVersion.current) return;
       if (!dreamSettings?.settings) throw new Error('Invalid dream settings response.');
       const loaded = normalizeSettings(dreamSettings.settings);
@@ -151,7 +133,6 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
       setBaseline(settingsBaseline(loaded));
       setEffectiveModel(dreamSettings.effectiveModel ?? null);
       setModelResolutionError(dreamSettings.modelResolutionError ?? null);
-      setReceipts(Array.isArray(dreamCycles.receipts) ? dreamCycles.receipts : []);
       setState('idle');
     }).catch(cause => {
       if (controller.signal.aborted || version !== requestVersion.current) return;
@@ -222,26 +203,6 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
   const commitsOnBlur = (relatedTarget: EventTarget | null) => !isUnsavedChangesModalTarget(relatedTarget)
     && !(relatedTarget instanceof Element && relatedTarget.closest('[data-dream-independent-action]'));
   const disabled = state !== 'idle';
-  const activity = <div className="dream-cycle-activity" aria-label="Recent dream activity">
-      {receipts.length ? <div className="dream-cycle-list">
-        {receipts.map((receipt) => {
-          const at = receipt.completedAt || receipt.startedAt;
-          const status = typeof receipt.status === 'string' && receipt.status.trim() ? receipt.status.trim().toLowerCase() : 'unknown';
-          const label = status === 'running' ? 'Running' : status === 'interrupted' ? 'Interrupted' : status.charAt(0).toUpperCase() + status.slice(1);
-          const failures = (receipt.phases ?? []).flatMap((phase) => {
-            const responses = (phase.modelResponses ?? []).filter((response) => response.ok === false || response.error);
-            const fallback = [...new Set([phase.extractionError, phase.diaryError].filter(Boolean))].join(' · ');
-            return responses.length ? responses.map((response) => [phase.phase || 'Unknown phase', response.provider, response.model, response.status != null ? `HTTP ${response.status}` : null, response.error || fallback || 'Model request failed'].filter(Boolean).join(' · ')) : fallback ? [`${phase.phase || 'Unknown phase'} · ${fallback}`] : [];
-          });
-          return <div className={`dream-cycle-receipt dream-cycle-${status}`} key={receipt.runId}>
-            <div className="dream-cycle-receipt-heading"><strong>{label}</strong>{at && <time dateTime={at}>{new Date(at).toLocaleString()}</time>}</div>
-            {failures.length > 0 && <ul aria-label="Dream phase failures">{failures.map((failure, index) => <li key={index}>{failure}</li>)}</ul>}
-            {receipt.error && !failures.some((failure) => failure.includes(receipt.error!)) && <p role={status === 'interrupted' || status === 'failed' ? 'alert' : undefined}>{receipt.error}</p>}
-          </div>;
-        })}
-      </div> : <p className="settings-description">No dream activity recorded yet.</p>}
-      {receiptError && <p className="settings-request-error" role="alert">{receiptError}</p>}
-    </div>;
   const memoryControls = <SettingSection title="Dream memory">
       <label className="agent-enabled"><input type="checkbox" data-dream-independent-action checked={settings.promoteToMemory} disabled={disabled} aria-describedby="agent-dream-promotion-help" onChange={(event) => { const promoteToMemory = event.target.checked; changeSettings({ promoteToMemory }); void saveChanges({ promoteToMemory }, ['promoteToMemory']); }} /><span>Promote Dreams to memory</span></label>
       <p id="agent-dream-promotion-help" className="settings-description">Also requires global promotion in Continuity. Turning this off keeps the archive and existing memories; explicit saves still work. Skipped promotions are not caught up later.</p>
@@ -283,7 +244,6 @@ export function AgentDreams({ agentId, savedProviders, overflowTarget }: { agent
     {state === 'idle' && failedKeys.length > 0 && <div className="dream-actions"><button className="secondary" type="button" data-dream-independent-action disabled={state !== 'idle'} onClick={retryFailed}>Retry saving dream settings</button></div>}
     {error && <p className="settings-request-error" role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
-    <details className="dream-recent-activity"><summary>Recent activity</summary>{activity}</details>
   </SettingSection>{overflowTarget ? createPortal(<div className="settings-overflow-content">{memoryControls}</div>, overflowTarget) : memoryControls}</>;
 }
 

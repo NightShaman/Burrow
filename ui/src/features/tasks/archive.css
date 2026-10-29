@@ -61,6 +61,9 @@
   gap:10px;
   width:min(500px,45vw)
 }
+.archive-heading-tools[hidden] {
+  display:none
+}
 .archive-search {
   flex:1;
   min-width:0
@@ -495,6 +498,107 @@
 .dream-archive-stack .dream-archive-entry {
   margin:0
 }
+/* One bounded card per evidenced phase, with inline diary/result sections. */
+.dream-phase-card {
+  min-width:0;
+  overflow-wrap:anywhere
+}
+.dream-phase-heading {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:6px 14px;
+  margin-bottom:16px
+}
+.dream-phase-heading h3 {
+  margin:0;
+  color:var(--accent-strong);
+  font-size:14px
+}
+.dream-phase-heading > span {
+  color:var(--muted);
+  font-size:11px
+}
+.dream-diary-narrative {
+  color:var(--text)
+}
+.dream-diary-narrative > :first-child {
+  margin-top:0
+}
+.dream-diary-label {
+  margin:0 0 8px;
+  color:var(--muted);
+  font-size:11px;
+  font-weight:600
+}
+.dream-phase-card > .dream-diary + .dream-diary {
+  margin-top:18px;
+  padding-top:16px;
+  border-top:1px solid var(--line)
+}
+.dream-attempt {
+  margin-top:12px;
+  padding-top:10px;
+  border-top:1px solid var(--line)
+}
+.dream-phase-attempts {
+  margin-top:12px
+}
+.dream-archive-entry .dream-phase-status {
+  margin:0 0 4px;
+  color:var(--muted);
+  font-size:12px
+}
+.dream-phase-attempt-details {
+  margin-top:6px
+}
+.dream-attempt h4 {
+  margin:0 0 4px;
+  color:var(--muted);
+  font-size:12px;
+  font-weight:600
+}
+.dream-recorded-status {
+  color:var(--text-strong)
+}
+.dream-archive-entry .dream-attempt-errors p,
+.dream-archive-entry p.dream-attempt-errors {
+  margin:4px 0;
+  color:var(--danger);
+  font-size:13px;
+  white-space:pre-wrap
+}
+.dream-diary-footer {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  margin-top:12px
+}
+.dream-diary-footer .dream-archive-entry-actions {
+  margin-top:0
+}
+.dream-evidence-details {
+  min-width:0;
+  color:var(--muted);
+  font-size:11px
+}
+.dream-evidence-details summary {
+  width:fit-content;
+  cursor:pointer
+}
+.dream-evidence-details summary:hover {
+  color:var(--text-strong)
+}
+.dream-evidence-details summary:focus-visible {
+  outline:2px solid var(--accent-strong);
+  outline-offset:3px
+}
+.dream-archive-entry .dream-evidence-details p {
+  margin:5px 0;
+  font-size:12px
+}
 .dream-archive-entry .archive-turn-meta {
   align-items:flex-start;
   flex-direction:column;
@@ -844,3 +948,7 @@
 .forge-evidence-reader { padding:20px; overflow-wrap:anywhere; }
 .forge-evidence-reader pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; line-height:1.6; }
 .forge-evidence-prompt { white-space:pre-wrap; line-height:1.6; }
+
+/* Reuse the Archive reader; event payloads remain literal, wrapping text. */
+.workflow-archive-details { padding-top:18px; overflow-wrap:anywhere; }
+.workflow-archive-details pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; line-height:1.55; }
