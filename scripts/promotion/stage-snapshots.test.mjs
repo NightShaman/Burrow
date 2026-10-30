@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { setBurrowReleaseAuthority, setNodeGoblinReleaseAuthority, TARGETS, validateInputs } from './stage-snapshots.mjs';
+import { setBurrowReleaseAuthority, setNodeGoblinReleaseAuthority, stampSkills, PUBLIC_SKILL_IDS, TARGETS, validateInputs } from './stage-snapshots.mjs';
 
 const sha = 'a'.repeat(40);
 const sources = { burrow: sha, burrowBackend: sha, burrowUi: sha, nodeGoblin: sha, goblinSecretStore: sha, burrowSkills: sha, burrowBackdoor: sha, burrowTutor: sha, burrowTheater: sha, burrowSwitchboard: sha };
@@ -123,4 +123,44 @@ test('Burrow Switchboard snapshot includes the standalone mod without developmen
   }
   assert.ok(!paths.some(file => file.startsWith('.github')));
   assert.ok(!paths.includes('scripts'));
+});
+
+
+test('public snapshot stamps all four skill frontmatter versions without changing instructions', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'public-skill-versions-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const originals = new Map();
+  for (const [index, id] of PUBLIC_SKILL_IDS.entries()) {
+    const newline = index % 2 ? '\r\n' : '\n';
+    const content = ['---', `name: ${id}`, 'version: "2026.10.19.1"', 'description: "Keep exact instructions"', '---', '', '# Instructions', 'version: must not rewrite a body example', 'Unicode: 🟢 café', ''].join(newline);
+    fs.mkdirSync(path.join(root, id));
+    fs.writeFileSync(path.join(root, id, 'SKILL.md'), content);
+    originals.set(id, content);
+  }
+  stampSkills(root, '2026.10.30', sources);
+  for (const [id, original] of originals) {
+    assert.equal(fs.readFileSync(path.join(root, id, 'SKILL.md'), 'utf8'), original.replace('version: "2026.10.19.1"', 'version: 2026.10.30'));
+  }
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'PUBLIC_RELEASE.json'))), { schemaVersion: 1, releaseDate: '2026.10.30', sources });
+  // Restamping is idempotent, but Development revision suffixes are never Public identities.
+  stampSkills(root, '2026.10.30', sources);
+  assert.throws(() => stampSkills(root, '2026.10.30.4', sources), /promotion_release_date_invalid/);
+});
+
+test('public skill stamping rejects missing or duplicate frontmatter versions before writing', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'public-skill-versions-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const id of PUBLIC_SKILL_IDS) {
+    fs.mkdirSync(path.join(root, id));
+    fs.writeFileSync(path.join(root, id, 'SKILL.md'), `---\nname: ${id}\nversion: 2026.10.19.1\n---\nBody\n`);
+  }
+  const first = path.join(root, PUBLIC_SKILL_IDS[0], 'SKILL.md');
+  const last = path.join(root, PUBLIC_SKILL_IDS.at(-1), 'SKILL.md');
+  const original = fs.readFileSync(first, 'utf8');
+  for (const invalid of ['# No frontmatter\nversion: 2026.10.19.1\n', '---\nname: missing\n---\nBody\n', '---\nversion: one\nversion: two\n---\nBody\n']) {
+    fs.writeFileSync(last, invalid);
+    assert.throws(() => stampSkills(root, '2026.10.30', sources), /promotion_skill_version_invalid/);
+    assert.equal(fs.readFileSync(first, 'utf8'), original);
+    assert.equal(fs.existsSync(path.join(root, 'PUBLIC_RELEASE.json')), false);
+  }
 });

@@ -21,6 +21,10 @@ promotion workflow publishes reviewed, allowlisted snapshots to the public
   `YYYY.MM.DD` identity. Never allocate `.N` revisions.
 - A target already published that UTC day is immutable; later changes wait for
   the next UTC day.
+- Public skill `SKILL.md` frontmatter versions are stamped with that same plain
+  release date during staging, before validation and publication. Development
+  `.N` authoring versions remain in NightShaman only. The four official skills
+  must match their `PUBLIC_RELEASE.json`; only the version field is rewritten.
 - Node Goblin owns its version, source snapshot, bootstrap installer, tarball, and checksum. Node Goblin changes do not create a Burrow release.
 - Burrow owns only its assembled source snapshot and GHCR image; Burrow releases do not contain Node Goblin assets or adopt Node Goblin's version.
 - GSS, Skills, Backdoor, Tutor, Theater, and Switchboard own their public source snapshots.

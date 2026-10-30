@@ -38,6 +38,8 @@ export const TARGETS = {
   }
 };
 
+export const PUBLIC_SKILL_IDS = ['burrow-runtime', 'burrow-backdoor', 'goblin-secret-store', 'node-goblin-operations'];
+
 const DATE = /^\d{4}\.\d{2}\.\d{2}$/;
 const SHA = /^[0-9a-f]{40}$/;
 
@@ -122,7 +124,21 @@ function stampGss(root, version, sources) {
   writeJson(path.join(root, 'PUBLIC_RELEASE.json'), { schemaVersion: 1, releaseDate: version, sources });
 }
 
-function stampSkills(root, version, sources) {
+export function stampSkills(root, version, sources) {
+  if (!DATE.test(String(version || ''))) throw new Error('promotion_release_date_invalid');
+  // Version identity belongs to the published snapshot, not its Development
+  // authoring revision. Preserve every byte outside the frontmatter version.
+  const skills = PUBLIC_SKILL_IDS.map(id => {
+    const file = path.join(root, id, 'SKILL.md');
+    const content = fs.readFileSync(file, 'utf8');
+    const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
+    if (!frontmatter || frontmatter[1].match(/^version:[^\r\n]*/gm)?.length !== 1) {
+      throw new Error(`promotion_skill_version_invalid:${id}`);
+    }
+    const header = frontmatter[0].replace(/^version:[^\r\n]*/m, `version: ${version}`);
+    return { file, content: header + content.slice(frontmatter[0].length) };
+  });
+  for (const skill of skills) fs.writeFileSync(skill.file, skill.content);
   writeJson(path.join(root, 'PUBLIC_RELEASE.json'), { schemaVersion: 1, releaseDate: version, sources });
 }
 

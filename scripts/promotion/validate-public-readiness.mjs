@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { PUBLIC_SKILL_IDS } from './stage-snapshots.mjs';
 
 const projects = [
   ['Burrow', 'Burrow'],
@@ -47,6 +48,20 @@ export async function validatePublicReadiness(root) {
       if (!stat.isFile() || stat.size === 0) failures.push(`${label}: LICENSE must be a non-empty file`);
     } catch (error) { failures.push(`${label}: LICENSE unavailable (${error.code || error.message})`); }
   }
+  // Check the files agents actually fetch, not just the GitHub release tag.
+  try {
+    const skillRoot = path.join(root, 'Burrow-Skills');
+    const { releaseDate } = JSON.parse(await fs.readFile(path.join(skillRoot, 'PUBLIC_RELEASE.json'), 'utf8'));
+    if (!/^\d{4}\.\d{2}\.\d{2}$/.test(String(releaseDate || ''))) throw new Error('release_date_invalid');
+    for (const id of PUBLIC_SKILL_IDS) {
+      const content = await fs.readFile(path.join(skillRoot, id, 'SKILL.md'), 'utf8');
+      const header = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content)?.[1];
+      const versions = [...(header || '').matchAll(/^version:[ \t]*([^\r\n]*)/gm)];
+      if (versions.length !== 1 || versions[0][1] !== releaseDate) {
+        failures.push(`Burrow Skills: ${id} version must match Public ${releaseDate}`);
+      }
+    }
+  } catch (error) { failures.push(`Burrow Skills: release identity unavailable (${error.code || error.message})`); }
   return failures;
 }
 
