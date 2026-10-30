@@ -104,3 +104,10 @@ describe('archive derivations', () => {
     expect(days.at(-1)).toEqual({ key: '2024-02-29', day: 29, count: 3, hasData: true });
   });
 });
+
+it('retains historical ordinary Default sessions using authoritative occurrence dates', () => {
+  const regular = session({ sessionId: 'default', kind: 'main', matchedDate: '2026-07-15' });
+  expect(filterArchiveSessions([regular], 'smatchet', '2026-07-15')).toEqual([regular]);
+  expect(filterArchiveSessions([regular], 'hatchet', '2026-07-15')).toEqual([]);
+  expect(filterArchiveSessions([regular], '', '2026-07-16')).toEqual([]);
+});

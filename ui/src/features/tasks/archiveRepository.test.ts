@@ -123,3 +123,33 @@ it('rejects a malformed workflow collection instead of treating it as a successf
   apiMock.mockResolvedValueOnce({ events: null });
   await expect(repository.listWorkflowEvents('')).rejects.toThrow('Invalid workflow events response.');
 });
+
+it.each(['2026-10-29', '2026-03-08', '2026-11-01'])('keeps inclusive microsecond local-day bounds on initial and earlier transcript requests for %s', async (date) => {
+  apiMock.mockResolvedValue({ turns: [], hasMore: false });
+  await repository.loadSession(session, undefined, undefined, date);
+  await repository.loadSession(session, undefined, 'earlier cursor', date);
+  const [year, month, day] = date.split('-').map(Number);
+  const expected = {
+    from: new Date(year, month - 1, day).toISOString(),
+    to: new Date(new Date(year, month - 1, day + 1).getTime() - 1).toISOString().replace('.999Z', '.999999Z'),
+  };
+  for (const [path] of apiMock.mock.calls) {
+    const params = new URL(path, 'http://fixture').searchParams;
+    expect(params.get('from')).toBe(expected.from);
+    expect(params.get('to')).toBe(expected.to);
+  }
+  expect(new URL(apiMock.mock.calls[1][0], 'http://fixture').searchParams.get('before')).toBe('earlier cursor');
+});
+
+it('uses independent local midnights across DST rather than a fixed 24 hours', async () => {
+  const { archiveDayBounds } = await import('./archiveRepository');
+  if (browserTimezone() === 'America/Chicago') {
+    expect(archiveDayBounds('2026-03-08')).toEqual({from: '2026-03-08T06:00:00.000Z', to: '2026-03-09T04:59:59.999999Z'});
+    expect(archiveDayBounds('2026-11-01')).toEqual({from: '2026-11-01T05:00:00.000Z', to: '2026-11-02T05:59:59.999999Z'});
+  }
+  const bounds = archiveDayBounds('2026-10-29');
+  expect(new Date(bounds.from).getHours()).toBe(0);
+  expect(new Date(bounds.to).getHours()).toBe(23);
+  expect(new Date(bounds.to).getMilliseconds()).toBe(999);
+  expect(bounds.to).toMatch(/\.999999Z$/);
+});

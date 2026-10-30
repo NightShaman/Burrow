@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { archiveCacheInvalidated, readArchiveSessionCache, writeArchiveSessionCache } from './archiveCache';
 import type { ArchiveRepository } from './archiveRepository';
-import { archiveSessionDate, filterArchiveSessions } from './archiveDerivations';
-import { archiveSessionTitle, ChatArchiveReader, formatArchiveDate } from './ArchiveReaders';
+import { filterArchiveSessions } from './archiveDerivations';
+import { archiveSessionContext, archiveSessionTitle, ChatArchiveReader } from './ArchiveReaders';
 import type { ArchiveDetail, ArchiveSession } from './archiveTypes';
 
 type ShelfProps = { archiveRepository: ArchiveRepository; selectedAgent: string; selectedDate: string; search: string; queryKey: string; onCount: (count: number) => void; agentNames: Map<string, string>; operatorName: string };
@@ -67,7 +67,7 @@ export function ChatArchiveShelf({ archiveRepository, selectedAgent, selectedDat
     const abort = new AbortController();
     earlierAbort.current?.abort();
     loadingEarlier.current = false;
-    const identity = selectedSession ? `${selectedSession.agentId}:${selectedSession.sessionId}` : '';
+    const identity = selectedSession ? `${selectedSession.agentId}:${selectedSession.sessionId}:${selectedDate}` : '';
     selectionRef.current = identity;
     setDetail(null);
     setEarlierError('');
@@ -76,12 +76,12 @@ export function ChatArchiveShelf({ archiveRepository, selectedAgent, selectedDat
     if (!identity || !selectedSession) { setDetailLoading(false); return () => abort.abort(); }
     setDetailError('');
     setDetailLoading(true);
-    archiveRepository.loadSession(selectedSession, abort.signal)
+    archiveRepository.loadSession(selectedSession, abort.signal, undefined, selectedDate || undefined)
       .then((page) => { if (!abort.signal.aborted && selectionRef.current === identity) { setDetail(page); setHistoryUnavailable(page.historyStatus === 'unavailable'); } })
       .catch((cause: Error) => { if (!abort.signal.aborted && selectionRef.current === identity) setDetailError(cause.message || 'Could not load this conversation.'); })
       .finally(() => { if (!abort.signal.aborted && selectionRef.current === identity) setDetailLoading(false); });
     return () => { abort.abort(); if (selectionRef.current === identity) selectionRef.current = ''; earlierAbort.current?.abort(); };
-  }, [selectedSession, archiveRepository]);
+  }, [selectedSession, selectedDate, archiveRepository]);
   const loadMoreSessions = async () => {
     if (!sessionsHasMore || !sessionsCursor || sessionsMoreLoading || moreRequests.current.size) return;
     const scope = queryKey; const abort = new AbortController(); moreRequests.current.add(abort);
@@ -100,7 +100,7 @@ export function ChatArchiveShelf({ archiveRepository, selectedAgent, selectedDat
     loadingEarlier.current = true;
     setEarlierLoading(true);
     setEarlierError('');
-    archiveRepository.loadSession(selectedSession, abort.signal, cursor)
+    archiveRepository.loadSession(selectedSession, abort.signal, cursor, selectedDate || undefined)
       .then((page) => {
         if (abort.signal.aborted || selectionRef.current !== identity) return;
         setDetail((current) => {
@@ -139,9 +139,10 @@ export function ChatArchiveShelf({ archiveRepository, selectedAgent, selectedDat
                 {chatStale ? <p role="status">Showing stale cached conversations while revalidating.</p> : null}
                 {chatError ? <div role="alert"><p>{chatError}</p><button type="button" onClick={() => setChatRetry((value) => value + 1)}>Retry conversations</button></div> : null}
                 {!chatLoading && !chatError && !visibleSessions.length ? <p>No conversations match this shelf.</p> : null}
-                <div className="archive-session-list">{visibleSessions.map((session) => <button type="button" key={`${session.agentId || 'agent'}:${session.sessionId}`} className={`archive-session-card${selectedSession && session.sessionId === selectedSession.sessionId && session.agentId === selectedSession.agentId ? ' selected' : ''}`} onClick={() => { selectionRef.current = ""; earlierAbort.current?.abort(); setSelectedSession({ ...session }); }}><div className="archive-session-main"><div className="archive-session-meta"><span>{session.agentName || session.agentId || 'Unknown agent'}</span><span>{formatArchiveDate(archiveSessionDate(session))}</span></div><h3>{archiveSessionTitle(session)}</h3><p>{session.summary || 'No summary is available yet.'}</p></div><div className="archive-session-side"><strong>{session.chatTurnCount ?? session.turnCount ?? 0}</strong><span>turns</span>{session.archived ? <em>Archived</em> : <em>Active</em>}</div></button>)}{sessionsHasMore ? <button type="button" className="archive-load-more" disabled={sessionsMoreLoading} onClick={() => void loadMoreSessions()}>{sessionsMoreLoading ? 'Loading more conversations…' : 'Load more conversations'}</button> : null}</div>
+                <div className="archive-session-list">{visibleSessions.map((session) => <button type="button" key={`${session.agentId || 'agent'}:${session.sessionId}`} className={`archive-session-card${selectedSession && session.sessionId === selectedSession.sessionId && session.agentId === selectedSession.agentId ? ' selected' : ''}`} onClick={() => { selectionRef.current = ""; earlierAbort.current?.abort(); setSelectedSession({ ...session }); }}><div className="archive-session-main"><div className="archive-session-meta"><span>{session.agentName || session.agentId || 'Unknown agent'}</span><span>{archiveSessionContext(session)}</span></div><h3>{archiveSessionTitle(session)}</h3><p>{session.summary || 'No summary is available yet.'}</p></div><div className="archive-session-side"><strong>{session.chatTurnCount ?? session.turnCount ?? 0}</strong><span>turns</span>{session.archived ? <em>Archived</em> : <em>Active</em>}</div></button>)}{sessionsHasMore ? <button type="button" className="archive-load-more" disabled={sessionsMoreLoading} onClick={() => void loadMoreSessions()}>{sessionsMoreLoading ? 'Loading more conversations…' : 'Load more conversations'}</button> : null}</div>
               </section>
               <section className="archive-reader-pane">
+                {selectedDate && detail && !(detail.session?.turns || detail.turns || detail.chatTurns || []).length && !detailLoading && !detailError ? <p role="status">No retained messages on {selectedDate}. This conversation may match its creation, update, or archive date.</p> : null}
                 <ChatArchiveReader session={selectedSession} detail={detail} loading={detailLoading} error={detailError} earlierLoading={earlierLoading} earlierError={earlierError} historyUnavailable={historyUnavailable} onLoadEarlier={loadEarlier} onRestart={() => setSelectedSession((current) => current ? { ...current } : null)} agentNames={agentNames} operatorName={operatorName} attachmentAgentId={selectedSession?.agentId ?? undefined} />
               </section>
             </div>

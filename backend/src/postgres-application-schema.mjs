@@ -195,4 +195,7 @@ ALTER TABLE dream_settings ADD COLUMN memory_prompt_override TEXT CHECK (char_le
 INSERT INTO agent_identity_registry(agent_id,archived) VALUES('group-channel',false)
 ON CONFLICT(agent_id) DO NOTHING;
 ` },
+  { version: 80, name: 'mod-external-turn-attachments', sql: `
+ALTER TABLE mod_external_turns ADD COLUMN attachments JSON NOT NULL DEFAULT '[]'::json;
+` },
 ]);

@@ -15,25 +15,27 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
   function archiveSessionListItem(record = {}, agentRuntime = {}, agent = {}) {
     const metadata = record.metadata || {};
     const sessionId = record.id || metadata.sessionId || metadata.sessionKey || 'default';
+    const reset = record.archiveSnapshot === 'reset';
     return {
       agentId: agentRuntime.agentId || agent.id || null,
       agentName: agent.name || agentRuntime.agentName || agentRuntime.agentId || agent.id || null,
       sessionId,
       id: sessionId,
-      title: record.archiveTitle || metadata.archiveTitle || metadata.title || metadata.name || sessionId,
+      title: record.archiveTitle || metadata.archiveTitle || metadata.title || metadata.name || (reset && record.sourceSessionId ? `Conversation from ${record.sourceSessionId}` : sessionId),
       titleSource: record.archiveTitle || metadata.archiveTitle ? 'derived' : 'legacy',
       summary: record.archiveSummary || metadata.archiveSummary || null,
       summaryStatus: record.summaryStatus || metadata.archiveSummaryStatus || 'not_configured',
       summarizedAt: record.summarizedAt || metadata.archiveSummarizedAt || null,
       turnCount: record.turnCount ?? metadata.turnCount ?? 0,
-      chatTurnCount: metadata.chatTurnCount ?? null,
+      chatTurnCount: reset ? null : metadata.chatTurnCount ?? null,
       createdAt: metadata.createdAt || null,
       updatedAt: record.updatedAt || metadata.updatedAt || metadata.lastInteractionAt || null,
       archived: Boolean(record.archiveSnapshot || record.archived || metadata.archived),
-      archivedAt: metadata.archivedAt || null,
+      archivedAt: reset ? record.updatedAt || metadata.createdAt || null : metadata.archivedAt || null,
       kind: metadata.kind || null,
       lastRole: metadata.lastRole || null,
       lastRunId: metadata.lastRunId || null,
+      ...(record.matchedDate ? { matchedDate: record.matchedDate } : {}),
       ...(record.archiveSnapshot ? { archiveSnapshot: record.archiveSnapshot, sourceSessionId: record.sourceSessionId } : {}),
     };
   }
@@ -177,7 +179,7 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
       const [sessions, archives] = await Promise.all([store.listSessions({ agentId: agent.id, includeArchived }), store.listArchives({ agentId: agent.id, limit: null })]);
       return [
         ...sessions.map((record) => archiveSessionListItem({ id: record.sessionId, ...record, metadata: record }, { agentId: agent.id }, agent)),
-        ...archives.filter((record) => record.kind === 'reset').map((record) => archiveSessionListItem({ id: record.archiveId, archiveSnapshot: 'reset', sourceSessionId: record.sessionId, turnCount: record.entries.length, updatedAt: record.createdAt, archiveSummary: record.metadata?.summary, summaryStatus: record.metadata?.summaryStatus, metadata: { ...record.metadata, createdAt: record.createdAt } }, { agentId: agent.id }, agent)),
+        ...archives.filter((record) => record.kind === 'reset').map((record) => archiveSessionListItem({ id: record.archiveId, archiveSnapshot: 'reset', sourceSessionId: record.metadata?.sourceSessionId || record.sessionId, turnCount: record.entries.length, updatedAt: record.createdAt, archiveSummary: record.metadata?.summary, summaryStatus: record.metadata?.summaryStatus, metadata: { ...record.metadata, createdAt: record.createdAt } }, { agentId: agent.id }, agent)),
       ];
     }))).flat();
   }
@@ -221,18 +223,29 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
       const boundary = archiveCursorBoundary(cursor, { scope });
       const agents = (await agentsStore().list({ includeDisabled: Boolean(includeDisabled) })).filter((agent) => !agentId || agent.id === agentId);
       const pages = await Promise.all(agents.map(async (agent) => ({ agent, page: await store.listArchiveSessions({ agentId: agent.id, includeArchived, query, date, timezone, limit: size, boundary }) })));
-      const rows = pages.flatMap(({ agent, page }) => page.rows.map((record) => archiveSessionListItem({
-        id: record.id, archiveSnapshot: record.archiveSnapshot, sourceSessionId: record.sourceSessionId,
-        turnCount: record.turnCount, updatedAt: record.updatedAt,
-        archiveSummary: record.metadata?.archiveSummary || record.metadata?.summary,
-        summaryStatus: record.metadata?.archiveSummaryStatus || record.metadata?.summaryStatus,
-        metadata: { ...record.metadata, createdAt: record.createdAt, updatedAt: record.updatedAt },
-      }, { agentId: agent.id }, agent)));
-      rows.sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')) || `${right.agentId}:${right.id}`.localeCompare(`${left.agentId}:${left.id}`));
-      const sessions = rows.slice(0, size);
+      const rows = pages.flatMap(({ agent, page }) => page.rows.map((record) => ({
+        // Native stores return UTC6 verbatim; compatibility stores predate the
+        // exact scalar and provide only millisecond display timestamps.
+        sortTimestamp: record.sortTimestamp ?? (record.updatedAt ? `${new Date(record.updatedAt).toISOString().slice(0, -1)}000Z` : ''),
+        item: archiveSessionListItem({
+          id: record.id, archiveSnapshot: record.archiveSnapshot, sourceSessionId: record.sourceSessionId,
+          turnCount: record.turnCount, updatedAt: record.updatedAt, matchedDate: record.matchedDate,
+          archiveSummary: record.metadata?.archiveSummary || record.metadata?.summary,
+          summaryStatus: record.metadata?.archiveSummaryStatus || record.metadata?.summaryStatus,
+          metadata: { ...record.metadata, createdAt: record.createdAt, updatedAt: record.updatedAt },
+        }, { agentId: agent.id }, agent),
+      })));
+      rows.sort((left, right) => {
+        const time = left.sortTimestamp < right.sortTimestamp ? 1 : left.sortTimestamp > right.sortTimestamp ? -1 : 0;
+        const a = `${left.item.agentId}:${left.item.id}`, b = `${right.item.agentId}:${right.item.id}`;
+        // PostgreSQL uses COLLATE C for the identity tie-breaker. UTF-8 byte
+        // ordering (not localeCompare/UTF-16) keeps aggregate cursors identical.
+        return time || Buffer.compare(Buffer.from(b), Buffer.from(a));
+      });
+      const selected = rows.slice(0, size);
       const hasMore = rows.length > size || pages.some(({ page }) => page.hasMore);
-      const last = sessions.at(-1);
-      return { sessions, nextCursor: hasMore && last ? archiveCursor({ scope, timestamp: String(last.updatedAt || ''), identity: `${last.agentId}:${last.id}` }) : null, hasMore };
+      const last = selected.at(-1);
+      return { sessions: selected.map(row => row.item), nextCursor: hasMore && last ? archiveCursor({ scope, timestamp: last.sortTimestamp, identity: `${last.item.agentId}:${last.item.id}` }) : null, hasMore };
     }
     const rows = await archiveSessionRows({ includeArchived, agentId, includeDisabled });
     const page = archivePage(rows.filter((item) => (matchesArchiveDay(item.archivedAt || item.updatedAt || item.createdAt, date, timezone)) && (!query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase()))), { limit, cursor, max: 1000, scope: JSON.stringify(['sessions', includeArchived, query, includeDisabled, agentId, date, timezone]), timestamp: (row) => row.updatedAt, identity: (row) => `${row.agentId}:${row.id}` });
@@ -241,7 +254,37 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
 
   // UI cursors bind to both authority scope and the exact PostgreSQL snapshot.
   function uiArchivePage(source, { agentId, sessionId, limit, before, from, to }) {
-    const turns = source.filter(isChatMessage).filter((turn) => (!from || String(turn.ts || '') >= from) && (!to || String(turn.ts || '') <= to));
+    // Compare the same microsecond instants used by PostgreSQL discovery, not
+    // millisecond-truncated Date.parse values or ISO spellings. Missing/invalid
+    // occurrence clocks remain visible unbounded, but never borrow storage time.
+    const instant = value => {
+      if (typeof value !== 'string') return null;
+      const match = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2})(?::?(\d{2}))?))?$/.exec(value);
+      if (!match || match[1].startsWith('0000')) return null;
+      const midnight = Date.parse(`${match[1]}T00:00:00Z`);
+      // Date.parse normalizes impossible dates; PostgreSQL rejects them.
+      if (!Number.isFinite(midnight) || new Date(midnight).toISOString().slice(0, 10) !== match[1]) return null;
+      const hour = Number(match[2] || 0), minute = Number(match[3] || 0), second = Number(match[4] || 0);
+      const offsetHour = Number(match[8] || 0), offsetMinute = Number(match[9] || 0);
+      if (hour > 24 || minute > 59 || second > 60 || offsetHour > 15 || offsetMinute > 59) return null;
+      // PostgreSQL parses the fractional second as a double, then rints to
+      // microseconds (round to nearest, ties to even), including rollover.
+      const fraction = Number(`0.${match[5] || '0'}`) * 1e6;
+      let micros = Math.floor(fraction);
+      if (fraction - micros > 0.5 || (fraction - micros === 0.5 && micros % 2 === 1)) micros++;
+      const seconds = (hour * 60 + minute) * 60 + second;
+      if (seconds > 86400 || (seconds === 86400 && micros !== 0)) return null;
+      const offset = (offsetHour * 60 + offsetMinute) * (match[7] === '-' ? -1 : 1);
+      const wholeSecond = midnight + (seconds - offset * 60) * 1000;
+      return BigInt(wholeSecond) * 1000n + BigInt(micros);
+    };
+    const lower = from ? instant(from) : null, upper = to ? instant(to) : null;
+    if ((from && lower === null) || (to && upper === null)) throw new Error('archive_date_invalid');
+    const turns = source.filter(isChatMessage).filter((turn) => {
+      if (!from && !to) return true;
+      const at = instant(turn.timestamp ?? turn.ts ?? turn.at ?? turn.createdAt);
+      return at !== null && (lower === null || at >= lower) && (upper === null || at <= upper);
+    });
     const scope = `${agentId}:${sessionId}`;
     const digest = createHmac('sha256', settingsKeyFromEnvironment()).update(JSON.stringify({ scope, from, to, turns })).digest('hex');
     let end = turns.length;
@@ -269,7 +312,7 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
         : (await store.listArchives({ agentId: agentRuntime.agentId, limit: null })).find((item) => item.kind === 'reset' && item.archiveId === sessionId);
     const reset = reconstructed ? { archiveId: reconstructed.archiveId, sessionId: reconstructed.sourceSessionId,
       entries: reconstructed.entries, createdAt: reconstructed.createdAt, metadata: reconstructed.session.metadata } : archive;
-    const resetSnapshot = reset ? { id: reset.archiveId, sourceSessionId: reset.sessionId, turnCount: reset.entries.length, createdAt: reset.createdAt, updatedAt: reset.createdAt, archiveSummary: reset.metadata?.summary, summaryStatus: reset.metadata?.summaryStatus, archiveTitle: reset.metadata?.archiveTitle } : null;
+    const resetSnapshot = reset ? { id: reset.archiveId, sourceSessionId: reset.metadata?.sourceSessionId || reset.sessionId, turnCount: reset.entries.length, createdAt: reset.createdAt, updatedAt: reset.createdAt, archiveSummary: reset.metadata?.summary, summaryStatus: reset.metadata?.summaryStatus, archiveTitle: reset.metadata?.archiveTitle } : null;
     const source = reset ? reset.entries : (await store.exportTranscript({ agentId: agentRuntime.agentId, sessionId }))?.entries;
     if (!source) return null;
     const page = uiArchivePage(source, { agentId: agentRuntime.agentId, sessionId, ...pageOptions });
@@ -287,7 +330,7 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
           archiveSnapshot: 'reset',
           sourceSessionId: resetSnapshot.sourceSessionId,
           turnCount: resetSnapshot.turnCount,
-          metadata: { archived: true, archiveSnapshot: 'reset', sourceSessionId: resetSnapshot.sourceSessionId, createdAt: resetSnapshot.createdAt, updatedAt: resetSnapshot.updatedAt },
+          metadata: { archived: true, archiveSnapshot: 'reset', sourceSessionId: resetSnapshot.sourceSessionId, createdAt: resetSnapshot.createdAt, updatedAt: resetSnapshot.updatedAt, archivedAt: resetSnapshot.createdAt },
           summary: resetSnapshot.archiveSummary || null,
           summaryStatus: resetSnapshot.summaryStatus || 'not_configured',
           title: resetSnapshot.archiveTitle || `Conversation from ${resetSnapshot.sourceSessionId}`,

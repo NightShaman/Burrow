@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readModConversationPage } from './mod-conversation-pager.mjs';
 import { MODEL_REASONING_EFFORT_VALUES, modelSupportsTemperature, normalizeModelReasoningEffort, resolveModelConfig } from './config.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
+import { normalizeExternalTurnAttachments } from './mod-external-turn-attachments.mjs';
 
 function invalid() { throw new Error('mod_capability_input_invalid'); }
 function bounded(value, max) { if (typeof value !== 'string' || !value || value.length > max) invalid(); return value; }
@@ -224,14 +225,15 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
     },
     async submitExternalTurn(input) {
       if (!externalTurnDispatcher) throw new Error('mod_external_turns_unavailable');
-      const value = exactKeys(plain(input), ['agentId', 'sessionId', 'message', 'displayMessage', 'idempotencyKey']);
+      const value = exactKeys(plain(input), ['agentId', 'sessionId', 'message', 'displayMessage', 'idempotencyKey', 'attachments']);
       const agentId = bounded(value.agentId, 96).trim();
       const sessionId = bounded(value.sessionId, 128).trim();
       const message = bounded(value.message, 100_000);
       const displayMessage = value.displayMessage === undefined ? message : bounded(value.displayMessage, 100_000);
       const idempotencyKey = bounded(value.idempotencyKey, 256).trim();
       if (!agentId || !sessionId || !message.trim() || !displayMessage.trim() || !idempotencyKey) invalid();
-      const request = { ownerModId: schedulerOwner(), agentId, sessionId, message, displayMessage, idempotencyKey };
+      const attachments = normalizeExternalTurnAttachments(value.attachments);
+      const request = { ownerModId: schedulerOwner(), agentId, sessionId, message, displayMessage, idempotencyKey, attachments };
       const replay = await externalTurnDispatcher.replay?.(request);
       if (replay) return replay;
       const agent = await withStore('agents', store => store.get(agentId));

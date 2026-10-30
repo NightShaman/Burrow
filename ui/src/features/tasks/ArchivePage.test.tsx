@@ -88,7 +88,7 @@ describe('Paginated chat history', () => {
     await screen.findByText('old');
     expect(screen.getByText('new')).toBeTruthy();
     expect(screen.getByText('Beginning of retained history')).toBeTruthy();
-    expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'one' }), expect.any(AbortSignal), 'older');
+    expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'one' }), expect.any(AbortSignal), 'older', undefined);
   });
   it('does not let a late older page enter the next selected conversation', async () => {
     vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([]));

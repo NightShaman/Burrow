@@ -12,6 +12,16 @@ export function browserTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
 
+// Construct each midnight independently: local calendar days can be 23 or 25 hours.
+export function archiveDayBounds(day: string): { from: string; to: string } {
+  const [year, month, date] = day.split('-').map(Number);
+  return {
+    from: new Date(year, month - 1, date).toISOString(),
+    // PostgreSQL retains microseconds: include the entire final millisecond.
+    to: new Date(new Date(year, month - 1, date + 1).getTime() - 1).toISOString().replace(/\.999Z$/, '.999999Z'),
+  };
+}
+
 export function createArchiveRepository(request: typeof api = api) {
   return {
     async listCalendarAvailability(kind: ArchiveCalendarKind, month: string, agentId?: string, signal?: AbortSignal): Promise<ArchiveCalendarAvailability> {
@@ -38,9 +48,14 @@ export function createArchiveRepository(request: typeof api = api) {
       if (!Array.isArray(response.events)) throw new Error('Invalid workflow events response.');
       return { items: response.events, nextCursor: response.nextCursor, hasMore: response.hasMore };
     },
-    loadSession(session: ArchiveSession, signal?: AbortSignal, before?: string) {
+    loadSession(session: ArchiveSession, signal?: AbortSignal, before?: string, date?: string) {
       const query = new URLSearchParams({ limit: '100' });
       if (before) query.set('before', before);
+      if (date) {
+        const bounds = archiveDayBounds(date);
+        query.set('from', bounds.from);
+        query.set('to', bounds.to);
+      }
       return request<ArchiveDetail>(`/api/archive/sessions/${encodeURIComponent(session.agentId ?? '')}/${encodeURIComponent(session.sessionId)}?${query}`, { signal });
     },
     async listDreams(signal?: AbortSignal, cursor?: string | null, date?: string, agentId?: string, search = ''): Promise<ArchivePage<DreamGroupSummary>> {

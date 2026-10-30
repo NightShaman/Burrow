@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
+import { sameExternalTurnInput } from './mod-external-turn-attachments.mjs';
 
 export const POSTGRES_MOD_EXTERNAL_TURN_SCHEMA_SQL = `
 CREATE TABLE mod_external_turns (
@@ -34,6 +35,7 @@ function row(record) {
     sessionId: record.session_id,
     message: record.message,
     displayMessage: record.display_message || record.message,
+    attachments: parse(record.attachments) || [],
     status: record.status,
     runId: record.run_id,
     result: parse(record.result),
@@ -52,20 +54,20 @@ export class PostgresModExternalTurnStore {
     this.clock = clock;
   }
 
-  async create({ ownerModId, idempotencyKey, agentId, sessionId, message, displayMessage = message }) {
+  async create({ ownerModId, idempotencyKey, agentId, sessionId, message, displayMessage = message, attachments = [] }) {
     const now = this.clock();
     const id = randomUUID();
     const inserted = await this.pool.query(
-      `INSERT INTO mod_external_turns(id,owner_mod_id,idempotency_key,agent_id,session_id,message,display_message,status,created_at,updated_at)
-       VALUES($1,$2,$3,$4,$5,$6,$7,'queued',$8,$8)
+      `INSERT INTO mod_external_turns(id,owner_mod_id,idempotency_key,agent_id,session_id,message,display_message,attachments,status,created_at,updated_at)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,'queued',$9,$9)
        ON CONFLICT(owner_mod_id,idempotency_key) DO NOTHING RETURNING *`,
-      [id, ownerModId, idempotencyKey, agentId, sessionId, message, displayMessage, now],
+      [id, ownerModId, idempotencyKey, agentId, sessionId, message, displayMessage, JSON.stringify(attachments), now],
     );
     if (inserted.rows[0]) return { turn: row(inserted.rows[0]), replayed: false };
     const existing = await this.pool.query('SELECT * FROM mod_external_turns WHERE owner_mod_id=$1 AND idempotency_key=$2', [ownerModId, idempotencyKey]);
     const turn = row(existing.rows[0]);
     if (!turn) throw new Error('mod_external_turn_persistence_failed');
-    if (turn.agentId !== agentId || turn.sessionId !== sessionId || turn.message !== message || turn.displayMessage !== displayMessage) throw new Error('mod_external_turn_idempotency_conflict');
+    if (!sameExternalTurnInput(turn, { agentId, sessionId, message, displayMessage, attachments })) throw new Error('mod_external_turn_idempotency_conflict');
     return { turn, replayed: true };
   }
 

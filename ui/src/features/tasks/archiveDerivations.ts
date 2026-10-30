@@ -45,7 +45,7 @@ export function dreamPhaseRank(phase: string): number {
 export function filterArchiveSessions(sessions: ArchiveSession[], selectedAgent: string, selectedDate: string): ArchiveSession[] {
   return sessions.filter((session) => (
     (!selectedAgent || session.agentId === selectedAgent)
-    && (!selectedDate || formatDayKey(archiveSessionDate(session)) === selectedDate)
+    && (!selectedDate || session.matchedDate === selectedDate || formatDayKey(archiveSessionDate(session)) === selectedDate)
   ));
 }
 

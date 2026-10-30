@@ -1480,7 +1480,7 @@
             "name": "date",
             "in": "query",
             "required": false,
-            "description": "calendar day in the requested timezone of session archive/list display timestamp (archivedAt, then updatedAt, then createdAt).",
+            "description": "Local day of retained visible message occurrence or catalog update/reset creation in the requested timezone.",
             "schema": {
               "type": "string",
               "format": "date"
@@ -1519,7 +1519,8 @@
           "404": {
             "$ref": "#/components/responses/ErrorResponse"
           }
-        }
+        },
+        "description": "List retained active/archived conversations and independent reset documents. Date and session-calendar discovery match retained visible message occurrence days (including compacted generations in the document’s canonical generation window), plus catalog update/reset-creation dates. Unknown message clocks are not inferred. Date-filtered rows include matchedDate in the requested timezone; clients must retain these matches even when the catalog timestamp differs. Search matches identity, names, titles and human-facing summaries, not internal run evidence. Opaque cursors preserve exact catalog ordering and must keep filters unchanged."
       }
     },
     "/api/archive/sessions/{agentId}/{sessionId}": {
@@ -1545,7 +1546,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "Page size (1\u2013200, default 100).",
+            "description": "Page size (1–200, default 100).",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -3732,7 +3733,7 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Maximum rows in this page (1\u2013500, default 100). Invalid or out-of-range values return 400 archive_limit_invalid.",
+            "description": "Maximum rows in this page (1–500, default 100). Invalid or out-of-range values return 400 archive_limit_invalid.",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -4183,7 +4184,7 @@
           "Agents"
         ],
         "summary": "Read bulk agent UI overview",
-        "description": "Return registered agents with identities, requested-session/descendant status, context usage, and model selections in one request. The optional sessions map selects each agent\u2019s session. Status uses the same runtime-owned ancestry as /api/agent-status, including metadata-only live descendants and honest orphans. Context inspection is bounded to the requested session plus 12 descendants per agent; contextHydration.truncated reports omitted contexts, not a truncated status tree. Opt in to agent-wide minions with minionScope: agent (session is the default). status.minionScope: agent confirms a successful all-origin scan for that agent; disabled/error entries do not claim coverage. The anchor session and its activity remain independent. Ordinary unrelated chats are not minions; requested child anchors retain depth and appear once. Depth-two orphans without root metadata keep unknown roots. Context hydration remains bounded to the anchor plus 12 distinct minion sessions; session recovery and cancellation stay scoped.",
+        "description": "Return registered agents with identities, requested-session/descendant status, context usage, and model selections in one request. The optional sessions map selects each agent’s session. Status uses the same runtime-owned ancestry as /api/agent-status, including metadata-only live descendants and honest orphans. Context inspection is bounded to the requested session plus 12 descendants per agent; contextHydration.truncated reports omitted contexts, not a truncated status tree. Opt in to agent-wide minions with minionScope: agent (session is the default). status.minionScope: agent confirms a successful all-origin scan for that agent; disabled/error entries do not claim coverage. The anchor session and its activity remain independent. Ordinary unrelated chats are not minions; requested child anchors retain depth and appear once. Depth-two orphans without root metadata keep unknown roots. Context hydration remains bounded to the anchor plus 12 distinct minion sessions; session recovery and cancellation stay scoped.",
         "operationId": "getAgentOverview",
         "requestBody": {
           "required": true,
@@ -5755,7 +5756,7 @@
             "$ref": "#/components/responses/ErrorResponse"
           }
         },
-        "description": "Days are computed across retained records independently of page limits. Dreams includes diary creation and cycle receipt start/creation days, including failure-only receipts; workflow-events uses event acceptance createdAt. Calendar is not filtered by q."
+        "description": "Days across retained records independently of list pagination. Sessions include visible message occurrence days across canonical live/compacted/reset windows plus catalog update/reset-creation dates. Unknown message clocks do not acquire invented dates. Dreams include diary creation and cycle receipt start/creation, including failure-only receipts; workflow-events use event acceptance createdAt. Calendar is not filtered by q."
       }
     },
     "/api/settings/timezone": {
@@ -6946,7 +6947,7 @@
         ],
         "summary": "Read an agent minion depth setting",
         "operationId": "getAgentMinionSettings",
-        "description": "Read the per-agent maximum nesting depth (integer 0\u20132, default 1). This is independent of minion model selection. Zero disables spawning, one permits direct children, and two also permits grandchildren. Requires an enabled registered agent.",
+        "description": "Read the per-agent maximum nesting depth (integer 0–2, default 1). This is independent of minion model selection. Zero disables spawning, one permits direct children, and two also permits grandchildren. Requires an enabled registered agent.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PathAgentId"
@@ -6954,7 +6955,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The agent\u2019s durable minion depth setting; defaults to one when unset.",
+            "description": "The agent’s durable minion depth setting; defaults to one when unset.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7047,7 +7048,7 @@
         },
         "responses": {
           "200": {
-            "description": "The agent\u2019s durable minion depth setting; defaults to one when unset.",
+            "description": "The agent’s durable minion depth setting; defaults to one when unset.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12725,7 +12726,8 @@
             "type": [
               "integer",
               "null"
-            ]
+            ],
+            "description": "Visible chat count when known; reset snapshots omit stale inherited tail counts (null) rather than claiming a complete visible count."
           },
           "archived": {
             "type": "boolean"
@@ -12737,7 +12739,13 @@
             ]
           },
           "sourceSessionId": {
-            "type": "string"
+            "type": "string",
+            "description": "Proven original session of a reset document, preserved through later session renames; never inferred from a UUID."
+          },
+          "matchedDate": {
+            "type": "string",
+            "format": "date",
+            "description": "Authoritative local-day match for a date-filtered list; may differ from the catalog timestamp."
           }
         },
         "additionalProperties": true

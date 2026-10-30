@@ -3,6 +3,7 @@ import { createChatTurnRunId } from './chat-turn-run-id.mjs';
 import { runChatTurnFromBody } from './chat-turn-controller.mjs';
 import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
 import { createBackgroundLifecycle } from './background-lifecycle.mjs';
+import { sameExternalTurnInput } from './mod-external-turn-attachments.mjs';
 
 function boundedResult(result = {}) {
   return {
@@ -85,7 +86,7 @@ export function createModExternalTurnDispatcher({ store, stores, resolveAgentRun
       const selection = metadata?.externalModOwnerId === turn.ownerModId ? metadata.externalModModel : null;
       signal.throwIfAborted();
       const result = await executeTurn({
-        body: { message: turn.message, sessionId: turn.sessionId, runId, abortSignal: signal, ...(selection ? { modelConnectionId: selection.connectionId, model: selection.model } : {}) },
+        body: { message: turn.message, attachments: turn.attachments || [], sessionId: turn.sessionId, runId, abortSignal: signal, ...(selection ? { modelConnectionId: selection.connectionId, model: selection.model } : {}) },
         rootDir,
         stores,
         agentRuntime,
@@ -132,7 +133,7 @@ export function createModExternalTurnDispatcher({ store, stores, resolveAgentRun
       if (typeof store.getByIdempotency !== 'function') return null;
       const turn = await store.getByIdempotency(input.ownerModId, input.idempotencyKey);
       if (!turn) return null;
-      if (turn.agentId !== input.agentId || turn.sessionId !== input.sessionId || turn.message !== input.message || (turn.displayMessage || turn.message) !== input.displayMessage) throw new Error('mod_external_turn_idempotency_conflict');
+      if (!sameExternalTurnInput(turn, input)) throw new Error('mod_external_turn_idempotency_conflict');
       return { turn: publicExternalTurn(turn), replayed: true };
     },
     async submit(input) {

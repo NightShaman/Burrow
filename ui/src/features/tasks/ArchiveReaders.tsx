@@ -12,12 +12,31 @@ export function formatArchiveDate(value: string | null) {
   return date ? new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(date) : 'No date';
 }
 
+const uuidSessionId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function archiveSessionOrigin(session: ArchiveSession): string {
+  const source = session.sourceSessionId;
+  if (source === 'default' || session.sessionId === 'default') return 'Default';
+  if (source && !uuidSessionId.test(source)) return source;
+  return '';
+}
+
+export function archiveSessionTimestamp(session: ArchiveSession): string {
+  const date = archiveDate(archiveSessionDate(session));
+  return date ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date) : 'No date';
+}
+
+export function archiveSessionContext(session: ArchiveSession): string {
+  const origin = archiveSessionOrigin(session);
+  return [origin ? `From ${origin}` : '', session.archiveSnapshot === 'reset' ? 'Reset' : '', archiveSessionTimestamp(session)].filter(Boolean).join(' · ');
+}
+
 export function archiveSessionTitle(session: ArchiveSession) {
-  if (session.archiveSnapshot === 'reset' && session.title === 'default · Reset') {
-    const date = archiveDate(session.updatedAt || session.createdAt);
-    return date ? `Default · Reset ${formatArchiveDate(date.toISOString())}` : session.title;
-  }
-  return session.title || session.sessionId;
+  const title = session.title?.trim();
+  const generatedReset = session.archiveSnapshot === 'reset' && title === 'default · Reset';
+  if (title && title !== 'default' && !uuidSessionId.test(title) && !generatedReset) return title;
+  const origin = archiveSessionOrigin(session);
+  return [origin || 'Conversation', session.archiveSnapshot === 'reset' ? 'Reset' : '', archiveSessionTimestamp(session)].filter(Boolean).join(' · ');
 }
 
 function formatTurnDate(value?: string) {
@@ -137,7 +156,7 @@ export function ChatArchiveReader({ session, detail, loading, error, earlierLoad
     onLoadEarlier();
   };
   return <>
-    <ArchiveReaderToolbar eyebrow={session.agentName || session.agentId || 'Archived chat'} title={archiveSessionTitle(session)} detail={`${formatArchiveDate(archiveSessionDate(session))} · ${turns.length} loaded turns${detail?.hasMore ? ' · more available' : ''}`} value={copyValue} copyLabel="Copy loaded chat" />
+    <ArchiveReaderToolbar eyebrow={session.agentName || session.agentId || 'Archived chat'} title={archiveSessionTitle(session)} detail={`${archiveSessionContext(session)} · ${turns.length} loaded turns${detail?.hasMore ? ' · more available' : ''}`} value={copyValue} copyLabel="Copy loaded chat" />
     <div className="archive-content-body archive-reader-body" ref={readerRef}>
       {loading ? <LoadingState title="Loading conversation." detail="Opening the most recent messages." /> : null}
       {error ? <ErrorState title="Could not open this conversation." error={error} /> : null}
