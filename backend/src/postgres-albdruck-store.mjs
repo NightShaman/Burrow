@@ -163,14 +163,86 @@ export class PostgresAlbdruckStore {
         }).join('\n');
         if(cleaned!==original) await client.query("UPDATE agent_profile_documents SET markdown=$2,updated_at=now() WHERE agent_id=$1 AND kind='DREAM_MEMORY'",[agentId,cleaned]);
       }
-      // Preference signals are derived evidence, not operator-authored guidance.
-      const signalKey=`preference-signals:${agentId}`;
-      const signalRows=await client.query('SELECT value_json::text AS value FROM settings_meta WHERE key=$1 FOR UPDATE',[signalKey]);
-      if(signalRows.rows[0]) {
-        const value=JSON.parse(signalRows.rows[0].value);
-        value.signals=(value.signals || []).filter(signal=>!references(signal.sourceRefs));
-        await client.query('UPDATE settings_meta SET value_json=$2::json,updated_at=now() WHERE key=$1',[signalKey,JSON.stringify(value)]);
+      // Preference provenance is derived evidence; the operator's PREFERENCES
+      // document is intentionally not rewritten. Match the metadata store and
+      // atomic preference writer's advisory-lock protocol, including first writes.
+      const signalKey = `preference-signals:${agentId}`;
+      const stateKey = `preference-learning:${agentId}`;
+      const auditKey = `preference-audit:${agentId}`;
+      for (const key of [auditKey, stateKey, signalKey].sort()) {
+        await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`settings-meta:${key}`]);
       }
+      const readPreferenceMeta = async key => {
+        const result = await client.query('SELECT value_json::text AS value FROM settings_meta WHERE key=$1 FOR UPDATE', [key]);
+        if (!result.rows[0]) return null;
+        const value = JSON.parse(result.rows[0].value);
+        // Failing closed is preferable to silently discarding an unreadable
+        // provenance envelope or a previously installed erasure fence.
+        if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('albdruck_purge_preference_envelope_invalid');
+        return value;
+      };
+      const audit = await readPreferenceMeta(auditKey);
+      const state = await readPreferenceMeta(stateKey);
+      const existingSignals = await readPreferenceMeta(signalKey);
+      const signalEnvelope = existingSignals || { version: 2, agentId, signals: [] };
+      if (signalEnvelope.erasedSessions !== undefined && (!Array.isArray(signalEnvelope.erasedSessions) || signalEnvelope.erasedSessions.some(id => typeof id !== 'string'))) {
+        throw new Error('albdruck_purge_preference_erasure_fence_invalid');
+      }
+      for (const [envelope, field] of [[signalEnvelope,'signals'], [signalEnvelope,'resolvedEvidence'], [audit,'entries'], [state,'reviewedSignalIds']]) {
+        if (envelope && Object.hasOwn(envelope, field) && !Array.isArray(envelope[field])) throw new Error('albdruck_purge_preference_envelope_invalid');
+      }
+      const signals = signalEnvelope.signals || [];
+      const resolved = signalEnvelope.resolvedEvidence || [];
+      const entries = audit?.entries || [];
+      const removedIds = new Set();
+      const removedIdentities = new Set();
+      const signalIdentity = item => item?.evidenceKey ? JSON.stringify([item.evidenceKey, item.kind, item.scope, item.guidance]) : null;
+      const signalReferences = item => references(item?.sourceRefs) ||
+        (Array.isArray(item?.evidence) && item.evidence.some(evidenceItem => references(evidenceItem?.sourceRef)));
+      const addId = id => { if (typeof id === 'string' && id) removedIds.add(id); };
+      const addIdentity = identity => { if (typeof identity === 'string' && identity) removedIdentities.add(identity); };
+      // Legacy resolved evidence lacks sourceRefs. An ID/identity linked to a
+      // removed signal (or a single-ID sourced audit) is still identifiable.
+      // Never infer which member of a mixed multi-signal audit was erased.
+      for (const entry of entries) {
+        if (references(entry?.sourceRefs) && Array.isArray(entry?.sourceSignalIds) && entry.sourceSignalIds.length === 1) addId(entry.sourceSignalIds[0]);
+      }
+      let previousSize;
+      do {
+        previousSize = removedIds.size + removedIdentities.size;
+        for (const item of signals) {
+          const identity = signalIdentity(item);
+          if (signalReferences(item) || removedIds.has(item?.id) || (identity && removedIdentities.has(identity))) {
+            addId(item?.id); addIdentity(identity);
+          }
+        }
+        for (const item of resolved) {
+          if (references(item?.sourceRefs) || removedIds.has(item?.id) || (item?.identity && removedIdentities.has(item.identity))) {
+            addId(item?.id); addIdentity(item?.identity);
+          }
+        }
+      } while (removedIds.size + removedIdentities.size !== previousSize);
+      const keptSignals = signals.filter(item => !signalReferences(item) && !removedIds.has(item?.id) && !(signalIdentity(item) && removedIdentities.has(signalIdentity(item))));
+      const keptResolved = resolved.filter(item => !references(item?.sourceRefs) && !removedIds.has(item?.id) && !(item?.identity && removedIdentities.has(item.identity)));
+      const keptEntries = entries.filter(entry => !references(entry?.sourceRefs) && !(Array.isArray(entry?.sourceSignalIds) && entry.sourceSignalIds.some(id => removedIds.has(id))));
+      derived.preference_signals = signals.length - keptSignals.length;
+      derived.preference_resolved_evidence = resolved.length - keptResolved.length;
+      derived.preference_audit_entries = entries.length - keptEntries.length;
+      const reviewed = Array.isArray(state?.reviewedSignalIds) ? state.reviewedSignalIds : [];
+      const keptReviewed = reviewed.filter(id => !removedIds.has(id));
+      derived.preference_reviewed_signal_ids = reviewed.length - keptReviewed.length;
+      const erasedSessions = signalEnvelope.erasedSessions || [];
+      const nextSignals = { ...signalEnvelope,
+        ...(Array.isArray(signalEnvelope.signals) ? { signals: keptSignals } : {}),
+        ...(Array.isArray(signalEnvelope.resolvedEvidence) ? { resolvedEvidence: keptResolved } : {}),
+        erasedSessions: erasedSessions.includes(sessionId) ? erasedSessions : [...erasedSessions, sessionId],
+      };
+      const stamp = new Date().toISOString();
+      const writePreferenceMeta = (key, value) => client.query(`INSERT INTO settings_meta(key,value_json,updated_at) VALUES($1,$2,$3)
+        ON CONFLICT(key) DO UPDATE SET value_json=EXCLUDED.value_json,updated_at=EXCLUDED.updated_at`, [key, JSON.stringify(value), stamp]);
+      if (audit && keptEntries.length !== entries.length) await writePreferenceMeta(auditKey, { ...audit, entries: keptEntries });
+      if (state && keptReviewed.length !== reviewed.length) await writePreferenceMeta(stateKey, { ...state, reviewedSignalIds: keptReviewed });
+      if (!existingSignals || JSON.stringify(existingSignals) !== JSON.stringify(nextSignals)) await writePreferenceMeta(signalKey, nextSignals);
       const conversation = (await client.query('DELETE FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [agentId, sessionId])).rowCount;
       return { agentId, sessionId, deleted: conversation === 1, removed: { evidence, knowledge, revisions, ...derived } };
     });

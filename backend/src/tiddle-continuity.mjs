@@ -1,9 +1,9 @@
 import { createBackgroundLifecycle } from './background-lifecycle.mjs';
 import { withTiddleOccurrence, runAsync, tiddlePersistence } from './tiddle-persistence.mjs';
 import { rollingCardActive } from './postgres-rolling-continuity-store.mjs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { completeCurator, curatorRoot, readCuratorSelection } from './curator-runtime.mjs';
-import { appendPreferenceSignal, appendPreferenceSignalAsync, normalizePreferenceSignal } from './preference-learning.mjs';
+import { appendPreferenceSignalAsync } from './preference-learning.mjs';
 
 const PASS_INTERVAL_MS = 4 * 60 * 60 * 1_000;
 const LOOKBACK_MS = 24 * 60 * 60 * 1_000;
@@ -49,22 +49,66 @@ async function commitScopePass(db, { agentId, scope, at, entry, cardUpdate = nul
   }, assertActive);
 }
 function selectionIdentity(selection) { return selection ? { kind: selection.kind, connectionId: selection.connectionId || null, model: selection.model || selection.modelPath || null, temperature: selection.temperature ?? 0 } : null; }
+// The model may nominate a preference and its supporting refs, but may not
+// supply provenance timestamps, IDs or evidence keys. Malformed optional
+// observations are ignored without invalidating an otherwise valid warm pass.
+function preferenceObservation(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (![value.kind, value.scope, value.guidance, value.reason].every((field) => typeof field === 'string' && field.trim())) return null;
+  const kind = value.kind.trim().toLowerCase();
+  if (!['reinforce', 'contradict', 'replace'].includes(kind)) return null;
+  if (!Array.isArray(value.sourceRefs) || !value.sourceRefs.length || value.sourceRefs.length > 20 ||
+      value.sourceRefs.some((ref) => typeof ref !== 'string' || !ref || ref.trim() !== ref)) return null;
+  return { kind, scope: bounded(value.scope, 120), guidance: bounded(value.guidance, 600), reason: bounded(value.reason, 240), sourceRefs: [...new Set(value.sourceRefs)] };
+}
+
+// Runtime turn-start timestamps are UTC ISO instants. Missing/invalid legacy
+// timestamps remain unknown, rather than borrowing the later terminal `at`.
+function trustedUserAt(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/u.test(value)) return null;
+  const millis = Date.parse(value);
+  if (!Number.isFinite(millis)) return null;
+  const normalized = new Date(millis).toISOString();
+  return normalized.slice(0, 19) === value.slice(0, 19) ? normalized : null;
+}
+
+/** Ground optional preference observations against precisely the residue sent to the model. */
+export function groundTiddlePreferenceSignal({ signal, agentId, residue = [] } = {}) {
+  const observation = preferenceObservation(signal);
+  if (!observation || !text(agentId) || !Array.isArray(residue)) return null;
+  const byRef = new Map();
+  for (const item of residue) {
+    if (typeof item?.ref !== 'string') continue;
+    // An ambiguous duplicate cannot safely identify the supporting user turn.
+    if (byRef.has(item.ref)) byRef.set(item.ref, null);
+    else byRef.set(item.ref, item);
+  }
+  const supporting = observation.sourceRefs.map((ref) => byRef.get(ref));
+  if (supporting.some((item) => !item || typeof item.message !== 'string' || !item.message.trim() || item.operatorInput === false) ||
+      !supporting.some((item) => item.newSinceLastPass === true)) return null;
+  const times = supporting.map((item) => trustedUserAt(item.userAt));
+  // If any supporting time is unknown, neither end of the interval is safe.
+  const known = times.every(Boolean) ? times.sort() : [];
+  const evidenceKey = createHash('sha256').update(JSON.stringify(['tiddle-preference-evidence-v1', text(agentId), [...observation.sourceRefs].sort()])).digest('hex');
+  return { ...observation, evidence: supporting.map(item => ({ sourceRef: item.ref, at: trustedUserAt(item.userAt), content: item.message })), sourceAt: known[0] || null, sourceEndAt: known.at(-1) || null, evidenceKey };
+}
+
 export function parseTiddleProposal(value) {
   const source = text(value);
   const candidates = [source, ...[...source.matchAll(/```(?:json)?\s*([\s\S]*?)```/giu)].map((match) => typeof match === 'string' ? match : match[1])];
   for (const candidate of candidates) {
     const proposal = parse(candidate);
     const action = text(proposal?.action).toUpperCase();
-    if (action === 'NOOP') return { action, reason: bounded(proposal.reason, 240) || 'no_warm_continuity', preferenceSignal: normalizePreferenceSignal(proposal.preferenceSignal) };
-    if (action === 'UPSERT' && text(proposal.title) && text(proposal.summary) && (proposal.targetId === null || text(proposal.targetId))) return { action, targetId: text(proposal.targetId) || null, title: bounded(proposal.title, 240), summary: bounded(proposal.summary, 2400), reason: bounded(proposal.reason, 240) || 'persistence across the window', preferenceSignal: normalizePreferenceSignal(proposal.preferenceSignal) };
+    if (action === 'NOOP') return { action, reason: bounded(proposal.reason, 240) || 'no_warm_continuity', preferenceSignal: preferenceObservation(proposal.preferenceSignal) };
+    if (action === 'UPSERT' && text(proposal.title) && text(proposal.summary) && (proposal.targetId === null || text(proposal.targetId))) return { action, targetId: text(proposal.targetId) || null, title: bounded(proposal.title, 240), summary: bounded(proposal.summary, 2400), reason: bounded(proposal.reason, 240) || 'persistence across the window', preferenceSignal: preferenceObservation(proposal.preferenceSignal) };
   }
   return null;
 }
 
-function residueUpdate(current, { agentId, scope, sessionId, conversationId, runId, message, answerText, toolResults = [], at }) {
+function residueUpdate(current, { agentId, scope, sessionId, conversationId, runId, message, userAt = null, operatorInput = null, answerText, toolResults = [], at }) {
     const item = {
       ref: `session:${sessionId}:run:${runId}`,
-      scope: text(scope), sessionId: text(sessionId), conversationId: text(conversationId) || text(sessionId), runId: text(runId), at,
+      scope: text(scope), sessionId: text(sessionId), conversationId: text(conversationId) || text(sessionId), runId: text(runId), at, userAt: trustedUserAt(userAt), operatorInput,
       // Residue is a bounded conversation projection, so preserve the user's and
       // assistant's words exactly. Credential material must enter through typed
       // protected tool fields rather than heuristic rewriting of ordinary prose.
@@ -86,11 +130,11 @@ export async function appendTiddleResidueAsync({ metadataStore, ...input } = {})
 }
 
 /** Cheap terminal residue only: no model call, no warm-card mutation. */
-function* appendTiddleResidueOperation({ stores = null, agentId, scope, sessionId, conversationId, runId, message, answerText, toolResults = [], at = iso() } = {}) {
+function* appendTiddleResidueOperation({ stores = null, agentId, scope, sessionId, conversationId, runId, message, userAt = null, operatorInput = null, answerText, toolResults = [], at = iso() } = {}) {
   if (!text(agentId) || !text(scope) || !text(sessionId) || !text(runId) || !text(answerText)) return null;
   const db = tiddlePersistence({ stores });
   try {
-    const { item } = residueUpdate(null, { agentId, scope, sessionId, conversationId, runId, message, answerText, toolResults, at });
+    const { item } = residueUpdate(null, { agentId, scope, sessionId, conversationId, runId, message, userAt, operatorInput, answerText, toolResults, at });
     yield () => db.transaction(agentId, function* (tx) { yield () => tx.append(residueKey(agentId), item, { version: 1, agentId, updatedAt: at }, at, iso(new Date(at).getTime() - LOOKBACK_MS)); });
     return item;
   } finally { db.close(); }
@@ -103,16 +147,16 @@ function prompt({ agentId, scope, residue, cards }) {
     'You are Tiddle. You reconcile rolling conversational continuity on a four-hour cadence. Return JSON only; never address the user.',
     'Warm continuity means a concept persisted, resumed, or recurred across the window. A single vivid turn is not warmth. Default to NOOP.',
     'Do not create tasks, decisions, emotional/therapy notes, transcript summaries, raw tool dumps, verified external state, or instructions for the agent. This is recall metadata only.',
-    'Separately, notice only a clear operator behavioral correction (especially an explicit correction). You may emit at most one preferenceSignal when grounded in this residue. It is an observation, never a profile edit. Do not infer a preference from mood, one-off task instructions, or generic conversation. Use {kind:reinforce|contradict|replace,scope,guidance,reason}.',
+    'Separately, notice a clear, enduring operator behavioral preference, either an explicit positive preference or a correction. You may emit at most one grounded preferenceSignal; it is an observation, never a profile edit. Do not infer a stable preference from a mood, one-off task instruction, or generic conversation. Use {kind:reinforce|contradict|replace,scope,guidance,reason,sourceRefs:[...]} and cite only the exact ref(s) of the supporting operator messages, not assistant answers or every new ref. Every cited message must contain supporting operator text; at least one cited ref must have newSinceLastPass:true. If you cannot cite the support, omit preferenceSignal.',
     'Return JSON with the normal action fields and optional preferenceSignal. Use UPSERT only when the supplied residue demonstrates a compact future-turn-relevant thread that persisted or recurred. If it is an existing concept, set targetId to that exact existing card id even if you improve its title. Set targetId:null only for a genuinely new concept. Output either {"action":"NOOP","reason":"..."} or {"action":"UPSERT","targetId":"existing-card-id-or-null","title":"...","summary":"...","reason":"..."}.',
     `Agent: ${agentId}; continuity scope: ${scope}`,
     `Existing warm cards: ${JSON.stringify(cards.map((card) => ({ id: card.id, title: card.title, summary: card.summary, recurrence: card.recurrence, lastSeen: card.lastSeen })).slice(0, 24))}`,
-    `24-hour context residue (newSinceLastPass marks what arrived after the prior successful pass): ${JSON.stringify(residue.map((item) => ({ ref: item.ref, at: item.at, newSinceLastPass: item.newSinceLastPass === true, sessionId: item.sessionId, message: item.message, answer: item.answer, tools: item.tools })))}`,
+    `24-hour context residue (newSinceLastPass marks what arrived after the prior successful pass): ${JSON.stringify(residue.map((item) => ({ ref: item.ref, at: item.at, userAt: item.userAt || null, newSinceLastPass: item.newSinceLastPass === true, operatorInput: item.operatorInput, sessionId: item.sessionId, message: item.message, answer: item.answer, tools: item.tools })))}`,
   ].join('\n\n');
 }
 function schema() { return { oneOf: [
-  { type: 'object', additionalProperties: false, required: ['action', 'reason'], properties: { action: { const: 'NOOP' }, reason: { type: 'string', minLength: 8, maxLength: 240 }, preferenceSignal: { type: 'object', additionalProperties: false, required: ['kind','scope','guidance','reason'], properties: { kind: { enum: ['reinforce','contradict','replace'] }, scope: { type: 'string', minLength: 1, maxLength: 120 }, guidance: { type: 'string', minLength: 1, maxLength: 600 }, reason: { type: 'string', minLength: 1, maxLength: 240 } } } } },
-  { type: 'object', additionalProperties: false, required: ['action', 'targetId', 'title', 'summary', 'reason'], properties: { action: { const: 'UPSERT' }, targetId: { anyOf: [{ type: 'null' }, { type: 'string', minLength: 1, maxLength: 120 }] }, title: { type: 'string', minLength: 1, maxLength: 240 }, summary: { type: 'string', minLength: 1, maxLength: 2400 }, reason: { type: 'string', minLength: 8, maxLength: 240 }, preferenceSignal: { type: 'object', additionalProperties: false, required: ['kind','scope','guidance','reason'], properties: { kind: { enum: ['reinforce','contradict','replace'] }, scope: { type: 'string', minLength: 1, maxLength: 120 }, guidance: { type: 'string', minLength: 1, maxLength: 600 }, reason: { type: 'string', minLength: 1, maxLength: 240 } } } } },
+  { type: 'object', additionalProperties: false, required: ['action', 'reason'], properties: { action: { const: 'NOOP' }, reason: { type: 'string', minLength: 8, maxLength: 240 }, preferenceSignal: { type: 'object', additionalProperties: false, required: ['kind','scope','guidance','reason','sourceRefs'], properties: { sourceRefs: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'string', minLength: 1 } }, kind: { enum: ['reinforce','contradict','replace'] }, scope: { type: 'string', minLength: 1, maxLength: 120 }, guidance: { type: 'string', minLength: 1, maxLength: 600 }, reason: { type: 'string', minLength: 1, maxLength: 240 } } } } },
+  { type: 'object', additionalProperties: false, required: ['action', 'targetId', 'title', 'summary', 'reason'], properties: { action: { const: 'UPSERT' }, targetId: { anyOf: [{ type: 'null' }, { type: 'string', minLength: 1, maxLength: 120 }] }, title: { type: 'string', minLength: 1, maxLength: 240 }, summary: { type: 'string', minLength: 1, maxLength: 2400 }, reason: { type: 'string', minLength: 8, maxLength: 240 }, preferenceSignal: { type: 'object', additionalProperties: false, required: ['kind','scope','guidance','reason','sourceRefs'], properties: { sourceRefs: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'string', minLength: 1 } }, kind: { enum: ['reinforce','contradict','replace'] }, scope: { type: 'string', minLength: 1, maxLength: 120 }, guidance: { type: 'string', minLength: 1, maxLength: 600 }, reason: { type: 'string', minLength: 1, maxLength: 240 } } } } },
 ] }; }
 
 function* synthesisCandidates(db, agentId, at) {
@@ -256,12 +300,14 @@ async function runTiddlePassOwned({ assertOwner, ownerClient, signal = null, age
       const cards = (await runAsync(activeCards(db, id, scope, at)));
       signal?.throwIfAborted();
       await assertOwner();
-      const completion = await completeCurator({ selection, stores, settingsKey, root: curatorRoot({ runtimeRoot: runtimeRoot || undefined }), prompt: prompt({ agentId: id, scope, residue: items.map((item) => ({ ...item, newSinceLastPass: newRefs.has(item.ref) })), cards }), jsonSchema: schema(), traceLogger, signal });
+      const promptResidue = items.map((item) => ({ ...item, newSinceLastPass: newRefs.has(item.ref) }));
+      const completion = await completeCurator({ selection, stores, settingsKey, root: curatorRoot({ runtimeRoot: runtimeRoot || undefined }), prompt: prompt({ agentId: id, scope, residue: promptResidue, cards }), jsonSchema: schema(), traceLogger, signal });
       signal?.throwIfAborted();
       const proposal = parseTiddleProposal(completion?.choice?.text);
       if (!proposal) throw new Error('tiddle_proposal_invalid');
       await assertOwner();
-      const observedPreference = proposal?.preferenceSignal ? await appendPreferenceSignalAsync({ metadataStore: db, agentId: id, signal: { ...proposal.preferenceSignal, sourceRefs: [...newRefs] }, at }) : null;
+      const groundedPreference = groundTiddlePreferenceSignal({ signal: proposal.preferenceSignal, agentId: id, residue: promptResidue });
+      const observedPreference = groundedPreference ? await appendPreferenceSignalAsync({ metadataStore: db, agentId: id, signal: groundedPreference, at }) : null;
       const cardUpdate = proposal?.action === 'UPSERT' ? { agentId: id, scope, proposal, residue: items, at } : null;
       const update = await commitScopePass(db, { agentId: id, scope, at, cardUpdate, entry: (cardUpdateResult) => {
         const card = cardUpdateResult?.card || null;

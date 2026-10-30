@@ -1,3 +1,4 @@
+import { operatorPreferenceTurn } from './preference-learning.mjs';
 import { resolveTurnMinionDepth } from './minion-depth.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 import { contextSessionId, withContextHistory } from './model-context-boundary.mjs';
@@ -499,6 +500,7 @@ async function runAskChatUnserialized({
       traceDir: logger.traceDir,
       metadata: {
         ...userTurnMetadata({ command, session, intent, attachments: turnAttachments, turnPlan, subjectScope: verifiedSubjectScope }),
+        operatorInputAt: turnStartedAt,
         ...(turnSource ? { source: turnSource } : {}),
         ...(completionEvent ? { completionEvent } : {}),
         ...(chatInput ? { chatInput } : {}),
@@ -585,7 +587,7 @@ async function runAskChatUnserialized({
       // into a failure. Record it before terminal.json so the marker remains the
       // final trace write and completed traces stay retention-eligible.
       try {
-        const residue = await appendTiddleResidueAsync({ metadataStore: stores.metadata, agentId: runtimeState.agentId, scope: continuityScope, sessionId: resolvedSessionId, conversationId: conversationId || resolvedSessionId, runId: logger.runId, message, answerText: committedResult.answerText, toolResults: committedResult?.proposalExecution?.tools || [] });
+        const residue = await appendTiddleResidueAsync({ metadataStore: stores.metadata, agentId: runtimeState.agentId, scope: continuityScope, sessionId: resolvedSessionId, conversationId: conversationId || resolvedSessionId, runId: logger.runId, message, userAt: turnStartedAt, operatorInput: !incomingAgentMessage && operatorPreferenceTurn({ source: turnSource, externalTurn: externalTurnMetadata, completionEvent }), answerText: committedResult.answerText, toolResults: committedResult?.proposalExecution?.tools || [] });
         await logger.event('tiddle-residue-recorded', { rollingContinuity: true, residue: residue ? { ref: residue.ref, scope: residue.scope } : null });
       } catch (error) {
         await logger.event('tiddle-residue-recorded', { rollingContinuity: true, error: String(error?.message || error) });

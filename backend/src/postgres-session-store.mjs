@@ -1584,6 +1584,7 @@ export class PostgresSessionStore {
     const target = required(rawTarget, 'targetSessionId');
     if (source === target) return { ok: true, agentId, sessionId: source, targetSessionId: target };
     return withPostgresTransaction(this.pool, async (client) => {
+      const exists = async name => (await client.query('SELECT to_regclass($1) AS relation',[name])).rows[0].relation !== null;
       const sourceRow = await client.query('SELECT metadata,created_at,updated_at FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, source]);
       if (!sourceRow.rows[0]) return null;
       const reserved = await client.query('INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at) VALUES($1,$2,$3::jsonb,$4,$5) ON CONFLICT DO NOTHING RETURNING session_id', [agentId, target, JSON.stringify({ ...sourceRow.rows[0].metadata, sessionId: target }), sourceRow.rows[0].created_at, sourceRow.rows[0].updated_at]);
@@ -1614,7 +1615,6 @@ export class PostgresSessionStore {
           last_activity_at=EXCLUDED.last_activity_at,sort_timestamp=EXCLUDED.sort_timestamp`, [agentId,source,target]);
       // Mutable ownership and citations follow the new identity; original JSON
       // entries/archives above remain byte-for-byte lexical evidence.
-      const exists = async name => (await client.query('SELECT to_regclass($1) AS relation',[name])).rows[0].relation !== null;
       if (await exists('chat_inputs')) {
         const running = await client.query("SELECT 1 FROM chat_inputs WHERE agent_id=$1 AND session_id=$2 AND status='running' LIMIT 1",[agentId,source]);
         if (running.rows.length) throw Object.assign(new Error('session_busy_chat_inputs'),{statusCode:409});
@@ -1658,7 +1658,7 @@ export class PostgresSessionStore {
           if (['sessionId','conversationId'].includes(key) && value === source) return target;
           if (key === 'conversationId' && value === `${agentId}:${source}`) return `${agentId}:${target}`;
           if (['project','scope'].includes(key) && value === `conversation:${source}`) return `conversation:${target}`;
-          if (['ref','sourceRefs','recentRefs'].includes(key)) {
+          if (['ref','sourceRef','sourceRefs','recentRefs'].includes(key)) {
             if (value === `session:${source}`) return `session:${target}`;
             if (value.startsWith(oldRef)) return newRef + value.slice(oldRef.length);
           }
@@ -1677,6 +1677,107 @@ export class PostgresSessionStore {
           if (JSON.stringify(next) !== JSON.stringify(row.payload)) await update(row, JSON.stringify(next));
         }
       };
+      // Read residue before settings locks: an in-flight pass may already have
+      // captured a run even if it has not yet written a preference signal.
+      const residueRefs = [];
+      if (await exists('tiddle_envelopes')) {
+        const residue = await client.query(`SELECT t.value_json AS payload FROM tiddle_entries t JOIN tiddle_envelopes e USING(envelope_id)
+          WHERE e.agent_id=$1 AND e.kind='tiddle-residue' AND t.source_sessions @> ARRAY[$2]::text[]`,[agentId,source]);
+        for (const row of residue.rows) if (row.payload?.sessionId === source) residueRefs.push(row.payload.ref);
+      }
+      if (await exists('settings_meta')) {
+        // These are the same sorted locks used by the preference writer and
+        // purge, including when a metadata row does not yet exist. Never touch
+        // the public PREFERENCES document, or rewrite prose / opaque hashes.
+        const signalKey = `preference-signals:${agentId}`;
+        const auditKey = `preference-audit:${agentId}`;
+        const stateKey = `preference-learning:${agentId}`;
+        for (const key of [auditKey,stateKey,signalKey].sort()) {
+          await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`settings-meta:${key}`]);
+        }
+        const readPreference = async key => {
+          const row = (await client.query('SELECT value_json::text AS payload FROM settings_meta WHERE key=$1 FOR UPDATE',[key])).rows[0];
+          if (!row) return null;
+          let value;
+          try { value = JSON.parse(row.payload); } catch { throw new Error('rename_preference_envelope_invalid'); }
+          if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('rename_preference_envelope_invalid');
+          return value;
+        };
+        const audit = await readPreference(auditKey);
+        const state = await readPreference(stateKey);
+        const envelope = await readPreference(signalKey);
+        for (const [value,field] of [[audit,'entries'],[state,'reviewedSignalIds'],[envelope,'signals'],[envelope,'resolvedEvidence'],[envelope,'sessionAliases']]) {
+          if (value && Object.hasOwn(value,field) && !Array.isArray(value[field])) throw new Error('rename_preference_envelope_invalid');
+        }
+        // A source ref is the smallest available rename fence: unlike a bare
+        // session alias it does not capture new messages when the old name is
+        // reused. Keep every old original, even when no signal existed yet: an
+        // extraction already in flight may cite any of them after this commit.
+        const oldRefs = new Set();
+        // Session names may contain colons; a lexical prefix alone would turn
+        // `session:old:child:message:x` into an unrelated renamed citation.
+        const preferenceRef = ref => typeof ref === 'string' && (ref === `session:${source}` ||
+          ['message:','run:'].some(kind => ref.startsWith(`${oldRef}${kind}`)));
+        const rewritePreferenceRef = value => {
+          if (Array.isArray(value)) return value.map(rewritePreferenceRef);
+          return preferenceRef(value) ? rewriteIdentity(value,'sourceRef') : value;
+        };
+        const remember = value => {
+          if (Array.isArray(value)) { for (const ref of value) remember(ref); return; }
+          if (preferenceRef(value)) oldRefs.add(value);
+        };
+        for (const ref of residueRefs) remember(ref);
+        const originals = await client.query('SELECT DISTINCT entry_key,has_payload_id FROM conversation_original_rows WHERE agent_id=$1 AND session_id=$2',[agentId,source]);
+        for (const row of originals.rows) {
+          try {
+            // Dream interpolates the payload id (including undefined/null),
+            // rather than the relational fallback for id-less payloads.
+            const id = row.has_payload_id ? JSON.parse(row.entry_key) : undefined;
+            oldRefs.add(`session:${source}:message:${id}`);
+          } catch { throw new Error('rename_preference_source_identity_invalid'); }
+        }
+        const rewriteItems = (items, evidence = false) => items?.map(item => {
+          if (!item || typeof item !== 'object' || Array.isArray(item) || (item.agentId && item.agentId !== agentId)) return item;
+          let next = item;
+          if (Object.hasOwn(item,'sourceRefs')) {
+            remember(item.sourceRefs);
+            next = { ...next, sourceRefs: rewritePreferenceRef(item.sourceRefs) };
+          }
+          if (evidence && Array.isArray(item.evidence)) next = { ...next, evidence: item.evidence.map(entry => {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !Object.hasOwn(entry,'sourceRef')) return entry;
+            remember(entry.sourceRef);
+            return { ...entry, sourceRef: rewritePreferenceRef(entry.sourceRef) };
+          }) };
+          return next;
+        });
+        const nextAudit = audit && { ...audit, ...(audit.entries ? { entries: rewriteItems(audit.entries) } : {}) };
+        const signals = rewriteItems(envelope?.signals, true);
+        const resolvedEvidence = rewriteItems(envelope?.resolvedEvidence, true);
+        // Flatten historical aliases on subsequent renames. If an old message
+        // spelling was reused for a different occurrence, its two owners are
+        // indistinguishable; fail closed instead of stealing either identity.
+        const aliases = new Map();
+        const addAlias = (from,to) => {
+          if (from === to) return;
+          if (aliases.has(from) && aliases.get(from) !== to) throw new Error('rename_preference_source_alias_conflict');
+          aliases.set(from,to);
+        };
+        for (const alias of envelope?.sessionAliases || []) {
+          if (!alias || typeof alias !== 'object' || Array.isArray(alias) || typeof alias.sourceRef !== 'string' || typeof alias.targetRef !== 'string') throw new Error('rename_preference_envelope_invalid');
+          addAlias(alias.sourceRef,rewritePreferenceRef(alias.targetRef));
+        }
+        for (const ref of oldRefs) addAlias(ref,rewriteIdentity(ref,'sourceRef'));
+        const nextSignals = {
+          ...(envelope || { version: 2, agentId, signals: [] }),
+          ...(signals ? { signals } : {}),
+          ...(resolvedEvidence ? { resolvedEvidence } : {}),
+          ...(aliases.size || envelope?.sessionAliases ? { sessionAliases: [...aliases].map(([sourceRef,targetRef]) => ({ sourceRef,targetRef })) } : {}),
+        };
+        const writePreference = (key,value) => client.query(`INSERT INTO settings_meta(key,value_json,updated_at) VALUES($1,$2,$3)
+          ON CONFLICT(key) DO UPDATE SET value_json=EXCLUDED.value_json,updated_at=EXCLUDED.updated_at`,[key,JSON.stringify(value),this.clock()]);
+        if (audit && JSON.stringify(audit) !== JSON.stringify(nextAudit)) await writePreference(auditKey,nextAudit);
+        if ((envelope || aliases.size) && JSON.stringify(envelope) !== JSON.stringify(nextSignals)) await writePreference(signalKey,nextSignals);
+      }
       if (await exists('rolling_continuity_cards')) {
         await rewriteRows('SELECT project,card_id,card_json AS payload FROM rolling_continuity_cards WHERE agent_id=$1 FOR UPDATE',[agentId],
           (row,json) => client.query('UPDATE rolling_continuity_cards SET card_json=$4::json WHERE agent_id=$1 AND project=$2 AND card_id=$3',[agentId,row.project,row.card_id,json]));
