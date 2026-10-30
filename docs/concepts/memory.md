@@ -2,7 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 BURROW separates original conversation evidence, editable agent profiles, operational working memory and explicit saved memories. These have different scopes, lifetimes and routes into model context. Understanding those boundaries helps explain both recall and retention.
 
@@ -59,7 +59,7 @@ A memory item whose kind is `task` is operational evidence. Board task status an
 Tiddle collects terminal-turn residue with bounded message excerpts and periodically proposes continuity cards. The terminal append is intentionally cheap: it stores residue without a model call or direct card mutation. The normal pass runs every **four hours**, considers the last **24 hours** of residue and tracks success separately per scope. A failed scope therefore does not require replaying already successful scopes.
 
 Residue and history are native `tiddle_entries` rows with `tiddle_envelopes` retaining scheduling and envelope metadata. Residue appends prune older than the 24-hour cutoff and replace the same reference; history appends prune older than 180 days. The previous 240-residue count cap is removed. Due work uses an indexed `next_run_at` projection. These storage changes do not remove the bounded evidence excerpts or synthesis selection budget.
-The default proposal is a no-op. One vivid exchange alone is not sufficient recurrence. Accepted updates target exact card identities and preserve evidence references. Behavioral corrections may become preference signals, but Tiddle does not directly rewrite agent profiles. Card changes, history and per-scope success commit atomically under an agent-scoped PostgreSQL advisory lock.
+The default proposal is a no-op. One vivid exchange alone is not sufficient recurrence. Accepted updates target exact card identities and preserve evidence references. Explicit lasting positive preferences and behavioral corrections may become grounded preference signals, but Tiddle does not directly rewrite agent profiles. Card changes, history and per-scope success commit atomically under an agent-scoped PostgreSQL advisory lock.
 Cross-scope synthesis considers a 21-day window, requires at least two source cards across two scopes and checks referenced card identities. Its daily boundary is the first due pass on a different **UTC date**, rather than a separate local-time nightly cron. The scheduler checks every 60 seconds and starts with an immediate tick.
 Rolling cards use the persisted rolling TTL, **90 days by default**. Expired cards are filtered from reads; that is not a guarantee of immediate physical deletion. Relational scope and identity are `(agent_id, project, card_id)`, and card JSON preserves evidence and legacy metadata.
 
@@ -95,3 +95,11 @@ Brains, working records, rolling cards, handoffs, Dream preloads, original conve
 
 The former `/api/albdruck/*` routes, including history, retention and conversation purge, are not mounted in this release. Use [session search and Archive](../reference/api/sessions.md) for retained conversation evidence and the current [retention controls](../reference/api/settings.md) for supported trace cleanup. Those controls are not a replacement per-conversation purge API. Do not use an old Albdruck purge example as a current API procedure.
 For deletion protections and exact distinctions, continue to [Conversation retention](conversation-history.md#retention-and-deletion). For recovery of memory together with its original evidence, use [Backup and recovery](../operations/backup-recovery.md).
+
+## Current preference learning boundary
+
+The learner proposes against the **current operator-edited PREFERENCES document**. A row-version check fences concurrent edits before a replacement or valid no-op resolves signals. Prior edits do not permanently disable learning. Invalid output, failed writes, missing evidence and baseline conflicts retain pending signals; only cited signals are resolved by a replacement, while a valid no-op resolves its supplied batch.
+
+Supporting operator-message times, not extraction time, establish chronology. Old, mixed-before-edit or unknown-time evidence is deferred rather than restoring removed guidance. Tiddle cites exact supporting operator residue, including at least one newly observed reference; overlapping Dream phases deduplicate evidence. Quiet Dream windows can adjudicate pending preferences without repeating extraction or memory publication.
+
+PREFERENCES remains current guidance only. Evidence, citations and audit stay in private provenance. The learner does not change SOUL, RULES, ORIENTATION or TOOLS, and inactivity alone does not remove preferences. Conversation purge removes linked private provenance, not operator-authored PREFERENCES. This is a static source check of Core `bea2171508d1821440ed5c554a688768848699c9`, not a claim that a particular preference was learned.

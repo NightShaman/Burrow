@@ -1653,12 +1653,36 @@
       "page": "reference/api/settings.md",
       "inPinnedOpenApi": false,
       "routeFamilySource": "backend/scripts/ui/settings-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/archive/dreams/groups",
+      "operationId": "listArchiveDreamGroups",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/archive/dreams/groups/{agentId}/{day}",
+      "operationId": "getArchiveDreamGroup",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/archive/workflow-events",
+      "operationId": "listArchiveWorkflowEvents",
+      "page": "reference/api/sessions.md",
+      "inPinnedOpenApi": false,
+      "routeFamilySource": "backend/scripts/ui/session-routes.mjs"
     }
   ],
   "contractArtifactSourceBaseline": "d6490825401405ce719e007fd96a487c5b0cde56",
   "latestSourceAdditionReview": {
-    "date": "2026-10-29",
-    "sourceCommit": "4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9",
-    "scope": "Minion Depth GET/PUT additions; retained pinned artifact remains historical."
+    "date": "2026-10-30",
+    "sourceCommit": "bea2171508d1821440ed5c554a688768848699c9",
+    "scope": "Grouped Dream list/detail and workflow-event Archive GET additions; retained pinned artifact remains historical."
   }
 }

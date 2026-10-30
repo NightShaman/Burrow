@@ -6,10 +6,10 @@ The operator guide follows inspected current development implementation, without
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.10.29.4` | `cb159b6064c911192e4760c0b52f84f352a8102c` |
-| Core / Backend | `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` |
-| UI | `daa914ae80ed154ce39a76d0b8ca5f84aa278b21` |
-| Skills | `c56400e5ccbf2af74e94e52ec9b08fb4a48fab76` |
+| Assembled Burrow, build `2026.10.30.1` | `23bf37de7a7353732005123c3c44b7f2822463bb` |
+| Core / Backend | `bea2171508d1821440ed5c554a688768848699c9` |
+| UI | `bb78b136e7ceb21858b134c1f8376726d8e18f5d` |
+| Skills | `9bb95549b00429f99ccdaf30c804134ee4418738` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
 
@@ -71,3 +71,7 @@ Compared implementation changes since the successful 27 October update. This pas
 ## Ordinary update: 29 October 2026
 
 Compared implementation changes since the successful 28 October update: native peer discovery and direct A2A guidance, configurable minion depth and descendant visibility, multiple telemetry destinations, bounded generic-provider recovery, and group transcript ownership. Node Goblin telemetry, Skills guidance and Goblin Secret Store access choices are reconciled separately. This is static changed-source review and basic documentation drift checking, not a new full review, application test run, live integration check or runtime release promotion.
+
+## Ordinary update: 30 October 2026
+
+Compared implementation changes since the successful 29 October baseline: independent Settings autosave with explicit coupled-form boundaries; Dream phase and workflow delivery history in Archive; agent-wide Minion discovery and source-authored delegation labels; full home-Core administrative API dispatch through a separately granted system capability; expanded operational/provider responsiveness telemetry; and preference adjudication against the current operator baseline. This is static changed-source reconciliation, not a full-page recertification, provider/application test, runtime deployment or release promotion. Historical screenshots and source qualifications remain intact.

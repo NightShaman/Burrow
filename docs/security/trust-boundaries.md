@@ -2,8 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
-
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 BURROW is an operator-controlled runtime with native filesystem/process tools, model connections, MCP integrations, and installable code. Deploy it inside a trust boundary suitable for the data and credentials available to its service account. HTTP login, encrypted settings, and child processes each provide specific protections; together they do not establish hostile multi-tenant isolation.
 
@@ -139,3 +138,9 @@ Corrections on this page were checked against public **2026.10.19**; any newer d
 - [backend/src/mod-runtime.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-runtime.mjs)
 - [backend/src/postgres-otel-settings-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-otel-settings-store.mjs)
 - [backend/src/otel-settings.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/otel-settings.mjs)
+
+## Granted full Core API access
+
+The current `core-api-v1` system-mod capability permits a live, trusted administrator tool caller to reach the home Core's administrative `/api` routes. It is separate from read-only diagnostics and can include access-policy mutations. Explicit capability approval plus Core-owned administrator assignment are required; a manifest declaration, skill, argument or forwarded header cannot grant this authority. Existing external HTTP authentication and webhook-signature boundaries remain unchanged.
+
+A Core-private invocation identity retains the actual mod/agent/session/run actor rather than manufacturing a human login. Revocation stops later admissions, not already admitted side effects. Request/response failures do not imply mutation rollback. See [full Core API capability](../development/extensions.md#full-home-core-api-capability) before enabling this powerful boundary.

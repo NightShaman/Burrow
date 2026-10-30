@@ -4,7 +4,6 @@
 !!! note "Source-reviewed API reference"
     This reference was reconciled against current development source on **2026-10-25**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
-
 The agent registry is PostgreSQL-backed. An empty registry is valid; a fallback agent label in code does not establish that a real agent exists. Start with `GET /api/setup/status` and `GET /api/agents`.
 
 ## Initial setup
@@ -61,3 +60,7 @@ The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d
 ## 29 October development delta
 
 Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../../project/source-map.md).
+
+## Agent-wide Minion overview
+
+`POST /api/agents/overview` additionally accepts `minionScope: "session" | "agent"`; default is `session`, invalid values return `400 minion_scope_invalid`. With `agent`, each successful status includes the requested session anchor plus visible Minions across that agent's originating sessions and declares `status.minionScope: "agent"`. It does not include unrelated ordinary chats or other agents. Anchor IDs stay unchanged, including when the anchor itself is a child. Context hydration remains independently capped at the anchor plus 12 distinct children. `/api/agent-status`, recovery and cancellation retain their existing session scopes.

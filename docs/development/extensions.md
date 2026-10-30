@@ -52,3 +52,11 @@ Provider wire protocols belong in Core's model-adapter layer. Test request const
 5. Verify disabled or ungranted capabilities remain unavailable.
 6. Update documentation alongside the behavior.
 7. Publish through the supported tagged release process rather than editing an active installation.
+
+## Full home-Core API capability
+
+Current Core supports the independently declared and operator-granted `core-api-v1` system capability. `context.coreApi.request` requires a live tool invocation, trusted Core-bound caller and membership in the mod's Core-owned `adminAgentIds` on each admission. It is full administrative access to the home Core API, not the managed read-only diagnostics subset, a remote proxy or a GET-only endpoint allowlist. Activations, background work and detached callbacks cannot use a completed invocation's authority. Revocation blocks subsequent admissions; it does not undo already admitted side effects.
+
+Requests accept a local `/api` path and optional method, headers, and exactly one of JSON `body`, UTF-8 `bodyText` or `bodyBase64`. Responses preserve status, headers, encoding, original byte length and complete finite body; HTTP errors remain response data. Finite NDJSON is aggregated, not delivered incrementally. The default 96 MiB response allocation ceiling fails explicitly rather than returning truncated success. Response failure does not roll back an already executed mutation; reconcile before retrying.
+
+This capability does not automatically grant other host interfaces or cross-agent managed diagnostics. Neither tool arguments nor headers establish trusted caller authority. Task-board mutations retain the actual agent/session/run attribution. Use [Backdoor's current API guidance](https://burrow-docs.blissful-psychosis.com/burrow-backdoor/operator-api/) for the shipped tool surface; a skill itself grants none of these capabilities.

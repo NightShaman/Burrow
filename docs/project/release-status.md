@@ -18,14 +18,14 @@ Later Core implementation was also reviewed. This historical comparison is not a
 
 Reviewed on **22 October 2026**: ordinary mods can request asynchronous, potentially paid image jobs through Core’s saved Forge selection and read only their own image jobs. The [Tutor Forge lesson](https://burrow-docs.blissful-psychosis.com/burrow-tutor/forge-images/) covers consent, durable retries, and previews. This interface is absent from the older public snapshot above. Current guides follow implementation; the public snapshot follows the daily sync. Update Core alongside mods that use this capability.
 
-## Current implementation check: 29 October 2026
+## Current implementation check: 30 October 2026
 
 This nightly pass uses current development implementation as documentation truth; it does not wait for a public mirror or alter a release. Pins:
 
-- Assembled Burrow: `cb159b6064c911192e4760c0b52f84f352a8102c`.
-- Core: `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9`.
-- UI: `daa914ae80ed154ce39a76d0b8ca5f84aa278b21`.
-- Operating skills: `c56400e5ccbf2af74e94e52ec9b08fb4a48fab76`.
+- Assembled Burrow: `23bf37de7a7353732005123c3c44b7f2822463bb`.
+- Core: `bea2171508d1821440ed5c554a688768848699c9`.
+- UI: `bb78b136e7ceb21858b134c1f8376726d8e18f5d`.
+- Operating skills: `9bb95549b00429f99ccdaf30c804134ee4418738`.
 
 Recent operator-facing changes include a **Browse stored credentials** picker and configured-credential state for HTTPS mod sources, plus a per-agent **A2A in default** routing toggle and readable external-chat session labels. See [tools and mods](../guide/tools-and-mods.md#private-source-credentials-in-current-core) and [everyday use](../guide/everyday-use.md#current-session-routing-controls).
 
@@ -33,7 +33,7 @@ The dedicated Core/mod-managed skill catalog is implemented, not merely planned.
 
 Current Core also exposes mod-owned external-turn cancellation and session create/model controls. Cancellation is cooperative and must be polled to terminal status; new-session creation does not delete an old conversation or cancel its work. These are Core capabilities, not proof that every transport mod exposes matching commands. Follow each mod's documentation and installed-version requirements.
 
-The reviewed assembly identifies itself as **2026.10.29.4**. Native **OpenAI LB** and **Anthropic LB** connection types are now present in default-branch UI and Core, with same-family OAuth membership and bounded text-model routing. See [account-pool setup and limitations](../guide/models.md#native-oauth-account-pools). This is implemented source, not a claim of successful live provider validation. Current schema inventory reaches migration **79**. `run_evidence_search` adds explicit agent-owned historical proof retrieval; it does not add automatic prompt recall or a new HTTP API.
+The reviewed assembly identifies itself as **2026.10.30.1**. Native **OpenAI LB** and **Anthropic LB** connection types are now present in default-branch UI and Core, with same-family OAuth membership and bounded text-model routing. See [account-pool setup and limitations](../guide/models.md#native-oauth-account-pools). This is implemented source, not a claim of successful live provider validation. Current schema inventory reaches migration **79**. `run_evidence_search` adds explicit agent-owned historical proof retrieval; it does not add automatic prompt recall or a new HTTP API.
 
 The earlier Sunday pass reconciled the full documentation surface, including historical-page scope. No live provider, OAuth, installation, database restore, runtime test, or unmerged branch was treated as successful verification. Historical examples remain historical; documentation publication does not establish runtime readiness.
 
@@ -61,3 +61,7 @@ Compared implementation changes since the successful 27 October update. This pas
 ## Ordinary update: 29 October 2026
 
 Compared implementation changes since the successful 28 October update: native peer discovery and direct A2A guidance, configurable minion depth and descendant visibility, multiple telemetry destinations, bounded generic-provider recovery, and group transcript ownership. Node Goblin telemetry, Skills guidance and Goblin Secret Store access choices are reconciled separately. This is static changed-source review and basic documentation drift checking, not a new full review, application test run, live integration check or runtime release promotion.
+
+## Ordinary update: 30 October 2026
+
+Compared implementation changes since the successful 29 October baseline: independent Settings autosave with explicit coupled-form boundaries; Dream phase and workflow delivery history in Archive; agent-wide Minion discovery and source-authored delegation labels; full home-Core administrative API dispatch through a separately granted system capability; expanded operational/provider responsiveness telemetry; and preference adjudication against the current operator baseline. This is static changed-source reconciliation, not a full-page recertification, provider/application test, runtime deployment or release promotion. Historical screenshots and source qualifications remain intact.

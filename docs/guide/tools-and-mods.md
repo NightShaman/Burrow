@@ -19,7 +19,7 @@ Start here when an agent needs access to files, a service, or another execution 
 3. For HTTP, enter the **Server URL** and optional API key. For stdio, enter the **Command**, one argument per line, and any required environment variables. A local stdio command runs on the Burrow host, not in your browser.
 4. Choose **Ephemeral** or **Keep alive**. Keep alive preserves a stateful MCP session between calls, useful for servers that maintain tabs or selections.
 5. Click **Add MCP server**, then **Discover tools** on the saved server.
-6. Open **Settings → Agents**, select an agent, and open **MCP tools**. Select the server, check the tools it may use, then click **Save MCP tools**.
+6. Open **Settings → Agents**, select an agent, and open **MCP tools**. Select the server and check the tools it may use. Individual grants and Select all/Clear all autosave; check saved feedback and retry failures. Each write uses accepted grants rather than silently committing other failed drafts.
 
 Saved credentials are not shown again. Existing configured secret fields can remain blank when you are not replacing them. Deleting a connection also removes its agent tool grants.
 

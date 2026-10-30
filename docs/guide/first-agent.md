@@ -6,20 +6,67 @@ Once [Burrow is running](installation.md), open its web interface. A new install
 
 ## Complete the first-run wizard
 
-1. **Bring your kingdom with you.** Choose **Start fresh**, or import a Burrow export you trust. An export contains selected portable records, not a complete installation backup. First-run import replaces conflicting records and may restore enabled schedules; inspect what you are importing before using it.
-2. **Set up your operator profile.** Enter your displayed name. Optionally choose or paste an image.
-3. **Identify your first agent.** Enter an agent name and optionally add an avatar.
-4. **Give them a personality.** Write a short `SOUL.md` description, or leave it blank and return later. For example: “A practical research assistant. Explain uncertainty, cite sources, and keep answers concise.”
-5. **Choose a model.** Connect OpenAI or Anthropic with the sign-in buttons, select an already configured provider/model, or choose **Skip / Finish**.
+These screenshots show one example setup. Choose your own operator name, agent identity, personality, and available model; the example values are not requirements.
+
+### 1. Bring your kingdom with you
+
+Choose **Start fresh**, or import a Burrow export you trust. An export contains selected portable records, not a complete installation backup. First-run import replaces conflicting records and may restore enabled schedules; inspect what you are importing before using it.
+
+![Step 1 of 5: restore from a Burrow export or choose Start fresh](../assets/screenshots/18-first-run-start.png)
+
+If the export requires a password, enter it in **Export password** and choose **Unlock and import**. The example below shows the **Password required** state with an empty field. For a new setup instead, choose **Start fresh** and continue through the remaining steps.
+
+![Optional import branch: empty export-password field and Password required message](../assets/screenshots/19-first-run-export-password.png)
+
+### 2. Set up your operator profile
+
+Enter your displayed name. Optionally choose or paste an image, then choose **Next**.
+
+![Step 2 of 5: operator profile with an example displayed name and image](../assets/screenshots/20-first-run-operator.png)
+
+### 3. Identify your first agent
+
+Enter an agent name and optionally add an avatar, then choose **Next**.
+
+![Step 3 of 5: an example first agent named Agent 42 with an avatar](../assets/screenshots/21-first-run-agent.png)
+
+### 4. Give them a personality
+
+Write a short `SOUL.md` description, or leave it blank and return later. For example: “A practical research assistant. Explain uncertainty, cite sources, and keep answers concise.” Choose **Next** when ready.
+
+![Step 4 of 5: the SOUL.md personality editor with example agent text](../assets/screenshots/22-first-run-personality.png)
+
+### 5. Choose a model
+
+Connect OpenAI or Anthropic with the sign-in buttons, select an already configured provider/model, or choose **Skip / Finish**.
+
+![Step 5 of 5: OpenAI and Anthropic sign-in options and Skip / Finish](../assets/screenshots/23-first-run-model-options.png)
 
 Finishing without a model is supported. It creates your operator and agent, but a working model connection is still needed for chat. If finishing reports an uncertain or failed submission, use the offered retry to recover the original setup operation rather than starting again in another browser.
 
 ### Sign in during setup
 
-- **OpenAI → Sign in with ChatGPT:** open the displayed sign-in link, complete sign-in, then paste the callback URL or code into Burrow and choose **Complete sign-in**.
-- **Anthropic → Claude Code login:** open the displayed Claude sign-in link, finish the flow, then paste its callback code and choose **Complete sign-in**.
+**OpenAI → Sign in with ChatGPT:** open the displayed sign-in link, complete sign-in, then paste the callback URL or code into Burrow and choose **Complete sign-in**.
+
+![OpenAI OAuth dialog with Open ChatGPT sign-in and an empty callback field](../assets/screenshots/24-first-run-openai-oauth.png)
+
+**Anthropic → Claude Code login:** open the displayed Claude sign-in link, finish the flow, then paste its callback code and choose **Complete sign-in**.
+
+![Anthropic OAuth dialog waiting for a callback code, with the field empty](../assets/screenshots/25-first-run-anthropic-oauth.png)
+
+Keep callback URLs, codes, tokens, and API keys private. The screenshots above intentionally show empty callback fields.
+
+### Select the model and finish
 
 The wizard discovers available models and saves the connection with those models selected. Choose the model you want for the first agent before finishing. Provider-side account access and available models still determine whether requests succeed; a Burrow installation does not supply a model subscription or API allowance.
+
+![Step 5 after connecting: Provider and Model selectors appear above Skip / Finish](../assets/screenshots/26-first-run-model-selected.png)
+
+The model shown is an example from this installation. Your available models may differ. Choose **Skip / Finish** to complete setup.
+
+![First run complete: Agent 42 is ready and Burrow is opening](../assets/screenshots/27-first-run-complete.png)
+
+The completion screen confirms setup finished; [send a first message](#send-the-first-message) to check that your chosen model connection can reply.
 
 ## Add or change a model connection
 
@@ -67,7 +114,7 @@ Under **Settings → Agents**, select the agent you intend to edit.
 
 - **Agent details** changes its displayed name, image, and enabled state. Click **Save changes**.
 - **Profile documents** holds its instructions and personality documents. Keep credentials out of reusable prose.
-- **Minion settings**, beside Agent details, contains **Default minion model** for delegated work. Leaving the model on inheritance uses the current parent turn's model. **Maximum minion depth** separately permits no children (0), direct children only (1, the default), or one additional nested level (2). Choose **Save minion depth** after changing it; an existing child tree cannot gain extra depth. See [Agents and Minions](../concepts/agents-minions.md).
+- **Minion settings**, beside Agent details, contains **Default minion model** for delegated work. Leaving the model on inheritance uses the current parent turn's model. **Maximum minion depth** separately permits no children (0), direct children only (1, the default), or one additional nested level (2). Depth autosaves when slider adjustment ends; confirm saved feedback; an existing child tree cannot gain extra depth. See [Agents and Minions](../concepts/agents-minions.md).
 
 Set **Settings → General → Operator profile → Operator timezone** before relying on scheduled jobs. Add tools, schedules, and execution permissions deliberately as you begin using them; they are not needed to prove the first chat works.
 

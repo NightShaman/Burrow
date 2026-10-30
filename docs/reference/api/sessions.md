@@ -4,7 +4,6 @@
 !!! note "Source-reviewed API reference"
     This reference was reconciled against current development source on **2026-10-25**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
-
 A session's canonical conversation evidence is in PostgreSQL. The current prompt tail, human-facing transcript, original export, trace proof and reset/archive snapshots are distinct views. See [conversation history](../../concepts/conversation-history.md) before choosing an export or deleting data.
 
 ## Discovery and transcript operations
@@ -98,3 +97,17 @@ The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d
 ## 28 October development delta
 
 Changed behavior above was checked statically against Backend `a04acb16b0eab2a910c3ef0fb452622df81a05cb` on **2026-10-28**. This is not a live provider, database or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../../project/source-map.md).
+
+## Current Archive groups and workflow events
+
+| Method/path | Contract |
+|---|---|
+| `GET /api/archive/dreams/groups` | Optional `q`, `date`, `agentId`, `timezone`, `limit` (default 200, maximum 500), `cursor`; complete agent/local-day group summaries, including disabled agents and receipt-only days. |
+| `GET /api/archive/dreams/groups/:agentId/:day` | Same `timezone` as listing; retained diaries, recorded phase attempts and unattributed cycle failures/progress for the selected group. |
+| `GET /api/archive/workflow-events` | Same optional list filters; default limit 100, maximum 500. Retained completion snapshots ordered by acceptance `createdAt` and ID descending. |
+
+Dream groups are ordered by day/agent descending. Search covers complete retained narratives and sanitized attempt/error fields, returning the whole matching group. Diary creation and cycle start determine local-day membership; phase timestamps are not inferred from cycle timing. Only an explicit receipt diary ID is a link, and the referenced diary can be outside the group or no longer retained. Legacy individual `/api/archive/dreams` routes remain available.
+
+Workflow records include watch, repository/workflow, attempt/SHA/conclusion, agent/session, instruction, handling status, chat-run identity, result/error and timing. Returned results are boundary-redacted; `ownerId` and `traceDir` are omitted. Retained instruction/error prose still requires review before sharing. These are ordinary authenticated Archive reads, not changes to webhook acceptance or evidence that handling succeeded.
+
+Use a fresh first page after changing filters/timezone. Invalid dates, zones, cursors or limits return the normal 400 errors. Source reviewed against Core `bea2171508d1821440ed5c554a688768848699c9` on 30 October 2026.

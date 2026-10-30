@@ -4,7 +4,6 @@
 !!! warning "Earlier technical reference"
     This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
-
 Use a registered agent for a persistent identity and configuration. Use a minion for an explicit child task. Use peer messaging when one registered agent needs another agent's response in that recipient's own context.
 
 ## Registered agents
@@ -74,7 +73,6 @@ Local minions use a separate Node process. A remote-assigned minion uses the chi
 !!! warning "Isolation is about session/process context"
     A minion target is not a filesystem cage. An instruction such as “do not modify files” communicates task scope, but the target directory does not remove mutation tools. Configured execution boundaries are forwarded into child review and execution; they retain the limited enforcement scope described in [Permissions](../security/permissions.md#minion-boundary-propagation).
 
-
 ### Completion and evidence
 
 ```mermaid
@@ -139,7 +137,7 @@ Use [Interface groups](interface.md#attachments-and-groups) for room controls an
 
 ## Watching and stopping work
 
-Active peer runs expose bounded progress. Stopping an A2A parent cancels its active nested reply tree. Local minion process cancellation sends `SIGTERM` to the process group, then forces `SIGKILL` after a configurable grace (default one second); cleanup also handles remaining descendants and removes the temporary payload. This cancellation grace is not a wall-clock task timeout. Current status projects the requested session and its descendants, not an arbitrary capped child list. Recent completed children normally remain visible for one hour; an ended ancestor can remain to connect a visible descendant. Immediate parent, root and depth are separate fields. A child-scoped query excludes siblings; overview context hydration is separately bounded to the requested session plus 12 descendants. Durable receipts remain separate from visibility.
+Active peer runs expose bounded progress. Stopping an A2A parent cancels its active nested reply tree. Local minion process cancellation sends `SIGTERM` to the process group, then forces `SIGKILL` after a configurable grace (default one second); cleanup also handles remaining descendants and removes the temporary payload. This cancellation grace is not a wall-clock task timeout. Session-scoped status projects the requested session and its descendants, not an arbitrary capped child list. The agent rail additionally requests agent-wide Minion discovery through overview, covering visible children from all originating sessions for the selected agent without adding unrelated normal conversations. Recent completed children normally remain visible for one hour; an ended ancestor can remain to connect a visible descendant. Immediate parent, root and depth are separate fields. A child-scoped query excludes siblings; overview context hydration is separately bounded to the requested session plus 12 descendants. Durable receipts remain separate from visibility.
 
 See [Interface](interface.md), [Observability](../operations/observability.md), and [Execution flow](../architecture/execution-flow.md).
 
@@ -155,3 +153,9 @@ Corrections on this page were checked against public **2026.10.19**; any newer d
 ## 29 October development delta
 
 Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).
+
+## Cross-session discovery and delegated authorship
+
+`POST /api/agents/overview` accepts `minionScope: "agent"` to return the requested anchor and visible Minions across that agent's sessions; omitted scope remains `session`. A successful `status.minionScope: "agent"` confirms that broader coverage. An older response without that marker proves only session-scoped coverage. Context hydration is separately bounded to the anchor plus 12 distinct child sessions; omitted contexts do not hide status rows. This does not broaden cancellation, recovery, or `/api/agent-status`.
+
+Live and Archive child turns retain compact source-authored delegation metadata. A `role: user` child task with `kind: subagent-delegated-task` is delegated work, not a fresh operator instruction. Missing legacy markers do not prove operator authorship; arbitrary raw metadata is not passed through. The UI uses retained source information for truthful sender labels.

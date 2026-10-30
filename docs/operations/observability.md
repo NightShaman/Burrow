@@ -2,8 +2,7 @@
 
 
 !!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
-
+    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
 
 Use runtime receipts, persisted history, logs, and provider-request evidence to answer different questions. A green process or successful HTTP response is not proof that the requested work completed.
 
@@ -97,7 +96,7 @@ OTel is a curated external projection; PostgreSQL history, Archive and local rec
 
 Changing or disabling export affects new independent runs. Existing runs and their children retain their exporter generation until they drain, including new process/filesystem operations started by those older runs after the change. A child keeps its generation independently if its parent finishes first. Shutdown remains bounded; disabling settings does not erase already exported data. Exporter failures have independent service-log diagnostics.
 
-The owning run span receives `burrow.model.recovery` events with curated **`burrow.model.recovery.*`** attributes for state, method, attempt bounds, original/last failure and safe failover blocker. Failed request spans keep their observed status even if a later attempt succeeds. This is not a new TTFT instrument or account-health diagnostic subsystem. See [bounded recovery](../architecture/runtime.md#bounded-live-model-recovery).
+The owning run span receives `burrow.model.recovery` events with curated **`burrow.model.recovery.*`** attributes for state, method, attempt bounds, original/last failure and safe failover blocker. Failed request spans keep their observed status even if a later attempt succeeds. The newer provider responsiveness instruments below are separate from these recovery events. See [bounded recovery](../architecture/runtime.md#bounded-live-model-recovery).
 
 ## Native OpenAI pool metrics
 
@@ -150,3 +149,17 @@ Changed behavior above was checked statically against Backend `a04acb16b0eab2a91
 ## 29 October development delta
 
 Multi-destination export, settings, generation ownership and exporter diagnostics above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` and UI `daa914ae80ed154ce39a76d0b8ca5f84aa278b21` on **2026-10-29**. No collector, remote gateway or application runtime was exercised. Unchanged historical sections retain their earlier qualifications. See [source coverage](../project/source-map.md).
+
+## Operational timing and measured responsiveness
+
+Current Core exports additional observations to the existing enabled destinations; no new collector connection is required. All measured durations below are milliseconds.
+
+- `burrow.model.requests` / `duration` describe physical provider requests, including retries. `burrow.model.ttft` measures fetch invocation to first parsed nonempty streaming thought, text or tool content; `burrow.model.first_delta` distinguishes those kinds. Headers, heartbeats and terminal-only snapshots are not first content. Non-streaming or missing-delta responses have no TTFT sample, not zero.
+- `burrow.provider_pool.request.ttft` covers a logical invocation including earlier failed attempts; `burrow.provider_pool.ttft` and `attempt.duration` cover one physical account attempt. Retry/failover counts and persisted cooldown-window observations retain that distinction. A successful later account does not rewrite the earlier failure. Cooldown expiry is not continuously polled or claimed as recovery.
+- Context usage/budget/pressure and compaction counts/durations retain measured-versus-estimated provenance. Compaction before/after values are conversation estimates, not measured provider-token savings; failed or stale rotations do not claim after values.
+- Queue pending/oldest-age/wait and recovery transitions/outcomes expose observed durable work. A failed queue read is unavailable, not an empty queue. Only an actual cancellation grace deadline establishes overdue drain; elapsed run age alone never means stuck.
+- Database pool-wait/query-duration, event-loop lag, process/filesystem dispatch timing, explicit execution/MCP disconnect-reconnect evidence, and fixed authentication outcome categories distinguish dependencies. Dispatch observations are not an idle host monitor. Ordinary session-cookie checks are not new logins.
+
+Pool and generic token counters are views of the same usage, not additive totals. Cached input is already included in normalized input. Unknown values remain absent; explicit measured zero remains zero. Run/request IDs and readable names are trace-only; curated metric dimensions exclude prompts, commands, SQL, arguments/results, secret-bearing URLs and raw errors.
+
+These are source-backed instrument contracts, not proof of collector ingestion. Check the exact installed build and receiving-service samples. Source: Core `bea2171508d1821440ed5c554a688768848699c9`, operational/provider exporters and producer call sites; no application/provider tests were run for this documentation pass.
