@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto';
+import { archiveReadCheckpoint, archiveReadTasks } from '../../src/archive-read-scope.mjs';
 import { archiveRunListPage } from './archive-run-list.mjs';
 import { readArchiveRun } from '../../src/archive-proof.mjs';
 import { archivePage, archiveUtcDay, archiveUtcMonth, archiveCalendarDates, matchesArchiveDay, archiveCursorBoundary, archiveCursor } from '../../src/archive-pagination.mjs';
@@ -9,9 +10,18 @@ import { dreamReceiptCreatedAt, listDreamGroups, projectDreamGroups } from './ar
 
 // Read-only Archive projections own collection scope, pagination and snapshot
 // cursors. Store access is composed by the server, never opened by this service.
-export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
+export function createArchiveService({ stores, agentsStore: registryFactory, dreamDiaryStore,
   resolveAgentRuntime, runtimeConfig, runtimeTraceRoot, settingsKeyFromEnvironment,
   isChatMessage, compactChatTurn, summarizeSessionTurns, boundedInteger } = {}) {
+  // Native registry reads must not enter bootstrap's durable row lock, even
+  // when the service is composed directly (tests/mods), rather than by the UI.
+  const agentsStore = () => {
+    const registry = registryFactory();
+    if (typeof registry.listArchiveAgents !== 'function') return registry;
+    return { list: options => registry.listArchiveAgents(options),
+      get: (id, options) => registry.resolveArchiveAgent(id, options),
+      resolve: (id, options) => registry.resolveArchiveAgent(id, options) };
+  };
   function archiveSessionListItem(record = {}, agentRuntime = {}, agent = {}) {
     const metadata = record.metadata || {};
     const sessionId = record.id || metadata.sessionId || metadata.sessionKey || 'default';
@@ -40,102 +50,136 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
     };
   }
 
-  async function archiveDreamRows({ agentId = null, phase = null } = {}) {
-    const agents = (await agentsStore().list({ includeDisabled: true })).filter((agent) => !agentId || agent.id === String(agentId));
+  async function archiveDreamRows({ agentId = null, phase = null, signal, deadline } = {}) {
+    const options = { signal, deadline };
+    archiveReadCheckpoint(options);
+    const agents = (await agentsStore().list({ includeDisabled: true, ...options })).filter((agent) => !agentId || agent.id === String(agentId));
+    archiveReadCheckpoint(options);
     const store = dreamDiaryStore();
     try {
-      return (await Promise.all(agents.map(async (agent) => {
-        const listed = await store.list(agent.id, { phase, limit: null });
+      return (await archiveReadTasks(agents.map((agent) => async readOptions => {
+        const listed = await store.list(agent.id, { phase, limit: null, ...readOptions });
         return listed.map((entry) => ({ id: entry.id, kind: 'dream', agentId: agent.id, agentName: agent.name, entryDate: entry.entryDate, phase: entry.phase, title: `${entry.phase.toUpperCase()} dream · ${entry.entryDate}`, excerpt: String(entry.narrative || '').slice(0, 320).trim(), createdAt: entry.createdAt }));
-      }))).flat();
+      }), options)).flat();
     } finally { await store.close(); }
   }
 
-  async function archiveDreams({ timezone = 'UTC', agentId = null, date = null, phase = null, limit = 200, cursor = null } = {}) {
+  async function archiveDreams({ timezone = 'UTC', agentId = null, date = null, phase = null, limit = 200, cursor = null, signal, deadline } = {}) {
     timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
     if (date) archiveUtcDay(date);
-    const entries = await archiveDreamRows({ agentId, phase });
+    const options = { signal, deadline };
+    const entries = await archiveDreamRows({ agentId, phase, ...options });
+    archiveReadCheckpoint(options);
     const page = archivePage(entries.filter((entry) => matchesArchiveDay(entry.createdAt, date, timezone)), { limit, cursor, scope: JSON.stringify(['dreams', agentId, date, phase, timezone]), timestamp: (row) => row.createdAt, identity: (row) => `${row.agentId}:${row.id}` });
     return { ok: true, entries: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
   }
 
-  async function archiveDreamDetail(agentId, entryId) {
+  async function archiveDreamDetail(agentId, entryId, options = {}) {
+    archiveReadCheckpoint(options);
     const store = dreamDiaryStore();
     try {
-      const entry = await store.get(agentId, entryId);
-      const agent = await agentsStore().get(agentId);
+      const entry = await store.get(agentId, entryId, options);
+      archiveReadCheckpoint(options);
+      const agent = await agentsStore().get(agentId, options);
+      archiveReadCheckpoint(options);
       return { ok: true, document: { id: entry.id, kind: 'dream', agentId, agentName: agent?.name || agentId, title: `${entry.phase.toUpperCase()} dream · ${entry.entryDate}`, subtitle: entry.entryDate, phase: entry.phase, markdown: entry.narrative, createdAt: entry.createdAt } };
-    } catch (error) { return { ok: false, status: String(error?.message || error) === 'dream_diary_entry_not_found' ? 404 : 400, error: String(error?.message || error) }; } finally { await store.close(); }
+    } catch (error) {
+      archiveReadCheckpoint(options);
+      if (error?.message === 'archive_query_timeout') throw error;
+      return { ok: false, status: String(error?.message || error) === 'dream_diary_entry_not_found' ? 404 : 400, error: String(error?.message || error) };
+    } finally { await store.close(); }
   }
 
-  async function archiveDreamReceiptRows(agents) {
+  async function archiveDreamReceiptRows(agents, options = {}) {
+    archiveReadCheckpoint(options);
     const cycleStore = stores()?.dreamCycles;
     if (!cycleStore) return new Map(agents.map((agent) => [agent.id, []]));
     // Never silently fall back to Settings' latest-100 view: an incomplete
     // history would make search, calendar, and cursors incorrect.
     if (typeof cycleStore.listArchiveDreamCycleReceipts !== 'function') throw new Error('dream_cycle_archive_read_required');
-    return new Map(await Promise.all(agents.map(async (agent) => [agent.id, await cycleStore.listArchiveDreamCycleReceipts({ agentId: agent.id })])));
+    return new Map(await archiveReadTasks(agents.map((agent) => async readOptions => [agent.id, await cycleStore.listArchiveDreamCycleReceipts({ agentId: agent.id, ...readOptions })]), options));
   }
 
-  async function archiveDreamGroupRows({ agentId = null, timezone = 'UTC' } = {}) {
-    const agents = (await agentsStore().list({ includeDisabled: true })).filter((agent) => !agentId || agent.id === String(agentId));
+  async function archiveDreamGroupRows({ agentId = null, timezone = 'UTC', signal, deadline } = {}) {
+    const options = { signal, deadline };
+    archiveReadCheckpoint(options);
+    const agents = (await agentsStore().list({ includeDisabled: true, ...options })).filter((agent) => !agentId || agent.id === String(agentId));
+    archiveReadCheckpoint(options);
     const diaryStore = dreamDiaryStore();
     try {
-      const [diaryRows, receiptsByAgent] = await Promise.all([
-        Promise.all(agents.map(async (agent) => [agent.id, await diaryStore.list(agent.id, { limit: null })])),
-        archiveDreamReceiptRows(agents),
-      ]);
+      const [diaryRows, receiptsByAgent] = await archiveReadTasks([
+        readOptions => archiveReadTasks(agents.map((agent) => async diaryOptions => [agent.id, await diaryStore.list(agent.id, { limit: null, ...diaryOptions })]), readOptions),
+        readOptions => archiveDreamReceiptRows(agents, readOptions),
+      ], options);
+      archiveReadCheckpoint(options);
       return projectDreamGroups({ agents, diariesByAgent: new Map(diaryRows), receiptsByAgent, timezone });
     } finally { await diaryStore.close(); }
   }
 
-  async function archiveDreamGroups({ timezone = 'UTC', agentId = null, date = null, query = '', limit = 200, cursor = null } = {}) {
+  async function archiveDreamGroups({ timezone = 'UTC', agentId = null, date = null, query = '', limit = 200, cursor = null, signal, deadline } = {}) {
     timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
     if (date) archiveUtcDay(date);
-    const groups = await archiveDreamGroupRows({ agentId, timezone });
+    const groups = await archiveDreamGroupRows({ agentId, timezone, signal, deadline });
     return listDreamGroups(groups, { timezone, agentId, date, query, limit, cursor });
   }
 
-  async function archiveDreamGroupDetail({ agentId, day, timezone = 'UTC' } = {}) {
+  async function archiveDreamGroupDetail({ agentId, day, timezone = 'UTC', signal, deadline } = {}) {
     timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
     archiveUtcDay(day);
     if (!agentId) return { ok: false, status: 400, error: 'archive_dream_target_required' };
-    const group = (await archiveDreamGroupRows({ agentId, timezone })).find((item) => item.day === day);
+    const group = (await archiveDreamGroupRows({ agentId, timezone, signal, deadline })).find((item) => item.day === day);
     return group ? { ok: true, group } : { ok: false, status: 404, error: 'archive_dream_group_not_found' };
   }
 
   async function archiveWorkflowEvents(options = {}) {
+    archiveReadCheckpoint(options);
     const page = await stores().completionEvents.listArchive(options);
-    const names = new Map((await agentsStore().list({ includeDisabled: true })).map(agent => [agent.id, agent.name]));
+    archiveReadCheckpoint(options);
+    const names = new Map((await agentsStore().list({ includeDisabled: true, ...options })).map(agent => [agent.id, agent.name]));
+    archiveReadCheckpoint(options);
     return { ok: true, ...page, events: page.events.map(({ ownerId, traceDir, ...event }) => ({
       ...event, agentName: names.get(event.agentId) || event.agentId,
       result: redactValue(event.result),
     })) };
   }
 
-  async function archiveContinuityCards({ agentId = null, scope = null, limit = 200, cursor = null } = {}) {
-    const agents = (await agentsStore().list({ includeDisabled: true })).filter((agent) => !agentId || agent.id === String(agentId));
-    const cards = (await Promise.all(agents.map(async (agent) => (await listTiddleCards({ agentId: agent.id, scope, limit: null, stores: stores(), })).cards.map((card) => ({ ...card, kind: 'continuity', agentId: agent.id, agentName: agent.name }))))).flat();
+  async function archiveContinuityCards({ agentId = null, scope = null, limit = 200, cursor = null, signal, deadline } = {}) {
+    const options = { signal, deadline };
+    archiveReadCheckpoint(options);
+    const agents = (await agentsStore().list({ includeDisabled: true, ...options })).filter((agent) => !agentId || agent.id === String(agentId));
+    archiveReadCheckpoint(options);
+    const cards = (await archiveReadTasks(agents.map((agent) => async readOptions => (await listTiddleCards({ agentId: agent.id, scope, limit: null, stores: stores(), ...readOptions })).cards.map((card) => ({ ...card, kind: 'continuity', agentId: agent.id, agentName: agent.name }))), options)).flat();
     const page = archivePage(cards, { limit, cursor, scope: JSON.stringify(['cards', agentId, scope]), timestamp: (row) => row.lastSeen, identity: (row) => `${row.agentId}:${row.id}` });
     return { ok: true, scope: scope || null, cards: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
   }
 
-  async function archiveContinuityCardDetail({ agentId, cardId, limit = 200, cursor = null } = {}) {
-    const agent = await agentsStore().get(agentId);
+  async function archiveContinuityCardDetail({ agentId, cardId, limit = 200, cursor = null, signal, deadline } = {}) {
+    const options = { signal, deadline };
+    archiveReadCheckpoint(options);
+    const agent = await agentsStore().get(agentId, options);
+    archiveReadCheckpoint(options);
     if (!agent) return { ok: false, status: 404, error: 'agent_not_found' };
-    const cards = (await listTiddleCards({ agentId, limit: null, stores: stores(), })).cards;
+    const cards = (await listTiddleCards({ agentId, limit: null, stores: stores(), ...options })).cards;
+    archiveReadCheckpoint(options);
     const card = cards.find((candidate) => candidate.id === cardId);
     if (!card) return { ok: false, status: 404, error: 'archive_continuity_card_not_found' };
-    const history = (await tiddleHistory({ agentId, cardId, limit: null, stores: stores(), })).entries;
+    const history = (await tiddleHistory({ agentId, cardId, limit: null, stores: stores(), ...options })).entries;
+    archiveReadCheckpoint(options);
     const page = archivePage(history, { limit, cursor, scope: JSON.stringify(['history', agentId, cardId]), timestamp: (row) => row.at, identity: (row) => row.id });
     return { ok: true, card: { ...card, kind: 'continuity', agentId, agentName: agent.name }, history: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
   }
 
-  async function archiveRuns({ agentRuntime = null, sessionId = null, limit = 100, cursor = null } = {}) {
-    const agents = agentRuntime ? [agentRuntime] : await Promise.all((await agentsStore().list({ includeDisabled: false })).map((agent) => resolveAgentRuntime(agent.id)));
-    const scopes = await Promise.all(agents.map(async runtime => {
-      const agent = await agentsStore().resolve(runtime.agentId) || { name: runtime.agentId };
-      const config = await runtimeConfig(runtime.agentId);
+  async function archiveRuns({ agentRuntime = null, sessionId = null, limit = 100, cursor = null, signal, deadline } = {}) {
+    const options = { signal, deadline };
+    archiveReadCheckpoint(options);
+    const listed = agentRuntime ? [] : await agentsStore().list({ includeDisabled: false, ...options });
+    archiveReadCheckpoint(options);
+    const agents = agentRuntime ? [agentRuntime] : await archiveReadTasks(listed.map((agent) => readOptions => resolveAgentRuntime(agent.id, readOptions)), options);
+    const scopes = await archiveReadTasks(agents.map(runtime => async readOptions => {
+      const agent = await agentsStore().resolve(runtime.agentId, readOptions) || { name: runtime.agentId };
+      archiveReadCheckpoint(readOptions);
+      const config = await runtimeConfig(runtime.agentId, readOptions);
+      archiveReadCheckpoint(readOptions);
       return {
         conversationStore: stores().conversations,
         rootDir: runtime.agentWorkspaceRoot,
@@ -144,14 +188,18 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
         agentId: runtime.agentId,
         agentName: agent.name,
       };
-    }));
-    return archiveRunListPage({ scopes, agentId: agentRuntime?.agentId ?? null, sessionId, limit, cursor });
+    }), options);
+    return archiveRunListPage({ scopes, agentId: agentRuntime?.agentId ?? null, sessionId, limit, cursor, ...options });
   }
 
 
-  async function archiveRunDetailForAgent({ agentRuntime, runId } = {}) {
-    const agent = await agentsStore().resolve(agentRuntime.agentId) || { id: agentRuntime.agentId, name: agentRuntime.agentId };
-    const runtime = await runtimeConfig(agentRuntime.agentId);
+  async function archiveRunDetailForAgent({ agentRuntime, runId, signal, deadline } = {}) {
+    const options = { signal, deadline };
+    archiveReadCheckpoint(options);
+    const agent = await agentsStore().resolve(agentRuntime.agentId, options) || { id: agentRuntime.agentId, name: agentRuntime.agentId };
+    archiveReadCheckpoint(options);
+    const runtime = await runtimeConfig(agentRuntime.agentId, options);
+    archiveReadCheckpoint(options);
     return readArchiveRun({
       conversationStore: stores().conversations,
       rootDir: agentRuntime.agentWorkspaceRoot,
@@ -160,60 +208,76 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
       agentId: agentRuntime.agentId,
       agentName: agent.name,
       runId,
+      ...options,
     });
   }
 
-  async function archiveRunDetail({ agentRuntime = null, runId } = {}) {
-    if (agentRuntime) return archiveRunDetailForAgent({ agentRuntime, runId });
-    for (const agent of await agentsStore().list({ includeDisabled: false })) {
-      const run = await archiveRunDetailForAgent({ agentRuntime: await resolveAgentRuntime(agent.id), runId });
+  async function archiveRunDetail({ agentRuntime = null, runId, signal, deadline } = {}) {
+    const options = { signal, deadline };
+    archiveReadCheckpoint(options);
+    if (agentRuntime) return archiveRunDetailForAgent({ agentRuntime, runId, ...options });
+    const agents = await agentsStore().list({ includeDisabled: false, ...options });
+    archiveReadCheckpoint(options);
+    for (const agent of agents) {
+      const runtime = await resolveAgentRuntime(agent.id, options);
+      archiveReadCheckpoint(options);
+      const run = await archiveRunDetailForAgent({ agentRuntime: runtime, runId, ...options });
       if (run) return run;
     }
     return null;
   }
 
-  async function archiveSessionRows({ includeArchived = true, agentId = null, includeDisabled = true } = {}) {
-    const agents = (await agentsStore().list({ includeDisabled: Boolean(includeDisabled) })).filter((agent) => !agentId || agent.id === agentId);
+  async function archiveSessionRows({ includeArchived = true, agentId = null, includeDisabled = true, signal, deadline } = {}) {
+    const options = { signal, deadline };
+    archiveReadCheckpoint(options);
+    const agents = (await agentsStore().list({ includeDisabled: Boolean(includeDisabled), ...options })).filter((agent) => !agentId || agent.id === agentId);
     const store = stores().conversations;
-    return (await Promise.all(agents.map(async (agent) => {
-      const [sessions, archives] = await Promise.all([store.listSessions({ agentId: agent.id, includeArchived }), store.listArchives({ agentId: agent.id, limit: null })]);
+    return (await archiveReadTasks(agents.map(agent => async readOptions => {
+      const [sessions, archives] = await archiveReadTasks([
+        childOptions => store.listSessions({ agentId: agent.id, includeArchived, ...childOptions }),
+        childOptions => store.listArchives({ agentId: agent.id, limit: null, ...childOptions }),
+      ], readOptions);
       return [
         ...sessions.map((record) => archiveSessionListItem({ id: record.sessionId, ...record, metadata: record }, { agentId: agent.id }, agent)),
         ...archives.filter((record) => record.kind === 'reset').map((record) => archiveSessionListItem({ id: record.archiveId, archiveSnapshot: 'reset', sourceSessionId: record.metadata?.sourceSessionId || record.sessionId, turnCount: record.entries.length, updatedAt: record.createdAt, archiveSummary: record.metadata?.summary, summaryStatus: record.metadata?.summaryStatus, metadata: { ...record.metadata, createdAt: record.createdAt } }, { agentId: agent.id }, agent)),
       ];
-    }))).flat();
+    }), options)).flat();
   }
 
-  async function archiveCalendar({ timezone = 'UTC', kind, month, agentId = null } = {}) {
+  async function archiveCalendar({ timezone = 'UTC', kind, month, agentId = null, signal, deadline } = {}) {
+    const options = { signal, deadline };
+    archiveReadCheckpoint(options);
     timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
     const parsedMonth = archiveUtcMonth(month);
     if (!['sessions', 'dreams', 'workflow-events'].includes(kind)) throw new Error('archive_kind_invalid');
-    if (kind === 'workflow-events') return { ok: true, kind, month: parsedMonth, dates: await stores().completionEvents.listArchiveCalendarDates({ agentId, month: parsedMonth, timezone }) };
+    if (kind === 'workflow-events') return { ok: true, kind, month: parsedMonth, dates: await stores().completionEvents.listArchiveCalendarDates({ agentId, month: parsedMonth, timezone, ...options }) };
     if (kind === 'sessions' && typeof stores().conversations.listArchiveCalendarDates === 'function') {
-      const agents = (await agentsStore().list({ includeDisabled: true })).filter((agent) => !agentId || agent.id === agentId);
-      const dates = [...new Set((await Promise.all(agents.map((agent) => stores().conversations.listArchiveCalendarDates({ agentId: agent.id, month: parsedMonth, timezone })))).flat())].sort();
+      const agents = (await agentsStore().list({ includeDisabled: true, ...options })).filter((agent) => !agentId || agent.id === agentId);
+      const dates = [...new Set((await archiveReadTasks(agents.map(agent => readOptions => stores().conversations.listArchiveCalendarDates({ agentId: agent.id, month: parsedMonth, timezone, ...readOptions })), options)).flat())].sort();
       return { ok: true, kind, month: parsedMonth, dates };
     }
     if (kind === 'dreams') {
-      const agents = (await agentsStore().list({ includeDisabled: true })).filter((agent) => !agentId || agent.id === agentId);
+      const agents = (await agentsStore().list({ includeDisabled: true, ...options })).filter((agent) => !agentId || agent.id === agentId);
       const store = dreamDiaryStore();
       try {
-        const [diaryDates, receiptsByAgent] = await Promise.all([
-          typeof store.listCalendarDates === 'function'
-            ? Promise.all(agents.map((agent) => store.listCalendarDates(agent.id, { month: parsedMonth, timezone }))).then((dates) => dates.flat())
-            : Promise.all(agents.map(async (agent) => (await store.list(agent.id, { limit: null })).map((entry) => ({ createdAt: entry.createdAt })))).then((rows) => archiveCalendarDates(rows.flat(), parsedMonth, (row) => row.createdAt, timezone)),
-          archiveDreamReceiptRows(agents),
-        ]);
+        const [diaryDates, receiptsByAgent] = await archiveReadTasks([
+          readOptions => typeof store.listCalendarDates === 'function'
+            ? archiveReadTasks(agents.map(agent => childOptions => store.listCalendarDates(agent.id, { month: parsedMonth, timezone, ...childOptions })), readOptions).then(dates => dates.flat())
+            : archiveReadTasks(agents.map(agent => async childOptions => (await store.list(agent.id, { limit: null, ...childOptions })).map(entry => ({ createdAt: entry.createdAt }))), readOptions).then(rows => archiveCalendarDates(rows.flat(), parsedMonth, row => row.createdAt, timezone)),
+          readOptions => archiveDreamReceiptRows(agents, readOptions),
+        ], options);
         const receiptDates = archiveCalendarDates([...receiptsByAgent.values()].flat(), parsedMonth, dreamReceiptCreatedAt, timezone);
         return { ok: true, kind, month: parsedMonth, dates: [...new Set([...diaryDates, ...receiptDates])].sort() };
       } finally { await store.close(); }
     }
-    const rows = await archiveSessionRows({ agentId });
+    const rows = await archiveSessionRows({ agentId, ...options });
     const dates = archiveCalendarDates(rows, parsedMonth, (row) => kind === 'dreams' ? row.createdAt : row.archivedAt || row.updatedAt || row.createdAt, timezone);
     return { ok: true, kind, month: parsedMonth, dates };
   }
 
-  async function archiveSessions({ timezone = 'UTC', includeArchived = true, query = '', agentId = null, date = null, limit = 200, includeDisabled = true, cursor = null } = {}) {
+  async function archiveSessions({ timezone = 'UTC', includeArchived = true, query = '', agentId = null, date = null, limit = 200, includeDisabled = true, cursor = null, signal, deadline } = {}) {
+    const options = { signal, deadline };
+    archiveReadCheckpoint(options);
     timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
     if (date) archiveUtcDay(date);
     const store = stores().conversations;
@@ -221,8 +285,8 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
       const size = Math.max(1, Math.min(1000, Number(limit) || 200));
       const scope = JSON.stringify(['sessions', includeArchived, query, includeDisabled, agentId, date, timezone]);
       const boundary = archiveCursorBoundary(cursor, { scope });
-      const agents = (await agentsStore().list({ includeDisabled: Boolean(includeDisabled) })).filter((agent) => !agentId || agent.id === agentId);
-      const pages = await Promise.all(agents.map(async (agent) => ({ agent, page: await store.listArchiveSessions({ agentId: agent.id, includeArchived, query, date, timezone, limit: size, boundary }) })));
+      const agents = (await agentsStore().list({ includeDisabled: Boolean(includeDisabled), ...options })).filter((agent) => !agentId || agent.id === agentId);
+      const pages = await archiveReadTasks(agents.map(agent => async readOptions => ({ agent, page: await store.listArchiveSessions({ agentId: agent.id, includeArchived, query, date, timezone, limit: size, boundary, ...readOptions }) })), options);
       const rows = pages.flatMap(({ agent, page }) => page.rows.map((record) => ({
         // Native stores return UTC6 verbatim; compatibility stores predate the
         // exact scalar and provide only millisecond display timestamps.
@@ -247,7 +311,7 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
       const last = selected.at(-1);
       return { sessions: selected.map(row => row.item), nextCursor: hasMore && last ? archiveCursor({ scope, timestamp: last.sortTimestamp, identity: `${last.item.agentId}:${last.item.id}` }) : null, hasMore };
     }
-    const rows = await archiveSessionRows({ includeArchived, agentId, includeDisabled });
+    const rows = await archiveSessionRows({ includeArchived, agentId, includeDisabled, ...options });
     const page = archivePage(rows.filter((item) => (matchesArchiveDay(item.archivedAt || item.updatedAt || item.createdAt, date, timezone)) && (!query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase()))), { limit, cursor, max: 1000, scope: JSON.stringify(['sessions', includeArchived, query, includeDisabled, agentId, date, timezone]), timestamp: (row) => row.updatedAt, identity: (row) => `${row.agentId}:${row.id}` });
     return { sessions: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
   }
@@ -299,21 +363,43 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
   }
 
   async function archiveSessionDetail(agentId, sessionId, pageOptions = {}) {
-    const agentRuntime = await resolveAgentRuntime(agentId);
-    const agent = await agentsStore().resolve(agentRuntime.agentId) || { id: agentRuntime.agentId, name: agentRuntime.agentId };
+    const options = pageOptions;
+    archiveReadCheckpoint(options);
+    const agentRuntime = await resolveAgentRuntime(agentId, options);
+    const agent = await agentsStore().resolve(agentRuntime.agentId, options) || { id: agentRuntime.agentId, name: agentRuntime.agentId };
     const store = stores().conversations;
+    archiveReadCheckpoint(pageOptions);
+    if (typeof store.readArchiveTranscriptPage === 'function') {
+      const page = await store.readArchiveTranscriptPage({ agentId: agentRuntime.agentId, sessionId,
+        ...pageOptions, cursorSecret: settingsKeyFromEnvironment() });
+      archiveReadCheckpoint(pageOptions);
+      if (!page) return null;
+      const reset = page.archiveSnapshot === 'reset';
+      const metadata = reset ? { archived: true, archiveSnapshot: 'reset', sourceSessionId: page.sourceSessionId,
+        createdAt: page.createdAt, updatedAt: page.updatedAt, archivedAt: page.createdAt } : page.metadata;
+      const session = { id: sessionId, sessionId, agentId: agentRuntime.agentId,
+        agentName: agent.name || agentRuntime.agentId, turnCount: page.turnCount, metadata,
+        summary: page.summary || (reset ? null : summarizeSessionTurns(page.entries, { maxChars: 2000 })),
+        turns: page.entries.map(compactChatTurn), activities: [],
+        ...(reset ? { archiveSnapshot: 'reset', sourceSessionId: page.sourceSessionId,
+          summaryStatus: page.summaryStatus || 'not_configured', title: page.title || `Conversation from ${page.sourceSessionId}` } : {}),
+      };
+      return { agentId: agentRuntime.agentId, agentName: agent.name || agentRuntime.agentId, sessionId,
+        session, hasMore: page.hasMore, nextCursor: page.nextCursor, historyStatus: page.historyStatus };
+    }
+
     // Native stores reconstruct reset history from its bounded compaction
     // generations. Raw archive reads intentionally remain evidence snapshots.
     const reconstructed = typeof store.exportArchiveTranscript === 'function'
-      ? await store.exportArchiveTranscript({ agentId: agentRuntime.agentId, archiveId: sessionId }) : null;
+      ? await store.exportArchiveTranscript({ agentId: agentRuntime.agentId, archiveId: sessionId, ...pageOptions }) : null;
     const archive = typeof store.exportArchiveTranscript === 'function' ? null
       : typeof store.readArchiveById === 'function'
-        ? await store.readArchiveById({ agentId: agentRuntime.agentId, archiveId: sessionId, kind: 'reset' })
-        : (await store.listArchives({ agentId: agentRuntime.agentId, limit: null })).find((item) => item.kind === 'reset' && item.archiveId === sessionId);
+        ? await store.readArchiveById({ agentId: agentRuntime.agentId, archiveId: sessionId, kind: 'reset', ...pageOptions })
+        : (await store.listArchives({ agentId: agentRuntime.agentId, limit: null, ...pageOptions })).find((item) => item.kind === 'reset' && item.archiveId === sessionId);
     const reset = reconstructed ? { archiveId: reconstructed.archiveId, sessionId: reconstructed.sourceSessionId,
       entries: reconstructed.entries, createdAt: reconstructed.createdAt, metadata: reconstructed.session.metadata } : archive;
     const resetSnapshot = reset ? { id: reset.archiveId, sourceSessionId: reset.metadata?.sourceSessionId || reset.sessionId, turnCount: reset.entries.length, createdAt: reset.createdAt, updatedAt: reset.createdAt, archiveSummary: reset.metadata?.summary, summaryStatus: reset.metadata?.summaryStatus, archiveTitle: reset.metadata?.archiveTitle } : null;
-    const source = reset ? reset.entries : (await store.exportTranscript({ agentId: agentRuntime.agentId, sessionId }))?.entries;
+    const source = reset ? reset.entries : (await store.exportTranscript({ agentId: agentRuntime.agentId, sessionId, ...pageOptions }))?.entries;
     if (!source) return null;
     const page = uiArchivePage(source, { agentId: agentRuntime.agentId, sessionId, ...pageOptions });
     if (resetSnapshot) {
@@ -340,7 +426,7 @@ export function createArchiveService({ stores, agentsStore, dreamDiaryStore,
         hasMore: page.hasMore, nextCursor: page.nextCursor, historyStatus: page.historyStatus,
       };
     }
-    const metadata = await stores().conversations.getMetadata({agentId:agentRuntime.agentId,sessionId});
+    const metadata = await stores().conversations.getMetadata({agentId:agentRuntime.agentId,sessionId,...pageOptions});
     if (!metadata || !page) return null;
     const session = { id: sessionId, turnCount: metadata.turnCount ?? page.turns.length, metadata, summary: metadata.summary || summarizeSessionTurns(page.turns, { maxChars: 2000 }), turns: page.turns.map(compactChatTurn), activities: [] };
     return {

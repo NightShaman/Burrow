@@ -1518,6 +1518,9 @@
           },
           "404": {
             "$ref": "#/components/responses/ErrorResponse"
+          },
+          "504": {
+            "$ref": "#/components/responses/ErrorResponse"
           }
         },
         "description": "List retained active/archived conversations and independent reset documents. Date and session-calendar discovery match retained visible message occurrence days (including compacted generations in the document’s canonical generation window), plus catalog update/reset-creation dates. Unknown message clocks are not inferred. Date-filtered rows include matchedDate in the requested timezone; clients must retain these matches even when the catalog timestamp differs. Search matches identity, names, titles and human-facing summaries, not internal run evidence. Opaque cursors preserve exact catalog ordering and must keep filters unchanged."
@@ -1546,11 +1549,11 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "Page size (1–200, default 100).",
+            "description": "Page size (clamped to 1–500, default 100).",
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 200,
+              "maximum": 500,
               "default": 100
             }
           },
@@ -1565,19 +1568,17 @@
           {
             "name": "from",
             "in": "query",
-            "description": "Inclusive chat timestamp lower bound (ISO 8601).",
+            "description": "Inclusive chat timestamp lower bound (ISO 8601). Microseconds are preserved; YYYY-MM-DD means UTC midnight.",
             "schema": {
-              "type": "string",
-              "format": "date-time"
+              "type": "string"
             }
           },
           {
             "name": "to",
             "in": "query",
-            "description": "Inclusive chat timestamp upper bound (ISO 8601).",
+            "description": "Inclusive chat timestamp upper bound (ISO 8601). Microseconds are preserved; YYYY-MM-DD means UTC midnight.",
             "schema": {
-              "type": "string",
-              "format": "date-time"
+              "type": "string"
             }
           }
         ],
@@ -1593,9 +1594,12 @@
           },
           "409": {
             "$ref": "#/components/responses/ErrorResponse"
+          },
+          "504": {
+            "$ref": "#/components/responses/ErrorResponse"
           }
         },
-        "description": "Archive-only chat conversation reader. Newest page first; before selects older pages. Compacted generations are deduplicated by stable turn ID; reset snapshots remain separate. Missing retained generations and stale cursors return 409 rather than implying beginning of history."
+        "description": "Archive-only canonical chat reader. Newest page first; before selects older pages. SQL selects canonical live/compacted/reset winners before bounded hydration; no full-history Node export per page. Signed cursors bind raw interval scope and retained-row revision; mutation or physical rewrite invalidates with 400 archive_cursor_invalid. Deadline/lock exhaustion returns 504 archive_query_timeout, never an empty history."
       }
     },
     "/api/sessions/{sessionId}/rename": {
@@ -3527,6 +3531,9 @@
           },
           "400": {
             "$ref": "#/components/responses/ErrorResponse"
+          },
+          "504": {
+            "$ref": "#/components/responses/ErrorResponse"
           }
         }
       }
@@ -3564,6 +3571,9 @@
             "$ref": "#/components/responses/ErrorResponse"
           },
           "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "504": {
             "$ref": "#/components/responses/ErrorResponse"
           }
         }
@@ -3638,6 +3648,9 @@
           },
           "400": {
             "$ref": "#/components/responses/ErrorResponse"
+          },
+          "504": {
+            "$ref": "#/components/responses/ErrorResponse"
           }
         }
       }
@@ -3683,6 +3696,9 @@
             "$ref": "#/components/responses/ErrorResponse"
           },
           "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "504": {
             "$ref": "#/components/responses/ErrorResponse"
           }
         }
@@ -3756,6 +3772,9 @@
             "$ref": "#/components/responses/ArchiveWorkflowEventListResponse"
           },
           "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "504": {
             "$ref": "#/components/responses/ErrorResponse"
           }
         }
@@ -3863,6 +3882,9 @@
           },
           "400": {
             "$ref": "#/components/responses/ErrorResponse"
+          },
+          "504": {
+            "$ref": "#/components/responses/ErrorResponse"
           }
         }
       }
@@ -3920,6 +3942,9 @@
             "$ref": "#/components/responses/ErrorResponse"
           },
           "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "504": {
             "$ref": "#/components/responses/ErrorResponse"
           }
         }
@@ -4043,6 +4068,9 @@
           },
           "404": {
             "$ref": "#/components/responses/ErrorResponse"
+          },
+          "504": {
+            "$ref": "#/components/responses/ErrorResponse"
           }
         }
       }
@@ -4068,6 +4096,9 @@
             "$ref": "#/components/responses/ArchiveRunResponse"
           },
           "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "504": {
             "$ref": "#/components/responses/ErrorResponse"
           }
         }
@@ -5753,6 +5784,9 @@
             "$ref": "#/components/responses/ArchiveCalendarResponse"
           },
           "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "504": {
             "$ref": "#/components/responses/ErrorResponse"
           }
         },
@@ -8051,6 +8085,9 @@
             "$ref": "#/components/responses/ErrorResponse"
           },
           "500": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "504": {
             "$ref": "#/components/responses/ErrorResponse"
           }
         }

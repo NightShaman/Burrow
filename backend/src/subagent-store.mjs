@@ -1,3 +1,4 @@
+import { archiveReadCheckpoint } from './archive-read-scope.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createSubagentContract, subagentTransition, isFinalSubagentStatus } from './subagent-contracts.mjs';
@@ -59,10 +60,14 @@ function historicalDelegatedFile(dataRoot, id) {
   return path.join(dataRoot, 'delegated-runs', safeId(id), 'delegated-work.json');
 }
 
-async function readJson(filePath) {
+async function readJson(filePath, options = {}) {
+  archiveReadCheckpoint(options);
   try {
-    return JSON.parse(await fs.readFile(filePath, 'utf8'));
+    const source = await fs.readFile(filePath, { encoding: 'utf8', signal: options.signal });
+    archiveReadCheckpoint(options);
+    return JSON.parse(source);
   } catch (error) {
+    archiveReadCheckpoint(options);
     if (error?.code === 'ENOENT') return null;
     throw error;
   }
@@ -87,13 +92,14 @@ export async function createSubagentRecord({ dataRoot, clock = nowIso, ...input 
   return writeSubagentFile({ dataRoot, record });
 }
 
-export async function readSubagentRecord({ dataRoot, id, legacyDataRoot = null, compatibilityObserver = null, sessionId = null, runId = null } = {}) {
+export async function readSubagentRecord({ dataRoot, id, legacyDataRoot = null, compatibilityObserver = null, sessionId = null, runId = null, signal, deadline } = {}) {
   if (!dataRoot) throw new Error('dataRoot is required');
   if (!id) throw new Error('id is required');
-  const current = await readJson(subagentFile(dataRoot, id));
+  const options = { signal, deadline };
+  const current = await readJson(subagentFile(dataRoot, id), options);
   if (current || !legacyDataRoot) return current;
   const legacyPath = historicalDelegatedFile(legacyDataRoot, id);
-  const legacy = await readJson(legacyPath);
+  const legacy = await readJson(legacyPath, options);
   if (legacy) observeCompatibilityRead(compatibilityObserver, { operation: 'read-historical-delegated-run', legacyPath, replacementPath: subagentFile(dataRoot, id), sessionId, runId });
   return legacy;
 }
@@ -107,24 +113,29 @@ export async function findSubagentBySpawnRequestKey({ dataRoot, key, legacyDataR
   return records.find((record) => record.spawnRequest?.key === normalizedKey) || null;
 }
 
-export async function listSubagentRecords({ dataRoot, legacyDataRoot = null, compatibilityObserver = null, sessionId = null, runId = null, includeFinal = true, limit = 100 } = {}) {
+export async function listSubagentRecords({ dataRoot, legacyDataRoot = null, compatibilityObserver = null, sessionId = null, runId = null, includeFinal = true, limit = 100, signal, deadline } = {}) {
   if (!dataRoot) throw new Error('dataRoot is required');
+  const options = { signal, deadline };
+  archiveReadCheckpoint(options);
   let entries = [];
   try {
     entries = await fs.readdir(subagentRoot(dataRoot), { withFileTypes: true });
   } catch (error) {
+    archiveReadCheckpoint(options);
     if (error?.code === 'ENOENT') return [];
     throw error;
   }
+  archiveReadCheckpoint(options);
   const records = [];
   for (const entry of entries.filter((item) => item.isDirectory())) {
-    const record = await readSubagentRecord({ dataRoot, legacyDataRoot, compatibilityObserver, sessionId, runId, id: entry.name });
+    archiveReadCheckpoint(options);
+    const record = await readSubagentRecord({ dataRoot, legacyDataRoot, compatibilityObserver, sessionId, runId, id: entry.name, ...options });
     if (!record) continue;
     if (!includeFinal && isFinalSubagentStatus(record.status)) continue;
     records.push(record);
   }
   if (legacyDataRoot) {
-    const legacyRecords = await listSubagentRecords({ dataRoot: legacyDataRoot, includeFinal, limit, sessionId, runId });
+    const legacyRecords = await listSubagentRecords({ dataRoot: legacyDataRoot, includeFinal, limit, sessionId, runId, ...options });
     const seen = new Set(records.map((record) => record.id));
     for (const record of legacyRecords) {
       if (seen.has(record.id)) continue;
@@ -132,6 +143,7 @@ export async function listSubagentRecords({ dataRoot, legacyDataRoot = null, com
       records.push(record);
     }
   }
+  archiveReadCheckpoint(options);
   return records
     .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
     .slice(0, limit);

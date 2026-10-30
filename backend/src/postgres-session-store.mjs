@@ -1,7 +1,10 @@
+import { archiveReadQuery, withArchiveRead } from './postgres-archive-read.mjs';
 import { projectPendingActions } from './session-entry.mjs';
 import { fenceChatInputsForReset } from './postgres-chat-input-store.mjs';
 import { matchCompactionOccurrences, COMPACTION_COPY_BATCH_SIZE } from './postgres-compaction.mjs';
 import { POSTGRES_COMPACTION_PROJECTIONS_SQL } from './postgres-compaction-projections.mjs';
+import { readArchiveTranscriptPage } from './postgres-archive-page.mjs';
+import { POSTGRES_ARCHIVE_LEXICAL_SQL, archiveOccurrenceTokenSQL, archivePayloadKeySQL, archiveTruthyPayloadSQL, archiveVisibleMessageSQL } from './postgres-archive-lexical.mjs';
 import { POSTGRES_OPERATOR_INSTANT_SQL } from './postgres-operator-instant.mjs';
 import { exportSessionRawEvidence } from './session-evidence-export.mjs';
 import { POSTGRES_LOGICAL_MEMBER_SQL, POSTGRES_ARCHIVE_RELATIONAL_ID_SQL, POSTGRES_CATALOG_SCALAR_ID_SQL, POSTGRES_LOGICAL_LOOKUP_INDEX_SQL } from './postgres-lexical-identity.mjs';
@@ -650,7 +653,7 @@ UPDATE conversation_entries SET has_payload_id=NULL;
 UPDATE conversation_archive_entries SET has_payload_id=NULL;
 `;
 
-export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL + POSTGRES_RESET_INSTANT_SQL + POSTGRES_HISTORY_KEYSET_SQL + POSTGRES_LOGICAL_MEMBER_SQL + POSTGRES_ARCHIVE_RELATIONAL_ID_SQL + POSTGRES_CATALOG_SCALAR_ID_SQL + POSTGRES_LOGICAL_LOOKUP_INDEX_SQL + POSTGRES_AGENT_DELIVERY_SCHEMA_SQL + POSTGRES_AGENT_DELIVERY_OWNER_SQL + POSTGRES_OPERATOR_INSTANT_SQL + POSTGRES_ARCHIVE_LISTING_INDEX_SQL + POSTGRES_COMPACTION_PROJECTIONS_SQL;
+export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL + POSTGRES_RESET_INSTANT_SQL + POSTGRES_HISTORY_KEYSET_SQL + POSTGRES_LOGICAL_MEMBER_SQL + POSTGRES_ARCHIVE_RELATIONAL_ID_SQL + POSTGRES_CATALOG_SCALAR_ID_SQL + POSTGRES_LOGICAL_LOOKUP_INDEX_SQL + POSTGRES_AGENT_DELIVERY_SCHEMA_SQL + POSTGRES_AGENT_DELIVERY_OWNER_SQL + POSTGRES_OPERATOR_INSTANT_SQL + POSTGRES_ARCHIVE_LISTING_INDEX_SQL + POSTGRES_COMPACTION_PROJECTIONS_SQL + POSTGRES_ARCHIVE_LEXICAL_SQL;
 
 const text = (value) => String(value ?? '');
 const required = (value, name) => { const result = text(value).trim(); if (!result) throw new Error(`${name} is required`); return result; };
@@ -659,12 +662,11 @@ const stamp = () => new Date().toISOString();
 // otherwise JIT-compiles every (mostly unexecuted) branch based on conservative
 // JSON-function costs; compilation can dwarf the millisecond candidate read.
 // Transaction-local only: never change a shared pooled connection's defaults.
-async function archiveQuery(pool, sql, values) {
-  return withPostgresTransaction(pool, async client => {
-    await client.query('SET LOCAL jit=off');
-    return client.query(sql, values);
-  });
+function sessionReadQuery(pool, sql, values, { signal, deadline } = {}) {
+  if (deadline !== undefined) return archiveReadQuery(pool, sql, values, { signal, deadline });
+  return signal ? withPostgresTransaction(pool, client => client.query(sql, values), { signal }) : pool.query(sql, values);
 }
+
 const cursorValue = (value, name = 'after') => {
   if (value === undefined || value === null || value === '') return 0n;
   const result = typeof value === 'bigint' ? value : (typeof value === 'number' && Number.isSafeInteger(value) ? BigInt(value) : (typeof value === 'string' && /^[0-9]+$/.test(value) ? BigInt(value) : null));
@@ -711,143 +713,21 @@ function archiveRowsSQL({ occurrences = true } = {}) {
   )`;
 }
 
-function archiveOccurrenceTokenSQL(alias) {
-  return `COALESCE(NULLIF(btrim(burrow_json_member(${alias}.entry,'timestamp')::text),'null'),
-    NULLIF(btrim(burrow_json_member(${alias}.entry,'ts')::text),'null'),
-    NULLIF(btrim(burrow_json_member(${alias}.entry,'at')::text),'null'),
-    NULLIF(btrim(burrow_json_member(${alias}.entry,'createdAt')::text),'null'))`;
-}
-
-// JavaScript's String(number), not a JSON numeric spelling (1, 1.0 and "1"
-// share a truthy payload identity). Only individual safe numeric tokens decode.
-function archiveNumberTextSQL(token) {
-  // PostgreSQL deliberately avoids shortest decimal midpoint spellings (1e23),
-  // whereas JS chooses them. Find the shortest rounded significant decimal that
-  // reads back to the same IEEE-754 value, then apply ECMAScript's exponent cutoffs.
-  return `(SELECT CASE WHEN number IS NOT NULL THEN CASE WHEN number=0 THEN '0'
-      WHEN abs(number)>=0.000001 AND abs(number)<1e21 THEN
-        CASE WHEN position('.' IN decimal::text)>0 THEN rtrim(rtrim(decimal::text,'0'),'.') ELSE decimal::text END
-      ELSE (CASE WHEN number<0 THEN '-' ELSE '' END) || left(digits,1)
-        || CASE WHEN length(digits)>1 THEN '.' || substring(digits FROM 2) ELSE '' END
-        || 'e' || CASE WHEN exponent>=0 THEN '+' ELSE '' END || exponent::text END
-    WHEN pg_input_is_valid(raw,'numeric') THEN CASE WHEN abs(raw::numeric)<1 THEN '0'
-      WHEN left(raw,1)='-' THEN '-Infinity' ELSE 'Infinity' END
-    WHEN raw ~ '[eE]-' THEN '0' WHEN left(raw,1)='-' THEN '-Infinity' ELSE 'Infinity' END
-    FROM (SELECT *,rtrim(regexp_replace(replace(abs(decimal)::text,'.',''),'^0+',''),'0') AS digits,
-        CASE WHEN decimal<>0 THEN floor(log(abs(decimal)))::int ELSE 0 END AS exponent
-      FROM (SELECT *,CASE WHEN number<>0 THEN (
-          SELECT rounded FROM (SELECT p,round(number::text::numeric,
-            p-1-floor(log(abs(number::text::numeric)))::int) AS rounded FROM generate_series(1,17) p) choices
-          WHERE CASE WHEN pg_input_is_valid(rounded::text,'double precision') THEN rounded::text::double precision=number ELSE false END
-          ORDER BY p LIMIT 1) ELSE 0::numeric END AS decimal
-        FROM (SELECT raw,CASE WHEN pg_input_is_valid(raw,'double precision') THEN raw::double precision END AS number
-          FROM (SELECT btrim((${token})::text) AS raw OFFSET 0) numeric_token) parsed_number) shortest) formatted_number)`;
-}
-
-function archiveTruthyNumberSQL(token) {
-  const raw = `btrim((${token})::text)`;
-  return `(CASE WHEN pg_input_is_valid(${raw},'double precision') THEN ${raw}::double precision<>0
-    WHEN pg_input_is_valid(${raw},'numeric') THEN abs(${raw}::numeric)>=1
-    ELSE ${raw} !~ '[eE]-' END)`;
-}
-
-function archiveLeafStringKeySQL(token) {
-  return `CASE json_typeof(${token})
-    WHEN 'string' THEN burrow_history_key((${token})::text)
-    WHEN 'number' THEN burrow_history_text(${archiveNumberTextSQL(token)})
-    WHEN 'boolean' THEN burrow_history_text(btrim((${token})::text))
-    WHEN 'object' THEN burrow_history_text('[object Object]') ELSE '' END`;
-}
-
-// Lossless UTF-16 String(value) key. Arrays use recursive Array#join semantics:
-// null/empty children are blank, each array-level separator is still visible.
-// Never decode a retained object/string into jsonb (NUL and lone surrogates).
-function archiveStringKeySQL(token) {
-  return `(CASE WHEN json_typeof(${token})='array' THEN (
-    WITH RECURSIVE parts(value,path,separator) AS (
-      SELECT ${token},ARRAY[]::bigint[],false
-      UNION ALL SELECT child.value,parts.path || child.ordinal,child.ordinal>1 FROM parts
-        CROSS JOIN LATERAL json_array_elements(CASE WHEN json_typeof(parts.value)='array' THEN parts.value ELSE '[]'::json END)
-          WITH ORDINALITY child(value,ordinal)
-    ) SELECT COALESCE(string_agg((CASE WHEN separator THEN '002c' ELSE '' END) ||
-      ${archiveLeafStringKeySQL('parts.value')},'' ORDER BY path),'') FROM parts
-    ) ELSE ${archiveLeafStringKeySQL(token)} END)`;
-}
-
-function archivePayloadKeySQL(alias) {
-  // Presence is not truthiness. Falsey IDs use relational occurrence identity;
-  // legacy archive rows without either identity remain distinct occurrences.
-  const token = `(CASE WHEN ${alias}.has_payload_id THEN ${alias}.entry_key::json
-    WHEN ${alias}.has_payload_id IS NULL THEN burrow_json_member(${alias}.entry,'id') END)`;
-  return `(SELECT CASE json_typeof(id_token)
-    WHEN 'string' THEN NULLIF(burrow_history_key(id_token::text),'')
-    WHEN 'number' THEN NULLIF(burrow_history_text(${archiveNumberTextSQL('id_token')}),burrow_history_text('0'))
-    WHEN 'boolean' THEN CASE WHEN btrim(id_token::text)='true' THEN burrow_history_text('true') END
-    WHEN 'array' THEN ${archiveStringKeySQL('id_token')}
-    WHEN 'object' THEN burrow_history_text('[object Object]') END
-    FROM (SELECT ${token} AS id_token OFFSET 0) payload_token)`;
-}
-
-// For a blank Array#toString, every level must be a singleton (or empty),
-// ending in null/blank text. Stripping only edge brackets preserves commas or
-// objects from every non-singleton case, hence they cannot be mistaken as blank.
-function archiveArrayLeafSQL(token) {
-  return `regexp_replace(regexp_replace(btrim((${token})::text),
-    '^(\\[[ \\t\\r\\n]*)+','','g'),'([ \\t\\r\\n]*\\])+$','','g')`;
-}
-
-function archiveTruthyPayloadSQL(alias) {
-  const token = `(CASE WHEN ${alias}.has_payload_id THEN ${alias}.entry_key::json
-    WHEN ${alias}.has_payload_id IS NULL THEN burrow_json_member(${alias}.entry,'id') END)`;
-  return `COALESCE((CASE json_typeof(${token})
-    WHEN 'string' THEN burrow_history_key((${token})::text)<>''
-    WHEN 'number' THEN ${archiveTruthyNumberSQL(token)}
-    WHEN 'boolean' THEN btrim((${token})::text)='true'
-    WHEN 'null' THEN false ELSE ${token} IS NOT NULL END),false)`;
-}
-
-function archiveVisibleMessageSQL(alias) {
-  const blank = '^(0009|000a|000b|000c|000d|0020|00a0|1680|200[0-9a]|2028|2029|202f|205f|3000|feff)*$';
-  const attachments = `burrow_json_member(burrow_json_member(${alias}.entry,'metadata'),'attachments')`;
-  const content = `COALESCE(NULLIF(${alias}.search_projection,''),'null')::json`;
-  const leaf = archiveArrayLeafSQL(content);
-  const visibleContent = `(CASE json_typeof(${content})
-    WHEN 'string' THEN burrow_history_key((${content})::text) !~ '${blank}'
-    WHEN 'number' THEN ${archiveTruthyNumberSQL(content)}
-    WHEN 'boolean' THEN btrim((${content})::text)='true'
-    WHEN 'object' THEN true
-    WHEN 'array' THEN CASE WHEN ${leaf} IN ('','null') THEN false
-      WHEN left(${leaf},1)='"' THEN burrow_history_key(${leaf}) !~ '${blank}' ELSE true END
-    ELSE false END)`;
-  const role = archiveArrayLeafSQL(`burrow_json_member(${alias}.entry,'role')`);
-  return `burrow_history_key(burrow_json_member(${alias}.entry,'type')::text)=burrow_history_text('message')
-    AND burrow_history_key(${role}) IN (burrow_history_text('user'),burrow_history_text('assistant'),burrow_history_text('agent'))
-    AND burrow_history_key(burrow_json_member(${alias}.entry,'visibility')::text)=burrow_history_text('chat')
-    AND btrim(burrow_json_member(${alias}.entry,'entersPrompt')::text)='true'
-    AND (${visibleContent}
-      OR CASE WHEN json_typeof(${attachments})='array' THEN json_array_length(${attachments})>0 ELSE false END)`;
-}
-
 function archiveOccurrenceDaysSQL({ native, start, end, timezone }) {
   const token = archiveOccurrenceTokenSQL('e');
-  // Parse only an explicit occurrence clock. Missing/ambiguous/unsafe clocks
-  // never borrow storage, reset or compaction time to manufacture chat days.
-  const value = `(CASE WHEN (${token}) ~ '^"[0-9T Z:+.\\-]+"$' THEN trim(both '"' from (${token})) END)`;
-  const occurrenceInstant = `burrow_legacy_instant(CASE
-    WHEN ${value} ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN ${value} || 'T00:00:00Z'
-    WHEN ${value} ~ '(Z|[+-][0-9]{2}(:?[0-9]{2})?)$' THEN ${value} END)`;
   const branch = (live, fallback = false) => {
-    // NULL stored provenance prevents Dream's parser from borrowing a storage
-    // clock, while still decoding an individually escaped explicit ISO scalar.
-    const instant = native ? (fallback ? 'burrow_dream_instant(e.entry,NULL::text)' : 'e.dream_at') : occurrenceInstant;
+    // Project exactly once after the indexed date cut. The two cold paths
+    // (session-only schemas and unprojected NULL dates) parse that same
+    // projection, never rescanning the retained body to find each clock field.
     return `SELECT e.agent_id,e.session_id,'${live ? 'live' : 'archive'}'::text AS source_store,
       ${live ? 'e.sequence::text' : 'e.source_id'} AS source_id,${live ? 'e.sequence' : 'e.ordinal'} AS ordinal,
-      e.entry,e.entry_key,e.has_payload_id,e.search_projection,e.entry_id,${live ? 'NULL::bigint' : 'e.generation'} AS generation,
-      ${live ? 'NULL::text' : 'e.archive_kind'} AS archive_kind,
-      to_char(${instant} AT TIME ZONE ${timezone},'YYYY-MM-DD') AS day
+      burrow_archive_fields(e.entry) AS fields,e.entry_key,e.has_payload_id,e.search_projection,e.entry_id,
+      ${live ? 'NULL::bigint' : 'e.generation'} AS generation,${live ? 'NULL::text' : 'e.archive_kind'} AS archive_kind,
+      ${native && !fallback ? 'e.dream_at' : 'NULL::timestamptz'} AS occurrence_at,
+      ${!native || fallback} AS needs_instant
       FROM ${live ? 'conversation_entries' : 'conversation_archive_entries'} e
-      WHERE e.agent_id=$1 ${fallback ? 'AND e.dream_at IS NULL AND e.created_at IS NULL' : ''}
-        AND ${instant}>=${start}::timestamptz AND ${instant}<${end}::timestamptz`;
+      WHERE e.agent_id=$1 ${fallback ? 'AND e.dream_at IS NULL' : ''}
+        ${native && !fallback ? `AND e.dream_at>=${start}::timestamptz AND e.dream_at<${end}::timestamptz` : ''}`;
   };
   // Separate indexed probes keep ordinary string-ID candidates on the logical
   // identity index. Only non-string/falsey identity cases need scalar coercion;
@@ -858,7 +738,7 @@ function archiveOccurrenceDaysSQL({ native, start, end, timezone }) {
     `c.payload_key IS NOT NULL AND n.has_payload_id IS DISTINCT FROM false
       AND burrow_history_key(n.entry_key) IS NULL AND ${archivePayloadKeySQL('n')}=c.payload_key`,
     `c.payload_key IS NULL AND NULLIF(c.entry_id,'') IS NOT NULL
-      AND n.entry_id=c.entry_id AND NOT ${archiveTruthyPayloadSQL('n')}`,
+      AND n.entry_id<>'' AND n.entry_id=c.entry_id AND NOT ${archiveTruthyPayloadSQL('n')}`,
   ];
   const probes = identities.flatMap(identity => [
     `NOT EXISTS (SELECT 1 FROM conversation_entries n
@@ -877,9 +757,12 @@ function archiveOccurrenceDaysSQL({ native, start, end, timezone }) {
   ]);
   return `occurrence_windows AS MATERIALIZED (${[branch(true), branch(false), ...(native ? [branch(true, true), branch(false, true)] : [])].map(sql => `(${sql})`).join(' UNION ALL ')}),
     occurrence_candidates AS MATERIALIZED (
-      SELECT e.agent_id,e.session_id,e.source_store,e.source_id,e.ordinal,e.entry_id,e.generation,e.archive_kind,e.day,
-        ${archivePayloadKeySQL('e')} AS payload_key FROM occurrence_windows e
-      WHERE ${token} IS NOT NULL AND ${archiveVisibleMessageSQL('e')}),
+      SELECT e.agent_id,e.session_id,e.source_store,e.source_id,e.ordinal,e.entry_id,e.generation,e.archive_kind,
+        to_char(clock.instant AT TIME ZONE ${timezone},'YYYY-MM-DD') AS day,
+        ${archivePayloadKeySQL('e', { projected: true })} AS payload_key FROM occurrence_windows e
+      CROSS JOIN LATERAL (SELECT CASE WHEN e.needs_instant THEN burrow_archive_instant((${token})::json)
+        ELSE e.occurrence_at END AS instant OFFSET 0) clock
+      WHERE clock.instant>=${start}::timestamptz AND clock.instant<${end}::timestamptz AND ${token} IS NOT NULL AND ${archiveVisibleMessageSQL('e')}),
     matched_days AS (
       SELECT DISTINCT d.agent_id,d.id,c.day FROM occurrence_candidates c
       JOIN archive_rows d ON d.agent_id=c.agent_id AND d.session_id=c.session_id
@@ -941,9 +824,9 @@ export class PostgresSessionStore {
     if (this.proofProjection === null) this.proofProjection = available;
     return available;
   }
-  async hasArchiveDateProjection() {
+  async hasArchiveDateProjection(client = this.pool) {
     if (this.archiveDateProjection !== null) return this.archiveDateProjection;
-    const { rows } = await this.pool.query(`SELECT
+    const { rows } = await client.query(`SELECT
       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema()
         AND table_name='conversation_entries' AND column_name='dream_at') AS available,
       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema()
@@ -1341,9 +1224,10 @@ export class PostgresSessionStore {
   }
   async appendIfAbsent(args = {}) { return this.append(args); }
 
-  async read({ agentId: rawAgentId, sessionId: rawSessionId, limit = 20, after = 0 } = {}) {
+  async read({ agentId: rawAgentId, sessionId: rawSessionId, limit = 20, after = 0 , signal, deadline } = {}) {
+    const readQuery = (sql, values) => sessionReadQuery(this.pool, sql, values, { signal, deadline });
     const agentId = required(rawAgentId, 'agentId'); const sid = required(rawSessionId, 'sessionId'); const size = limitValue(limit); const cursor = cursorValue(after);
-    const result = await this.pool.query(`SELECT sequence,entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND sequence>$3 ORDER BY sequence LIMIT $4`, [agentId, sid, cursor.toString(), size]);
+    const result = await readQuery(`SELECT sequence,entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND sequence>$3 ORDER BY sequence LIMIT $4`, [agentId, sid, cursor.toString(), size]);
     return result.rows.map(rowEntry);
   }
 
@@ -1389,7 +1273,7 @@ export class PostgresSessionStore {
 
   async page(args = {}) {
     const size = limitValue(args.limit); const cursor = cursorValue(args.after); const agentId = required(args.agentId, 'agentId'); const sid = required(args.sessionId, 'sessionId');
-    const result = await this.pool.query(`SELECT sequence,entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND sequence>$3 ORDER BY sequence LIMIT $4`, [agentId, sid, cursor.toString(), size + 1]);
+    const result = await sessionReadQuery(this.pool, `SELECT sequence,entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 AND sequence>$3 ORDER BY sequence LIMIT $4`, [agentId, sid, cursor.toString(), size + 1], args);
     const hasMore = result.rows.length > size; const rows = hasMore ? result.rows.slice(0, size) : result.rows;
     return { entries: rows.map(rowEntry), next: hasMore ? String(rows.at(-1).sequence) : null, hasMore };
   }
@@ -1480,9 +1364,10 @@ export class PostgresSessionStore {
     }, { signal });
   }
 
-  async listSessions({ agentId: rawAgentId, includeArchived = true } = {}) {
+  async listSessions({ agentId: rawAgentId, includeArchived = true , signal, deadline } = {}) {
+    const readQuery = (sql, values) => sessionReadQuery(this.pool, sql, values, { signal, deadline });
     const agentId = required(rawAgentId, 'agentId');
-    const result = await this.pool.query(`SELECT session_id,metadata,created_at,updated_at,(SELECT head FROM continuity_state c WHERE c.agent_id=conversation_sessions.agent_id AND c.session_id=conversation_sessions.session_id) AS continuity_head FROM conversation_sessions WHERE agent_id=$1 ${includeArchived ? '' : "AND COALESCE((metadata->>'archived')::boolean,false)=false"} ORDER BY updated_at DESC`, [agentId]);
+    const result = await readQuery(`SELECT session_id,metadata,created_at,updated_at,(SELECT head FROM continuity_state c WHERE c.agent_id=conversation_sessions.agent_id AND c.session_id=conversation_sessions.session_id) AS continuity_head FROM conversation_sessions WHERE agent_id=$1 ${includeArchived ? '' : "AND COALESCE((metadata->>'archived')::boolean,false)=false"} ORDER BY updated_at DESC`, [agentId]);
     return result.rows.map((row) => ({ ...row.metadata, ...(row.continuity_head ? {continuityHead:row.continuity_head} : {}), sessionId: row.session_id, createdAt: row.created_at, updatedAt: row.updated_at }));
   }
 
@@ -1511,6 +1396,12 @@ export class PostgresSessionStore {
     return { schemaVersion: '1', session: { id: sessionId, metadata: { ...row.metadata, createdAt: row.created_at, updatedAt: row.updated_at } }, entries };
   }
 
+
+  // Native Archive detail pages keep retained bodies in PostgreSQL until the
+  // bounded canonical page has been selected.
+  async readArchiveTranscriptPage(args = {}) {
+    return readArchiveTranscriptPage(this.pool, args);
+  }
 
   // Reconstruct a reset's entire conversation without rewriting immutable
   // evidence. The target's generation window, not today's live metadata, owns
@@ -1545,12 +1436,10 @@ export class PostgresSessionStore {
       session: { id: row.archive_id, metadata: { ...row.metadata, createdAt: row.created_at, updatedAt: row.created_at, archivedAt: row.created_at, chatTurnCount: null } }, entries };
   }
 
-  async getMetadata({ agentId: rawAgentId, sessionId: rawSessionId, signal } = {}) {
+  async getMetadata({ agentId: rawAgentId, sessionId: rawSessionId, signal, deadline } = {}) {
     const sql = 'SELECT metadata,created_at,updated_at FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2';
     const args = [required(rawAgentId, 'agentId'), required(rawSessionId, 'sessionId')];
-    const result = signal
-      ? await withPostgresTransaction(this.pool, client => client.query(sql, args), { signal })
-      : await this.pool.query(sql, args);
+    const result = await sessionReadQuery(this.pool, sql, args, { signal, deadline });
     if (!result.rows[0]) return null;
     return { ...result.rows[0].metadata, createdAt: result.rows[0].created_at, updatedAt: result.rows[0].updated_at };
   }
@@ -2048,12 +1937,13 @@ export class PostgresSessionStore {
     });
   }
 
-  async listArchiveRunDirectory({ agentId: rawAgentId, sessionId: rawSessionId = null, limit = 100, boundary = null } = {}) {
+  async listArchiveRunDirectory({ agentId: rawAgentId, sessionId: rawSessionId = null, limit = 100, boundary = null, signal, deadline } = {}) {
+    const readQuery = (sql, values) => sessionReadQuery(this.pool, sql, values, { signal, deadline });
     const agentId = required(rawAgentId, 'agentId');
     const sessionId = rawSessionId == null ? null : required(rawSessionId, 'sessionId');
     const size = limitValue(limit);
     if (boundary && (typeof boundary.t !== 'string' || typeof boundary.i !== 'string')) throw new Error('archive_cursor_invalid');
-    const { rows } = await this.pool.query(`SELECT r.agent_id,r.session_id,r.run_id,r.started_at,r.completed_at,r.last_activity_at,r.sort_timestamp,evidence.item AS evidence
+    const { rows } = await readQuery(`SELECT r.agent_id,r.session_id,r.run_id,r.started_at,r.completed_at,r.last_activity_at,r.sort_timestamp,evidence.item AS evidence
       FROM conversation_archive_runs r LEFT JOIN conversation_sessions s ON s.agent_id=r.agent_id AND s.session_id=r.session_id
       LEFT JOIN LATERAL (SELECT item FROM jsonb_array_elements(COALESCE(s.metadata->'runEvidence','[]'::jsonb)) item WHERE item->>'runId'=r.run_id LIMIT 1) evidence ON true
       WHERE r.agent_id=$1 AND ($2::text IS NULL OR r.session_id=$2)
@@ -2071,7 +1961,8 @@ export class PostgresSessionStore {
     })), hasMore };
   }
 
-  async readArchiveRunSources({ agentId: rawAgentId, runs = [] } = {}) {
+  async readArchiveRunSources({ agentId: rawAgentId, runs = [], signal, deadline } = {}) {
+    const readQuery = (sql, values) => sessionReadQuery(this.pool, sql, values, { signal, deadline });
     const agentId = required(rawAgentId, 'agentId');
     const requested = (Array.isArray(runs) ? runs : []).filter(item => item?.sessionId && item?.runId);
     if (!requested.length) return [];
@@ -2081,7 +1972,7 @@ export class PostgresSessionStore {
     // exact requested (session, run) pairs through the existing run indexes;
     // both stores are read in one statement so compaction cannot hide a row.
     // Do not reserialize the JSON originals or select just the newest snapshot.
-    const { rows } = await this.pool.query(`WITH requested AS MATERIALIZED (
+    const { rows } = await readQuery(`WITH requested AS MATERIALIZED (
       SELECT DISTINCT session_id,run_key FROM unnest($2::text[],$3::text[]) AS r(session_id,run_key)
       WHERE run_key IS NOT NULL
     ), occurrences AS (
@@ -2109,7 +2000,7 @@ export class PostgresSessionStore {
       if (source !== group.source) { group.snapshots.push([]); group.source = source; }
       group.snapshots.at(-1).push({ entry: rowEntry(row), occurrence: row.entry_id });
     }
-    const metadataRows = await this.pool.query('SELECT session_id,metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=ANY($2::text[])', [agentId,[...new Set(sessions)]]);
+    const metadataRows = await readQuery('SELECT session_id,metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=ANY($2::text[])', [agentId,[...new Set(sessions)]]);
     const metadata = new Map(metadataRows.rows.map(row => [row.session_id,row.metadata]));
     return requested.map((item,index) => {
       const group = grouped.get(JSON.stringify([sessions[index],keys[index]]));
@@ -2124,20 +2015,21 @@ export class PostgresSessionStore {
     });
   }
 
-  async readArchiveRunSource({ agentId: rawAgentId, sessionId: rawSessionId = null, runId: rawRunId } = {}) {
+  async readArchiveRunSource({ agentId: rawAgentId, sessionId: rawSessionId = null, runId: rawRunId, signal, deadline } = {}) {
+    const readQuery = (sql, values) => sessionReadQuery(this.pool, sql, values, { signal, deadline });
     const agentId = required(rawAgentId, 'agentId'); const runId = required(rawRunId, 'runId');
     const sessionId = rawSessionId == null ? null : required(rawSessionId, 'sessionId');
     const key = JSON.stringify(runId);
-    const located = await this.pool.query(`SELECT session_id FROM conversation_archive_runs
+    const located = await readQuery(`SELECT session_id FROM conversation_archive_runs
       WHERE agent_id=$1 AND run_key=encode(convert_to($2,'UTF8'),'hex') AND ($3::text IS NULL OR session_id=$3)
       ORDER BY sort_timestamp DESC,session_id DESC LIMIT 1`, [agentId, key, sessionId]);
     const sid = located.rows[0]?.session_id;
     if (!sid) return null;
-    const [source] = await this.readArchiveRunSources({ agentId, runs: [{ sessionId: sid, runId }] });
+    const [source] = await this.readArchiveRunSources({ agentId, runs: [{ sessionId: sid, runId }], signal, deadline });
     return { sessionId: sid, entries: source.entries, evidence: source.evidence };
   }
 
-  async listArchiveSessions({ agentId: rawAgentId, includeArchived = true, query = '', date = null, month = null, timezone = 'UTC', limit = 100, boundary = null } = {}) {
+  async listArchiveSessions({ agentId: rawAgentId, includeArchived = true, query = '', date = null, month = null, timezone = 'UTC', limit = 100, boundary = null, signal, deadline } = {}) {
     const agentId = required(rawAgentId, 'agentId');
     const size = limitValue(limit);
     const search = text(query).trim().toLowerCase();
@@ -2151,10 +2043,11 @@ export class PostgresSessionStore {
     const windowEnd = windowStart ? new Date(windowStart) : null;
     if (windowStart) windowStart.setUTCDate(windowStart.getUTCDate() - 1);
     if (windowEnd) date ? windowEnd.setUTCDate(windowEnd.getUTCDate() + 2) : windowEnd.setUTCMonth(windowEnd.getUTCMonth() + 1, 2);
-    const native = await this.hasArchiveDateProjection();
+    return withArchiveRead(this.pool, async client => {
+    const native = await this.hasArchiveDateProjection(client);
     const sortTime = this.archiveNativeCatalogTime ? 'updated_at' : 'burrow_legacy_instant(updated_at::text)';
     const days = windowKey ? archiveOccurrenceDaysSQL({ native, start: '$10', end: '$11', timezone: '$6' }) : null;
-    const { rows } = await archiveQuery(this.pool, `WITH ${archiveRowsSQL({ occurrences: Boolean(days) })}${days ? `, ${days}` : ''}, bounded AS (
+    const { rows } = await client.query( `WITH ${archiveRowsSQL({ occurrences: Boolean(days) })}${days ? `, ${days}` : ''}, bounded AS (
       SELECT *,agent_id || ':' || id AS identity,
         COALESCE(to_char(${sortTime} AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),'') AS sort_timestamp FROM archive_rows
       WHERE ($3::text='' OR lower(concat_ws(' ',id,session_id,source_session_id,metadata->>'archiveTitle',metadata->>'title',metadata->>'name',metadata->>'summary',metadata->>'archiveSummary')) LIKE '%' || $3 || '%')
@@ -2220,15 +2113,17 @@ export class PostgresSessionStore {
       // Empty sorts strictly after known clocks and is a real cursor position.
       sortTimestamp: row.sort_timestamp, identity: row.identity,
     })), hasMore };
+    }, { signal, deadline, readOnly: false });
   }
 
-  async listArchiveCalendarDates({ agentId: rawAgentId, month, timezone = 'UTC' } = {}) {
+  async listArchiveCalendarDates({ agentId: rawAgentId, month, timezone = 'UTC', signal, deadline } = {}) {
     const agentId = required(rawAgentId, 'agentId');
     const monthStart = new Date(`${month}-01T00:00:00Z`);
     const safeStart = new Date(monthStart); safeStart.setUTCDate(safeStart.getUTCDate() - 1);
     const safeEnd = new Date(monthStart); safeEnd.setUTCMonth(safeEnd.getUTCMonth() + 1, 2);
-    const days = archiveOccurrenceDaysSQL({ native: await this.hasArchiveDateProjection(), start: '$4', end: '$5', timezone: '$3' });
-    const { rows } = await archiveQuery(this.pool, `WITH ${archiveRowsSQL()}, ${days}
+    return withArchiveRead(this.pool, async client => {
+    const days = archiveOccurrenceDaysSQL({ native: await this.hasArchiveDateProjection(client), start: '$4', end: '$5', timezone: '$3' });
+    const { rows } = await client.query( `WITH ${archiveRowsSQL()}, ${days}
       SELECT DISTINCT day FROM (
         SELECT to_char(burrow_legacy_instant(updated_at::text) AT TIME ZONE $3,'YYYY-MM-DD') AS day
           FROM archive_rows WHERE burrow_legacy_instant(updated_at::text)>=$4::timestamptz AND burrow_legacy_instant(updated_at::text)<$5::timestamptz
@@ -2236,21 +2131,24 @@ export class PostgresSessionStore {
       ) archive_days WHERE day LIKE $6 || '-%' ORDER BY day`,
     [agentId, true, timezone, safeStart.toISOString(), safeEnd.toISOString(), month]);
     return rows.map(row => row.day);
+    }, { signal, deadline });
   }
 
-  async listArchives({ agentId: rawAgentId, sessionId: rawSessionId, limit = 100 } = {}) {
+  async listArchives({ agentId: rawAgentId, sessionId: rawSessionId, limit = 100, signal, deadline } = {}) {
+    const readQuery = (sql, values) => sessionReadQuery(this.pool, sql, values, { signal, deadline });
     const agentId = required(rawAgentId, 'agentId'); const params = [agentId]; let where = 'agent_id=$1';
     if (rawSessionId != null) { params.push(required(rawSessionId, 'sessionId')); where += ` AND session_id=$${params.length}`; }
     if (rawSessionId == null) where += ` AND NULLIF(metadata->'contextIsolation'->>'historySessionId','') IS NULL`;
     const unbounded = limit === null;
     if (!unbounded) params.push(limitValue(limit));
-    const result = await this.pool.query(`SELECT archive_id,session_id,generation,kind,COALESCE((SELECT json_agg(e.entry ORDER BY e.ordinal) FROM conversation_archive_entries e WHERE e.agent_id=conversation_archives.agent_id AND e.session_id=conversation_archives.session_id AND e.source_id=conversation_archives.archive_id),'[]'::json) AS entries,metadata,created_at FROM conversation_archives WHERE ${where} ORDER BY generation DESC, created_at DESC, archive_id DESC${unbounded ? '' : ` LIMIT $${params.length}`}`, params);
+    const result = await readQuery(`SELECT archive_id,session_id,generation,kind,COALESCE((SELECT json_agg(e.entry ORDER BY e.ordinal) FROM conversation_archive_entries e WHERE e.agent_id=conversation_archives.agent_id AND e.session_id=conversation_archives.session_id AND e.source_id=conversation_archives.archive_id),'[]'::json) AS entries,metadata,created_at FROM conversation_archives WHERE ${where} ORDER BY generation DESC, created_at DESC, archive_id DESC${unbounded ? '' : ` LIMIT $${params.length}`}`, params);
     return result.rows.map((row) => ({ archiveId: row.archive_id, sessionId: row.session_id, generation: Number(row.generation), kind: row.kind, entries: row.entries, metadata: row.metadata, createdAt: row.created_at }));
   }
 
-  async readArchiveById({ agentId: rawAgentId, archiveId, kind = null } = {}) {
+  async readArchiveById({ agentId: rawAgentId, archiveId, kind = null, signal, deadline } = {}) {
+    const readQuery = (sql, values) => sessionReadQuery(this.pool, sql, values, { signal, deadline });
     const agentId = required(rawAgentId, 'agentId'); const id = required(archiveId, 'archiveId');
-    const result = await this.pool.query(`SELECT archive_id,session_id,generation,kind,
+    const result = await readQuery(`SELECT archive_id,session_id,generation,kind,
       COALESCE((SELECT json_agg(e.entry ORDER BY e.ordinal) FROM conversation_archive_entries e
         WHERE e.agent_id=conversation_archives.agent_id AND e.session_id=conversation_archives.session_id
         AND e.source_id=conversation_archives.archive_id),'[]'::json) AS entries,metadata,created_at

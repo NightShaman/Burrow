@@ -1,3 +1,4 @@
+import { withArchiveRead } from './postgres-archive-read.mjs';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import {
   closePostgresPool,
@@ -99,6 +100,28 @@ export class PostgresAgentRegistryStore {
       );
       return row(selected.rows[0]);
     });
+  }
+  // Page-owned reads never bootstrap identities or lock the registry row.
+  async listArchiveAgents({ includeDisabled = true, signal, deadline } = {}) {
+    return withArchiveRead(this.pool, async client => {
+      const result = await client.query(`SELECT * FROM agents ${includeDisabled ? "" : "WHERE enabled=TRUE"}
+        ORDER BY CASE id WHEN 'hatchet' THEN 0 ELSE 1 END,
+        translate(name,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') COLLATE "C", id COLLATE "C"`);
+      return result.rows.map(row);
+    }, { signal, deadline });
+  }
+  async resolveArchiveAgent(reference, { signal, deadline } = {}) {
+    const value = text(reference);
+    if (!value) return null;
+    return withArchiveRead(this.pool, async client => {
+      const exact = await this.get(value, client);
+      if (exact) return exact;
+      const result = await client.query(`SELECT * FROM agents
+        WHERE translate(id,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')=translate($1,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')
+        OR translate(name,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')=translate($1,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')
+        ORDER BY id COLLATE "C"`, [value]);
+      return result.rows.length === 1 ? row(result.rows[0]) : null;
+    }, { signal, deadline });
   }
   async get(id, client = this.pool) {
     const r = await client.query("SELECT * FROM agents WHERE id=$1", [

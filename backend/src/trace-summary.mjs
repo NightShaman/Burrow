@@ -1,26 +1,33 @@
+import { archiveReadCheckpoint, archiveReadTasks } from './archive-read-scope.mjs';
 import { existsSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { redactAndTruncateText, redactText } from './redaction.mjs';
 import { evidenceTranscript } from './session-search.mjs';
 
-async function readJsonl(filePath) {
+async function readJsonl(filePath, options = {}) {
+  archiveReadCheckpoint(options);
   try {
-    const text = await fs.readFile(filePath, 'utf8');
+    const text = await fs.readFile(filePath, { encoding: 'utf8', signal: options.signal });
+    archiveReadCheckpoint(options);
     return text.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
   } catch (error) {
+    archiveReadCheckpoint(options);
     if (error?.code === 'ENOENT') return [];
     throw error;
   }
 }
 
-async function readPreview(filePath, maxChars = 1000) {
+async function readPreview(filePath, maxChars = 1000, options = {}) {
+  archiveReadCheckpoint(options);
   if (!filePath) return null;
   try {
-    const text = await fs.readFile(filePath, 'utf8');
+    const text = await fs.readFile(filePath, { encoding: 'utf8', signal: options.signal });
+    archiveReadCheckpoint(options);
     const envelope = redactAndTruncateText(text, { maxChars });
     return { path: filePath, chars: envelope.originalChars, text: envelope.text, truncated: envelope.truncated };
   } catch (error) {
+    archiveReadCheckpoint(options);
     if (error?.code === 'ENOENT') return { path: filePath, missing: true };
     throw error;
   }
@@ -50,32 +57,37 @@ export function validTraceRunId(runId) {
   return typeof runId === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(runId);
 }
 
-async function containedTraceDirectory(traceRoot, runId) {
+async function containedTraceDirectory(traceRoot, runId, options = {}) {
+  archiveReadCheckpoint(options);
   const traceDir = path.join(traceRoot, runId);
   try {
-    const [root, directory] = await Promise.all([fs.realpath(traceRoot), fs.realpath(traceDir)]);
+    const [root, directory] = await archiveReadTasks([() => fs.realpath(traceRoot), () => fs.realpath(traceDir)], options);
     const relative = path.relative(root, directory);
     if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
       throw new Error('trace_path_outside_root');
     }
   } catch (error) {
+    archiveReadCheckpoint(options);
     if (error?.code !== 'ENOENT') throw error;
   }
   return traceDir;
 }
 
-async function traceBaseRoot(rootDir, runId = null) {
+async function traceBaseRoot(rootDir, runId = null, options = {}) {
+  archiveReadCheckpoint(options);
   const resolved = path.resolve(rootDir);
   if (!runId) return resolved;
   try {
     await fs.access(path.join(resolved, runId));
+    archiveReadCheckpoint(options);
     return resolved;
-  } catch {}
+  } catch { archiveReadCheckpoint(options); }
   const cacheTraceRoot = path.join(resolved, 'cache', 'traces');
   try {
     await fs.access(path.join(cacheTraceRoot, runId));
+    archiveReadCheckpoint(options);
     return cacheTraceRoot;
-  } catch {}
+  } catch { archiveReadCheckpoint(options); }
   return resolved;
 }
 
@@ -273,23 +285,28 @@ function latestAuthorityFromEntries(entries = [], runId = null) {
     .at(-1) || {});
 }
 
-async function latestReceiptAuthorityEvidence({ conversationStore, agentId, runId, sessionId }) {
+async function latestReceiptAuthorityEvidence({ conversationStore, agentId, runId, sessionId, signal, deadline }) {
   if (!conversationStore) throw new Error('conversation_store_required');
   if (!runId) return null;
-  const sessions = sessionId ? [{sessionId}] : await conversationStore.listSessions({agentId,includeArchived:true});
+  const options = { signal, deadline };
+  archiveReadCheckpoint(options);
+  const sessions = sessionId ? [{sessionId}] : await conversationStore.listSessions({agentId,includeArchived:true,...options});
   for (const session of sessions) {
-    const evidence = latestAuthorityFromEntries(await evidenceTranscript({conversationStore,agentId,sessionId:session.sessionId,includeResetHistory:true}), runId);
+    const evidence = latestAuthorityFromEntries(await evidenceTranscript({conversationStore,agentId,sessionId:session.sessionId,includeResetHistory:true,...options}), runId);
     if (evidence) return compactAuthorityEvidence(evidence);
   }
   return null;
 }
 
-async function linkedWorkItems({ rootDir, runId, sessionId }) {
+async function linkedWorkItems({ rootDir, runId, sessionId, signal, deadline }) {
+  const options = { signal, deadline };
+  archiveReadCheckpoint(options);
   const dataRoot = dataRootFromTraceRoot(rootDir);
   const candidateDirs = [path.join(dataRoot, 'sessions', '_work-items'), path.join(dataRoot, 'work-items')];
   let workItemsDir = candidateDirs[0];
   let entries = [];
   for (const candidate of candidateDirs) {
+    archiveReadCheckpoint(options);
     try {
       entries = await fs.readdir(candidate, { withFileTypes: true });
       workItemsDir = candidate;
@@ -298,13 +315,17 @@ async function linkedWorkItems({ rootDir, runId, sessionId }) {
       if (error?.code !== 'ENOENT') throw error;
     }
   }
+  archiveReadCheckpoint(options);
   if (!entries.length) return [];
   const linked = [];
   for (const entry of entries.filter((item) => item.isDirectory())) {
+    archiveReadCheckpoint(options);
     let item = null;
     try {
-      item = JSON.parse(await fs.readFile(path.join(workItemsDir, entry.name, 'work-item.json'), 'utf8'));
+      item = JSON.parse(await fs.readFile(path.join(workItemsDir, entry.name, 'work-item.json'), { encoding: 'utf8', signal }));
+      archiveReadCheckpoint(options);
     } catch (error) {
+      archiveReadCheckpoint(options);
       if (error?.code === 'ENOENT' || error instanceof SyntaxError) continue;
       throw error;
     }
@@ -396,22 +417,24 @@ export function authorityExplanationFromTraceSummary(traceSummary = {}) {
   };
 }
 
-export async function summarizeTrace({ rootDir, conversationStore, agentId, runId, includeToolOutput = false, maxOutputChars = 1000, includeRelatedWorkTrace = true } = {}) {
+export async function summarizeTrace({ rootDir, conversationStore, agentId, runId, includeToolOutput = false, maxOutputChars = 1000, includeRelatedWorkTrace = true, signal, deadline } = {}) {
   if (!rootDir) throw new Error('rootDir is required');
   if (!runId) throw new Error('runId is required');
   if (!validTraceRunId(runId)) throw new Error('trace_run_id_invalid');
   if (!conversationStore) throw new Error('conversation_store_required');
 
-  const traceRoot = await traceBaseRoot(rootDir, runId);
-  const traceDir = await containedTraceDirectory(traceRoot, runId);
-  const [events, router, tools, memory, model, verifier] = await Promise.all([
-    readJsonl(path.join(traceDir, 'events.jsonl')),
-    readJsonl(path.join(traceDir, 'router.jsonl')),
-    readJsonl(path.join(traceDir, 'tool-calls.jsonl')),
-    readJsonl(path.join(traceDir, 'memory.jsonl')),
-    readJsonl(path.join(traceDir, 'model.jsonl')),
-    readJsonl(path.join(traceDir, 'verifier.jsonl')),
-  ]);
+  const options = { signal, deadline };
+  archiveReadCheckpoint(options);
+  const traceRoot = await traceBaseRoot(rootDir, runId, options);
+  const traceDir = await containedTraceDirectory(traceRoot, runId, options);
+  const [events, router, tools, memory, model, verifier] = await archiveReadTasks([
+    readOptions => readJsonl(path.join(traceDir, 'events.jsonl'), readOptions),
+    readOptions => readJsonl(path.join(traceDir, 'router.jsonl'), readOptions),
+    readOptions => readJsonl(path.join(traceDir, 'tool-calls.jsonl'), readOptions),
+    readOptions => readJsonl(path.join(traceDir, 'memory.jsonl'), readOptions),
+    readOptions => readJsonl(path.join(traceDir, 'model.jsonl'), readOptions),
+    readOptions => readJsonl(path.join(traceDir, 'verifier.jsonl'), readOptions),
+  ], options);
 
   let artifactCount = 0;
   try {
@@ -420,6 +443,7 @@ export async function summarizeTrace({ rootDir, conversationStore, agentId, runI
     if (error?.code !== 'ENOENT') throw error;
   }
 
+  archiveReadCheckpoint(options);
   const toolFailures = tools.filter((record) => record.payload?.ok === false);
   const latestRouter = router.at(-1)?.payload || null;
   const traceSessionId = latestTraceSessionId({ events, router, tools, memory, model, verifier });
@@ -432,18 +456,18 @@ export async function summarizeTrace({ rootDir, conversationStore, agentId, runI
     proposedActions: latestSessionRouter.proposedActions ?? null,
   } : (traceSessionId ? { session: null, sessionId: traceSessionId, priorSession: null, answerChars: null, proposedActions: null } : null);
   const toolOutput = includeToolOutput
-    ? await Promise.all(tools.map(async (record) => {
+    ? await archiveReadTasks(tools.map((record) => async readOptions => {
         const artifacts = record.payload?.artifacts || {};
         return {
           tool: record.payload?.tool || null,
           ok: record.payload?.ok ?? null,
           command: record.payload?.command ? redactText(record.payload.command) : null,
           filePath: record.payload?.filePath || null,
-          stdout: await readPreview(artifacts.stdoutPath, maxOutputChars),
-          stderr: await readPreview(artifacts.stderrPath, maxOutputChars),
-          result: await readPreview(artifacts.resultPath, maxOutputChars),
+          stdout: await readPreview(artifacts.stdoutPath, maxOutputChars, readOptions),
+          stderr: await readPreview(artifacts.stderrPath, maxOutputChars, readOptions),
+          result: await readPreview(artifacts.resultPath, maxOutputChars, readOptions),
         };
-      }))
+      }), options)
     : undefined;
 
   const timeline = buildTraceTimeline({ events, router, tools, memory, model, verifier });
@@ -453,10 +477,10 @@ export async function summarizeTrace({ rootDir, conversationStore, agentId, runI
     ? { kind: 'tools', items: toolActivity.filter((item) => item.status === 'running') }
     : modelActivity ? { kind: 'model', items: [modelActivity] } : { kind: 'idle', items: [] };
   const resolvedSessionId = traceSessionId || sessionSummary?.sessionId || null;
-  const [workItems, authorityEvidence] = await Promise.all([
-    linkedWorkItems({ rootDir: traceRoot, runId, sessionId: resolvedSessionId }),
-    latestReceiptAuthorityEvidence({ conversationStore, agentId, runId, sessionId: resolvedSessionId }),
-  ]);
+  const [workItems, authorityEvidence] = await archiveReadTasks([
+    readOptions => linkedWorkItems({ rootDir: traceRoot, runId, sessionId: resolvedSessionId, ...readOptions }),
+    readOptions => latestReceiptAuthorityEvidence({ conversationStore, agentId, runId, sessionId: resolvedSessionId, ...readOptions }),
+  ], options);
 
   let relatedWorkTrace = null;
   if (includeRelatedWorkTrace && !runId.endsWith('-work')) {
@@ -468,10 +492,12 @@ export async function summarizeTrace({ rootDir, conversationStore, agentId, runI
       includeToolOutput,
       maxOutputChars,
       includeRelatedWorkTrace: false,
+      ...options,
     });
     if (related.exists) relatedWorkTrace = related;
   }
 
+  archiveReadCheckpoint(options);
   return {
     runId,
     traceDir,

@@ -4,6 +4,7 @@ import { migrationLockKey, postgresTransactionContext } from './postgres-foundat
 import { isTiddleIdentity, readTiddle, writeTiddle, appendTiddle, tiddleRows } from './postgres-tiddle-store.mjs';
 import { readRollingCards, writeRollingCard, pruneRollingCards } from './postgres-rolling-continuity-store.mjs';
 import { withPostgresTransaction } from './postgres-foundation.mjs';
+import { withArchiveRead } from './postgres-archive-read.mjs';
 
 export async function runAsync(iterator) {
   let step = iterator.next();
@@ -25,9 +26,21 @@ export function tiddlePersistence({ stores, ownerClient = null } = {}) {
     };
     const adapter = (client, transactional = false) => ({
       atomicUpdate: (key, update, at) => transaction(tx => new PostgresSettingsMetadataStore({pool: postgresTransactionContext(tx)}).atomicUpdate(key, update, at)),
-      get: key => isTiddleIdentity(key) ? readTiddle(client,key) : typeof key === 'string' && key.startsWith('rolling-continuity:') ? readRollingCards(client, ...rollingScope(key)).then(cards => ({ cards })) : transactional ? client.query('SELECT value_json::text AS value_json FROM settings_meta WHERE key=$1', [key]).then(r => { try { return JSON.parse(r.rows[0]?.value_json || 'null'); } catch { return null; } }) : ownerClient ? client.query('SELECT value_json FROM settings_meta WHERE key=$1', [key]).then(r => { const v=r.rows[0]?.value_json; try { return typeof v === 'string' ? JSON.parse(v) : v ?? null; } catch { return null; } }) : metadata.get(key),
+      get: (key, options = {}) => {
+        // Archive owns a read-only checkout; durable pass/synthesis operations
+        // keep their existing owner connection and transaction semantics.
+        if (!transactional && !ownerClient && (options.signal || options.deadline !== undefined)) {
+          return withArchiveRead(pool, tx => adapter(tx, true).get(key), options);
+        }
+        return isTiddleIdentity(key) ? readTiddle(client,key) : typeof key === 'string' && key.startsWith('rolling-continuity:') ? readRollingCards(client, ...rollingScope(key)).then(cards => ({ cards })) : transactional ? client.query('SELECT value_json::text AS value_json FROM settings_meta WHERE key=$1', [key]).then(r => { try { return JSON.parse(r.rows[0]?.value_json || 'null'); } catch { return null; } }) : ownerClient ? client.query('SELECT value_json FROM settings_meta WHERE key=$1', [key]).then(r => { const v=r.rows[0]?.value_json; try { return typeof v === 'string' ? JSON.parse(v) : v ?? null; } catch { return null; } }) : metadata.get(key);
+      },
       set: (key, value, at) => isTiddleIdentity(key) ? writeTiddle(client,key,value,at) : typeof key === 'string' && key.startsWith('rolling-continuity:') ? Promise.all(value.cards.map(card => writeRollingCard(client, card, at))) : client.query('INSERT INTO settings_meta(key,value_json,updated_at) VALUES($1,$2,$3) ON CONFLICT(key) DO UPDATE SET value_json=EXCLUDED.value_json,updated_at=EXCLUDED.updated_at', [key, JSON.stringify(value), at]),
-      rows: prefix => isTiddleIdentity(prefix) ? tiddleRows(client,prefix) : typeof prefix === 'string' && prefix.startsWith('rolling-continuity:') ? readRollingCards(client, prefix.slice('rolling-continuity:'.length, -1)).then(cards => [...new Set(cards.map(card => card.project))].map(project => ({ key: `rolling-continuity:${cards[0].agentId}:${project}`, value_json: JSON.stringify({ cards: cards.filter(card => card.project === project) }) }))) : client.query('SELECT key,value_json::text AS value_json,updated_at FROM settings_meta WHERE starts_with(key,$1) ORDER BY updated_at DESC,key', [prefix]).then(r => r.rows),
+      rows: (prefix, options = {}) => {
+        if (!transactional && !ownerClient && (options.signal || options.deadline !== undefined)) {
+          return withArchiveRead(pool, tx => adapter(tx, true).rows(prefix), options);
+        }
+        return isTiddleIdentity(prefix) ? tiddleRows(client,prefix) : typeof prefix === 'string' && prefix.startsWith('rolling-continuity:') ? readRollingCards(client, prefix.slice('rolling-continuity:'.length, -1)).then(cards => [...new Set(cards.map(card => card.project))].map(project => ({ key: `rolling-continuity:${cards[0].agentId}:${project}`, value_json: JSON.stringify({ cards: cards.filter(card => card.project === project) }) }))) : client.query('SELECT key,value_json::text AS value_json,updated_at FROM settings_meta WHERE starts_with(key,$1) ORDER BY updated_at DESC,key', [prefix]).then(r => r.rows);
+      },
       append: (key,item,envelope,at,cutoff) => appendTiddle(client,key,item,envelope,at,cutoff),
       dueIds: at => client.query("SELECT a.id FROM tiddle_envelopes t JOIN agents a ON t.agent_id=a.id AND t.kind='tiddle-pass' AND t.project='' AND t.scope='' WHERE t.kind='tiddle-pass' AND t.next_run_at <= $1 AND a.enabled=TRUE UNION ALL SELECT a.id FROM agents a WHERE a.enabled=TRUE AND NOT EXISTS (SELECT 1 FROM tiddle_envelopes t WHERE t.agent_id=a.id AND t.kind='tiddle-pass' AND t.project='' AND t.scope='' AND t.next_run_at IS NOT NULL)",[at]).then(r=>r.rows.map(r=>r.id)),
       transaction: (agentId, operation, assertActive = null) => transaction(async tx => {

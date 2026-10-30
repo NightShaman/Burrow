@@ -153,3 +153,23 @@ it('uses independent local midnights across DST rather than a fixed 24 hours', a
   expect(new Date(bounds.to).getMilliseconds()).toBe(999);
   expect(bounds.to).toMatch(/\.999999Z$/);
 });
+
+it('passes each exact owner signal to calendar, first list, pagination, detail and earlier requests', async () => {
+  apiMock.mockResolvedValue({ sessions: [], turns: [], nextCursor: null, hasMore: false });
+  const owners = Array.from({ length: 5 }, () => new AbortController());
+  await repository.listCalendarAvailability('sessions', '2026-10', undefined, owners[0].signal);
+  await repository.listSessions('', owners[1].signal);
+  await repository.listSessions('', owners[2].signal, 'next-page');
+  await repository.loadSession(session, owners[3].signal);
+  await repository.loadSession(session, owners[4].signal, 'earlier-page');
+  expect(apiMock).toHaveBeenCalledTimes(5);
+  for (const [index, owner] of owners.entries()) {
+    const signal = apiMock.mock.calls[index][1]?.signal;
+    expect(signal).toBe(owner.signal);
+    expect(signal?.aborted).toBe(false);
+    owner.abort();
+    expect(signal?.aborted).toBe(true);
+  }
+  expect(new URL(apiMock.mock.calls[2][0], 'http://fixture').searchParams.get('cursor')).toBe('next-page');
+  expect(new URL(apiMock.mock.calls[4][0], 'http://fixture').searchParams.get('before')).toBe('earlier-page');
+});

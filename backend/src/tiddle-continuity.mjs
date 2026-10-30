@@ -1,4 +1,5 @@
 import { createBackgroundLifecycle } from './background-lifecycle.mjs';
+import { archiveReadCheckpoint } from './archive-read-scope.mjs';
 import { withTiddleOccurrence, runAsync, tiddlePersistence } from './tiddle-persistence.mjs';
 import { rollingCardActive } from './postgres-rolling-continuity-store.mjs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -29,7 +30,7 @@ const historyKey = (agentId) => ({ agentId, kind: 'tiddle-history' });
 const synthesisKey = (agentId) => ({ agentId, kind: 'tiddle-synthesis' });
 const globalCardKey = (agentId) => cardKey(agentId, GLOBAL_SCOPE);
 
-function* meta(db, key, fallback = null) { return (yield () => db.get(key)) ?? fallback; }
+function* meta(db, key, fallback = null, options = {}) { return (yield () => db.get(key, options)) ?? fallback; }
 function* setMeta(db, key, value, at) { return yield () => db.set(key, value, at); }
 function* activeCards(db, agentId, scope, at) {
   const value = yield* meta(db, cardKey(agentId, scope), { cards: [] });
@@ -335,24 +336,30 @@ async function runTiddlePassOwned({ assertOwner, ownerClient, signal = null, age
   } finally { db.close(); }
 }
 
-function* listTiddleCardsOperation({ agentId, scope = null, stores = null, limit = 100, at = iso() } = {}) {
+function* listTiddleCardsOperation({ agentId, scope = null, stores = null, limit = 100, at = iso(), signal, deadline } = {}) {
+  const options = { signal, deadline };
+  archiveReadCheckpoint(options);
   const id = text(agentId);
   if (!id) throw new Error('tiddle_agent_required');
   const db = tiddlePersistence({ stores });
   try {
-    const keys = scope ? [cardKey(id, text(scope))] : (yield () => db.rows(`rolling-continuity:${id}:`)).map((row) => row.key);
-    const allCards = []; for (const key of keys) allCards.push(...((yield* meta(db, key, { cards: [] }))?.cards || []));
+    const keys = scope ? [cardKey(id, text(scope))] : (yield () => db.rows(`rolling-continuity:${id}:`, options)).map((row) => row.key);
+    const allCards = []; for (const key of keys) allCards.push(...((yield* meta(db, key, { cards: [] }, options))?.cards || []));
     const cards = allCards.filter((card) => rollingCardActive(card, at)).sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen))).slice(0, limit === null ? undefined : Math.max(1, Math.min(500, Number(limit) || 100)));
+    archiveReadCheckpoint(options);
     return { ok: true, agentId: id, scope: text(scope) || null, cards };
   } finally { db.close(); }
 }
 
-function* tiddleHistoryOperation({ agentId, cardId = null, since = null, limit = 100, stores = null } = {}) {
+function* tiddleHistoryOperation({ agentId, cardId = null, since = null, limit = 100, stores = null, signal, deadline } = {}) {
+  const options = { signal, deadline };
+  archiveReadCheckpoint(options);
   const id = text(agentId);
   if (!id) throw new Error('tiddle_agent_required');
   const db = tiddlePersistence({ stores });
   try {
-    const entries = ((yield* meta(db, historyKey(id), { entries: [] }))?.entries || []).filter((entry) => (!text(cardId) || entry.cardId === text(cardId)) && (!text(since) || entry.at >= text(since))).slice(0, limit === null ? undefined : Math.max(1, Math.min(500, Number(limit) || 100)));
+    const entries = ((yield* meta(db, historyKey(id), { entries: [] }, options))?.entries || []).filter((entry) => (!text(cardId) || entry.cardId === text(cardId)) && (!text(since) || entry.at >= text(since))).slice(0, limit === null ? undefined : Math.max(1, Math.min(500, Number(limit) || 100)));
+    archiveReadCheckpoint(options);
     return { ok: true, agentId: id, cardId: text(cardId) || null, entries };
   } finally { db.close(); }
 }

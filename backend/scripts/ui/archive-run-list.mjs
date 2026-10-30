@@ -1,11 +1,14 @@
+import { archiveReadCheckpoint, archiveReadTasks } from '../../src/archive-read-scope.mjs';
 import { archivePage, archiveCursorBoundary, archiveCursor } from '../../src/archive-pagination.mjs';
 import { listArchiveRuns, listArchiveRunSummariesPage } from '../../src/archive-proof.mjs';
 
-export async function archiveRunListPage({ scopes, agentId = null, sessionId = null, limit = 100, cursor = null }) {
+export async function archiveRunListPage({ scopes, agentId = null, sessionId = null, limit = 100, cursor = null, signal, deadline }) {
+  const options = { signal, deadline };
+  archiveReadCheckpoint(options);
   const size = Math.max(1, Math.min(200, Number(limit) || 100));
   const scopeKey = JSON.stringify(['runs', agentId, sessionId]);
   const boundary = archiveCursorBoundary(cursor, { scope: scopeKey });
-  const pages = await Promise.all(scopes.map(scope => listArchiveRunSummariesPage({ ...scope, sessionId, limit: size, boundary })));
+  const pages = await archiveReadTasks(scopes.map(scope => readOptions => listArchiveRunSummariesPage({ ...scope, sessionId, limit: size, boundary, ...readOptions })), options);
   if (pages.every(page => page !== null)) {
     const ordered = pages.flatMap(page => page.runs).sort((left, right) => {
       const lt = String(left._sortTimestamp || left.completedAt || left.startedAt || ''), rt = String(right._sortTimestamp || right.completedAt || right.startedAt || '');
@@ -20,7 +23,7 @@ export async function archiveRunListPage({ scopes, agentId = null, sessionId = n
   }
   // Compatibility for injected non-PostgreSQL stores. Production PostgreSQL
   // stores never fall back to reconstructing all conversations.
-  const lists = await Promise.all(scopes.map(scope => listArchiveRuns({ ...scope, sessionId, limit: null, summaryOnly: true })));
+  const lists = await archiveReadTasks(scopes.map(scope => readOptions => listArchiveRuns({ ...scope, sessionId, limit: null, summaryOnly: true, ...readOptions })), options);
   const page = archivePage(lists.flat(), { limit: size, cursor, max: 200, scope: scopeKey, timestamp: row => row.completedAt || row.startedAt, identity: row => `${row.agentId}:${row.runId}` });
   return { runs: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
 }

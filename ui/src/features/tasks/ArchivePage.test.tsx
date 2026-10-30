@@ -340,3 +340,41 @@ it('loads all navigation badges before their shelves are clicked', async () => {
   expect(fetch).toHaveBeenCalled();
   expect(screen.queryByRole('region', { name: 'Archived tasks' })).toBeNull();
 });
+
+// These requests deliberately ignore cancellation and settle after unmount:
+// owner cleanup must abort the signal, not depend on a cooperative repository.
+describe('Archive page-owned pending reads', () => {
+  it.each(['calendar', 'first-list', 'detail', 'loadEarlier'] as const)('aborts pending %s on page unmount', async (stage) => {
+    const pending = deferred<any>();
+    const item = { id: 'owned', sessionId: 'owned', agentId: 'a', title: 'Owned conversation', archived: true } as ArchiveSession;
+    const loaded: ArchiveDetail = { turns: [{ role: 'user', content: 'Loaded newest message' }], hasMore: true, nextCursor: 'earlier' };
+    const calendar = vi.spyOn(archiveRepository, 'listCalendarAvailability').mockImplementation(async (kind, month) => ({ ok: true, kind, month, dates: [] }));
+    const list = vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([item]));
+    const load = vi.spyOn(archiveRepository, 'loadSession').mockResolvedValue(loaded);
+    vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([]));
+    vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([]));
+    if (stage === 'calendar') calendar.mockReturnValue(pending.promise);
+    if (stage === 'first-list') list.mockReturnValue(pending.promise);
+    if (stage === 'detail') load.mockReturnValue(pending.promise);
+    const view = render(<Archive agents={[]} repository={archiveRepository} />);
+    if (stage === 'detail' || stage === 'loadEarlier') {
+      fireEvent.click(await screen.findByRole('button', { name: /Owned conversation.*turns/i }));
+      if (stage === 'loadEarlier') {
+        await screen.findByText('Loaded newest message');
+        load.mockReturnValueOnce(pending.promise);
+        fireEvent.click(screen.getByRole('button', { name: 'Load earlier messages' }));
+        expect(load.mock.calls.at(-1)?.[2]).toBe('earlier');
+      }
+      await waitFor(() => expect(load).toHaveBeenCalledTimes(stage === 'detail' ? 1 : 2));
+    }
+    if (stage === 'first-list') await waitFor(() => expect(list).toHaveBeenCalledOnce());
+    const signal = stage === 'calendar' ? calendar.mock.calls[0][3] : stage === 'first-list' ? list.mock.calls[0][1] : load.mock.calls.at(-1)?.[1];
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal?.aborted).toBe(false);
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => pending.resolve(stage === 'calendar' ? { ok: true, kind: 'sessions', month: calendar.mock.calls[0][1], dates: [] } : stage === 'first-list' ? collectionPage([item]) : loaded));
+    expect(screen.queryByRole('heading', { name: 'Archive' })).toBeNull();
+    expect(screen.queryByText('Loaded newest message')).toBeNull();
+  });
+});

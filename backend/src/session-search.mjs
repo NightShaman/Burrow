@@ -1,17 +1,20 @@
+import { archiveReadCheckpoint, archiveReadTasks } from './archive-read-scope.mjs';
 import { isInternalContextSession, canonicalHistorySessionId } from './model-context-boundary.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 import { compressionSummariesFromTranscript } from './session-compression.mjs';
 
 // PostgreSQL owns both live entries and archive evidence when injected. Never
 // supplement an empty/failed authority read from workspace JSONL exports.
-export async function evidenceTranscript({ conversationStore, agentId, rootDir, sessionId, includeResetHistory = false }) {
+export async function evidenceTranscript({ conversationStore, agentId, rootDir, sessionId, includeResetHistory = false, signal, deadline }) {
   if (!conversationStore) throw new Error('conversation_store_required');
   const authority = conversationAuthority({ store: conversationStore, agentId });
-  const [active, archives, metadata] = await Promise.all([
-    authority.entriesAll(sessionId),
-    conversationStore.listArchives({ agentId, sessionId, limit: null }),
-    authority.metadata(sessionId),
-  ]);
+  const options = { signal, deadline };
+  archiveReadCheckpoint(options);
+  const [active, archives, metadata] = await archiveReadTasks([
+    readOptions => authority.entriesAll(sessionId, readOptions),
+    readOptions => conversationStore.listArchives({ agentId, sessionId, limit: null, ...readOptions }),
+    readOptions => authority.metadata(sessionId, readOptions),
+  ], options);
   const resetGeneration = Math.max(-1, ...archives.filter((archive) => archive.kind === 'reset').map((archive) => Number(archive.generation)));
   const seen = new Set(active.map((entry) => entry.id).filter(Boolean));
   const history = [];

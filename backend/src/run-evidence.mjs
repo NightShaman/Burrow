@@ -1,3 +1,4 @@
+import { archiveReadCheckpoint } from './archive-read-scope.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 
 const MAX_ITEMS = 12;
@@ -232,10 +233,14 @@ export function selectRunEvidence(records = [], { message = '', targets = [], se
   return { selected, selectedDetails, omittedDetails, omittedCount: omitted, candidateCount: scored.length, chars: used, reason: selected.length ? 'relevant' : 'no_matching_evidence' };
 }
 
-export async function readRunEvidenceWithDiagnostics({ rootDir, sessionId = 'default', limit = 24, conversationStore = null, agentId } = {}) {
+export async function readRunEvidenceWithDiagnostics({ rootDir, sessionId = 'default', limit = 24, conversationStore = null, agentId, signal, deadline } = {}) {
   if (!conversationStore) throw new Error('conversation_store_required');
-  const entries = await conversationAuthority({store:conversationStore,agentId}).entriesAll(sessionId);
-  const dedicated = (await conversationStore.getMetadata({agentId,sessionId}))?.runEvidence || [];
+  const options = { signal, deadline };
+  archiveReadCheckpoint(options);
+  const entries = await conversationAuthority({store:conversationStore,agentId}).entriesAll(sessionId, options);
+  archiveReadCheckpoint(options);
+  const dedicated = (await conversationStore.getMetadata({agentId,sessionId,...options}))?.runEvidence || [];
+  archiveReadCheckpoint(options);
   const legacy = list(entries).filter((entry) => entry?.type === 'evidence' && entry?.metadata?.runEvidence).map((entry) => compactRunEvidence(entry.metadata.runEvidence));
   const retained = retainedEvidence([...legacy, ...dedicated]).reverse();
   return {

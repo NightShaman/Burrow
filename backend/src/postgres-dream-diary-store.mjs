@@ -1,4 +1,5 @@
 import { normalizePostgresPool } from './postgres-foundation.mjs';
+import { archiveReadQuery, withArchiveRead } from './postgres-archive-read.mjs';
 import { createHash } from 'node:crypto';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 
@@ -54,27 +55,35 @@ export class PostgresDreamDiaryStore {
     const result = await this.pool.query('SELECT * FROM dream_diary_entries WHERE agent_id=$1 AND entry_date=$2 AND phase=$3 AND narrative_digest=$4 AND narrative=$5', [agentId, entryDate, entryPhase, narrativeDigest, body]);
     return publicRow(result.rows[0]);
   }
-  async listCalendarDates(agent, { month, timezone = 'UTC' } = {}) {
+  async listCalendarDates(agent, { month, timezone = 'UTC', signal, deadline } = {}) {
     const agentId = text(agent); if (!agentId) throw new Error('dream_diary_agent_required');
     const value = text(month); if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) throw new Error('archive_month_invalid');
     const start = new Date(`${value}-01T00:00:00Z`); const safeStart = new Date(start); safeStart.setUTCDate(safeStart.getUTCDate() - 1);
     const safeEnd = new Date(start); safeEnd.setUTCMonth(safeEnd.getUTCMonth() + 1, 2);
-    const result = await this.pool.query(`SELECT DISTINCT to_char(created_at AT TIME ZONE $4,'YYYY-MM-DD') AS day
+    const query = signal || deadline !== undefined ? (sql, values) => archiveReadQuery(this.pool, sql, values, { signal, deadline }) : (sql, values) => this.pool.query(sql, values);
+    const result = await query(`SELECT DISTINCT to_char(created_at AT TIME ZONE $4,'YYYY-MM-DD') AS day
       FROM dream_diary_entries WHERE agent_id=$1 AND created_at>=$2 AND created_at<$3
       AND to_char(created_at AT TIME ZONE $4,'YYYY-MM')=$5 ORDER BY day`,
     [agentId, safeStart.toISOString(), safeEnd.toISOString(), timezone, value]);
     return result.rows.map(row => row.day);
   }
-  async list(agent, { date: filterDate = null, phase: filterPhase = null, limit = 30 } = {}) {
+  async list(agent, { date: filterDate = null, phase: filterPhase = null, limit = 30, signal, deadline } = {}) {
     const agentId = text(agent); if (!agentId) throw new Error('dream_diary_agent_required');
-    const check = await this.pool.query('SELECT id FROM agents WHERE id=$1', [agentId]); if (!check.rows[0]) throw new Error('agent_not_found');
-    const d = filterDate ? date(filterDate) : null, p = filterPhase ? phase(filterPhase) : null, n = limit === null ? null : Math.max(1, Math.min(200, Number(limit) || 30));
-    const result = await this.pool.query(`SELECT * FROM dream_diary_entries WHERE agent_id=$1 AND ($2::text IS NULL OR entry_date=$2::text) AND ($3::text IS NULL OR phase=$3::text) ORDER BY entry_date DESC,created_at DESC${n === null ? '' : ' LIMIT $4'}`, n === null ? [agentId, d, p] : [agentId, d, p, n]);
-    return result.rows.map(publicRow);
+    const read = async client => {
+      const check = await client.query('SELECT id FROM agents WHERE id=$1', [agentId]); if (!check.rows[0]) throw new Error('agent_not_found');
+      const d = filterDate ? date(filterDate) : null, p = filterPhase ? phase(filterPhase) : null, n = limit === null ? null : Math.max(1, Math.min(200, Number(limit) || 30));
+      const result = await client.query(`SELECT * FROM dream_diary_entries WHERE agent_id=$1 AND ($2::text IS NULL OR entry_date=$2::text) AND ($3::text IS NULL OR phase=$3::text) ORDER BY entry_date DESC,created_at DESC${n === null ? '' : ' LIMIT $4'}`, n === null ? [agentId, d, p] : [agentId, d, p, n]);
+      return result.rows.map(publicRow);
+    };
+    // Ordinary Dream jobs keep their existing unbudgeted read behavior.
+    return signal || deadline !== undefined ? withArchiveRead(this.pool, read, { signal, deadline }) : read(this.pool);
   }
-  async get(agent, entryId) {
+  async get(agent, entryId, { signal, deadline } = {}) {
     const agentId = text(agent), id = text(entryId); if (!agentId || !id) throw new Error('dream_diary_entry_required');
-    const result = await this.pool.query('SELECT * FROM dream_diary_entries WHERE agent_id=$1 AND id=$2', [agentId, id]); if (!result.rows[0]) throw new Error('dream_diary_entry_not_found'); return publicRow(result.rows[0]);
+    const sql = 'SELECT * FROM dream_diary_entries WHERE agent_id=$1 AND id=$2', values = [agentId, id];
+    const result = signal || deadline !== undefined
+      ? await archiveReadQuery(this.pool, sql, values, { signal, deadline }) : await this.pool.query(sql, values);
+    if (!result.rows[0]) throw new Error('dream_diary_entry_not_found'); return publicRow(result.rows[0]);
   }
   async renderMarkdown(agent, options = {}) {
     const entries = await this.list(agent, options), format = text(options.format || options.markdown);

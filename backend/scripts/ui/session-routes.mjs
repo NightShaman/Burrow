@@ -1,8 +1,10 @@
+import { requestReadOwner } from './request-read-owner.mjs';
 export function createSessionRoutes({
   rootDir: projectRoot,
   readJsonBody,
   sendJson,
   resolveAgentRuntime,
+  resolveArchiveAgentRuntime = resolveAgentRuntime,
   runtimeAgentWorkspaceRoot,
   runtimeDataRoot,
   runtimeSessionRoot,
@@ -43,6 +45,7 @@ export function createSessionRoutes({
   latestAuthorityExplanationForSession,
   listAuthorityExplanationsForSession,
   conversationStore = null,
+  archiveReadTimeoutMs,
 } = {}) {
   if (!conversationStore) throw new Error('conversation_store_required');
   const resultResponse = (res, result, success = 200) => {
@@ -50,7 +53,10 @@ export function createSessionRoutes({
     return true;
   };
   return async function handleSessionRoute({ req, res, url } = {}) {
+    let owner;
     try {
+    if (req.method === 'GET' && url.pathname.startsWith('/api/archive/')) owner = requestReadOwner(req, res, { timeoutMs: archiveReadTimeoutMs });
+    const readOptions = owner?.options || {};
     if (req.method === 'GET' && url.pathname === '/api/session/context') {
       const sessionId = url.searchParams.get('sessionId') || 'default';
       const agentRuntime = await resolveAgentRuntime(url.searchParams.get('agentId'));
@@ -100,53 +106,53 @@ export function createSessionRoutes({
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/calendar') {
-      sendJson(res, 200, await archiveCalendar({ kind: url.searchParams.get('kind'), month: url.searchParams.get('month'), timezone: url.searchParams.get('timezone'), agentId: url.searchParams.get('agentId') }));
+      sendJson(res, 200, await archiveCalendar({ ...readOptions, kind: url.searchParams.get('kind'), month: url.searchParams.get('month'), timezone: url.searchParams.get('timezone'), agentId: url.searchParams.get('agentId') }));
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/workflow-events') {
-      sendJson(res, 200, await archiveWorkflowEvents({ agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), timezone: url.searchParams.get('timezone'), query: url.searchParams.get('q') || '', limit: url.searchParams.get('limit') || 100, cursor: url.searchParams.get('cursor') }));
+      sendJson(res, 200, await archiveWorkflowEvents({ ...readOptions, agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), timezone: url.searchParams.get('timezone'), query: url.searchParams.get('q') || '', limit: url.searchParams.get('limit') || 100, cursor: url.searchParams.get('cursor') }));
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/dreams/groups') {
-      sendJson(res, 200, await archiveDreamGroups({ agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), timezone: url.searchParams.get('timezone'), query: url.searchParams.get('q') || '', limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') }));
+      sendJson(res, 200, await archiveDreamGroups({ ...readOptions, agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), timezone: url.searchParams.get('timezone'), query: url.searchParams.get('q') || '', limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') }));
       return true;
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/archive/dreams/groups/') && url.pathname.slice('/api/archive/dreams/groups/'.length).split('/').length !== 1) {
       const parts = url.pathname.slice('/api/archive/dreams/groups/'.length).split('/').map(decodeURIComponent);
       const [agentId, day] = parts;
       if (!agentId || !day || parts.length !== 2) { sendJson(res, 400, { ok: false, error: 'archive_dream_target_required' }); return true; }
-      const result = await archiveDreamGroupDetail({ agentId, day, timezone: url.searchParams.get('timezone') });
+      const result = await archiveDreamGroupDetail({ ...readOptions, agentId, day, timezone: url.searchParams.get('timezone') });
       sendJson(res, result.ok ? 200 : (result.status || 500), result);
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/dreams') {
-      sendJson(res, 200, await archiveDreams({ agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), timezone: url.searchParams.get('timezone'), phase: url.searchParams.get('phase'), limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') }));
+      sendJson(res, 200, await archiveDreams({ ...readOptions, agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), timezone: url.searchParams.get('timezone'), phase: url.searchParams.get('phase'), limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') }));
       return true;
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/archive/dreams/')) {
       const parts = url.pathname.slice('/api/archive/dreams/'.length).split('/').map(decodeURIComponent);
       const [agentId, entryId] = parts;
       if (!agentId || !entryId) { sendJson(res, 400, { ok: false, error: 'archive_dream_target_required' }); return true; }
-      const result = await archiveDreamDetail(agentId, entryId);
+      const result = await archiveDreamDetail(agentId, entryId, readOptions);
       sendJson(res, result.ok ? 200 : (result.status || 500), result);
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/continuity/cards') {
-      sendJson(res, 200, await archiveContinuityCards({ agentId: url.searchParams.get('agentId'), scope: url.searchParams.get('scope'), limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') }));
+      sendJson(res, 200, await archiveContinuityCards({ ...readOptions, agentId: url.searchParams.get('agentId'), scope: url.searchParams.get('scope'), limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') }));
       return true;
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/archive/continuity/cards/')) {
       const parts = url.pathname.slice('/api/archive/continuity/cards/'.length).split('/').map(decodeURIComponent);
       const [agentId, cardId] = parts;
       if (!agentId || !cardId) { sendJson(res, 400, { ok: false, error: 'archive_continuity_card_target_required' }); return true; }
-      const result = await archiveContinuityCardDetail({ agentId, cardId, limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') });
+      const result = await archiveContinuityCardDetail({ ...readOptions, agentId, cardId, limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') });
       sendJson(res, result.ok ? 200 : (result.status || 500), result);
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/runs') {
       const agentId = url.searchParams.get('agentId');
-      const agentRuntime = agentId ? await resolveAgentRuntime(agentId) : null;
-      const result = await archiveRuns({ agentRuntime, sessionId: url.searchParams.get('sessionId'), limit: url.searchParams.get('limit') || 100, cursor: url.searchParams.get('cursor') });
+      const agentRuntime = agentId ? await resolveArchiveAgentRuntime(agentId, readOptions) : null;
+      const result = await archiveRuns({ ...readOptions, agentRuntime, sessionId: url.searchParams.get('sessionId'), limit: url.searchParams.get('limit') || 100, cursor: url.searchParams.get('cursor') });
       sendJson(res, 200, { ok: true, ...result });
       return true;
     }
@@ -154,20 +160,20 @@ export function createSessionRoutes({
       const runId = decodeURIComponent(url.pathname.slice('/api/archive/runs/'.length));
       if (!runId) { sendJson(res, 400, { ok: false, error: 'archive_run_target_required' }); return true; }
       const agentId = url.searchParams.get('agentId');
-      const agentRuntime = agentId ? await resolveAgentRuntime(agentId) : null;
-      const run = await archiveRunDetail({ agentRuntime, runId });
+      const agentRuntime = agentId ? await resolveArchiveAgentRuntime(agentId, readOptions) : null;
+      const run = await archiveRunDetail({ ...readOptions, agentRuntime, runId });
       sendJson(res, run ? 200 : 404, run ? { ok: true, run } : { ok: false, error: 'archive_run_not_found' });
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/sessions') {
-      sendJson(res, 200, { ok: true, ...(await archiveSessions({ includeArchived: url.searchParams.get('archived') !== 'false', query: url.searchParams.get('q') || '', agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), timezone: url.searchParams.get('timezone'), limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') })) });
+      sendJson(res, 200, { ok: true, ...(await archiveSessions({ ...readOptions, includeArchived: url.searchParams.get('archived') !== 'false', query: url.searchParams.get('q') || '', agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), timezone: url.searchParams.get('timezone'), limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') })) });
       return true;
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/archive/sessions/')) {
       const parts = url.pathname.slice('/api/archive/sessions/'.length).split('/').map(decodeURIComponent);
       const [agentId, sessionId] = parts;
       if (!agentId || !sessionId) { sendJson(res, 400, { ok: false, error: 'archive_session_target_required' }); return true; }
-      const detail = await archiveSessionDetail(agentId, sessionId, { limit: url.searchParams.get('limit') ?? 100, before: url.searchParams.get('before'), from: url.searchParams.get('from'), to: url.searchParams.get('to') });
+      const detail = await archiveSessionDetail(agentId, sessionId, { ...readOptions, limit: url.searchParams.get('limit') ?? 100, before: url.searchParams.get('before'), from: url.searchParams.get('from'), to: url.searchParams.get('to') });
       sendJson(res, detail ? 200 : 404, detail ? { ok: true, ...detail } : { ok: false, error: 'not_found' });
       return true;
     }
@@ -221,10 +227,15 @@ export function createSessionRoutes({
     if (req.method === 'POST' && url.pathname === '/api/session/handoff-candidate') { sendJson(res, 200, await sessionWriteHandoffCandidate(await readJsonBody(req))); return true; }
     return false;
     } catch (error) {
+      owner?.cancel(error);
+      if (owner?.disconnected || res.destroyed || res.writableEnded) return true;
+      if (error?.message === 'archive_query_timeout' || owner?.options.signal.reason?.message === 'archive_query_timeout') {
+        sendJson(res, 504, { ok: false, error: 'archive_query_timeout' }); return true;
+      }
       if (error?.message === 'session_target_exists') { sendJson(res, 409, { ok: false, error: error.message }); return true; }
       if (!['archive_cursor_invalid', 'archive_date_invalid', 'archive_month_invalid', 'archive_kind_invalid', 'archive_timezone_invalid', 'archive_limit_invalid'].includes(error?.message)) throw error;
       sendJson(res, 400, { ok: false, error: error.message });
       return true;
-    }
+    } finally { owner?.dispose(); }
   };
 }

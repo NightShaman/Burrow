@@ -21,14 +21,14 @@ function scopedReadOptions(agentId, sessionId, options = {}) {
 
 function turnEntry(turn = {}) { return buildSessionEntry({ ...turn, type: 'message' }); }
 
-async function readAllEntries(store, agentId, sessionId, signal) {
+async function readAllEntries(store, agentId, sessionId, signal, deadline) {
   const found = [];
   let after = 0;
   for (;;) {
     signal?.throwIfAborted();
     const page = typeof store.page === 'function'
-      ? await store.page({ agentId, sessionId, limit: 256, after })
-      : { entries: await store.read({ agentId, sessionId, limit: 256, after }) };
+      ? await store.page({ agentId, sessionId, limit: 256, after, signal, deadline })
+      : { entries: await store.read({ agentId, sessionId, limit: 256, after, signal, deadline }) };
     const entries = page?.entries || [];
     found.push(...entries);
     if (!page?.hasMore && (typeof store.page === 'function' || !entries.length)) break;
@@ -73,9 +73,9 @@ export function conversationAuthority({ store = null, agentId } = {}) {
   if (typeof agentId !== 'string' || !agentId.trim()) throw new Error('agent_id_required');
   const key = (sessionId) => scope(agentId, sessionId);
   return Object.freeze({
-    async metadata(sessionId, { signal } = {}) { return pg.getMetadata({ ...key(sessionId), signal }); },
+    async metadata(sessionId, { signal, deadline } = {}) { return pg.getMetadata({ ...key(sessionId), signal, ...(deadline === undefined ? {} : { deadline }) }); },
     async entries(sessionId, options = {}) { return pg.read(scopedReadOptions(agentId, sessionId, options)); },
-    async entriesAll(sessionId) { return readAllEntries(pg, agentId, sessionId); },
+    async entriesAll(sessionId, { signal, deadline } = {}) { return readAllEntries(pg, agentId, sessionId, signal, deadline); },
     async originalEntries(sessionId, { entryIds, signal } = {}) {
       signal?.throwIfAborted();
       if (entryIds !== undefined) {

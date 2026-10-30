@@ -4,6 +4,7 @@ import { archiveCursorBoundary, archiveCursor, archiveUtcDay, archiveUtcMonth } 
 import { validateTimezone } from './timezone.mjs';
 import { createContinuityOwner } from './postgres-continuity-owner.mjs';
 import { withPostgresTransaction } from './postgres-foundation.mjs';
+import { archiveReadQuery } from './postgres-archive-read.mjs';
 
 // Additive migration only: earlier manifest SQL/checksums must remain immutable.
 export const POSTGRES_COMPLETION_EVENT_SCHEMA_SQL = `
@@ -136,7 +137,7 @@ export class PostgresCompletionEventStore {
     return rows.map(eventRow);
   }
   // Archive reads retained snapshots, not the bounded Settings latest-N list.
-  async listArchive({ agentId = null, date = null, timezone = 'UTC', query = '', limit = 100, cursor = null } = {}) {
+  async listArchive({ agentId = null, date = null, timezone = 'UTC', query = '', limit = 100, cursor = null, signal, deadline } = {}) {
     timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
     if (date) archiveUtcDay(date);
     query = String(query || '').trim().toLowerCase();
@@ -145,7 +146,8 @@ export class PostgresCompletionEventStore {
     const scope = JSON.stringify(['workflow-events', agentId || null, date || null, timezone, query]);
     const boundary = archiveCursorBoundary(cursor, { scope });
     if (boundary && (boundary.t.startsWith('0000-') || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3,6}Z$/.test(boundary.t) || !Number.isFinite(Date.parse(boundary.t)) || new Date(boundary.t).toISOString().slice(0,19) !== boundary.t.slice(0,19) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(boundary.i))) throw new Error('archive_cursor_invalid');
-    const { rows } = await this.pool.query(`SELECT id,watch_id,repository,workflow,run_id,run_attempt,head_sha,conclusion,url,completed_at,
+    const read = signal || deadline !== undefined ? (sql, values) => archiveReadQuery(this.pool, sql, values, { signal, deadline }) : (sql, values) => this.pool.query(sql, values);
+    const { rows } = await read(`SELECT id,watch_id,repository,workflow,run_id,run_attempt,head_sha,conclusion,url,completed_at,
       agent_id,session_id,instruction,status,chat_run_id,result,error,created_at,started_at,finished_at,
       to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS archive_cursor_timestamp
       FROM github_completion_events
@@ -160,10 +162,11 @@ export class PostgresCompletionEventStore {
     const last = events.at(-1);
     return { events, hasMore, nextCursor: hasMore && last ? archiveCursor({ scope, timestamp: rows[size - 1].archive_cursor_timestamp, identity: last.id }) : null };
   }
-  async listArchiveCalendarDates({ agentId = null, month, timezone = 'UTC' } = {}) {
+  async listArchiveCalendarDates({ agentId = null, month, timezone = 'UTC', signal, deadline } = {}) {
     timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
     month = archiveUtcMonth(month);
-    const { rows } = await this.pool.query(`SELECT DISTINCT to_char(created_at AT TIME ZONE $3,'YYYY-MM-DD') AS day
+    const read = signal || deadline !== undefined ? (sql, values) => archiveReadQuery(this.pool, sql, values, { signal, deadline }) : (sql, values) => this.pool.query(sql, values);
+    const { rows } = await read(`SELECT DISTINCT to_char(created_at AT TIME ZONE $3,'YYYY-MM-DD') AS day
       FROM github_completion_events WHERE ($1::text IS NULL OR agent_id=$1)
       AND to_char(created_at AT TIME ZONE $3,'YYYY-MM')=$2 ORDER BY day`, [agentId || null, month, timezone]);
     return rows.map(row => row.day);
