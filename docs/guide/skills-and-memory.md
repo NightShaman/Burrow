@@ -4,11 +4,11 @@ Current implementation delta reviewed **31 October 2026**. [Source coverage](../
 
 Use **skills** for reusable instructions, **profile documents** for agent-specific guidance, and **Brains** for explicit saved memories.
 
-Current Core supplies Core and loaded mods' declared operating skills through a dedicated read-only managed catalog; they do not require an ordinary-library Git install. Bundled and Git-managed instructions are read-only; creating a text skill is for your own optional instructions. Meet Tinker and Trixie and inspect the public instructions in [Burrow Skills](https://burrow-docs.blissful-psychosis.com/burrow-skills/). The [managed-skills guide](https://burrow-docs.blissful-psychosis.com/burrow-skills/managed-skills/) distinguishes the historical 2026.10.19 runtime from the implemented Core/mod-managed catalog.
+Current Core supplies Core and loaded mods' declared operating skills through a dedicated read-only managed catalog; they do not require an ordinary-library Git install. Bundled and Git-managed instructions are read-only; creating a text skill is for your own optional instructions. Meet Tinker and Trixie and inspect the public instructions in [Burrow Skills](https://docs.goblin-kingdom.com/burrow-skills/). The [managed-skills guide](https://docs.goblin-kingdom.com/burrow-skills/managed-skills/) distinguishes the historical 2026.10.19 runtime from the implemented Core/mod-managed catalog.
 
 ## Official managed skills
 
-Burrow's official operating skills have their own [repository and user guide](https://burrow-docs.blissful-psychosis.com/burrow-skills/). Read the source instructions and companion files before trusting them. Repository visibility helps inspection; it does not certify that a skill is safe.
+Burrow's official operating skills have their own [repository and user guide](https://docs.goblin-kingdom.com/burrow-skills/). Read the source instructions and companion files before trusting them. Repository visibility helps inspection; it does not certify that a skill is safe.
 
 The historical 2026.10.19 runtime adopted the official `burrow-runtime` Git source automatically. Current Core supplies Core and loaded mods' declared skills automatically from a dedicated read-only catalog, synchronizes at startup and mod lifecycle changes, and checks again every six hours by default. These managed copies are not edited or individually assigned through the ordinary skill editor. Customize a separate operator-owned skill instead.
 

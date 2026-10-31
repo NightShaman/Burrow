@@ -51,7 +51,7 @@ Checked **24 October 2026**: in **Mod sources**, select an existing source or en
 
 A saved source shows **Stored credential configured**. Leave the password/token field empty to keep it; use its explicit **Remove** action to clear it. **Update source** saves a replacement for the selected source. If discovery fails after saving, inspect that source's status rather than assuming nothing was persisted.
 
-This support is for **HTTPS Git mod sources**, not every password field in Burrow. The reference provider must remain loaded and able to resolve the selected value. See [Goblin Secret Store](https://burrow-docs.blissful-psychosis.com/goblin-secret-store/) for its own setup. SSH keys and host trust must be configured for the Core service account; the form does not configure SSH access.
+This support is for **HTTPS Git mod sources**, not every password field in Burrow. The reference provider must remain loaded and able to resolve the selected value. See [Goblin Secret Store](https://docs.goblin-kingdom.com/goblin-secret-store/) for its own setup. SSH keys and host trust must be configured for the Core service account; the form does not configure SSH access.
 
 Implementation: `ModsSettings.tsx`, `mod-distribution.mjs` and `secret-references.mjs`; source pins are recorded in [release coverage](../project/release-status.md).
 
@@ -69,11 +69,11 @@ If an assigned remote provider is unavailable, Core reports an execution error r
 
 ### Keep access to the home Burrow
 
-When Node Goblin points shell and filesystem tools at a remote host, those tools operate on that host. Install [Burrow Backdoor](https://burrow-docs.blissful-psychosis.com/burrow-backdoor/) in the agent's home Burrow for its diagnostic and supported administrative operations. Backdoor's agent scope and administrative authority still apply.
+When Node Goblin points shell and filesystem tools at a remote host, those tools operate on that host. Install [Burrow Backdoor](https://docs.goblin-kingdom.com/burrow-backdoor/) in the agent's home Burrow for its diagnostic and supported administrative operations. Backdoor's agent scope and administrative authority still apply.
 
 Core's mod-access settings changed after public 2026.10.19: newer Core permits direct UI use with `authMode: none`, while authenticated mode requires operator login. API tokens do not authorize the operator access-settings route in either path. Updating only the Backdoor package does not update this Core behavior.
 
-For authoring a mod, start with [Burrow Tutor](https://burrow-docs.blissful-psychosis.com/burrow-tutor/) and its [contract guide](https://burrow-docs.blissful-psychosis.com/burrow-tutor/contract/).
+For authoring a mod, start with [Burrow Tutor](https://docs.goblin-kingdom.com/burrow-tutor/) and its [contract guide](https://docs.goblin-kingdom.com/burrow-tutor/contract/).
 
 ## Image generation in ordinary mods
 
@@ -93,7 +93,7 @@ Creation returns a job receipt; it does not wait for an image. Save stable reque
 
 Core returns the mod's own image-job status and authenticated preview metadata. It does not expose credentials, storage references, prompts, connection/model IDs, downloads, or another mod's jobs through this facade. The facade has no provider picker, Forge settings mutation, cancellation, attachment delivery, or non-image generation methods.
 
-See [Burrow Tutor's contract guide](https://burrow-docs.blissful-psychosis.com/burrow-tutor/contract/) and [Forge image lesson](https://burrow-docs.blissful-psychosis.com/burrow-tutor/forge-images/) for an authoring example. Check your installed Core's support before adopting it; updating a mod alone does not add a missing Core capability.
+See [Burrow Tutor's contract guide](https://docs.goblin-kingdom.com/burrow-tutor/contract/) and [Forge image lesson](https://docs.goblin-kingdom.com/burrow-tutor/forge-images/) for an authoring example. Check your installed Core's support before adopting it; updating a mod alone does not add a missing Core capability.
 
 ## Tutor and the separate Reference Mod example
 
@@ -123,4 +123,4 @@ For command rules, select **execute**: command-pattern matching is only evaluate
 
 ## Images from transport mods
 
-Current Core accepts real image attachments in mod-submitted agent turns. Transport support is separate: a mod must download and submit supported bytes, and the selected model's vision behavior still applies. The current [Switchboard guide](https://burrow-docs.blissful-psychosis.com/burrow-switchboard/) covers Telegram inbound images and its limits; this does not imply Discord attachments or outbound media support. Core and the mod must both include the capability. Accepted normalized content is retained with the durable turn and normal chat artifacts, not just a transient URL. See [external-turn contract](../reference/api/mods.md#external-agent-turns-with-images).
+Current Core accepts real image attachments in mod-submitted agent turns. Transport support is separate: a mod must download and submit supported bytes, and the selected model's vision behavior still applies. The current [Switchboard guide](https://docs.goblin-kingdom.com/burrow-switchboard/) covers Telegram inbound images and its limits; this does not imply Discord attachments or outbound media support. Core and the mod must both include the capability. Accepted normalized content is retained with the durable turn and normal chat artifacts, not just a transient URL. See [external-turn contract](../reference/api/mods.md#external-agent-turns-with-images).

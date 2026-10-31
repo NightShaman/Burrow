@@ -16,7 +16,7 @@ Later Core implementation was also reviewed. This historical comparison is not a
 
 ## Forge image capability
 
-Reviewed on **22 October 2026**: ordinary mods can request asynchronous, potentially paid image jobs through Core’s saved Forge selection and read only their own image jobs. The [Tutor Forge lesson](https://burrow-docs.blissful-psychosis.com/burrow-tutor/forge-images/) covers consent, durable retries, and previews. This interface is absent from the older public snapshot above. Current guides follow implementation; the public snapshot follows the daily sync. Update Core alongside mods that use this capability.
+Reviewed on **22 October 2026**: ordinary mods can request asynchronous, potentially paid image jobs through Core’s saved Forge selection and read only their own image jobs. The [Tutor Forge lesson](https://docs.goblin-kingdom.com/burrow-tutor/forge-images/) covers consent, durable retries, and previews. This interface is absent from the older public snapshot above. Current guides follow implementation; the public snapshot follows the daily sync. Update Core alongside mods that use this capability.
 
 ## Current implementation check: 31 October 2026
 
@@ -29,7 +29,7 @@ This nightly pass uses current development implementation as documentation truth
 
 Recent operator-facing changes include a **Browse stored credentials** picker and configured-credential state for HTTPS mod sources, plus a per-agent **A2A in default** routing toggle and readable external-chat session labels. See [tools and mods](../guide/tools-and-mods.md#private-source-credentials-in-current-core) and [everyday use](../guide/everyday-use.md#current-session-routing-controls).
 
-The dedicated Core/mod-managed skill catalog is implemented, not merely planned. Its startup/lifecycle/periodic reconciliation and read-only ownership are described in [managed skills](https://burrow-docs.blissful-psychosis.com/burrow-skills/managed-skills/). Older installed builds may still use the historical adoption mechanism above.
+The dedicated Core/mod-managed skill catalog is implemented, not merely planned. Its startup/lifecycle/periodic reconciliation and read-only ownership are described in [managed skills](https://docs.goblin-kingdom.com/burrow-skills/managed-skills/). Older installed builds may still use the historical adoption mechanism above.
 
 Current Core also exposes mod-owned external-turn cancellation and session create/model controls. Cancellation is cooperative and must be polled to terminal status; new-session creation does not delete an old conversation or cancel its work. These are Core capabilities, not proof that every transport mod exposes matching commands. Follow each mod's documentation and installed-version requirements.
 
@@ -42,7 +42,7 @@ The earlier Sunday pass reconciled the full documentation surface, including his
 - Start with the [current operator guide](../guide/installation.md) and compare its source coverage with your installed build.
 - If your installed build includes the newer behavior, use the clearly marked newer sections in [Skills and memory](../guide/skills-and-memory.md), [Dream cycles](../concepts/dreams.md), and [Conversation history](../concepts/conversation-history.md).
 - If a setting is missing, check Core's version before reinstalling a mod or changing authentication.
-- For remote execution, use [Node Goblin](https://burrow-docs.blissful-psychosis.com/node-goblin/) with [Backdoor](https://burrow-docs.blissful-psychosis.com/burrow-backdoor/) to retain an internal path to the agent's home Burrow.
+- For remote execution, use [Node Goblin](https://docs.goblin-kingdom.com/node-goblin/) with [Backdoor](https://docs.goblin-kingdom.com/burrow-backdoor/) to retain an internal path to the agent's home Burrow.
 
 Public calendar tags are created by coordinated promotion. This review did not create a release or advance a tag. Future release dates are not promised here.
 

@@ -40,7 +40,7 @@ Edit the hand-written documentation in `docs/` and its build configuration in `m
 
 ## Publishing the documentation
 
-The canonical URL is `https://burrow-docs.blissful-psychosis.com/`, without a `/Burrow/` path. GitHub Pages owns the custom-domain binding; the DNS CNAME points `burrow-docs` to `GoblinKing-Burrow.github.io`. This source configuration does not itself change DNS or Pages settings. Build output is in `site/`.
+The canonical URL is `https://docs.goblin-kingdom.com/`, without a `/Burrow/` path. GitHub Pages owns the custom-domain binding; the DNS CNAME for `docs.goblin-kingdom.com` points to `GoblinKing-Burrow.github.io`. This source configuration does not itself change DNS or Pages settings. Build output is in `site/`.
 
 The Documentation workflow builds and checks the site. In **GoblinKing-Burrow/Burrow**, after successful checks on `main`, it uploads the static `site/` directory and deploys to that repository’s configured GitHub Pages site. Pull requests run checks only. This workflow does not build or publish Burrow application images.
 

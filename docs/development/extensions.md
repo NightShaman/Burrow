@@ -14,7 +14,7 @@ A skill does not install a tool or grant permission. Mods run executable code; a
 
 ## Create a skill
 
-Use the [Burrow Skills authoring guide](https://burrow-docs.blissful-psychosis.com/burrow-skills/authoring/) for `SKILL.md`, companion files and validation. Ordinary operator-owned skills can be imported and assigned through Settings. Official managed copies are maintained by their source and are not customized in place; see [Skills and memory](../guide/skills-and-memory.md).
+Use the [Burrow Skills authoring guide](https://docs.goblin-kingdom.com/burrow-skills/authoring/) for `SKILL.md`, companion files and validation. Ordinary operator-owned skills can be imported and assigned through Settings. Official managed copies are maintained by their source and are not customized in place; see [Skills and memory](../guide/skills-and-memory.md).
 
 ## Add an MCP capability
 
@@ -22,7 +22,7 @@ Configure the provider, discover tools and apply the relevant access controls. O
 
 ## Build a mod
 
-Use [Burrow Tutor](https://burrow-docs.blissful-psychosis.com/burrow-tutor/) as the runnable example, and its [contract walkthrough](https://burrow-docs.blissful-psychosis.com/burrow-tutor/contract/) for manifests, routes, tools, storage, UI and lifecycle. Read the checked source/version limits before treating an example as compatible with an older installed Core.
+Use [Burrow Tutor](https://docs.goblin-kingdom.com/burrow-tutor/) as the runnable example, and its [contract walkthrough](https://docs.goblin-kingdom.com/burrow-tutor/contract/) for manifests, routes, tools, storage, UI and lifecycle. Read the checked source/version limits before treating an example as compatible with an older installed Core.
 
 Minimal manifest:
 
@@ -37,7 +37,7 @@ Minimal manifest:
 
 A server module exports `activate(context)`, registers only its own routes/tools and returns cleanup when needed. Validate arguments in the handler and handle cancellation. Installation, enablement, ordinary tool grants and privileged system-mod capabilities are separate concerns; a manifest cannot grant itself Core authority.
 
-The current authoring material follows inspected development source. [Release status](../project/release-status.md) distinguishes that work from public snapshots and installed versions. Tutor’s [installation readiness](https://burrow-docs.blissful-psychosis.com/burrow-tutor/install/#release-readiness) records a verified public tag; select an actual accepted tag with a matching manifest rather than inventing one from a default branch.
+The current authoring material follows inspected development source. [Release status](../project/release-status.md) distinguishes that work from public snapshots and installed versions. Tutor’s [installation readiness](https://docs.goblin-kingdom.com/burrow-tutor/install/#release-readiness) records a verified public tag; select an actual accepted tag with a matching manifest rather than inventing one from a default branch.
 
 ## Extend a model adapter
 
@@ -59,4 +59,4 @@ Current Core supports the independently declared and operator-granted `core-api-
 
 Requests accept a local `/api` path and optional method, headers, and exactly one of JSON `body`, UTF-8 `bodyText` or `bodyBase64`. Responses preserve status, headers, encoding, original byte length and complete finite body; HTTP errors remain response data. Finite NDJSON is aggregated, not delivered incrementally. The default 96 MiB response allocation ceiling fails explicitly rather than returning truncated success. Response failure does not roll back an already executed mutation; reconcile before retrying.
 
-This capability does not automatically grant other host interfaces or cross-agent managed diagnostics. Neither tool arguments nor headers establish trusted caller authority. Task-board mutations retain the actual agent/session/run attribution. Use [Backdoor's current API guidance](https://burrow-docs.blissful-psychosis.com/burrow-backdoor/operator-api/) for the shipped tool surface; a skill itself grants none of these capabilities.
+This capability does not automatically grant other host interfaces or cross-agent managed diagnostics. Neither tool arguments nor headers establish trusted caller authority. Task-board mutations retain the actual agent/session/run attribution. Use [Backdoor's current API guidance](https://docs.goblin-kingdom.com/burrow-backdoor/operator-api/) for the shipped tool surface; a skill itself grants none of these capabilities.
