@@ -952,3 +952,13 @@
 /* Reuse the Archive reader; event payloads remain literal, wrapping text. */
 .workflow-archive-details { padding-top:18px; overflow-wrap:anywhere; }
 .workflow-archive-details pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; line-height:1.55; }
+
+/* Explicit anchoring owns deferred Markdown/media height changes. */
+.archive-chat-body { overflow-anchor: none; }
+.archive-turn-pending { min-height: 180px; }
+.archive-render-status { position: absolute; z-index: 1; inset: auto 16px 8px; margin: 0; padding: 6px 10px; border-radius: 6px; background: var(--panel-bg, #202027); color: var(--text-muted); font-size: 12px; pointer-events: none; }
+.archive-reader-pane { position: relative; }
+.archive-chat-body > .archive-reader { flex-shrink: 0; }
+.archive-chat-body { display: block; }
+/* Retain DOM/selection/Find while letting the browser reuse offscreen layout. */
+.archive-chat-body .archive-turn { content-visibility: auto; contain-intrinsic-size: auto 240px; }

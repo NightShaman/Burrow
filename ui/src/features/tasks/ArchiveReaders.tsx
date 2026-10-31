@@ -1,9 +1,11 @@
-import { memo, useMemo, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useMemo, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { markdownPlugins, MarkdownImage, MarkdownTable } from '../../app/markdownTables';
 import { generatedArtifactPath, textFromChatValue, type SessionTurn } from '../../app/api';
-import { chatInputLabel, reconcileChatInputs } from '../chat/chatInputs';
+import { chatInputLabel } from '../chat/chatInputs';
 import { ChatMessage } from '../chat/ChatTranscript';
+import { archiveTurnId, reconcileArchiveTurns } from './archiveTurns';
+import { useArchiveBodies } from './useArchiveBodies';
 import { archiveDate, archiveSessionDate } from './archiveDerivations';
 import type { ArchiveDetail, ArchiveSession, ContinuityCardGroup, DreamArchiveGroup, DreamGroupSummary, DreamDiary, DreamPhaseAttempt } from './archiveTypes';
 
@@ -87,7 +89,7 @@ export function archiveTurnText(turn: SessionTurn, sessionAgentName: string, age
   return body ? `## ${speaker}${date ? ` · ${date}` : ''}\n\n${body}` : '';
 }
 
-function ArchiveReaderToolbar({ eyebrow, title, detail, value, copyLabel }: { eyebrow: string; title: string; detail: string; value: string; copyLabel: string }) {
+function ArchiveReaderToolbar({ eyebrow, title, detail, value, copyLabel }: { eyebrow: string; title: string; detail: string; value: string | (() => string); copyLabel: string }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
 
   useEffect(() => {
@@ -96,7 +98,7 @@ function ArchiveReaderToolbar({ eyebrow, title, detail, value, copyLabel }: { ey
     return () => window.clearTimeout(timer);
   }, [copyState]);
 
-  const copy = async () => setCopyState(await copyText(value) ? 'copied' : 'failed');
+  const copy = async () => setCopyState(await copyText(typeof value === 'function' ? value() : value) ? 'copied' : 'failed');
   return <div className="archive-content-toolbar archive-reader-toolbar"><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2><p>{detail}</p></div><button type="button" className="archive-copy-button" onClick={() => void copy()} disabled={!value} aria-label={copyState === 'copied' ? 'Copied' : `${copyLabel} as Markdown`}><span aria-hidden="true">{copyState === 'copied' ? '✓' : '⧉'}</span>{copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : copyLabel}</button></div>;
 }
 
@@ -125,51 +127,28 @@ function Placeholder({ title, detail }: { title: string; detail: string }) {
   return <section className="archive-empty-state archive-reader-placeholder"><div className="archive-empty-mark" aria-hidden="true">⌁</div><div><h3>{title}</h3><p>{detail}</p></div></section>;
 }
 
-// Stable per-object identity preserves existing DOM and Markdown work on prepend.
-const archiveTurnIds = new WeakMap<SessionTurn, number>();
-let nextArchiveTurnId = 0;
-function archiveTurnId(turn: SessionTurn) {
-  let id = archiveTurnIds.get(turn);
-  if (id === undefined) { id = ++nextArchiveTurnId; archiveTurnIds.set(turn, id); }
-  return id;
-}
-const ArchiveChatTurn = memo(function ArchiveChatTurn({ turn, sessionAgentName, agentNames, operatorName, attachmentAgentId, sessionAgentId }: { turn: SessionTurn; sessionAgentName: string; agentNames: ReadonlyMap<string, string>; operatorName: string; attachmentAgentId?: string; sessionAgentId: string | null }) {
-  const role = ['user', 'operator', 'human'].includes((turn.role || '').toLowerCase()) ? 'operator' : 'agent'; const text = textFromChatValue(turn.content); const artifacts = turn.metadata?.outputArtifacts ?? []; const attachments = turn.metadata?.attachments ?? []; const ownerId = attachmentAgentId || turn.metadata?.fromAgentId || sessionAgentId || ''; return <article className={`archive-turn ${role}`}><div className="archive-turn-meta"><strong>{archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName)}</strong><span>{formatTurnDate(turn.ts)}{turn.metadata?.chatInput ? ` · ${chatInputLabel(turn.metadata.chatInput)}` : ''}</span></div>{text ? <div className="archive-turn-body"><ReactMarkdown remarkPlugins={markdownPlugins} components={{ table: MarkdownTable, img: MarkdownImage }}>{text}</ReactMarkdown></div> : null}{attachments.length || artifacts.length ? <ChatMessage side={role} name={archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName)} avatar="" time={formatTurnDate(turn.ts)} text="" attachments={attachments} outputArtifacts={artifacts} attachmentAgentId={ownerId} /> : null}</article>;
+const ArchiveChatTurn = memo(function ArchiveChatTurn({ turn, sessionAgentName, agentNames, operatorName, attachmentAgentId, sessionAgentId, bodyReady }: { turn: SessionTurn; sessionAgentName: string; agentNames: ReadonlyMap<string, string>; operatorName: string; attachmentAgentId?: string; sessionAgentId: string | null; bodyReady: boolean }) {
+  const role = ['user', 'operator', 'human'].includes((turn.role || '').toLowerCase()) ? 'operator' : 'agent'; const text = textFromChatValue(turn.content); const artifacts = turn.metadata?.outputArtifacts ?? []; const attachments = turn.metadata?.attachments ?? []; const ownerId = attachmentAgentId || turn.metadata?.fromAgentId || sessionAgentId || ''; return <article className={`archive-turn ${role}`} data-body-ready={bodyReady} data-turn-id={archiveTurnId(turn)}><div className="archive-turn-meta"><strong>{archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName)}</strong><span>{formatTurnDate(turn.ts)}{turn.metadata?.chatInput ? ` · ${chatInputLabel(turn.metadata.chatInput)}` : ''}</span></div>{!bodyReady ? <div className="archive-turn-pending" aria-label="Message body rendering" /> : text ? <div className="archive-turn-body"><ReactMarkdown remarkPlugins={markdownPlugins} components={{ table: MarkdownTable, img: MarkdownImage }}>{text}</ReactMarkdown></div> : null}{bodyReady && (attachments.length || artifacts.length) ? <ChatMessage side={role} name={archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName)} avatar="" time={formatTurnDate(turn.ts)} text="" attachments={attachments} outputArtifacts={artifacts} attachmentAgentId={ownerId} /> : null}</article>;
 });
 
-export function ChatArchiveReader({ session, detail, loading, error, earlierLoading, earlierError, historyUnavailable, onLoadEarlier, onRestart, agentNames = new Map(), operatorName = 'Operator', attachmentAgentId }: { session: ArchiveSession | null; detail: ArchiveDetail | null; loading: boolean; error: string; earlierLoading: boolean; earlierError: string; historyUnavailable: boolean; onLoadEarlier: () => void; onRestart: () => void; agentNames?: ReadonlyMap<string, string>; operatorName?: string; attachmentAgentId?: string }) {
+const emptyAgentNames: ReadonlyMap<string, string> = new Map();
+
+export function ChatArchiveReader({ session, detail, loading, error, earlierLoading, earlierError, historyUnavailable, onLoadEarlier, onRestart, agentNames = emptyAgentNames, operatorName = 'Operator', attachmentAgentId }: { session: ArchiveSession | null; detail: ArchiveDetail | null; loading: boolean; error: string; earlierLoading: boolean; earlierError: string; historyUnavailable: boolean; onLoadEarlier: () => void; onRestart: () => void; agentNames?: ReadonlyMap<string, string>; operatorName?: string; attachmentAgentId?: string }) {
   const readerRef = useRef<HTMLDivElement>(null);
-  const pendingScroll = useRef<{ height: number; top: number } | null>(null);
   const activeSession = `${session?.agentId}:${session?.sessionId}`;
-  const lastSession = useRef(activeSession);
-  if (lastSession.current !== activeSession) { pendingScroll.current = null; lastSession.current = activeSession; }
-  useLayoutEffect(() => {
-    pendingScroll.current = null;
-    if (readerRef.current) readerRef.current.scrollTop = readerRef.current.scrollHeight;
-  }, [activeSession]);
-  const turns = useMemo(() => reconcileChatInputs(detail?.session?.turns || detail?.turns || detail?.chatTurns || [], []), [detail]);
-  useLayoutEffect(() => {
-    const node = readerRef.current;
-    if (!node || !detail || loading) return;
-    if (pendingScroll.current) {
-      node.scrollTop = pendingScroll.current.top + node.scrollHeight - pendingScroll.current.height;
-      pendingScroll.current = null;
-    } else if (node.dataset.initialized !== activeSession) {
-      node.scrollTop = node.scrollHeight;
-      node.dataset.initialized = activeSession;
-    }
-  }, [activeSession, detail, loading]);
+  const turns = useMemo(() => reconcileArchiveTurns(detail?.session?.turns || detail?.turns || detail?.chatTurns || []), [detail]);
+  const bodies = useArchiveBodies(turns, activeSession, readerRef);
   const sessionAgentName = session?.agentName || (session?.agentId ? agentNames.get(session.agentId) : '') || session?.agentId || 'Agent';
-  const copyValue = useMemo(() => turns.map((turn) => archiveTurnText(turn, sessionAgentName, agentNames, operatorName)).filter(Boolean).join('\n\n'), [turns, sessionAgentName, agentNames, operatorName]);
+  const copyValue = () => turns.map((turn) => archiveTurnText(turn, sessionAgentName, agentNames, operatorName)).filter(Boolean).join('\n\n');
   if (!session) return <Placeholder title="Select a conversation." detail="Choose a chat from the list to read it here." />;
   const load = () => {
-    const node = readerRef.current;
-    if (node) pendingScroll.current = { height: node.scrollHeight, top: node.scrollTop };
+    bodies.remember();
     onLoadEarlier();
   };
   return <>
-    <ArchiveReaderToolbar eyebrow={session.agentName || session.agentId || 'Archived chat'} title={archiveSessionTitle(session)} detail={`${archiveSessionContext(session)} · ${turns.length} loaded turns${detail?.hasMore ? ' · more available' : ''}`} value={copyValue} copyLabel="Copy loaded chat" />
-    <div className="archive-content-body archive-reader-body" ref={readerRef}>
+    <ArchiveReaderToolbar eyebrow={session.agentName || session.agentId || 'Archived chat'} title={archiveSessionTitle(session)} detail={`${archiveSessionContext(session)} · ${turns.length} loaded turns${detail?.hasMore ? ' · more available' : ''}`} value={turns.length ? copyValue : ''} copyLabel="Copy loaded chat" />
+    {bodies.pending ? <p className="archive-render-status" role="status">Rendering loaded messages… Selection and browser Find include all loaded text when finished. Copy includes every loaded message.</p> : null}
+    <div className="archive-content-body archive-reader-body archive-chat-body" ref={readerRef}>
       {loading ? <LoadingState title="Loading conversation." detail="Opening the most recent messages." /> : null}
       {error ? <ErrorState title="Could not open this conversation." error={error} /> : null}
       {!loading && detail ? <div className="archive-reader">
@@ -178,7 +157,7 @@ export function ChatArchiveReader({ session, detail, loading, error, earlierLoad
           {earlierError ? <div><span>Earlier messages could not be loaded: {earlierError}</span> <button type="button" onClick={load}>Retry</button> <button type="button" onClick={onRestart}>Restart from latest</button></div> : null}
         </div>
         <div className="archive-reader-summary">{session.summary || 'A mysterious little shelf item.'}</div>
-        {turns.length ? turns.map((turn) => <ArchiveChatTurn key={archiveTurnId(turn)} turn={turn} sessionAgentName={sessionAgentName} agentNames={agentNames} operatorName={operatorName} attachmentAgentId={attachmentAgentId} sessionAgentId={session.agentId} />) : <p className="archive-reader-empty">This conversation has no readable chat turns.</p>}
+        {turns.length ? turns.map((turn) => <ArchiveChatTurn key={archiveTurnId(turn)} turn={turn} sessionAgentName={sessionAgentName} agentNames={agentNames} operatorName={operatorName} attachmentAgentId={attachmentAgentId} sessionAgentId={session.agentId} bodyReady={bodies.ready.has(turn)} />) : <p className="archive-reader-empty">This conversation has no readable chat turns.</p>}
       </div> : null}
     </div>
   </>;

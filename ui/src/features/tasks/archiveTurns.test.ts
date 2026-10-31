@@ -19,3 +19,23 @@ describe('archive immutable page overlap', () => {
     expect(reads).toBe(1);
   });
 });
+
+import { reconcileArchiveTurns } from './archiveTurns';
+it('retains reconciled input row identities through prepend without hiding metadata updates', () => {
+  const original: SessionTurn = { type: 'message', role: 'user', content: 'queued', metadata: { chatInput: { id: 'input', intent: 'queue_next', status: 'queued' } } };
+  const first = reconcileArchiveTurns([original])[0];
+  expect(reconcileArchiveTurns([{ role: 'assistant', content: 'older' }, original])[1]).toBe(first);
+  const updated: SessionTurn = { type: 'message', role: 'assistant', content: 'answer', metadata: { chatInput: { id: 'input', intent: 'queue_next', status: 'succeeded' } } };
+  const next = reconcileArchiveTurns([original, updated]);
+  expect(next[0]).not.toBe(first);
+  expect(next[0].metadata?.chatInput?.status).toBe('succeeded');
+});
+it('preserves distinct assistant projection identities in timestamp order', () => {
+  const input = { id: 'shared', intent: 'queue_next' as const };
+  const late: SessionTurn = { type: 'message', role: 'assistant', ts: '2026-10-02', content: 'late', metadata: { chatInput: input } };
+  const early: SessionTurn = { type: 'message', role: 'assistant', ts: '2026-10-01', content: 'early', metadata: { chatInput: input } };
+  const first = reconcileArchiveTurns([late, early]);
+  const next = reconcileArchiveTurns([{ role: 'user', ts: '2026-09-30', content: 'older' }, late, early]);
+  expect(next[1]).toBe(first[0]);
+  expect(next[2]).toBe(first[1]);
+});
