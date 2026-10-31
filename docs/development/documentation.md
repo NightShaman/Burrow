@@ -40,9 +40,9 @@ Edit the hand-written documentation in `docs/` and its build configuration in `m
 
 ## Publishing the documentation
 
-The canonical URL is `https://docs.goblin-kingdom.com/`, without a `/Burrow/` path. GitHub Pages owns the custom-domain binding; the DNS CNAME for `docs.goblin-kingdom.com` points to `GoblinKing-Burrow.github.io`. This source configuration does not itself change DNS or Pages settings. Build output is in `site/`.
+The consolidated documentation at `https://docs.goblin-kingdom.com/` is published from **GoblinKing-Burrow/Docs-Website**, not this repository. Its Docusaurus deployment owns the canonical root and component routes. This repository retains a separate MkDocs build with output in `site/`. Hosting, DNS and custom-domain settings are managed separately; changing a source URL does not change them.
 
-The Documentation workflow builds and checks the site. In **GoblinKing-Burrow/Burrow**, after successful checks on `main`, it uploads the static `site/` directory and deploys to that repository’s configured GitHub Pages site. Pull requests run checks only. This workflow does not build or publish Burrow application images.
+The retained Documentation workflow builds and checks this repository’s MkDocs site. In **GoblinKing-Burrow/Burrow**, after successful checks on `main`, it uploads the static `site/` directory and deploys to that repository’s configured GitHub Pages site. Pull requests run checks only. This workflow does not build or publish Burrow application images.
 
 The deploy job has narrowly scoped `pages: write` and `id-token: write` permissions and uses the `github-pages` environment. Hosting and custom-domain settings are managed separately. The workflow reads existing Pages settings with automatic enablement disabled; an unconfigured Pages site must be configured by its owner before deployment can succeed. Do not assume that a successful build or an uploaded artifact updates the website: verify the deployment job and live URL.
 
