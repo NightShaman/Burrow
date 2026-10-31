@@ -632,7 +632,9 @@ button:disabled{cursor:not-allowed;opacity:.45}
 
 /* Mod contributions use the same column surface as native Settings: no nested card. */
 .settings-prototype-configuration > .mod-settings-mount > .setting-section,
+.settings-prototype-configuration > .mod-settings-mount > .mod-settings-surface > .setting-section,
 .settings-prototype-overflow > .mod-settings-mount > .setting-section,
+.settings-prototype-overflow > .mod-settings-surface.settings-overflow-content > .setting-section,
 .settings-prototype-overflow > .settings-overflow-content > .setting-section {
   margin: 0;
   padding: 0;
@@ -642,7 +644,9 @@ button:disabled{cursor:not-allowed;opacity:.45}
   box-shadow: none;
 }
 .settings-prototype-configuration > .mod-settings-mount > .setting-section > h2,
+.settings-prototype-configuration > .mod-settings-mount > .mod-settings-surface > .setting-section > h2,
 .settings-prototype-overflow > .mod-settings-mount > .setting-section > h2,
+.settings-prototype-overflow > .mod-settings-surface.settings-overflow-content > .setting-section > h2,
 .settings-prototype-overflow > .settings-overflow-content > .setting-section > h2 {
   margin: 0 0 14px;
   padding: 0 0 12px;
@@ -839,3 +843,33 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .telemetry-inventory-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}.telemetry-inventory-heading h3{margin:0}.telemetry-inventory-list{display:grid;gap:7px}.telemetry-inventory-item{display:grid;gap:4px;min-width:0;width:100%;padding:10px;text-align:left;border:1px solid var(--line);border-radius:7px;background:var(--surface-raised);color:var(--text);cursor:pointer}.telemetry-inventory-item:hover,.telemetry-inventory-item.active{border-color:var(--accent-border);background:var(--accent-subtle)}.telemetry-inventory-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.telemetry-inventory-item span,.telemetry-inventory-item small{color:var(--muted);font-size:11px;overflow-wrap:anywhere}.telemetry-advanced{margin-top:8px;padding:10px;border:1px solid var(--line);border-radius:7px}.telemetry-advanced summary{cursor:pointer;font-weight:700;font-size:12px}.telemetry-advanced>div{margin-top:12px}
 
 .minion-depth-marks{display:flex;justify-content:space-between;padding:0 7px;color:var(--muted);font-size:11px;font-weight:400;line-height:1}
+
+
+/* Flat, reusable mod/native building blocks; the shell remains the surface. */
+.mod-settings-surface,.settings-form{min-width:0}
+.settings-form{container:settings-form / inline-size}
+.settings-field-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:10px;min-width:0}
+.settings-field-pair>.field{min-width:0}
+@container settings-form (max-width:460px){.settings-field-pair{grid-template-columns:minmax(0,1fr)}}
+.settings-stack{display:grid;gap:12px;min-width:0}
+.settings-stack>.field{margin:0;min-width:0}
+.settings-group{min-width:0;margin-top:14px;padding-top:14px;border-top:1px solid var(--line-soft)}
+.settings-group>h3{margin:0 0 12px;color:var(--text-strong);font-size:13px}
+.settings-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;min-width:0}
+.settings-status{display:inline;color:var(--muted);font-size:12px;line-height:1.4;overflow-wrap:anywhere}
+.settings-status.ok{color:var(--ok)}
+.settings-status.warn{color:var(--warn)}
+.settings-status.error{color:var(--danger)}
+.settings-facts{display:grid;gap:6px;min-width:0;margin:0;font-size:12px}
+.settings-facts dt{color:var(--muted);font-size:11px}
+.settings-facts dd{margin:0 0 8px;overflow-wrap:anywhere;color:var(--text)}
+.settings-disclosure{min-width:0;margin:10px 0}
+.settings-disclosure>summary{padding:6px 0;font-size:12px;cursor:pointer}
+.settings-disclosure>summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.settings-disclosure[open]>summary{margin-bottom:12px}
+.settings-danger-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line-soft)}
+/* Long mod inventory names/actions may wrap without changing MCP's baseline. */
+.mod-settings-surface .memory-connection{flex-wrap:wrap;min-width:0}
+.mod-settings-surface .memory-connection-select{flex:1 1 140px;min-width:0}
+.mod-settings-surface .memory-connection strong{overflow-wrap:anywhere}
+.mod-settings-surface .memory-connection-actions{flex-wrap:wrap;max-width:100%;min-width:0}

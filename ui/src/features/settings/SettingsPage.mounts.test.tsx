@@ -176,7 +176,7 @@ it('uses dynamic mod sections when manifest metadata is only a top-level contrib
   const [tab, setTab] = useState<SettingsTab>('general');
   return <Settings {...{ tab, setTab, agents: [], selected: { id: '', name: '' }, savedProviders: [], onOperatorProfileChanged: vi.fn(), agentRailPreferences: { view: 'regular', order: [] } } as unknown as ComponentProps<typeof Settings>} />;
  }
- render(<Parent />);
+ render(<ConfirmProvider><Parent /></ConfirmProvider>);
  fireEvent.click(await screen.findByRole('button', { name: 'Node Goblin' }));
  const secondary = await screen.findByRole('navigation', { name: 'node-goblin settings sections' });
  await waitFor(() => expect(Array.from(secondary.querySelectorAll('button'), (button) => button.textContent)).toEqual(['Controller & TLS', 'Pending pairings', 'Gateways', 'Agent assignments', 'Operation activity']));

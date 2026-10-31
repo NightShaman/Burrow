@@ -1,5 +1,6 @@
 import { enabledAgents } from '../../app/agentCatalog';
 import { useConfirm } from '../../app/ConfirmDialog';
+import { useImperativeUnsavedChanges, useUnsavedNavigation, type UnsavedDraft } from '../../app/UnsavedChanges';
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import type { Agent } from '../../app/types';
@@ -21,6 +22,9 @@ type ModSettingsContext = {
   agents: readonly Agent[];
   primary: SettingsSurface;
   overflow: SettingsSurface | null;
+  confirm: ReturnType<typeof useConfirm>;
+  navigate: (proceed: () => void) => void;
+  setDraft: (draft: UnsavedDraft | null) => void;
   api: <T = unknown>(path: string, init?: RequestInit) => Promise<T>;
   accessApi: <T = unknown>(init?: RequestInit) => Promise<T>;
   refreshAgents: () => Promise<void>;
@@ -153,6 +157,9 @@ function settingsFactoryContext(modId: string, agents: readonly Agent[]) {
 
 export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, navigationTarget, overflowTarget, selectedSectionId, onSectionChange }: { modId: string; settingsUrl: string; agents: Agent[]; onAgentsChanged: () => Promise<void>; navigationTarget: HTMLElement | null; overflowTarget: HTMLElement | null; selectedSectionId?: string; onSectionChange?: (sectionId: string) => void }) {
   const primaryRef = useRef<HTMLDivElement>(null);
+  const confirm = useConfirm();
+  const navigate = useUnsavedNavigation();
+  const createDraft = useImperativeUnsavedChanges();
   const [module, setModule] = useState<ModSettingsModule | null>(null);
   const [contribution, setContribution] = useState<SettingsContribution | null>(null);
   const [sections, setSections] = useState<ModSettingsSection[]>([]);
@@ -176,7 +183,9 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
       const next = contribution?.sections ?? validSections(loaded.settingsSections);
       if ((!contribution && typeof loaded.mountSettings !== 'function') || !next.length) throw new Error('The mod settings entry does not implement the Burrow settings contract.');
       const initialSection = next.find((item) => item.id === selectedSectionId)?.id ?? next[0].id;
-      setModule(loaded); setContribution(contribution); setSections(next); setSection(initialSection);
+      // A module namespace can be reused across remounts. Wrap it so every
+      // load has a distinct React state identity, even when its URL is unchanged.
+      setModule({ ...loaded }); setContribution(contribution); setSections(next); setSection(initialSection);
     }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'Could not load mod settings.'); });
     return () => { active = false; };
   }, [settingsUrl, modId]);
@@ -187,8 +196,8 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
   }, [selectedSectionId, sections]);
 
   const selectSection = (sectionId: string) => {
-    setSection(sectionId);
-    onSectionChange?.(sectionId);
+    if (sectionId === section) return;
+    navigate(() => { setSection(sectionId); onSectionChange?.(sectionId); });
   };
 
   useEffect(() => {
@@ -197,14 +206,17 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
     const hasDeclarativeContent = Boolean(definition && (definition.layout === 'form' ? (definition.fields?.length || definition.actions?.length) : definition.items?.length));
     if (hasDeclarativeContent || !module?.mountSettings || !primary || !section) return;
     const node = document.createElement('div');
+    node.className = 'mod-settings-surface';
     primary.replaceChildren(node);
     const overflowNode = overflowTarget ? document.createElement('div') : null;
-    if (overflowNode) overflowTarget!.replaceChildren(overflowNode);
+    if (overflowNode) { overflowNode.className = 'mod-settings-surface settings-overflow-content'; overflowTarget!.replaceChildren(overflowNode); }
     const primarySurface = createSurface(node);
     const overflowSurface = overflowNode ? createSurface(overflowNode) : null;
     const disposeSafely = (candidate?: () => void) => { try { candidate?.(); } catch { /* Mod cleanup cannot break navigation. */ } };
     let disposed = false;
     let cleanup: (() => void) | undefined;
+    const draft = createDraft();
+    const navigationCancellations = new Set<() => void>();
     const context: ModSettingsContext = {
       modId,
       runtimeScope: 'local',
@@ -212,6 +224,23 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
       agents: agentsRef.current,
       primary: primarySurface,
       overflow: overflowSurface,
+      confirm: async (options) => {
+        if (disposed) return false;
+        const result = await confirm(options);
+        return !disposed && result;
+      },
+      navigate: (proceed) => {
+        if (disposed) return;
+        let cancel: (() => void) | undefined;
+        let completed = false;
+        cancel = navigate(() => {
+          completed = true;
+          if (cancel) navigationCancellations.delete(cancel);
+          if (!disposed) proceed();
+        });
+        if (!completed) navigationCancellations.add(cancel);
+      },
+      setDraft: draft.setDraft,
       api: modApi(modId),
       accessApi: modAccessApi(modId),
       refreshAgents: () => onAgentsChangedRef.current(),
@@ -227,8 +256,13 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
       const candidate = typeof result === 'function' ? result : result?.unmount;
       if (disposed) disposeSafely(candidate); else cleanup = candidate;
     }).catch((cause) => { if (!disposed) setError(cause instanceof Error ? cause.message : 'Could not mount mod settings.'); });
-    return () => { disposed = true; node.remove(); overflowNode?.remove(); disposeSafely(cleanup); node.replaceChildren(); overflowNode?.replaceChildren(); };
-  }, [module, contribution, section, modId, overflowTarget]);
+    return () => {
+      disposed = true;
+      navigationCancellations.forEach(cancel => cancel());
+      draft.dispose();
+      node.remove(); overflowNode?.remove(); disposeSafely(cleanup); node.replaceChildren(); overflowNode?.replaceChildren();
+    };
+  }, [module, contribution, section, modId, overflowTarget, confirm, navigate, createDraft]);
 
   return <>
     {navigationTarget && createPortal(<nav className="settings-prototype-section-items" aria-label={`${modId} settings sections`}>{sections.map((item) => <button type="button" className={section === item.id ? 'active' : ''} aria-current={section === item.id ? 'page' : undefined} onClick={() => selectSection(item.id)} key={item.id}>{item.label}</button>)}</nav>, navigationTarget)}
