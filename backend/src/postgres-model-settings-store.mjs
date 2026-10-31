@@ -471,7 +471,15 @@ export class PostgresModelSettingsStore {
         for (const key of new Set([...Object.keys(expectedAuth), ...Object.keys(stored)])) {
           if (key === 'refreshToken' || JSON.stringify(stored[key]) === JSON.stringify(expectedAuth[key])) continue;
           if (Object.hasOwn(stored, key)) auth[key] = stored[key];
-          else delete auth[key]; // Access-token edits also clear absent identity claims.
+          else delete auth[key];
+        }
+        if (stored.accessToken !== expectedAuth.accessToken) {
+          // Identity belongs to the selected access token, including when only
+          // the in-flight provider reply introduced those claims.
+          for (const key of ['accountId', 'planType', 'email']) {
+            if (Object.hasOwn(stored, key)) auth[key] = stored[key];
+            else delete auth[key];
+          }
         }
       }
     }
