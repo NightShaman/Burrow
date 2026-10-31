@@ -30,6 +30,14 @@ Treat callback URLs, codes, and tokens as secrets. Enter them only into the sign
 
 [Source: sign-in dialogs and statuses](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/ModelConnectionOAuthDialog.tsx).
 
+## OAuth refresh and cancellation
+
+Current Core shares in-flight credential resolution per connection. Stopping a run cancels that caller's wait, not a refresh exchange that may already have consumed a single-use token. The exchange has its own 15-second network deadline and finishes response reading and encrypted persistence independently. PostgreSQL advisory locking coordinates refreshes across store instances; normal shutdown drains credential work before closing the pool.
+
+A concurrent operator credential replacement is re-read before returning an obsolete failure. A successful rotation cannot overwrite a different replacement refresh token. For a token-only edit that retains the exchanged refresh token, edited fields are preserved while the lineage advances; account identity remains tied to the selected access token rather than the discarded response.
+
+OpenAI invalid-grant, reused, expired, invalidated and revoked-token failures are classified separately from generic failure or timeout. The latter do not automatically require reauthorization. Independent applications sharing the same token lineage are outside this coordination, and a process crash or transport failure can leave the exchange outcome unknown. This is source-reviewed behavior, not a claim of crash-proof or long-duration live authentication.
+
 ## Native OAuth account pools
 
 Use **Settings → Connections → Load Balancing**, separate from **Model providers**, to create a logical OpenAI or Anthropic OAuth pool.

@@ -6,10 +6,10 @@ The operator guide follows inspected current development implementation, without
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.10.30.1` | `23bf37de7a7353732005123c3c44b7f2822463bb` |
-| Core / Backend | `bea2171508d1821440ed5c554a688768848699c9` |
-| UI | `bb78b136e7ceb21858b134c1f8376726d8e18f5d` |
-| Skills | `9bb95549b00429f99ccdaf30c804134ee4418738` |
+| Assembled Burrow, build `2026.10.31.6` | `203c3ed2d634680bb98a6e04bb75247cd9b3e2c2` |
+| Core / Backend | `8275b6bedf1fcd969fb5289cf0b673a80ddc8146` |
+| UI | `f48a29337abccdfeb8c34895d043d6be4110b1fb` |
+| Skills | `078031793d93118e463c0c780feefa3dd109e257` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
 
@@ -75,3 +75,7 @@ Compared implementation changes since the successful 28 October update: native p
 ## Ordinary update: 30 October 2026
 
 Compared implementation changes since the successful 29 October baseline: independent Settings autosave with explicit coupled-form boundaries; Dream phase and workflow delivery history in Archive; agent-wide Minion discovery and source-authored delegation labels; full home-Core administrative API dispatch through a separately granted system capability; expanded operational/provider responsiveness telemetry; and preference adjudication against the current operator baseline. This is static changed-source reconciliation, not a full-page recertification, provider/application test, runtime deployment or release promotion. Historical screenshots and source qualifications remain intact.
+
+## Ordinary update: 31 October 2026
+
+Compared changes since the successful 30 October baseline: retained Chat occurrence-day discovery, local-day transcript filtering and readable reset origins; bounded SQL transcript pages and revision-bound cursors; request-owned Archive cancellation/timeouts and separate calendar/foreground reader lanes; mod-submitted image attachments; OAuth refresh persistence and selected-token identity across caller cancellation; and schema migrations 80–83. Managed-skill ownership/version guidance and Switchboard Telegram image support are reconciled in their component guides. This is static delta reconciliation, not a full-page recertification, application/provider test, runtime deployment or release promotion. Unchanged historical source links and screenshot qualifications remain intact.

@@ -1,10 +1,10 @@
 # Skills and memory
 
-Current implementation delta reviewed **27 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation delta reviewed **31 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 Use **skills** for reusable instructions, **profile documents** for agent-specific guidance, and **Brains** for explicit saved memories.
 
-Burrow automatically provisions its runtime skill and adopts its official update source by default. Bundled and Git-managed instructions are read-only; creating a text skill is for your own optional instructions. Meet Tinker and Trixie and inspect the public instructions in [Burrow Skills](https://burrow-docs.blissful-psychosis.com/burrow-skills/). The [managed-skills guide](https://burrow-docs.blissful-psychosis.com/burrow-skills/managed-skills/) distinguishes the historical 2026.10.19 runtime from the implemented Core/mod-managed catalog.
+Current Core supplies Core and loaded mods' declared operating skills through a dedicated read-only managed catalog; they do not require an ordinary-library Git install. Bundled and Git-managed instructions are read-only; creating a text skill is for your own optional instructions. Meet Tinker and Trixie and inspect the public instructions in [Burrow Skills](https://burrow-docs.blissful-psychosis.com/burrow-skills/). The [managed-skills guide](https://burrow-docs.blissful-psychosis.com/burrow-skills/managed-skills/) distinguishes the historical 2026.10.19 runtime from the implemented Core/mod-managed catalog.
 
 ## Official managed skills
 

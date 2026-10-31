@@ -58,3 +58,9 @@ No credentials, real operator data, private transcripts, or secret-bearing scree
 ## Updating the guide
 
 Use concrete UI labels, small safe examples, and links to immutable public source. Distinguish installed, enabled, connected, accepted, running, and completed states. Record verification limits in [Source and coverage](../project/source-map.md). Retained historical pages must stay visibly marked until their claims have been checked against a new public baseline.
+
+## Validate upstream copies as well as this site
+
+When synchronizing a guide into an owning repository, copy or verify every referenced local image, download and linked page at that repository's final paths. A successful consolidated build does not prove the upstream documentation is self-contained. Compare asset hashes where the same illustration is shared, and preserve that repository's Markdown/admonition conventions instead of copying Docusaurus syntax into MkDocs.
+
+For Burrow's upstream MkDocs tree, run its documented docs-only dependency setup and `mkdocs build --strict` from the repository root. Also check rendered internal links/fragments and referenced assets. Do not run application/provider tests to validate documentation. Upstream `[skip ci]` avoids runtime/release workflows; it does not excuse skipping safe local documentation checks. Keep the upstream commit, asset check, build result, consolidated deployment and live-page verification in the maintenance receipt.

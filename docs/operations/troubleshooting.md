@@ -226,3 +226,19 @@ Changed behavior above was checked statically against Backend `a04acb16b0eab2a91
 ## 29 October development delta
 
 Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).
+
+## Archive dates, paging or timeouts
+
+Current Chat Archive includes retained message dates, not just the latest catalog date. Check the agent and browser-local day, then clear the day filter to inspect the full retained conversation. A creation/update/reset-date match without messages on that day is labeled explicitly. Reset origin is shown only when proven; an unknown UUID is not automatically Default.
+
+After `archive_cursor_invalid`, choose **Restart from latest** or request a new first page; do not reuse a cursor after changing bounds or source revisions. `archive_query_timeout` (HTTP 504) and `archive_reader_unavailable` (HTTP 503) are failures, not empty history. Retry the read and capture sanitized timing, agent/session and filter information if it persists. Leaving Archive cancels its read workload, not an accepted chat/job, so resubmitting agent work is not an Archive repair.
+
+Old rows remain readable through fallback while the automatic indexed discovery backfill progresses. Cold reset counts, dense date windows, full Proof traces and browser Markdown rendering can still be costly. Do not delete retained history or edit migration checksums to make a slow page appear empty. See [Archive contract](../reference/api/sessions.md#current-chat-archive-read-contract).
+
+## OAuth refresh after Stop or a canceled request
+
+Current Core lets the canceled caller stop waiting while an already-started token refresh finishes reading and saving its result under its own network deadline. This avoids abandoning a refresh token that the provider may already have consumed. A generic timeout/refresh failure alone is not proof that login must be repeated; inspect the bounded diagnostic code and connection state. OpenAI invalid-grant, reused, expired, invalidated and revoked token classifications indicate reauthorization is required.
+
+Do not independently rotate copies of the same refresh-token lineage in Burrow and another application. Cancellation shielding does not cover another application's refreshes or a crash/transport failure with an unknown exchange outcome. Never include tokens or raw provider responses in the diagnostic report. See [OAuth refresh behavior](../guide/models.md#oauth-refresh-and-cancellation).
+
+These changed behaviors were source-reviewed on **31 October 2026**; no provider login, token refresh, database or application tests were executed by this documentation pass.

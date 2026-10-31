@@ -82,7 +82,11 @@ In chat, open a file from the **Workspace** panel. It opens in a document tab. C
 
 ## Find earlier work
 
-Open **archive** and choose **Chat**, **Dreams**, **Tiddle**, or **Proof**. Use search and the agent filter. Chat and Dreams support calendar browsing in your browser's local timezone. **Proof** shows recorded run outcomes and evidence; an old successful run does not verify today's filesystem or service state. The **Copy conversation** button in chat copies the displayed transcript as Markdown.
+Open **archive** and choose **Chat**, **Dreams**, **Tiddle**, **Tasks**, **Forge**, **Workflow Events**, or **Proof**. Use search and the agent filter. Chat, Dreams and Workflow Events support calendar browsing in your browser's local timezone. **Proof** shows recorded run outcomes and evidence; an old successful run does not verify today's filesystem or service state. The **Copy conversation** button in chat copies the displayed transcript as Markdown.
+
+Chat calendar days include retained message dates, so a long-running Default conversation can appear on earlier days even after later messages or compaction. Selecting a day restricts both the first transcript page and **Load earlier messages** to that local day. Clear the day filter to browse the full retained conversation. A card may match its creation/update/reset date but contain no retained messages on that day; the reader says so. Reset cards show their proven origin and reset time instead of treating every UUID session as Default. **Copy loaded chat** copies only loaded messages.
+
+Changing filters or leaving Archive cancels its reads, not durable chat/jobs. A timeout is an error, not an empty history. Use **Restart from latest** after an invalidated paging cursor. See [Archive API details](../reference/api/sessions.md#current-chat-archive-read-contract).
 
 [Source: Archive](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/tasks/ArchivePage.tsx#L13-L18) · [Source: archive filters](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/tasks/ArchivePage.tsx#L67-L92) · [Source: historical evidence scope](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/action-proposal.mjs#L230-L231)
 

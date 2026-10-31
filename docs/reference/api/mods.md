@@ -60,3 +60,13 @@ The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d
 - [backend/src/mod-authority.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-authority.mjs)
 - [backend/src/mod-distribution.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-distribution.mjs)
 - [backend/src/mod-runtime.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-runtime.mjs)
+
+## External agent turns with images
+
+Current Core's host capability `context.agents.turns.submit` accepts optional `attachments` beside `agentId`, `sessionId`, `message`, optional `displayMessage`, and `idempotencyKey`. This is an internal mod capability, not a new public HTTP route. Attachments use normal ChatAttachment fields (`name`, `type` or `mimeType`, `size`, `encoding`, `content`); actual nonempty content is required. Images must be matching `data:image/...;base64,...` content with canonical padded base64, never provider download URLs, private storage paths or credentials.
+
+Core normalizes before durable acceptance and rejects dropped/truncated or malformed input. Image content is limited to 30,000,000 characters including the data URL prefix; non-image content beyond 200,000 characters is rejected. Provider/model limits still apply. Normalized bytes persist with the durable receipt and normal agent attachment artifacts. Submit/read/cancel public projections omit those submitted payloads.
+
+Idempotency compares normalized attachment content and metadata as well as agent/session/message/display input. Omitted attachments and `[]` are equivalent; changing attachments under an existing key returns `mod_external_turn_idempotency_conflict`. A vision-capable selected model receives the actual image; otherwise the ordinary chat vision fallback applies. Update Core before enabling a transport feature that depends on this capability. See [Tutor external-turn lesson](https://burrow-docs.blissful-psychosis.com/burrow-tutor/advanced/external-agent-turns/).
+
+Source reviewed on **31 October 2026** against Core `8275b6bedf1fcd969fb5289cf0b673a80ddc8146`; no transport/provider call was performed.

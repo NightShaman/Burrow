@@ -84,11 +84,13 @@ Original resolution prefers the live entry and then a retained archived occurren
 ## Transcript export and archive display
 
 Transcript export uses one database snapshot. It includes compacted predecessor generations since the latest reset plus active entries; reset archives remain separately retrievable. An export of the current conversation is therefore different from exporting every retained historical generation.
-Archive cursors bind collection/filter scope and use descending timestamp plus identity. Calendar availability is calculated from retained rows; day filters use the supplied timezone. Page size is capped at 500. Human-readable archive summaries are model-generated and bounded; a summary is not a verification receipt.
+Archive collection cursors bind collection/filter scope and use descending timestamp plus identity. Chat calendar availability includes retained visible message occurrence days as well as catalog update/reset dates; unknown occurrence clocks are not replaced with storage timestamps. Reset discovery stays inside that reset's own generation window. Day filters use the supplied timezone, including DST boundaries. Human-readable archive summaries are model-generated and bounded; a summary is not a verification receipt.
+
+Chat detail uses a bounded canonical PostgreSQL page, not a full export followed by slicing. It defaults to 100 turns, clamped to 1–500, with newest page first and chronological order within each page. Its signed cursor binds the agent/session, raw timestamp bounds and retained source revision. A mutation or rewrite may invalidate it; restart from the newest page after `400 archive_cursor_invalid`. `historyStatus: complete` describes retained results, not recovery of previously deleted evidence. The separate mod conversation reader retains its own segmented response contract; do not interchange its cursor with HTTP Chat Archive cursors.
 ### Evidence and completion
 
 Archive proof combines terminal receipts, canonical tool calls/results and trace evidence, correlated by call IDs to avoid double reporting. Without a terminal receipt, an answer is `unverified`; without an answer it is `incomplete`. Assistant prose alone does not establish success. Child verification uses typed results such as `passed`, `failed`, `failed_expected` and `not_run`.
-Proof details are bounded and redacted. Context receipts distinguish current from retained attachments and record compression outcomes. Review those receipts when investigating whether a claimed action had durable effects.
+Proof reads inspect the requested run's complete retained trace streams incrementally in an isolated reader, rather than silently truncating evidence or exporting a whole session. Cost still grows with that run's retained trace bytes. Damaged trace records fail rather than inventing a successful receipt. Returned evidence requires review before sharing; historical success is not current verification. Context receipts distinguish current from retained attachments and record compression outcomes. Review those receipts when investigating whether a claimed action had durable effects.
 
 ## Retention and deletion
 
