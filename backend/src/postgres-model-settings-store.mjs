@@ -8,6 +8,7 @@ import {
   refreshAnthropicOauth, discoverModels, isProviderPool, assertProviderPoolMembers, providerPoolModels, modelSettingsFailureDiagnostic,
 } from './model-settings-store.mjs';
 import { refreshOpenAiOAuth } from './openai-oauth-login.mjs';
+import { operationalEvent } from './operational-log.mjs';
 
 export const POSTGRES_MODEL_SETTINGS_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS chat_identities (
@@ -67,6 +68,20 @@ const API_KEY = 'apiKey';
 const CONNECTION_WRITE_LOCK = 'burrow-model-settings-connection-write';
 const IDENTITY_WRITE_LOCK = 'burrow-model-settings-identity-write';
 const OAUTH_REFRESH_LOCK = 'burrow-model-settings-oauth-refresh';
+const OAUTH_REFRESH_TIMEOUT_MS = 15_000;
+
+// Cancel the caller's wait, never a refresh which may already have consumed a
+// single-use token upstream. Both promise outcomes remain observed after abort.
+function waitForAuth(pending, signal) {
+  if (!signal) return pending;
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const aborted = () => reject(signal.reason);
+    signal.addEventListener('abort', aborted, { once: true });
+    pending.then(resolve, reject).finally(() => signal.removeEventListener('abort', aborted));
+  });
+}
+
 const json = (value, fallback = {}) => { try { return JSON.parse(value); } catch { return fallback; } };
 
 export class PostgresModelSettingsStore {
@@ -75,10 +90,16 @@ export class PostgresModelSettingsStore {
     if (!Buffer.isBuffer(key) || key.length !== 32) throw new Error('settings_encryption_key_invalid');
     this.pool = normalizePostgresPool(pool); this.key = key; this.ownsPool = ownsPool; this.clock = clock;
     this.logger = logger;
+    this.oauthRefreshes = new Map();
     this.providerPoolMetrics = new PostgresProviderPoolMetrics(this.pool);
     this.bootstrapSampleIdentities = ["1", "true", "yes", "on"].includes(String(bootstrapSampleIdentities ?? "0").trim().toLowerCase());
   }
-  async close() { if (this.ownsPool) await closePostgresPool(this.pool); }
+  async close() {
+    // A canceled caller may have left a rotation queued for checkout or still
+    // committing. Keep the pool available until that owned work finishes.
+    while (this.oauthRefreshes.size) await Promise.allSettled([...this.oauthRefreshes.values()]);
+    if (this.ownsPool) await closePostgresPool(this.pool);
+  }
   defaultIdentityName(kind) { return this.bootstrapSampleIdentities ? (kind === 'operator' ? 'Rob' : 'Hatchet') : ''; }
   async identitySnapshot(client = this.pool) {
     const [agents, operator] = await Promise.all([
@@ -261,6 +282,25 @@ export class PostgresModelSettingsStore {
 
   async resolveAuth(id, { fetchImpl = fetch, nowMs = Date.now(), signal = null } = {}) {
     signal?.throwIfAborted();
+    let pending = this.oauthRefreshes.get(id);
+    if (!pending) {
+      // Register before the first lookup can yield. Concurrent calls share the
+      // entire lifecycle, including failure and work queued on a max=1 pool.
+      pending = this.resolveAuthUncancelled(id, { fetchImpl, nowMs });
+      this.oauthRefreshes.set(id, pending);
+      pending.then(() => this.oauthRefreshes.delete(id), error => {
+        this.oauthRefreshes.delete(id);
+        // The last caller may already have stopped. Retain a safe diagnostic,
+        // not an unhandled rejection or raw upstream response/credentials.
+        if (this.logger) operationalEvent(this.logger, 'model_auth_refresh_failed', {
+          connectionId: id, ...modelSettingsFailureDiagnostic(error),
+        }, { component: 'models' });
+      });
+    }
+    return waitForAuth(pending, signal);
+  }
+
+  async resolveAuthUncancelled(id, { fetchImpl, nowMs }) {
     const connection = await this.get(id);
     if (!connection) throw new Error('model_connection_not_found');
     let auth = await this.auth(id);
@@ -269,14 +309,11 @@ export class PostgresModelSettingsStore {
       // The lock is session-scoped and held on the same pinned client used for
       // the re-read/write. This avoids a max=1 pool deadlock and lets ordinary
       // operator writes proceed until the short persistence transaction.
-      signal?.throwIfAborted();
       const client = await this.pool.connect();
       let locked = false;
       try {
-        signal?.throwIfAborted();
         await client.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [`${OAUTH_REFRESH_LOCK}:${id}`]);
         locked = true;
-        signal?.throwIfAborted();
         const current = await client.query(`${this.selectSql('WHERE c.id=$1')}`, [id]);
         if (!current.rows[0]) throw new Error('model_connection_not_found');
         const currentConnection = publicConnection(current.rows[0]);
@@ -284,18 +321,35 @@ export class PostgresModelSettingsStore {
         if (!auth) throw new Error('model_connection_auth_required');
         if (auth.type === 'oauth' && Number(auth.expiresAt) <= nowMs + 60_000) {
           const provider = auth.provider || currentConnection.provider;
-          const refreshed = /openai/i.test(provider)
-            ? await refreshOpenAiOAuth(auth, { fetchImpl, nowMs, signal })
-            : /anthropic|claude/i.test(provider)
-              ? await refreshAnthropicOauth(auth, { fetchImpl, nowMs, signal })
-              : (() => { throw new Error('model_auth_refresh_provider_unsupported'); })();
-          await client.query('BEGIN');
+          let refreshed;
           try {
-            auth = await this.persistAuthOnClient(client, id, refreshed, this.clock(), auth.refreshToken || null, auth);
-            await client.query('COMMIT');
+            // Only this exchange owns the network deadline. Neither a stopped
+            // run nor background catalog deadline may cancel its token body.
+            const signal = AbortSignal.timeout(OAUTH_REFRESH_TIMEOUT_MS);
+            refreshed = /openai/i.test(provider)
+              ? await refreshOpenAiOAuth(auth, { fetchImpl, nowMs, signal })
+              : /anthropic|claude/i.test(provider)
+                ? await refreshAnthropicOauth(auth, { fetchImpl, nowMs, signal })
+                : (() => { throw new Error('model_auth_refresh_provider_unsupported'); })();
           } catch (error) {
-            await client.query('ROLLBACK').catch(() => {});
-            throw error;
+            // An operator may have reauthorized while the provider was failing.
+            // A stale failure must not conceal a genuinely newer usable login.
+            const saved = await this.authWithClient(client, id, currentConnection.provider);
+            const usable = saved?.type === 'oauth'
+              ? saved.accessToken && Number(saved.expiresAt) > nowMs + 60_000
+              : saved?.type === 'api_key' ? saved.apiKey : saved?.token;
+            if (!usable || JSON.stringify(saved) === JSON.stringify(auth)) throw error;
+            auth = saved;
+          }
+          if (refreshed) {
+            await client.query('BEGIN');
+            try {
+              auth = await this.persistAuthOnClient(client, id, refreshed, this.clock(), auth.refreshToken || null, auth);
+              await client.query('COMMIT');
+            } catch (error) {
+              await client.query('ROLLBACK').catch(() => {});
+              throw error;
+            }
           }
         }
       } finally {
@@ -407,7 +461,19 @@ export class PostgresModelSettingsStore {
     if (!current) throw new Error('model_connection_not_found');
     if (expectedRefreshToken !== undefined) {
       const stored = await this.authWithClient(client, id, current.provider);
-      if (stored?.refreshToken !== expectedRefreshToken || (expectedAuth && JSON.stringify(stored) !== JSON.stringify(expectedAuth))) return stored || auth;
+      if (stored?.refreshToken !== expectedRefreshToken) return stored || auth;
+      if (expectedAuth && JSON.stringify(stored) !== JSON.stringify(expectedAuth)) {
+        if (stored?.type !== 'oauth' || !/openai/i.test(stored.provider || '') || expectedAuth.type !== 'oauth') return stored || auth;
+        // A token-only edit can retain the very refresh token this exchange
+        // just consumed. Do not discard its replacement: preserve edited
+        // fields, but advance that same token lineage to the provider's rotation.
+        auth = { ...auth };
+        for (const key of new Set([...Object.keys(expectedAuth), ...Object.keys(stored)])) {
+          if (key === 'refreshToken' || JSON.stringify(stored[key]) === JSON.stringify(expectedAuth[key])) continue;
+          if (Object.hasOwn(stored, key)) auth[key] = stored[key];
+          else delete auth[key]; // Access-token edits also clear absent identity claims.
+        }
+      }
     }
     const canonical = canonicalizeOauthConnection({ provider: current.provider, apiType: current.api_type, baseUrl: current.base_url }, auth);
     if (canonical.apiType !== current.api_type) await client.query('UPDATE model_connections SET api_type=$1, updated_at=$2 WHERE id=$3', [canonical.apiType, timestamp, id]);

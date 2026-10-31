@@ -12,6 +12,8 @@ const AAD_PREFIX = 'burrow-model-secret-v1';
 // failures (including OAuth/Google producers that still throw that form).
 const MODEL_DIAGNOSTIC_CODES = new Set([
   'model_discovery_failed', 'model_discovery_invalid', 'model_auth_refresh_failed',
+  'model_auth_refresh_invalid_grant', 'model_auth_refresh_token_reused', 'model_auth_refresh_token_expired',
+  'model_auth_refresh_token_invalidated', 'model_auth_refresh_token_revoked',
   'model_auth_refresh_missing_access_token', 'model_auth_refresh_provider_unsupported',
   'model_auth_refresh_token_required', 'model_connection_not_found', 'model_connection_auth_required',
   'member_catalog_empty', 'openai_oauth_access_token_required', 'openai_oauth_refresh_token_required',
@@ -37,7 +39,10 @@ export function modelSettingsFailureDiagnostic(error, fallback = 'model_catalog_
   else if (diagnostic.errorType === 'SyntaxError' || /(?:_invalid|_empty|_missing_access_token)$/.test(diagnostic.errorCode)) classification = 'invalid_response';
   else if (diagnostic.errorType === 'AbortError' || ['ABORT_ERR', 'ERR_ABORTED'].includes(diagnostic.errorCode)) classification = 'dependency_aborted';
   else if (['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_SOCKET'].includes(diagnostic.errorCode)) classification = 'dependency_unavailable';
-  return { ...diagnostic, ...(status === undefined ? {} : { upstreamStatus: status }), classification };
+  const reauthRequired = ['model_auth_refresh_invalid_grant', 'model_auth_refresh_token_reused', 'model_auth_refresh_token_expired',
+    'model_auth_refresh_token_invalidated', 'model_auth_refresh_token_revoked'].includes(diagnostic.errorCode);
+  return { ...diagnostic, ...(status === undefined ? {} : { upstreamStatus: status }), classification,
+    ...(reauthRequired ? { reauthRequired: true } : {}) };
 }
 
 function modelHttpError(code, status) {

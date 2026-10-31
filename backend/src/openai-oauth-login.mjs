@@ -12,6 +12,25 @@ const DEFAULT_CALLBACK_PATH = '/auth/callback';
 const DEFAULT_SCOPE = 'openid profile email offline_access';
 const DEFAULT_TTL_MS = 10 * 60_000;
 const sessions = new Map();
+// Only documented whole structured reasons survive provider replies. Never
+// classify from error_description/message prose or retain the response body.
+const REFRESH_FAILURE_CODES = new Map([
+  ['invalid_grant', 'model_auth_refresh_invalid_grant'],
+  ['refresh_token_reused', 'model_auth_refresh_token_reused'],
+  ['refresh_token_expired', 'model_auth_refresh_token_expired'],
+  ['refresh_token_invalidated', 'model_auth_refresh_token_invalidated'],
+  ['refresh_token_revoked', 'model_auth_refresh_token_revoked'],
+]);
+function refreshFailure(data, status) {
+  const reasons = [data?.error?.code, data?.error?.type, data?.code, data?.error];
+  const reason = reasons.find(value => REFRESH_FAILURE_CODES.has(value));
+  const reauthRequired = status >= 400 && status < 500 && Boolean(reason);
+  return Object.assign(new Error(`model_auth_refresh_failed:${status}`), {
+    code: reauthRequired ? REFRESH_FAILURE_CODES.get(reason) : 'model_auth_refresh_failed',
+    upstreamStatus: status, reauthRequired,
+  });
+}
+
 const SESSION_RETENTION_GRACE_MS = 60_000;
 
 function sessionExpired(session, nowMs = Date.now()) {
@@ -109,7 +128,7 @@ function authPayloadFromTokenJson(json = {}, nowMs = Date.now()) {
   if (!refreshToken) throw new Error('openai_oauth_refresh_token_required');
   if (!expiresAt) throw new Error('openai_oauth_expires_at_required');
   const identity = openaiOAuthIdentity(accessToken);
-  return { type: 'oauth', provider: OPENAI_OAUTH_PROVIDER, source: OPENAI_OAUTH_SOURCE, accessToken, refreshToken, expiresAt, ...identity };
+  return { type: 'oauth', provider: OPENAI_OAUTH_PROVIDER, source: OPENAI_OAUTH_SOURCE, accessToken, refreshToken, expiresAt, ...(normalize(json.id_token || json.idToken) ? { idToken: normalize(json.id_token || json.idToken) } : {}), ...identity };
 }
 
 export async function exchangeOpenAiOAuthCode({ code, verifier, redirectUri: callbackRedirectUri, tokenUrl = OPENAI_OAUTH_TOKEN_URL, fetchImpl = fetch, nowMs = Date.now() } = {}) {
@@ -127,8 +146,12 @@ export async function refreshOpenAiOAuth(auth = {}, { tokenUrl = OPENAI_OAUTH_TO
   if (!refreshToken) throw new Error('model_auth_refresh_token_required');
   const response = await fetchImpl(tokenUrl, { method: 'POST', ...(signal ? { signal } : {}), headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: new URLSearchParams({ grant_type: 'refresh_token', client_id: OPENAI_OAUTH_CLIENT_ID, refresh_token: refreshToken }) });
   const data = await response.json().catch(() => { signal?.throwIfAborted(); return {}; });
-  if (!response.ok) throw new Error(`model_auth_refresh_failed:${response.status}`);
-  return { ...auth, ...authPayloadFromTokenJson(data, nowMs), provider: auth.provider || OPENAI_OAUTH_PROVIDER, source: auth.source || OPENAI_OAUTH_SOURCE };
+  if (!response.ok) throw refreshFailure(data, response.status);
+  // Some providers omit an unchanged refresh token. Preserve it only when the
+  // field is absent; an explicitly empty replacement is still an invalid reply.
+  const tokens = { ...data };
+  if (tokens.refresh_token == null && tokens.refreshToken == null && tokens.refresh == null) tokens.refresh_token = refreshToken;
+  return { ...auth, ...authPayloadFromTokenJson(tokens, nowMs), provider: auth.provider || OPENAI_OAUTH_PROVIDER, source: auth.source || OPENAI_OAUTH_SOURCE };
 }
 
 async function completeSession(session, code, { persistAuth, fetchImpl = fetch, tokenUrl = OPENAI_OAUTH_TOKEN_URL, nowMs = Date.now() } = {}) {

@@ -121,6 +121,7 @@ export async function createPostgresApplication({
         () => archiveChatBackfill.close(),
         () => operatorBackfill.close(),
         () => stores.brainEmbeddings.close(),
+        () => stores.models.close(),
         () => stores.chatInputs.close(),
         () => stores.conversations.close(),
         () => stores.completionEvents.close(),

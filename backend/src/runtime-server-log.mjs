@@ -69,6 +69,8 @@ const RUNTIME_CODES = new Set([
   'secret_reference_provider_unavailable',
   // Provider catalog and logical model-result whole codes.
   'model_discovery_failed', 'model_discovery_invalid', 'model_auth_refresh_failed',
+  'model_auth_refresh_invalid_grant', 'model_auth_refresh_token_reused', 'model_auth_refresh_token_expired',
+  'model_auth_refresh_token_invalidated', 'model_auth_refresh_token_revoked',
   'model_auth_refresh_missing_access_token', 'model_auth_refresh_provider_unsupported',
   'model_auth_refresh_token_required', 'model_connection_not_found', 'model_connection_auth_required',
   'member_catalog_empty', 'openai_oauth_access_token_required', 'openai_oauth_refresh_token_required',
