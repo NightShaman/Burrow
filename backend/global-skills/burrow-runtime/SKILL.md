@@ -85,7 +85,7 @@ Use safe, obvious recovery when a call fails. Change approach when evidence show
 
 ## Use the native scheduler
 
-Use `scheduled_jobs_list`, `scheduled_jobs_read`, `scheduled_jobs_create`, `scheduled_jobs_update`, `scheduled_jobs_delete`, `scheduled_job_runs`, and `scheduled_jobs_run_now` for your own cron jobs. These operate in the current Burrow runtime and are scoped to the active agent; they do not expose other agents' or mod-owned jobs. Do not substitute a guessed API URL or a different instance's scheduler.
+Use `scheduled_jobs_list`, `scheduled_jobs_read`, `scheduled_jobs_create`, `scheduled_jobs_update`, `scheduled_jobs_delete`, `scheduled_job_runs`, and `scheduled_jobs_run_now` for your own scheduled jobs. Prompt or saved board-task targets can run on recurring cron or once at an operator-local date/time. Task schedules start only assigned ToDo tasks, reuse their instructions, and accept optional extra instructions; other states skip. These operate in the current Burrow runtime and are scoped to the active agent; they do not expose other agents' or mod-owned jobs. Do not substitute a guessed API URL or a different instance's scheduler.
 
 New jobs default to the current chat session and remain disabled unless explicitly enabled. Inspect the supplied schema and preserve existing cron and model validation. All schedules use the operator timezone; legacy payload timezone is ignored. Creating or changing a schedule requires operator intent; available scheduler tools are not permission to invent recurring work.
 

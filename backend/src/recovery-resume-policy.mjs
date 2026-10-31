@@ -25,6 +25,7 @@ export async function readRecoveryTranscriptTail({ rootDir, sessionId, readChatM
 // scheduled, not whether its work is correct: reconcile-first remains a normal
 // same-session runtime turn with the manifest and bounded transcript available.
 export function decideInterruptedRunRecovery({ manifest = null, transcript = [] } = {}) {
+  if (manifest?.recoveryPolicy === 'scheduled-task') return { action: 'needs_user_input', autoResume: false, reason: 'scheduled_task_requires_explicit_retry', transcriptMessages: transcript.length };
   const objective = boundedText(manifest?.objective, 2_000);
   // A2A ingress is a durable attributed transcript turn, not a user turn, but
   // it is still a reliable same-session objective. Requiring a user turn here

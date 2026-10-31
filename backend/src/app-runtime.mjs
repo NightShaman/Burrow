@@ -143,6 +143,7 @@ async function runAskChatUnserialized({
   contextBoundary = null,
   // Internal ingress provenance; never taken from request body.
   turnSource = null,
+  recoveryPolicy = null,
   // Core-attested external ingress metadata; never taken from request body.
   externalTurnMetadata = null,
   completionEvent = null,
@@ -268,6 +269,7 @@ async function runAskChatUnserialized({
     sessionId: resolvedSessionId,
     runId: resolvedRunId,
     objective: message,
+    recoveryPolicy,
     expectedResetGeneration: chatInput?.generation,
     chatInputId: chatInput?.id,
     // An internally delivered agent message is persisted first so it enters

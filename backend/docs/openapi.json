@@ -1187,7 +1187,8 @@
           "404": {
             "$ref": "#/components/responses/ErrorResponse"
           }
-        }
+        },
+        "description": "Job entries include an optional nullable lastRun receipt for operator status, plus schedules expressed in the operator timezone."
       },
       "post": {
         "tags": [
@@ -1200,7 +1201,7 @@
         },
         "responses": {
           "201": {
-            "$ref": "#/components/responses/CreatedJsonResponse"
+            "$ref": "#/components/responses/ScheduledJobResponse"
           },
           "400": {
             "$ref": "#/components/responses/ErrorResponse"
@@ -1217,7 +1218,7 @@
         "operationId": "getScheduledJob",
         "responses": {
           "200": {
-            "$ref": "#/components/responses/JsonResponse"
+            "$ref": "#/components/responses/ScheduledJobResponse"
           },
           "404": {
             "$ref": "#/components/responses/ErrorResponse"
@@ -1236,13 +1237,16 @@
         "summary": "Update a scheduled job",
         "operationId": "updateScheduledJob",
         "requestBody": {
-          "$ref": "#/components/requestBodies/JsonBody"
+          "$ref": "#/components/requestBodies/ScheduledJobPatch"
         },
         "responses": {
           "200": {
-            "$ref": "#/components/responses/JsonResponse"
+            "$ref": "#/components/responses/ScheduledJobResponse"
           },
           "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "400": {
             "$ref": "#/components/responses/ErrorResponse"
           }
         },
@@ -1260,7 +1264,7 @@
         "operationId": "deleteScheduledJob",
         "responses": {
           "200": {
-            "$ref": "#/components/responses/JsonResponse"
+            "$ref": "#/components/responses/ScheduledJobResponse"
           },
           "404": {
             "$ref": "#/components/responses/ErrorResponse"
@@ -1287,12 +1291,13 @@
         ],
         "responses": {
           "200": {
-            "$ref": "#/components/responses/JsonResponse"
+            "$ref": "#/components/responses/ScheduledJobRunListResponse"
           },
           "404": {
             "$ref": "#/components/responses/ErrorResponse"
           }
-        }
+        },
+        "description": "Receipts include missed occurrences recorded after downtime without replay, skipped ineligible task occurrences, and completed execution. An interrupted running run becomes missed on restart."
       }
     },
     "/api/scheduled-jobs/{jobId}/trigger": {
@@ -1312,12 +1317,13 @@
         },
         "responses": {
           "202": {
-            "$ref": "#/components/responses/AcceptedJsonResponse"
+            "$ref": "#/components/responses/ScheduledJobTriggerResponse"
           },
           "404": {
             "$ref": "#/components/responses/ErrorResponse"
           }
-        }
+        },
+        "description": "Returns HTTP 202 for admission, not completion. Ineligible task targets (not ToDo, missing, or reassigned) yield ok:true, skipped:true, reason, and a persisted skipped run without mutating the task. True once jobs are consumed and disabled on manual trigger or occurrence."
       }
     },
     "/api/group-channels": {
@@ -9012,62 +9018,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "type": "object",
-              "required": [
-                "agentId",
-                "name",
-                "prompt",
-                "cron"
-              ],
-              "properties": {
-                "agentId": {
-                  "type": "string"
-                },
-                "name": {
-                  "type": "string"
-                },
-                "prompt": {
-                  "type": "string"
-                },
-                "cron": {
-                  "type": "string"
-                },
-                "timezone": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "description": "Deprecated compatibility field; accepted and ignored. All schedules use operator_timezone."
-                },
-                "sessionId": {
-                  "type": "string"
-                },
-                "enabled": {
-                  "type": "boolean"
-                },
-                "modelConnectionId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "model": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "contextMode": {
-                  "type": "string",
-                  "enum": [
-                    "continue",
-                    "fresh"
-                  ],
-                  "default": "continue",
-                  "description": "Fresh creates an isolated execution context per run while preserving named history; requires a non-default sessionId."
-                }
-              },
-              "additionalProperties": false
+              "$ref": "#/components/schemas/ScheduledJobCreate"
             }
           }
         }
@@ -9235,6 +9186,17 @@
                 }
               },
               "additionalProperties": false
+            }
+          }
+        }
+      },
+      "ScheduledJobPatch": {
+        "description": "Partial job update. Changing to a new task target requires an assigned ToDo task; pausing/editing an existing unchanged task target remains permitted even if it has become ineligible or missing. Schedule-kind and job-kind combinations are validated against the resulting job.",
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ScheduledJobPatch"
             }
           }
         }
@@ -9917,6 +9879,36 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/OtelSettingsResponse"
+            }
+          }
+        }
+      },
+      "ScheduledJobResponse": {
+        "description": "Scheduled job mutation or detail response.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ScheduledJobResponse"
+            }
+          }
+        }
+      },
+      "ScheduledJobRunListResponse": {
+        "description": "Bounded durable scheduled-job run receipts.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ScheduledJobRunListResponse"
+            }
+          }
+        }
+      },
+      "ScheduledJobTriggerResponse": {
+        "description": "Accepted manual trigger admission, including a skipped task run when ineligible; not a completion receipt.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ScheduledJobTriggerResponse"
             }
           }
         }
@@ -10764,8 +10756,7 @@
           "jobs": {
             "type": "array",
             "items": {
-              "type": "object",
-              "additionalProperties": true
+              "$ref": "#/components/schemas/ScheduledJob"
             }
           },
           "activeRuns": {
@@ -17839,6 +17830,652 @@
               "null"
             ],
             "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "ScheduledJobRun": {
+        "type": "object",
+        "required": [
+          "id",
+          "jobId",
+          "agentId",
+          "sessionId",
+          "runId",
+          "status",
+          "error",
+          "completedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "missed",
+              "skipped"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "scheduledFor": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dispatchedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "traceDir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "decision": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ok": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "result": {
+            "$ref": "#/components/schemas/JsonObject"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": true,
+        "description": "Durable scheduled occurrence or manual-trigger run receipt. A skipped task run leaves task state unchanged; missed downtime occurrences are recorded, not replayed."
+      },
+      "ScheduledJob": {
+        "type": "object",
+        "required": [
+          "id",
+          "agentId",
+          "name",
+          "jobKind",
+          "taskId",
+          "extraInstructions",
+          "scheduleKind",
+          "cron",
+          "runAt",
+          "sessionId",
+          "contextMode",
+          "enabled"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "ownerModId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "jobKind": {
+            "type": "string",
+            "enum": [
+              "prompt",
+              "task"
+            ]
+          },
+          "taskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "extraInstructions": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Prompt jobs use their explicit prompt; task jobs use the stored task instructions instead."
+          },
+          "scheduleKind": {
+            "type": "string",
+            "enum": [
+              "cron",
+              "once"
+            ]
+          },
+          "cron": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Five-field operator-timezone cron expression for scheduleKind=cron; null for once jobs."
+          },
+          "runAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "ISO date-time of a once job, or null for cron."
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "effectiveTimezone": {
+            "type": "string",
+            "description": "Authoritative operator IANA timezone."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Always default for task jobs."
+          },
+          "contextMode": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "fresh"
+            ],
+            "description": "Always continue for task jobs."
+          },
+          "modelConnectionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "nextRunAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "lastRunAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "lastRun": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScheduledJobRun"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional nullable most recent durable receipt; null when none exists. This is not the activeRuns list."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": true,
+        "description": "Operator-owned prompt or task schedule. Only assigned ToDo tasks start; all other task states, missing targets, or reassigned targets skip without task-status mutation. Existing unchanged ineligible task targets remain editable/pausable."
+      },
+      "ScheduledJobResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "job"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "job": {
+            "$ref": "#/components/schemas/ScheduledJob"
+          }
+        },
+        "additionalProperties": true
+      },
+      "ScheduledJobRunListResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "runs"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduledJobRun"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "ScheduledJobTriggerResponse": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "job": {
+            "$ref": "#/components/schemas/ScheduledJob"
+          },
+          "run": {
+            "$ref": "#/components/schemas/ScheduledJobRun"
+          },
+          "skipped": {
+            "type": "boolean",
+            "description": "True for a task target that cannot start (missing, not ToDo, or reassigned)."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reason the task run was skipped."
+          },
+          "error": {
+            "type": "string",
+            "description": "May be present for rejected requests, for example overlapping runs."
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "skipped": {
+                  "const": true
+                }
+              },
+              "required": [
+                "skipped"
+              ]
+            },
+            "then": {
+              "required": [
+                "reason",
+                "run"
+              ],
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "run": {
+                  "properties": {
+                    "status": {
+                      "const": "skipped"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "additionalProperties": true,
+        "description": "HTTP 202 indicates admitted or skipped, not execution success; inspect runs for completion. True once schedules are disabled/consumed on manual trigger."
+      },
+      "ScheduledJobCreate": {
+        "type": "object",
+        "required": [
+          "agentId",
+          "name"
+        ],
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required and nonblank for prompt jobs. Task jobs use the existing task instructions instead of a separate prompt."
+          },
+          "cron": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Five-field operator-timezone cron expression for scheduleKind=cron; null for once jobs."
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Deprecated compatibility field; accepted and ignored. All schedules use operator_timezone."
+          },
+          "sessionId": {
+            "type": "string",
+            "default": "default",
+            "description": "Task jobs always use the assigned agent’s default session; prompt jobs retain their selected session."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "modelConnectionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contextMode": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "fresh"
+            ],
+            "default": "continue",
+            "description": "Prompt jobs may use fresh only in a named non-default session. Task jobs are fixed to continue in the default session."
+          },
+          "jobKind": {
+            "type": "string",
+            "enum": [
+              "prompt",
+              "task"
+            ],
+            "default": "prompt",
+            "description": "Prompt jobs retain existing recurring automation; task jobs execute the referenced ToDo task with its existing instructions."
+          },
+          "taskId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required existing ToDo task assigned to agentId for a new task-job target; null for prompt jobs."
+          },
+          "extraInstructions": {
+            "type": "string",
+            "default": "",
+            "description": "Optional additional task instructions; task execution reuses the task’s existing instructions and appends only these extras, never a replacement prompt."
+          },
+          "scheduleKind": {
+            "type": "string",
+            "enum": [
+              "cron",
+              "once"
+            ],
+            "default": "cron",
+            "description": "Cron recurs; once is consumed and disabled after its occurrence or manual trigger."
+          },
+          "runAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required for scheduleKind=once. Accept an ISO date-time with UTC/explicit offset or an offsetless local YYYY-MM-DDTHH:mm[:ss] interpreted in the server operator IANA timezone. Responses are normalized ISO date-times. Null for cron jobs.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?(?:Z|[+-]\\d{2}:\\d{2})?$"
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "jobKind"
+              ],
+              "properties": {
+                "jobKind": {
+                  "const": "task"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "taskId"
+              ],
+              "properties": {
+                "taskId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sessionId": {
+                  "const": "default"
+                },
+                "contextMode": {
+                  "const": "continue"
+                }
+              }
+            },
+            "else": {
+              "required": [
+                "prompt"
+              ],
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "scheduleKind"
+              ],
+              "properties": {
+                "scheduleKind": {
+                  "const": "once"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "runAt"
+              ],
+              "properties": {
+                "runAt": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "else": {
+              "required": [
+                "cron"
+              ],
+              "properties": {
+                "cron": {
+                  "type": "string",
+                  "pattern": "^\\S+(?:\\s+\\S+){4}$"
+                }
+              }
+            }
+          }
+        ],
+        "description": "New task targets must exist, be ToDo, and be assigned to agentId. Prompt and cron remain the defaults. Set enabled:true explicitly to activate. Legacy timezone is accepted and ignored.",
+        "examples": [
+          {
+            "agentId": "hatchet",
+            "name": "Daily check",
+            "prompt": "Run a daily check.",
+            "cron": "0 8 * * *",
+            "enabled": false
+          },
+          {
+            "agentId": "hatchet",
+            "name": "Review task once",
+            "jobKind": "task",
+            "taskId": "task-id",
+            "scheduleKind": "once",
+            "runAt": "2026-11-03T09:30",
+            "extraInstructions": "Report blockers.",
+            "enabled": false
+          }
+        ]
+      },
+      "ScheduledJobPatch": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required and nonblank for prompt jobs. Task jobs use the existing task instructions instead of a separate prompt."
+          },
+          "cron": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Five-field operator-timezone cron expression for scheduleKind=cron; null for once jobs."
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Deprecated compatibility field; accepted and ignored. All schedules use operator_timezone."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Task jobs always use the assigned agent’s default session; prompt jobs retain their selected session."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "modelConnectionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contextMode": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "fresh"
+            ],
+            "description": "Prompt jobs may use fresh only in a named non-default session. Task jobs are fixed to continue in the default session."
+          },
+          "jobKind": {
+            "type": "string",
+            "enum": [
+              "prompt",
+              "task"
+            ],
+            "description": "Prompt jobs retain existing recurring automation; task jobs execute the referenced ToDo task with its existing instructions."
+          },
+          "taskId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required existing ToDo task assigned to agentId for a new task-job target; null for prompt jobs."
+          },
+          "extraInstructions": {
+            "type": "string",
+            "description": "Optional additional task instructions; task execution reuses the task’s existing instructions and appends only these extras, never a replacement prompt."
+          },
+          "scheduleKind": {
+            "type": "string",
+            "enum": [
+              "cron",
+              "once"
+            ],
+            "description": "Cron recurs; once is consumed and disabled after its occurrence or manual trigger."
+          },
+          "runAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required for scheduleKind=once. Accept an ISO date-time with UTC/explicit offset or an offsetless local YYYY-MM-DDTHH:mm[:ss] interpreted in the server operator IANA timezone. Responses are normalized ISO date-times. Null for cron jobs.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?(?:Z|[+-]\\d{2}:\\d{2})?$"
           }
         },
         "additionalProperties": true

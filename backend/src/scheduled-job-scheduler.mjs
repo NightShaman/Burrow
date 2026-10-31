@@ -13,7 +13,7 @@ function boundedResult(result = {}) {
   };
 }
 
-export function createScheduledJobScheduler({ storeFactory, closeStore: closeStoreOverride, resolveAgentRuntime, rootDir, stores = null, executeTurn, createRunId, telemetry = null, intervalMs = 30_000, retryDelayMs = intervalMs, activeOwnerModIds = () => [], clock = () => new Date().toISOString() } = {}) {
+export function createScheduledJobScheduler({ storeFactory, closeStore: closeStoreOverride, resolveAgentRuntime, rootDir, stores = null, executeTurn, executeTask = null, createRunId, telemetry = null, intervalMs = 30_000, retryDelayMs = intervalMs, activeOwnerModIds = () => [], clock = () => new Date().toISOString() } = {}) {
   if (typeof storeFactory !== 'function' || typeof resolveAgentRuntime !== 'function' || typeof executeTurn !== 'function' || typeof createRunId !== 'function') throw new Error('scheduled_job_scheduler_dependencies_required');
   const lifecycle = createBackgroundLifecycle({ name: 'scheduled_job_scheduler', clock });
   const active = new Map();
@@ -32,7 +32,10 @@ export function createScheduledJobScheduler({ storeFactory, closeStore: closeSto
     console.error('scheduled_job_scheduler_failure', JSON.stringify(lastFailure));
   }
   function launch(job, run) {
-    void lifecycle.track(() => dispatch(job, run), 'dispatch').catch(error => reportFailure(error, 'failure_persistence', run));
+    let admit;
+    const admission = job.jobKind === 'task' ? new Promise(resolve => { admit = resolve; }) : null;
+    void lifecycle.track(() => dispatch(job, run, admit), 'dispatch').catch(error => { admit?.({ ok: false, error: String(error?.message || error), job, run }); reportFailure(error, 'failure_persistence', run); });
+    return admission;
   }
   function timerTick() {
     if (Date.now() < retryAt) return;
@@ -42,20 +45,61 @@ export function createScheduledJobScheduler({ storeFactory, closeStore: closeSto
     });
   }
 
-  async function dispatch(job, run) {
+  async function dispatch(job, run, admit = null) {
     const controller = new AbortController();
     const runId = createRunId({ sessionId: job.sessionId, prefix: 'scheduled' });
     const record = { jobId: job.id, runId: run.id, chatRunId: runId, controller, startedAt: clock() };
     active.set(run.id, record);
+    let taskAdmitted = false;
     try {
       if (lifecycle.stopped) controller.abort(lifecycle.signal.reason);
       controller.signal.throwIfAborted();
       if (!ownerAvailable(job)) throw new Error('scheduled_job_owner_inactive');
-      const validationStore = await openStore();
-      try { await validationStore.validateModel(job); } finally { await closeStore(validationStore); }
+      const validate = async () => {
+        const validationStore = await openStore();
+        try { await validationStore.validateModel(job); } finally { await closeStore(validationStore); }
+      };
+      if (job.jobKind !== 'task') await validate();
       if (lifecycle.stopped) controller.abort(lifecycle.signal.reason);
       controller.signal.throwIfAborted();
       if (!ownerAvailable(job)) throw new Error('scheduled_job_owner_inactive');
+      if (job.jobKind === 'task') {
+        if (typeof executeTask !== 'function') throw new Error('scheduled_task_executor_required');
+        const accepted = await executeTask(job.taskId, {
+          scheduled: true, agentId: job.agentId, runId, scheduledRunId: run.id, validate,
+          extraInstructions: job.extraInstructions, abortSignal: controller.signal,
+          onFinalizing: () => { record.finalizing = true; },
+          modelConnectionId: job.modelConnectionId, model: job.model,
+          onAdmitted: async () => {
+            const store = await openStore();
+            try { await store.markDispatched?.(run.id, { chatRunId: runId, at: record.startedAt }); } finally { await closeStore(store); }
+          },
+        });
+        if (!accepted.ok) {
+          const skipped = accepted.skipped === true;
+          const store = await openStore();
+          let terminal;
+          try { terminal = await store.completeRun(run.id, { status: skipped ? 'skipped' : 'failed', ok: false, error: accepted.error }); } finally { await closeStore(store); }
+          admit?.({ ok: skipped, skipped, reason: accepted.error, ...(skipped ? {} : { error: accepted.error }), job, run: terminal });
+          return;
+        }
+        // Admission is not completion: trigger may respond now, but the durable
+        // scheduler receipt remains running until this very task turn settles.
+        taskAdmitted = true;
+        admit?.({ ok: true, job, run: { ...run, runId, dispatchedAt: record.startedAt } });
+        const result = await accepted.completion;
+        if (!result) throw new Error('scheduled_task_completion_required');
+        const outcome = classifyRuntimeOutcome(result); // mirror canonical task terminal outcome
+        const store = await openStore();
+        const terminal = { ...outcome, runId, dispatchedAt: record.startedAt, traceDir: result.traceDir || null, decision: result.decision || null, error: outcome.ok ? null : result.error || result.decision || outcome.status, result: boundedResult(result) };
+        try {
+          try { await store.completeRun(run.id, terminal); }
+          catch { await store.completeRun(run.id, terminal); } // same canonical result on an ordinary transient failure
+        } finally { await closeStore(store); }
+        return;
+      }
+      const dispatchStore = await openStore();
+      try { await dispatchStore.markDispatched?.(run.id, { chatRunId: runId, at: record.startedAt }); } finally { await closeStore(dispatchStore); }
       const agentRuntime = await resolveAgentRuntime(job.agentId);
       if (lifecycle.stopped) controller.abort(lifecycle.signal.reason);
       controller.signal.throwIfAborted();
@@ -75,7 +119,11 @@ export function createScheduledJobScheduler({ storeFactory, closeStore: closeSto
       const store = await openStore();
       try { await store.completeRun(run.id, { ...outcome, runId: result.runId || runId, dispatchedAt: record.startedAt, traceDir: result.traceDir || null, decision: result.decision || null, error: outcome.ok ? null : (result.error || result.blockedReason || result.decision || outcome.status), result: boundedResult(result) }); } finally { await closeStore(store); }
     } catch (error) {
+      admit?.({ ok: false, error: String(error?.message || error), job, run });
       reportFailure(error, 'dispatch', run);
+      // The task owns its terminal outcome. A persistence failure after admission
+      // must remain reconcilable, not manufacture a new failed schedule outcome.
+      if (taskAdmitted) return;
       const store = await openStore();
       try { await store.completeRun(run.id, { runId, dispatchedAt: record.startedAt, status: controller.signal.aborted ? 'cancelled' : 'failed', ok: false, error: String(error?.message || error), result: { answerText: null, blockers: [String(error?.message || error)], verification: null, completionEvidence: null } }); } finally { await closeStore(store); }
     } finally { active.delete(run.id); }
@@ -108,15 +156,17 @@ export function createScheduledJobScheduler({ storeFactory, closeStore: closeSto
       if (lifecycle.stopped) return { ok: false, error: 'scheduled_job_scheduler_stopped' };
       run = await store.createManualRun(job.id, { at: clock() });
       if (!run) return { ok: false, error: 'scheduled_job_not_found' };
+      job = run.job || job;
+      if (run.onceConsumed) return { ok: false, error: 'scheduled_job_once_consumed', job };
       if (run.overlap) return { ok: false, error: 'scheduled_job_already_running', job, run };
     } finally { await closeStore(store); }
-    launch(job, run);
-    return { ok: true, job, run };
+    const admission = launch(job, run);
+    return admission || { ok: true, job, run };
   }
 
   function cancel(runId, reason) {
     const record = active.get(runId);
-    if (!record) return false;
+    if (!record || record.finalizing) return false;
     record.controller.abort(reason || 'cancelled by operator');
     return true;
   }

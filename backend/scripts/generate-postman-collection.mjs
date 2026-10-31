@@ -230,12 +230,13 @@ const collection = {
     ]),
     folder('Scheduled Jobs', [
       req('List scheduled jobs', 'GET', '/api/scheduled-jobs', { query: [['agentId', '{{agentId}}'], ['enabled', 'true']] }),
-      req('Create scheduled job', 'POST', '/api/scheduled-jobs', { body: { agentId: '{{agentId}}', name: 'Daily check', prompt: 'Run a daily check.', schedule: '0 8 * * *', timezone: 'America/Chicago', enabled: false } }),
-      req('Get scheduled job', 'GET', '/api/scheduled-jobs/{{jobId}}'),
-      req('Update scheduled job', 'PATCH', '/api/scheduled-jobs/{{jobId}}', { body: { enabled: false, name: 'Daily check updated' } }),
+      req('Create scheduled prompt job (cron)', 'POST', '/api/scheduled-jobs', { body: { agentId: '{{agentId}}', name: 'Daily check', jobKind: 'prompt', prompt: 'Run a daily check.', scheduleKind: 'cron', cron: '0 8 * * *', enabled: false }, description: 'Prompt/cron are the defaults; five-field cron uses the configured operator IANA timezone. Recurring prompt jobs retain existing behavior. Jobs are disabled unless explicitly enabled.' }),
+      req('Create scheduled task job (once)', 'POST', '/api/scheduled-jobs', { body: { agentId: '{{agentId}}', name: 'Review task once', jobKind: 'task', taskId: '{{taskId}}', extraInstructions: 'Report blockers.', scheduleKind: 'once', runAt: '2026-11-03T09:30', enabled: false }, description: 'Target must be assigned to this agent and ToDo; execution uses default session/continue and the task instructions plus extras. Offsetless runAt is operator-local; ISO offsets also accepted. A true once job is disabled on occurrence or manual trigger, even when skipped.' }),
+      req('Get scheduled job', 'GET', '/api/scheduled-jobs/{{jobId}}', { description: 'A job may include nullable lastRun (most recent durable run status, IDs, error and completion time).' }),
+      req('Update scheduled job', 'PATCH', '/api/scheduled-jobs/{{jobId}}', { body: { enabled: false, name: 'Daily check updated' }, description: 'Partial patch; unchanged ineligible or missing task targets may be paused/edited; a new task target must be assigned ToDo.' }),
       req('Delete scheduled job', 'DELETE', '/api/scheduled-jobs/{{jobId}}'),
       req('List scheduled job runs', 'GET', '/api/scheduled-jobs/{{jobId}}/runs', { query: [['limit', '20']] }),
-      req('Trigger scheduled job', 'POST', '/api/scheduled-jobs/{{jobId}}/trigger', { body: {} }),
+      req('Trigger scheduled job', 'POST', '/api/scheduled-jobs/{{jobId}}/trigger', { body: {}, description: '202 is admission, not completion. Ineligible task targets return ok:true, skipped:true, reason and a skipped run without task status mutation. Trigger consumes/disables a true once job; missed downtime occurrences are not replayed.' }),
       req('Cancel scheduled job run', 'POST', '/api/scheduled-jobs/{{jobId}}/runs/{{jobRunId}}/cancel', { body: { reason: 'operator_cancelled' } }),
     ]),
     folder('Task Board', [

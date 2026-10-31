@@ -37,7 +37,7 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
      const at=clock();
      return {...metadata,recoveryQueue:{...queue,status:'failed',autoResume:false,completedAt:at,result:'recovery_owner_lost'},...(head?.runId===queue.claimedByRunId && ['running','finalizing'].includes(head.state)?{continuityHead:{...head,state:'retired',retiredAt:at,reason:'recovery_owner_lost'}}:{})};
     }
-    const manifest=abandoned ? {version:1,sessionId,runId:head.runId,generation:head.generation,status:'interrupted',reason:head.state==='finalizing'?'terminal_finalization_abandoned':'process_lost',interruptedAt:clock(),objective:head.objective || transcript.findLast(entry=>entry.role==='user' || entry.role==='agent')?.content || null,pendingVerification:['Reconcile durable effects and terminal receipts before continuing.']} : metadata.interruptedRun;
+    const manifest=abandoned ? {version:1,sessionId,runId:head.runId,generation:head.generation,status:'interrupted',...(head.recoveryPolicy?{recoveryPolicy:head.recoveryPolicy}:{}),reason:head.state==='finalizing'?'terminal_finalization_abandoned':'process_lost',interruptedAt:clock(),objective:head.objective || transcript.findLast(entry=>entry.role==='user' || entry.role==='agent')?.content || null,pendingVerification:['Reconcile durable effects and terminal receipts before continuing.']} : metadata.interruptedRun;
     if(!manifest)return metadata;
     const assessment=await assessInterruptedRunRecovery({sessionId,manifest,readChatMessages:async()=>transcript});
     return {...metadata,interruptedRun:manifest,recoveryQueue:{version:1,key:`${manifest.runId}:${manifest.generation}`,status:'pending',decision:assessment.action,decisionReason:assessment.reason,autoResume:assessment.autoResume,transcriptMessages:assessment.transcriptMessages,queuedAt:clock(),attempts:Number(queue?.attempts||0)},...(abandoned?{continuityHead:{...head,state:'interrupted',interruptedAt:clock()}}:{})};
@@ -45,7 +45,7 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
   },
   async read({sessionId}) {return (await state.read(sessionId))?.continuityHead || null;},
   async current(args) {await owner.ready();return matches(await this.read(args),args);},
-  async claim({sessionId,runId,objective=null,expectedResetGeneration,chatInputId}) {
+  async claim({sessionId,runId,objective=null,expectedResetGeneration,chatInputId,recoveryPolicy=null}) {
    await this.reconcile({sessionId});
    let result;
    await updateMetadata({...scope(sessionId),update:async (metadata,client)=>{
@@ -60,7 +60,7 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
     const recoveryBusy=recovery?.status==='running' && (recovery.ownerId!==ownerId || recovery.claimedByRunId!==runId);
     const uncertain=recoveryBusy || prior?.state==='finalizing' || (prior?.state==='running' && prior.ownerId!==ownerId);
     if(uncertain){result={...prior,current:false,reason:'active_or_abandoned_owner_requires_reconciliation'};return metadata;}
-    const head={version:1,sessionId,ownerId,ownershipProtocol:'postgres-session-lock-v1',objective,processId:process.pid,generation:Number(prior?.generation||0)+1,runId:String(runId),latestRunId:prior?.latestRunId||metadata.lastRunId||null,state:'running',claimedAt:clock(),completedAt:null};
+    const head={version:1,sessionId,ownerId,ownershipProtocol:'postgres-session-lock-v1',objective,...(recoveryPolicy==='scheduled-task'?{recoveryPolicy}:{}),processId:process.pid,generation:Number(prior?.generation||0)+1,runId:String(runId),latestRunId:prior?.latestRunId||metadata.lastRunId||null,state:'running',claimedAt:clock(),completedAt:null};
     result={...head,current:true,recoveryManifest:metadata.interruptedRun||null};
     return {...metadata,continuityHead:head,...(chatInputId && recovery?.status==='pending' && !recovery.autoResume ? {recoveryQueue:{...recovery,status:'running',claimedByRunId:String(runId),manualInputId:chatInputId,ownerId,ownershipProtocol:'postgres-session-lock-v1',autoResume:false}} : {})};
    }});return result;
@@ -72,6 +72,7 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
     const head=metadata.continuityHead;
     manifest={version:1,sessionId:args.sessionId,runId:args.runId,generation:args.generation,status:'interrupted',reason:args.reason,interruptedAt:clock(),objective:args.objective||null,lastCompletedStep:args.lastCompletedStep||null,pendingVerification:args.pendingVerification||[],changedFiles:args.changedFiles||[],traceRef:args.traceRef||null};
     if(!['running','finalizing'].includes(head?.state) || head.ownerId!==ownerId || head?.runId!==String(args.runId) || (args.generation!=null && Number(head.generation)!==Number(args.generation))) return metadata;
+    if(head.recoveryPolicy==='scheduled-task') { manifest.recoveryPolicy=head.recoveryPolicy; assessment.autoResume=false; assessment.action='needs_user_input'; assessment.reason='scheduled_task_requires_explicit_retry'; }
     return {...metadata,interruptedRun:manifest,recoveryQueue:{version:1,key:`${args.runId}:${args.generation ?? 'unknown'}`,status:'pending',decision:assessment.action,decisionReason:assessment.reason,transcriptMessages:assessment.transcriptMessages,autoResume:assessment.autoResume,queuedAt:manifest.interruptedAt,attempts:0},continuityHead:{...head,state:'interrupted',interruptedAt:manifest.interruptedAt}};
    }});return manifest;
   },
@@ -85,7 +86,7 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
    let result={ok:false};
    await updateMetadata({...scope(sessionId),update:metadata=>{
     const queue=metadata.recoveryQueue,manifest=metadata.interruptedRun;
-    if(['running','finalizing'].includes(metadata.continuityHead?.state) || !manifest || !queue?.autoResume || queue.status!=='pending')return metadata;
+    if(manifest?.recoveryPolicy==='scheduled-task' || ['running','finalizing'].includes(metadata.continuityHead?.state) || !manifest || !queue?.autoResume || queue.status!=='pending')return metadata;
     const continuation={...queue,status:'running',ownershipProtocol:'postgres-session-lock-v1',claimedAt:clock(),claimedByRunId:recoveryRunId,ownerId,attempts:Number(queue.attempts||0)+1};
     result={ok:true,manifest,continuation};return {...metadata,recoveryQueue:continuation};
    }});return result;

@@ -204,4 +204,18 @@ ALTER TABLE mod_external_turns ADD COLUMN attachments JSON NOT NULL DEFAULT '[]'
   { version: 81, name: 'archive-lossless-candidate-projection', sql: POSTGRES_ARCHIVE_LEXICAL_SQL },
   { version: 82, name: 'archive-chat-projection-revisions', sql: POSTGRES_ARCHIVE_CHAT_PROJECTION_SQL },
   { version: 83, name: 'archive-discovery-scalar-probe-indexes', sql: POSTGRES_ARCHIVE_DISCOVERY_INDEX_SQL },
+  { version: 84, name: 'scheduled-board-tasks-and-once', sql: `
+ALTER TABLE scheduled_jobs ALTER COLUMN cron_expression DROP NOT NULL;
+ALTER TABLE scheduled_jobs ADD COLUMN job_kind TEXT NOT NULL DEFAULT 'prompt' CHECK (job_kind IN ('prompt','task'));
+ALTER TABLE scheduled_jobs ADD COLUMN task_id TEXT;
+ALTER TABLE scheduled_jobs ADD COLUMN extra_instructions TEXT NOT NULL DEFAULT '';
+ALTER TABLE scheduled_jobs ADD COLUMN schedule_kind TEXT NOT NULL DEFAULT 'cron' CHECK (schedule_kind IN ('cron','once'));
+ALTER TABLE scheduled_jobs ADD COLUMN run_at TIMESTAMPTZ;
+ALTER TABLE scheduled_jobs ADD COLUMN consumed_at TIMESTAMPTZ;
+ALTER TABLE scheduled_jobs ADD CONSTRAINT scheduled_jobs_target_check CHECK ((job_kind='prompt' AND task_id IS NULL) OR (job_kind='task' AND task_id IS NOT NULL AND session_id='default' AND context_mode='continue'));
+ALTER TABLE scheduled_jobs ADD CONSTRAINT scheduled_jobs_schedule_check CHECK ((schedule_kind='cron' AND cron_expression IS NOT NULL AND run_at IS NULL) OR (schedule_kind='once' AND cron_expression IS NULL AND run_at IS NOT NULL));
+-- Deliberately no task FK: a removed task must remain an identifiable skip.
+ALTER TABLE scheduled_job_runs ADD COLUMN task_id TEXT;
+CREATE INDEX scheduled_job_runs_latest_idx ON scheduled_job_runs(job_id,created_at DESC,scheduled_for DESC,id DESC);
+` },
 ]);

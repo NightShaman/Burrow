@@ -61,3 +61,42 @@ export function validateScheduledJobModel() { throw new Error('postgres_required
 export class ScheduledJobStore {
   constructor() { throw new Error('postgres_required'); }
 }
+
+/** Convert datetime-local using the operator zone, never the host/browser zone.
+ * Gaps are rejected; a repeated wall time selects its first occurrence. An
+ * explicit offset/ISO instant retains the caller's selected occurrence.
+ */
+export function scheduledRunInstant(value, timezone = 'UTC') {
+  const source = text(value);
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|[+-]\d{2}:\d{2})?$/i.exec(source);
+  if (!match) throw new Error('scheduled_job_run_at_invalid');
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(v => Number(v || 0));
+  const ms = Number((match[7] || '').padEnd(3, '0'));
+  const civil = new Date(0);
+  civil.setUTCFullYear(year, month - 1, day);
+  civil.setUTCHours(hour, minute, second, ms);
+  if (civil.getUTCFullYear() !== year || civil.getUTCMonth() !== month - 1 || civil.getUTCDate() !== day || civil.getUTCHours() !== hour || civil.getUTCMinutes() !== minute || civil.getUTCSeconds() !== second) throw new Error('scheduled_job_run_at_invalid');
+  if (match[8]) {
+    const date = new Date(source);
+    if (!Number.isFinite(date.getTime())) throw new Error('scheduled_job_run_at_invalid');
+    return date.toISOString();
+  }
+  // Sample the surrounding offsets, then round-trip candidates. This covers
+  // half-hour transitions and dateline shifts without a minute-by-minute scan.
+  const naive = civil.getTime();
+  const offsets = new Set();
+  for (let hours = -48; hours <= 48; hours += 6) {
+    const instant = naive + hours * 3600_000;
+    const local = localParts(new Date(instant), timezone);
+    const sample = new Date(0);
+    sample.setUTCFullYear(local.year, local.month - 1, local.day);
+    sample.setUTCHours(local.hour, local.minute, 0, 0);
+    offsets.add(sample.getTime() - Math.floor(instant / 60_000) * 60_000);
+  }
+  const candidates = [...offsets].map(offset => naive - offset).filter(instant => {
+    const local = localParts(new Date(instant), timezone);
+    return local.year === year && local.month === month && local.day === day && local.hour === hour && local.minute === minute;
+  }).sort((a, b) => a - b);
+  if (!candidates.length) throw new Error('scheduled_job_run_at_nonexistent');
+  return new Date(candidates[0]).toISOString();
+}

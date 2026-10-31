@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createBoardTaskExecutor } from '../src/task-execution.mjs';
 import { compactChatTurn } from '../src/compact-chat-turn.mjs';
 import { createArchiveReadProcess } from './ui/archive-read-process.mjs';
 import { createArchiveAgentContext } from './ui/archive-agent-context.mjs';
@@ -321,7 +322,7 @@ function scheduler() {
     const borrowedStore = postgresApplication.stores.scheduledJobs;
     scheduledJobScheduler = createScheduledJobScheduler({
       storeFactory: () => borrowedStore,
-      executeTurn: runChatTurnFromBody, createRunId: createChatTurnRunId,
+      executeTurn: runChatTurnFromBody, createRunId: createChatTurnRunId, executeTask: executeBoardTask,
       closeStore: async () => {},
       resolveAgentRuntime, rootDir: projectRoot, stores: postgresApplication.stores, telemetry: otelRuntime,
       activeOwnerModIds: () => loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id),
@@ -376,129 +377,15 @@ function installerStagingScheduler() {
   return installStagingCleanupScheduler;
 }
 
-function taskExecutionMessage(task, project) {
-  return [
-    'Task-board execution request. Work this task now and report concise evidence, blockers, and any changed files. Keep this task’s status aligned with your work: move it to `in_progress` when you begin execution and to `review` when the work is complete and ready for operator review. These transitions do not require confirmation. The operator owns the final move to `done`; do not mark tasks done yourself. Confirm other changes to task fields, assignment, or metadata with the operator unless already authorized.',
-    `Task ID: ${task.id}`,
-    `Task execution project: ${project.name} (${project.id})`,
-    project.description ? `Project description: ${project.description}` : null,
-    project.notes ? `Project notes:\n${project.notes}` : null,
-    project.pathEntries?.length ? `Project paths:\n${project.pathEntries.map((entry) => `- ${entry.label}: ${entry.path}${entry.note ? ` — ${entry.note}` : ''}`).join('\n')}` : null,
-    'This task project context applies to this task run only. It does not change the conversation active project. Project paths are orientation, not authorization or proof of current filesystem state.',
-    `Title: ${task.title}`,
-    `Priority: ${task.priority}`,
-    task.description ? `Description:\n${task.description}` : null,
-    Object.keys(task.metadata || {}).length ? `Metadata:\n${JSON.stringify(task.metadata, null, 2)}` : null,
-  ].filter(Boolean).join('\n\n');
-}
-
-async function executeBoardTask(taskId) {
-  const lifecycle = typeof requestLifecycle === 'undefined' ? null : requestLifecycle;
-  const dispatch = await withTaskBoard(async (store) => {
-    const task = await store.getTask(taskId);
-    if (!task) return { ok: false, error: 'task_not_found' };
-    if (!task.assignedAgentId) return { ok: false, error: 'task_assigned_agent_required', task };
-    if (['done', 'cancelled'].includes(task.status)) return { ok: false, error: 'task_not_executable', task };
-    const agentRuntime = await resolveAgentRuntime(task.assignedAgentId);
-    // Board tasks deliberately execute where Rob works: the assigned agent's
-    // main/default conversation. The task record, not a task-specific session,
-    // is the durable execution owner.
-    const sessionId = 'default';
-    const runId = createChatTurnRunId({ sessionId, prefix: 'task' });
-    lifecycle?.signal.throwIfAborted();
-    let updated;
-    try {
-      updated = await store.startExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId }, { actor: { type: 'operator', id: 'default' } });
-    } catch (error) {
-      if (['task_execution_running', 'task_not_executable', 'task_assigned_agent_required', 'task_assigned_agent_changed'].includes(error?.message))
-        return { ok: false, error: error.message };
-      throw error;
-    }
-    if (!updated) return { ok: false, error: 'task_not_found' };
-    // Only a successful durable claim may register or enqueue work. Use the
-    // locked task snapshot rather than the preflight read for the prompt.
-    // A task can move projects while the claim waits for its row lock.
-    let project;
-    try {
-      project = await store.getProject(updated.projectId);
-    } catch (error) {
-      // No turn has been registered or dispatched. Release only this known
-      // failed admission via the existing owner CAS; never reset other claims.
-      const message = String(error?.message || error);
-      try {
-        await store.recordExecution(updated.id, { agentId: agentRuntime.agentId, sessionId, runId, ok: false, error: message, result: { answerText: null, blockers: [message], verification: null, completionEvidence: null } }, { actor: { type: 'agent', id: agentRuntime.agentId } });
-      } catch (recoveryError) {
-        // Persistence is unavailable: retain the fail-closed claim and surface
-        // both failures instead of claiming the task is safe to retry.
-        const failure = new AggregateError([error, recoveryError], 'task_execution_pre_dispatch_recovery_failed', { cause: error });
-        // Preserve only diagnostic fields, not arbitrary error properties or
-        // credentials. The request logger applies its normal bounds/redaction;
-        // keep this separate from `details`, which is exposed over HTTP.
-        const diagnostic = (error) => safeOperationalError(error);
-        failure.taskExecutionDiagnostics = {
-          taskId: updated.id, runId, agentId: agentRuntime.agentId, sessionId,
-          projectReadError: diagnostic(error), recoveryWriteError: diagnostic(recoveryError),
-        };
-        throw failure;
-      }
-      throw error;
-    }
-    return { ok: true, task: updated, project, agentRuntime, sessionId, runId, updated };
-  });
-  if (!dispatch.ok) return dispatch;
-  const { task, project, agentRuntime, sessionId, runId, updated } = dispatch;
-  const controller = new AbortController();
-  const record = { agentId: agentRuntime.agentId, runId, sessionId, controller, startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: taskExecutionMessage(task, project).slice(0, 16_000), objective: taskExecutionMessage(task, project).slice(0, 16_000), progress: [], contextUsage: null, cancelled: false, reason: null, detached: true, steeringReady: false, taskId: task.id };
-  const headKey = sessionContinuityHeadKey(agentRuntime.agentId, sessionId);
-  sessionContinuityHeads.set(headKey, record);
-  activeChatRuns.set(activeChatRunKey(agentRuntime.agentId, runId), record);
-  if (lifecycle?.stopped) controller.abort(lifecycle.signal.reason);
-  const emitTextDelta = createChatStreamDelta({ record, type: 'assistant.delta', runId, sessionId, write: () => {} });
-  const emitThoughtDelta = createChatStreamDelta({ record, type: 'assistant.thought', runId, sessionId, write: () => {} });
-  const runTaskTurn = () => runChatTurnFromBody({
-    body: { message: record.latestUserMessage, sessionId, runId, abortSignal: controller.signal },
-    rootDir: projectRoot,
-    agentRuntime,
-    stores: postgresApplication.stores,
-    resolveAgentRuntime,
-    telemetry: otelRuntime,
-    runSource: 'task-board',
-    cancellationGraceMs: RUN_CANCELLATION_GRACE_MS,
-    onCancellationDeadline: () => retireCancelledRun(record),
-    registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerRuntimeActiveRun({ agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
-    onModelTextDelta: (delta) => { if (controller.signal.aborted || record.phase === 'cancelling') { record.phase = 'cancelling'; return; } emitTextDelta(delta); },
-    onModelThoughtDelta: (delta) => { if (controller.signal.aborted || record.phase === 'cancelling') { record.phase = 'cancelling'; return; } emitThoughtDelta(delta); },
-    onSteeringReady: () => { record.steeringReady = !controller.signal.aborted && record.phase !== 'cancelling'; },
-    onTraceRecord: (traceRecord) => {
-      const progress = publicChatProgress(traceRecord);
-      if (!progress) return;
-      if (progress.type === 'model.recovery') observeModelRecovery(serverLogger, traceRecord, record);
-      record.progress = [...record.progress, { ...progress, runId, sessionId, ts: traceRecord.ts || new Date().toISOString() }].slice(-50);
-      if (applyModelRecoveryProgress(record, progress)) return;
-      if (controller.signal.aborted || record.phase === 'cancelling') { record.phase = 'cancelling'; return; }
-      if (progress.type === 'context.compaction.started') record.phase = 'compacting';
-      if (['context.compaction.completed', 'context.compaction.failed', 'model.started'].includes(progress.type)) record.phase = 'thinking';
-      if (progress.type === 'model.completed') record.phase = 'streaming';
-    },
-    onModelContextUsage: async (usage) => {
-      if (!usage || typeof usage !== 'object') return;
-      record.contextUsage = updateContextUsageHighWater(record.contextUsage, usage);
-    },
-  }).then(async (result) => {
-    const taskResult = {
-      answerText: String(result.answerText || '').slice(0, 12_000) || null,
-      blockers: Array.isArray(result.blockers) ? result.blockers.slice(0, 20) : [],
-      verification: result.verification ? { required: Boolean(result.verification.required), ok: result.verification.ok ?? null, reason: result.verification.reason || null } : null,
-      completionEvidence: result.completionEvidence || null,
-    };
-    await withTaskBoard((store) => store.recordExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId, decision: result.decision || null, ok: Boolean(result.ok), executedAt: new Date().toISOString(), traceDir: result.traceDir || null, error: result.ok ? null : (result.error || null), result: taskResult }, { actor: { type: 'agent', id: agentRuntime.agentId } }));
-  }).catch(async (error) => {
-    await withTaskBoard((store) => store.recordExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId, ok: false, error: String(error?.message || error), result: { answerText: null, blockers: [String(error?.message || error)], verification: null, completionEvidence: null } }, { actor: { type: 'agent', id: agentRuntime.agentId } }));
-  }).finally(() => {
-    if (activeChatRuns.get(activeChatRunKey(agentRuntime.agentId, runId)) === record) activeChatRuns.delete(activeChatRunKey(agentRuntime.agentId, runId));
-  });
-  void (lifecycle ? lifecycle.track(runTaskTurn, 'task_board') : runTaskTurn()).catch(() => {});
-  return { ok: true, task: updated, execution: updated.execution };
+async function executeBoardTask(taskId, options = {}) {
+  return createBoardTaskExecutor({
+    withTaskBoard, resolveAgentRuntime, createChatTurnRunId, runChatTurnFromBody,
+    projectRoot, postgresApplication, otelRuntime, requestLifecycle,
+    activeChatRuns, sessionContinuityHeads, activeChatRunKey, sessionContinuityHeadKey,
+    RUN_CANCELLATION_GRACE_MS, retireCancelledRun, registerRuntimeActiveRun,
+    publicChatProgress, observeModelRecovery, serverLogger, applyModelRecoveryProgress,
+    updateContextUsageHighWater,
+  })(taskId, options);
 }
 
 function updateContextUsageHighWater(previous, usage) {
@@ -1761,16 +1648,6 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
       imported.push('agents:operator');
     }
   }
-  for (const job of (categories['scheduled-jobs']?.jobs || [])) {
-    if (conflictPolicy === 'skip' && conflicts.some(c => c.category === 'scheduled-jobs' && c.id === job.id)) continue;
-    const store = postgresApplication.stores.scheduledJobs;
-    const existing = await store.getJob(job.id);
-    await write(`scheduled-jobs:${job.id}`, async () => {
-      if (!await agentsStore().get(job.agentId)) throw new Error('scheduled_job_agent_not_found');
-      return existing ? store.updateJob(job.id, job) : store.createJob(job);
-    });
-    imported.push(`scheduled-jobs:${job.id}`);
-  }
   if (categories.settings?.brainEmbeddings !== undefined) {
     await write('settings:brain-embeddings', () => postgresApplication.stores.brainEmbeddings.configure(categories.settings.brainEmbeddings));
     imported.push('settings:brain-embeddings');
@@ -1791,6 +1668,16 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
   }
   if (categories['task-board']) for (const project of (categories['task-board'].projects || [])) { if (conflictPolicy === 'skip' && conflicts.some((c) => c.category === 'task-board.projects' && c.id === project.id)) continue; const existing = await withTaskBoard((store) => store.getProject(project.id)); if (!existing) await write(`task-board.projects:${project.id}`, () => withTaskBoard((store) => store.createProject(project))); else if (conflictPolicy === 'replace') await write(`task-board.projects:${project.id}`, () => withTaskBoard((store) => store.updateProject(project.id, project))); else continue; imported.push(`task-board.projects:${project.id}`); }
   if (categories['task-board']) for (const task of (categories['task-board'].tasks || [])) { const exists = await withTaskBoard((store) => store.getTask(task.id)); if (exists && conflictPolicy !== 'replace') continue; if (!exists) await write(`task-board.tasks:${task.id}`, () => withTaskBoard((store) => store.createTask(task))); else await write(`task-board.tasks:${task.id}`, () => withTaskBoard((store) => store.updateTask(task.id, task))); imported.push(`task-board.tasks:${task.id}`); }
+  for (const job of (categories['scheduled-jobs']?.jobs || [])) {
+    if (conflictPolicy === 'skip' && conflicts.some(c => c.category === 'scheduled-jobs' && c.id === job.id)) continue;
+    const store = postgresApplication.stores.scheduledJobs;
+    const existing = await store.getJob(job.id);
+    await write(`scheduled-jobs:${job.id}`, async () => {
+      if (!await agentsStore().get(job.agentId)) throw new Error('scheduled_job_agent_not_found');
+      return existing ? store.updateJob(job.id, job) : store.createJob(job);
+    });
+    imported.push(`scheduled-jobs:${job.id}`);
+  }
   if (categories['mcp-connections'] && typeof categories['mcp-connections'] === 'object' && !Array.isArray(categories['mcp-connections'])) {
     const connections = Array.isArray(categories['mcp-connections'].connections) ? categories['mcp-connections'].connections : [];
     for (const connection of connections) { if (connection.apiKey === '[redacted]' || (conflictPolicy === 'skip' && conflicts.some(c => c.category === 'mcp-connections' && c.id === connection.id))) continue; const { environmentVariables, ...portableConnection } = connection; await write(`mcp-connections:${connection.id}`, () => mcpStore().save(portableConnection)); imported.push(`mcp-connections:${connection.id}`); }
@@ -1872,7 +1759,7 @@ async function exportSnapshot(categories = []) {
       externalAssignments: await Promise.all((await agentsStore().list({ includeDisabled: true })).map(async agent => ({ agentId: agent.id, assignedSkillIds: (await postgresApplication.stores.skills.assignments(agent.id)).assignedSkillIds.filter(id => !portableIds.has(id)) }))) };
   }
   if (categories.includes('scheduled-jobs')) {
-    data['scheduled-jobs'] = { schema: 'burrow.scheduled-jobs/v1', jobs: (await postgresApplication.stores.scheduledJobs.listJobs({ ownerModId: null })).map(({ id, agentId, name, prompt, cron, sessionId, modelConnectionId, model, enabled }) => ({ id, agentId, name, prompt, cron, sessionId, modelConnectionId, model, enabled })) };
+    data['scheduled-jobs'] = { schema: 'burrow.scheduled-jobs/v1', jobs: (await postgresApplication.stores.scheduledJobs.listJobs({ ownerModId: null })).map(({ id, agentId, name, prompt, cron, sessionId, modelConnectionId, model, enabled, contextMode, jobKind, taskId, extraInstructions, scheduleKind, runAt }) => ({ id, agentId, name, prompt, cron, sessionId, modelConnectionId, model, enabled, contextMode, jobKind, taskId, extraInstructions, scheduleKind, runAt })) };
   }
   if (categories.includes('model-connections')) {
     const store = modelsStore();
@@ -2030,7 +1917,11 @@ function validateBoundaryBody(kind, input = {}) {
   if (kind === 'workspace-write') { requireStringField(body, 'path'); if (typeof body.content !== 'string') throw Object.assign(new Error('content_required'), { statusCode: 400 }); }
   if (kind === 'project-create') requireStringField(body, 'name');
   if (kind === 'task-create') { requireStringField(body, 'projectId'); requireStringField(body, 'title'); }
-  if (kind === 'scheduled-job-create') for (const field of ['agentId', 'name', 'prompt', 'cron']) requireStringField(body, field);
+  if (kind === 'scheduled-job-create') {
+    for (const field of ['agentId', 'name']) requireStringField(body, field);
+    requireStringField(body, body.jobKind === 'task' ? 'taskId' : 'prompt');
+    requireStringField(body, body.scheduleKind === 'once' ? 'runAt' : 'cron');
+  }
   if (kind === 'group-create') { requireStringField(body, 'name'); if (!Array.isArray(body.participantAgentIds) || !body.participantAgentIds.length || body.participantAgentIds.some((id) => typeof id !== 'string' || !id.trim())) throw Object.assign(new Error('group_participants_required'), { statusCode: 400 }); }
   if (kind === 'group-message') { const hasMessage = typeof body.message === 'string' && body.message.trim(); const hasAttachment = Array.isArray(body.attachments) && body.attachments.length > 0; if (!hasMessage && !hasAttachment) throw Object.assign(new Error('message_required'), { statusCode: 400 }); }
   return body;
@@ -3730,7 +3621,7 @@ server.listen(port, host, () => {
     void managedSkillSynchronizer.start().catch(() => {}); // Synchronizer owns failure/recovery diagnostics.
     void skillGitSync.start().catch(error => serverLogger.event('skill_sync_startup_failed',{ error }, { level: 'warn', component: 'skills' }));
     const store = postgresApplication.stores.scheduledJobs;
-    try { await store.markMissedRuns(); await store.markMissedSchedules({ activeOwnerModIds: loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id) }); } finally { /* Shared application store remains open. */ }
+    try { await postgresApplication.stores.tasks.reconcileInterruptedExecutions(); await store.markMissedRuns(); await store.markMissedSchedules({ activeOwnerModIds: loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id) }); } finally { /* Shared application store remains open. */ }
     if (shuttingDown) return;
     await completionEventRunner.start();
     await chatInputRunner.start();

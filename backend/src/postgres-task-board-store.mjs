@@ -1,3 +1,4 @@
+import { continuityOwner } from './postgres-continuity-owner.mjs';
 import { taskArchiveState } from './task-archive-state.mjs';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { randomUUID } from "node:crypto";
@@ -452,9 +453,12 @@ export class PostgresTaskBoardStore {
     });
   }
   async startExecution(taskId, execution = {}, audit = {}) {
+    const owner = continuityOwner(this.pool);
+    await owner.ready();
     return withPostgresTransaction(this.pool, async (c) => {
       const current = await this.lockTask(c, taskId);
       if (!current) return null;
+      if (execution.requiredStatus && current.status !== execution.requiredStatus) throw new Error('scheduled_job_task_not_todo');
       // The row lock is the claim authority, not the dispatcher's earlier read.
       // A running receipt owns this task even while its turn is queued.
       if (["done", "cancelled"].includes(current.status))
@@ -472,6 +476,8 @@ export class PostgresTaskBoardStore {
       const stamp = this.clock(),
         receipt = {
           taskId: current.id,
+          ownerId: owner.id,
+          scheduledRunId: execution.scheduledRunId || null,
           agentId: current.assignedAgentId,
           sessionId: text(execution.sessionId) || "default",
           runId,
@@ -532,6 +538,33 @@ export class PostgresTaskBoardStore {
       await this.audit.append(c, current.id, receipt.ok ? 'execution_completed' : 'execution_failed', { ...audit, at: stamp, sessionId: receipt.sessionId, runId: receipt.runId, details: { agentId: receipt.agentId, status: receipt.status, ok: receipt.ok, error: receipt.error, decision: receipt.decision } });
       return this.getTask(current.id, c);
     });
+  }
+  async reconcileInterruptedExecutions() {
+    const owner = continuityOwner(this.pool);
+    await owner.ready();
+    const { rows } = await this.pool.query("SELECT id FROM task_board_tasks WHERE execution_json->>'status' IN ('running','queued') ORDER BY id");
+    let count = 0;
+    for (const { id: taskId } of rows) {
+      await withPostgresTransaction(this.pool, async c => {
+        const current = await this.lockTask(c, taskId);
+        const execution = current?.execution;
+        if (!execution || !['running','queued'].includes(execution.status)) return;
+        if (execution.ownerId && await owner.alive(execution.ownerId)) return;
+        // Legacy receipts have no explicit task owner: respect a live matching
+        // conversation head before retiring a claim from the old runtime.
+        if (!execution.ownerId) {
+          const { rows: heads } = await c.query('SELECT head FROM continuity_state WHERE agent_id=$1 AND session_id=$2', [execution.agentId,execution.sessionId || 'default']);
+          const head = heads[0]?.head;
+          if (head?.runId === execution.runId && head.ownerId && await owner.alive(head.ownerId)) return;
+        }
+        const stamp = this.clock();
+        const receipt = { ...execution, status: 'failed', ok: false, completedAt: stamp, error: 'task_execution_interrupted_reconcile_before_retry' };
+        await c.query('UPDATE task_board_tasks SET execution_json=$1::jsonb,updated_at=$2 WHERE id=$3', [json(receipt),stamp,taskId]);
+        await this.audit.append(c, taskId, 'execution_failed', { actor: { type: 'agent', id: execution.agentId }, at: stamp, sessionId: execution.sessionId, runId: execution.runId, details: { status: receipt.status, error: receipt.error } });
+        count++;
+      });
+    }
+    return count;
   }
   async taskHistory(taskId, options = {}) { return this.audit.history(taskId, options); }
   async listAttachments(taskId) { return this.audit.listAttachments(taskId); }
