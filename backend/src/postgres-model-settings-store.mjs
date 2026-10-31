@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 import {
   assertConnection, canonicalizeOauthConnection, decrypt, encrypt, normalizeAuth, mergeOpenAiOAuthTokens,
-  publicConnection, secretPreview, normalizeModels, normalizeReasoningEffort, normalizeTemperature, assertIdentity,
+  publicConnection, secretPreview, normalizeModels, mergeModelMetadata, normalizeReasoningEffort, normalizeTemperature, assertIdentity,
   refreshAnthropicOauth, discoverModels, isProviderPool, assertProviderPoolMembers, providerPoolModels, modelSettingsFailureDiagnostic,
 } from './model-settings-store.mjs';
 import { refreshOpenAiOAuth } from './openai-oauth-login.mjs';
@@ -202,7 +202,14 @@ export class PostgresModelSettingsStore {
       const existingModels = normalizeModels(json(priorRow?.rows[0]?.models_json, []), { provider: connection.provider, apiType: connection.apiType });
       const submittedModels = normalizeModels(input.models, { provider: connection.provider, apiType: connection.apiType });
       const priorById = new Map(existingModels.map((model) => [model.id, model]));
-      let models = submittedModels.map((model) => { const prior = priorById.get(model.id); return (!prior || model.manual || prior.manual) ? model : normalizeModels([{ ...prior, ...model }], { provider: connection.provider, apiType: connection.apiType })[0]; });
+      const submittedById = new Map((Array.isArray(input.models) ? input.models : []).filter(model => model && typeof model === 'object').map(model => [String(model.id ?? '').trim(), model]));
+      let models = submittedModels.map(model => {
+        const prior = priorById.get(model.id);
+        if (!prior || ((model.manual || prior.manual) && connection.apiType !== 'anthropic-messages')) return model;
+        const patch = connection.apiType === 'anthropic-messages' && !Object.hasOwn(submittedById.get(model.id) || {}, 'manual')
+          ? { ...model, manual: prior.manual } : model;
+        return mergeModelMetadata(prior, patch, connection);
+      });
       // Saves patch catalog entries; omitted/empty lists never erase discovery or
       // models added by a concurrent refresh. Explicit selected:false disables.
       models.push(...existingModels.filter(model => !models.some(item => item.id === model.id)));
@@ -390,7 +397,7 @@ export class PostgresModelSettingsStore {
       // Keep explicit choices even while an upstream ID is temporarily absent.
       const choices = { ...state.choices, ...Object.fromEntries(member.models.map(model => [model.id, model.selected])) };
       const prior = new Map(member.models.map(model => [model.id, model]));
-      const models = normalizeModels(discovered.map(model => ({ ...prior.get(model.id), ...model, ...(prior.get(model.id)?.manual ? { manual: true } : {}), selected: choices[model.id] ?? true })), { provider: member.provider, apiType: member.apiType });
+      const models = discovered.map(model => mergeModelMetadata(prior.get(model.id), { ...model, ...(prior.get(model.id)?.manual ? { manual: true } : {}), selected: choices[model.id] ?? true }, { ...member, refresh: true }));
       for (const model of member.models) if (model.manual && !models.some(item => item.id === model.id)) models.push(model);
       const stamp = this.clock();
       await client.query(`INSERT INTO model_settings_cache(cache_key,value_json,updated_at) VALUES($1,$2,$3)

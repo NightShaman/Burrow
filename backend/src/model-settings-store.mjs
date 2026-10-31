@@ -3,7 +3,7 @@ import { operationalEvent } from './operational-log.mjs';
 import { googleNativeApi, discoverGoogleModels } from './model-adapters/google-native-catalog.mjs';
 import { randomBytes, randomUUID, createCipheriv, createDecipheriv } from 'node:crypto';
 import { openaiOAuthIdentity, refreshOpenAiOAuth } from './openai-oauth-login.mjs';
-import { anthropicSupportsTemperature, isAnthropicMessagesConnection } from './anthropic-model-capabilities.mjs';
+import { anthropicSupportsTemperature, isAnthropicMessagesConnection, normalizeAnthropicModelMetadata, anthropicDiscoveredReasoningEfforts } from './anthropic-model-capabilities.mjs';
 
 const AAD_PREFIX = 'burrow-model-secret-v1';
 
@@ -11,7 +11,7 @@ const AAD_PREFIX = 'burrow-model-secret-v1';
 // prose. The legacy code:status form is accepted only for these exact HTTP
 // failures (including OAuth/Google producers that still throw that form).
 const MODEL_DIAGNOSTIC_CODES = new Set([
-  'model_discovery_failed', 'model_discovery_invalid', 'model_auth_refresh_failed',
+  'model_discovery_failed', 'model_discovery_invalid', 'model_discovery_pagination_invalid', 'model_auth_refresh_failed',
   'model_auth_refresh_invalid_grant', 'model_auth_refresh_token_reused', 'model_auth_refresh_token_expired',
   'model_auth_refresh_token_invalidated', 'model_auth_refresh_token_revoked',
   'model_auth_refresh_missing_access_token', 'model_auth_refresh_provider_unsupported',
@@ -210,21 +210,50 @@ function normalizeCapabilityProvenance(value) {
   const snapshotAt = normalize(value.snapshotAt);
   const matchedProvider = normalize(value.matchedProvider);
   const matchedModel = normalize(value.matchedModel);
-  return source && snapshotAt && matchedProvider && matchedModel ? { source, snapshotAt, matchedProvider, matchedModel } : null;
+  const fields = Array.isArray(value.fields) ? value.fields.filter(field => ['displayName', 'discoveredContextWindow', 'contextWindow', 'outputTokens', 'discoveredInput', 'discoveredOutput'].includes(field)) : null;
+  return source && snapshotAt && matchedProvider && matchedModel ? { source, snapshotAt, matchedProvider, matchedModel, ...(fields ? { fields } : {}) } : null;
 }
 
 function safeModelMetadata(model = {}, { provider = '', apiType = '' } = {}) {
   const metadata = model?.metadata && typeof model.metadata === 'object' ? model.metadata : {};
   const capabilities = model?.capabilities && typeof model.capabilities === 'object' ? model.capabilities : {};
+  const nativeProtocol = ['anthropic-messages', 'anthropic-lb'].includes(normalize(apiType));
+  const incompatibleNative = apiType && !nativeProtocol && (model.anthropicMetadata || model.capabilityProvenance?.source === 'anthropic-models-api');
+  const nativeOwned = !incompatibleNative && Object.hasOwn(model, 'anthropicMetadata');
+  const wrappedNative = nativeOwned ? normalizeAnthropicModelMetadata(model.anthropicMetadata) : null;
+  const anthropicMetadata = wrappedNative ?? (nativeProtocol && !Object.hasOwn(model, 'anthropicMetadata') ? normalizeAnthropicModelMetadata(model) : null);
+  const nativeFields = new Set([
+    ...(Number.isSafeInteger(anthropicMetadata?.max_input_tokens) ? ['discoveredContextWindow', 'contextWindow'] : []),
+    ...(Number.isSafeInteger(anthropicMetadata?.max_tokens) ? ['outputTokens'] : []),
+    ...(typeof anthropicMetadata?.capabilities?.image_input?.supported === 'boolean' ? ['discoveredInput'] : []),
+  ]);
+  const fallbackProvenance = incompatibleNative ? null : normalizeCapabilityProvenance(model.fallbackCapabilityProvenance);
+  const fallbackFields = (fallbackProvenance?.fields || []).filter(field => !nativeFields.has(field));
+  const unknownNativeFields = new Set([
+    ...(nativeOwned && model.anthropicMetadata === null ? ['discoveredInput', 'discoveredOutput', 'reasoningEfforts', 'discoveredContextWindow', 'contextWindow', 'outputTokens'] : []),
+    ...(anthropicMetadata?.max_input_tokens === null ? ['discoveredContextWindow', 'contextWindow'] : []),
+    ...(anthropicMetadata?.max_tokens === null ? ['outputTokens'] : []),
+    ...(anthropicMetadata?.capabilities === null ? ['discoveredInput', 'reasoningEfforts'] : []),
+    ...(anthropicMetadata?.capabilities?.image_input === null ? ['discoveredInput'] : []),
+    ...(anthropicMetadata?.capabilities?.effort === null ? ['reasoningEfforts'] : []),
+  ]);
+  // Explicit native unknowns invalidate echoed projections, unless a separately
+  // attributed fallback supplies them. Absent native fields may coexist with
+  // generic metadata from compatible proxies. New refresh snapshots are merged
+  // separately, so omission cannot revive an older snapshot's fields.
+  const projected = key => incompatibleNative || (unknownNativeFields.has(key) && !fallbackFields.includes(key)) ? undefined : model[key];
+  const nativeImageInput = anthropicMetadata?.capabilities?.image_input?.supported;
+  const nativeInput = typeof nativeImageInput === 'boolean' ? ['text', ...(nativeImageInput ? ['image'] : [])] : null;
+  const nativeEfforts = anthropicDiscoveredReasoningEfforts(anthropicMetadata);
   const override = model.acceptedInputOverride ?? model.accepted_input_override;
-  const suppliedDiscovered = Array.isArray(model.discoveredInput) ? normalizedInput(model.discoveredInput) : null;
-  const discovered = suppliedDiscovered ?? discoveredInput(model, metadata, capabilities);
-  const suppliedOutput = Array.isArray(model.discoveredOutput) ? normalizedOutput(model.discoveredOutput) : null;
+  const suppliedDiscovered = Array.isArray(projected('discoveredInput')) ? normalizedInput(projected('discoveredInput')) : null;
+  const discovered = nativeInput ?? suppliedDiscovered ?? discoveredInput(model, metadata, capabilities);
+  const suppliedOutput = Array.isArray(projected('discoveredOutput')) ? normalizedOutput(projected('discoveredOutput')) : null;
   const discoveredOutputs = suppliedOutput ?? discoveredOutput(model, metadata, capabilities);
   const outputOverride = model.acceptedOutputOverride ?? model.accepted_output_override;
   const displayName = normalize(model.displayName ?? model.display_name ?? model.label ?? model.name ?? metadata.display_name ?? metadata.displayName);
-  const supportedReasoningLevels = Array.isArray(model.reasoningEfforts)
-    ? model.reasoningEfforts
+  const supportedReasoningLevels = incompatibleNative || unknownNativeFields.has('reasoningEfforts') ? [] : Array.isArray(projected('reasoningEfforts'))
+    ? projected('reasoningEfforts')
     : Array.isArray(model.supportedReasoningLevels)
       ? model.supportedReasoningLevels
       : Array.isArray(model.supported_reasoning_levels)
@@ -234,26 +263,29 @@ function safeModelMetadata(model = {}, { provider = '', apiType = '' } = {}) {
           : Array.isArray(metadata.supportedReasoningLevels)
             ? metadata.supportedReasoningLevels
             : [];
-  const reasoningEfforts = [...new Set(supportedReasoningLevels
+  const reasoningEfforts = nativeEfforts ?? [...new Set(supportedReasoningLevels
     .map((level) => normalize(typeof level === 'string' ? level : level?.effort ?? level?.id ?? level?.name))
     .filter(Boolean))];
   const defaultReasoningEffort = normalize(model.defaultReasoningEffort ?? model.default_reasoning_effort ?? model.default_reasoning_level ?? model.defaultReasoningLevel ?? metadata.default_reasoning_level ?? metadata.defaultReasoningLevel);
   const knownCapabilities = knownModelCapabilities({ provider, apiType, modelId: model.id });
   const supportsTemperatureValue = model.supportsTemperature ?? model.supports_temperature ?? metadata.supportsTemperature ?? metadata.supports_temperature ?? capabilities.supportsTemperature ?? capabilities.supports_temperature ?? knownCapabilities.supportsTemperature;
-  const outputTokens = positiveInteger(model.outputTokens ?? model.output_tokens ?? model.maxOutputTokens ?? model.max_output_tokens ?? metadata.output_tokens ?? metadata.outputTokens ?? metadata.max_output_tokens ?? metadata.maxOutputTokens ?? capabilities.output_tokens ?? capabilities.outputTokens ?? capabilities.max_output_tokens ?? capabilities.maxOutputTokens);
-  const suppliedDiscoveredContextWindow = positiveInteger(model.discoveredContextWindow ?? model.discovered_context_window);
-  const providerContextWindow = positiveInteger(model.context_window ?? metadata.context_window ?? metadata.contextWindow ?? capabilities.context_length);
-  const legacyContextWindow = positiveInteger(model.contextWindow);
+  const outputTokens = positiveInteger(anthropicMetadata?.max_tokens) ?? positiveInteger(projected('outputTokens') ?? model.output_tokens ?? model.maxOutputTokens ?? model.max_output_tokens ?? metadata.output_tokens ?? metadata.outputTokens ?? metadata.max_output_tokens ?? metadata.maxOutputTokens ?? capabilities.output_tokens ?? capabilities.outputTokens ?? capabilities.max_output_tokens ?? capabilities.maxOutputTokens);
+  const suppliedDiscoveredContextWindow = positiveInteger(projected('discoveredContextWindow') ?? model.discovered_context_window);
+  const providerContextWindow = positiveInteger(model.context_window ?? metadata.context_window ?? metadata.contextWindow ?? capabilities.context_length ?? anthropicMetadata?.max_input_tokens);
+  const legacyContextWindow = positiveInteger(projected('contextWindow'));
   const contextWindowOverride = positiveInteger(model.contextWindowOverride ?? model.context_window_override);
-  const discoveredContextWindow = suppliedDiscoveredContextWindow ?? providerContextWindow ?? (!contextWindowOverride ? legacyContextWindow : null);
+  const discoveredContextWindow = positiveInteger(anthropicMetadata?.max_input_tokens) ?? suppliedDiscoveredContextWindow ?? providerContextWindow ?? (!contextWindowOverride ? legacyContextWindow : null);
   const contextWindow = contextWindowOverride ?? discoveredContextWindow;
-  const capabilityProvenance = normalizeCapabilityProvenance(model.capabilityProvenance);
+  const capabilityProvenance = incompatibleNative ? null : normalizeCapabilityProvenance(model.capabilityProvenance);
+  const fallbackCapabilityProvenance = fallbackFields.length ? { ...fallbackProvenance, fields: fallbackFields } : null;
   return {
+    ...(anthropicMetadata ? { anthropicMetadata } : nativeOwned && model.anthropicMetadata === null ? { anthropicMetadata: null } : {}),
     ...(Array.isArray(model.supportedGenerationMethods) ? { supportedGenerationMethods: model.supportedGenerationMethods.filter(x => typeof x === 'string') } : {}),
     ...(model.googleMetadata && typeof model.googleMetadata === 'object' ? { googleMetadata: Object.fromEntries(['name','baseModelId','version','description','inputTokenLimit','outputTokenLimit','thinking','temperature','maxTemperature','topP','topK','metadataSource','outputCapabilitySource'].filter(k => model.googleMetadata[k] !== undefined).map(k => [k, model.googleMetadata[k]])) } : {}),
     ...(displayName ? { displayName } : {}),
     ...(capabilityProvenance ? { capabilityProvenance } : {}),
-    ...(reasoningEfforts.length ? { reasoningEfforts } : {}),
+    ...(fallbackCapabilityProvenance ? { fallbackCapabilityProvenance } : {}),
+    ...(reasoningEfforts.length || nativeEfforts !== undefined || (!incompatibleNative && !unknownNativeFields.has('reasoningEfforts') && Array.isArray(projected('reasoningEfforts'))) ? { reasoningEfforts } : {}),
     ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
     ...(typeof supportsTemperatureValue === 'boolean' ? { supportsTemperature: supportsTemperatureValue } : {}),
     ...(discoveredContextWindow ? { discoveredContextWindow } : {}),
@@ -283,6 +315,19 @@ export function normalizeModels(models = [], { provider = '', apiType = '' } = {
       ...(acceptedOutput ? { acceptedOutput } : {}),
     };
   }).filter((model) => model.id && !ids.has(model.id) && (ids.add(model.id), true));
+}
+
+
+// A new native catalogue snapshot replaces provider facts, not operator intent.
+// Selection-only saves still patch existing metadata; an absent proxy capability
+// is unknown and must not revive an old native projection during refresh.
+export function mergeModelMetadata(prior, model, { provider = '', apiType = '', refresh = false } = {}) {
+  const nativeSnapshot = apiType === 'anthropic-messages' && (refresh || model.anthropicMetadata || model.capabilityProvenance?.source === 'anthropic-models-api');
+  const retained = nativeSnapshot ? Object.fromEntries(
+    ['acceptedInputOverride', 'acceptedOutputOverride', 'contextWindowOverride', 'selected', 'manual']
+      .filter(key => prior?.[key] !== undefined).map(key => [key, prior[key]]),
+  ) : prior;
+  return normalizeModels([{ ...retained, ...model }], { provider, apiType })[0];
 }
 
 
@@ -591,15 +636,18 @@ function enrichFromModelsDev(models, catalog, { provider, snapshotAt } = {}) {
       displayName: match.name,
       discoveredContextWindow: match.context_window ?? match.contextWindow ?? limit.context,
       outputTokens: match.max_output_tokens ?? match.outputTokens ?? limit.output,
-      discoveredInput: normalizedCatalogModalities(modalities.input, { input: true }),
-      discoveredOutput: normalizedCatalogModalities(modalities.output),
+      ...(Array.isArray(modalities.input) ? { discoveredInput: normalizedCatalogModalities(modalities.input, { input: true }) } : {}),
+      ...(Array.isArray(modalities.output) ? { discoveredOutput: normalizedCatalogModalities(modalities.output) } : {}),
     });
     // Provider responses are authoritative. The catalog only fills absent fields;
     // explicit operator overrides remain on the provider-normalized model.
+    const provenance = { source: 'models.dev', snapshotAt, matchedProvider: normalize(matchProvider.id || matchProvider.key), matchedModel: normalize(match.id || match.key) };
+    const fills = Object.fromEntries(Object.entries(catalogMetadata).filter(([key]) => model[key] === undefined));
     return {
-      ...catalogMetadata,
+      ...fills,
       ...model,
-      capabilityProvenance: { source: 'models.dev', snapshotAt, matchedProvider: normalize(matchProvider.id || matchProvider.key), matchedModel: normalize(match.id || match.key) },
+      capabilityProvenance: model.capabilityProvenance ?? provenance,
+      ...(model.capabilityProvenance && Object.keys(fills).length ? { fallbackCapabilityProvenance: { ...provenance, fields: Object.keys(fills) } } : {}),
     };
   });
 }
@@ -707,12 +755,41 @@ export async function discoverModels({ baseUrl, provider = '', useModelsDev = fa
   }
 
   const url = modelDiscoveryUrl({ baseUrl, apiType });
-  return fetchImpl(url, { headers: modelDiscoveryHeaders({ apiType, apiKey, auth }), signal })
-    .then(async (response) => {
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw modelHttpError('model_discovery_failed', response.status);
-      if (!Array.isArray(body.data) && !Array.isArray(body.models)) throw Object.assign(new Error('model_discovery_invalid'), { upstreamStatus: response.status });
-      const data = Array.isArray(body.data) ? body.data : body.models;
-      return enrich(normalizeModels(data.map((model) => ({ ...model, id: model?.id, selected: true, manual: false }))));
+  const headers = modelDiscoveryHeaders({ apiType, apiKey, auth });
+  const anthropic = normalize(apiType) === 'anthropic-messages';
+  const models = [], cursors = new Set();
+  let cursor = '';
+  for (;;) {
+    signal?.throwIfAborted();
+    let pageUrl = url;
+    if (cursor) {
+      const next = new URL(url);
+      next.searchParams.set('after_id', cursor);
+      pageUrl = next.toString();
+    }
+    const response = await fetchImpl(pageUrl, { headers, signal });
+    const body = await response.json().catch(error => {
+      signal?.throwIfAborted();
+      if (error?.name === 'AbortError') throw error;
+      return {};
     });
+    signal?.throwIfAborted();
+    if (!response.ok) throw modelHttpError('model_discovery_failed', response.status);
+    if (!Array.isArray(body?.data) && !Array.isArray(body?.models)) throw Object.assign(new Error('model_discovery_invalid'), { upstreamStatus: response.status });
+    const data = Array.isArray(body.data) ? body.data : body.models;
+    models.push(...data.map(model => ({ ...model, id: model?.id, selected: true, manual: false,
+      ...(anthropic ? {
+        capabilityProvenance: { source: 'anthropic-models-api', snapshotAt: new Date(nowMs).toISOString(), matchedProvider: 'anthropic', matchedModel: normalize(model.id) },
+      } : {}),
+    })));
+    // Older native responses and compatible proxies may omit pagination. Never
+    // return a partial catalogue as success when a provider declares more pages.
+    if (!anthropic || (!cursor && body.has_more === undefined) || body.has_more === false) break;
+    if (body.has_more !== true || !data.length || typeof body.last_id !== 'string' || !body.last_id.trim() || body.last_id !== data.at(-1)?.id || cursors.has(body.last_id)) {
+      throw new Error('model_discovery_pagination_invalid');
+    }
+    cursor = body.last_id;
+    cursors.add(cursor);
+  }
+  return enrich(normalizeModels(models, { provider, apiType }));
 }

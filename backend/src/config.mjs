@@ -134,6 +134,8 @@ export async function resolveModelConfig(args = {}) {
     ...(positiveInteger(args.max_tokens ?? args.maxTokens ?? args.output_tokens ?? args.outputTokens ?? model.maxTokens) ? {
       maxTokens: positiveInteger(args.max_tokens ?? args.maxTokens ?? args.output_tokens ?? args.outputTokens ?? model.maxTokens),
     } : {}),
+    // Native catalogue facts remain separate from selected request controls.
+    ...(model.anthropicMetadata ? { anthropicMetadata: model.anthropicMetadata } : {}),
     reasoningEfforts: model.reasoningEfforts ?? undefined,
     defaultReasoningEffort: model.defaultReasoningEffort ?? undefined,
     supportsTemperature: modelSupportsTemperature({ provider: connection.provider, api: connection.apiType, model: model.id, declared: model.supportsTemperature }),

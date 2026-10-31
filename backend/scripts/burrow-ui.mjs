@@ -91,7 +91,7 @@ import { createExecutionProviderRegistry } from '../src/process-execution-router
 import { buildChatSupportStatus, buildWorkbenchStatus } from '../src/workbench-status.mjs';
 import { allowedNextSteps, appendWorkItemStep, archiveWorkItem, createWorkItem, listWorkItems, readWorkItem, workItemEligibility } from '../src/work-item-store.mjs';
 import { searchBurrowSessionEvidence, searchSessionEvidence } from '../src/session-search.mjs';
-import { CODEX_CLIENT_VERSION_CACHE_TTL_MS, isProviderPool, assertConnection, assertProviderPoolMembers, providerPoolModels, discoverModels, refreshCodexClientVersionCache } from '../src/model-settings-store.mjs';
+import { CODEX_CLIENT_VERSION_CACHE_TTL_MS, isProviderPool, assertConnection, assertProviderPoolMembers, providerPoolModels, normalizeModels, discoverModels, refreshCodexClientVersionCache } from '../src/model-settings-store.mjs';
 import { claudeCredentialAuthPayload, detectClaudeCliCredential } from '../src/claude-cli-credentials.mjs';
 import { cancelClaudeCodeLogin, getClaudeCodeLogin, importClaudeCodeLoginCredential, startClaudeCodeLogin, submitClaudeCodeLoginCode } from '../src/claude-code-login.mjs';
 import { cancelOpenAiOAuthLogin, getOpenAiOAuthLogin, startOpenAiOAuthLogin, submitOpenAiOAuthCode } from '../src/openai-oauth-login.mjs';
@@ -565,7 +565,7 @@ function mergeDiscoveredModels(discovered = [], existing = []) {
       ...(Array.isArray(priorModel.acceptedOutputOverride) ? { acceptedOutputOverride: priorModel.acceptedOutputOverride } : {}),
       ...(priorModel.contextWindowOverride !== undefined ? { contextWindowOverride: priorModel.contextWindowOverride } : {}),
     } : {};
-    merged.push({ ...model, ...operatorOverrides, selected: priorModel?.selected !== false, manual: false });
+    merged.push(normalizeModels([{ ...model, ...operatorOverrides, selected: priorModel?.selected !== false, manual: false }])[0]);
     prior.delete(model.id);
   }
   for (const model of prior.values()) merged.push({ ...model, selected: model.selected !== false, manual: Boolean(model.manual) });

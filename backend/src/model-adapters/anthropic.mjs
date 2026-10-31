@@ -527,7 +527,9 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
   const imageCountFor = (messages = []) => (Array.isArray(messages) ? messages : []).reduce((count, message) => count + (Array.isArray(message?.content) ? message.content.filter((part) => part?.type === 'image_url' || part?.type === 'input_image' || part?.image_url || part?.input_image).length : 0), 0);
   const textPromptCharsFor = (messages = []) => (Array.isArray(messages) ? messages : []).reduce((total, message) => total + (typeof message?.content === 'string' ? message.content.length : (Array.isArray(message?.content) ? message.content.reduce((chars, part) => chars + String(part?.text || '').length, 0) : 0)), 0);
 
-  const buildRequest = ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens ?? config.outputTokens ?? DEFAULT_MODEL_OUTPUT_TOKENS, tools = null, streaming = false } = {}) => {
+  // Discovery supplies a ceiling, not a request to use the entire allowance.
+  // Retain the usual default (or a smaller capacity); explicit limits still win.
+  const buildRequest = ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens ?? Math.min(config.outputTokens ?? DEFAULT_MODEL_OUTPUT_TOKENS, DEFAULT_MODEL_OUTPUT_TOKENS), tools = null, streaming = false } = {}) => {
     const sourceTranscript = normalizeProviderMessages(messages?.length ? messages : [{ role: 'user', content: String(prompt || '') }]);
     const converted = anthropicMessages(sourceTranscript);
     if (!converted.messages.length || !converted.messages.some((message) => Array.isArray(message.content) && message.content.length)) throw new Error('prompt or messages are required');
@@ -557,7 +559,7 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
     return contextUsageFromRequest({ promptChars: request.promptChars, bodyChars: request.serializedBody.length, imageCount: request.imageCount, model, api: 'anthropic-messages', modelCall: options.modelCall, clock });
   };
 
-  const complete = async ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens ?? config.outputTokens ?? DEFAULT_MODEL_OUTPUT_TOKENS, tools = null, traceLogger, signal = null, onTextDelta = null, onThoughtDelta = null, onContextUsage = null, modelCall = null, recoveryContext = null } = {}) => {
+  const complete = async ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens ?? Math.min(config.outputTokens ?? DEFAULT_MODEL_OUTPUT_TOKENS, DEFAULT_MODEL_OUTPUT_TOKENS), tools = null, traceLogger, signal = null, onTextDelta = null, onThoughtDelta = null, onContextUsage = null, modelCall = null, recoveryContext = null } = {}) => {
     if (recoveryContext?.nextModelCall) modelCall = await recoveryContext.nextModelCall();
     const requestId = idFactory();
     const timing = providerTiming({ identity: providerIdentity(config), traceLogger, requestId, provider: 'anthropic', api: 'anthropic-messages', model, modelCall, contextBudgetTokens: config.contextTokens ?? config.contextWindow, clock });
