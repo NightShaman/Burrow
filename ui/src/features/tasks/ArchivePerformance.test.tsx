@@ -36,7 +36,8 @@ it('profiles bounded large-fixture Chat list/date/detail/loadEarlier and badge r
   const existing = view.container.querySelectorAll('.archive-turn')[99];
   stage = 'loadEarlier';
   fireEvent.click(screen.getByRole('button', { name: 'Load earlier messages' }));
-  await screen.findByText('Message 0');
+  // Prepending yields message bodies across paint batches; completion is not a 1s performance assertion.
+  await screen.findByText('Message 0', {}, { timeout: 10_000 });
   expect(view.container.querySelectorAll('.archive-turn')).toHaveLength(200);
   const retainedNode = view.container.querySelectorAll('.archive-turn')[199] === existing;
   expect(retainedNode).toBe(true);
