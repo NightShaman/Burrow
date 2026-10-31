@@ -65,17 +65,11 @@ export function SystemPanel({ provider, providerConnectionStatus }: { provider: 
 
 function AgentCard({ agent, selectedStreamId, expanded, compact, onToggle, onSelect, onSelectSubagent }: { agent: Agent; selectedStreamId: string; expanded: boolean; compact: boolean; onToggle: () => void; onSelect: () => void; onSelectSubagent: (id: string) => void }) {
   const selected = selectedStreamId === agent.id;
-  return <div className={`agent-group ${selected ? 'active' : ''}`}><div className="agent-card"><button type="button" className="agent-select" onClick={onSelect} aria-label={`Select ${agent.name}`} aria-pressed={selected}><span className="avatar">{agent.avatar.startsWith('data:image/') ? <img src={agent.avatar} alt="" /> : agent.avatar}</span><span className="agent-details"><span className="agent-summary"><span className="agent-identity"><span className="agent-name"><b>{agent.name}</b></span></span><span className={`agent-status ${statusClass(agent.activity)}`}><i />{agent.activity}</span></span></span></button><button type="button" className="agent-toggle" onClick={onToggle} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${agent.name}`} aria-expanded={expanded}><Chevron direction="right" /></button>{!compact && <ContextUsage value={agent.context} details={agent.contextDetails} />}</div>{expanded && <MinionGroups agent={agent} selectedStreamId={selectedStreamId} onSelect={onSelectSubagent} />}</div>;
+  const childSelected = agent.subagents.some(child => selectedStreamId === childStreamId(agent.id, child.resourceId ?? child.id));
+  return <div className={`agent-group ${selected || childSelected ? 'active' : ''}`}><div className="agent-card"><button type="button" className="agent-select" onClick={onSelect} aria-label={`Select ${agent.name}`} aria-pressed={selected}><span className="avatar">{agent.avatar.startsWith('data:image/') ? <img src={agent.avatar} alt="" /> : agent.avatar}</span><span className="agent-details"><span className="agent-summary"><span className="agent-identity"><span className="agent-name"><b>{agent.name}</b></span></span><span className={`agent-status ${statusClass(agent.activity)}`}><i />{agent.activity}</span></span></span></button><button type="button" className="agent-toggle" onClick={onToggle} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${agent.name}`} aria-expanded={expanded}><Chevron direction="right" /></button>{!compact && <ContextUsage value={agent.context} details={agent.contextDetails} />}</div>{expanded && <AgentMinions agent={agent} selectedStreamId={selectedStreamId} onSelect={onSelectSubagent} />}</div>;
 }
 
-function MinionGroups({ agent, selectedStreamId, onSelect }: { agent: Agent; selectedStreamId: string; onSelect: (id: string) => void }) {
-  const groups = new Map<string | null, Agent['subagents']>();
-  for (const child of agent.subagents) {
-    const root = child.rootSessionId || null;
-    const group = groups.get(root) ?? [];
-    group.push(child);
-    groups.set(root, group);
-  }
+function AgentMinions({ agent, selectedStreamId, onSelect }: { agent: Agent; selectedStreamId: string; onSelect: (id: string) => void }) {
   const coverageNotice = agent.minionCoverage === 'stale'
     ? 'Minion status unavailable · showing last seen'
     : agent.minionCoverage === 'unavailable'
@@ -85,10 +79,7 @@ function MinionGroups({ agent, selectedStreamId, onSelect }: { agent: Agent; sel
         : '';
   return <>
     {coverageNotice && <div className="minion-scope-notice">{coverageNotice}</div>}
-    {[...groups].map(([root, children]) => <div key={root === null ? 'unknown:' : `root:${root}`}>
-      <div className="minion-origin" title={root ?? 'Unknown origin'}>{root ? `Session: ${root}` : 'Unknown origin'}</div>
-      <MinionList nodes={minionTree(children)} agentId={agent.id} selectedStreamId={selectedStreamId} onSelect={onSelect} />
-    </div>)}
+    <MinionList nodes={minionTree(agent.subagents)} agentId={agent.id} selectedStreamId={selectedStreamId} onSelect={onSelect} />
   </>;
 }
 
@@ -100,8 +91,7 @@ function MinionList({ nodes, agentId, selectedStreamId, onSelect, level = 1 }: {
       const selected = selectedStreamId === selectionId;
       return <li key={minion.id}>
       <button type="button" className={`subagent-row ${selected ? 'active' : ''}`} onClick={() => onSelect(minion.id)} aria-label={`Select ${minion.name}`} aria-pressed={selected}>
-        <span className="subagent-branch" aria-hidden="true">└</span>
-        <span className="subagent-copy"><b>{minion.name}</b><small>{minion.retained ? 'Last seen · ' : ''}{minion.activity}</small></span>
+        <span className="subagent-copy"><b title={minion.name}>{minion.name}</b><small>{minion.retained ? 'Last seen · ' : ''}{minion.activity}</small></span>
       </button>
       <MinionList nodes={children} agentId={agentId} selectedStreamId={selectedStreamId} onSelect={onSelect} level={level + 1} />
     </li>;})}

@@ -67,7 +67,7 @@ describe('AgentsPanel', () => {
     expect(screen.getByRole('button', { name: 'Select Orphan' }).closest('ul')?.getAttribute('aria-label')).toBe('Minions');
   });
 
-  describe.each(['regular', 'compact'] as const)('%s origin grouping', view => {
+  describe.each(['regular', 'compact'] as const)('%s connected minion hierarchy', view => {
     it.each(['session', 'run'] as const)('does not create cross-root edges from parent %s ids', parentKind => {
       const parentLink = parentKind === 'session'
         ? { parentSessionId: 'parent-session' }
@@ -78,13 +78,14 @@ describe('AgentsPanel', () => {
       const onSelectSubagent = vi.fn();
       render(<AgentsPanel agents={[{ ...agent, subagents: [nested, conflict, parent] }]} view={view} selectedStreamId={childStreamId('smatchet', 'conflict')} expandedAgents={new Set(['smatchet'])} onSelectAgent={vi.fn()} onToggleAgent={vi.fn()} onSelectSubagent={onSelectSubagent} />);
 
-      const rootA = screen.getByText('Session: root-a').parentElement!;
-      const rootB = screen.getByText('Session: root-b').parentElement!;
-      const parentButton = within(rootA).getByRole('button', { name: 'Select Parent' });
-      const nestedButton = within(rootA).getByRole('button', { name: 'Select Nested' });
-      const conflictButton = within(rootB).getByRole('button', { name: 'Select Conflict' });
+      const parentButton = screen.getByRole('button', { name: 'Select Parent' });
+      const nestedButton = screen.getByRole('button', { name: 'Select Nested' });
+      const conflictButton = screen.getByRole('button', { name: 'Select Conflict' });
       expect(parentButton.closest('li')?.querySelector('ul')?.contains(nestedButton)).toBe(true);
-      expect(within(rootA).queryByRole('button', { name: 'Select Conflict' })).toBeNull();
+      expect(within(parentButton.closest('li')!).queryByRole('button', { name: 'Select Conflict' })).toBeNull();
+      expect(conflictButton.closest('ul')).toBe(parentButton.closest('ul'));
+      expect(screen.getAllByRole('list', { name: 'Minions' })).toHaveLength(1);
+      expect(screen.queryByText(/^Session:/)).toBeNull();
       expect(conflictButton.closest('ul')?.getAttribute('aria-label')).toBe('Minions');
       expect(screen.getAllByRole('button', { name: 'Select Conflict' })).toHaveLength(1);
       expect(conflictButton.getAttribute('aria-pressed')).toBe('true');
@@ -104,19 +105,34 @@ describe('AgentsPanel', () => {
       const nested = { ...agent.subagents[0], id: 'unknown-nested', stream: 'unknown-nested', name: 'Unknown nested', ...unknownLink };
       render(<AgentsPanel agents={[{ ...agent, subagents: [nested, known, unknown] }]} view={view} selectedStreamId={childStreamId('smatchet', 'unknown-nested')} expandedAgents={new Set(['smatchet'])} onSelectAgent={vi.fn()} onToggleAgent={vi.fn()} onSelectSubagent={vi.fn()} />);
 
-      const knownGroup = screen.getByText('Session: known-root').parentElement!;
-      const unknownGroup = screen.getByText('Unknown origin').parentElement!;
-      const knownButton = within(knownGroup).getByRole('button', { name: 'Select Known' });
-      const unknownButton = within(unknownGroup).getByRole('button', { name: 'Select Unknown' });
-      const nestedButton = within(unknownGroup).getByRole('button', { name: 'Select Unknown nested' });
+      const knownButton = screen.getByRole('button', { name: 'Select Known' });
+      const unknownButton = screen.getByRole('button', { name: 'Select Unknown' });
+      const nestedButton = screen.getByRole('button', { name: 'Select Unknown nested' });
       expect(knownButton.closest('ul')?.getAttribute('aria-label')).toBe('Minions');
       expect(unknownButton.closest('ul')?.getAttribute('aria-label')).toBe('Minions');
       expect(unknownButton.closest('li')?.querySelector('ul')?.contains(nestedButton)).toBe(true);
-      expect(within(knownGroup).queryByRole('button', { name: 'Select Unknown' })).toBeNull();
-      expect(within(unknownGroup).queryByRole('button', { name: 'Select Known' })).toBeNull();
-      expect(screen.getAllByText('Unknown origin')).toHaveLength(1);
+      expect(within(knownButton.closest('li')!).queryByRole('button', { name: 'Select Unknown' })).toBeNull();
+      expect(within(unknownButton.closest('li')!).queryByRole('button', { name: 'Select Known' })).toBeNull();
+      expect(knownButton.closest('ul')).toBe(unknownButton.closest('ul'));
+      expect(screen.queryByText('Unknown origin')).toBeNull();
       expect(nestedButton.getAttribute('aria-pressed')).toBe('true');
     });
+  });
+
+  it('keeps the owning agent visually active while only its exact child is pressed', () => {
+    const other = { ...agent, id: 'other', name: 'Other', subagents: [] };
+    const { container } = render(<AgentsPanel agents={[agent, other]} selectedStreamId={childStreamId('smatchet', 'child')} expandedAgents={new Set(['smatchet'])} onSelectAgent={vi.fn()} onToggleAgent={vi.fn()} onSelectSubagent={vi.fn()} />);
+    const child = screen.getByRole('button', { name: 'Select Child' });
+    expect(child.closest('.agent-group')?.classList.contains('active')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Select Smatchet' }).getAttribute('aria-pressed')).toBe('false');
+    expect(child.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelectorAll('.agent-group.active')).toHaveLength(1);
+  });
+
+  it('keeps an empty agent free of session labels and empty minion lists', () => {
+    render(<AgentsPanel agents={[{ ...agent, subagents: [] }]} selectedStreamId="smatchet" expandedAgents={new Set(['smatchet'])} onSelectAgent={vi.fn()} onToggleAgent={vi.fn()} onSelectSubagent={vi.fn()} />);
+    expect(screen.queryByRole('list', { name: 'Minions' })).toBeNull();
+    expect(screen.queryByText(/^Session:|Unknown origin/)).toBeNull();
   });
 
   it.each(['Error', 'Incomplete'])('keeps %s rail status free of diagnostic text', (activity) => {
@@ -184,16 +200,18 @@ describe('configurable rails', () => {
   });
 });
 
-it('groups known roots separately from unknown origins and labels scoped compatibility honestly', () => {
+it('keeps all origins in one list while preserving ancestry and honest compatibility status', () => {
   const child = agent.subagents[0];
   const named = { ...child, id: 'named-child', name: 'Named child', rootSessionId: 'named' };
   const nested = { ...child, id: 'nested', name: 'Nested', rootSessionId: 'named', parentSessionId: 'named-child' };
   const conflict = { ...child, id: 'conflict', name: 'Other root', rootSessionId: 'other', parentSessionId: 'named-child' };
   render(<AgentsPanel agents={[{ ...agent, minionScope: 'session', subagents: [named, nested, conflict, child] }]} selectedStreamId={childStreamId('smatchet', 'nested')} expandedAgents={new Set(['smatchet'])} onSelectAgent={vi.fn()} onToggleAgent={vi.fn()} onSelectSubagent={vi.fn()} />);
   expect(screen.getByText('Minions for the requested session only')).toBeTruthy();
-  expect(screen.getByText('Session: named')).toBeTruthy();
-  expect(screen.getByText('Session: other')).toBeTruthy();
-  expect(screen.getByText('Unknown origin')).toBeTruthy();
+  const minions = screen.getAllByRole('list', { name: 'Minions' });
+  expect(minions).toHaveLength(1);
+  for (const name of ['Named child', 'Nested', 'Other root', 'Child']) expect(within(minions[0]).getByRole('button', { name: `Select ${name}` })).toBeTruthy();
+  expect(screen.queryByText(/^Session:/)).toBeNull();
+  expect(screen.queryByText('Unknown origin')).toBeNull();
   expect(screen.getByRole('button', { name: 'Select Named child' }).closest('li')?.querySelector('ul')?.contains(screen.getByRole('button', { name: 'Select Nested' }))).toBe(true);
   expect(screen.getByRole('button', { name: 'Select Other root' }).closest('ul')?.getAttribute('aria-label')).toBe('Minions');
 });

@@ -8,27 +8,39 @@ export function minionTree(minions: Subagent[]): MinionNode[] {
   for (const minion of minions) {
     if (!nodes.has(minion.id)) nodes.set(minion.id, { minion, children: [] });
   }
-  const bySession = new Map([...nodes.values()].map(node => [node.minion.resourceId ?? node.minion.id, node]));
-  const byRun = new Map([...nodes.values()].filter(node => node.minion.runId).map(node => [node.minion.runId, node]));
-  const bySessionAndRun = new Map<string, Map<string, MinionNode>>();
+  // Root origins constrain ancestry; they are not extra navigation groups.
+  // Resolve inside each origin so reused session/run ids in another origin
+  // cannot fabricate a relationship or shadow the real parent.
+  const origins = new Map<string, MinionNode[]>();
   for (const node of nodes.values()) {
-    if (!node.minion.runId) continue;
-    const sessionId = node.minion.resourceId ?? node.minion.id;
-    const sessionRuns = bySessionAndRun.get(sessionId) ?? new Map<string, MinionNode>();
-    sessionRuns.set(node.minion.runId, node);
-    bySessionAndRun.set(sessionId, sessionRuns);
+    const origin = node.minion.rootSessionId || '';
+    const group = origins.get(origin) ?? [];
+    group.push(node);
+    origins.set(origin, group);
   }
   const parents = new Map<MinionNode, MinionNode>();
-  for (const node of nodes.values()) {
-    // Sessions and run ids can both be reused. When both parent ids are known,
-    // require one retained parent to match both rather than falling back to either.
-    const { parentRunId, parentSessionId } = node.minion;
-    const parent = parentRunId
-      ? parentSessionId
-        ? bySessionAndRun.get(parentSessionId)?.get(parentRunId)
-        : byRun.get(parentRunId)
-      : bySession.get(parentSessionId ?? '');
-    if (parent) parents.set(node, parent);
+  for (const group of origins.values()) {
+    const bySession = new Map(group.map(node => [node.minion.resourceId ?? node.minion.id, node]));
+    const byRun = new Map(group.filter(node => node.minion.runId).map(node => [node.minion.runId, node]));
+    const bySessionAndRun = new Map<string, Map<string, MinionNode>>();
+    for (const node of group) {
+      if (!node.minion.runId) continue;
+      const sessionId = node.minion.resourceId ?? node.minion.id;
+      const sessionRuns = bySessionAndRun.get(sessionId) ?? new Map<string, MinionNode>();
+      sessionRuns.set(node.minion.runId, node);
+      bySessionAndRun.set(sessionId, sessionRuns);
+    }
+    for (const node of group) {
+      // Sessions and run ids can both be reused. When both parent ids are known,
+      // require one retained parent to match both rather than falling back to either.
+      const { parentRunId, parentSessionId } = node.minion;
+      const parent = parentRunId
+        ? parentSessionId
+          ? bySessionAndRun.get(parentSessionId)?.get(parentRunId)
+          : byRun.get(parentRunId)
+        : bySession.get(parentSessionId ?? '');
+      if (parent) parents.set(node, parent);
+    }
   }
   const roots: MinionNode[] = [];
   for (const node of nodes.values()) {

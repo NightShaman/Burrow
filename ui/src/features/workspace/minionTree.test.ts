@@ -72,4 +72,32 @@ describe('minionTree presentation', () => {
     expect(tree.map(node => node.minion.id)).toEqual(['a', 'b', 'self', 'below-cycle']);
     expect(tree.every(node => node.children.length === 0)).toBe(true);
   });
+  it.each(['session', 'run', 'both'] as const)('constrains parent %s lookup by root without extra presentation groups', kind => {
+    const link = { ...(kind !== 'run' ? { parentSessionId: 'shared-session' } : {}), ...(kind !== 'session' ? { parentRunId: 'shared-run' } : {}) };
+    const tree = minionTree([
+      child('parent-a', { resourceId: 'shared-session', runId: 'shared-run', rootSessionId: 'a' }),
+      child('parent-b', { resourceId: 'shared-session', runId: 'shared-run', rootSessionId: 'b' }),
+      child('parent-unknown', { resourceId: 'shared-session', runId: 'shared-run' }),
+      child('nested-a', { rootSessionId: 'a', ...link }),
+      child('nested-b', { rootSessionId: 'b', ...link }),
+      child('nested-unknown', link),
+      child('conflict', { rootSessionId: 'c', ...link }),
+    ]);
+    expect(tree.map(node => node.minion.id)).toEqual(['parent-a', 'parent-b', 'parent-unknown', 'conflict']);
+    expect(tree.slice(0, 3).map(node => node.children.map(child => child.minion.id))).toEqual([['nested-a'], ['nested-b'], ['nested-unknown']]);
+    expect(tree[3].children).toEqual([]);
+  });
+
+  it.each(['session', 'run'] as const)('never links known and unknown roots through parent %s ids', kind => {
+    const link = kind === 'session' ? { parentSessionId: 'parent' } : { parentRunId: 'parent-run' };
+    for (const [parentRoot, childRoot] of [['known', undefined], [undefined, 'known']]) {
+      const tree = minionTree([
+        child('parent', { runId: 'parent-run', rootSessionId: parentRoot }),
+        child('descendant', { ...link, rootSessionId: childRoot }),
+      ]);
+      expect(tree.map(node => node.minion.id)).toEqual(['parent', 'descendant']);
+      expect(tree.every(node => node.children.length === 0)).toBe(true);
+    }
+  });
+
 });

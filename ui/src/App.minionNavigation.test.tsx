@@ -26,6 +26,7 @@ const runtimeAgents = [
 ] satisfies RuntimeAgent[];
 const descendants: Record<string, AgentStatus[]> = {
   hatchet: [
+    { sessionId: 'default-child', subagentId: 'default-worker', label: 'Default child', status: 'complete', depth: 1, parentSessionId: 'default', rootSessionId: 'default' },
     { sessionId: 'named-child', subagentId: 'worker', label: 'Named child', status: 'complete', depth: 1, parentSessionId: 'named-root', rootSessionId: 'named-root' },
     { sessionId: 'nested-child', subagentId: 'nested-worker', label: 'Nested child', status: 'complete', depth: 2, parentSessionId: 'named-child', rootSessionId: 'named-root' },
     { sessionId: 'shared-child', subagentId: 'hatchet-shared-worker', label: 'Hatchet shared child', status: 'complete', depth: 1, parentSessionId: 'named-root', rootSessionId: 'named-root' },
@@ -122,6 +123,11 @@ describe('App minion navigation integration', () => {
   ])('returns from %s to its named root via the parent row', async (name, childSessionId) => {
     await renderApp();
     await click('Expand Hatchet');
+    const minions = screen.getAllByRole('list', { name: 'Minions' });
+    expect(minions).toHaveLength(1);
+    expect(within(minions[0]).getByRole('button', { name: 'Select Default child' })).toBeTruthy();
+    expect(within(minions[0]).getByRole('button', { name: 'Select Named child' })).toBeTruthy();
+    expect(screen.queryByText(/^Session:/)).toBeNull();
     if (name === 'Nested child') {
       const parent = screen.getByRole('button', { name: 'Select Named child' }).closest('li')!;
       expect(within(parent).getByRole('button', { name: 'Select Nested child' })).toBeTruthy();
