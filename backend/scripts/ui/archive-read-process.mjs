@@ -11,10 +11,9 @@ export function isIsolatedArchiveRead(method, url) {
     || url.pathname === '/api/archive/calendar' && url.searchParams.get('kind') === 'sessions';
 }
 
-// Authentication/CORS remain in Core. A single owner retains the reader until
-// SQL and pipe output settle, even if its HTTP caller has stopped waiting.
-export function createArchiveReadProcess({ poolConfig, rootDir, onResult = () => {},
-  childPath = CHILD, timeoutMs, cancelGraceMs = 10_000 } = {}) {
+// Each worker retains its single owner until SQL and pipe output settle, even
+// if its HTTP caller has stopped waiting. Its queue/quarantine is lane-local.
+function createArchiveReadWorker({ poolConfig, rootDir, childPath, cancelGraceMs }) {
   let child = null, ready = null, active = null, sequence = 0, closed = false, closing;
   let quarantineUntil = 0, resumeTimer;
   const queue = [];
@@ -110,7 +109,7 @@ export function createArchiveReadProcess({ poolConfig, rootDir, onResult = () =>
       }
       tryFinish(job);
     });
-    const config = { ...poolConfig, max: 2 };
+    const config = { ...poolConfig, max: 1 };
     if (config.ssl && typeof config.ssl === 'object') {
       // pg may make ssl.key non-enumerable when another pool was created.
       config.ssl = Object.fromEntries(Object.getOwnPropertyNames(config.ssl)
@@ -163,12 +162,41 @@ export function createArchiveReadProcess({ poolConfig, rootDir, onResult = () =>
     });
   }
   return {
+    read,
+    close() {
+      if (closing) return closing;
+      closed = true; clearTimeout(resumeTimer);
+      for (const job of [...queue]) finish(job, failure('archive_reader_closed'));
+      const current = child;
+      if (!current || !current.pid || current.exitCode !== null || current.signalCode) return closing = Promise.resolve();
+      closing = new Promise(resolve => {
+        const timer = setTimeout(() => current.kill('SIGKILL'), cancelGraceMs); timer.unref?.();
+        current.once('exit', () => { clearTimeout(timer); resolve(); });
+        try { current.send({ type: 'close' }, error => { if (error) current.kill('SIGKILL'); }); }
+        catch { current.kill('SIGKILL'); }
+      });
+      return closing;
+    },
+  };
+}
+
+// Authentication/CORS remain in Core. Calendar discovery cannot hold up a
+// foreground list/detail/Proof read (or vice versa). Both children stay lazy;
+// their physical pools are one connection each, never four connections total.
+export function createArchiveReadProcess({ poolConfig, rootDir, onResult = () => {},
+  childPath = CHILD, timeoutMs, cancelGraceMs = 10_000 } = {}) {
+  const config = { poolConfig, rootDir, childPath, cancelGraceMs };
+  const calendar = createArchiveReadWorker(config), foreground = createArchiveReadWorker(config);
+  const workerFor = url => url.pathname === '/api/archive/calendar' && url.searchParams.get('kind') === 'sessions'
+    ? calendar : foreground;
+  let closing;
+  return {
     async route({ req, res, url }) {
       if (!isIsolatedArchiveRead(req.method, url)) return false;
       let owner;
       try {
         owner = requestReadOwner(req, res, { timeoutMs });
-        await read(url.pathname + url.search, owner.options, {
+        await workerFor(url).read(url.pathname + url.search, owner.options, {
           headers(result) { onResult(res, result.status, result.error); res.writeHead(result.status, { 'content-type': 'application/json; charset=utf-8', 'content-length': result.length }); },
           chunk: chunk => res.write(chunk), drain: resume => { res.once('drain', resume); return () => res.removeListener('drain', resume); },
         });
@@ -189,25 +217,17 @@ export function createArchiveReadProcess({ poolConfig, rootDir, onResult = () =>
     async request(path, options = {}) {
       const budget = archiveReadBudget(options), chunks = [];
       try {
-        const result = await read(path, budget, { headers() {}, chunk: chunk => { chunks.push(chunk); return true; }, drain() {} });
+        // Invalid paths still reach the child and retain its existing error contract.
+        let worker = foreground;
+        try { worker = workerFor(new URL(path, 'http://archive-reader.invalid')); } catch {}
+        const result = await worker.read(path, budget, { headers() {}, chunk: chunk => { chunks.push(chunk); return true; }, drain() {} });
         const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
         if (result.status >= 400 && body.error !== 'archive_run_not_found') throw Object.assign(new Error(body.error), { statusCode: result.status });
         return body;
       } finally { budget.dispose(); }
     },
     close() {
-      if (closing) return closing;
-      closed = true; clearTimeout(resumeTimer);
-      for (const job of [...queue]) finish(job, failure('archive_reader_closed'));
-      const current = child;
-      if (!current || !current.pid || current.exitCode !== null || current.signalCode) return closing = Promise.resolve();
-      closing = new Promise(resolve => {
-        const timer = setTimeout(() => current.kill('SIGKILL'), cancelGraceMs); timer.unref?.();
-        current.once('exit', () => { clearTimeout(timer); resolve(); });
-        try { current.send({ type: 'close' }, error => { if (error) current.kill('SIGKILL'); }); }
-        catch { current.kill('SIGKILL'); }
-      });
-      return closing;
+      return closing ||= Promise.all([calendar.close(), foreground.close()]).then(() => {});
     },
   };
 }

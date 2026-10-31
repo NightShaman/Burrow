@@ -34,7 +34,8 @@ process.on('SIGTERM', () => { void close(); });
 process.on('message', async message => {
   if (message?.type === 'init' && !pool && !closing) {
     try {
-      const config = { ...message.poolConfig, max: 2, statement_timeout: ARCHIVE_READ_TIMEOUT_MS,
+      // Each fixed lane owns one physical connection, regardless of caller config.
+      const config = { ...message.poolConfig, max: 1, statement_timeout: ARCHIVE_READ_TIMEOUT_MS,
         idle_in_transaction_session_timeout: ARCHIVE_READ_TIMEOUT_MS };
       // node-postgres merges URL parameters over config, and PostgreSQL startup
       // options can override individual startup GUCs. Make the bound the final

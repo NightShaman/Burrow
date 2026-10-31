@@ -1,3 +1,4 @@
+import { POSTGRES_ARCHIVE_DISCOVERY_INDEX_SQL } from './postgres-archive-discovery-indexes.mjs';
 import { POSTGRES_ARCHIVE_CHAT_PROJECTION_SQL } from './postgres-archive-chat-projection.mjs';
 import { POSTGRES_ARCHIVE_LEXICAL_SQL } from './postgres-archive-lexical.mjs';
 import { POSTGRES_CHAT_INPUT_SCHEMA_SQL } from './postgres-chat-input-store.mjs';
@@ -202,4 +203,5 @@ ALTER TABLE mod_external_turns ADD COLUMN attachments JSON NOT NULL DEFAULT '[]'
 ` },
   { version: 81, name: 'archive-lossless-candidate-projection', sql: POSTGRES_ARCHIVE_LEXICAL_SQL },
   { version: 82, name: 'archive-chat-projection-revisions', sql: POSTGRES_ARCHIVE_CHAT_PROJECTION_SQL },
+  { version: 83, name: 'archive-discovery-scalar-probe-indexes', sql: POSTGRES_ARCHIVE_DISCOVERY_INDEX_SQL },
 ]);
