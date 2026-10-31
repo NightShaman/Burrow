@@ -1,3 +1,4 @@
+import { startArchiveChatBackfill } from './postgres-archive-chat-backfill.mjs';
 import { PostgresChatInputStore } from './postgres-chat-input-store.mjs';
 import { PostgresCompletionEventSettingsStore } from './postgres-completion-event-settings-store.mjs';
 import { attemptResourceClosers } from './background-lifecycle.mjs';
@@ -105,6 +106,7 @@ export async function createPostgresApplication({
     await stores.forge.init();
     stores.brainEmbeddings.start();
     const operatorBackfill = startOperatorInstantBackfill(sharedPool, operatorBackfillOptions);
+    const archiveChatBackfill = startArchiveChatBackfill(sharedPool);
     let closePromise = null;
     return Object.freeze({
     modDistributionRepositoryFactory: () => createPostgresModDistributionRepository({ pool: sharedPool }),
@@ -116,6 +118,7 @@ export async function createPostgresApplication({
     stores: Object.freeze(stores),
     close() {
       closePromise ||= attemptResourceClosers([
+        () => archiveChatBackfill.close(),
         () => operatorBackfill.close(),
         () => stores.brainEmbeddings.close(),
         () => stores.chatInputs.close(),

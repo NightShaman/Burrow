@@ -32,7 +32,8 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
     return base;
   }, [repository]);
   const cacheOwner = 'local';
-  const agentNames = useMemo(() => new Map(agents.map((agent) => [agent.id, agent.name])), [agents]);
+  const agentNameKey = JSON.stringify(agents.map(agent => [agent.id, agent.name]));
+  const agentNames = useMemo(() => new Map<string, string>(JSON.parse(agentNameKey)), [agentNameKey]);
   const [modArchives, setModArchives] = useState<ModArchive[]>([]);
   const [modId, setModId] = useState('');
   const activeMod = modArchives.find((mod) => mod.modId === modId);
@@ -56,26 +57,53 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
   const [chatCount, setChatCount] = useState<number | null>(null);
   const [dreamCount, setDreamCount] = useState<number | null>(null);
   const [tiddleCount, setTiddleCount] = useState<number | null>(null);
-  // Populate navigation badges on entry, not only after opening each shelf.
+  // Fetch only when the underlying remote scope changes. Local badge filters
+  // must not refetch unrelated shelves on every keystroke or agent poll.
+  const [badgeCards, setBadgeCards] = useState<Awaited<ReturnType<ArchiveRepository['listContinuityCards']>>['items']>([]);
+  const [cardsReady, setCardsReady] = useState(false);
+  const [tasksReady, setTasksReady] = useState(false);
+  const [badgeTasks, setBadgeTasks] = useState<BoardTask[]>([]);
+  const [badgeProjects, setBadgeProjects] = useState<Project[]>([]);
   useEffect(() => {
     const abort = new AbortController();
-    setDreamCount(null); setTiddleCount(null); setTaskCount(null);
-    void archiveRepository.listDreams(abort.signal, null, selectedDate || undefined, selectedAgent || undefined, search)
-      .then(page => { if (!abort.signal.aborted) setDreamCount(page.items.length); }).catch(() => {});
+    setDreamCount(null);
+    const timer = window.setTimeout(() => {
+      void archiveRepository.listDreams(abort.signal, null, selectedDate || undefined, selectedAgent || undefined, search)
+        .then(page => { if (!abort.signal.aborted) setDreamCount(page.items.length); }).catch(() => {});
+    }, 180);
+    return () => { abort.abort(); window.clearTimeout(timer); };
+  }, [archiveRepository, selectedAgent, selectedDate, search]);
+  useEffect(() => {
+    const abort = new AbortController();
+    setTiddleCount(null); setCardsReady(false); setBadgeCards([]);
     void archiveRepository.listContinuityCards(selectedAgent, abort.signal)
-      .then(page => { if (!abort.signal.aborted) setTiddleCount(page.items.filter(card => !search.trim() || `${card.title} ${card.summary}`.toLowerCase().includes(search.trim().toLowerCase())).length); }).catch(() => {});
+      .then(page => { if (!abort.signal.aborted) { setBadgeCards(page.items); setCardsReady(true); } }).catch(() => {});
+    return () => abort.abort();
+  }, [archiveRepository, selectedAgent]);
+  useEffect(() => {
+    const query = search.trim().toLowerCase();
+    setTiddleCount(cardsReady ? badgeCards.filter(card => !query || `${card.title} ${card.summary}`.toLowerCase().includes(query)).length : null);
+  }, [badgeCards, search, cardsReady]);
+  useEffect(() => {
+    const abort = new AbortController();
+    setTaskCount(null); setTasksReady(false);
     void Promise.all([
       api<{ tasks: BoardTask[] }>('/api/task-board/tasks', { signal: abort.signal }),
       api<{ projects: Project[] }>('/api/task-board/projects', { signal: abort.signal }),
     ]).then(([{ tasks }, { projects }]) => {
-        if (abort.signal.aborted) return;
-        const agentId = agents.find(agent => agent.id === selectedAgent)?.resourceId ?? selectedAgent;
-        setTaskCount(tasks.filter(task => task.archived && (!agentId || task.assignedAgentId === agentId) &&
-          (!selectedDate || taskArchiveDate(task.archivedAt) === selectedDate) &&
-          (!search.trim() || [task.title, task.description, projects.find(project => project.id === task.projectId)?.name ?? 'Unknown project', agents.find(agent => (agent.resourceId ?? agent.id) === task.assignedAgentId)?.name ?? task.assignedAgentId ?? 'Unassigned', task.priority].join(' ').toLowerCase().includes(search.trim().toLowerCase()))).length);
-      }).catch(() => {});
+      if (!abort.signal.aborted) { setBadgeTasks(tasks); setBadgeProjects(projects); setTasksReady(true); }
+    }).catch(() => {});
     return () => abort.abort();
-  }, [archiveRepository, selectedAgent, selectedDate, search, agents]);
+  }, [archiveRepository]);
+  useEffect(() => {
+    const agentId = agents.find(agent => agent.id === selectedAgent)?.resourceId ?? selectedAgent;
+    const query = search.trim().toLowerCase();
+    const projects = new Map(badgeProjects.map(project => [project.id, project.name]));
+    const names = new Map(agents.map(agent => [agent.resourceId ?? agent.id, agent.name]));
+    setTaskCount(tasksReady ? badgeTasks.filter(task => task.archived && (!agentId || task.assignedAgentId === agentId) &&
+      (!selectedDate || taskArchiveDate(task.archivedAt) === selectedDate) &&
+      (!query || [task.title, task.description, projects.get(task.projectId) ?? 'Unknown project', names.get(task.assignedAgentId ?? '') ?? task.assignedAgentId ?? 'Unassigned', task.priority].join(' ').toLowerCase().includes(query))).length : null);
+  }, [badgeTasks, badgeProjects, agents, selectedAgent, selectedDate, search, tasksReady]);
   const [calendarMonth, setCalendarMonth] = useState(() => monthKey(new Date()));
   const [calendarDates, setCalendarDates] = useState<string[]>([]);
   const [calendarAvailabilityState, setCalendarAvailabilityState] = useState<'loading' | 'ready' | 'error'>('loading');

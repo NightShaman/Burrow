@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { isChatMessage } from './session-entry.mjs';
-import { archiveOccurrenceTokenSQL, archivePayloadKeySQL, archiveTruthyPayloadSQL, archiveVisibleMessageSQL } from './postgres-archive-lexical.mjs';
+import { archivePayloadKeySQL, archiveTruthyPayloadSQL } from './postgres-archive-lexical.mjs';
 import { withArchiveRead } from './postgres-archive-read.mjs';
 
 const required = (value, name) => {
@@ -80,30 +80,26 @@ const targetSQL = `WITH target AS (
   FROM conversation_sessions s WHERE s.agent_id=$1 AND s.session_id=$2 AND NOT EXISTS(SELECT 1 FROM target)
 ) SELECT * FROM selected`;
 
-// Only row coordinates and PostgreSQL row versions enter the digest, never
-// retained prose. A row insert/update/delete, snapshot-window edit, or change
-// of a catalog generation changes this scalar revision. Two independently
-// seeded 64-bit hashes accumulated without overflow plus cardinality avoid building an unbounded
-// string_agg or crossing the SQL/Node boundary with history. Read under the
-// same repeatable-read transaction as the subsequent pages.
-const revisionSQL = `SELECT count(*)::text AS n,
-  COALESCE(sum(hashtextextended(stamp,0)::numeric),0)::text AS h1,
-  COALESCE(sum(hashtextextended(stamp,1)::numeric),0)::text AS h2
- FROM (
-  SELECT json_build_array('catalog',a.archive_id,a.generation::text,a.xmin::text,a.ctid::text)::text AS stamp
-    FROM conversation_archives a WHERE ${compactWindow}
-  UNION ALL
-  SELECT json_build_array('archived',e.source_store,e.source_id,e.ordinal::text,e.xmin::text,e.ctid::text)::text
-    FROM conversation_archive_entries e JOIN conversation_archives a
-      ON a.agent_id=e.agent_id AND a.session_id=e.session_id AND a.archive_id=e.source_id
-    WHERE ${compactWindow}
-  UNION ALL
-  SELECT json_build_array('reset',e.source_store,e.source_id,e.ordinal::text,e.xmin::text,e.ctid::text)::text
-    FROM conversation_archive_entries e WHERE $3::text IS NOT NULL AND e.agent_id=$1 AND e.session_id=$2 AND e.source_id=$3
-  UNION ALL
-  SELECT json_build_array('live',e.sequence::text,e.xmin::text,e.ctid::text)::text
-    FROM conversation_entries e WHERE $3::text IS NULL AND e.agent_id=$1 AND e.session_id=$2
- ) versions`;
+// One scalar per relevant snapshot, never one hash per retained row. A
+// source revision is maintained transactionally on all ordinary SQL writes.
+// Scope filters exclude post-reset live/future compact mutations.
+const revisionSQL = `SELECT count(*)::text AS n, COALESCE(sum(hashtextextended(stamp,0)::numeric),0)::text AS h1,
+ COALESCE(sum(hashtextextended(stamp,1)::numeric),0)::text AS h2 FROM (
+ SELECT json_build_array('compact',a.archive_id,a.generation::text,r.revision::text)::text AS stamp
+ FROM conversation_archives a LEFT JOIN conversation_archive_revisions r
+   ON r.agent_id=a.agent_id AND r.session_id=a.session_id AND r.scope='source' AND r.source_id=a.archive_id
+ WHERE ${compactWindow}
+ UNION ALL
+ SELECT json_build_array('epoch',revision::text)::text FROM conversation_archive_revision_epoch
+ UNION ALL
+ SELECT json_build_array('terminal',r.revision::text)::text FROM conversation_archive_revisions r
+ WHERE r.agent_id=$1 AND r.session_id=$2 AND ((r.scope='live' AND $3::text IS NULL)
+   OR (r.scope='source' AND r.source_id=$3::text))
+ UNION ALL
+ SELECT json_build_array('prior-reset',a.archive_id,a.generation::text,a.xmin::text,a.ctid::text)::text
+ FROM conversation_archives a WHERE a.agent_id=$1 AND a.session_id=$2 AND a.kind='reset'
+ AND ($5::bigint IS NULL OR a.generation<$5::bigint)
+) versions`;
 
 // A logical occurrence without a payload or relational ID is its own position.
 // Keys use lossless UTF-16 encoding for payload IDs, and disjoint prefixes for
@@ -130,11 +126,11 @@ const countSQL = `SELECT count(DISTINCT identity COLLATE "C")::text AS count FRO
 function identityBranches(candidate, other, anonymous) {
   return [
     `${candidate}.payload_key IS NOT NULL AND ${candidate}.payload_key<>'' AND ${other}.has_payload_id
-      AND burrow_history_key(${other}.entry_key)=${candidate}.payload_key AND ${archiveTruthyPayloadSQL(other)}`,
-    `${candidate}.payload_key IS NOT NULL AND ${other}.has_payload_id IS DISTINCT FROM false
+      AND burrow_history_key(${other}.entry_key)=${candidate}.payload_key`,
+    `${candidate}.payload_key IS NOT NULL AND ${other}.has_payload_id = true
       AND burrow_history_key(${other}.entry_key) IS NULL AND ${archivePayloadKeySQL(other)}=${candidate}.payload_key`,
     `${candidate}.payload_key IS NOT NULL AND ${other}.has_payload_id IS NULL
-      AND burrow_history_key(${other}.entry_key) IS NOT NULL AND ${archivePayloadKeySQL(other)}=${candidate}.payload_key`,
+      AND ${archivePayloadKeySQL(other)}=${candidate}.payload_key`,
     `${candidate}.payload_key IS NULL AND NULLIF(${candidate}.entry_id,'') IS NOT NULL
       AND ${other}.entry_id<>'' AND ${other}.entry_id=${candidate}.entry_id AND NOT ${archiveTruthyPayloadSQL(other)}`,
     `${candidate}.payload_key IS NULL AND NULLIF(${candidate}.entry_id,'') IS NULL AND ${anonymous}`,
@@ -163,19 +159,31 @@ function snapshotPageSQL(kind) {
   }).join(' AND ');
   const archiveAnonymous = live ? 'false' : `(n.source_store=c.source_store AND n.source_id=c.source_id AND n.ordinal=c.ordinal)`;
   const liveAnonymous = live ? 'n.sequence=c.ordinal' : 'false';
+  const liveFallback = `g.agent_id=n.agent_id AND g.session_id=n.session_id AND g.sequence=n.sequence`;
+  const archiveFallback = `g.agent_id=n.agent_id AND g.session_id=n.session_id AND g.source_store=n.source_store
+    AND g.source_id=n.source_id AND g.ordinal=n.ordinal`;
+  // A NULL instant in an existing side projection is meaningful. Check row
+  // presence separately rather than COALESCE-ing its value with a payload parse.
+  const projection = (table, key, column) => `CASE WHEN n.archive_chat_projected THEN n.archive_chat_${column}
+    WHEN EXISTS (SELECT 1 FROM ${table} g WHERE ${key}) THEN
+      (SELECT g.${column === 'at' ? 'instant' : column} FROM ${table} g WHERE ${key})
+    ELSE (SELECT p.${column === 'at' ? 'instant' : column} FROM burrow_archive_chat_projection(n.entry,
+      COALESCE(n.search_projection,burrow_json_member(n.entry,'content')::text,'')) p) END`;
   const winnerLive = identityBranches('c','n',liveAnonymous).map(match => `
     (SELECT 'live'::text AS store,'live'::text AS source_store,n.sequence::text AS source_id,
-      n.sequence AS ordinal,n.entry,n.search_projection,2 AS rank,NULL::bigint AS generation
+      n.sequence AS ordinal,${projection('conversation_live_chat_grandfathered',liveFallback,'visible')} AS archive_chat_visible,
+      ${projection('conversation_live_chat_grandfathered',liveFallback,'at')} AS archive_chat_at,2 AS rank,NULL::bigint AS generation
      FROM conversation_entries n WHERE $3::text IS NULL AND n.agent_id=$1 AND n.session_id=$2
        AND ${match} ORDER BY n.sequence LIMIT 1)`);
   const winnerArchive = identityBranches('c','n',archiveAnonymous).map(match => `
-    (SELECT 'archive'::text AS store,n.source_store,n.source_id,n.ordinal,n.entry,n.search_projection,
+    (SELECT 'archive'::text AS store,n.source_store,n.source_id,n.ordinal,
+      ${projection('conversation_archive_chat_grandfathered',archiveFallback,'visible')} AS archive_chat_visible,
+      ${projection('conversation_archive_chat_grandfathered',archiveFallback,'at')} AS archive_chat_at,
       CASE WHEN a.archive_id=$3 THEN 2 ELSE 1 END AS rank,a.generation
      ${archiveProbe}
      WHERE (${compactWindow} OR (a.agent_id=$1 AND a.session_id=$2 AND a.archive_id=$3 AND a.kind='reset'))
        AND ${match}
      ORDER BY rank DESC,a.generation DESC,n.source_id DESC,n.ordinal LIMIT 1)`);
-  const token = archiveOccurrenceTokenSQL('f');
   return `WITH candidates AS (
     SELECT e.entry,e.entry_id,e.entry_key,e.has_payload_id,${ordinal} AS ordinal,
       ${live ? "'live'::text AS source_store,e.sequence::text AS source_id" : 'e.source_store,e.source_id'},
@@ -190,14 +198,10 @@ function snapshotPageSQL(kind) {
         ${[...winnerLive,...winnerArchive].join(' UNION ALL ')}
       ) choices ORDER BY rank DESC,generation DESC,CASE WHEN rank=1 THEN source_id END DESC,ordinal LIMIT 1
     ) w
-    CROSS JOIN LATERAL (SELECT burrow_archive_fields(w.entry) AS fields,
-      COALESCE(w.search_projection,burrow_json_member(w.entry,'content')::text,'') AS search_projection OFFSET 0) f
     WHERE ${priorArchive} AND ${priorTerminal}
-      AND ${archiveVisibleMessageSQL('f')}
-      AND (($9::text IS NULL AND $10::text IS NULL) OR (
-        json_typeof((${token})::json)='string'
-        AND ($9::text IS NULL OR burrow_archive_instant((${token})::json)>=$9::timestamptz)
-        AND ($10::text IS NULL OR burrow_archive_instant((${token})::json)<=$10::timestamptz)))
+      AND w.archive_chat_visible
+      AND ($9::text IS NULL OR w.archive_chat_at>=$9::timestamptz)
+      AND ($10::text IS NULL OR w.archive_chat_at<=$10::timestamptz)
     ORDER BY c.ordinal DESC LIMIT $11`;
 }
 
@@ -220,6 +224,12 @@ const hydrationSQL = `SELECT requested.position,e.entry FROM
     AND e.sequence=requested.ordinal
  ORDER BY position`;
 
+// Count caches are safe only for an identical target/window/content revision.
+// They are process-local and bounded; the read transaction remains read-only.
+// Restarts and other processes reconstruct on the first reset detail page.
+const resetCountsByPool = new WeakMap();
+const RESET_COUNT_CACHE_LIMIT = 512;
+
 export async function readArchiveTranscriptPage(pool, {
   agentId: rawAgentId, sessionId: rawSessionId, limit, before = null, from = null, to = null,
   signal, deadline, cursorSecret,
@@ -228,6 +238,8 @@ export async function readArchiveTranscriptPage(pool, {
   if ((from && !validInstant(from)) || (to && !validInstant(to))) throw new Error('archive_date_invalid');
   if (!(typeof cursorSecret === 'string' && cursorSecret.length || Buffer.isBuffer(cursorSecret) && cursorSecret.length)) throw new Error('archive_cursor_secret_required');
   const scope = [agentId, sessionId, from, to];
+  // Older signed cursors contain row-hash revisions; v82 uses transactional
+  // source revisions, so an upgrade intentionally invalidates those cursors.
   const cursor = parseCursor(cursorSecret, before, scope), size = pageSize(limit);
   return withArchiveRead(pool, async client => {
     const target = (await client.query(targetSQL, [agentId, sessionId])).rows[0];
@@ -240,7 +252,21 @@ export async function readArchiveTranscriptPage(pool, {
     if (cursor && cursor.revision !== revision) throw new Error('archive_cursor_invalid');
     // Live detail historically advertises the metadata tail count (or page
     // length), whereas resets advertise the complete reconstructed count.
-    const count = target.reset ? Number((await client.query(countSQL, params)).rows[0].count) : null;
+    // A cached count is valid only with precisely the revision for which it was
+    // computed; generation/SQL row edits invalidate it automatically. Cache
+    // misses reconstruct once (no write from this read-only transaction).
+    let count = null;
+    if (target.reset) {
+      let resetCounts = resetCountsByPool.get(pool);
+      if (!resetCounts) { resetCounts = new Map(); resetCountsByPool.set(pool, resetCounts); }
+      const cacheKey = JSON.stringify([scope[0], scope[1], revision]);
+      count = resetCounts.get(cacheKey);
+      if (count === undefined) {
+        count = Number((await client.query(countSQL, params)).rows[0].count);
+        if (resetCounts.size >= RESET_COUNT_CACHE_LIMIT) resetCounts.delete(resetCounts.keys().next().value);
+        resetCounts.set(cacheKey, count);
+      }
+    }
     const found = [];
     let snapshot = cursor?.position?.kind === 'archive'
       ? { kind: 'compact', source: cursor.position.source, generation: cursor.position.generation, before: cursor.position.ordinal }
@@ -273,7 +299,8 @@ export async function readArchiveTranscriptPage(pool, {
     if (payloads.some(row => !isChatMessage(row.entry))) throw new Error('archive_projection_invalid');
     const entries = payloads.map(row => row.entry).reverse();
     const hasMore = found.length > size;
-    const metadata = { ...target.metadata, createdAt: target.created_at, updatedAt: target.updated_at };
+    const metadata = { ...target.metadata, ...(target.reset ? { archiveTranscriptTurnCount: count } : {}),
+      createdAt: target.created_at, updatedAt: target.updated_at };
     const sourceSessionId = target.reset ? target.metadata?.sourceSessionId || target.source : target.source;
     return { entries, hasMore, nextCursor: hasMore ? makeCursor(cursorSecret, scope, revision, selected.at(-1).position) : null,
       historyStatus: 'complete', metadata, turnCount: target.reset ? count : metadata.turnCount ?? entries.length, archiveSnapshot: target.reset ? 'reset' : null,

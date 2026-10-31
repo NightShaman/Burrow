@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { compactChatTurn } from '../src/compact-chat-turn.mjs';
+import { createArchiveReadProcess } from './ui/archive-read-process.mjs';
 import { createArchiveAgentContext } from './ui/archive-agent-context.mjs';
 import { createChatInputRunner } from '../src/chat-input-runner.mjs';
 import { createChatInputService } from '../src/chat-input-service.mjs';
@@ -2110,46 +2112,6 @@ async function sessionActivities({ sessionId, turns } = {}) {
   return activities;
 }
 
-function compactAttachmentMetadata(attachment = {}, index = 0) {
-  if (!attachment || typeof attachment !== 'object') return null;
-  const projected = {
-    index,
-    name: String(attachment.name || `attachment-${index + 1}`),
-    type: String(attachment.type || attachment.mimeType || 'application/octet-stream'),
-    size: attachment.size ?? null,
-    encoding: String(attachment.encoding || 'utf8'),
-  };
-  for (const key of ['artifactPath', 'storedAt']) {
-    if (attachment[key] !== undefined && attachment[key] !== null) projected[key] = attachment[key];
-  }
-  return projected;
-}
-
-import { compactDelegationMetadata } from '../src/compact-delegation-metadata.mjs';
-
-function compactChatTurn(turn = {}) {
-  const metadata = compactDelegationMetadata(turn.metadata);
-  if (turn.metadata?.toolActivity) metadata.toolActivity = turn.metadata.toolActivity;
-  if (Array.isArray(turn.metadata?.attachments)) {
-    const attachments = turn.metadata.attachments.map(compactAttachmentMetadata).filter(Boolean);
-    if (attachments.length) metadata.attachments = attachments;
-  }
-  for (const key of ['fromAgentName', 'fromAgentId', 'messageMode', 'direction', 'chatInput', 'lane', 'steering']) {
-    if (turn.metadata?.[key] !== undefined) metadata[key] = turn.metadata[key];
-  }
-  return {
-    id: turn.id,
-    parentId: turn.parentId ?? null,
-    ts: turn.ts,
-    type: turn.type,
-    role: turn.role,
-    content: turn.content,
-    contentTruncated: Boolean(turn.contentTruncated),
-    runId: turn.runId ?? null,
-    visibility: turn.visibility,
-    ...(Object.keys(metadata).length ? { metadata } : {}),
-  };
-}
 
 async function sessionDetail(id, { rootDir, agentId = null } = {}) {
   agentId ||= (await resolveAgentRuntime()).agentId;
@@ -3279,6 +3241,11 @@ const { archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, arc
   resolveAgentRuntime: archiveAgentContext.resolveAgentRuntime, runtimeConfig: archiveAgentContext.runtimeConfig, runtimeTraceRoot, settingsKeyFromEnvironment,
   isChatMessage, compactChatTurn, summarizeSessionTurns, boundedInteger,
 });
+// One bounded read process owns expensive Chat Archive/Proof parsing, heap and
+// a separate two-connection queue; no second authority, migrations or producers.
+const archiveReadProcess = createArchiveReadProcess({ poolConfig: runtimePostgresConfig, rootDir: projectRoot,
+  onResult: (res, status, error) => observeHttpResult(res, status, error ? { ok: false, error } : { ok: true }),
+});
 const sessionRoute = createSessionRoutes({ resolveArchiveAgentRuntime: archiveAgentContext.resolveAgentRuntime, rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveDreamGroups, archiveDreamGroupDetail, archiveWorkflowEvents, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, supersedeSessionRuns, beginSessionAdmissionsReset, finishSessionAdmissionsReset, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
 const brainRoute = createBrainRoutes({ store: postgresApplication.stores.brains, metadata: metadataStore(), embeddings: postgresApplication.stores.brainEmbeddings, readJsonBody, sendJson });
 const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, browserOriginSettings: () => browserOriginSettings({ metadata: metadataStore() }), saveBrowserOriginSettings: body => saveBrowserOriginSettings(body, { metadata: metadataStore() }), browserTabSettings: () => browserTabSettings({ metadata: metadataStore() }), saveBrowserTabSettings: body => saveBrowserTabSettings(body, { metadata: metadataStore() }), otelSettings: () => otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }), saveOtelSettings: async body => { let result = await saveOtelSettings(body, { store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); if (result.ok) { try { await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore() })); await applyOtelConfigurationToNodeGoblins(); } catch (error) { serverLogger.event('otel_configuration_apply_failed', { error }); return { ok: false, status: 500, error: 'opentelemetry_configuration_apply_failed' }; } result = await otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); } return result; }, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
@@ -3341,8 +3308,8 @@ const runtimeDiagnostics = Object.freeze({
       const trace = await summarizeTrace({ conversationStore: postgresApplication.stores.conversations, agentId: runtime.agentId, rootDir: await traceRootForRun({ rootDir: runtime.agentWorkspaceRoot, sessionId: sessionId(), runId, runtime: config, agentId: runtime.agentId }), runId, includeToolOutput: operation === 'trace' && input.includeToolOutput === true });
       return operation === 'trace' ? { ok: true, trace } : { ok: true, runId, authority: authorityExplanationFromTraceSummary(trace) };
     }
-    if (operation === 'run-proofs') { const runtime = await agentRuntime(input.agentId); return { ok: true, ...(await archiveRuns({ agentRuntime: runtime, sessionId: input.sessionId || null, limit: input.limit || 100, cursor: input.cursor })) }; }
-    if (operation === 'run-proof') { const runtime = await agentRuntime(input.agentId); const run = await archiveRunDetail({ agentRuntime: runtime, runId: String(input.runId || '') }); return run ? { ok: true, run } : { ok: false, error: 'archive_run_not_found' }; }
+    if (operation === 'run-proofs') { const runtime = await agentRuntime(input.agentId); const query = new URLSearchParams({ agentId: runtime.agentId, limit: String(input.limit || 100) }); if (input.sessionId) query.set('sessionId', input.sessionId); if (input.cursor) query.set('cursor', input.cursor); return archiveReadProcess.request('/api/archive/runs?' + query); }
+    if (operation === 'run-proof') { const runtime = await agentRuntime(input.agentId); return archiveReadProcess.request('/api/archive/runs/' + encodeURIComponent(String(input.runId || '')) + '?agentId=' + encodeURIComponent(runtime.agentId)); }
     if (operation === 'session-context' || operation === 'context-status') {
       const runtime = await agentRuntime(input.agentId); const config = await runtimeConfig(runtime.agentId); const sid = sessionId();
       const limits = activeConversationLimits({ modelConfig: config.modelConfig, contextConfig: config.contextConfig });
@@ -3645,6 +3612,7 @@ async function handleRequest(req, res) {
     }
     if (await observabilityRoute({ req, res, url })) return;
     if (await agentRoute({ req, res, url })) return;
+    if (await archiveReadProcess.route({ req, res, url })) return;
     if (await sessionRoute({ req, res, url })) return;
     if (await brainRoute({ req, res, url })) return;
     if (await generalSettingsRoute({ req, res, url })) return;
@@ -3676,6 +3644,7 @@ function closeOnlyProducer(resource) {
   let closing = null;
   return { stop() { closing ||= Promise.resolve().then(() => resource.close()); closing.catch(() => {}); }, close() { this.stop(); return closing; } };
 }
+const archiveReadProducer = closeOnlyProducer(archiveReadProcess);
 const skillSyncProducer = closeOnlyProducer(skillGitSync);
 const modDistributionProducer = closeOnlyProducer({ async close() {
   // Drain durable work while hosts and PostgreSQL remain alive. Host teardown
@@ -3690,7 +3659,7 @@ const closeRuntimeResources = createCoordinatedShutdown({
     httpClosePromise = new Promise(resolve => server.close(() => resolve()));
     server.closeIdleConnections?.();
   },
-  producers: () => [skillSyncProducer, managedSkillSynchronizer, modDistributionProducer, completionEventRunner, chatInputRunner, externalTurnDispatcher, generationDispatcher, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
+  producers: () => [archiveReadProducer, skillSyncProducer, managedSkillSynchronizer, modDistributionProducer, completionEventRunner, chatInputRunner, externalTurnDispatcher, generationDispatcher, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
   beforeDrain: async () => {
     try {
       await recordActiveRunInterruptions({ stores: postgresApplication.stores, activeRuns: activeChatRuns, resolveAgentRuntime, reason: shutdownReason });
@@ -3700,7 +3669,7 @@ const closeRuntimeResources = createCoordinatedShutdown({
     }
   },
   drainAdmission: () => httpClosePromise,
-  closers: () => [() => cleanupMods(loadedMods, { logger: serverLogger }), () => otelRuntime.shutdown(), () => postgresApplication.close()],
+  closers: () => [() => archiveReadProcess.close(), () => cleanupMods(loadedMods, { logger: serverLogger }), () => otelRuntime.shutdown(), () => postgresApplication.close()],
   onTimeout: () => server.closeAllConnections?.(),
 });
 let shutdownPromise = null;

@@ -1,0 +1,51 @@
+import { Profiler } from 'react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { Archive } from './ArchivePage';
+import { createArchiveRepository } from './archiveRepository';
+import type { ArchiveSession } from './archiveTypes';
+import type { SessionTurn } from '../../app/api';
+
+// Real shelf + reader + Markdown renderer; deterministic large, bounded API pages.
+// No production reads. Timings are diagnostic, never flaky pass/fail thresholds.
+afterEach(() => { cleanup(); window.localStorage.clear(); vi.restoreAllMocks(); });
+it('profiles bounded large-fixture Chat list/date/detail/loadEarlier and badge retriggers', async () => {
+  const repository = createArchiveRepository();
+  const page = <T,>(items: T[]) => ({ items, nextCursor: null, hasMore: false });
+  const date = new Date();
+  const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-15`;
+  const sessions = Array.from({ length: 200 }, (_, i) => ({ id: `${i}`, sessionId: `${i}`, agentId: 'smatchet', agentName: 'Smatchet', title: `Fixture chat ${i}`, summary: 'Realistic retained summary. '.repeat(12), archived: true, matchedDate: day, turnCount: 200, archivedAt: `${day}T12:00:00Z` } as ArchiveSession));
+  const turns = (start: number): SessionTurn[] => Array.from({ length: 100 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', ts: new Date(Date.UTC(2026, 0, 1, 0, start + i)).toISOString(), content: `### Message ${start + i}\n\n${'A retained paragraph with **Markdown**, links and context. '.repeat(25)}\n\n\`\`\`ts\nconst answer = 42;\n\`\`\`` }));
+  vi.spyOn(repository, 'listSessions').mockResolvedValue(page(sessions));
+  vi.spyOn(repository, 'listCalendarAvailability').mockImplementation(async (kind, month) => ({ ok: true, kind, month, dates: [day] }));
+  const dreams = vi.spyOn(repository, 'listDreams').mockResolvedValue(page([]));
+  const tiddle = vi.spyOn(repository, 'listContinuityCards').mockResolvedValue(page([]));
+  vi.spyOn(repository, 'loadSession').mockImplementation(async (_session, _signal, before) => ({ turns: turns(before ? 0 : 100), hasMore: !before, nextCursor: before ? null : 'older' }));
+  const requests: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => { requests.push(url); return new Response(JSON.stringify(url.includes('projects') ? { projects: [] } : { tasks: [] }), { status: 200, headers: { 'content-type': 'application/json' } }); }));
+  let stage = 'list';
+  const commits: Record<string, number[]> = {};
+  const view = render(<Profiler id="archive" onRender={(_id, _phase, duration) => { (commits[stage] ??= []).push(duration); }}><Archive agents={[]} repository={repository} /></Profiler>);
+  await screen.findByRole('button', { name: /Fixture chat 199/ });
+  stage = 'date';
+  fireEvent.click(screen.getByRole('button', { name: `Select ${day}, has archived records` }));
+  await screen.findByRole('button', { name: /Fixture chat 199/ });
+  stage = 'detail';
+  fireEvent.click(screen.getByRole('button', { name: /Fixture chat 0\b/ }));
+  await screen.findByText('Message 199');
+  const existing = view.container.querySelectorAll('.archive-turn')[99];
+  stage = 'loadEarlier';
+  fireEvent.click(screen.getByRole('button', { name: 'Load earlier messages' }));
+  await screen.findByText('Message 0');
+  expect(view.container.querySelectorAll('.archive-turn')).toHaveLength(200);
+  const retainedNode = view.container.querySelectorAll('.archive-turn')[199] === existing;
+  expect(retainedNode).toBe(true);
+  stage = 'agentsIdentity';
+  view.rerender(<Profiler id="archive" onRender={(_id, _phase, duration) => { (commits[stage] ??= []).push(duration); }}><Archive agents={[]} repository={repository} /></Profiler>);
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 220)); });
+  console.log('ARCHIVE_PROFILE', JSON.stringify({ commitsMs: Object.fromEntries(Object.entries(commits).map(([key, values]) => [key, { count: values.length, total: +values.reduce((a, b) => a + b, 0).toFixed(2), max: +Math.max(...values).toFixed(2) }])), badges: { dreams: dreams.mock.calls.length, tiddle: tiddle.mock.calls.length, tasks: requests.filter(url => url.includes('task-board/tasks')).length, projects: requests.filter(url => url.includes('task-board/projects')).length }, retainedNode }));
+  expect(tiddle).toHaveBeenCalledTimes(1);
+  expect(dreams).toHaveBeenCalledTimes(2);
+  expect(requests.filter(url => url.includes('task-board/tasks'))).toHaveLength(1);
+  await waitFor(() => expect(screen.getByText('Beginning of retained history')).toBeTruthy());
+}, 30000);

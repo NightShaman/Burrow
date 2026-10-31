@@ -3,6 +3,7 @@ import { archiveCacheInvalidated, readArchiveSessionCache, writeArchiveSessionCa
 import type { ArchiveRepository } from './archiveRepository';
 import { filterArchiveSessions } from './archiveDerivations';
 import { archiveSessionContext, archiveSessionTitle, ChatArchiveReader } from './ArchiveReaders';
+import { mergeArchiveTurns } from './archiveTurns';
 import type { ArchiveDetail, ArchiveSession } from './archiveTypes';
 
 type ShelfProps = { archiveRepository: ArchiveRepository; selectedAgent: string; selectedDate: string; search: string; queryKey: string; onCount: (count: number) => void; agentNames: Map<string, string>; operatorName: string };
@@ -107,17 +108,8 @@ export function ChatArchiveShelf({ archiveRepository, selectedAgent, selectedDat
           if (!current || current.nextCursor !== cursor) return current;
           const existing = current.session?.turns || current.turns || current.chatTurns || [];
           const incoming = page.session?.turns || page.turns || page.chatTurns || [];
-          const key = (turn: typeof incoming[number]) => JSON.stringify(turn);
-          const seen = new Map<string, number>();
-          existing.forEach((turn) => seen.set(key(turn), (seen.get(key(turn)) || 0) + 1));
-          const older = incoming.filter((turn) => {
-            const fingerprint = key(turn);
-            const count = seen.get(fingerprint) || 0;
-            if (!count) return true;
-            seen.set(fingerprint, count - 1);
-            return false;
-          });
-          return { ...current, turns: [...older, ...existing], chatTurns: undefined, session: undefined, hasMore: page.hasMore, nextCursor: page.nextCursor, historyStatus: page.historyStatus };
+          const merged = mergeArchiveTurns(existing, incoming);
+          return { ...current, turns: merged, chatTurns: undefined, session: undefined, hasMore: page.hasMore, nextCursor: page.nextCursor, historyStatus: page.historyStatus };
         });
         setHistoryUnavailable(page.historyStatus === 'unavailable');
       })

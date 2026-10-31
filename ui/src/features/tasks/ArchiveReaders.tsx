@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useMemo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { markdownPlugins, MarkdownImage, MarkdownTable } from '../../app/markdownTables';
 import { generatedArtifactPath, textFromChatValue, type SessionTurn } from '../../app/api';
@@ -125,6 +125,18 @@ function Placeholder({ title, detail }: { title: string; detail: string }) {
   return <section className="archive-empty-state archive-reader-placeholder"><div className="archive-empty-mark" aria-hidden="true">⌁</div><div><h3>{title}</h3><p>{detail}</p></div></section>;
 }
 
+// Stable per-object identity preserves existing DOM and Markdown work on prepend.
+const archiveTurnIds = new WeakMap<SessionTurn, number>();
+let nextArchiveTurnId = 0;
+function archiveTurnId(turn: SessionTurn) {
+  let id = archiveTurnIds.get(turn);
+  if (id === undefined) { id = ++nextArchiveTurnId; archiveTurnIds.set(turn, id); }
+  return id;
+}
+const ArchiveChatTurn = memo(function ArchiveChatTurn({ turn, sessionAgentName, agentNames, operatorName, attachmentAgentId, sessionAgentId }: { turn: SessionTurn; sessionAgentName: string; agentNames: ReadonlyMap<string, string>; operatorName: string; attachmentAgentId?: string; sessionAgentId: string | null }) {
+  const role = ['user', 'operator', 'human'].includes((turn.role || '').toLowerCase()) ? 'operator' : 'agent'; const text = textFromChatValue(turn.content); const artifacts = turn.metadata?.outputArtifacts ?? []; const attachments = turn.metadata?.attachments ?? []; const ownerId = attachmentAgentId || turn.metadata?.fromAgentId || sessionAgentId || ''; return <article className={`archive-turn ${role}`}><div className="archive-turn-meta"><strong>{archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName)}</strong><span>{formatTurnDate(turn.ts)}{turn.metadata?.chatInput ? ` · ${chatInputLabel(turn.metadata.chatInput)}` : ''}</span></div>{text ? <div className="archive-turn-body"><ReactMarkdown remarkPlugins={markdownPlugins} components={{ table: MarkdownTable, img: MarkdownImage }}>{text}</ReactMarkdown></div> : null}{attachments.length || artifacts.length ? <ChatMessage side={role} name={archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName)} avatar="" time={formatTurnDate(turn.ts)} text="" attachments={attachments} outputArtifacts={artifacts} attachmentAgentId={ownerId} /> : null}</article>;
+});
+
 export function ChatArchiveReader({ session, detail, loading, error, earlierLoading, earlierError, historyUnavailable, onLoadEarlier, onRestart, agentNames = new Map(), operatorName = 'Operator', attachmentAgentId }: { session: ArchiveSession | null; detail: ArchiveDetail | null; loading: boolean; error: string; earlierLoading: boolean; earlierError: string; historyUnavailable: boolean; onLoadEarlier: () => void; onRestart: () => void; agentNames?: ReadonlyMap<string, string>; operatorName?: string; attachmentAgentId?: string }) {
   const readerRef = useRef<HTMLDivElement>(null);
   const pendingScroll = useRef<{ height: number; top: number } | null>(null);
@@ -147,9 +159,9 @@ export function ChatArchiveReader({ session, detail, loading, error, earlierLoad
       node.dataset.initialized = activeSession;
     }
   }, [activeSession, detail, loading]);
+  const sessionAgentName = session?.agentName || (session?.agentId ? agentNames.get(session.agentId) : '') || session?.agentId || 'Agent';
+  const copyValue = useMemo(() => turns.map((turn) => archiveTurnText(turn, sessionAgentName, agentNames, operatorName)).filter(Boolean).join('\n\n'), [turns, sessionAgentName, agentNames, operatorName]);
   if (!session) return <Placeholder title="Select a conversation." detail="Choose a chat from the list to read it here." />;
-  const sessionAgentName = session.agentName || (session.agentId ? agentNames.get(session.agentId) : '') || session.agentId || 'Agent';
-  const copyValue = turns.map((turn) => archiveTurnText(turn, sessionAgentName, agentNames, operatorName)).filter(Boolean).join('\n\n');
   const load = () => {
     const node = readerRef.current;
     if (node) pendingScroll.current = { height: node.scrollHeight, top: node.scrollTop };
@@ -166,7 +178,7 @@ export function ChatArchiveReader({ session, detail, loading, error, earlierLoad
           {earlierError ? <div><span>Earlier messages could not be loaded: {earlierError}</span> <button type="button" onClick={load}>Retry</button> <button type="button" onClick={onRestart}>Restart from latest</button></div> : null}
         </div>
         <div className="archive-reader-summary">{session.summary || 'A mysterious little shelf item.'}</div>
-        {turns.length ? turns.map((turn, index) => { const role = ['user', 'operator', 'human'].includes((turn.role || '').toLowerCase()) ? 'operator' : 'agent'; const text = textFromChatValue(turn.content); const artifacts = turn.metadata?.outputArtifacts ?? []; const attachments = turn.metadata?.attachments ?? []; const ownerId = attachmentAgentId || turn.metadata?.fromAgentId || session.agentId || ''; return <article className={`archive-turn ${role}`} key={`${turn.ts || 'turn'}-${index}`}><div className="archive-turn-meta"><strong>{archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName)}</strong><span>{formatTurnDate(turn.ts)}{turn.metadata?.chatInput ? ` · ${chatInputLabel(turn.metadata.chatInput)}` : ''}</span></div>{text ? <div className="archive-turn-body"><ReactMarkdown remarkPlugins={markdownPlugins} components={{ table: MarkdownTable, img: MarkdownImage }}>{text}</ReactMarkdown></div> : null}{attachments.length || artifacts.length ? <ChatMessage side={role} name={archiveTurnSpeaker(turn, sessionAgentName, agentNames, operatorName)} avatar="" time={formatTurnDate(turn.ts)} text="" attachments={attachments} outputArtifacts={artifacts} attachmentAgentId={ownerId} /> : null}</article>; }) : <p className="archive-reader-empty">This conversation has no readable chat turns.</p>}
+        {turns.length ? turns.map((turn) => <ArchiveChatTurn key={archiveTurnId(turn)} turn={turn} sessionAgentName={sessionAgentName} agentNames={agentNames} operatorName={operatorName} attachmentAgentId={attachmentAgentId} sessionAgentId={session.agentId} />) : <p className="archive-reader-empty">This conversation has no readable chat turns.</p>}
       </div> : null}
     </div>
   </>;

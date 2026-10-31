@@ -1,3 +1,4 @@
+import { POSTGRES_ARCHIVE_CHAT_PROJECTION_SQL } from './postgres-archive-chat-projection.mjs';
 import { POSTGRES_ARCHIVE_LEXICAL_SQL } from './postgres-archive-lexical.mjs';
 import { POSTGRES_CHAT_INPUT_SCHEMA_SQL } from './postgres-chat-input-store.mjs';
 import { POSTGRES_EVENT_OPERATOR_PROJECTION_SQL } from './postgres-event-operator-projection.mjs';
@@ -200,4 +201,5 @@ ON CONFLICT(agent_id) DO NOTHING;
 ALTER TABLE mod_external_turns ADD COLUMN attachments JSON NOT NULL DEFAULT '[]'::json;
 ` },
   { version: 81, name: 'archive-lossless-candidate-projection', sql: POSTGRES_ARCHIVE_LEXICAL_SQL },
+  { version: 82, name: 'archive-chat-projection-revisions', sql: POSTGRES_ARCHIVE_CHAT_PROJECTION_SQL },
 ]);

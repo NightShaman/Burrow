@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { redactAndTruncateText, redactText } from './redaction.mjs';
 import { evidenceTranscript } from './session-search.mjs';
+import { readProofTraceJsonl } from './archive-proof-trace-reader.mjs';
 
 async function readJsonl(filePath, options = {}) {
   archiveReadCheckpoint(options);
@@ -414,6 +415,114 @@ export function authorityExplanationFromTraceSummary(traceSummary = {}) {
     executionPolicy: evidence.executionPolicy || {},
     toolActivity: evidence.toolActivity || {},
     explanation: evidence.explanation || 'Receipt authority evidence is present without a textual explanation.',
+  };
+}
+
+// Proof needs only the existence, activity and time bounds of a run, not the
+// public trace report's authority lookup, work-item enumeration, counts or raw
+// payloads. Its receipt and authority remain the supplied run's canonical
+// conversation entries; do not reopen the entire conversation here. Every
+// individual run-local stream is nevertheless scanned completely: the aggregate
+// is not a trusted index of the streams (including for interrupted writers).
+export async function summarizeProofTrace({ rootDir, runId, signal, deadline, onTraceBytes } = {}) {
+  if (!rootDir) throw new Error('rootDir is required');
+  if (!runId) throw new Error('runId is required');
+  if (!validTraceRunId(runId)) throw new Error('trace_run_id_invalid');
+  const options = { signal, deadline };
+  archiveReadCheckpoint(options);
+  const traceRoot = await traceBaseRoot(rootDir, runId, options);
+  const traceDir = await containedTraceDirectory(traceRoot, runId, options);
+  const specs = [
+    ['router.jsonl', 'router'], ['memory.jsonl', 'memory'], ['model.jsonl', 'model'],
+    ['tool-calls.jsonl', 'tool'], ['verifier.jsonl', 'verifier'], ['events.jsonl', 'event'],
+  ];
+  const results = await archiveReadTasks(specs.map(([file, defaultStream]) => async readOptions => {
+    const cards = [];
+    const count = await readProofTraceJsonl(path.join(traceDir, file), record => {
+      // The full reader dereferences every record before timeline projection.
+      // A JSON null is damaged evidence, not an anonymous successful tool.
+      if (record === null) throw new TypeError('trace_record_invalid');
+      // Public summaries read an absent aggregate as an empty stream. For a
+      // present aggregate, filter typed records before object projection, just
+      // as buildTraceTimeline does (including failure on a null record).
+      let projected;
+      if (defaultStream === 'event') {
+        if (['router', 'tool', 'memory', 'model', 'verifier'].includes(record.type)) return;
+        projected = { stream: record.stream || 'event', ...record };
+      } else projected = { stream: defaultStream, ...record };
+      const stream = projected.stream || 'event';
+      const card = { ts: projected.ts || null, stream };
+      if (stream === 'tool') {
+        card.status = cardStatus(projected);
+        card.payload = compactPayload(projected);
+      }
+      cards.push(card);
+    }, { ...readOptions, onBytes: onTraceBytes ? bytes => onTraceBytes(file, bytes) : undefined });
+    return { cards, count };
+  }), options);
+  let artifactCount = 0;
+  try { artifactCount = (await fs.readdir(path.join(traceDir, 'artifacts'))).length; }
+  catch (error) { if (error?.code !== 'ENOENT') throw error; }
+  archiveReadCheckpoint(options);
+  const counts = new Map(specs.map(([file], index) => [file, results[index].count]));
+  let cards = results.flatMap(result => result.cards);
+  // Stable merge sort matches buildTraceTimeline's stable sort, including the
+  // legacy index assigned to anonymous tool records, while allowing owner
+  // cancellation/deadlines to run during CPU-heavy legacy traces.
+  let buffer = new Array(cards.length), comparisons = 0;
+  for (let width = 1; width < cards.length; width *= 2) {
+    for (let start = 0; start < cards.length; start += width * 2) {
+      const middle = Math.min(start + width, cards.length), end = Math.min(start + width * 2, cards.length);
+      let left = start, right = middle;
+      for (let out = start; out < end; out++) {
+        const takeLeft = right >= end || (left < middle && String(cards[left].ts || '').localeCompare(String(cards[right].ts || '')) <= 0);
+        buffer[out] = takeLeft ? cards[left++] : cards[right++];
+        if (++comparisons % 4096 === 0) {
+          await new Promise(resolve => setImmediate(resolve));
+          archiveReadCheckpoint(options);
+        }
+      }
+    }
+    [cards, buffer] = [buffer, cards];
+  }
+  // Maintain the public timeline's anonymous tool indices without copying all
+  // records through an uncancellable tool-activity reducer.
+  const byActivityId = new Map();
+  for (let index = 0; index < cards.length; index++) {
+    const card = cards[index];
+    card.index = index;
+    if (card.stream === 'tool') {
+      const payload = card.payload || {};
+      const activityId = payload.activityId || `legacy-${index}`;
+      const prior = byActivityId.get(activityId);
+      byActivityId.set(activityId, {
+        id: activityId,
+        tool: payload.tool || prior?.tool || null,
+        phase: payload.phase || 'result',
+        status: card.status,
+        startedAt: prior?.startedAt || (payload.phase === 'start' ? card.ts : null),
+        finishedAt: payload.phase === 'result' ? card.ts : prior?.finishedAt || null,
+        payload: { ...(prior?.payload || {}), ...payload },
+      });
+    }
+    if ((index + 1) % 4096 === 0) {
+      await new Promise(resolve => setImmediate(resolve));
+      archiveReadCheckpoint(options);
+    }
+  }
+  const toolActivity = [];
+  for (const item of byActivityId.values()) {
+    toolActivity.push({ ...item, status: item.phase === 'start' ? 'running' : item.status });
+    if (toolActivity.length % 4096 === 0) {
+      await new Promise(resolve => setImmediate(resolve));
+      archiveReadCheckpoint(options);
+    }
+  }
+  archiveReadCheckpoint(options);
+  return {
+    exists: Boolean(counts.get('events.jsonl') || counts.get('router.jsonl') || counts.get('tool-calls.jsonl') || artifactCount),
+    timeline: cards,
+    toolActivity,
   };
 }
 

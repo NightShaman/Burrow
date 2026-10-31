@@ -1,10 +1,11 @@
+import { POSTGRES_ARCHIVE_CHAT_PROJECTION_SQL } from './postgres-archive-chat-projection.mjs';
 import { archiveReadQuery, withArchiveRead } from './postgres-archive-read.mjs';
 import { projectPendingActions } from './session-entry.mjs';
 import { fenceChatInputsForReset } from './postgres-chat-input-store.mjs';
 import { matchCompactionOccurrences, COMPACTION_COPY_BATCH_SIZE } from './postgres-compaction.mjs';
 import { POSTGRES_COMPACTION_PROJECTIONS_SQL } from './postgres-compaction-projections.mjs';
 import { readArchiveTranscriptPage } from './postgres-archive-page.mjs';
-import { POSTGRES_ARCHIVE_LEXICAL_SQL, archiveOccurrenceTokenSQL, archivePayloadKeySQL, archiveTruthyPayloadSQL, archiveVisibleMessageSQL } from './postgres-archive-lexical.mjs';
+import { POSTGRES_ARCHIVE_LEXICAL_SQL, archivePayloadKeySQL, archiveTruthyPayloadSQL } from './postgres-archive-lexical.mjs';
 import { POSTGRES_OPERATOR_INSTANT_SQL } from './postgres-operator-instant.mjs';
 import { exportSessionRawEvidence } from './session-evidence-export.mjs';
 import { POSTGRES_LOGICAL_MEMBER_SQL, POSTGRES_ARCHIVE_RELATIONAL_ID_SQL, POSTGRES_CATALOG_SCALAR_ID_SQL, POSTGRES_LOGICAL_LOOKUP_INDEX_SQL } from './postgres-lexical-identity.mjs';
@@ -653,7 +654,7 @@ UPDATE conversation_entries SET has_payload_id=NULL;
 UPDATE conversation_archive_entries SET has_payload_id=NULL;
 `;
 
-export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL + POSTGRES_RESET_INSTANT_SQL + POSTGRES_HISTORY_KEYSET_SQL + POSTGRES_LOGICAL_MEMBER_SQL + POSTGRES_ARCHIVE_RELATIONAL_ID_SQL + POSTGRES_CATALOG_SCALAR_ID_SQL + POSTGRES_LOGICAL_LOOKUP_INDEX_SQL + POSTGRES_AGENT_DELIVERY_SCHEMA_SQL + POSTGRES_AGENT_DELIVERY_OWNER_SQL + POSTGRES_OPERATOR_INSTANT_SQL + POSTGRES_ARCHIVE_LISTING_INDEX_SQL + POSTGRES_COMPACTION_PROJECTIONS_SQL + POSTGRES_ARCHIVE_LEXICAL_SQL;
+export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL + POSTGRES_RESET_INSTANT_SQL + POSTGRES_HISTORY_KEYSET_SQL + POSTGRES_LOGICAL_MEMBER_SQL + POSTGRES_ARCHIVE_RELATIONAL_ID_SQL + POSTGRES_CATALOG_SCALAR_ID_SQL + POSTGRES_LOGICAL_LOOKUP_INDEX_SQL + POSTGRES_AGENT_DELIVERY_SCHEMA_SQL + POSTGRES_AGENT_DELIVERY_OWNER_SQL + POSTGRES_OPERATOR_INSTANT_SQL + POSTGRES_ARCHIVE_LISTING_INDEX_SQL + POSTGRES_COMPACTION_PROJECTIONS_SQL + POSTGRES_ARCHIVE_LEXICAL_SQL + POSTGRES_ARCHIVE_CHAT_PROJECTION_SQL;
 
 const text = (value) => String(value ?? '');
 const required = (value, name) => { const result = text(value).trim(); if (!result) throw new Error(`${name} is required`); return result; };
@@ -666,6 +667,12 @@ function sessionReadQuery(pool, sql, values, { signal, deadline } = {}) {
   if (deadline !== undefined) return archiveReadQuery(pool, sql, values, { signal, deadline });
   return signal ? withPostgresTransaction(pool, client => client.query(sql, values), { signal }) : pool.query(sql, values);
 }
+
+// Reset listing counts are advisory metadata unless tied to the exact source
+// revisions used by that listing statement. Keep the bounded cache per pool;
+// new processes reconstruct on first use, and SQL edits cannot leave it stale.
+const resetListingCountsByPool = new WeakMap();
+const RESET_LISTING_COUNT_CACHE_LIMIT = 512;
 
 const cursorValue = (value, name = 'after') => {
   if (value === undefined || value === null || value === '') return 0n;
@@ -713,21 +720,48 @@ function archiveRowsSQL({ occurrences = true } = {}) {
   )`;
 }
 
-function archiveOccurrenceDaysSQL({ native, start, end, timezone }) {
-  const token = archiveOccurrenceTokenSQL('e');
-  const branch = (live, fallback = false) => {
-    // Project exactly once after the indexed date cut. The two cold paths
-    // (session-only schemas and unprojected NULL dates) parse that same
-    // projection, never rescanning the retained body to find each clock field.
+function archiveOccurrenceDaysSQL({ start, end, timezone }) {
+  const branch = live => `SELECT e.agent_id,e.session_id,'${live ? 'live' : 'archive'}'::text AS source_store,
+      ${live ? 'e.sequence::text' : 'e.source_id'} AS source_id,${live ? 'e.sequence' : 'e.ordinal'} AS ordinal,
+      e.entry_key,e.has_payload_id,e.entry_id,CASE WHEN e.has_payload_id IS NULL THEN e.entry END AS entry,
+      ${live ? 'NULL::bigint' : 'e.generation'} AS generation,${live ? 'NULL::text' : 'e.archive_kind'} AS archive_kind,
+      e.archive_chat_at AS occurrence_at
+      FROM ${live ? 'conversation_entries' : 'conversation_archive_entries'} e
+      WHERE e.agent_id=$1 AND e.archive_chat_projected AND e.archive_chat_visible
+        AND e.archive_chat_at>=${start}::timestamptz AND e.archive_chat_at<${end}::timestamptz`;
+  const grandfathered = live => `SELECT e.agent_id,e.session_id,'${live ? 'live' : 'archive'}'::text AS source_store,
+      ${live ? 'e.sequence::text' : 'e.source_id'} AS source_id,${live ? 'e.sequence' : 'e.ordinal'} AS ordinal,
+      e.entry_key,e.has_payload_id,e.entry_id,CASE WHEN e.has_payload_id IS NULL THEN e.entry END AS entry,
+      ${live ? 'NULL::bigint' : 'e.generation'} AS generation,${live ? 'NULL::text' : 'e.archive_kind'} AS archive_kind,
+      g.instant AS occurrence_at
+      FROM ${live ? 'conversation_live_chat_grandfathered' : 'conversation_archive_chat_grandfathered'} g
+      JOIN ${live ? 'conversation_entries' : 'conversation_archive_entries'} e ON e.agent_id=g.agent_id AND e.session_id=g.session_id
+        AND ${live ? 'e.sequence=g.sequence' : 'e.source_store=g.source_store AND e.source_id=g.source_id AND e.ordinal=g.ordinal'}
+      WHERE g.agent_id=$1 AND NOT e.archive_chat_projected AND g.visible
+        AND g.instant>=${start}::timestamptz AND g.instant<${end}::timestamptz`;
+  // Only the not-yet-checkpointed portion needs a lexical parse. Completed
+  // side projections (including invisible/undated ones) are excluded by key.
+  // The state, original and side table are all read under one MVCC snapshot.
+  const pending = live => {
+    const table = live ? 'conversation_entries' : 'conversation_archive_entries';
+    const side = live ? 'conversation_live_chat_grandfathered' : 'conversation_archive_chat_grandfathered';
+    const keys = live ? ['agent_id','session_id','sequence'] : ['agent_id','session_id','source_store','source_id','ordinal'];
+    const checkpoint = live ? ['live_agent','live_session','live_sequence'] : ['archive_agent','archive_session','archive_store','archive_source','archive_ordinal'];
     return `SELECT e.agent_id,e.session_id,'${live ? 'live' : 'archive'}'::text AS source_store,
       ${live ? 'e.sequence::text' : 'e.source_id'} AS source_id,${live ? 'e.sequence' : 'e.ordinal'} AS ordinal,
-      burrow_archive_fields(e.entry) AS fields,e.entry_key,e.has_payload_id,e.search_projection,e.entry_id,
+      e.entry_key,e.has_payload_id,e.entry_id,CASE WHEN e.has_payload_id IS NULL THEN e.entry END AS entry,
       ${live ? 'NULL::bigint' : 'e.generation'} AS generation,${live ? 'NULL::text' : 'e.archive_kind'} AS archive_kind,
-      ${native && !fallback ? 'e.dream_at' : 'NULL::timestamptz'} AS occurrence_at,
-      ${!native || fallback} AS needs_instant
-      FROM ${live ? 'conversation_entries' : 'conversation_archive_entries'} e
-      WHERE e.agent_id=$1 ${fallback ? 'AND e.dream_at IS NULL' : ''}
-        ${native && !fallback ? `AND e.dream_at>=${start}::timestamptz AND e.dream_at<${end}::timestamptz` : ''}`;
+      p.instant AS occurrence_at
+      FROM (SELECT e.* FROM (SELECT * FROM burrow_archive_chat_backfill state
+          WHERE state.id AND NOT state.${live ? 'live_done' : 'archive_done'} OFFSET 0) state
+        CROSS JOIN LATERAL (SELECT * FROM ${table} e WHERE e.agent_id=$1 AND NOT e.archive_chat_projected
+          AND (e.agent_id>state.${checkpoint[0]} OR (e.agent_id=state.${checkpoint[0]}
+            AND (${keys.slice(1).map(key => `e.${key}`).join(',')})>(${checkpoint.slice(1).map(key => `state.${key}`).join(',')}))
+            OR (state.${checkpoint[0]} IS NULL AND (e.agent_id,e.session_id)>=($1,'')))
+          AND NOT EXISTS (SELECT 1 FROM ${side} g WHERE ${keys.map(key => `g.${key}=e.${key}`).join(' AND ')}) OFFSET 0) e OFFSET 0) e
+      CROSS JOIN LATERAL burrow_archive_chat_projection(e.entry,
+        COALESCE(e.search_projection,burrow_json_member(e.entry,'content')::text,'')) p
+      WHERE p.visible AND p.instant>=${start}::timestamptz AND p.instant<${end}::timestamptz`;
   };
   // Separate indexed probes keep ordinary string-ID candidates on the logical
   // identity index. Only non-string/falsey identity cases need scalar coercion;
@@ -735,8 +769,12 @@ function archiveOccurrenceDaysSQL({ native, start, end, timezone }) {
   const identities = [
     `c.payload_key IS NOT NULL AND c.payload_key<>'' AND n.has_payload_id
       AND burrow_history_key(n.entry_key)=c.payload_key`,
-    `c.payload_key IS NOT NULL AND n.has_payload_id IS DISTINCT FROM false
+    `c.payload_key IS NOT NULL AND n.has_payload_id = true
       AND burrow_history_key(n.entry_key) IS NULL AND ${archivePayloadKeySQL('n')}=c.payload_key`,
+    // A v81-grandfathered NULL marker can have a non-null relational entry_key
+    // that is NOT the payload ID. Always parse that cold branch independently.
+    `c.payload_key IS NOT NULL AND n.has_payload_id IS NULL
+      AND ${archivePayloadKeySQL('n')}=c.payload_key`,
     `c.payload_key IS NULL AND NULLIF(c.entry_id,'') IS NOT NULL
       AND n.entry_id<>'' AND n.entry_id=c.entry_id AND NOT ${archiveTruthyPayloadSQL('n')}`,
   ];
@@ -755,14 +793,11 @@ function archiveOccurrenceDaysSQL({ native, start, end, timezone }) {
           OR ((NOT d.archive_snapshot OR c.source_id<>d.id)
             AND (n.generation>c.generation OR (n.generation=c.generation AND n.source_id>c.source_id)))) OFFSET 0)`,
   ]);
-  return `occurrence_windows AS MATERIALIZED (${[branch(true), branch(false), ...(native ? [branch(true, true), branch(false, true)] : [])].map(sql => `(${sql})`).join(' UNION ALL ')}),
+  return `occurrence_windows AS MATERIALIZED (${[branch(true), branch(false), grandfathered(true), grandfathered(false), pending(true), pending(false)].map(sql => `(${sql})`).join(' UNION ALL ')}),
     occurrence_candidates AS MATERIALIZED (
       SELECT e.agent_id,e.session_id,e.source_store,e.source_id,e.ordinal,e.entry_id,e.generation,e.archive_kind,
-        to_char(clock.instant AT TIME ZONE ${timezone},'YYYY-MM-DD') AS day,
-        ${archivePayloadKeySQL('e', { projected: true })} AS payload_key FROM occurrence_windows e
-      CROSS JOIN LATERAL (SELECT CASE WHEN e.needs_instant THEN burrow_archive_instant((${token})::json)
-        ELSE e.occurrence_at END AS instant OFFSET 0) clock
-      WHERE clock.instant>=${start}::timestamptz AND clock.instant<${end}::timestamptz AND ${token} IS NOT NULL AND ${archiveVisibleMessageSQL('e')}),
+        to_char(e.occurrence_at AT TIME ZONE ${timezone},'YYYY-MM-DD') AS day,
+        ${archivePayloadKeySQL('e')} AS payload_key FROM occurrence_windows e),
     matched_days AS (
       SELECT DISTINCT d.agent_id,d.id,c.day FROM occurrence_candidates c
       JOIN archive_rows d ON d.agent_id=c.agent_id AND d.session_id=c.session_id
@@ -2044,10 +2079,13 @@ export class PostgresSessionStore {
     if (windowStart) windowStart.setUTCDate(windowStart.getUTCDate() - 1);
     if (windowEnd) date ? windowEnd.setUTCDate(windowEnd.getUTCDate() + 2) : windowEnd.setUTCMonth(windowEnd.getUTCMonth() + 1, 2);
     return withArchiveRead(this.pool, async client => {
-    const native = await this.hasArchiveDateProjection(client);
+    await this.hasArchiveDateProjection(client);
     const sortTime = this.archiveNativeCatalogTime ? 'updated_at' : 'burrow_legacy_instant(updated_at::text)';
-    const days = windowKey ? archiveOccurrenceDaysSQL({ native, start: '$10', end: '$11', timezone: '$6' }) : null;
-    const { rows } = await client.query( `WITH ${archiveRowsSQL({ occurrences: Boolean(days) })}${days ? `, ${days}` : ''}, bounded AS (
+    const days = windowKey ? archiveOccurrenceDaysSQL({ start: '$10', end: '$11', timezone: '$6' }) : null;
+    let countCache = resetListingCountsByPool.get(this.pool);
+    if (!countCache) { countCache = new Map(); resetListingCountsByPool.set(this.pool, countCache); }
+    const cacheArg = days ? '$12' : '$10';
+    const { rows } = await client.query( `WITH ${archiveRowsSQL()}${days ? `, ${days}` : ''}, bounded AS (
       SELECT *,agent_id || ':' || id AS identity,
         COALESCE(to_char(${sortTime} AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),'') AS sort_timestamp FROM archive_rows
       WHERE ($3::text='' OR lower(concat_ws(' ',id,session_id,source_session_id,metadata->>'archiveTitle',metadata->>'title',metadata->>'name',metadata->>'summary',metadata->>'archiveSummary')) LIKE '%' || $3 || '%')
@@ -2060,60 +2098,68 @@ export class PostgresSessionStore {
         OR ($7::text='' AND ${sortTime} IS NULL AND (agent_id || ':' || id) COLLATE "C"<$8::text COLLATE "C")
         OR ($7::text<>'' AND (${sortTime} IS NULL OR (${sortTime},(agent_id || ':' || id) COLLATE "C")<(NULLIF($7::text,'')::timestamptz,$8::text COLLATE "C"))))
       ORDER BY ${sortTime} DESC NULLS LAST,(agent_id || ':' || id) COLLATE "C" DESC LIMIT $9
+    ), reset_versions AS MATERIALIZED (
+      -- Include the exact effective window and each contributing source version.
+      -- The epoch handles TRUNCATE; changing a prior reset changes min_generation.
+      SELECT b.agent_id,b.session_id,b.id,
+        jsonb_build_array(b.agent_id,b.session_id,b.id,b.min_generation,b.max_generation,
+          (SELECT revision FROM conversation_archive_revision_epoch WHERE singleton),
+          (SELECT revision FROM conversation_archive_revisions r WHERE r.agent_id=b.agent_id
+            AND r.session_id=b.session_id AND r.scope='source' AND r.source_id=b.id),
+          (SELECT COALESCE(jsonb_agg(jsonb_build_array(a.archive_id,a.generation,r.revision)
+                ORDER BY a.generation,a.archive_id),'[]'::jsonb)
+           FROM conversation_archives a LEFT JOIN conversation_archive_revisions r
+             ON r.agent_id=a.agent_id AND r.session_id=a.session_id AND r.scope='source' AND r.source_id=a.archive_id
+           WHERE a.agent_id=b.agent_id AND a.session_id=b.session_id AND a.kind='compacted'
+             AND a.generation>=b.min_generation AND a.generation<=b.max_generation))::text AS cache_key
+      FROM bounded b WHERE b.archive_snapshot
+    ), cached_counts AS MATERIALIZED (
+      SELECT v.*,cache.turn_count FROM reset_versions v
+      LEFT JOIN jsonb_to_recordset(${cacheArg}::jsonb) AS cache(cache_key text,turn_count bigint)
+        ON cache.cache_key=v.cache_key
     ), missing AS MATERIALIZED (
-      SELECT * FROM bounded WHERE archive_snapshot
-        AND NOT COALESCE(metadata->>'archiveTranscriptTurnCount' ~ '^[0-9]+$',false)
+      SELECT b.*,v.cache_key FROM bounded b JOIN cached_counts v USING(agent_id,session_id,id)
+      WHERE v.turn_count IS NULL
     ), counts AS MATERIALIZED (
       SELECT missing.agent_id,missing.session_id,missing.id,
-        (SELECT count(*) FROM (
-        SELECT DISTINCT COALESCE(
-          'payload:' || ${archivePayloadKeySQL('e')},
-          'occurrence:' || NULLIF(e.entry_id,''),
-          'row:' || e.source_id || ':' || e.ordinal::text) AS identity
-        FROM conversation_archives target JOIN conversation_archives a
-          ON a.agent_id=target.agent_id AND a.session_id=target.session_id
-        JOIN conversation_archive_entries e ON e.agent_id=a.agent_id
-          AND e.session_id=a.session_id AND e.source_id=a.archive_id
-        WHERE target.agent_id=missing.agent_id AND target.session_id=missing.session_id AND target.archive_id=missing.id
-          AND (a.archive_id=target.archive_id OR (a.kind='compacted' AND a.generation<=target.generation
-            AND a.generation>=COALESCE((target.metadata->>'resetGeneration')::bigint,
-              (SELECT max(r.generation)+1 FROM conversation_archives r
-                WHERE r.agent_id=target.agent_id AND r.session_id=target.session_id
-                  AND r.kind='reset' AND r.generation<target.generation),0)))
+        (SELECT count(DISTINCT identity COLLATE "C") FROM (
+        SELECT COALESCE(
+          'p:' || ${archivePayloadKeySQL('e')},
+          'o:' || NULLIF(e.entry_id,''),
+          'r:' || json_build_array('archive',e.source_store,e.source_id,e.ordinal::text)::text) AS identity
+        FROM conversation_archives a JOIN conversation_archive_entries e
+          ON e.agent_id=a.agent_id AND e.session_id=a.session_id AND e.source_id=a.archive_id
+        WHERE a.agent_id=missing.agent_id AND a.session_id=missing.session_id
+          AND ((a.archive_id=missing.id AND a.kind='reset') OR
+            (a.kind='compacted' AND a.generation>=missing.min_generation AND a.generation<=missing.max_generation))
       ) occurrences) AS turn_count FROM missing
-    ), cached AS (
-      UPDATE conversation_archives target SET metadata=jsonb_set(target.metadata,
-        '{archiveTranscriptTurnCount}',to_jsonb(counts.turn_count),true)
-      FROM counts JOIN missing ON missing.agent_id=counts.agent_id AND missing.session_id=counts.session_id AND missing.id=counts.id
-      WHERE target.agent_id=counts.agent_id AND target.session_id=counts.session_id
-        AND target.archive_id=counts.id AND target.kind='reset'
-        AND target.metadata->'resetGeneration' IS NOT DISTINCT FROM missing.metadata->'resetGeneration'
-        AND NOT COALESCE(target.metadata->>'archiveTranscriptTurnCount' ~ '^[0-9]+$',false)
-      RETURNING target.agent_id,target.session_id,target.archive_id,target.metadata
     ) SELECT bounded.agent_id,bounded.session_id,bounded.id,bounded.source_session_id,
       bounded.archive_snapshot,bounded.created_at,bounded.updated_at,bounded.identity,bounded.sort_timestamp,
-      CASE WHEN archive_snapshot THEN COALESCE(
-        CASE WHEN cached.metadata->>'archiveTranscriptTurnCount' ~ '^[0-9]+$' THEN (cached.metadata->>'archiveTranscriptTurnCount')::bigint END,
-        CASE WHEN bounded.metadata->>'archiveTranscriptTurnCount' ~ '^[0-9]+$' THEN (bounded.metadata->>'archiveTranscriptTurnCount')::bigint END,
-        counts.turn_count)
+      cached_counts.cache_key,
+      CASE WHEN archive_snapshot THEN COALESCE(cached_counts.turn_count,counts.turn_count)
       WHEN bounded.metadata->>'turnCount' ~ '^[0-9]+$' THEN (bounded.metadata->>'turnCount')::bigint ELSE 0 END AS turn_count,
-      (COALESCE(cached.metadata,bounded.metadata) - 'runEvidence') AS projected_metadata
+      (bounded.metadata - 'runEvidence') AS projected_metadata
       FROM bounded LEFT JOIN counts ON counts.agent_id=bounded.agent_id AND counts.session_id=bounded.session_id AND counts.id=bounded.id
-        LEFT JOIN cached ON cached.agent_id=bounded.agent_id AND cached.session_id=bounded.session_id AND cached.archive_id=bounded.id
+        LEFT JOIN cached_counts ON cached_counts.agent_id=bounded.agent_id AND cached_counts.session_id=bounded.session_id AND cached_counts.id=bounded.id
       ORDER BY ${sortTime} DESC NULLS LAST,identity COLLATE "C" DESC`,
-    [agentId, Boolean(includeArchived), search, date, month, timezone, boundary?.t ?? null, boundary?.i ?? null, size + 1, windowStart?.toISOString() || null, windowEnd?.toISOString() || null].slice(0, days ? 11 : 9));
+    [...[agentId, Boolean(includeArchived), search, date, month, timezone, boundary?.t ?? null, boundary?.i ?? null, size + 1, windowStart?.toISOString() || null, windowEnd?.toISOString() || null].slice(0, days ? 11 : 9),
+      JSON.stringify([...countCache].map(([cache_key, turn_count]) => ({ cache_key, turn_count })))]);
+    for (const row of rows) if (row.archive_snapshot && row.cache_key && row.turn_count != null && !countCache.has(row.cache_key)) {
+      if (countCache.size >= RESET_LISTING_COUNT_CACHE_LIMIT) countCache.delete(countCache.keys().next().value);
+      countCache.set(row.cache_key, Number(row.turn_count));
+    }
     const hasMore = rows.length > size;
     return { rows: (hasMore ? rows.slice(0, size) : rows).map(row => ({
       id: row.id, sessionId: row.id, sourceSessionId: row.source_session_id,
       archiveSnapshot: row.archive_snapshot ? 'reset' : null, metadata: row.archive_snapshot
-        ? { ...row.projected_metadata, archivedAt: row.created_at, chatTurnCount: null } : row.projected_metadata,
+        ? { ...row.projected_metadata, archiveTranscriptTurnCount: Number(row.turn_count), archivedAt: row.created_at, chatTurnCount: null } : row.projected_metadata,
       ...(date ? { matchedDate: String(date) } : {}),
       turnCount: Number(row.turn_count), createdAt: row.created_at, updatedAt: row.updated_at,
       // Exact UTC microseconds survive pg/JS Date's millisecond normalization.
       // Empty sorts strictly after known clocks and is a real cursor position.
       sortTimestamp: row.sort_timestamp, identity: row.identity,
     })), hasMore };
-    }, { signal, deadline, readOnly: false });
+    }, { signal, deadline });
   }
 
   async listArchiveCalendarDates({ agentId: rawAgentId, month, timezone = 'UTC', signal, deadline } = {}) {
@@ -2122,7 +2168,7 @@ export class PostgresSessionStore {
     const safeStart = new Date(monthStart); safeStart.setUTCDate(safeStart.getUTCDate() - 1);
     const safeEnd = new Date(monthStart); safeEnd.setUTCMonth(safeEnd.getUTCMonth() + 1, 2);
     return withArchiveRead(this.pool, async client => {
-    const days = archiveOccurrenceDaysSQL({ native: await this.hasArchiveDateProjection(client), start: '$4', end: '$5', timezone: '$3' });
+    const days = archiveOccurrenceDaysSQL({ start: '$4', end: '$5', timezone: '$3' });
     const { rows } = await client.query( `WITH ${archiveRowsSQL()}, ${days}
       SELECT DISTINCT day FROM (
         SELECT to_char(burrow_legacy_instant(updated_at::text) AT TIME ZONE $3,'YYYY-MM-DD') AS day

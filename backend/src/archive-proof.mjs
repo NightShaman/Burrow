@@ -3,7 +3,7 @@ import { isInternalContextSession } from './model-context-boundary.mjs';
 import { evidenceTranscript } from './session-search.mjs';
 import { readRunEvidence } from './run-evidence.mjs';
 import { listSubagentRecords, subagentVisibilitySummary } from './subagent-store.mjs';
-import { summarizeTrace } from './trace-summary.mjs';
+import { summarizeProofTrace } from './trace-summary.mjs';
 import { redactAndTruncateText } from './redaction.mjs';
 
 const MAX_RUNS = 200;
@@ -420,7 +420,10 @@ async function proofDetail({ conversationStore, agentId, agentName, sessionId, r
   const executionEntries = executionEntriesFor(entries);
   const options = { signal, deadline };
   archiveReadCheckpoint(options);
-  const trace = traceRoot ? await summarizeTrace({ conversationStore, agentId, rootDir: traceRoot, runId, includeToolOutput: false, includeRelatedWorkTrace: false, ...options }) : null;
+  // The exact run's entries above already carry receipt truth. Proof consumes
+  // only trace times and tool activity, so do not export session/reset history
+  // a second time or enumerate unrelated work items to build a public report.
+  const trace = traceRoot ? await summarizeProofTrace({ rootDir: traceRoot, runId, ...options }) : null;
   archiveReadCheckpoint(options);
   const bounds = runBounds(entries, trace?.exists ? trace : null);
   const status = statusFor({ receipt, evidence, answer });

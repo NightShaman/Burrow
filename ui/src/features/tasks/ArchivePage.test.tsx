@@ -378,3 +378,31 @@ describe('Archive page-owned pending reads', () => {
     expect(screen.queryByText('Loaded newest message')).toBeNull();
   });
 });
+
+it('filters prefetched badges locally without unrelated IO and coalesces rapid dream search', async () => {
+  const dreams = vi.spyOn(archiveRepository, 'listDreams').mockResolvedValue(collectionPage([]));
+  const cards = vi.spyOn(archiveRepository, 'listContinuityCards').mockResolvedValue(collectionPage([card('one', 'Magenta'), card('two', 'Teal')]));
+  vi.spyOn(archiveRepository, 'listSessions').mockResolvedValue(collectionPage([]));
+  vi.spyOn(archiveRepository, 'listCalendarAvailability').mockImplementation(async (kind, month) => ({ ok: true, kind, month, dates: [] }));
+  const tasksSignal: AbortSignal[] = [];
+  const request = vi.fn(async (url: string, options?: RequestInit) => {
+    if (url.includes('task-board')) tasksSignal.push(options?.signal as AbortSignal);
+    return new Response(JSON.stringify(url.includes('projects') ? { projects: [] } : url.includes('task-board') ? { tasks: [] } : { archives: [] }), { headers: { 'content-type': 'application/json' } });
+  });
+  vi.stubGlobal('fetch', request);
+  const view = render(<Archive repository={archiveRepository} agents={[]} />);
+  await screen.findByRole('button', { name: /Tiddle\s*2/ });
+  await waitFor(() => expect(dreams).toHaveBeenCalledTimes(1));
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Ma' } });
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Magenta' } });
+  await screen.findByRole('button', { name: /Tiddle\s*1/ });
+  await waitFor(() => expect(dreams).toHaveBeenCalledTimes(2));
+  expect(dreams.mock.calls.at(-1)?.[4]).toBe('Magenta');
+  expect(dreams.mock.calls[0][0]?.aborted).toBe(true);
+  expect(cards).toHaveBeenCalledTimes(1);
+  expect(tasksSignal).toHaveLength(2);
+  view.unmount();
+  expect(cards.mock.calls[0][1]?.aborted).toBe(true);
+  expect(tasksSignal.every(signal => signal.aborted)).toBe(true);
+  expect(dreams.mock.calls.at(-1)?.[0]?.aborted).toBe(true);
+});
