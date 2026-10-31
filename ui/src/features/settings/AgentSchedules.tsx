@@ -6,99 +6,233 @@ import { api, jsonMutation } from '../../app/api';
 import type { SavedProvider } from '../../app/types';
 import { useConfirm } from '../../app/ConfirmDialog';
 import { Field, SettingSection } from './SettingsPrimitives';
+import {
+  operatorDateTimeInput, scheduleDraft, schedulePayload, scheduleRunLabel, scheduleTime, taskEligibility,
+  type JobModel, type ScheduleDraft, type ScheduledJob, type ScheduleProject, type ScheduleRun, type ScheduleTask,
+} from './schedules';
 
-type JobModel = { modelConnectionId?: string | null; model?: string | null };
-type ScheduledJob = { id: string; ownerModId?: string | null; agentId: string; name: string; prompt: string; cron: string; timezone: string | null; effectiveTimezone?: string; sessionId?: string; enabled: boolean; nextRunAt?: string | null; lastRunAt?: string | null } & JobModel;
-type ModelOption = { value: string; label: string };
-
+type OpenChat = (sessionId: string, agentId: string) => void;
 function modelValue(connectionId: string, model: string) { return JSON.stringify([connectionId, model]); }
 function selectedModelValue(model: JobModel) { return model.modelConnectionId && model.model ? modelValue(model.modelConnectionId, model.model) : ''; }
 function unavailableModelLabel(model: JobModel) {
   return model.modelConnectionId && model.model ? `Unavailable override · ${model.modelConnectionId} · ${model.model}` : '';
 }
 
-export function AgentSchedules({ agentId, savedProviders, overflowTarget }: { agentId: string; savedProviders: SavedProvider[]; overflowTarget?: HTMLElement | null }) {
+export function AgentSchedules({ agentId, savedProviders, overflowTarget, onOpenChat }: { agentId: string; savedProviders: SavedProvider[]; overflowTarget?: HTMLElement | null; onOpenChat?: OpenChat }) {
   const resourceId = agentId.includes('::') ? agentId.slice(agentId.indexOf('::') + 2) : agentId;
-  const request = <T,>(path: string, init?: RequestInit) => api<T>(path, init);
   const confirm = useConfirm();
   const navigate = useUnsavedNavigation();
-  const modelOptions: ModelOption[] = savedProviders.flatMap((provider) => provider.models.map((model) => ({ value: modelValue(provider.id, model), label: `${provider.provider} · ${provider.modelLabels?.[model] ?? model}` })));
+  const modelOptions = savedProviders.flatMap(provider => provider.models.map(model => ({ value: modelValue(provider.id, model), label: `${provider.provider} · ${provider.modelLabels?.[model] ?? model}` })));
   const [jobs, setJobs] = useState<ScheduledJob[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingManagedId, setViewingManagedId] = useState<string | null>(null);
-  const [name, setName] = useState(''); const [prompt, setPrompt] = useState(''); const [cron, setCron] = useState('0 9 * * *'); const [enabled, setEnabled] = useState(true);
-  const [jobModel, setJobModel] = useState<JobModel>({ modelConnectionId: null, model: null });
-  const [state, setState] = useState<'loading' | 'idle' | 'saving'>('loading'); const [error, setError] = useState('');
-  const [triggeringId, setTriggeringId] = useState<string | null>(null); const [notice, setNotice] = useState('');
+  const [draft, setDraft] = useState(scheduleDraft);
+  const [state, setState] = useState<'loading' | 'idle' | 'saving'>('loading');
+  const [jobsLoaded, setJobsLoaded] = useState(false);
+  const [error, setError] = useState('');
+  const [triggeringId, setTriggeringId] = useState<string | null>(null);
+  const [notice, setNotice] = useState('');
   const requestVersion = useRef(0);
   const committed = useRef(false);
+  const saving = useRef(false);
+  const boardVersion = useRef(0);
+  const jobsVersion = useRef(0);
   const [operatorTimezone, setOperatorTimezone] = useState('');
+  const [timezoneError, setTimezoneError] = useState('');
+  const [tasks, setTasks] = useState<ScheduleTask[]>([]);
+  const [projects, setProjects] = useState<ScheduleProject[]>([]);
+  const [boardState, setBoardState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [boardError, setBoardError] = useState('');
   const nameInput = useRef<HTMLInputElement>(null);
+  const change = (patch: Partial<ScheduleDraft>) => setDraft(current => ({ ...current, ...patch }));
+
   const load = async (signal: AbortSignal | undefined, version: number): Promise<boolean> => {
+    const jobsRequest = ++jobsVersion.current;
     try {
-      const result = await request<{ jobs: ScheduledJob[] }>(`/api/scheduled-jobs?agentId=${encodeURIComponent(resourceId)}`, { signal });
-      if (!signal?.aborted && version === requestVersion.current) { setJobs(result.jobs ?? []); return true; }
-      return false;
+      const result = await api<{ jobs: ScheduledJob[] }>(`/api/scheduled-jobs?agentId=${encodeURIComponent(resourceId)}`, { signal });
+      if (!signal?.aborted && version === requestVersion.current && jobsRequest === jobsVersion.current) { setJobs(result.jobs ?? []); setJobsLoaded(true); return true; }
     } catch (cause) {
-      if (!signal?.aborted && version === requestVersion.current) setError(cause instanceof Error ? `Could not load schedules: ${cause.message}` : 'Could not load schedules.');
-      return false;
-    } finally { if (!signal?.aborted && version === requestVersion.current) setState('idle'); }
+      if (!signal?.aborted && version === requestVersion.current && jobsRequest === jobsVersion.current) { setJobsLoaded(false); setError(cause instanceof Error ? `Could not load schedules: ${cause.message}` : 'Could not load schedules.'); }
+    }
+    return false;
+  };
+  const loadTimezone = async (signal: AbortSignal | undefined, version: number) => {
+    setTimezoneError('');
+    try {
+      const result = await api<{ timezone: string }>('/api/settings/timezone', { signal });
+      if (!result.timezone) throw new Error('Timezone unavailable');
+      new Intl.DateTimeFormat(undefined, { timeZone: result.timezone }).format();
+      if (!signal?.aborted && version === requestVersion.current) setOperatorTimezone(result.timezone);
+    } catch {
+      if (!signal?.aborted && version === requestVersion.current) setTimezoneError('Could not load operator timezone.');
+    }
+  };
+  const loadBoard = async (signal: AbortSignal | undefined, version: number) => {
+    const boardRequest = ++boardVersion.current;
+    setBoardState('loading'); setBoardError('');
+    try {
+      // Read saved records, not a copy of their descriptions. Fetch all statuses
+      // so a previously selected Done/reassigned/archived task stays identifiable.
+      const [taskResult, projectResult] = await Promise.all([
+        api<{ tasks: ScheduleTask[] }>('/api/task-board/tasks', { signal }),
+        api<{ projects: ScheduleProject[] }>('/api/task-board/projects', { signal }),
+      ]);
+      if (!Array.isArray(taskResult.tasks) || !Array.isArray(projectResult.projects)) throw new Error('Invalid task board response');
+      if (!signal?.aborted && version === requestVersion.current && boardRequest === boardVersion.current) { setTasks(taskResult.tasks); setProjects(projectResult.projects); setBoardState('ready'); }
+    } catch (cause) {
+      if (!signal?.aborted && version === requestVersion.current && boardRequest === boardVersion.current) { setBoardState('error'); setBoardError(`Could not load task board: ${(cause as Error).message}`); }
+    }
   };
   useEffect(() => {
     const version = ++requestVersion.current;
     const controller = new AbortController();
-    committed.current = false; setJobs([]); setName(''); setPrompt(''); setCron('0 9 * * *'); setEnabled(true); setState('loading'); setEditingId(null); setViewingManagedId(null); setError(''); setNotice(''); setTriggeringId(null); setJobModel({ modelConnectionId: null, model: null });
-    setOperatorTimezone('');
-    void request<{ timezone: string }>('/api/settings/timezone', { signal: controller.signal }).then(result => {
-      if (!controller.signal.aborted && version === requestVersion.current && result.timezone) { setOperatorTimezone(result.timezone); }
-    }).catch(() => { if (!controller.signal.aborted) setError('Could not load operator timezone. Schedules still use the configured operator timezone.'); });
-    void load(controller.signal, version);
-    return () => controller.abort();
+    committed.current = false; saving.current = false; ++boardVersion.current; setJobs([]); setDraft(scheduleDraft()); setState('loading'); setJobsLoaded(false);
+    setEditingId(null); setViewingManagedId(null); setError(''); setNotice(''); setTriggeringId(null);
+    setOperatorTimezone(''); setTasks([]); setProjects([]); setBoardState('idle'); setBoardError('');
+    void loadTimezone(controller.signal, version);
+    void load(controller.signal, version).finally(() => { if (!controller.signal.aborted && version === requestVersion.current) setState('idle'); });
+    return () => { controller.abort(); ++requestVersion.current; };
   }, [agentId]);
-  const reset = () => { committed.current = false; setEditingId(null); setViewingManagedId(null); setName(''); setPrompt(''); setCron('0 9 * * *'); setEnabled(true); setJobModel({ modelConnectionId: null, model: null }); setError(''); };
-  const edit = (job: ScheduledJob) => { committed.current = false; setViewingManagedId(null); setEditingId(job.id); setName(job.name); setPrompt(job.prompt); setCron(job.cron); setEnabled(job.enabled); setJobModel({ modelConnectionId: job.modelConnectionId ?? null, model: job.model ?? null }); setError(''); nameInput.current?.focus(); };
+  const needsBoard = draft.jobKind === 'task' || jobs.some(job => job.jobKind === 'task');
+  useEffect(() => {
+    if (!needsBoard) return;
+    const controller = new AbortController();
+    void loadBoard(controller.signal, requestVersion.current);
+    return () => controller.abort();
+  }, [agentId, needsBoard]);
+
+  const reset = () => { committed.current = false; setEditingId(null); setViewingManagedId(null); setDraft(scheduleDraft()); setError(''); };
+  const edit = (job: ScheduledJob) => { committed.current = false; setViewingManagedId(null); setEditingId(job.id); setDraft(scheduleDraft(job)); setError(''); nameInput.current?.focus(); };
   const viewManaged = (job: ScheduledJob) => { setEditingId(null); setViewingManagedId(job.id); setError(''); };
   useEffect(() => { if (viewingManagedId) nameInput.current?.focus(); }, [viewingManagedId]);
-  const draft = JSON.stringify([name, prompt, cron, enabled, jobModel.modelConnectionId ?? null, jobModel.model ?? null]);
   const selectedJob = jobs.find(job => job.id === editingId);
-  const baseline = selectedJob ? JSON.stringify([selectedJob.name, selectedJob.prompt, selectedJob.cron, selectedJob.enabled, selectedJob.modelConnectionId ?? null, selectedJob.model ?? null]) : JSON.stringify(['', '', '0 9 * * *', true, null, null]);
+  const selectedTask = tasks.find(task => task.id === draft.taskId);
+  const retainingTask = Boolean(selectedJob?.jobKind === 'task' && selectedJob.taskId === draft.taskId);
+  const taskProblem = boardState !== 'ready' ? '' : selectedTask ? taskEligibility(selectedTask, resourceId) : draft.taskId ? 'Task no longer exists' : '';
+  const eligibleTasks = tasks.filter(task => !taskEligibility(task, resourceId));
+  const taskGroups = [...new Set(eligibleTasks.map(task => task.projectId))].map(id => ({ id, name: projects.find(project => project.id === id)?.name ?? 'Unknown project' }));
+  const taskLabel = (task: ScheduleTask) => `${projects.find(project => project.id === task.projectId)?.name ?? 'Unknown project'} · ${task.title}`;
+  const selectedValue = selectedModelValue(draft);
+  const persistedOverrideUnavailable = Boolean((draft.modelConnectionId || draft.model) && (!selectedValue || !modelOptions.some(option => option.value === selectedValue)));
   const save = async () => {
-    if (state !== 'idle' || committed.current) return false;
-    if (!name.trim() || !prompt.trim() || !cron.trim()) { setError('Name, prompt, and cron are required.'); return false; }
+    if (state !== 'idle' || saving.current || !jobsLoaded || committed.current || triggeringId || persistedOverrideUnavailable) return false;
+    if (!draft.name.trim()) { setError('Name is required.'); return false; }
+    if (draft.jobKind === 'prompt' && !draft.prompt.trim()) { setError('Prompt is required.'); return false; }
+    if (draft.jobKind === 'task' && (!draft.taskId || (!retainingTask && (boardState !== 'ready' || !selectedTask || taskProblem)))) { setError('Choose a saved ToDo task assigned to this agent.'); return false; }
+    if (draft.scheduleKind === 'cron' && !draft.cron.trim()) { setError('Cron is required.'); return false; }
+    if (draft.scheduleKind === 'once' && (!draft.runAt || !operatorTimezone)) { setError('Run at and the operator timezone are required.'); return false; }
     const version = requestVersion.current;
-    setState('saving'); setError('');
+    saving.current = true;
+    setState('saving'); setError(''); setNotice('');
     try {
-      await request(editingId ? `/api/scheduled-jobs/${encodeURIComponent(editingId)}` : '/api/scheduled-jobs', { method: editingId ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...(editingId ? {} : { agentId: resourceId }), name: name.trim(), prompt: prompt.trim(), cron: cron.trim(), enabled, modelConnectionId: jobModel.modelConnectionId ?? null, model: jobModel.model ?? null }) });
+      await api(editingId ? `/api/scheduled-jobs/${encodeURIComponent(editingId)}` : '/api/scheduled-jobs', jsonMutation(editingId ? 'PATCH' : 'POST', { ...(editingId ? {} : { agentId: resourceId }), ...schedulePayload(draft) }));
       if (version !== requestVersion.current) return false;
       committed.current = true;
-      if (!await load(undefined, version)) { setError('Schedule saved, but refreshing jobs failed. Reload jobs before another save.'); return false; }
+      if (!await load(undefined, version)) { if (version === requestVersion.current) setError('Schedule saved, but refreshing jobs failed. Reload jobs before another save.'); return false; }
       if (version === requestVersion.current) { reset(); return true; }
-    } catch (cause) { if (version !== requestVersion.current) return false; setError(cause instanceof Error ? `Could not save schedule: ${cause.message}` : 'Could not save schedule.'); setState('idle'); }
+    } catch (cause) {
+      if (version !== requestVersion.current) return false;
+      setError(cause instanceof Error ? `Could not save schedule: ${cause.message}` : 'Could not save schedule.'); setState('idle');
+    } finally { if (version === requestVersion.current) { saving.current = false; setState('idle'); } }
     return false;
   };
-  useUnsavedChanges({ dirty: !committed.current && state !== 'loading' && !viewingManagedId && draft !== baseline, busy: state === 'saving', save, discard: () => { if (selectedJob) edit(selectedJob); else reset(); } });
+  useUnsavedChanges({ dirty: !committed.current && state !== 'loading' && !viewingManagedId && JSON.stringify(draft) !== JSON.stringify(scheduleDraft(selectedJob)), busy: state === 'saving', save, discard: () => { if (selectedJob) edit(selectedJob); else reset(); } });
+  const refresh = async () => {
+    if (state !== 'idle' || triggeringId) return;
+    const version = requestVersion.current;
+    setError('');
+    if (await load(undefined, version) && version === requestVersion.current && committed.current) reset();
+    if (needsBoard && version === requestVersion.current) void loadBoard(undefined, version);
+  };
   const runNow = async (job: ScheduledJob) => {
+    if (triggeringId || state !== 'idle') return;
     setTriggeringId(job.id); setError(''); setNotice('');
     const version = requestVersion.current;
     try {
-      const result = await request<{ ok: boolean; error?: string }>(`/api/scheduled-jobs/${encodeURIComponent(job.id)}/trigger`, jsonMutation('POST'));
+      const result = await api<{ ok: boolean; skipped?: boolean; error?: string; reason?: string; run?: ScheduleRun }>(`/api/scheduled-jobs/${encodeURIComponent(job.id)}/trigger`, jsonMutation('POST'));
       if (version !== requestVersion.current) return;
-      if (!result.ok) { setError(`Could not run ${job.name}: ${result.error || 'The scheduler rejected the request.'}`); return; }
-      setNotice(`${job.name} started. The run continues in the background.`);
+      if (result.skipped || result.run?.status === 'skipped') {
+        const reason = result.reason || result.run?.error || result.error;
+        setNotice(`${job.name} skipped.${reason ? ` ${reason}` : ''}`);
+      } else if (!result.ok) { setError(`Could not run ${job.name}: ${result.error || 'The scheduler rejected the request.'}`); return; }
+      else setNotice(`${job.name} started. The run continues in the background.`);
+      await load(undefined, version);
     } catch (cause) {
       if (version === requestVersion.current) setError(cause instanceof Error ? `Could not run ${job.name}: ${cause.message}` : `Could not run ${job.name}.`);
     } finally { if (version === requestVersion.current) setTriggeringId(null); }
   };
-  const remove = async (job: ScheduledJob) => { const version = requestVersion.current; if (!await confirm({ title: 'Delete scheduled job?', message: job.ownerModId ? `Delete ${job.name}? This job is managed by ${job.ownerModId} and the mod may create it again.` : `Delete ${job.name}?`, confirmLabel: 'Delete job', tone: 'danger' }) || version !== requestVersion.current) return; try { await request(`/api/scheduled-jobs/${encodeURIComponent(job.id)}`, { method: 'DELETE' }); if (version !== requestVersion.current) return; setJobs(items => items.filter(item => item.id !== job.id)); if (editingId === job.id || viewingManagedId === job.id) reset(); } catch (cause) { if (version !== requestVersion.current) return; setError(cause instanceof Error ? `Could not delete schedule: ${cause.message}` : 'Could not delete schedule.'); } };
+  const remove = async (job: ScheduledJob) => {
+    const version = requestVersion.current;
+    if (!await confirm({ title: 'Delete scheduled job?', message: job.ownerModId ? `Delete ${job.name}? This job is managed by ${job.ownerModId} and the mod may create it again.` : `Delete ${job.name}?`, confirmLabel: 'Delete job', tone: 'danger' }) || version !== requestVersion.current) return;
+    try {
+      await api(`/api/scheduled-jobs/${encodeURIComponent(job.id)}`, { method: 'DELETE' });
+      if (version !== requestVersion.current) return;
+      setJobs(items => items.filter(item => item.id !== job.id)); if (editingId === job.id || viewingManagedId === job.id) reset();
+    } catch (cause) { if (version === requestVersion.current) setError(cause instanceof Error ? `Could not delete schedule: ${cause.message}` : 'Could not delete schedule.'); }
+  };
+  const zoneFor = (job: ScheduledJob) => job.effectiveTimezone || operatorTimezone;
+  const scheduleLabel = (job: ScheduledJob) => job.scheduleKind === 'once' ? `Once · ${scheduleTime(job.runAt, zoneFor(job))}` : `Recurring · ${job.cron}`;
   const managedJob = jobs.find(job => job.id === viewingManagedId && job.ownerModId) ?? null;
-  const inventory = state === 'loading' ? <p className="settings-empty">Loading cron jobs…</p> : jobs.length === 0 ? <p className="settings-empty">No cron jobs configured for this agent.</p> : <div className="schedule-list">{jobs.map(job => {
-    const overrideValue = selectedModelValue(job);
-    const override = modelOptions.find((option) => option.value === overrideValue);
-    return <article className="schedule-card" key={job.id}><div className="schedule-card-details">{job.ownerModId ? <button className="schedule-card-select" type="button" onClick={() => { if (viewingManagedId !== job.id) navigate(() => viewManaged(job)); }} aria-pressed={viewingManagedId === job.id}><strong>{job.name}</strong><small>Managed by {job.ownerModId}</small><small>{job.cron} · {`Operator timezone · ${job.effectiveTimezone || operatorTimezone || 'Loading…'}`}</small><small>{overrideValue ? (override?.label ?? unavailableModelLabel(job)) : 'Uses agent chat model'}</small></button> : <button className="schedule-card-select" type="button" onClick={() => { if (editingId !== job.id) navigate(() => edit(job)); }} aria-pressed={editingId === job.id}><strong>{job.name}</strong><small>{job.cron} · {`Operator timezone · ${job.effectiveTimezone || operatorTimezone || 'Loading…'}`}</small><small>{overrideValue ? (override?.label ?? unavailableModelLabel(job)) : 'Uses agent chat model'}</small></button>}</div><div className="schedule-card-actions"><button className="secondary" type="button" onClick={() => void runNow(job)} disabled={triggeringId !== null}>{triggeringId === job.id ? "Starting…" : "Run now"}</button>{!job.ownerModId && <button className="danger" type="button" onClick={() => { if (editingId === job.id || viewingManagedId === job.id) navigate(() => void remove(job)); else void remove(job); }}>Delete</button>}</div></article>;
-  })}</div>;
-  const selectedValue = selectedModelValue(jobModel);
-  const persistedOverrideUnavailable = Boolean((jobModel.modelConnectionId || jobModel.model) && (!selectedValue || !modelOptions.some((option) => option.value === selectedValue)));
-  const editor = <><p className="settings-description">Run prompts for this agent on a five-field cron schedule. Jobs use the agent’s configured chat model unless you choose an override.</p><div className="schedule-form"><Field label="Name"><input ref={nameInput} value={name} onChange={event => setName(event.target.value)} placeholder="Morning briefing" /></Field><Field label="Prompt"><textarea value={prompt} onChange={event => setPrompt(event.target.value)} rows={3} placeholder="Prepare the daily briefing…" /></Field><ProviderModelFields providers={savedProviders} connectionId={jobModel.modelConnectionId} model={jobModel.model} inheritLabel="Use agent chat model" onChange={(modelConnectionId, model) => setJobModel({ modelConnectionId, model })} /><small className="field-hint">This changes only this cron job, not the agent’s configured model.</small>{persistedOverrideUnavailable && <p className="settings-request-error" role="alert">This job’s model override is unavailable. Choose an available model or use the agent chat model before saving; it will not silently fall back.</p>}<div className="skill-compact-field"><Field label="Cron"><input value={cron} onChange={event => setCron(event.target.value)} placeholder="0 9 * * *" /><small className="field-hint">minute hour day month weekday. Uses the operator timezone{operatorTimezone ? ` (${operatorTimezone})` : ''}.</small></Field></div><div className="schedule-footer"><label className="schedule-enabled"><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} /><span>Enabled</span></label><div className="setting-actions"><button className="secondary" type="button" onClick={() => navigate(reset)} disabled={state === 'saving'}>{editingId ? 'Cancel' : 'Clear'}</button><button className="primary" type="button" onClick={() => void save()} disabled={state !== 'idle' || committed.current || persistedOverrideUnavailable}>{state === 'saving' ? 'Saving…' : editingId ? 'Save job' : 'Add job'}</button></div></div></div></>;
-  const managedDetails = managedJob && <div className="schedule-form"><p className="settings-description">Managed by {managedJob.ownerModId}. Edit this job through its mod; you can run or delete it here. The mod may recreate a deleted job.</p><Field label="Name"><input ref={nameInput} value={managedJob.name} readOnly /></Field><Field label="Prompt"><textarea value={managedJob.prompt} rows={3} readOnly /></Field><Field label="Schedule"><input value={`${managedJob.cron} · ${`Operator timezone · ${managedJob.effectiveTimezone || operatorTimezone || 'Loading…'}`}`} readOnly /></Field><Field label="Model"><input value={modelOptions.find(option => option.value === selectedModelValue(managedJob))?.label || unavailableModelLabel(managedJob) || 'Uses agent chat model'} readOnly /></Field><div className="setting-actions"><button className="secondary" type="button" onClick={() => navigate(reset)}>Back to new job</button><button className="danger" type="button" onClick={() => void remove(managedJob)}>Delete job</button></div></div>;
-  return <><SettingSection title="Cron jobs">{managedDetails ?? editor}{!overflowTarget && inventory}{notice && <p role="status">{notice}</p>}{error && <p className="settings-request-error" role="alert">{error}</p>}</SettingSection>{overflowTarget && createPortal(<div className="settings-overflow-content"><SettingSection title="Saved cron jobs">{inventory}{notice && <p role="status">{notice}</p>}{error && <p className="settings-request-error" role="alert">{error}</p>}</SettingSection></div>, overflowTarget)}</>;
+  const inventory = <>
+    <div className="schedule-list-toolbar"><button className="secondary" type="button" disabled={state !== 'idle' || triggeringId !== null} onClick={() => void refresh()}>Refresh jobs</button></div>
+    {state === 'loading' ? <p className="settings-empty">Loading schedules…</p> : !jobsLoaded ? <p className="settings-empty">Schedules unavailable. Refresh jobs to retry.</p> : jobs.length === 0 ? <p className="settings-empty">No scheduled jobs for this agent.</p> : <div className="schedule-list">{jobs.map(job => {
+      const overrideValue = selectedModelValue(job);
+      const last = job.lastRun;
+      const task = tasks.find(item => item.id === job.taskId);
+      const selected = job.id === (editingId ?? viewingManagedId);
+      return <article className={`schedule-card${selected ? ' is-selected' : ''}`} key={job.id}>
+        <div className="schedule-card-details">
+          <button className="schedule-card-select" type="button" disabled={state === 'saving'} onClick={() => { if (!selected) navigate(() => job.ownerModId ? viewManaged(job) : edit(job)); }} aria-pressed={selected}>
+            <strong>{job.name}</strong>
+            {job.ownerModId && <small>Managed by {job.ownerModId}</small>}
+            <small>{job.jobKind === 'task' ? 'Board task' : 'Prompt'} · {job.enabled ? 'Enabled' : 'Paused'}</small>
+            <small>{scheduleLabel(job)} · {zoneFor(job) || 'Operator timezone unavailable'}</small>
+            {job.jobKind === 'task' && boardState === 'ready' && <small>{task ? taskLabel(task) : 'Task no longer exists'}</small>}
+            {job.enabled && <small>Next · {scheduleTime(job.nextRunAt, zoneFor(job))}</small>}
+            {overrideValue && <small>{modelOptions.find(option => option.value === overrideValue)?.label ?? unavailableModelLabel(job)}</small>}
+          </button>
+          <div className="schedule-last-run">
+            <small>Last · {last ? scheduleRunLabel(last.status) : job.lastRunAt ? 'Recorded run' : 'Not run'}{(last?.completedAt || job.lastRunAt) ? ` · ${scheduleTime(last?.completedAt || job.lastRunAt, zoneFor(job))}` : ''}</small>
+            {last?.error && <small className={last.status === 'failed' ? 'schedule-result-error' : ''}>{last.error}</small>}
+            {onOpenChat && last?.sessionId && last.runId && !['skipped', 'missed'].includes(last.status) && <button className="schedule-chat-link" type="button" onClick={() => navigate(() => onOpenChat(last.sessionId!, last.agentId || job.agentId))}>Open chat<span className="sr-only"> for {job.name}</span></button>}
+          </div>
+        </div>
+        <div className="schedule-card-actions"><button className="secondary" type="button" onClick={() => void runNow(job)} disabled={triggeringId !== null || state !== 'idle'}>{triggeringId === job.id ? 'Starting…' : 'Run now'}</button>{!job.ownerModId && <button className="danger" type="button" disabled={state === 'saving'} onClick={() => { if (selected) navigate(() => void remove(job)); else void remove(job); }}>Delete</button>}</div>
+      </article>;
+    })}</div>}
+  </>;
+  const editor = <div className="schedule-form"><fieldset className="schedule-fields" disabled={state !== 'idle' || !jobsLoaded || committed.current}>
+    <div className="schedule-field-pair">
+      <Field label="Run"><select value={draft.jobKind} onChange={event => change({ jobKind: event.target.value as ScheduleDraft['jobKind'] })}><option value="prompt">Prompt</option><option value="task">Board task</option></select></Field>
+      <Field label="Schedule"><select value={draft.scheduleKind} onChange={event => change({ scheduleKind: event.target.value as ScheduleDraft['scheduleKind'] })}><option value="cron">Recurring</option><option value="once">Once</option></select></Field>
+    </div>
+    {draft.jobKind === 'task' && <div>
+      <Field label="Task"><select aria-label="Task" value={draft.taskId} disabled={boardState !== 'ready'} onChange={event => {
+        const task = tasks.find(item => item.id === event.target.value);
+        change({ taskId: event.target.value, ...(!draft.name.trim() || draft.name === selectedTask?.title ? { name: task?.title ?? '' } : {}) });
+      }}><option value="">{boardState === 'loading' || boardState === 'idle' ? 'Loading tasks…' : eligibleTasks.length ? 'Choose a ToDo task' : 'No ToDo tasks assigned to this agent'}</option>
+        {draft.taskId && !eligibleTasks.some(task => task.id === draft.taskId) && <option value={draft.taskId} disabled>{selectedTask ? taskLabel(selectedTask) : `Saved task · ${draft.taskId}`}{taskProblem ? ` · ${taskProblem} (will skip)` : ''}</option>}
+        {taskGroups.map(project => <optgroup key={project.id} label={project.name}>{eligibleTasks.filter(task => task.projectId === project.id).map(task => <option key={task.id} value={task.id}>{task.title}</option>)}</optgroup>)}
+      </select></Field>
+      {taskProblem ? <p className="schedule-task-warning" role="status">{taskProblem}. This job will skip unless the saved task is unarchived, assigned to this agent, and ToDo when it runs.</p> : <small className="field-hint">Only this agent’s saved ToDo tasks can start. Eligibility is checked again when the job runs.</small>}
+      {boardError && <p className="settings-request-error" role="alert">{boardError} <button className="secondary" type="button" onClick={() => void loadBoard(undefined, requestVersion.current)}>Retry tasks</button></p>}
+    </div>}
+    <Field label="Name"><input ref={nameInput} value={draft.name} onChange={event => change({ name: event.target.value })} placeholder={draft.jobKind === 'task' ? 'Task title' : 'Morning briefing'} /></Field>
+    {draft.jobKind === 'prompt' ? <Field label="Prompt"><textarea value={draft.prompt} onChange={event => change({ prompt: event.target.value })} rows={3} placeholder="Prepare the daily briefing…" /></Field> : <Field label="Extra instructions (optional)"><textarea value={draft.extraInstructions} onChange={event => change({ extraInstructions: event.target.value })} rows={2} placeholder="Any additional direction for this run…" /></Field>}
+    {draft.scheduleKind === 'cron' ? <Field label="Cron"><input aria-label="Cron" value={draft.cron} onChange={event => change({ cron: event.target.value })} placeholder="0 9 * * *" /></Field> : <Field label="Run at"><input aria-label="Run at" type="datetime-local" step="1" disabled={!operatorTimezone} value={operatorDateTimeInput(draft.runAt, operatorTimezone)} onChange={event => change({ runAt: event.target.value })} /></Field>}
+    <small className="field-hint schedule-timezone">{draft.scheduleKind === 'cron' && 'minute hour day month weekday. '}Operator timezone · {operatorTimezone || (timezoneError ? 'Unavailable' : 'Loading…')}</small>
+    {timezoneError && <p className="settings-request-error" role="alert">{timezoneError} <button className="secondary" type="button" onClick={() => void loadTimezone(undefined, requestVersion.current)}>Retry timezone</button></p>}
+    <ProviderModelFields providers={savedProviders} connectionId={draft.modelConnectionId} model={draft.model} inheritLabel="Use agent chat model" onChange={(modelConnectionId, model) => change({ modelConnectionId, model })} />
+    {persistedOverrideUnavailable && <p className="settings-request-error" role="alert">This job’s model override is unavailable. Choose an available model or use the agent chat model before saving; it will not silently fall back.</p>}
+    <div className="schedule-footer"><label className="schedule-enabled"><input type="checkbox" checked={draft.enabled} onChange={event => change({ enabled: event.target.checked })} /><span>Enabled</span></label><div className="setting-actions"><button className="secondary" type="button" onClick={() => navigate(reset)}>{editingId ? 'Cancel' : 'Clear'}</button><button className="primary" type="button" onClick={() => void save()} disabled={persistedOverrideUnavailable || triggeringId !== null || (draft.scheduleKind === 'once' && !operatorTimezone) || (draft.jobKind === 'task' && !retainingTask && boardState !== 'ready')}>{state === 'saving' ? 'Saving…' : editingId ? 'Save job' : 'Add job'}</button></div></div>
+  </fieldset></div>;
+  const managedDetails = managedJob && <div className="schedule-form">
+    <p className="settings-description">Managed by {managedJob.ownerModId}. Edit this job through its mod; you can run or delete it here. The mod may recreate a deleted job.</p>
+    <Field label="Name"><input ref={nameInput} value={managedJob.name} readOnly /></Field>
+    {managedJob.jobKind === 'task' ? <><Field label="Task"><input value={tasks.find(task => task.id === managedJob.taskId)?.title ?? managedJob.taskId ?? 'Task unavailable'} readOnly /></Field><Field label="Extra instructions (optional)"><textarea value={managedJob.extraInstructions ?? ''} rows={2} readOnly /></Field></> : <Field label="Prompt"><textarea value={managedJob.prompt} rows={3} readOnly /></Field>}
+    <Field label="Schedule"><input value={`${scheduleLabel(managedJob)} · ${zoneFor(managedJob) || 'Operator timezone unavailable'}`} readOnly /></Field>
+    <Field label="Model"><input value={modelOptions.find(option => option.value === selectedModelValue(managedJob))?.label || unavailableModelLabel(managedJob) || 'Uses agent chat model'} readOnly /></Field>
+    <div className="setting-actions"><button className="secondary" type="button" onClick={() => navigate(reset)}>Back to new job</button><button className="danger" type="button" onClick={() => void remove(managedJob)}>Delete job</button></div>
+  </div>;
+  return <><SettingSection title="Cron jobs">{managedDetails ?? editor}{!overflowTarget && inventory}{!overflowTarget && notice && <p role="status">{notice}</p>}{error && <p className="settings-request-error" role="alert">{error}</p>}</SettingSection>{overflowTarget && createPortal(<div className="settings-overflow-content"><SettingSection title="Saved jobs">{inventory}{notice && <p role="status">{notice}</p>}</SettingSection></div>, overflowTarget)}</>;
 }

@@ -734,6 +734,22 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .schedule-card-details small,.provider-card-select small{margin-top:3px;color:var(--muted);font-size:11px;overflow-wrap:anywhere}
 .schedule-card-actions{display:flex;align-items:center;gap:7px;flex:0 0 auto}
 .schedule-card-actions button{white-space:nowrap}
+.schedule-form input[type=datetime-local]{color-scheme:dark}
+.schedule-fields{display:grid;gap:12px;min-width:0;margin:0;padding:0;border:0}
+.schedule-list-toolbar{display:flex;justify-content:flex-end;margin-bottom:10px}
+.schedule-list-toolbar+.schedule-list{margin-top:0}
+.schedule-card.is-selected{border-color:var(--accent-border)}
+.schedule-card-select strong{overflow-wrap:anywhere}
+.schedule-last-run{margin-top:7px;padding-top:6px;border-top:1px solid var(--line-soft)}
+.schedule-last-run .schedule-result-error{color:var(--danger)}
+.schedule-task-warning{margin:7px 0 0;color:var(--warn);font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+.schedule-timezone{margin-top:-7px}
+.schedule-chat-link{margin-top:5px;padding:0;border:0;background:transparent;color:var(--accent);font:inherit;font-size:11px;cursor:pointer}
+.schedule-chat-link:hover{text-decoration:underline}
+.schedule-chat-link:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:2px}
+.schedule-list{container-type:inline-size}
+@container(max-width:420px){.schedule-card{align-items:stretch;flex-direction:column}.schedule-card-actions{justify-content:flex-end}}
+
 .model-saved .provider-card{display:flex;align-items:center;gap:10px;padding:9px 11px;min-width:0}
 .model-saved .provider-card-select{flex:1}
 .model-saved .provider-card > .danger{flex:0 0 auto}

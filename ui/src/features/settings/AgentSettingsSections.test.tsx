@@ -67,7 +67,7 @@ describe('agent settings sections', () => {
     apiMock.mockImplementation((path, init) => path === '/api/settings/timezone' ? Promise.resolve({ timezone: 'America/Chicago' }) : init?.method === 'POST' ? Promise.resolve({}) : Promise.resolve({ jobs: [] }));
     render(<ConfirmProvider><AgentSchedules agentId="smatchet" savedProviders={[{ id: 'connection-1', provider: 'Claude', apiType: 'anthropic-messages', url: '', apiKey: '', models: ['model-1'] }]} /></ConfirmProvider>);
 
-    await screen.findByText('No cron jobs configured for this agent.');
+    await screen.findByText('No scheduled jobs for this agent.');
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Briefing' } });
     fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Prepare it.' } });
     fireEvent.change(screen.getByRole('combobox', { name: 'Provider' }), { target: { value: 'connection-1' } });
@@ -85,7 +85,7 @@ describe('agent settings sections', () => {
     apiMock.mockImplementation((path, init) => path === '/api/settings/timezone' ? Promise.resolve({ timezone: 'America/Chicago' }) : init?.method === 'POST' ? Promise.resolve({}) : Promise.resolve({ jobs: [] }));
     render(<ConfirmProvider><AgentSchedules agentId="smatchet" savedProviders={[]} /></ConfirmProvider>);
 
-    await screen.findByText('No cron jobs configured for this agent.');
+    await screen.findByText('No scheduled jobs for this agent.');
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Briefing' } });
     fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Prepare it.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add job' }));
@@ -96,7 +96,7 @@ describe('agent settings sections', () => {
   });
 
   it('shows a persisted unavailable cron override and blocks silent fallback', async () => {
-    apiMock.mockResolvedValue({ jobs: [{ id: 'job-1', agentId: 'smatchet', name: 'Briefing', prompt: 'Prepare it.', cron: '0 9 * * *', timezone: 'UTC', enabled: true, modelConnectionId: 'removed', model: 'gone' }] });
+    apiMock.mockImplementation(path => Promise.resolve(path === '/api/settings/timezone' ? { timezone: 'UTC' } : { jobs: [{ id: 'job-1', agentId: 'smatchet', name: 'Briefing', prompt: 'Prepare it.', cron: '0 9 * * *', timezone: 'UTC', enabled: true, modelConnectionId: 'removed', model: 'gone' }] }));
     render(<ConfirmProvider><AgentSchedules agentId="smatchet" savedProviders={[]} /></ConfirmProvider>);
 
     fireEvent.click(await screen.findByRole('button', { name: /Briefing.*0 9/ }));
