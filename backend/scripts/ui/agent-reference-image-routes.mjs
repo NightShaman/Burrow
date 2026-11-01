@@ -26,3 +26,23 @@ export function createAgentReferenceImageRoutes({ store, readJsonBody, sendJson 
     return true;
   };
 }
+
+/** Mod HTTP remains JSON-only; serve its Core-owned photo bytes at the ordinary
+ * authenticated media boundary rather than tunnelling base64 through settings. */
+export function createModReferenceImageContentRoute({ store, sendJson }) {
+  return async ({ req, res, url }) => {
+    const match = /^\/api\/mod-reference-images\/([^/]+)\/([^/]+)\/content$/.exec(url.pathname);
+    if (!match) return false;
+    try {
+      if (req.method !== 'GET') { sendJson(res, 405, { ok: false, error: 'method_not_allowed' }); return true; }
+      const { image, bytes } = await store().readMod(decodeURIComponent(match[1]), decodeURIComponent(match[2]), url.searchParams.get('id'));
+      res.writeHead(200, { 'content-type': image.mimeType, 'content-length': bytes.length,
+        ...artifactResponseHeaders({ name: image.fileName, mimeType: image.mimeType }) });
+      res.end(bytes);
+    } catch (error) {
+      const badId = error instanceof URIError;
+      sendJson(res, badId ? 400 : error.statusCode || 500, { ok: false, error: badId ? 'mod_reference_image_invalid' : error.statusCode ? error.message : 'mod_reference_image_unavailable' });
+    }
+    return true;
+  };
+}

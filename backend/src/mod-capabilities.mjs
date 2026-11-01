@@ -403,12 +403,27 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
       if (!model) return { available: false, reason: 'forge_model_unavailable' };
       return { available: true };
     },
+    async getForgeReferenceImage(input) {
+      const value = exactKeys(plain(input), ['key']);
+      if (!injected.referenceImages?.getMod) throw new Error('reference_images_unavailable');
+      return injected.referenceImages.getMod(forgeOwner(), bounded(value.key, 160));
+    },
+    async putForgeReferenceImage(input) {
+      const value = exactKeys(plain(input), ['key', 'body']);
+      if (!injected.referenceImages?.putMod) throw new Error('reference_images_unavailable');
+      return injected.referenceImages.putMod(forgeOwner(), bounded(value.key, 160), value.body);
+    },
+    async removeForgeReferenceImage(input) {
+      const value = exactKeys(plain(input), ['key']);
+      if (!injected.referenceImages?.removeMod) throw new Error('reference_images_unavailable');
+      return injected.referenceImages.removeMod(forgeOwner(), bounded(value.key, 160));
+    },
     async createForgeImage(input) {
-      const value = exactKeys(plain(input), ['prompt', 'idempotencyKey']);
+      const value = exactKeys(plain(input), ['prompt', 'idempotencyKey', 'referenceImages']);
       const prompt = bounded(value.prompt, 100_000);
       const idempotencyKey = bounded(value.idempotencyKey, 256);
       const store = forgeStore();
-      const result = await store.create({ mode: 'image', prompt, idempotencyKey: `${forgeKeyPrefix()}${idempotencyKey}` }, { ownerModId: forgeOwner() });
+      const result = await store.create({ mode: 'image', prompt, idempotencyKey: `${forgeKeyPrefix()}${idempotencyKey}` }, { ownerModId: forgeOwner(), ...(value.referenceImages === undefined ? {} : { referenceImages: value.referenceImages }) });
       return { job: projectForgeImageJob(store, await store.get(result.job.id)), replayed: result.replayed === true };
     },
     async readForgeImageJob(input) {

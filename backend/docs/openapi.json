@@ -1243,10 +1243,10 @@
           "200": {
             "$ref": "#/components/responses/ScheduledJobResponse"
           },
-          "404": {
+          "400": {
             "$ref": "#/components/responses/ErrorResponse"
           },
-          "400": {
+          "404": {
             "$ref": "#/components/responses/ErrorResponse"
           }
         },
@@ -1529,7 +1529,7 @@
             "$ref": "#/components/responses/ErrorResponse"
           }
         },
-        "description": "List retained active/archived conversations and independent reset documents. Date and session-calendar discovery match retained visible message occurrence days (including compacted generations in the document\u2019s canonical generation window), plus catalog update/reset-creation dates. Unknown message clocks are not inferred. Date-filtered rows include matchedDate in the requested timezone; clients must retain these matches even when the catalog timestamp differs. Search matches identity, names, titles and human-facing summaries, not internal run evidence. Opaque cursors preserve exact catalog ordering and must keep filters unchanged."
+        "description": "List retained active/archived conversations and independent reset documents. Date and session-calendar discovery match retained visible message occurrence days (including compacted generations in the document’s canonical generation window), plus catalog update/reset-creation dates. Unknown message clocks are not inferred. Date-filtered rows include matchedDate in the requested timezone; clients must retain these matches even when the catalog timestamp differs. Search matches identity, names, titles and human-facing summaries, not internal run evidence. Opaque cursors preserve exact catalog ordering and must keep filters unchanged."
       }
     },
     "/api/archive/sessions/{agentId}/{sessionId}": {
@@ -1555,7 +1555,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "Page size (clamped to 1\u2013500, default 100).",
+            "description": "Page size (clamped to 1–500, default 100).",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -3762,7 +3762,7 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Maximum rows in this page (1\u2013500, default 100). Invalid or out-of-range values return 400 archive_limit_invalid.",
+            "description": "Maximum rows in this page (1–500, default 100). Invalid or out-of-range values return 400 archive_limit_invalid.",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -4228,7 +4228,7 @@
           "Agents"
         ],
         "summary": "Read bulk agent UI overview",
-        "description": "Return registered agents with identities, requested-session/descendant status, context usage, and model selections in one request. The optional sessions map selects each agent\u2019s session. Status uses the same runtime-owned ancestry as /api/agent-status, including metadata-only live descendants and honest orphans. Context inspection is bounded to the requested session plus 12 descendants per agent; contextHydration.truncated reports omitted contexts, not a truncated status tree. Opt in to agent-wide minions with minionScope: agent (session is the default). status.minionScope: agent confirms a successful all-origin scan for that agent; disabled/error entries do not claim coverage. The anchor session and its activity remain independent. Ordinary unrelated chats are not minions; requested child anchors retain depth and appear once. Depth-two orphans without root metadata keep unknown roots. Context hydration remains bounded to the anchor plus 12 distinct minion sessions; session recovery and cancellation stay scoped.",
+        "description": "Return registered agents with identities, requested-session/descendant status, context usage, and model selections in one request. The optional sessions map selects each agent’s session. Status uses the same runtime-owned ancestry as /api/agent-status, including metadata-only live descendants and honest orphans. Context inspection is bounded to the requested session plus 12 descendants per agent; contextHydration.truncated reports omitted contexts, not a truncated status tree. Opt in to agent-wide minions with minionScope: agent (session is the default). status.minionScope: agent confirms a successful all-origin scan for that agent; disabled/error entries do not claim coverage. The anchor session and its activity remain independent. Ordinary unrelated chats are not minions; requested child anchors retain depth and appear once. Depth-two orphans without root metadata keep unknown roots. Context hydration remains bounded to the anchor plus 12 distinct minion sessions; session recovery and cancellation stay scoped.",
         "operationId": "getAgentOverview",
         "requestBody": {
           "required": true,
@@ -7001,7 +7001,7 @@
         ],
         "summary": "Read an agent minion depth setting",
         "operationId": "getAgentMinionSettings",
-        "description": "Read the per-agent maximum nesting depth (integer 0\u20132, default 1). This is independent of minion model selection. Zero disables spawning, one permits direct children, and two also permits grandchildren. Requires an enabled registered agent.",
+        "description": "Read the per-agent maximum nesting depth (integer 0–2, default 1). This is independent of minion model selection. Zero disables spawning, one permits direct children, and two also permits grandchildren. Requires an enabled registered agent.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PathAgentId"
@@ -7009,7 +7009,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The agent\u2019s durable minion depth setting; defaults to one when unset.",
+            "description": "The agent’s durable minion depth setting; defaults to one when unset.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7102,7 +7102,7 @@
         },
         "responses": {
           "200": {
-            "description": "The agent\u2019s durable minion depth setting; defaults to one when unset.",
+            "description": "The agent’s durable minion depth setting; defaults to one when unset.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8726,6 +8726,69 @@
         "responses": {
           "200": {
             "description": "Original image bytes",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/api/mod-reference-images/{modId}/{key}/content": {
+      "get": {
+        "operationId": "getModReferenceImageContent",
+        "summary": "Read original canonical character photo bytes",
+        "description": "Ordinary operator-authenticated, private no-store image response. Optional id pins the current revision. Missing or stale keys return 404.",
+        "tags": [
+          "Attachments"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "modId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original PNG/JPEG/WebP bytes",
             "content": {
               "image/png": {
                 "schema": {
@@ -14699,7 +14762,22 @@
               "boolean",
               "null"
             ],
-            "description": "True uses the current agent canonical portrait as a reference for a supported image model. Requires trusted agent execution context (native tool); operator HTTP has no agent context and cannot supply agentId. False/null/omission preserves text-only generation."
+            "description": "True includes the current agent canonical portrait (trusted native agent context only). False/null/omission does not select self unless explicitly listed in referenceAgentIds."
+          },
+          "referenceAgentIds": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ordered IDs of registered agents with saved portraits; duplicates (including self) are ignored. Native and operator API can explicitly select IDs; no image bytes or paths are accepted. Null/empty array selects no additional references. Supported image models only."
           }
         },
         "required": [
@@ -14854,6 +14932,13 @@
               }
             ],
             "description": "Only present for trusted native agent context; never an arbitrary agent selected in model arguments."
+          },
+          "agentReferenceImages": {
+            "type": "array",
+            "description": "All registered agents with saved portraits, with agent name and portrait metadata only; attachmentId may be reopened with attachment_view.",
+            "items": {
+              "$ref": "#/components/schemas/ForgeAgentReferenceImage"
+            }
           },
           "defaults": {
             "type": "object",
@@ -18469,7 +18554,7 @@
           "sessionId": {
             "type": "string",
             "default": "default",
-            "description": "Task jobs always use the assigned agent\u2019s default session; prompt jobs retain their selected session."
+            "description": "Task jobs always use the assigned agent’s default session; prompt jobs retain their selected session."
           },
           "enabled": {
             "type": "boolean"
@@ -18514,7 +18599,7 @@
           "extraInstructions": {
             "type": "string",
             "default": "",
-            "description": "Optional additional task instructions; task execution reuses the task\u2019s existing instructions and appends only these extras, never a replacement prompt."
+            "description": "Optional additional task instructions; task execution reuses the task’s existing instructions and appends only these extras, never a replacement prompt."
           },
           "scheduleKind": {
             "type": "string",
@@ -18664,7 +18749,7 @@
           },
           "sessionId": {
             "type": "string",
-            "description": "Task jobs always use the assigned agent\u2019s default session; prompt jobs retain their selected session."
+            "description": "Task jobs always use the assigned agent’s default session; prompt jobs retain their selected session."
           },
           "enabled": {
             "type": "boolean"
@@ -18706,7 +18791,7 @@
           },
           "extraInstructions": {
             "type": "string",
-            "description": "Optional additional task instructions; task execution reuses the task\u2019s existing instructions and appends only these extras, never a replacement prompt."
+            "description": "Optional additional task instructions; task execution reuses the task’s existing instructions and appends only these extras, never a replacement prompt."
           },
           "scheduleKind": {
             "type": "string",
@@ -18875,6 +18960,59 @@
         "required": [
           "available",
           "reason"
+        ],
+        "additionalProperties": false
+      },
+      "ForgeAgentReferenceImage": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "agentName": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "attachmentId": {
+            "type": "string",
+            "description": "Saved portrait attachment_view identifier for any registered agent; not a host filesystem path."
+          },
+          "contentUrl": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string",
+            "enum": [
+              "image/png",
+              "image/jpeg",
+              "image/webp"
+            ]
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20971520
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "agentId",
+          "agentName",
+          "id",
+          "attachmentId",
+          "contentUrl",
+          "mimeType",
+          "fileName",
+          "sizeBytes",
+          "updatedAt"
         ],
         "additionalProperties": false
       }

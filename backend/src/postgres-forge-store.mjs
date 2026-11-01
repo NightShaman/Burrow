@@ -28,6 +28,7 @@ import {
   withPostgresTransaction,
 } from "./postgres-foundation.mjs";
 import { forgeCatalog } from "./forge-store.mjs";
+import { mediaBudgets } from './model-adapters/generated-media-budgets.mjs';
 import { referenceImageCapability, validatedSourceImages } from "./model-adapters/reference-image-capability.mjs";
 
 const fail = (error, statusCode = 400) => {
@@ -49,6 +50,14 @@ const stable = (value) => {
 };
 const sameRequest = (a, b, current) => {
   if (stable(a) === stable(b)) return true;
+  // New multi-reference identities bind ordered digests, actor and Mod owner.
+  // Saved-default retries may keep their admitted model when the configured
+  // default changes, but no other identity field can change on replay.
+  if (a?.referenceImages || current.referenceImages) {
+    if (!a?.referenceImages || !current.referenceImages || !a.implicitSelection || !current.implicitSelection) return false;
+    const withoutSelection = ({ connectionId, modelId, ...identity }) => identity;
+    return stable(withoutSelection(a)) === stable(withoutSelection(current));
+  }
   if (current.modOwnerId) return false;
   // Never let legacy identities (including the broad implicit-default match)
   // replay an image request with different bytes or a different portrait owner.
@@ -109,6 +118,8 @@ function publicJob(job) {
     ownerId,
     modOwnerId,
     referenceImage,
+    referenceImages,
+    referenceActorAgentId,
     ...safe
   } = job;
   return {
@@ -170,23 +181,19 @@ export class PostgresForgeStore {
       ? this.connections({agentId})
       : this.connections || []);
   }
-  async catalog({agentId = null} = {}) {
+  async catalog({agentId = null, includeSavedPortraits = true, includeOwnPortrait = true} = {}) {
     const catalog = forgeCatalog(await this.connectionList(agentId));
+    const savedPortraits = includeSavedPortraits ? await this.referenceImages?.list?.() ?? [] : [];
     return { ...catalog, defaults: await this.selections(),
-      ...(typeof agentId === 'string' && agentId.trim()
-        ? { agentReferenceImage: portraitMetadata(await this.referenceImages?.get(agentId) ?? null) }
+      agentReferenceImages: savedPortraits.map(({ agentId: id, agentName, portraitMetadata: metadata, ...image }) => ({
+        agentId: id, agentName, ...portraitMetadata(metadata ?? image),
+      })),
+      ...(includeOwnPortrait && typeof agentId === 'string' && agentId.trim()
+        ? { agentReferenceImage: portraitMetadata(await this.referenceImages?.get?.(agentId) ?? null) }
         : {}),
     };
   }
-  async referenceImageSnapshot(agentId) {
-    if (typeof agentId !== 'string' || !agentId.trim()) fail('forge_context_unavailable', 409);
-    if (!this.referenceImages?.read) fail('agent_reference_image_missing', 409);
-    let saved;
-    try { saved = await this.referenceImages.read(agentId); }
-    catch (error) {
-      if (error?.statusCode === 404) fail('agent_reference_image_missing', 409);
-      throw error;
-    }
+  snapshotSavedImage(saved, identity) {
     if (!saved?.image || !saved?.bytes) fail('agent_reference_image_missing', 409);
     // A private owned byte copy survives portrait replacement/removal. Only the
     // immutable metadata and content digest enter SQL JSON; never media bytes.
@@ -194,10 +201,60 @@ export class PostgresForgeStore {
     let sourceImages;
     try { sourceImages = validatedSourceImages([{ bytes, mimeType: saved.image.mimeType, name: saved.image.fileName }]); }
     catch { fail('agent_reference_image_invalid', 409); }
-    const referenceImage = { ...portraitMetadata(saved.image), agentId,
+    const referenceImage = { ...portraitMetadata(saved.image), ...identity,
       sizeBytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
     if (typeof referenceImage.id !== 'string' || !referenceImage.id) fail('agent_reference_image_invalid', 409);
     return { referenceImage: Object.freeze(referenceImage), sourceImages };
+  }
+  async referenceImageSnapshot(agentId) {
+    if (typeof agentId !== 'string' || !agentId.trim()) fail('forge_context_unavailable', 409);
+    if (!this.referenceImages?.read) fail('agent_reference_image_missing', 409);
+    let saved;
+    try { saved = await this.referenceImages.read(agentId); }
+    catch (error) {
+      if (error?.statusCode === 404 || error?.message === 'agent_not_found') fail('agent_reference_image_missing', 409);
+      throw error;
+    }
+    return this.snapshotSavedImage(saved, { agentId });
+  }
+  async referenceSnapshots({ agentId, referenceAgentIds, useAgentReferenceImage, catalog, ownerModId, privateReferences, maxBytes }) {
+    const snapshots = [];
+    let totalBytes = 0;
+    const add = snapshot => {
+      totalBytes += snapshot.sourceImages.reduce((total, image) => total + image.bytes.length, 0);
+      if (totalBytes > maxBytes) fail('reference_images_too_large', 413);
+      snapshots.push(snapshot);
+    };
+    if (privateReferences) {
+      if (!this.referenceImages?.readMod) fail('agent_reference_image_missing', 409);
+      const seen = new Set();
+      for (const { key, id, name } of privateReferences) {
+        const identity = `${key}\u0000${id}`;
+        if (seen.has(identity)) continue;
+        seen.add(identity);
+        let saved;
+        try { saved = await this.referenceImages.readMod(ownerModId, key, id); }
+        catch (error) {
+          if (error?.statusCode === 404 || error?.message === 'agent_not_found') fail('agent_reference_image_missing', 409);
+          throw error;
+        }
+        if (saved?.image?.id !== id) fail('agent_reference_image_missing', 409);
+        if (totalBytes + (saved?.bytes?.length || 0) > maxBytes) fail('reference_images_too_large', 413);
+        add(this.snapshotSavedImage(saved, { key, id, name }));
+      }
+    } else {
+      const ids = [...(useAgentReferenceImage ? [agentId] : []), ...referenceAgentIds];
+      const known = new Map(catalog.agentReferenceImages.map(image => [image.agentId, image]));
+      for (const id of new Set(ids)) {
+        if (typeof id !== 'string' || !id.trim()) fail('forge_context_unavailable', 409);
+        // Explicitly requested agents must still have a registered, saved photo.
+        if (!known.has(id) && !(id === agentId && useAgentReferenceImage)) fail('agent_reference_image_missing', 409);
+        const snapshot = await this.referenceImageSnapshot(id);
+        add({ ...snapshot, referenceImage: Object.freeze({ ...snapshot.referenceImage,
+          name: known.get(id)?.agentName || id }) });
+      }
+    }
+    return snapshots;
   }
   async selections() {
     const r = await this.pool.query(
@@ -372,7 +429,7 @@ export class PostgresForgeStore {
           )))
     );
   }
-  async create(body, {agentId = null, ownerModId = null} = {}) {
+  async create(body, {agentId = null, ownerModId = null, referenceImages: privateReferences = null} = {}) {
     if (!body || typeof body !== "object" || Array.isArray(body))
       fail("forge_request_invalid");
     if ("attachments" in body || "sourceAttachments" in body)
@@ -385,6 +442,7 @@ export class PostgresForgeStore {
       "prompt",
       "idempotencyKey",
       "useAgentReferenceImage",
+      "referenceAgentIds",
     ];
     if (
       Object.keys(body).some((k) => !keys.includes(k)) ||
@@ -402,7 +460,16 @@ export class PostgresForgeStore {
     if (body.useAgentReferenceImage !== undefined && body.useAgentReferenceImage !== null && typeof body.useAgentReferenceImage !== 'boolean')
       fail('forge_request_invalid');
     const useAgentReferenceImage = body.useAgentReferenceImage === true;
-    if (useAgentReferenceImage && body.mode && body.mode !== 'image') fail('agent_reference_image_image_only');
+    if (body.referenceAgentIds != null && (!Array.isArray(body.referenceAgentIds) ||
+      body.referenceAgentIds.some(id => typeof id !== 'string' || !id.trim() || id !== id.trim()))) fail('forge_request_invalid');
+    const referenceAgentIds = body.referenceAgentIds ?? [];
+    if (privateReferences != null && (!ownerModId || !Array.isArray(privateReferences) || !privateReferences.length ||
+      privateReferences.some(ref => !ref || Array.isArray(ref) || typeof ref !== 'object' ||
+        Object.keys(ref).some(key => !['key', 'id', 'name'].includes(key)) ||
+        ['key', 'id', 'name'].some(key => typeof ref[key] !== 'string' || !ref[key].trim())))) fail('forge_request_invalid');
+    if (privateReferences && (useAgentReferenceImage || referenceAgentIds.length || body.referenceAgentIds != null)) fail('forge_request_invalid');
+    const hasReferences = useAgentReferenceImage || referenceAgentIds.length > 0 || Boolean(privateReferences);
+    if (hasReferences && body.mode && body.mode !== 'image') fail('agent_reference_image_image_only');
     const explicit =
       body.connectionId !== undefined || body.modelId !== undefined;
     if (
@@ -413,7 +480,7 @@ export class PostgresForgeStore {
     )
       fail("forge_request_invalid");
     if (!explicit && !body.mode) fail("forge_selection_missing", 409);
-    const catalog = await this.catalog({agentId});
+    const catalog = await this.catalog({ agentId, includeSavedPortraits: !privateReferences && referenceAgentIds.length > 0, includeOwnPortrait: false });
     const saved = explicit
       ? { connectionId: body.connectionId, modelId: body.modelId }
       : (await this.selections())[body.mode];
@@ -429,14 +496,49 @@ export class PostgresForgeStore {
     )
       fail("forge_model_unavailable", 409);
     if (ownerModId !== null && (typeof ownerModId !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(ownerModId))) fail('forge_request_invalid');
-    const snapshot = useAgentReferenceImage ? await this.referenceImageSnapshot(agentId) : null;
-    const dispatch = snapshot ? { sourceImages: snapshot.sourceImages } : null;
+    let referenceConfig, referenceConfigurationUnavailable = false;
+    if (hasReferences && model?.available && model.agentReferenceImage?.available) {
+      try { referenceConfig = await this.resolveConfig(saved.connectionId, saved.modelId); }
+      catch { referenceConfigurationUnavailable = true; }
+    }
+    // Reuse the existing deployment allocation budget, not a new product cap.
+    const maxReferenceBytes = mediaBudgets(referenceConfig || {}).total;
+    // A changed deployment budget cannot invalidate an already admitted key.
+    // The hint bounds snapshot allocation by that key's prior admitted size;
+    // exact replay identity is still checked under the claim transaction below.
+    let snapshotMaxBytes = maxReferenceBytes;
+    if (hasReferences) {
+      const prior = await this.pool.query('SELECT request FROM forge_jobs WHERE idem=$1', [body.idempotencyKey]);
+      for (const row of prior.rows) {
+        const identity = parse(row.request);
+        const refs = identity.referenceImages || (identity.referenceImage ? [identity.referenceImage] : []);
+        const bytes = refs.reduce((total, ref) => total + (Number.isSafeInteger(ref?.sizeBytes) && ref.sizeBytes > 0 ? ref.sizeBytes : 0), 0);
+        if (Number.isSafeInteger(bytes)) snapshotMaxBytes = Math.max(snapshotMaxBytes, bytes);
+      }
+    }
+    // Preserve the self-only identity/prompt for existing callers. New explicit
+    // lists (even one other agent), and Theater-owned refs use ordered snapshots.
+    const legacySelf = useAgentReferenceImage && !referenceAgentIds.length && !privateReferences;
+    const snapshots = legacySelf ? [await this.referenceImageSnapshot(agentId)] : hasReferences
+      ? await this.referenceSnapshots({ agentId, referenceAgentIds, useAgentReferenceImage, catalog, ownerModId, privateReferences, maxBytes: snapshotMaxBytes }) : [];
+    const referenceImage = legacySelf ? snapshots[0].referenceImage : null;
+    const multiReferences = hasReferences && !legacySelf ? snapshots.map(({ referenceImage: ref }) => privateReferences
+      ? { key: ref.key, id: ref.id, name: ref.name, mimeType: ref.mimeType, sizeBytes: ref.sizeBytes, sha256: ref.sha256 }
+      : ref) : null;
+    const dispatch = snapshots.length ? { sourceImages: snapshots.flatMap(snapshot => snapshot.sourceImages) } : null;
+    if (dispatch && multiReferences) {
+      // Keep the selected identities aligned with the adapter's image order.
+      // Only the provider prompt gets this mapping; the job's caller prompt
+      // stays unchanged and no single-self exact prompt changes.
+      dispatch.prompt = `${body.prompt}\n\nUse the supplied reference images as canonical character identities: preserve each character's face, species, build and distinctive features. Do not blend identities; depict only the characters called for by the scene.\nReference images (in the order supplied):\n${multiReferences.map((ref, index) =>
+        `${index + 1}. Image ${index + 1} depicts ${JSON.stringify(ref.name)}${ref.agentId ? ` (agent ${JSON.stringify(ref.agentId)})` : ''}.`).join('\n')}`;
+    }
     // Config resolution may borrow this same pool. Resolve before holding the
     // claim transaction (including max-one pools), but defer admission errors
     // until after replay matching so saved-default retries remain valid.
-    if (snapshot && model?.available && model.agentReferenceImage?.available) {
-      try { dispatch.config = await this.resolveConfig(saved.connectionId, saved.modelId); }
-      catch { dispatch.configurationUnavailable = true; }
+    if (dispatch) {
+      dispatch.config = referenceConfig;
+      dispatch.configurationUnavailable = referenceConfigurationUnavailable;
     }
     const request = {
       mode: body.mode ?? null,
@@ -446,7 +548,10 @@ export class PostgresForgeStore {
       idempotencyKey: body.idempotencyKey,
       implicitSelection: !explicit,
       ...(ownerModId ? { modOwnerId: ownerModId } : {}),
-      ...(snapshot ? { useAgentReferenceImage: true, referenceImage: snapshot.referenceImage } : {}),
+      ...(referenceImage ? { useAgentReferenceImage: true, referenceImage } : {}),
+      ...(multiReferences ? { referenceImages: multiReferences,
+        referenceActorAgentId: agentId || null,
+        ...(useAgentReferenceImage ? { useAgentReferenceImage: true } : {}) } : {}),
     };
     const owner = await this.owner();
     let result;
@@ -471,7 +576,8 @@ export class PostgresForgeStore {
           };
         }
         if (!model?.available) fail("forge_model_unavailable", 409);
-        if (snapshot) {
+        if (dispatch) {
+          if (dispatch.sourceImages.reduce((total, image) => total + image.bytes.length, 0) > maxReferenceBytes) fail('reference_images_too_large', 413);
           if (model.kind !== 'image') fail('agent_reference_image_image_only');
           if (!model.agentReferenceImage?.available) fail('agent_reference_image_unsupported', 409);
           if (dispatch.configurationUnavailable) fail('forge_model_unavailable', 409);
@@ -558,7 +664,7 @@ export class PostgresForgeStore {
       job.status = "running";
       if (!(await this.save(job))) return;
       config = dispatch?.config ?? await this.resolveConfig(job.connectionId, job.modelId);
-      if (job.useAgentReferenceImage && (!dispatch?.sourceImages?.length || !referenceImageCapability(config).available))
+      if ((job.useAgentReferenceImage || job.referenceImages?.length) && (!dispatch?.sourceImages?.length || !referenceImageCapability(config).available))
         throw new Error('agent_reference_image_snapshot_unavailable');
       const nativeGoogle = googleNativeApi(config) && googleMediaKind(config) === job.kind;
       const google = job.kind === "audio" && googleLyriaSupported(config) && googleMediaKind(config) === "audio";
@@ -577,7 +683,7 @@ export class PostgresForgeStore {
       stage = "provider";
       job.calls = [{ connectionId: job.connectionId, modelId: job.modelId, startedAt: at(), status: 'running' }];
       if (!(await this.save(job))) return;
-      const result = await adapter.complete({ prompt: job.prompt, ...(dispatch?.sourceImages ? { sourceImages: dispatch.sourceImages } : {}) });
+      const result = await adapter.complete({ prompt: dispatch?.prompt ?? job.prompt, ...(dispatch?.sourceImages ? { sourceImages: dispatch.sourceImages } : {}) });
       if (!result.ok || !result.outputArtifacts?.length)
         throw Object.assign(
           new Error(result.error || "Provider returned no artifacts"),

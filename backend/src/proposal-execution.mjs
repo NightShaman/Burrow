@@ -274,7 +274,9 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       let result;
       try {
         const attachment = attachmentId?.startsWith(REFERENCE_IMAGE_ATTACHMENT_PREFIX)
-          ? await executionContext?.stores?.referenceImages?.view(agentId || executionContext?.agentId, attachmentId)
+          ? await (executionContext?.stores?.referenceImages?.viewShared
+            ? executionContext.stores.referenceImages.viewShared(attachmentId)
+            : executionContext?.stores?.referenceImages?.view(agentId || executionContext?.agentId, attachmentId))
           : await readAttachmentArtifact({ agentWorkspaceRoot, artifactPath: attachmentId, attachment: { name: path.basename(attachmentId) } });
         result = attachment
           ? { tool: 'attachment_view', ok: true, attachmentId, attachment }
@@ -316,7 +318,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       let result;
       try {
         const args = action.tool === 'forge_create_job'
-          ? { mode: action.forgeMode, connectionId: action.forgeConnectionId || action.connectionId, modelId: action.forgeModelId || action.modelId, prompt: action.forgePrompt || action.prompt, idempotencyKey: action.forgeIdempotencyKey || action.idempotencyKey, useAgentReferenceImage: action.useAgentReferenceImage }
+          ? { mode: action.forgeMode, connectionId: action.forgeConnectionId || action.connectionId, modelId: action.forgeModelId || action.modelId, prompt: action.forgePrompt || action.prompt, idempotencyKey: action.forgeIdempotencyKey || action.idempotencyKey, useAgentReferenceImage: action.useAgentReferenceImage, referenceAgentIds: action.referenceAgentIds }
           : action.tool === 'forge_inspect_job' ? { jobId: action.jobId }
           : action.tool === 'forge_attach_artifact' ? { jobId: action.jobId, artifactId: action.artifactId } : {};
         result = await executeForgeTool(action.tool, args, { agentId, sessionId: sessionId || executionContext?.sessionId, conversationId: resolvedConversationId });
